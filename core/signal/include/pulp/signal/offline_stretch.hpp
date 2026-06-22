@@ -56,10 +56,9 @@ enum class StretchTransientMode { phase_reset, verbatim_relocate };
 ///                   Natural, time != pitch. Best for tonal/melodic/sustained.
 ///   varispeed     — pitch+time LINKED (pure resample) + speed-scaled tape head EQ.
 ///                   Tape character, NO stretch artifacts. Pitch follows tempo.
-///   phase_vocoder — clean + verbatim transient relocation for extra punch.
-///                   SCAFFOLD: relocation seam handling is not solved yet, so this
-///                   currently renders as `clean` (see relocate_transients).
-///   granular      — grain/stutter texture. SCAFFOLD: not implemented, renders clean.
+///   phase_vocoder — reserved for clean + verbatim transient relocation; currently
+///                   renders as `clean` until seam handling passes the quality gate.
+///   granular      — reserved for grain/stutter texture; currently renders as `clean`.
 enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
 
 /// Whole-input render options.
@@ -68,7 +67,7 @@ struct OfflineStretchOptions {
     /// pitch_semitones (pitch is linked to time_ratio); the others honor it.
     StretchCharacter character = StretchCharacter::clean;
     /// Cross-engine: graft verbatim transients onto the stretched output for punch.
-    /// SCAFFOLD — the seam-clean implementation is future work; currently a no-op.
+    /// Current limitation: seam-clean relocation is not enabled yet, so this is a no-op.
     bool relocate_transients = false;
     double time_ratio = 1.0;        ///< output duration / input duration
     double pitch_semitones = 0.0;   ///< fractional allowed
@@ -290,9 +289,9 @@ public:
 
         // Character-mode dispatch. `varispeed` is pitch+time-linked (tape): a pure
         // resample + a speed-scaled head EQ, no phase-vocoder artifacts. The
-        // `phase_vocoder` and `granular` characters are scaffolds — they fall
+        // `phase_vocoder` and `granular` characters are reserved modes that fall
         // through to the clean spectral path for now (relocate_transients is a
-        // documented no-op until the seam-clean relocation lands).
+        // documented no-op until seam-clean relocation is enabled).
         if (opts.character == StretchCharacter::varispeed)
             return varispeed_render(in, in_frames, out, out_frames, opts.time_ratio);
 

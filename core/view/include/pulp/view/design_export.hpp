@@ -76,8 +76,8 @@ public:
 //      back into DESIGN.md.
 //
 // This API is intentionally gated until anchor-stable IDs and 3-way merge
-// semantics are available. Until then, the function below throws
-// `std::logic_error("export_designmd is gated on pulp #1307")`.
+// semantics are available. Until then, the function below throws a
+// reimport-safe design-loop gate error instead of writing partial output.
 
 struct DesignMdProseHints {
     // Optional verbatim prose for each canonical section (Overview,

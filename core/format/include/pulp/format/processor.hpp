@@ -627,12 +627,14 @@ public:
     /// state/sync-strategy guidance for cache invalidation.
     ///
     /// Wiring:
-    ///   iOS       — PulpAudioSessionBridge routes didReceiveMemoryWarning
-    ///               into the running processor.
-    ///   macOS     — no-op today; host apps can still invoke manually to
-    ///               test plugin behaviour.
-    ///   Android   — ComponentCallbacks2.onTrimMemory (future slice).
-    ///   Windows   — CreateMemoryResourceNotification (future slice).
+    ///   iOS       — the platform layer receives didReceiveMemoryWarning;
+    ///               routing that signal into processors is host-owned.
+    ///   macOS     — the platform layer observes DISPATCH_MEMORYPRESSURE;
+    ///               routing that signal into processors is host-owned.
+    ///   Android   — the platform layer receives ComponentCallbacks2.onTrimMemory;
+    ///               routing that signal into processors is host-owned.
+    ///   Windows   — the platform layer samples GlobalMemoryStatusEx(); routing
+    ///               that signal into processors is host-owned.
     virtual void on_memory_pressure(MemoryPressure /*level*/) {}
 
     /// Latency in samples introduced by this processor (default 0).
