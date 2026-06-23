@@ -96,20 +96,14 @@ static_assert(count_quirk_fields() == 37,
 
 namespace {
 
-// Per-host quirk-population helpers. Extracted per-host modules under
-// `core/format/include/pulp/format/host_quirks/<host>.hpp` expose an
-// inline `host_quirks::apply_<host>(HostQuirks&, HostVersion)` that
-// the dispatch table below routes to. Hosts without a dedicated header
-// still live here as private helpers until the next batch extracts
-// them. License-hygiene: every flag flipped here (or in a per-host
-// header) must be backed by a host vendor doc + a reproducer Pulp
-// issue. See the catalog at
+// Per-host quirk-population helpers. Hosts without a dedicated header
+// live here as private helpers until they are extracted. License-hygiene:
+// every flag flipped here (or in a per-host header) must be backed by a
+// host vendor doc + a reproducer Pulp issue. See the catalog at
 // `planning/2026-05-24-daw-host-quirks-inheritance.md`.
 
 void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
-    // Main 6 REAPER rows (15 + R1-R4 + R6) — extracted to the per-host
-    // header so REAPER-specific lessons live in one place. Adapter
-    // surface unchanged; this is a pure header refactor for item 5.8.
+    // Main 6 REAPER rows (15 + R1-R4 + R6).
     host_quirks::apply_reaper(q, v);
     // Layer the iPlug2-audit keyboard-only-space lesson on top via the
     // separate factory so its LessonOnly tier can evolve independently
@@ -124,10 +118,9 @@ void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
 }
 
 void apply_pro_tools_quirks(HostQuirks& q, HostVersion v) {
-    // Main 3 AAX rows (16-18) — extracted to the per-host header for
-    // item 5.9 (opt-in lane gated on Avid SDK at the adapter level;
-    // the quirk dispatch itself is unconditional so filtering behaves
-    // identically across builds).
+    // Main 3 AAX rows (16-18). Adapter use is gated on the
+    // developer-supplied Avid SDK; the quirk dispatch itself is
+    // unconditional so filtering behaves identically across builds.
     host_quirks::apply_pro_tools(q, v);
     // Pro Tools' AAX wrapper does not surface a reliable vendor version
     // through the AAX spec, so version-gated decisions for this host

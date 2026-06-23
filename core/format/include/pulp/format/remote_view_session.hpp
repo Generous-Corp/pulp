@@ -28,8 +28,8 @@ namespace pulp::format {
 class RemoteViewSession {
 public:
     /// Role this session drives in the owning bridge — always
-    /// `ViewRole::Remote` in the current MVP; reserved for future
-    /// differentiation between different remote renderers.
+    /// `ViewRole::Remote`; reserved for future differentiation between
+    /// different remote renderers.
     ViewRole role() const { return ViewRole::Remote; }
 
     /// URL (or descriptive label) this session was opened against.
