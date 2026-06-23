@@ -18,36 +18,37 @@ for humans who do not want Shipyard in their checkout.
 
 ## Installation
 
-### From a local clone (current method)
+### From the marketplace (recommended)
 
-Since Pulp is not yet a public repository, install the plugin from your local clone:
+Install the Pulp CLI first so `pulp` and `pulp-mcp` are on `$PATH`, then add
+the Claude Code plugin from the public marketplace:
 
 ```bash
-# Clone the repository
-git clone https://github.com/danielraffel/pulp.git
-cd pulp
+# 1. Install the Pulp CLI and MCP binary.
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 
-# Install the plugin into Claude Code
-claude plugin add /path/to/pulp
+# 2. Add the marketplace and install the plugin.
+claude plugin marketplace add danielraffel/pulp
+claude plugin install pulp
 ```
 
 Then restart Claude Code or run `/reload-plugins` to activate.
 
-### From the marketplace (when public)
+### From a local clone (source-tree development)
 
-Once Pulp is a public repository, you'll be able to install from the Claude Code plugin marketplace:
+If you're developing Pulp from a checkout, or testing local plugin changes,
+install the plugin from that clone instead:
 
 ```bash
-# 1. Add the Pulp marketplace (one time)
-/plugin marketplace add danielraffel/pulp
+# Clone the repository.
+git clone https://github.com/danielraffel/pulp.git
+cd pulp
 
-# 2. Install the plugin
-/plugin install pulp@danielraffel/pulp
-
-# 3. Restart Claude Code to load the plugin
+# Install the checkout into Claude Code.
+claude plugin add "$PWD"
 ```
 
-This is not yet available because the Pulp repository is currently private. These instructions will work once the repository is public.
+Then restart Claude Code or run `/reload-plugins` to activate.
 
 ## What You Get
 
