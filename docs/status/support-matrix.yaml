@@ -425,51 +425,51 @@ widgets:
   # Audio / music-domain widgets.
   meter:
     status: usable
-    notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics. See core/view/include/pulp/view/widgets.hpp.
+    notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   spectrum_view:
     status: usable
-    notes: Real-time FFT spectrum display with log/linear frequency axis. See core/view/include/pulp/view/widgets.hpp.
+    notes: Real-time FFT spectrum display with log/linear frequency axis; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   spectrogram_view:
     status: usable
-    notes: Scrolling STFT spectrogram. See core/view/include/pulp/view/widgets.hpp.
+    notes: Scrolling STFT spectrogram; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   waveform_view:
     status: usable
-    notes: WaveformView for rendering audio buffers. See core/view/include/pulp/view/widgets.hpp.
+    notes: WaveformView for rendering audio buffers; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   waveform_editor:
     status: usable
-    notes: Selection, zoom, region-based editor built on WaveformView. See core/view/include/pulp/view/widgets/waveform_editor.hpp.
+    notes: Selection, zoom, region-based editor built on WaveformView; CI coverage includes pulp-test-waveform-editor. See core/view/include/pulp/view/waveform_editor.hpp.
   midi_keyboard:
     status: usable
-    notes: Display + interaction keyboard; note-on/off events routed through Binding. See core/view/include/pulp/view/widgets/midi_keyboard.hpp.
+    notes: Display + interaction keyboard; note-on/off events routed through Binding; CI coverage includes pulp-test-phase9-widgets. See core/view/include/pulp/view/midi_keyboard.hpp.
   preset_browser:
     status: usable
-    notes: Searchable, category-grouped preset browser with keyboard navigation. See core/view/include/pulp/view/widgets/preset_browser.hpp.
+    notes: Searchable, category-grouped preset browser with keyboard navigation; CI coverage includes pulp-test-preset-browser. See core/view/include/pulp/view/preset_browser.hpp.
   eq_curve_view:
     status: usable
-    notes: Draggable EQ band handles with live curve render. See core/view/include/pulp/view/widgets/eq_curve_view.hpp.
+    notes: Draggable EQ band handles with live curve render; CI coverage includes pulp-test-phase9-widgets. See core/view/include/pulp/view/eq_curve_view.hpp.
   graph_editor_view:
     status: usable
-    ci_test: pulp-test-graph-serializer
-    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph. See core/view/include/pulp/view/widgets/graph_editor_view.hpp.
+    ci_test: pulp-test-graph-editor-view
+    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph; CI coverage includes pulp-test-graph-editor-view. See core/view/include/pulp/view/widgets/graph_editor_view.hpp.
   # General-purpose UI widgets surfaced by the audit as missing rows.
   file_browser:
     status: usable
-    notes: FileBrowser + FileDropZone. See core/view/include/pulp/view/widgets/file_browser.hpp.
+    notes: FileBrowser + FileDropZone; CI coverage includes pulp-test-file-browser. See core/view/include/pulp/view/file_browser.hpp.
   color_picker:
     status: usable
-    notes: HSV + hex color picker with live swatch. See core/view/include/pulp/view/widgets/color_picker.hpp.
+    notes: HSV + hex color picker with live swatch; CI coverage includes pulp-test-phase9-widgets. See core/view/include/pulp/view/color_picker.hpp.
   concertina_panel:
     status: usable
-    notes: Stacked accordion-style panel with expand/collapse per section. See core/view/include/pulp/view/widgets/concertina_panel.hpp.
+    notes: Stacked accordion-style panel with expand/collapse per section; CI coverage includes pulp-test-view-layout-widgets. See core/view/include/pulp/view/concertina_panel.hpp.
   split_view:
     status: usable
-    notes: Draggable splitter between two views; horizontal and vertical. See core/view/include/pulp/view/widgets/split_view.hpp.
+    notes: Draggable splitter between two views; horizontal and vertical; CI coverage includes pulp-test-split-view. See core/view/include/pulp/view/split_view.hpp.
   breadcrumb:
     status: usable
-    notes: Breadcrumb trail navigation. See core/view/include/pulp/view/widgets/breadcrumb.hpp.
+    notes: Breadcrumb trail navigation; CI coverage includes pulp-test-phase9-widgets. See core/view/include/pulp/view/breadcrumb.hpp.
   lasso:
     status: usable
-    notes: Marquee / drag-to-select overlay. See core/view/include/pulp/view/widgets/lasso.hpp.
+    notes: Marquee / drag-to-select overlay; CI coverage includes pulp-test-lasso. See core/view/include/pulp/view/lasso.hpp.
   code_editor:
     status: usable
     ci_test: pulp-test-code-editor
