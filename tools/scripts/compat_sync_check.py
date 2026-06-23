@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-# Shared substrate (2026-05 refactor batch).
+# Shared gate substrate.
 from gate_common import (
     repo_root,
     git_diff_names,
@@ -138,7 +138,7 @@ def load_compat_map(path: Path) -> CompatMap:
                     glob=str(r.get("glob", "")),
                 ))
             else:
-                # pulp #1171 (Codex P2 on #1068) — unknown `kind` was
+                # Regression guard for #1171 (#1068): unknown `kind` was
                 # skipped silently, so a typo like `"kind": "tests"` in
                 # tools/scripts/compat_path_map.json silently dropped
                 # that requirement from enforcement and CI passed

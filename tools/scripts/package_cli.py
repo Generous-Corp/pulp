@@ -13,7 +13,7 @@ at /Users/runner/Library/Caches/Pulp/... and crashed on every user
 machine. release-cli.yml now invokes this script so the artifact is
 self-contained.
 
-Phase 8 dual-binary support (#783): when `--cpp-binary` is passed,
+Dual-binary support (#783): when `--cpp-binary` is passed,
 the tarball also ships `pulp-cpp[.exe]` so the post-swap layout
 (Rust `pulp` + C++ `pulp-cpp` delegate) can land both binaries with
 one upgrade. Without `--cpp-binary` the script keeps the legacy
@@ -44,7 +44,7 @@ Layout produced inside the tarball:
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
 The smoke gate from PR #395 verifies the output runs on a runner
-that did NOT build the binary. Phase 8 extends the smoke check to
+that did NOT build the binary. Dual-binary support extends the smoke check to
 exercise pulp-cpp too when the dual-binary flag is set, and #2067
 extends it again to exercise pulp-mcp.
 """
@@ -291,7 +291,7 @@ def main() -> int:
         files = [staged_bin]
         names = [bin_name]
 
-        # Phase 8: when caller passes --cpp-binary, bundle it as
+        # When caller passes --cpp-binary, bundle it as
         # pulp-cpp[.exe]. The Rust pulp's `upgrade --install` looks
         # for this name in the extracted archive and drops it into
         # the sibling slot.
@@ -328,8 +328,8 @@ def main() -> int:
             # which lets release-cli.yml treat script success as a pass
             # and publish an artifact without its required runtime
             # library — crashing every user machine on startup.
-            # See #438 P1 Codex review on #397 and the v0.15/0.16/0.17
-            # release-pipeline history.
+            # See #438 / #397 and the v0.15/0.16/0.17 release-pipeline
+            # history.
             print("ERROR: wgpu native library not found — refusing to "
                   "package an unportable tarball. Searched cache roots "
                   "(see find_wgpu_lib). Verify setup.sh ran and the "

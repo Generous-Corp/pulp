@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 #
-# pulp-internal task #35 — CMake smoke for the Debug-SDK perf-killer guard
-# in PulpConfig.cmake.
+# CMake smoke for the Debug-SDK perf-killer guard in PulpConfig.cmake.
 #
 # Runs three scenarios against a tempdir-fabricated SDK install:
 #
@@ -46,7 +45,7 @@ file(WRITE "${_sdk_dir}/version.txt" "0.0.0-fixture\n")
 if(SCENARIO STREQUAL "debug-no-override" OR SCENARIO STREQUAL "debug-with-override")
     file(WRITE "${_sdk_dir}/sdk_build_type.txt" "Debug\n")
 elseif(SCENARIO STREQUAL "debug-lowercase")
-    # Codex P1 — CMake accepts CMAKE_BUILD_TYPE case-insensitively
+    # CMake accepts CMAKE_BUILD_TYPE case-insensitively
     # (so `-DCMAKE_BUILD_TYPE=debug` is a real Debug build), and the
     # marker preserves the user's spelling. Pin that the guard
     # normalizes to lowercase before comparing — otherwise it

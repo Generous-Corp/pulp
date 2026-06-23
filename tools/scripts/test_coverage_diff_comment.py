@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fixture tests for tools/scripts/coverage_diff_comment.py.
 
-Guards the PR comment body formatter used by the #566 Phase 1 PR 3
-diff-cover advisory gate. Pure-Python and fast — no diff-cover binary,
+Guards the PR comment body formatter used by the #566 diff-cover
+advisory gate. Pure-Python and fast — no diff-cover binary,
 no git history, no network.
 
 Run:
@@ -63,7 +63,7 @@ class RenderTests(unittest.TestCase):
         self.assertIn("currently represented", body)
 
     def test_required_banner_drops_advisory_language(self) -> None:
-        # When Phase 3 flips the gate from advisory to required we want
+        # When the gate flips from advisory to required we want
         # to reuse this same renderer — exercise that mode now so the
         # future change is a one-line flag flip, not a re-render rewrite.
         body = cdc.render(

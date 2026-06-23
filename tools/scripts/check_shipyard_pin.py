@@ -5,8 +5,8 @@
 `tools/install-shipyard.sh` and `shipyard pr`. Two release workflows
 (`.github/workflows/release-cli.yml` and `.github/workflows/post-tag-sync.yml`)
 also bake the version into a `SHIPYARD_VERSION` env value. Prior drift
-between those locations broke release-note generation (Codex P1 on
-PR #719), and the fix at the time was "remember to update both".
+between those locations broke release-note generation (#719), and the
+fix at the time was "remember to update both".
 
 This script makes the drift mechanically impossible to ship by
 validating that every workflow's `SHIPYARD_VERSION` matches the pin in
@@ -20,8 +20,8 @@ Exits:
     2 — configuration error (file missing, unparseable, etc).
 
 The vacuous-pass case is gated by `REQUIRED_PIN_WORKFLOWS` — the
-explicit set of workflow filenames that MUST carry the pin. Codex P1
-on PR #2131 flagged that a silent removal of the env entry would
+explicit set of workflow filenames that MUST carry the pin. Regression
+coverage for #2131 ensures a silent removal of the env entry would
 otherwise let the script exit 0 even though the pin was no longer
 enforced anywhere. If a future refactor removes the pin from one of
 those workflows (e.g. replaces the inline env with a step that reads
@@ -44,8 +44,8 @@ WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
 # Workflows that MUST carry a `SHIPYARD_VERSION` env entry. The check
 # fails if any of these workflows exists but no longer declares the
-# pin — Codex P1 on PR #2131 flagged the silent-removal case as the
-# exact class of breakage this script is meant to prevent. A
+# pin — #2131 covers the silent-removal case as the exact class of
+# breakage this script is meant to prevent. A
 # legitimate switch to a runtime-read shape should update this tuple
 # in the same diff and document why.
 REQUIRED_PIN_WORKFLOWS: tuple[str, ...] = (
@@ -97,7 +97,7 @@ def main() -> int:
     pinned = read_pinned_version()
     workflow_versions = find_workflow_versions()
 
-    # Codex P1 (PR #2131): a required workflow that EXISTS but no
+    # Regression guard for #2131: a required workflow that EXISTS but no
     # longer declares `SHIPYARD_VERSION` is the vacuous-pass case —
     # the pin is no longer enforced anywhere, and the gate would
     # otherwise go green. Fail loudly instead.

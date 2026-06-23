@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # gates.sh — fast pre-push safety net for the cheap CI gates.
 #
-# Naming: aligned with Shipyard's planned `shipyard gates` subcommand
-# (see planning/2026-05-19-shipyard-preflight-upstream-proposal.md).
+# Naming: aligned with Shipyard's planned `shipyard gates` subcommand.
 # Avoids collision with Shipyard's existing `preflight` namespace,
 # which is exclusively about SSH backend reachability checks.
 #
@@ -24,8 +23,8 @@
 #   - build / test targets (the agent/developer should already be running
 #     these in their dev loop).
 #
-# Why this script exists (Phase 0b PR #2374 lesson): the pre-push hook
-# already runs all of these gates, but the bypass env vars are easy to
+# Why this script exists: the pre-push hook already runs all of these
+# gates, but the bypass env vars are easy to
 # misuse — `PULP_SKIP_PREPUSH=1` (nuclear) skips skill-sync along with
 # diff-cover, even though skill-sync is fast and catches real problems.
 # Running gates.sh BEFORE git push gives you the skill-sync /

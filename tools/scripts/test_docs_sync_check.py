@@ -72,7 +72,7 @@ class TrailerTests(unittest.TestCase):
         self.assertEqual(dsc.parse_bypass_trailers("fix: nothing\n"), {})
 
     def test_trailer_on_branch_tip_not_merge_commit(self) -> None:
-        # Codex #613 P1: CI checks out a synthetic merge commit, so a
+        # Regression guard for #613: CI checks out a synthetic merge commit, so a
         # trailer on the branch-tip commit must still be found when we
         # concatenate messages across base..HEAD.
         multi_commit_bodies = (

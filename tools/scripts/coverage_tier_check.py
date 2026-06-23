@@ -247,15 +247,14 @@ def parse_cobertura(xml_path: pathlib.Path) -> dict[str, FileCoverage]:
 #   1. The Clang source-based coverage pipeline (scripts/run_coverage.sh)
 #      emits Cobertura rows for C / C++ / Obj-C / Obj-C++ sources.
 #   2. The vitest v8 coverage pipeline in `packages/pulp-react/**` emits
-#      Cobertura rows for `.ts` / `.tsx` / `.js` / `.jsx` — wired by
-#      pulp #1886 Phase 1 (measure-only). Phase 2 layers enforcement.
+#      Cobertura rows for `.ts` / `.tsx` / `.js` / `.jsx` (#1886).
 #
 # Scripts, CMake modules, YAML, shell, Python etc. in the tier map
 # (ship/**, tools/**) can't produce Cobertura entries, so the old
 # "missing file = fully uncovered" path would fail the infrastructure
-# tier for any PR that only touched those files. Codex #612 P1.
+# tier for any PR that only touched those files (#612).
 #
-# Codex P2 (pulp #1886): JS/TS coverage is NOT global. Vitest only emits
+# JS/TS coverage is NOT global (#1886). Vitest only emits
 # Cobertura rows for `packages/pulp-react/**`. A `.ts` file outside that
 # surface (e.g. `tools/foo.ts`, `inspect/src/dev.tsx`) has no Cobertura
 # row by design, so the "missing file = uncovered" path would falsely
@@ -270,7 +269,7 @@ _INSTRUMENTED_EXTS = frozenset({
     ".c", ".cc", ".cpp", ".cxx", ".c++",
     ".h", ".hh", ".hpp", ".hxx", ".h++",
     ".m", ".mm",
-    # Vitest v8 coverage (packages/pulp-react/**) — pulp #1886 Phase 1.
+    # Vitest v8 coverage (packages/pulp-react/**) — #1886.
     # `.mts` / `.cts` deliberately omitted for now; @pulp/react is pure
     # `.ts` and there's no measured surface for the other variants yet.
     # Add them here when a real source file lands.
@@ -307,7 +306,7 @@ def is_instrumented_source(relpath: str) -> bool:
     reporting surface for that extension (per `_REPORTED_SURFACES`) is
     NOT counted as instrumented — its diff lines won't be aggregated as
     "uncovered" against any tier. This matches how non-source files
-    (shell, CMake, Python, YAML) are handled. Codex P2 on pulp #1886.
+    (shell, CMake, Python, YAML) are handled (#1886).
     """
     dot = relpath.rfind(".")
     if dot < 0:
@@ -367,7 +366,7 @@ def aggregate(
             continue
         # Non-instrumented files (CMake, shell, Python, YAML, …) can't
         # produce coverage rows — don't count them as "uncovered" and
-        # tank the tier. Codex #612 P1.
+        # tank the tier (#612).
         if not is_instrumented_source(relpath):
             continue
         fc = coverage.get(relpath)

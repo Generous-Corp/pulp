@@ -13,8 +13,8 @@
 #                                                 PATH (local-only).
 #
 # Coverage is informational only. This script never fails on a
-# coverage threshold; thresholds come via the Phase 2/3 diff-cover
-# gate (see planning/coverage-tooling-decision-2026-04-21.md).
+# coverage threshold; threshold enforcement belongs to the diff-cover
+# gate.
 
 set -euo pipefail
 
@@ -45,13 +45,13 @@ EXTRA_CTEST_ARGS=()
 #                          Library/Caches/Pulp/; CMake places downloaded
 #                          deps there and llvm-cov reports them with
 #                          absolute paths that don't hit the _deps/
-#                          pattern above. Caught Codex-sweep 2026-04-21
-#                          when the direct llvm-cov export pipeline
-#                          surfaced 69k lines of FetchContent noise.
+#                          pattern above; the direct llvm-cov export
+#                          pipeline otherwise surfaces tens of thousands
+#                          of FetchContent lines as first-party coverage.
 #
 # Each alternative uses `(^|/)` as the leading anchor so relative and
 # absolute paths are both matched. Keep in sync with codecov.yml's
-# `ignore:` list and with planning/coverage-tooling-decision-2026-04-21.md §4.
+# `ignore:` list.
 COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src|sandbox-e2e)/'
 
 while [[ $# -gt 0 ]]; do
@@ -160,11 +160,10 @@ cd "${BUILD_DIR}"
 # coverage run.
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 
-# #317 Codex P2: track test-suite outcome without aborting the
-# coverage report. A broken test run should still upload its
-# partial coverage (so reviewers can see what DID exercise), but
-# the script MUST exit non-zero so CI flags the failure —
-# silently swallowing test failures hid real regressions.
+# Regression guard for #317: track the test-suite outcome without aborting the
+# coverage report. A broken test run should still upload its partial coverage
+# (so reviewers can see what did exercise), but the script must exit non-zero so
+# CI flags the failure; silently swallowing test failures hid real regressions.
 CTEST_RC=0
 if [[ -n "${TESTS_REGEX}" ]]; then
     ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
@@ -192,10 +191,10 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # codebase and silently false-negative-ing the diff-cover gate on any PR
 # that touched code outside the test-linked set.
 #
-# Fix per Codex Q5: expose the full first-party surface by also passing
-# every first-party static archive plus any non-test executables
-# (tools/cli/pulp, standalone hosts, inspect tools). LLVM docs confirm
-# llvm-cov -object accepts .a archives directly:
+# Expose the full first-party surface by also passing every first-party static
+# archive plus any non-test executables (tools/cli/pulp, standalone hosts,
+# inspect tools). LLVM docs confirm llvm-cov -object accepts .a archives
+# directly:
 #   https://llvm.org/docs/CommandGuide/llvm-cov.html
 #
 # External SDK archives (libausdk.a, libvst3-sdk.a) are excluded because
@@ -402,8 +401,7 @@ llvm-cov show \
 # fetchcontent-src filtering) and the lcov_cobertura.py converter is a
 # single-file script we cache alongside this build script.
 #
-# Codex confirmed (2026-04-21 consult): `llvm-cov -object` accepts
-# static `.a` archives directly. LLVM docs:
+# `llvm-cov -object` accepts static `.a` archives directly. LLVM docs:
 #   https://llvm.org/docs/CommandGuide/llvm-cov.html
 #
 # The converter script lives at tools/scripts/lcov_cobertura.py and is

@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # cli_version_check.sh — plugin ↔ CLI skew detection helper.
 #
-# Release-discovery Slice 6 (#551). Sourced by Pulp Claude-Code plugin
-# skills that shell out to `pulp`. On the first invocation in a session,
-# compares the installed CLI's version against the plugin's declared
-# `min_cli_version` (from `plugin.json`, via `pulp doctor --versions --json`)
-# and prints a one-line upgrade hint on skew.
+# Sourced by Pulp Claude-Code plugin skills that shell out to `pulp`.
+# On the first invocation in a session, compares the installed CLI's
+# version against the plugin's declared `min_cli_version` (from
+# `plugin.json`, via `pulp doctor --versions --json`) and prints a
+# one-line upgrade hint on skew (#551).
 #
-# Design locked 2026-04-21: plugin location comes from
-# `pulp doctor --versions --json` (Slice 1 surface, #546) — never from
+# Plugin location comes from `pulp doctor --versions --json` (#546) — never from
 # an env var, a Claude-Code-specific lookup, or a self-locating trick.
 # That keeps the helper portable to any shell context and avoids
 # coupling Pulp skills to Claude-Code internals.
@@ -62,7 +61,7 @@ pulp_cli_version_check() {
     fi
 
     # Grab the diagnostic once. --json is the stable-shape surface
-    # (Slice 1 / #546) — do NOT parse human output. If the CLI is so
+    # (#546) — do NOT parse human output. If the CLI is so
     # old it lacks --json or --versions, the invocation fails and we
     # silently stop (older users will upgrade for other reasons).
     local json
@@ -89,7 +88,7 @@ pulp_cli_version_check() {
         awk 'BEGIN{RS="\"raw\"[ \t]*:[ \t]*\""}NR==2{print}' | \
         awk -F'"' 'NR==1{print $1}')"
 
-    # Missing plugin_min_cli (older plugin builds pre-Slice 6) —
+    # Missing plugin_min_cli (older plugin builds) —
     # silently skip the check but still mark the session so we don't
     # re-probe on every skill load in that session.
     if [ -z "$plugin_min_raw" ] || [ -z "$cli_raw" ]; then

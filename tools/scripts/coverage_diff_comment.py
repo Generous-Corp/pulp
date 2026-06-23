@@ -16,7 +16,7 @@ Diff-cover produces a markdown report like:
     - **Missing**: 52 lines
     - **Coverage**: 78%
 
-The gate is advisory in Phase 1 (issue #566 Phase 1 PR 3). We want the
+The gate starts as advisory (#566). We want the
 comment to:
 
   1. Always wear a stable HTML marker so the workflow can upsert a single

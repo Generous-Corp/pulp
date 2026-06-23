@@ -25,7 +25,7 @@ TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 # Mirrors the audit recipe in issue #1056. Every C/C++/Obj-C/Kotlin/
 # Swift/TS/JS file under these prefixes must classify into exactly one
 # tier OR appear in `_TIER_COMPLETENESS_ALLOWLIST` with a documented
-# reason. `packages/` was added in pulp #1886 Phase 1 alongside the
+# reason. `packages/` was added alongside the #1886
 # vitest v8 lane in `packages/pulp-react/**`.
 _FIRST_PARTY_PREFIXES = (
     "core/", "tools/", "apple/", "android/", "inspect/",
@@ -42,14 +42,14 @@ _FIRST_PARTY_PREFIXES = (
 # Kotlin/Swift extension we audit. A drift between the two means the
 # completeness gate silently skips files that the coverage pipeline
 # DOES instrument. See `test_audit_suffixes_cover_every_instrumented_extension`
-# below for the structural assertion. Codex P2 on PR #1154.
+# below for the structural assertion (#1154).
 _FIRST_PARTY_SUFFIXES = (
     # C/C++/Obj-C/Obj-C++ — every C-family extension in
     # coverage_tier_check._INSTRUMENTED_EXTS:
     ".c", ".cc", ".cpp", ".cxx", ".c++",
     ".h", ".hh", ".hpp", ".hxx", ".h++",
     ".m", ".mm",
-    # JS / TS — measured by the vitest v8 lane (pulp #1886 Phase 1):
+    # JS / TS — measured by the vitest v8 lane (#1886):
     ".ts", ".tsx", ".js", ".jsx",
     # Non-C-family first-party sources (Kotlin / Swift) audited here
     # but classified by the Kotlin / Swift coverage lanes, not by
@@ -417,7 +417,7 @@ class InstrumentedSourceTests(unittest.TestCase):
             self.assertTrue(ctc.is_instrumented_source(p), msg=p)
 
     def test_c_family_sources_are_instrumented(self) -> None:
-        # Codex P2 on PR #1154 — `is_instrumented_source` accepts every
+        # Regression guard for #1154: `is_instrumented_source` accepts every
         # C-family extension (.c / .cc / .cxx / .m), but the
         # completeness audit was only walking .cpp/.hpp/.mm/.h/.kt/.swift,
         # which silently skipped real instrumented sources (e.g. a
@@ -441,7 +441,7 @@ class InstrumentedSourceTests(unittest.TestCase):
             self.assertFalse(ctc.is_instrumented_source(p), msg=p)
 
     def test_ts_js_sources_are_instrumented(self) -> None:
-        # pulp #1886 Phase 1 — the vitest v8 lane in
+        # The #1886 vitest v8 lane in
         # `packages/pulp-react/**` emits Cobertura rows for these
         # extensions, so the tier gate must treat them as instrumented.
         # Without this, a TS-only PR like the one that motivated #1886
@@ -456,7 +456,7 @@ class InstrumentedSourceTests(unittest.TestCase):
             self.assertTrue(ctc.is_instrumented_source(p), msg=p)
 
     def test_ts_outside_reported_surface_not_instrumented(self) -> None:
-        # Codex P2 on pulp #1886 — JS/TS coverage is scoped to
+        # JS/TS coverage is scoped to #1886's
         # `packages/pulp-react/**`. A `.ts` / `.tsx` / `.js` / `.jsx`
         # file outside that surface (`tools/`, `inspect/`, anywhere
         # else) has no Cobertura row by design; treating it as
@@ -517,8 +517,8 @@ class InstrumentedSourceTests(unittest.TestCase):
         self.assertEqual(uf.touched_lines, 5)
         self.assertEqual(uf.covered_lines, 3)
         self.assertAlmostEqual(uf.percent, 60.0, places=1)
-        # 60% < 70% floor — used to fail; under Phase 1's measure-only
-        # gate (`continue-on-error` in the workflow) the failure is
+        # 60% < 70% floor — in advisory mode
+        # (`continue-on-error` in the workflow) the failure is
         # advisory, not blocking. The assertion here verifies the
         # *aggregation* math, independent of enforcement policy.
         self.assertFalse(uf.passed)
@@ -526,7 +526,7 @@ class InstrumentedSourceTests(unittest.TestCase):
 
 class FirstPartySuffixDriftTests(unittest.TestCase):
     """Test-side suffix list must include every C-family ext that the
-    coverage pipeline instruments. Codex P2 on PR #1154.
+    coverage pipeline instruments (#1154).
 
     Without this guard, the completeness gate silently skips real
     instrumented sources whose extension was added to
@@ -552,7 +552,7 @@ class FirstPartySuffixDriftTests(unittest.TestCase):
         )
 
     def test_aggregate_skips_non_instrumented_files(self) -> None:
-        # Codex #612 P1: a PR that only touches CMake/Python under
+        # Regression guard for #612: a PR that only touches CMake/Python under
         # `tools/**` must NOT fail the infrastructure tier because
         # those files never produce Cobertura entries. Without the
         # skip, all their changed lines would be counted as uncovered.

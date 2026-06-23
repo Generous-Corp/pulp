@@ -66,7 +66,7 @@ def repo_root() -> Path:
 def diff_files(base_ref: str) -> list[str]:
     # Let CalledProcessError propagate — a missing/unfetched base ref
     # (common failure mode locally) must fail loud, not silently exit 0
-    # and claim "nothing to verify." Codex #613 P2.
+    # and claim "nothing to verify" (#613).
     out = subprocess.check_output(
         ["git", "diff", "--name-only", f"{base_ref}...HEAD"], text=True
     )
@@ -80,7 +80,7 @@ def range_commit_messages(base_ref: str) -> str:
     so a `Docs-Update: skip` trailer on the branch tip wouldn't be
     visible via `git log -1`. Walk the whole range so trailers on any
     commit in the PR count as bypasses. Mirrors the
-    `git_range_trailers` pattern in skill_sync_check.py. Codex #613 P1.
+    `git_range_trailers` pattern in skill_sync_check.py (#613).
     """
     try:
         return subprocess.check_output(
