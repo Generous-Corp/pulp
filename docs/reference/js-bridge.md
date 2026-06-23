@@ -1,6 +1,11 @@
 # JS Bridge API Reference
 
-Complete reference for all JavaScript functions available in Pulp UI scripts. These functions are registered by the `WidgetBridge` and callable from any `.js` file loaded by the script engine.
+Reference for the author-facing bridge helpers and related DOM-style APIs that
+Pulp UI scripts commonly call directly. This page is not an exhaustive registry
+dump; lower-level runtime, DOM/web-compat, GPU, canvas, SVG, and style helpers
+used by `@pulp/react` and compatibility shims are tracked in
+`core/view/src/widget_bridge_api_manifest.tsv` and contract-tested against the
+native `WidgetBridge` registrars.
 
 **Status**: experimental
 
