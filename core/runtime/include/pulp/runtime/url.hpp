@@ -3,11 +3,9 @@
 /// @file url.hpp
 /// Minimal URL parser + builder utility.
 ///
-/// Closes the gap-doc Runtime row "URL parser class". Pulp already has
-/// `http_*` and `http_download` for transport — this header just adds
-/// the structural parse/build that callers need for query-string
-/// manipulation, scheme dispatch, and round-tripping a URL through
-/// state.
+/// Transport already lives in `http_*` and `http_download`; this header
+/// adds the structural parse/build that callers need for query-string
+/// manipulation, scheme dispatch, and round-tripping a URL through state.
 ///
 /// Scope:
 ///   - Parses the common URL grammar — `scheme://[user[:pass]@]host

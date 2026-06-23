@@ -3,10 +3,8 @@
 /// @file mac_address.hpp
 /// MAC address parsing, formatting, and validation utility.
 ///
-/// Closes the gap-doc Runtime row "MACAddress" (the IPAddress side
-/// already shipped via `pulp/runtime/ip_address.hpp`). Pure parser +
-/// formatter — no platform calls, no allocation in the common path.
-/// Headless-friendly, RT-safe to copy/compare.
+/// Pure parser + formatter — no platform calls, no allocation in the
+/// common path. Headless-friendly, RT-safe to copy/compare.
 
 #include <array>
 #include <cstdint>

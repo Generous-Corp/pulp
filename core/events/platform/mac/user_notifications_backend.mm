@@ -11,7 +11,7 @@
 // up the macOS path without per-call wiring. Plugin sandboxes that
 // cannot use UserNotifications (older AU hosts) still work because
 // the framework calls themselves no-op when the host process is not
-// authorized; the gap-doc row stays "local-only" until remote shipping.
+// authorized.
 
 #include <pulp/events/push_notifications.hpp>
 

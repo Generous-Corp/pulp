@@ -3,12 +3,10 @@
 /// @file result.hpp
 /// `Result<T, E>` — success / failure union for fallible operations.
 ///
-/// Closes the gap-doc Runtime row "Result" (currently `std::optional`
-/// throughout — drops the error context). This header is a
-/// dependency-free placeholder until `std::expected` (C++23) is
-/// available across all target toolchains. The shape is intentionally
-/// API-compatible with `std::expected` so callers can migrate
-/// mechanically (`Ok` / `Err` map to `T` / `unexpected<E>`).
+/// Dependency-free placeholder until `std::expected` (C++23) is available
+/// across all target toolchains. The shape is intentionally API-compatible
+/// with `std::expected` so callers can migrate mechanically (`Ok` / `Err`
+/// map to `T` / `unexpected<E>`).
 ///
 /// Why not just adopt `std::expected` today? Pulp's stable toolchain
 /// matrix still includes platforms whose stdlib lacks `<expected>` (or

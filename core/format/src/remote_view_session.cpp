@@ -84,9 +84,9 @@ void RemoteViewSession::install_handlers_(Processor& processor) {
             return runtime::JsonRpcResult::ok(os.str());
         });
 
-    // view.input: forwarded input event. Current MVP just logs;
-    // wiring into the bridge's primary view input dispatch is a
-    // follow-up (requires synthetic input API on View).
+    // view.input: forwarded input event. Currently just logs; wiring
+    // into the bridge's primary view input dispatch requires a
+    // synthetic input API on View.
     peer_->on_notification("view.input",
         [](std::string_view payload) {
             runtime::log_debug("RemoteViewSession: view.input {}", std::string{payload});
@@ -155,7 +155,7 @@ std::optional<float> RemoteViewSession::get_parameter(uint32_t id) {
         });
     // Spin briefly — the test harness uses synchronous message loopback
     // so the reply is usually immediate. Real WebSocket use should
-    // switch to an async accessor; kept synchronous for MVP.
+    // switch to an async accessor; kept synchronous for now.
     for (int i = 0; i < 100 && !done; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     return result;
 }
