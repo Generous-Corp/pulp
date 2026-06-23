@@ -155,6 +155,11 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   and `docs/status/cli-commands.yaml`. Do not invent convenience aliases such
   as `--formats`; for platform-gated defaults, document the real opt-in flag
   (for `pulp create`, `--targets android`) or omit the prompt entirely.
+- `/test` must invoke `pulp test` or `./build/pulp test`, not raw
+  `ctest --test-dir build`; the CLI owns project-root resolution, cold-start
+  builds, FetchContent cache preflight, and ctest passthrough. If slash-command
+  arguments already contain ctest flags such as `--exclude-regex`, forward them
+  after `pulp test` instead of wrapping the whole argument string in `-R`.
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
