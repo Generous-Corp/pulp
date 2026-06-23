@@ -1294,14 +1294,14 @@ pulp export-tokens --dry-run
 
 **Status**: experimental
 
-Repo-level audio analysis tooling. Manages offline audio models (text-to-audio / text-to-excerpt retrieval) and reads reproducible excerpt bundles. This is developer tooling for building datasets and evaluation corpora — not a runtime API.
+Repo-level audio analysis tooling. Manages offline audio model metadata, reads reproducible excerpt bundles, and runs live/offline Audio Scope analysis. The current `excerpt-find` path is a WAV-first deterministic/null-backend ranking scaffold for dataset and evaluation workflows; it does not run semantic text/audio embedding inference yet. This is developer tooling for building datasets and evaluation corpora — not a runtime API.
 
 ```bash
 pulp audio                                      # Show help
 pulp audio model list [--json]                  # List registered models
 pulp audio model status [--json]                # Show configured + resolved model
 pulp audio model activate <model-id> [--json]   # Pick the active model
-pulp audio excerpt-find --text "warm analog pad" --input /path/to/corpus [options]
+pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
@@ -1318,7 +1318,7 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 | `model list` | List all registered audio models with backend and tags |
 | `model status` | Show the configured model, resolved checkpoint, and whether it is loadable |
 | `model activate <id>` | Select the active model and persist the state file |
-| `excerpt-find` | Score audio files (or a directory) against a text query and emit an excerpt bundle |
+| `excerpt-find` | Rank WAV windows deterministically from a text query, then emit an excerpt bundle with backend metadata |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
@@ -1326,7 +1326,7 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
 
-Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
+Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline harness CLI over captured audio (Phase 7). They analyze WAVs and stored artifact bundles with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
