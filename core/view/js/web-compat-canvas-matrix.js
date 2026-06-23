@@ -2,9 +2,6 @@
 // _PulpCanvasMatrix — Canvas2D DOMMatrix-compat helper
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Extracted from web-compat-canvas.js to keep DOMMatrix compatibility
-// isolated from the canvas drawing surface.
-//
 // 2D affine + 3D-padded matrix with the snapshot-mutator semantics
 // HTML5 Canvas requires:
 //   * 2D fields (a/b/c/d/e/f) + 4×4 m11..m44 aliases

@@ -1,12 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — transform domain handler split from _applyProperty
+// CSSStyleDeclaration — transform domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the transform / transition / animation CSS properties.
 // `_applyTransformProp(decl, id, key, resolved, value)` returns true if
-// it claimed the key, false otherwise. Each `case` keeps the executable
-// logic from the matching arm of the pre-split `_applyProperty` switch.
-// Embed order: loaded AFTER web-compat-style-decl.js.
+// it claimed the key, false otherwise. Embed order: loaded AFTER
+// web-compat-style-decl.js.
 
 function _applyTransformProp(decl, id, key, resolved, value) {
     switch (key) {

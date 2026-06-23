@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — typography domain handler split from _applyProperty
+// CSSStyleDeclaration — typography domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the text / font CSS properties: font-size / weight / style /
@@ -7,9 +7,8 @@
 // decoration / overflow / shadow / indent, white-space, word-break,
 // list-style cluster, vertical-align, font-variant.
 // `_applyTypographyProp(decl, id, key, resolved, value)` returns true
-// if it claimed the key, false otherwise. Each `case` body is byte-
-// identical to the matching arm of the pre-split `_applyProperty`
-// switch. Embed order: loaded AFTER web-compat-style-decl.js.
+// if it claimed the key, false otherwise. Embed order: loaded AFTER
+// web-compat-style-decl.js.
 
 function _applyTypographyProp(decl, id, key, resolved, value) {
     switch (key) {

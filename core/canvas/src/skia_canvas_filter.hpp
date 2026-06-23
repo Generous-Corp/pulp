@@ -1,7 +1,6 @@
 // skia_canvas_filter.hpp — entry point for the CSS `filter` parser.
 //
-// Declares the single cross-TU symbol of the CSS filter-parsing cluster
-// that was extracted from skia_canvas.cpp into skia_canvas_filter.cpp.
+// Declares the single cross-TU symbol of the CSS filter-parsing cluster.
 // Every other function in that cluster (skip_ws, parse_filter_arg,
 // parse_css_color_to_skcolor, the SkColorMatrix builders, …) is pure and
 // file-local to skia_canvas_filter.cpp — only `parse_filter_chain` needs

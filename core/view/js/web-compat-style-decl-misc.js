@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — misc domain handler split from _applyProperty
+// CSSStyleDeclaration — misc domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the interaction / scroll / 3D-OOS CSS properties that don't
@@ -7,8 +7,7 @@
 // touch-action, user-select, pointer-events, line-clamp, perspective,
 // writing-mode, scroll-behavior / overscroll-behavior, resize.
 // `_applyMiscProp(decl, id, key, resolved, value)` returns true if it
-// claimed the key, false otherwise. Each `case` body is byte-identical
-// to the matching arm of the pre-split `_applyProperty` switch.
+// claimed the key, false otherwise.
 //
 // `decl` carries the CSSStyleDeclaration `this`; the touch-action case
 // writes `decl._touchAction` and the scroll-behavior / overscroll
