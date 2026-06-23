@@ -527,16 +527,21 @@ Parameters, state trees, presets, and settings.
 #include <pulp/state/store.hpp>
 
 StateStore store;
-auto gain_id = store.add_param({.name = "Gain", .min = -60, .max = 12, .default_val = 0});
-auto mix_id = store.add_param({.name = "Mix", .min = 0, .max = 1, .default_val = 1});
+constexpr ParamID kGainId = 1;
+constexpr ParamID kMixId = 2;
+
+store.add_parameter({.id = kGainId, .name = "Gain", .unit = "dB",
+                     .range = {-60.0f, 12.0f, 0.0f}});
+store.add_parameter({.id = kMixId, .name = "Mix",
+                     .range = {0.0f, 1.0f, 1.0f}});
 
 // Audio thread reads atomically (no locks)
-float gain = store.get(gain_id);
+float gain = store.get_value(kGainId);
 
 // UI thread writes with gesture grouping for undo
-store.begin_gesture(gain_id);
-store.set(gain_id, -6.0f);
-store.end_gesture(gain_id);
+store.begin_gesture(kGainId);
+store.set_value(kGainId, -6.0f);
+store.end_gesture(kGainId);
 ```
 
 ### StateTree — reactive hierarchical state
@@ -607,11 +612,18 @@ Plugin format adapters — write your plugin once, deploy to 9 formats.
 class MyPlugin : public Processor {
 public:
     PluginDescriptor descriptor() const override {
-        return {.name = "MyGain", .vendor = "MyCompany", .uid = "com.myco.gain"};
+        return {
+            .name = "MyGain",
+            .manufacturer = "MyCompany",
+            .bundle_id = "com.myco.gain",
+            .version = "1.0.0",
+            .category = PluginCategory::Effect,
+        };
     }
     
     void define_parameters(state::StateStore& store) override {
-        gain_id_ = store.add_param({.name = "Gain", .min = -60, .max = 12});
+        store.add_parameter({.id = gain_id_, .name = "Gain", .unit = "dB",
+                             .range = {-60.0f, 12.0f, 0.0f}});
     }
     
     void prepare(const PrepareContext& context) override {}
@@ -620,11 +632,20 @@ public:
                  const audio::BufferView<const float>& audio_input,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const ProcessContext& ctx) override {
-        float gain = db_to_linear(store().get(gain_id_));
-        for (int ch = 0; ch < audio_output.num_channels(); ++ch)
-            for (int i = 0; i < audio_output.num_frames(); ++i)
-                audio_output[ch][i] = audio_input[ch][i] * gain;
+        float gain = db_to_linear(state().get_value(gain_id_));
+        for (std::size_t ch = 0;
+             ch < audio_output.num_channels() && ch < audio_input.num_channels();
+             ++ch) {
+            auto in = audio_input.channel(ch);
+            auto out = audio_output.channel(ch);
+            for (std::size_t i = 0; i < out.size(); ++i) {
+                out[i] = in[i] * gain;
+            }
+        }
     }
+
+private:
+    state::ParamID gain_id_ = 1;
 };
 ```
 
@@ -778,7 +799,7 @@ root->set_background_token("bg.surface");
 auto knob = std::make_unique<Knob>();
 knob->set_label("Gain");
 knob->set_value(0.5f);
-knob->on_change = [&](float v) { store.set(gain_id, v); };
+knob->on_change = [&](float v) { store.set_value(gain_id, v); };
 root->add_child(std::move(knob));
 
 auto meter = std::make_unique<Meter>();
