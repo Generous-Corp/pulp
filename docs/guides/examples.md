@@ -46,12 +46,12 @@ Features:
 **Path**: `examples/pulp-compressor/`
 **Type**: Effect
 **Formats**: VST3, AU v2, CLAP
-**Purpose**: A dynamics processor. Validates the sidechain API, latency reporting, and more complex DSP.
+**Purpose**: A dynamics processor. Validates the sidechain API, multi-bus routing, and more complex DSP.
 
 Features:
 - Threshold, ratio, attack, release parameters
 - Sidechain input support
-- Latency compensation
+- Envelope follower and gain reduction
 
 ## PulpDrums
 
@@ -61,8 +61,8 @@ Features:
 **Purpose**: A generative drum sequencer. The first example using MIDI output. Validates MIDI effect processing.
 
 Features:
-- Three voices (kick, snare, hi-hat)
-- Density and chaos controls
+- Four tracks (kick, snare, hi-hat, clap)
+- Density, velocity, pattern, and randomize controls
 - Pattern generation
 - MIDI output
 
