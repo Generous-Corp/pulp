@@ -1,8 +1,4 @@
-// jsx_lock.cpp — Phase 4b Lock-to-source, Path B engine.
-//
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md,
-//       "Phase 4b — Path B (JSX/TSX AST patch via element
-//       instrumentation)". GitHub issue #1308.
+// jsx_lock.cpp — Lock-to-source, Path B engine.
 //
 // Definitions only; declarations live in pulp/view/jsx_lock.hpp.
 //
@@ -641,7 +637,7 @@ jsx_lock_property_to_key(const std::string& property_path) {
 
 bool is_authored_jsx_source(const std::string& source) {
     // A file carrying the Pulp codegen banner or an @generated marker in
-    // its first lines is a generated artifact — Phase 4a's domain.
+    // its first lines is a generated artifact handled by Path A.
     std::size_t pos = 0;
     int scanned = 0;
     while (pos < source.size() && scanned < 8) {
@@ -725,7 +721,7 @@ JsxLockResult jsx_lock_tweak_into_source(const std::string& source,
     }
     if (!vs.found) {
         // The element exists but neither a style property nor a bare
-        // attribute of this name is present. Phase 4b does not *insert*
+        // attribute of this name is present. Path B does not *insert*
         // props into authored JSX (an insert would have to pick a
         // formatting and risk a malformed tag) — it only patches what
         // the author already wrote. Report as too_dynamic's calmer
@@ -733,7 +729,7 @@ JsxLockResult jsx_lock_tweak_into_source(const std::string& source,
         result.status = JsxLockStatus::too_dynamic;
         result.message = "anchor '" + tweak.anchor_id +
                          "' has no '" + *key +
-                         "' style property or attribute to patch — Phase 4b "
+                         "' style property or attribute to patch — lock-to-source "
                          "patches existing props only; keep in the sidecar";
         return result;
     }
