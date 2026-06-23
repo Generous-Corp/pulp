@@ -144,7 +144,7 @@ round-trips back to the same factory pointer.
   convert to samples only at explicit sample-domain APIs.
 - **Threading contract**: ARA's render thread, document-editing thread,
   and main thread map to Pulp's audio / UI / main threads. Do not block
-  across them; consult `docs/guides/sync-strategy.md`.
+  across them; consult `docs/reference/host-thread-rules.md`.
 - **Host quirks are real**. Logic's ARA integration differs from
   Cubase's. Budget time for host-specific workarounds.
 - `host_supports_ara()` currently returns `false` even with the SDK
