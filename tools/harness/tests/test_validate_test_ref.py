@@ -1,4 +1,4 @@
-"""Tests for the test-reference validator (pulp #1737).
+"""Tests for the test-reference validator.
 
 Verifies that `_validate_test_ref()` correctly accepts/rejects each form
 of catalog test reference:
@@ -169,9 +169,11 @@ class ValidateTestRefTests(unittest.TestCase):
         self.assertTrue(ok)
 
     def test_unit_prefix_with_missing_path_rejected(self) -> None:
-        """pulp #1737 followup (Codex P2 on #1768): typed refs that
-        look like file paths get existence-checked. Pre-fix any string
-        starting with `unit:` auto-passed."""
+        """Typed refs that look like file paths get existence-checked.
+
+        Any string starting with `unit:` used to auto-pass, so this keeps the
+        path-shaped form honest.
+        """
         ok, reason = _validate_test_ref(
             self.repo, "unit:test/missing.cpp"
         )

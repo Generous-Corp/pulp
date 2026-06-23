@@ -1,4 +1,4 @@
-"""Yoga surface adapter — week 1 deliverable.
+"""Yoga surface adapter.
 
 Classifies each `yoga/*` entry in compat.json against three layers of evidence:
 
@@ -158,8 +158,7 @@ class YogaAdapter(AdapterBase):
     # The Yoga oracle stores bare CSS-style tokens (`flex`, `none`,
     # `row-reverse`). Naive string equality between the two surfaces
     # mis-classifies annotated catalog entries as NOT-IMPL even when the
-    # adapter found a binding, inflating the drift count (Codex P1 on
-    # PR #1395, tracked as #1413).
+    # adapter found a binding, inflating the drift count.
     #
     # Normalize by stripping a single trailing parenthetical group plus any
     # surrounding whitespace. Apply on BOTH sides so the contract is
@@ -278,7 +277,7 @@ class YogaAdapter(AdapterBase):
         # 4. Compare supportedValues vs the oracle's enum value set.
         #    Normalize annotated values like "flex (implicit)" -> "flex" on
         #    BOTH sides so the comparison is robust to either surface
-        #    growing parenthetical context. (Codex P1 on PR #1395 / #1413.)
+        #    growing parenthetical context.
         if kind == "enum" and oracle_values:
             sup = self._normalize_enum_values(entry.supported_values)
             unsup = self._normalize_enum_values(entry.unsupported_values)

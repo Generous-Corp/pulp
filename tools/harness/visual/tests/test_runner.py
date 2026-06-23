@@ -471,9 +471,9 @@ class RunnerTests(unittest.TestCase):
                 runner.generate(binary, root, "canvas2d", [bad])
 
     def test_generate_requires_explicit_all_or_entry(self) -> None:
-        # Codex P2 on PR #1598 — `--generate` without `--all` or
-        # `--entry` previously regenerated every golden silently.
-        # Now require an explicit opt-in to bulk rewrites.
+        # `--generate` without `--all` or `--entry` previously regenerated
+        # every golden silently. Now require an explicit opt-in to bulk
+        # rewrites.
         buf = io.StringIO()
         with redirect_stderr(buf):
             rc = runner.main(["--generate", "--surface", "yoga"])
@@ -481,6 +481,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("--generate requires", buf.getvalue())
         self.assertIn("--all", buf.getvalue())
         self.assertIn("--entry", buf.getvalue())
+        self.assertIn("rewrite every golden.", buf.getvalue())
 
     def test_verify_with_all_emits_deprecation_warning(self) -> None:
         # `--all` is redundant with `--verify` (omitting --entry already

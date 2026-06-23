@@ -59,7 +59,7 @@ NOT_IMPL_MARKERS = (
 # explanations of supported features (e.g. "no bridge round-trip" describing
 # a JS-only synchronous read like getTransform). When mapsTo contains both a
 # NOT_IMPL marker and one of these benign-context phrases, the marker hit is
-# treated as a false positive. See pulp #1615.
+# treated as a false positive.
 NOT_IMPL_MARKER_BENIGN_CONTEXT = (
     "no bridge round-trip",
     "no bridge round trip",
@@ -113,11 +113,11 @@ class Canvas2dAdapter(AdapterBase):
                 "core/view/src/widget_bridge/canvas2d_api.cpp",
             )
         )
-        # P5-6 + P5-6 follow-up extracted prelude content out of the original
-        # web-compat-canvas.js into sibling files (matrix helper, image API,
-        # native-GPU helpers). The shim text the adapter reasons about is the
-        # union of all three so prototype methods + ctx attributes that moved
-        # don't get mis-classified as NOT-IMPL.
+        # Prelude content lives in sibling files alongside the original
+        # web-compat-canvas.js (matrix helper, image API, native-GPU helpers).
+        # The shim text the adapter reasons about is the union of the parent
+        # file and its three siblings, so prototype methods + ctx attributes
+        # that moved don't get mis-classified as NOT-IMPL.
         self._shim_text = "\n".join(
             self._read(f"core/view/js/{name}")
             for name in (
@@ -216,10 +216,10 @@ class Canvas2dAdapter(AdapterBase):
         if not maps_to:
             return True
         m = maps_to.lower()
-        # Skip any NOT_IMPL marker hit when the mapsTo also contains one
-        # of the benign-context phrases (pulp #1615 — `getTransform` mentions
-        # "no bridge round-trip" to explain a synchronous JS-only read; that
-        # must not be misread as "no bridge").
+        # Skip any NOT_IMPL marker hit when the mapsTo also contains one of
+        # the benign-context phrases: `getTransform` mentions "no bridge
+        # round-trip" to explain a synchronous JS-only read; that must not be
+        # misread as "no bridge".
         if any(benign in m for benign in NOT_IMPL_MARKER_BENIGN_CONTEXT):
             return False
         return any(marker in m for marker in NOT_IMPL_MARKERS)
