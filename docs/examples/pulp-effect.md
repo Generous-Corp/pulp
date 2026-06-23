@@ -32,8 +32,8 @@ A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/
 | Platform | Supported |
 |----------|-----------|
 | macOS | Yes |
-| Windows | Build stubs present, not yet validated |
-| Linux | Build stubs present, not yet validated |
+| Windows | Build targets present; validation pending |
+| Linux | Build targets present; validation pending |
 
 ## Key Files
 
