@@ -1,5 +1,5 @@
-// Release-discovery Slice 5 (#550 / parent #499) — unit tests for the
-// auto/prompt/manual/off mode enforcement state machine.
+// Unit tests for the auto/prompt/manual/off update-mode enforcement state
+// machine.
 //
 // Covers:
 //   - Mode parsing (tolerant of typos — defaults to Prompt)
@@ -8,7 +8,7 @@
 //   - Tombstone path composition + cleanup no-op on POSIX, file-removal
 //     on any platform when the file actually exists
 //   - Banner composition for manual + auto-staged + auto-completed
-//     (locked verbatim, same policy as Slice 2's compose_banner)
+//     (locked verbatim, same policy as compose_banner)
 //   - Decision helpers: decide_prompt_banner + should_stage_auto_download
 //
 // Filesystem is mocked via a per-test tmp directory — no real
@@ -268,11 +268,11 @@ TEST_CASE("pending-upgrade file round-trips through write/read/clear",
     fs::remove_all(dir);
 }
 
-// #590 Codex P2 / wave-4 sweep: the auto-mode banner in pulp_cli.cpp
-// must gate its "downloaded / will complete next invocation" notice
-// on write_pending_upgrade succeeding. Exercise the underlying failure
-// mode (non-existent file as the parent path) so a regression in the
-// return-value contract surfaces immediately.
+// Issue #590: the auto-mode banner in pulp_cli.cpp must gate its
+// "downloaded / will complete next invocation" notice on
+// write_pending_upgrade succeeding. Exercise the underlying failure mode
+// (non-existent file as the parent path) so a regression in the return-value
+// contract surfaces immediately.
 TEST_CASE("write_pending_upgrade returns false when the parent cannot be created",
           "[cli][update-mode][issue-590]") {
     auto dir = make_tmpdir("pending-upgrade-badparent");
@@ -293,10 +293,10 @@ TEST_CASE("write_pending_upgrade returns false when the parent cannot be created
     fs::remove_all(dir);
 }
 
-// #590 Codex P2 / wave-4 sweep: the opportunistic tombstone sweep in
-// maybe_complete_pending_upgrade() runs even when no pending marker
-// exists (covers direct `pulp upgrade` flows on Windows). This test
-// asserts the contract of the piece that sweep relies on:
+// Issue #590: the opportunistic tombstone sweep in
+// maybe_complete_pending_upgrade() runs even when no pending marker exists
+// (covers direct `pulp upgrade` flows on Windows). This test asserts the
+// contract of the piece that sweep relies on:
 // cleanup_tombstone must be safe to call unconditionally, regardless
 // of marker state. The two cases already covered above (present /
 // absent) are what the unconditional call in pulp_cli.cpp depends on.
@@ -367,7 +367,7 @@ TEST_CASE("compose_manual_notice matches the locked Section A shape",
           "[cli][update-mode][issue-550]") {
     auto b = um::compose_manual_notice("0.30.0", "0.31.0");
     // Locked verbatim — any change to this string must update the
-    // test in the same PR. Same policy as compose_banner (Slice 2).
+    // test in the same PR. Same policy as compose_banner.
     REQUIRE(b ==
             "Pulp v0.31.0 available (you have v0.30.0). "
             "Run `pulp upgrade` when you're ready.");
@@ -406,7 +406,7 @@ TEST_CASE("decide_prompt_banner shows once per new version",
     REQUIRE_FALSE(d.write_snooze);
 
     // Second invocation with banner_already_shown_this_cycle=true →
-    // silent. This preserves Slice 2's banner-suppression bookkeeping.
+    // silent. This preserves banner-suppression bookkeeping.
     auto d2 = um::decide_prompt_banner(
         um::Mode::Prompt, "0.30.0", "0.31.0", true, false);
     REQUIRE_FALSE(d2.show_banner);
