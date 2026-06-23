@@ -772,7 +772,7 @@ public:
 
     /// Build the plugin editor: a graphite panel with a signal-teal waveform
     /// view of the loaded loop, slice regions shaded per onset. This is the
-    /// Phase-5 waveform-editor pilot for the Ink & Signal design language.
+    /// waveform-editor pilot for the Ink & Signal design language.
     std::unique_ptr<view::View> create_view() override {
         using namespace pulp::view;
         using canvas::Color;

@@ -10,7 +10,7 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_window.hpp>
-#include <pulp/view/lock_to_source.hpp>  // WYSIWYG T5 — reparent → source rewrite
+#include <pulp/view/lock_to_source.hpp>  // reparent -> source rewrite
 #include <pulp/render/render_pass.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -18,7 +18,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/state/store.hpp>
-#include "design_viewport_probe.hpp"  // WYSIWYG T3 — settle-probe sizing
+#include "design_viewport_probe.hpp"  // settle-probe sizing
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/view/widgets.hpp>
@@ -1045,7 +1045,7 @@ int main(int argc, char* argv[]) {
 
     // Set up inspector before screenshot so it renders in headless mode too.
     //
-    // The in-canvas overlay is the MINIMAL manipulate layer (P1): it paints
+    // The in-canvas overlay is the minimal manipulation layer: it paints
     // only the selection box + drag handles and owns the canvas for
     // move/resize gestures. The floating InspectorWindow (created later) is
     // the inspect/tree/props surface. Both share one selected View*; the
@@ -1055,8 +1055,8 @@ int main(int argc, char* argv[]) {
     inspector.set_manipulate_only(true);
     // NOTE: install_inspector_hooks(inspector) is intentionally NOT called
     // here — it sets the three global hooks to the overlay only, and the
-    // floating-window block below would clobber them (the historical P1
-    // bug). Instead the composing hooks below own all three globals and
+    // floating-window block below would clobber them. Instead the composing
+    // hooks below own all three globals and
     // route to BOTH surfaces. pulp-tweaks.json auto-save so move/resize
     // edits persist across runs.
     pulp::inspect::g_active_inspector = &inspector;
@@ -1064,14 +1064,14 @@ int main(int argc, char* argv[]) {
     inspector_tweaks.load_from_disk();          // best-effort; ok if absent
     inspector_tweaks.set_auto_save(true);
     inspector.set_tweak_store(&inspector_tweaks);
-    // P2a (undo safety net) — give each manipulation gesture (move /
-    // resize / tweak-panel delete) its own undoable EditHistory entry,
+    // Undo safety net: give each manipulation gesture (move / resize /
+    // tweak-panel delete) its own undoable EditHistory entry,
     // reachable via Cmd+Z / Cmd+Shift+Z in the overlay. Coalescing is OFF
     // so two consecutive moves are two distinct undo steps, not one.
     pulp::state::EditHistory inspector_history;
     inspector_history.set_coalesce(false);
     inspector.set_edit_history(&inspector_history);
-    // WYSIWYG T5 — lock a live structural reparent into the generated source.
+    // Lock a live structural reparent into the generated source.
     // When a --script generated artifact backs this preview, dropping a view
     // inside another container must persist as a source rewrite (not just a
     // live + EditHistory edit), so it survives a fresh re-import. The overlay
@@ -1226,9 +1226,9 @@ int main(int argc, char* argv[]) {
     // hit-testing — so the UI resizes PROPORTIONALLY without reflow and
     // without clipping edge content (it letterboxes as a backstop instead).
     //
-    // Size source mirrors the design-tool resolver (pulp-internal #70): the
-    // design's own `globalThis.__pulpDesignViewport__` declaration if present,
-    // else the requested --size. The previous "shrink the window height to the
+    // Size source mirrors the design-tool resolver: the design's own
+    // `globalThis.__pulpDesignViewport__` declaration if present, else the
+    // requested --size. The previous "shrink the window height to the
     // measured child bottom" path is intentionally gone here — it only walked
     // root's direct children and so underestimated overflowing absolute
     // content (e.g. a footer / export buttons), which then corrupted the
@@ -1263,8 +1263,8 @@ int main(int argc, char* argv[]) {
             }
         } catch (...) { /* fall back to measured/--size */ }
 
-        // WYSIWYG T3 — settle-probe responsive auto-sizing (mirrors the
-        // design-tool #70 resolver in examples/design-tool/main.cpp). The old
+        // Settle-probe responsive auto-sizing mirrors the design-tool resolver
+        // in examples/design-tool/main.cpp. The old
         // path here laid the tree out ONCE at the requested render_w (default
         // 360) and measured the content extent — so a fill-width design
         // (flex-grow children with no intrinsic width, e.g. the Chainer
@@ -1515,7 +1515,7 @@ int main(int argc, char* argv[]) {
         iopts.secondary_window = true;
         inspector_window = WindowHost::create(*inspector_view_ptr, iopts);
         if (inspector_window) {
-            // P2d (A): a window-button close must tear down the SAME state the
+            // A window-button close must tear down the same state the
             // Cmd+I close path does, so there's exactly one inspector and a
             // re-open rebuilds clean (no stale active overlay / stale selection
             // that would otherwise reopen with no fresh reflect).
@@ -1525,7 +1525,7 @@ int main(int argc, char* argv[]) {
                 // callback (next tick, off the close stack).
                 inspector_close_pending = true;
             });
-            // P2d (A): populate the tree + props BEFORE showing so the window
+            // Populate the tree + props before showing so the window
             // never flashes empty for a frame on open. The signature-guarded
             // refresh_elements() then keeps it stable across idle ticks
             // (no per-tick rebuild churn).
@@ -1535,7 +1535,7 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    // ── P2e: TWO-WAY selection (canvas ⇄ inspector tree) ───────────────
+    // ── Two-way selection (canvas ⇄ inspector tree) ────────────────────
     //
     // ONE input owner per process, dispatching to BOTH surfaces. The
     // in-canvas overlay is FIRST in the chain (it needs canvas-space mouse
@@ -1545,10 +1545,10 @@ int main(int argc, char* argv[]) {
     //   - tree-row click → on_view_selected drives the SHARED selection
     //                     (highlight in the canvas overlay + repaint).
     //
-    // Maintainer requirement (P2e correction): "we DO want to be able to tap
+    // Maintainer requirement: "we DO want to be able to tap
     // and select an item in the inspector as it works today." The only thing
     // forbidden is a stray selection BOX drawn inside the inspector window —
-    // that's the paint-leak fixed in the paint hook above (Fix 1), NOT a
+    // that's the paint-leak fixed in the paint hook below, NOT a
     // reason to strip the tree-row highlight or break two-way selection.
     //
     // sync_selection keeps a re-entry guard so the on_view_selected →
@@ -1572,7 +1572,7 @@ int main(int argc, char* argv[]) {
         syncing_selection = false;
     };
 
-    // P2e Fix 2 — tree-row click is a real selection SOURCE again. A pick in
+    // Tree-row click is a real selection source. A pick in
     // the floating inspector drives the shared selection: highlight that view
     // in the canvas overlay and repaint both surfaces. The re-entry guard in
     // sync_selection prevents recursion (this fires on_view_selected, which we
@@ -1582,7 +1582,7 @@ int main(int argc, char* argv[]) {
         sync_selection(v);
     };
 
-    // P3 — Figma-style tool strip ⇄ overlay tool, wired BOTH ways.
+    // Figma-style tool strip and overlay tool stay wired both ways.
     // Click a strip button → drive the overlay's tool; keyboard V/T flips
     // the overlay tool → the idle loop mirrors it back into the strip.
     inspector_view_ptr->on_tool_picked = [&](int tool_index) {
@@ -1642,8 +1642,8 @@ int main(int argc, char* argv[]) {
         return false;
     });
 
-    // P3 — route UTF-8 character input to the overlay's inline Text-tool
-    // edit BEFORE the focused widget. Consumes only while an inline text
+    // Route UTF-8 character input to the overlay's inline Text-tool edit
+    // before the focused widget. Consumes only while an inline text
     // edit is in progress; otherwise returns false so normal text-input
     // delivery proceeds.
     View::set_inspector_text_hook([&](const pulp::view::TextInputEvent& e,
@@ -1660,9 +1660,9 @@ int main(int argc, char* argv[]) {
         return consumed;
     });
 
-    // P2e: on_view_selected is wired above (two-way selection). A tree pick in
+    // on_view_selected is wired above for two-way selection. A tree pick in
     // the floating inspector drives the shared canvas selection — see the
-    // sync_selection / on_view_selected wiring in the P2e block above.
+    // sync_selection / on_view_selected wiring above.
 
     View::set_inspector_paint_hook(
         [&](pulp::canvas::Canvas& canvas, View* painting_root) {
@@ -1677,7 +1677,7 @@ int main(int argc, char* argv[]) {
             inspector.paint(canvas);
         });
 
-    // P2d (B) — cursor affordances. While the overlay is active and a view is
+    // Cursor affordances. While the overlay is active and a view is
     // selected, hovering a corner handle shows a resize cursor and hovering
     // the body shows a move cursor, so the user SEES move-vs-resize before
     // pressing. The overlay owns mouse-move before normal hit-testing, so the
@@ -1710,7 +1710,7 @@ int main(int argc, char* argv[]) {
             inspector_rpm.set_gpu_render_time_ms(
                 static_cast<float>(window->gpu_render_time_ms()),
                 window->gpu_render_timing_available());
-            // P3 — mirror the overlay's tool into the header strip so a
+            // Mirror the overlay's tool into the header strip so a
             // keyboard V/T flip is reflected (the strip reads active_tool_).
             inspector_view_ptr->set_active_tool(
                 inspector.tool() == pulp::inspect::InspectorOverlay::Tool::text
