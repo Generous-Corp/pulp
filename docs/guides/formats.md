@@ -226,11 +226,17 @@ Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are 
 - `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to
   `kInfiniteTail`.
 
+### Editor / GUI
+
+`createView("editor")` returns a `PulpPlugView` when the VST3 target is built
+with `PULP_VST3_GUI` and the processor reports an editor. Automation, headless,
+CI, and test environments intentionally return `nullptr` so validators and
+non-interactive runs do not launch editor windows.
+
 ### Known Limitations
 
 - Only the first input/output bus channels are passed to `process()`. Sidechain bus routing is declared but not yet connected.
 - Channel count in `setupProcessing()` defaults to 2; dynamic bus arrangement queries are not yet implemented.
-- No VST3 GUI (`IPlugView`) is wired.
 
 ---
 
@@ -255,7 +261,24 @@ PULP_AU_PLUGIN(MyPluginAU, my_namespace::create_my_processor)
 - A factory function `ClassNameFactory` for the `Info.plist` `factoryFunction` entry
 - Plugin registration via `PULP_REGISTER_PLUGIN`
 
-The factory function name must match the `factoryFunction` in your AU's `Info.plist`.
+Use this macro for audio-only `aufx` effects. The factory function name must
+match the `factoryFunction` in your AU's `Info.plist`.
+
+### Macro (MIDI-receiving Effect)
+
+```cpp
+#include "my_processor.hpp"
+#include <pulp/format/au_v2_entry.hpp>
+
+PULP_AU_MIDI_PLUGIN(MyMidiEffectAU, my_namespace::create_my_processor)
+```
+
+`PULP_AU_MIDI_PLUGIN(ClassName, factory_fn)` generates the same effect adapter
+class shape as `PULP_AU_PLUGIN`, but registers it through the AudioUnitSDK MIDI
+effect factory so `MusicDeviceMIDIEvent` and SysEx selectors reach the adapter.
+Pair it with an `aumf` component type: either let CMake emit `aumf` by setting
+the processor descriptor's `accepts_midi = true` / `ACCEPTS_MIDI`, or keep a
+custom `Info.plist.au` in sync manually.
 
 ### Macro (Instrument)
 
@@ -305,9 +328,19 @@ Stepped parameters with a `to_string` function get value string arrays via `GetP
 
 ### MIDI Routing
 
-**Effects:** No MIDI. `ProcessBufferLists()` passes empty `MidiBuffer` objects to `Processor::process()`.
+**Audio-only effects (`aufx`):** AU hosts do not route MIDI to plain effect
+components. Use `PULP_AU_PLUGIN` only when the processor does not accept MIDI.
 
-**Instruments:** MIDI notes arrive via `HandleNoteOn()` and `HandleNoteOff()` callbacks. These are buffered in `pending_midi_` (protected by a mutex) and drained into `midi_in` at the start of each `Render()` call. The sample offset (`inStartFrame`) is preserved.
+**MIDI-receiving effects (`aumf`):** Use `PULP_AU_MIDI_PLUGIN` and package the
+component as `aumf`. Host MIDI and SysEx arrive via `HandleMIDIEvent()` /
+`HandleSysEx()`, are queued on bounded lock-free queues, and are drained into
+`midi_in` at the start of each `ProcessBufferLists()` call. Sample offsets from
+`inStartFrame` are preserved for short MIDI messages.
+
+**Instruments (`aumu`):** MIDI notes arrive via `HandleNoteOn()` and
+`HandleNoteOff()` callbacks. These are buffered in `pending_midi_` (protected by
+a mutex) and drained into `midi_in` at the start of each `Render()` call. The
+sample offset (`inStartFrame`) is preserved.
 
 ### State Save/Load
 
@@ -345,6 +378,7 @@ The type codes (`aufx`, `aumu`) and four-character codes are set in your AU's `I
 ### Known Limitations
 
 - Effects do not emit parameter output changes back to the host.
+- AU v2 effects can receive MIDI as `aumf`, but outgoing MIDI from `midi_out` is not emitted back to the host yet.
 - AU v2 effects use `ProcessBufferLists` which receives interleaved audio. The adapter de-interleaves per buffer.
 - Instruments use a `std::mutex` to buffer MIDI between the host's note callbacks and the render call. This is safe because Apple guarantees these calls occur on the same thread or with proper synchronization, but it adds a small overhead.
 
@@ -572,7 +606,7 @@ For setup, download, and rules, see [AAX Setup](aax.md).
 
 ## Standalone Host
 
-**Header:** `core/format/src/standalone.hpp`
+**Header:** `<pulp/format/standalone.hpp>`
 
 `StandaloneApp` runs a Processor as a native desktop application with real audio I/O:
 
@@ -728,7 +762,7 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | Param values | Raw float | Normalized 0-1 | Raw float |
 | Param modulation | Yes (`PARAM_MOD` events) | No | No |
 | Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) |
-| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: no, Instruments: yes |
+| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes |
 | State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` |
 | Multi-bus declared | Yes | Yes | No |
 | Plugin-side param output | Yes | Yes | Not yet |
