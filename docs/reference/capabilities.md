@@ -19,11 +19,11 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 |---|---|---|
 | `formats.clap` | Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.vst3` | Only bus index 0 routed to process(); multi-bus + sidechain not wired. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | setBusArrangements forwards without validating channel counts or reading negotiated layout. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.au_v2` | MIDI input dead: AUEffectBase has no MIDI routing. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
 | `formats.auv3` | Single input bus; no sidechain support. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
