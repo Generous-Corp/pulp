@@ -611,7 +611,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
             // Optional checks report advice but don't count toward
             // fail_count, so `pulp doctor android` returns 0 when
             // only optional accelerators (e.g. Google Android CLI,
-            // #355) are missing. See #438 P1 for #389.
+            // #355) are missing.
             if (c.optional) {
                 ++optional_skipped;
                 if (!ci_mode) {

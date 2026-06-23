@@ -251,7 +251,7 @@ struct DoctorCheck {
     // Optional checks report remediation advice but don't contribute
     // to the overall doctor exit code when they fail. Used for e.g.
     // the Google Android CLI accelerator (#355) which is a speedup,
-    // not a requirement. See #438 P1 for #389.
+    // not a requirement.
     bool optional = false;
 };
 
