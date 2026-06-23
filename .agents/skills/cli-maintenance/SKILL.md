@@ -877,6 +877,11 @@ Gotchas:
   Bad `--frames` (non-integer / <= 0) exits 2 too. Both are caught
   before project resolution so they fail fast in `--help`-adjacent
   contexts.
+- CLI-owned launcher flags must appear before `--`; tokens after `--`
+  are passed through to the launched binary. Do not document
+  `pulp run -- --screenshot ...` as the screenshot path — use
+  `pulp run --headless --screenshot ...` and reserve `-- ...` for
+  target-specific arguments.
 - Both argv AND env vars are set on every invocation. Do not remove
   the env-var fallback — older standalone binaries (and the
   `pulp-screenshot` flow) read env first.
