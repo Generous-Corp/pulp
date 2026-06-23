@@ -155,7 +155,9 @@ When you use the package manager, these files are created or modified in your pr
 | `DEPENDENCIES.md` entries | `pulp add` | New rows in the dependency table |
 | `NOTICE.md` entries | `pulp add` | Attribution entries for added packages |
 
-All of these are cleaned up by `pulp remove` when the last package is removed.
+`pulp remove` updates package-owned files: the lock file, generated package
+CMake, and package metadata entries. Targets in `pulp.toml` are managed
+separately with `pulp target`.
 
 ---
 
