@@ -89,11 +89,10 @@ jobs:
           WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
           # BUSY threshold for macOS overflow. With one local runner,
-          # BUSY >= 1 would overflow as soon as any job is in flight —
-          # Codex flagged that as too aggressive (planning doc Step 2).
+          # BUSY >= 1 would overflow as soon as any job is in flight.
           # Default 2 means "local is fully saturated AND new work is
-          # coming"; when Plan A's 2nd local runner is added, bump to
-          # match the new capacity.
+          # coming"; if local runner capacity changes, keep this in
+          # lockstep with that capacity.
           LOCAL_MAC_OVERFLOW_THRESHOLD: ${{ vars.PULP_LOCAL_MAC_OVERFLOW_THRESHOLD || '2' }}
           # The runner label the overflow logic queries for `busy`. Must
           # match the label PULP_LOCAL_MACOS_RUNS_ON_JSON targets.
@@ -108,7 +107,7 @@ jobs:
           # NOTE: an *empty* variable value cannot disable overflow —
           # GitHub treats unset and empty identically and the `||` default
           # below re-fills it — so "local-only" is the explicit off
-          # switch, not emptiness (Codex P2 on #2451).
+          # switch, not emptiness.
           OVERFLOW_MACOS_RUNS_ON_JSON: ${{ vars.PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON || '["macos-15"]' }}
           # gh CLI auth for the overflow-busy-count probe.
           GH_TOKEN: ${{ github.token }}
@@ -155,19 +154,17 @@ jobs:
           #
           # Implementation note: `gh api .../actions/runners` requires
           # repo `Administration: Read` scope, which the default workflow
-          # GITHUB_TOKEN does not have. The first cut of this probe used
-          # that endpoint and fell back to BUSY=0 on every run — overflow
-          # never engaged (pulp #1935 post-merge finding). The second cut
-          # (pulp #1942) used `actions/runs?status=in_progress|queued`
-          # filtered to Build-and-Test runs as a proxy for "local Mac
-          # saturated" — but that over-counts: if 20 BAT runs are queued
-          # ALL routing to macos-15 (overflow), local sits idle yet the
-          # probe still reports BUSY=20 and routes the new PR to overflow
-          # too. Local participation drops to zero during deep queues
-          # (user feedback, pulp task #24).
+          # GITHUB_TOKEN does not have; falling back to BUSY=0 on that
+          # endpoint failure silently disables overflow. Counting
+          # Build-and-Test runs via `actions/runs?status=in_progress|queued`
+          # also over-counts:
+          # if many BAT runs are queued and all are already routing to
+          # macos-15 overflow, local sits idle yet the probe still reads
+          # as saturated and routes new PRs to overflow too. Local
+          # participation then drops to zero during deep queues.
           #
-          # This probe (pulp #2467 class) counts only the macOS legs
-          # ACTUALLY OCCUPYING a local M1 right now: a Build-and-Test
+          # This probe counts only the macOS legs ACTUALLY OCCUPYING a
+          # local M1 right now: a Build-and-Test
           # macOS job whose `status == "in_progress"` AND whose `labels`
           # include the local self-hosted label. Everything else counts
           # as 0:
@@ -178,15 +175,13 @@ jobs:
           #     not yet registered (matrix not expanded) or is still
           #     `queued` is NOT occupying an M1 — count 0.
           #
-          # The earlier cut (pulp #1942) enumerated in_progress + queued
-          # runs and PESSIMISTICALLY counted a not-yet-registered macOS
-          # job as local-busy. During a deep Actions queue (~250 runs)
-          # that over-counts catastrophically: hundreds of undispatched
+          # Counting in_progress + queued runs pessimistically treats
+          # not-yet-registered macOS jobs as local-busy. During a deep
+          # Actions queue that over-counts catastrophically: undispatched
           # queued runs all read as "local-busy", BUSY blows past the
-          # threshold, EVERY new macOS leg routes to github-hosted
-          # overflow, and the local M1 runners sit 100% idle while macOS
-          # work — the CI long-pole — starves on the contended
-          # github-hosted pool. Merges stalled ~80 minutes on 2026-05-20.
+          # threshold, every new macOS leg routes to github-hosted
+          # overflow, and the local M1 runners sit idle while macOS work
+          # starves on the contended github-hosted pool.
           #
           # The fix deliberately INVERTS the old pessimism: an
           # unregistered / queued / API-blip macOS job counts 0, not 1.
@@ -528,7 +523,7 @@ jobs:
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
       # cached CMake flags such as -fsanitize=address cannot bleed into it.
       PULP_BUILD_DIR: build-${{ matrix.key }}
-      # ── ccache correctness overrides (pulp #3504 follow-up) ──────────────
+      # ── ccache correctness overrides ─────────────────────────────────────
       # The self-hosted macOS runners' service env (~/actions-runner-*/.env)
       # sets CCACHE_DEPEND=true with the default compiler_check=mtime on a
       # ccache shared across all three runners. Depend mode skips the
@@ -537,8 +532,8 @@ jobs:
       # object gets served and corrupts unrelated TUs at once — observed as a
       # pure function (resolve_checkpoint_url) returning "" and other
       # change-unrelated tests failing on every PR while clean local Debug AND
-      # Release builds pass. #3504's build-dir guard does not touch ccache, so
-      # it cannot fix this. Force the safe path here (job env overrides the
+      # Release builds pass. Build-dir guards do not touch ccache, so force
+      # the safe path here (job env overrides the
       # runner-service .env for these steps):
       #   - compiler_check=content → key the compiler by content, not mtime;
       #     this also changes the cache-key namespace, so the existing
@@ -583,9 +578,9 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
-          # libfontconfig1-dev added in #1970: chrome/m144 Skia exposes
-          # fontconfig symbols (`FcInitLoadConfigAndFonts` et al.) that
-          # earlier Skia releases hid. Without the dev package,
+          # chrome/m144 Skia exposes fontconfig symbols
+          # (`FcInitLoadConfigAndFonts` et al.) that earlier Skia releases
+          # hid. Without the dev package,
           # `pkg_check_modules(FONTCONFIG fontconfig)` in
           # core/canvas/CMakeLists.txt comes up empty and the Linux link
           # step fails. Mirrors the matching fix in release-cli.yml.
@@ -613,7 +608,7 @@ jobs:
             wayland-protocols \
             ccache
 
-      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
+      # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
       # cutting brew-install latency and ccache miss rates substantially.
       # Detection: Namespace selectors land in matrix.runs_on_json as
@@ -621,20 +616,19 @@ jobs:
       # vars.PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON form configured today)
       # OR direct machine labels like "nscloud-macos-tahoe-arm64-6x14"
       # (documented in docs/guides/local-ci.md as an alternative).
-      # Codex P2 on #2399 flagged that a single "namespace" substring
-      # missed the nscloud-* form, so we check both prefixes.
+      # A single "namespace" substring misses the nscloud-* form, so we
+      # check both prefixes.
       #
-      # macOS-only restriction (fix-up to #2399 + #2402): the action
-      # hard-errors when run on a Namespace profile without cache
-      # volumes configured (observed on the Windows Namespace lane in
-      # PR #2376 — "nscloud-cache-action requires a cache volume to
-      # be configured"). Cache volumes are only configured for the
+      # macOS-only restriction: the action hard-errors when run on a
+      # Namespace profile without cache volumes configured
+      # ("nscloud-cache-action requires a cache volume to be configured").
+      # Cache volumes are only configured for the
       # macOS profile, and the cached paths here (brew, ~/Library/…)
       # are macOS-specific anyway. Windows uses choco + a different
       # ccache path, so it doesn't benefit from this step regardless.
       #
       # No-op on self-hosted Mac (already keeps caches on local disk)
-      # and github-hosted runners (have actions/cache via #420).
+      # and github-hosted runners (have actions/cache).
       - name: Namespace cache (brew + ccache + Pulp FetchContent)
         if: runner.os == 'macOS' && (contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud'))
         uses: namespacelabs/nscloud-cache-action@v1
@@ -648,8 +642,7 @@ jobs:
       # Without this `brew update`, any subsequent `brew install` fails
       # fast with: "You have disabled automatic updates and have not
       # updated today. Do not report this issue until you've run
-      # `brew update` and tried again." (PR #2399 — unblocks #2367,
-      # #2374, #2378, #2388 which all wedged on this on 2026-05-19.)
+      # `brew update` and tried again."
       # Local self-hosted Macs already keep brew warm between runs, but
       # `brew update --quiet` is idempotent and cheap there; cheap
       # enough to run unconditionally on every macOS leg.
@@ -862,7 +855,7 @@ jobs:
           fi
           exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
           if [ "${RUNNER_OS}" = "macOS" ]; then
-            # macOS self-hosted required gate stability, 2026-05-20:
+            # macOS self-hosted required gate stability:
             # these tests currently fail only on the local runner image
             # and block unrelated PRs behind the serialized macOS queue.
             # Keep them visible on Linux/Windows and in dedicated fixes.
@@ -877,16 +870,14 @@ jobs:
             exclude="${exclude}|mac harness scroll event carries non-zero deltas through PulpView"
             exclude="${exclude}|mac harness right-click reaches PulpView::rightMouseDown"
             exclude="${exclude}|pulp-mcp-launcher"
-            # NOTE: "CoreAudio render sine wave" + "StandaloneApp::apply_config"
-            # were temporarily excluded here on 2026-06-04 (full-suite-only 120s
-            # hang on the local runner). Root cause: CoreAudio teardown blocks on
-            # the RT I/O thread, which was CPU-starved under -j8. Fixed properly
-            # via a PROCESSORS reservation on the device-opening suites in
-            # test/CMakeLists.txt, so they are re-enabled here.
+            # CoreAudio/StandaloneApp device-opening suites rely on the
+            # PROCESSORS reservation in test/CMakeLists.txt to avoid
+            # RT-thread starvation under -j8; keep that reservation if
+            # those suites stay enabled here.
           fi
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            # Linux ARM64 PR runner, 2026-06-19: Skia is present, but the
-            # headless VM exposes an incompatible Vulkan device
+            # Linux ARM64 PR runner: Skia is present, but the headless VM
+            # exposes an incompatible Vulkan device
             # (/dev/dri/renderD128 -> VK_ERROR_INCOMPATIBLE_DRIVER) and no
             # DISPLAY. That makes visual/golden assertions fail as runner
             # capability checks, not as product regressions. Keep the rest of
@@ -912,8 +903,8 @@ jobs:
         # On a SELF-HOSTED runner the test step's log is not retrievable via
         # `gh run view --log` (you get only "Process completed with exit code
         # 8") and check-run annotations are empty — so a failing test is
-        # invisible remotely (see #3392; cost ~hours on 2026-06-03). ctest's own
-        # result logs name it: dump them into the job summary so the failing
+        # invisible remotely. ctest's own result logs name it: dump them into
+        # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
         if: failure() && runner.os != 'Windows'
         shell: bash
@@ -955,7 +946,7 @@ jobs:
         # ensures the code page applies to the cmd subshell that
         # spawns test binaries — a plain bash `chcp.com 65001` ran
         # at the outer shell level but didn't propagate to ctest's
-        # children on Namespace Windows (observed on #702).
+        # children on Namespace Windows.
         # Shipyard v0.38.0's UTF-8 prelude only covers commands
         # Shipyard dispatches via ssh-windows; GH Actions ctest
         # calls don't go through that path.
@@ -1004,20 +995,16 @@ jobs:
 
   # ── Windows MSVC release-path PR gate ────────────────────────────────────
   #
-  # The main `build-and-test` matrix above runs Windows via Namespace with a
-  # configure that differs from release-cli.yml's. Result: MSVC-specific
-  # errors (protected-member strictness, WIN32_LEAN_AND_MEAN / COM header
-  # interactions, etc.) only surface AFTER a tag is pushed, when
-  # release-cli.yml builds on a GitHub-hosted windows-latest runner. That's
-  # how v0.15.0 / v0.16.0 / v0.17.0 shipped broken release pipelines —
-  # wasapi_device.cpp and accessibility_win.cpp both hit MSVC errors that
-  # the PR gate didn't catch.
+  # The main `build-and-test` matrix uses a test-oriented Windows configure
+  # that differs from release-cli.yml's release configure. Without a matching
+  # release-path gate, MSVC-specific errors (protected-member strictness,
+  # WIN32_LEAN_AND_MEAN / COM header interactions, etc.) surface only AFTER a
+  # tag is pushed, when release-cli.yml builds on windows-latest.
   #
   # This job mirrors release-cli.yml's CLI-build configure on windows-latest
   # for every PR so MSVC errors block merge instead of silently failing at
   # tag-push time. Build-only; no test step — release-cli.yml doesn't run
-  # tests either, and the main matrix above already covers Windows tests on
-  # Namespace.
+  # tests either, and the main matrix above already covers Windows tests.
   windows-msvc-release-gate:
     needs: classify
     if: needs.classify.outputs.native_build_required == 'true'

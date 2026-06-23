@@ -3,8 +3,7 @@ name: Workflow lint
 # Layer 1 of the release-watchdog triad (docs/guides/release-watchdog.md):
 # catch bad `.github/workflows/*.yml` before merge. Uses agent-agnostic
 # tooling (yamllint, actionlint, `python3 -c yaml.safe_load`) so any
-# contributor or agent — Claude, Codex, a human — can run the same
-# checks locally.
+# contributor or agent can run the same checks locally.
 #
 # Motivating incident: #501 shipped an auto-release.yml with Python
 # code at column 1 nested inside a YAML `run: |` block whose indent

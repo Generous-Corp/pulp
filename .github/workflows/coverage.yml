@@ -707,11 +707,9 @@ jobs:
           }
           size=$(wc -c < "$xml")
           echo "coverage.cobertura.xml size: ${size} bytes"
-          # A2 first cut: assertion logic extracted to
-          # tools/scripts/verify_cobertura_xml.py so the inline-Python
-          # heredoc isn't duplicated across the native + Python lanes
-          # (and stays unit-testable). #605 contract preserved
-          # verbatim — non-empty file + lines-valid > 0.
+          # Shared verifier keeps the native + Python lanes on the same
+          # non-empty file + lines-valid > 0 contract without duplicating
+          # inline Python.
           python3 tools/scripts/verify_cobertura_xml.py "$xml" \
             --label "coverage.cobertura.xml" \
             --hint "llvm-cov / lcov_cobertura filtered out every source file — check scripts/run_coverage.sh's COVERAGE_IGNORE_REGEX and -object list against the actual profraw source paths."
@@ -729,7 +727,7 @@ jobs:
             echo "::error::Python tools coverage likely failed — check the 'Run Python tools coverage' step above."
             exit 1
           }
-          # A2 first cut: shared verifier (see native lane above).
+          # Shared verifier, same contract as the native lane above.
           python3 tools/scripts/verify_cobertura_xml.py "$xml" \
             --label "coverage.python.xml" \
             --hint "coverage.py did not record any executable tools/scripts lines."

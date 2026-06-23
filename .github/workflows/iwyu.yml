@@ -1,14 +1,13 @@
 name: IWYU advisory
 
-# include-what-you-use advisory gate for issue #594.
+# include-what-you-use advisory gate.
 #
 # Transitive-include bugs (code that uses std::X but only picks up
 # X's header transitively) keep reaching main because Apple Clang's
-# libc++ tolerates the miss while Linux Clang + MSVC reject. Three
-# incidents on 2026-04-21 (#540, <atomic>, #593) triggered this
-# gate. The coverage-build gate catches the same bug class later in
-# the matrix; this workflow catches it earlier, at IWYU-analysis time,
-# before it reaches the cross-platform matrix.
+# libc++ tolerates the miss while Linux Clang + MSVC reject. The
+# coverage-build gate catches the same bug class later in the matrix;
+# this workflow catches it earlier, at IWYU-analysis time, before it
+# reaches the cross-platform matrix.
 #
 # Still advisory: continue-on-error is true, PR diffs get inline
 # annotations, and merges are not blocked. Flip to blocking only after

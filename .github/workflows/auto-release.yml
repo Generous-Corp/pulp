@@ -69,8 +69,8 @@ jobs:
               echo "skip=1" >> "$GITHUB_OUTPUT"
               exit 0
           fi
-          # pulp #1308 follow-up — honor `Version-Bump: skip reason="..."`
-          # the same way `Release: skip` is honored. Authors use this
+          # Honor `Version-Bump: skip reason="..."` the same way
+          # `Release: skip` is honored. Authors use this
           # trailer for fix/feat changes that genuinely don't bump the
           # SDK or plugin (e.g. JS-only changes to packages/pulp-react/
           # which versions independently via npm, or docs fixups
@@ -94,9 +94,9 @@ jobs:
           # in version_bump_check.py). Mirrors the same matching shape
           # as `_range_has_version_bump_skip_trailer()` in
           # tools/scripts/version_bump_check.py — including the
-          # requirement that the reason be NON-EMPTY (Codex P2 on the
-          # original #1310 fix; the earlier regex allowed bare
-          # `reason=` with no value, but the Python gate rejects it).
+          # requirement that the reason be NON-EMPTY. The Python gate
+          # rejects bare `reason=` with no value; this shell guard must
+          # stay in lockstep.
           # If the two layers disagreed on validity, an author could
           # write `reason=""` that passes here but fails at PR time
           # (or vice-versa) — making the bypass inconsistent.
@@ -132,8 +132,8 @@ jobs:
           #    squash-merge in quick succession and a queued run is
           #    cancelled (see 2026-04-19 cascade: v0.23.0 lost).
           #
-          # 2. Latest existing tag. #498 switched to this; fixed the
-          #    self-heal case but broke TWO other cases (Codex review):
+          # 2. Latest existing tag. This fixed the self-heal case but
+          #    broke TWO other cases:
           #
           #    a. `Release: skip` trailer — if a bump merges WITH the
           #       trailer, latest-tag stays at the older version. Next
@@ -181,11 +181,11 @@ jobs:
           # "eq", or "lt". Empty strings behave like "missing" — treat
           # as "lt" so HEAD always wins over nothing.
           #
-          # #501 shipped this with the Python body at column 1, which
-          # broke the YAML `run: |` block scalar (any line less-indented
-          # than the block ends the scalar). GitHub rejected the workflow
-          # file with "workflow file issue" on every push since — every
-          # auto-release run silently failed, so v0.23.1 never tagged.
+          # Keep the Python body inside a heredoc. A prior inline body at
+          # column 1 broke the YAML `run: |` block scalar (any line
+          # less-indented than the block ends the scalar), so GitHub
+          # rejected the workflow file with "workflow file issue" before
+          # any jobs could run.
           # Fix: use a heredoc that python3 reads from stdin so script
           # indentation is divorced from YAML indentation.
           semver_cmp() {
@@ -212,8 +212,8 @@ jobs:
           # NB: `git tag --list … | head -1` SIGPIPEs the tag walk (exit 141)
           # under `set -o pipefail` once the tag set is large enough that
           # `--sort` is still streaming when `head` closes the pipe — which is
-          # exactly what wedged every auto-release on 2026-06-08 after the day's
-          # version bumps grew the tag list. `for-each-ref --count=1` returns a
+          # exactly what wedges auto-release once the tag list grows large
+          # enough. `for-each-ref --count=1` returns a
           # single ref with no pipe, so there is no reader to close early.
           latest_sdk_tag=$(git for-each-ref --sort=-version:refname --format='%(refname:short)' --count=1 'refs/tags/v[0-9]*')
           latest_plugin_tag=$(git for-each-ref --sort=-version:refname --format='%(refname:short)' --count=1 'refs/tags/plugin-v[0-9]*')
@@ -223,14 +223,12 @@ jobs:
           plugin_tag=$(extract_json_version "${latest_plugin_tag:-HEAD~1}" .claude-plugin/plugin.json || true)
           plugin_after=$(extract_json_version HEAD .claude-plugin/plugin.json || true)
 
-          # #513 fix — trailer-aware bump detection. Walk history from
-          # HEAD backward to find the commit that set a given version
-          # file to its current value. If that bump commit carries
-          # `Release: skip`, the skip is sticky (permanent for that
-          # bumped value) and no future push re-evaluates it. Prior
-          # logic tried to approximate this using event.before and
-          # broke the self-heal case (v0.23.1 recovery on 2026-04-20
-          # showed the pattern).
+          # Trailer-aware bump detection. Walk history from HEAD backward
+          # to find the commit that set a given version file to its
+          # current value. If that bump commit carries `Release: skip`,
+          # the skip is sticky for that bumped value and no future push
+          # re-evaluates it. Approximating this with event.before breaks
+          # self-heal after cancelled intermediate release runs.
           find_bump_commit() {
               local file="$1"
               local extract="$2"
@@ -374,8 +372,7 @@ jobs:
       # release. The intent: if v0.101.7 is mid-build and we just tagged
       # v0.102.0, v0.101.7's artifacts are obsolete — users will only
       # ever install v0.102.0. Saves github-hosted macos-15 minutes and
-      # gets the latest release to users faster (see #2075 + the 2026-05-15
-      # v0.101.x saga that motivated this step).
+      # gets the latest release to users faster.
       #
       # Two opt-outs:
       #   1. vars.PULP_RELEASE_MODE=land-all — repo-wide disable
@@ -384,7 +381,7 @@ jobs:
       #
       # Cancelling sign-and-release.yml is important: it runs on the same
       # tag push and can resurrect a draft release after release-cli is
-      # cancelled (codex flagged this footgun in #2075).
+      # cancelled.
       #
       # Semver via stdlib regex, not packaging.version (PEP 440 ≠ SemVer)
       # and not `sort -V` (Pulp pre-release suffixes would be a future
@@ -438,16 +435,15 @@ jobs:
                   return None
               return r.stdout
 
-          # The 2026-05-18 starvation incident (pulp #2226 / this fix):
-          # the original supersede policy "cancel any tag strictly older
+          # The original supersede policy "cancel any tag strictly older
           # than NEW_TAG" cascaded when main moved faster than
           # release-cli.yml could finish. Every new tag cancelled the
           # previous tag's release-cli, and itself got cancelled by the
-          # NEXT tag, leaving 10 SDK versions (v0.111.0 → v0.115.0)
-          # tagged-but-never-published. No watchdog caught it because
-          # release-cli was `cancelled` (not `failure`), draft was
-          # deleted (so draft-stuck didn't fire), and tag existed (so
-          # cadence-check was happy).
+          # next tag, leaving SDK versions tagged-but-never-published.
+          # No watchdog caught it because release-cli was `cancelled`
+          # (not `failure`), the draft was deleted before the draft-stuck
+          # watchdog could fire, and the tag existed so cadence-check was
+          # satisfied.
           #
           # New policy: never cancel any tag ≥ the LATEST PUBLISHED
           # release. We only supersede builds that we already know are
@@ -585,11 +581,10 @@ jobs:
           echo "Tip subject: ${subject}"
 
           # Bail early for non-fix/feat — the no-tag outcome is correct
-          # for those. B1 (2026-05): classification now shells out to
+          # for those. Classification shells out to
           # `version_bump_check.py classify-subject` so the regex has a
-          # single source of truth. Previous inline-Python heredoc copied
-          # _FIX_FEAT_TITLE_RE verbatim and could silently drift; the
-          # lock-step risk was documented but not enforced.
+          # single source of truth instead of an inline copy that can
+          # silently drift.
           if ! python3 tools/scripts/version_bump_check.py classify-subject "$subject"; then
               echo "Tip is not a fix:/feat: — no-tag outcome is expected. Done."
               exit 0
