@@ -436,7 +436,7 @@ mixer.mix_wet(output_channels, 2, num_frames);
 #include <pulp/signal/convolver.hpp>
 
 PartitionedConvolver conv;
-conv.init(impulse_response.data(), ir_length, block_size);
+conv.load_ir(impulse_response.data(), ir_length, block_size);
 
 // In your process callback:
 conv.process(input, output, block_size);
