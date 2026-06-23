@@ -75,4 +75,4 @@ Both scenarios surface the same error message, so rule them out in order. See sh
 ## See also
 - `tools/scripts/versioning.json` — machine-readable config consumed by `version_bump_check.py` and `skill_sync_check.py`.
 - `docs/guides/versioning.md` — author-facing guide on how `pulp pr` drives the whole pipeline, including bypass trailers.
-- `docs/guides/shipyard.md` — CI controller deep-dive.
+- `docs/guides/local-ci.md` — CI controller deep-dive.
