@@ -43,10 +43,11 @@ Advisory only — never blocks. Full contract + override knobs live in the
 | Command | Platform | What It Does |
 |---------|----------|-------------|
 | `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit `.app`/`.dmg`/bundle |
-| `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.app` (repeatable) |
+| `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.zip` (repeatable), not a raw `.app` |
 | `package` | All | Create .pkg/.dmg (macOS), NSIS (Windows), APK+AAB (Android) |
 | `release` | macOS only | One command: sign → package → **notarize + staple the .pkg/.dmg it builds** → verify |
 | `share` | macOS only | One-off: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify a single artifact for sharing |
+| `auv3-xcodeproj` | macOS only | Generate an Xcode project for an AUv3 target |
 | `appcast` | All | Generate Sparkle-compatible XML update feed |
 | `check` | All | Verify signing status of built artifacts |
 | `doctor` | macOS | Make signing+notarization non-interactive: self-heal the dedicated signing keychain and validate the `.p8` notary key. No build dir required. |
@@ -164,7 +165,7 @@ it. Two defenses now exist:
 
 The composable primitives underneath:
 - `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
-- `pulp ship notarize --path <dmg|pkg|app>` — notarize + staple one artifact (repeatable).
+- `pulp ship notarize --path <dmg|pkg|zip>` — notarize + staple one artifact (repeatable). Use `share` for a raw `.app`.
 
 **Do not confuse with the production release.** `share`/`release`/`sign`/
 `notarize` are local developer commands. The versioned GitHub Release (all
@@ -211,6 +212,18 @@ each artifact's signature and **skips (does not submit) any unsigned `.pkg`/
 artifact" warning instead of a failed notarytool submission. `notarize --path`
 likewise rejects a raw `.app` (notarytool needs a `.dmg`/`.pkg`/`.zip`
 container — use `share` for an app).
+
+### AUv3 Xcode handoff: `pulp ship auv3-xcodeproj`
+
+```bash
+pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
+pulp ship auv3-xcodeproj MyPlugin --sdk iphoneos --open
+```
+
+Generates a separate CMake Xcode build directory for an AUv3 target. `--sdk`
+accepts `iphonesimulator`, `iphoneos`, or `macosx`; the default output is
+`build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake invocation
+without requiring Xcode.
 
 ### macOS: Build → Sign → Notarize → Package → Appcast
 

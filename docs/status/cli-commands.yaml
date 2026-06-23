@@ -144,6 +144,40 @@ commands:
           - name: --icon
             required: false
             description: "Linux AppImage: optional .png icon (a placeholder is used when omitted)"
+      - name: release
+        summary: "Run the macOS sign, package, notarize, and staple pipeline in one command"
+        args:
+          - name: --target
+            required: false
+          - name: --identity
+            required: false
+          - name: --installer-identity
+            required: false
+            description: Developer ID Installer identity used to sign the macOS .pkg
+          - name: --apple-id
+            required: false
+          - name: --team-id
+            required: false
+          - name: --password
+            required: false
+          - name: --api-key
+            required: false
+          - name: --api-key-id
+            required: false
+          - name: --api-issuer
+            required: false
+          - name: --version
+            required: false
+          - name: --pkg
+            required: false
+          - name: --dmg
+            required: false
+          - name: --skip-sign
+            required: false
+          - name: --skip-package
+            required: false
+          - name: --skip-notarize
+            required: false
       - name: appcast
         summary: Generate Sparkle-compatible XML update feed
         args:
@@ -200,6 +234,22 @@ commands:
           - name: --team-id
             required: false
           - name: --password
+            required: false
+          - name: --dry-run
+            required: false
+      - name: auv3-xcodeproj
+        summary: Generate an Xcode project for an AUv3 target (macOS)
+        args:
+          - name: target
+            kind: positional
+            required: true
+            description: Pulp target to generate as an AUv3 Xcode project
+          - name: --sdk
+            required: false
+            description: iphonesimulator, iphoneos, or macosx; defaults to iphonesimulator
+          - name: --output
+            required: false
+          - name: --open
             required: false
           - name: --dry-run
             required: false

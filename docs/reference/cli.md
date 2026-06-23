@@ -821,7 +821,9 @@ pulp ship doctor                                   # make signing non-interactiv
 pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
 pulp ship notarize --dry-run                       # print resolved argv, no submit
+pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
+pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
 **Subcommands**:
@@ -833,6 +835,7 @@ pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+ver
 | `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
+| `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
 | `check`    | Check signing status of all built plugins |
 | `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
 
@@ -866,6 +869,11 @@ and are only notarized + verified.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
+
+`auv3-xcodeproj` generates a separate CMake Xcode build directory for an AUv3
+target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; default
+output is `build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake
+invocation without requiring Xcode.
 
 #### `pulp ship notarize`
 
