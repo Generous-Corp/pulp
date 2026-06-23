@@ -1439,7 +1439,7 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis tooling. Manage offline audio models (text-to-audio retrieval), read reproducible excerpt bundles, and run live/offline Audio Scope analysis.
+    summary: Repo-level audio analysis tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, and run live/offline Audio Scope analysis.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
@@ -1448,7 +1448,7 @@ commands:
       - name: model activate
         summary: Select the active model and persist the state file
       - name: excerpt-find
-        summary: Score audio files against a text query and emit an excerpt bundle
+        summary: Rank WAV windows deterministically from a text query and emit an excerpt bundle with backend metadata
         args:
           - name: --text
             required: true
