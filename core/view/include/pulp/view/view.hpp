@@ -900,11 +900,10 @@ public:
     void set_z_index(int z) { z_index_ = z; }
     int z_index() const { return z_index_; }
 
-    /// Return children stably sorted by z_index() ascending.
-    /// paint_all paints in this order so higher-z siblings render on top;
-    /// hit_test walks the same order in reverse. Exposed so tests can
-    /// assert ordering directly without piping through the paint pipeline.
+    /// Children stably sorted by z_index() ascending — paint order (higher-z on top); hit_test walks it reversed. Exposed for tests.
     std::vector<View*> sorted_children_by_z_index() const;
+    /// True iff children_ is already in that order — paint_all's fast path then iterates children_ directly, no sorted-copy alloc. Exposed for tests.
+    bool children_in_z_order() const;
 
     /// Overflow mode
     /// `scroll` accepted as a third keyword so the yoga `overflow`

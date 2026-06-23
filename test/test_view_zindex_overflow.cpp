@@ -147,6 +147,103 @@ TEST_CASE("View::paint_all paints higher-z child last so it lands on top",
     REQUIRE(last_full_bounds_fill.b8() == 0);
 }
 
+TEST_CASE("children_in_z_order predicate gates the paint-all alloc fast path",
+          "[view][perf][zorder-fastpath]") {
+    // paint_all skips the sorted_children_by_z_index() heap allocation when
+    // children are already in non-decreasing z order (the dominant case). The
+    // predicate must be true exactly in those cases and false only when a
+    // stable_sort would actually reorder.
+    SECTION("default z=0 → in order (fast path)") {
+        View parent;
+        parent.add_child(std::make_unique<View>());
+        parent.add_child(std::make_unique<View>());
+        parent.add_child(std::make_unique<View>());
+        REQUIRE(parent.children_in_z_order());
+    }
+    SECTION("ascending z → in order (fast path)") {
+        View parent;
+        auto a = std::make_unique<View>(); a->set_z_index(0);
+        auto b = std::make_unique<View>(); b->set_z_index(5);
+        auto c = std::make_unique<View>(); c->set_z_index(10);
+        parent.add_child(std::move(a));
+        parent.add_child(std::move(b));
+        parent.add_child(std::move(c));
+        REQUIRE(parent.children_in_z_order());
+    }
+    SECTION("equal non-zero z → in order (fast path)") {
+        View parent;
+        for (int i = 0; i < 3; ++i) {
+            auto v = std::make_unique<View>(); v->set_z_index(7);
+            parent.add_child(std::move(v));
+        }
+        REQUIRE(parent.children_in_z_order());
+    }
+    SECTION("a later child with lower z → needs sort (slow path)") {
+        View parent;
+        auto a = std::make_unique<View>();             // z=0
+        auto popover = std::make_unique<View>(); popover->set_z_index(20);
+        auto b = std::make_unique<View>();             // z=0 after a z=20 → out of order
+        parent.add_child(std::move(a));
+        parent.add_child(std::move(popover));
+        parent.add_child(std::move(b));
+        REQUIRE_FALSE(parent.children_in_z_order());
+    }
+    SECTION("empty / single child are trivially in order") {
+        View empty;
+        REQUIRE(empty.children_in_z_order());
+        View one;
+        one.add_child(std::make_unique<View>());
+        REQUIRE(one.children_in_z_order());
+    }
+}
+
+TEST_CASE("paint_all fast path preserves insertion order for default-z children",
+          "[view][perf][zorder-fastpath]") {
+    using namespace pulp::canvas;
+    // With all-default z (fast path), children must paint in insertion order —
+    // identical to the stable-sorted order — so the last-inserted full-bounds
+    // fill is the topmost. Locks behavioral equivalence of the alloc-free path
+    // against the sorted path exercised by the issue-972 paint test above.
+    View parent;
+    parent.set_bounds({0, 0, 100, 100});
+
+    auto first = std::make_unique<View>();
+    first->set_bounds({0, 0, 100, 100});
+    first->set_background_color(Color::rgba8(255, 0, 0, 255));   // red
+
+    auto last = std::make_unique<View>();
+    last->set_bounds({0, 0, 100, 100});
+    last->set_background_color(Color::rgba8(0, 0, 255, 255));    // blue
+
+    parent.add_child(std::move(first));
+    parent.add_child(std::move(last));
+
+    REQUIRE(parent.children_in_z_order());  // confirms we exercise the fast path
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    Color last_fill{};
+    Color last_full_bounds_fill{};
+    bool saw_full_bounds = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            last_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::fill_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 100.0f) {
+            last_full_bounds_fill = last_fill;
+            saw_full_bounds = true;
+        }
+    }
+    REQUIRE(saw_full_bounds);
+    REQUIRE(last_full_bounds_fill.r8() == 0);
+    REQUIRE(last_full_bounds_fill.g8() == 0);
+    REQUIRE(last_full_bounds_fill.b8() == 255);  // last-inserted (blue) on top
+}
+
 TEST_CASE("View::hit_test returns the highest-z child for overlapping bounds",
           "[view][issue-972]") {
     // Three siblings at the same bounds: content (z=0, inserted last),

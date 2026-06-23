@@ -117,7 +117,7 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1612,
+      "max_loc": 1611,
       "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
     },
     {

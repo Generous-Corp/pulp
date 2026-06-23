@@ -537,10 +537,24 @@ void View::paint_all(canvas::Canvas& canvas) {
     // order (CSS painting-order rule). Higher z paints later, ending
     // up visually on top. The default z_index_ is 0, so views that never call
     // set_z_index() retain insertion order.
-    auto paint_order = sorted_children_by_z_index();
+    // Fast path: when children are already in non-decreasing z_index order
+    // (the dominant case — the default z_index_ is 0, so any tree that never
+    // calls set_z_index() qualifies), a stable_sort by z is the identity, so we
+    // can paint children_ in place. This avoids allocating a fresh sorted
+    // vector for every interior view on every frame — paint_all runs inside a
+    // ScopedNoAlloc region, so that per-frame allocation is a real-time-safety
+    // violation. Only fall back to the allocating sorted copy when z-index
+    // actually reorders siblings.
     auto children_t0 = std::chrono::steady_clock::now();
-    for (View* child : paint_order) {
-        child->paint_all(canvas);
+    if (children_in_z_order()) {
+        for (const auto& child : children_) {
+            child->paint_all(canvas);
+        }
+    } else {
+        auto paint_order = sorted_children_by_z_index();
+        for (View* child : paint_order) {
+            child->paint_all(canvas);
+        }
     }
     children_dt = std::chrono::steady_clock::now() - children_t0;
 
@@ -806,6 +820,17 @@ std::unique_ptr<View> View::remove_child(View* child) {
     auto owned = std::move(*it);
     children_.erase(it);
     return owned;
+}
+
+bool View::children_in_z_order() const {
+    // True when children_ is already non-decreasing in z_index(), i.e. a
+    // stable_sort by z would be the identity and paint/hit-test can iterate
+    // children_ directly without allocating a sorted copy. A single linear
+    // scan, no allocation.
+    for (std::size_t i = 1; i < children_.size(); ++i) {
+        if (children_[i]->z_index() < children_[i - 1]->z_index()) return false;
+    }
+    return true;
 }
 
 std::vector<View*> View::sorted_children_by_z_index() const {
