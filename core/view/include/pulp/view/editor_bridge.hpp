@@ -97,7 +97,7 @@ public:
     // construction of an editor that contains one), and the next
     // inbound message would dereference a moved-from instance with
     // a null impl. Requiring construction-in-place surfaces that
-    // mistake at compile time. (Codex review on PR #711.)
+    // mistake at compile time.
     EditorBridge(const EditorBridge&) = delete;
     EditorBridge& operator=(const EditorBridge&) = delete;
     EditorBridge(EditorBridge&&) = delete;

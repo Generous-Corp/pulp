@@ -21,9 +21,6 @@
 # bootstrap osxcross; substitute `arm64-apple-darwin24` for whichever
 # triple your osxcross install produced.
 #
-# Design notes and full architecture: see
-# planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
-
 cmake_minimum_required(VERSION 3.24)
 
 set(CMAKE_SYSTEM_NAME Darwin)

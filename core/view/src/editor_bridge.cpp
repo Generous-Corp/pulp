@@ -146,8 +146,8 @@ std::size_t EditorBridge::get_uint(const choc::value::ValueView& v,
     // Clamp BOTH ends before casting. C++ float-to-int conversion is
     // undefined behavior when the source value doesn't fit the target
     // type, and a malformed editor payload can easily exceed SIZE_MAX
-    // (or even overflow the float's exponent). Codex flagged this on
-    // PR #711.
+    // (or even overflow the float's exponent), so clamp both ends before
+    // casting.
     constexpr auto kMaxAsDouble = static_cast<double>(
         std::numeric_limits<std::size_t>::max());
     constexpr auto kMaxAsInt64 = std::numeric_limits<std::size_t>::max() >

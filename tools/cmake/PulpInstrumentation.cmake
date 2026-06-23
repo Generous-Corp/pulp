@@ -17,9 +17,6 @@
 # without per-subsystem drift. External FetchContent deps (Skia, Dawn,
 # mbedTLS, QuickJS, etc.) are compiled separately and not affected.
 #
-# Full coverage/sanitizer design:
-# planning/coverage-sanitizers-spec-2026-04-16.md (private submodule).
-
 include_guard(GLOBAL)
 
 option(PULP_ENABLE_COVERAGE "Clang source-based coverage instrumentation" OFF)

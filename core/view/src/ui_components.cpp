@@ -838,7 +838,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     target_scroll_y_ += dy;
     clamp_scroll_targets();
 
-    // pulp #1737 RN-OOS-fixup — honor CSS `scroll-behavior`. CSS
+    // pulp #1737 — honor CSS `scroll-behavior`. CSS
     // default is `auto` (instant); Pulp's historic default has been
     // smooth, so we treat empty / `smooth` / anything-else as smooth
     // (preserves the existing scroll feel for callers that don't set
@@ -846,7 +846,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     // explicitly sets `scroll-behavior: auto`.
     const std::string& sb = scroll_behavior();
     if (sb == "auto" || !animate) {
-        // WYSIWYG P6 FIX 4 — wheel/trackpad scroll passes animate=false so
+        // Wheel/trackpad scroll passes animate=false so
         // the offset jumps instantly. A trackpad sends a continuous delta
         // stream; the OS already smooths/inerts it, so animating each delta
         // lags behind the fingers. Programmatic scroll (animate defaults to
@@ -980,7 +980,7 @@ View* ScrollView::hit_test(Point local_point) {
     if (!visible() || !enabled() || !hit_testable()) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
-    // React Native pointerEvents parity (pulp #1170 Codex P1 on #1044/#1026):
+    // React Native pointerEvents parity (pulp #1170):
     // ScrollView shadows the base View::hit_test, so without this honor the
     // setPointerEvents(box-only/box-none/none) path silently no-ops on
     // scrollables. Mirror View::hit_test's policy here.

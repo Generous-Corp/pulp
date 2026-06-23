@@ -564,7 +564,7 @@ pulp::view::Point ios_root_to_local(pulp::view::Point root_pt, pulp::view::View*
 // drag target can be destroyed (editor rebuild / JS unmount) between touch
 // events. Walking needle→parent would deref the freed pointer; walking
 // root→children only touches live nodes and compares addresses. Mirrors
-// window_host_mac_geometry.mm's view_is_in_tree (Codex P1).
+// window_host_mac_geometry.mm's view_is_in_tree.
 bool ios_view_in_tree(pulp::view::View* needle, pulp::view::View* root) {
     if (!needle || !root) return false;
     if (needle == root) return true;
@@ -673,7 +673,7 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         target->on_mouse_event(local);  // fires on_pointer_event → JS pointerdown
         // Also drive the native press virtual so View subclasses that init
         // drag state in on_mouse_down (knobs, faders) work in the GPU host —
-        // mirrors mac's pulp_plugin_mouse_down (Codex P2).
+        // mirrors mac's pulp_plugin_mouse_down.
         target->on_mouse_down(local.position);
         for (pulp::view::View* b = target->parent(); b; b = b->parent()) {
             if (!b->on_pointer_event) continue;
@@ -745,7 +745,7 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
             me.is_cancelled = cancelled;
             me.position = ios_root_to_local(me.window_position, target);
             // Distinct native cancel path so widgets can roll back in-progress
-            // gestures instead of treating a cancel as a commit (Codex P2).
+            // gestures instead of treating a cancel as a commit.
             if (cancelled) target->on_mouse_cancel(me.position);
             else target->on_mouse_up(me.position);
             target->on_mouse_event(me);  // fires on_pointer_event → JS pointerup/cancel

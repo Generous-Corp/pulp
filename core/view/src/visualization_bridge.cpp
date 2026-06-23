@@ -2,8 +2,8 @@
 //
 // The public header (pulp/view/visualization_bridge.hpp) forward-declares
 // pulp::render::bench::PerfCounters so view consumers don't pull the
-// render include tree when PULP_BENCHMARK is on (Codex P1 on PR #526 /
-// #500). The PerfCounters FIELDS (atomic<double>::fetch_add) still need
+// render include tree when PULP_BENCHMARK is on. The PerfCounters fields
+// (atomic<double>::fetch_add) still need
 // the full type, so the process() body lives here and only pulp-view's
 // translation unit sees the render header — consumers of
 // pulp::view::VisualizationBridge still don't need to link pulp::render.

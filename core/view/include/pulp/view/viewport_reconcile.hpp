@@ -65,7 +65,7 @@ inline void clamp_oversize_absolute_view(pulp::view::View& view,
     // opposite edge isn't anchored — i.e. the source said "size me
     // explicitly", not "stretch me from edge to edge".
     //
-    // pulp #1906 (Codex P2) — distinguish `right:auto` from explicit
+    // pulp #1906 — distinguish `right:auto` from explicit
     // `right:0`. The previous predicate `(!has_right() || right==0)`
     // treated `auto` and `0` identically, so an oversize child pinned
     // with explicit `right:0` / `bottom:0` got force-clamped even

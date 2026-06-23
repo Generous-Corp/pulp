@@ -719,7 +719,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
             // before hit_test. Painting them outside the transform would put
             // them at root coords in window space → visually misaligned and
             // non-clickable at any host size that isn't exactly design size.
-            // Matches the standalone host (pulp PR #1984 Codex P1).
+            // Matches the standalone host.
             pulp::view::View::paint_overlays(canvas, self.rootView);
             canvas.restore_to_count(saved);
         } else {
@@ -1709,7 +1709,7 @@ private:
             // coords, mouse input inverse-maps window→root before hit_test.
             // Painting outside the transform would visually misalign + make
             // overlays non-clickable at any non-design-size host. Matches
-            // the standalone GPU host (pulp PR #1984 Codex P1).
+            // the standalone GPU host.
             View::paint_overlays(canvas, &root_);
             canvas.restore_to_count(saved);
         } else {

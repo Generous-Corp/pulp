@@ -25,8 +25,8 @@ struct WindowOptions {
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
 
-    /// pulp-internal #71 follow-up — when true, the window is created and
-    /// the run loop drives the bridge per-vsync as usual, but the window
+    /// When true, the window is created and the run loop drives the bridge
+    /// per-vsync as usual, but the window
     /// is never made visible / brought to front / activated. The app also
     /// skips the Dock-icon and focus-stealing activation steps. Intended
     /// for headless smoke tests (live-host-pump-smoke.sh) and any
@@ -35,7 +35,7 @@ struct WindowOptions {
     /// flag fall back to normal behaviour.
     bool initially_hidden = false;
 
-    /// WYSIWYG P4 FIX 4 — explicit window role for the close policy. A PRIMARY
+    /// Explicit window role for the close policy. A PRIMARY
     /// window (default) is the app's main window: closing it stops/tears down
     /// the app. A SECONDARY window (e.g. the floating InspectorWindow) only
     /// orders itself out on close and never stops the app, so closing the
