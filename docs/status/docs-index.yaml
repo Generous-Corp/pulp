@@ -272,7 +272,7 @@ docs:
   - slug: design-tokens
     path: guides/design-tokens.md
     kind: guide
-    summary: Theme system — token categories, inheritance, JSON creation, CSS/WGSL/Figma export
+    summary: Theme system — token categories, inheritance, JSON creation, CSS/WGSL export, and W3C token handoff
 
   - slug: custom-rendering
     path: guides/custom-rendering.md

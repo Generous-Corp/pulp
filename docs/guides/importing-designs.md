@@ -18,7 +18,7 @@ pulp import-design --from pencil --file design.json --validate --reference sourc
 pulp import-design --from pencil --file design.json --dry-run
 
 # Export current theme as W3C Design Tokens
-pulp export-tokens --output tokens.json
+pulp export-tokens --tokens tokens.json
 ```
 
 ## How It Works
@@ -78,7 +78,9 @@ Key Figma MCP tools used:
 - `get_variable_defs` — design tokens (colors, spacing, typography)
 - `get_metadata` — layer tree with IDs, names, types, positions, sizes
 
-See [GitHub issue #49](https://github.com/danielraffel/pulp/issues/49) for Figma Design + Make adapter status.
+The raw Figma and Figma Make adapter lanes are tracked in the compatibility
+import reference, which records the current parser status instead of relying on
+a one-off issue link.
 
 ### Google Stitch
 

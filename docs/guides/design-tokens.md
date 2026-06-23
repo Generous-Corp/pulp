@@ -233,7 +233,7 @@ For web builds (WASM), tokens map to CSS custom properties:
 Generate CSS from a theme:
 
 ```bash
-pulp docs export-tokens --format css > tokens.css
+pulp export-tokens --file theme.json --format css-variables --tokens tokens.css
 ```
 
 ## Exporting to WGSL
@@ -258,28 +258,30 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
 ## Figma Integration
 
-Export Pulp tokens to Figma-compatible format for design handoff:
+Export Pulp tokens as W3C Design Tokens JSON for design handoff:
 
 ```bash
-pulp docs export-tokens --format figma > tokens.figma.json
+pulp export-tokens --file theme.json --tokens tokens.json
 ```
 
-The exported JSON uses Figma's token format:
+The exported JSON uses the W3C/DTCG token format:
 
 ```json
 {
     "color": {
-        "background": { "value": "#0f0f1a", "type": "color" },
-        "accent": { "value": "#58a6ff", "type": "color" }
+        "background": { "$value": "#0f0f1a", "$type": "color" },
+        "accent": { "$value": "#58a6ff", "$type": "color" }
     },
     "spacing": {
-        "sm": { "value": "8", "type": "spacing" },
-        "md": { "value": "12", "type": "spacing" }
+        "sm": { "$value": "8", "$type": "dimension" },
+        "md": { "$value": "12", "$type": "dimension" }
     }
 }
 ```
 
-Import into Figma using the [Tokens Studio](https://tokens.studio/) plugin. Changes in Figma can be exported back to `theme.json` to keep design and code in sync.
+Import into Figma using a token workflow that accepts W3C/DTCG JSON, such as
+the [Tokens Studio](https://tokens.studio/) plugin. Changes in Figma can be
+exported back to `theme.json` to keep design and code in sync.
 
 ## Best Practices
 
