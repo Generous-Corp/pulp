@@ -624,7 +624,8 @@ public:
     /// pressure. Default is a no-op — plugins that cache decoded images,
     /// analysis buffers, or paged samples override this to drop caches.
     /// Implementations MUST NOT block the audio thread; use the existing
-    /// state/sync-strategy guidance for cache invalidation.
+    /// host-thread rules guidance in docs/reference/host-thread-rules.md
+    /// for cache invalidation.
     ///
     /// Wiring:
     ///   iOS       — the platform layer receives didReceiveMemoryWarning;
