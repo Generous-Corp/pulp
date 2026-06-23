@@ -991,10 +991,18 @@ ara:
 accessibility_features:
   roles_labels_values:
     status: usable
-    notes: AccessRole enum + access_label + access_value on View; exposed on all four functional bridges (macos/ios/android and matrix skeleton on windows/linux).
+    notes: >
+      Validated by test/test_platform_maturity.cpp, test/test_view.cpp,
+      test/test_accessibility_tree.cpp, and test/test_widget_bridge_html_aria.cpp
+      for View roles/labels/values, accessibility snapshots, and HTML/ARIA slot
+      routing; native bridge source maps these slots on macOS/iOS/Android/Windows/Linux.
   slider_increment_decrement:
-    status: usable
-    notes: on_accessibility_adjust(float) routed through VoiceOver/TalkBack increment/decrement actions.
+    status: partial
+    notes: >
+      iOS/Android source bridges route VoiceOver/TalkBack increment/decrement
+      actions to on_accessibility_adjust(float). Direct platform-action
+      regression tests and uniform macOS/Windows/Linux action semantics are still
+      pending.
   actions:
     status: planned
     notes: Per-widget std::vector<Action> exposure planned.
