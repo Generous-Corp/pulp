@@ -1,9 +1,8 @@
 """I/O + locking utilities for local CI.
 
-Extracted from local_ci.py to give downstream modules a thin
-filesystem-and-locking seam. All helpers depend only on stdlib plus
-the path helpers in `state_paths` (for the `ensure_state_dirs()` call
-that's required before writing any state file).
+This is the thin filesystem-and-locking seam for downstream modules. All helpers
+depend only on stdlib plus the path helpers in `state_paths` (for the
+`ensure_state_dirs()` call that's required before writing any state file).
 
 `image_change_summary` falls back to a SHA-256 comparison when Pillow
 is unavailable, so the local CI test suite stays runnable on stripped

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the io_utils text/file/image helpers.
-
-Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
-extracted io_utils module directly instead of the local_ci.py facade.
-"""
+"""Tests for the io_utils text/file/image helpers."""
 
 import os
 import sys

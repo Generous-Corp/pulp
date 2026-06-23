@@ -1,8 +1,8 @@
 """State directory + lock + log path helpers for local CI.
 
-Extracted from local_ci.py to provide a stable, testable seam for code
-that reasons about where local CI state lives on disk. Nothing in this
-module touches the queue/results JSON contents — only paths.
+This module is the stable seam for code that reasons about where local CI state
+lives on disk. Nothing here touches the queue/results JSON contents — only
+paths.
 
 The path-resolution rules are:
 

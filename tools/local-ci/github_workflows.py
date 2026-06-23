@@ -1,8 +1,7 @@
 """GitHub Actions workflow dispatch helpers for local CI.
 
-Extracted from local_ci.py as part of the R2-1 phased split. The
-constants (GITHUB_ACTIONS_DEFAULTS, BUILTIN_GITHUB_WORKFLOWS,
-REPO_VARIABLE_FALLBACKS) plus the 11 resolver functions own:
+The constants (GITHUB_ACTIONS_DEFAULTS, BUILTIN_GITHUB_WORKFLOWS,
+REPO_VARIABLE_FALLBACKS) plus the resolver functions own:
 
   - Reading the `github_actions` block out of the active config
   - Computing the effective workflow + provider + selector that a CLI

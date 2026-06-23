@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the state_paths state/log path helpers.
-
-Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
-extracted state_paths module directly instead of the local_ci.py facade.
-"""
+"""Tests for the state_paths state/log path helpers."""
 
 import json
 import os

@@ -1,8 +1,7 @@
 """Disk-footprint accounting helpers for local CI.
 
-Extracted from local_ci.py to give the `status` / cleanup paths a
-focused seam without dragging in the orchestrator. Pure read-side
-helpers; no mutation, no subprocess.
+These are focused read-side helpers for the `status` / cleanup paths: no
+mutation, no subprocess.
 
 `local_ci_state_footprint()` summarizes the on-disk sizes of the
 state subdirectories that grow over time (bundles, prepared

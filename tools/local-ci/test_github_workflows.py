@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the github_workflows selector/provider helpers.
-
-Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
-extracted github_workflows module directly instead of the local_ci.py facade.
-"""
+"""Tests for the github_workflows selector/provider helpers."""
 
 import json
 import os

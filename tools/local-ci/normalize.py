@@ -1,9 +1,8 @@
 """Config/value normalization helpers for local CI.
 
-Extracted from local_ci.py to give the desktop-automation, queue, and
-target subsystems a stable seam they can reuse without importing the
-11k-line orchestrator. Pure functions only — nothing here touches disk
-or subprocess.
+These pure functions give the desktop-automation, queue, and target subsystems a
+stable seam they can reuse without importing the central orchestrator. Nothing
+here touches disk or subprocess.
 
 Boolean parsing is intentionally permissive (true/yes/on/1, false/no/off/0,
 empty string == False) so config files written by hand stay forgiving.

@@ -1,9 +1,9 @@
 """Cloud provider integration for local CI — GitHub Actions + Namespace.
 
-Extracted from local_ci.py (R2-1, #2645): cloud billing /
-provider-metadata helpers, provider comparison/recommendation, GitHub and
-Namespace helper facade seams, and the cmd_cloud_* subcommands. Public symbols
-are re-exported into local_ci.py for the non-cloud commands + main() dispatch.
+Cloud billing / provider-metadata helpers, provider comparison/recommendation,
+GitHub and Namespace helper facade seams, and the cmd_cloud_* subcommands live
+here. Public symbols are re-exported into local_ci.py for the non-cloud commands
++ main() dispatch.
 
 load_optional_config is still reached through the local_ci.py facade for
 compatibility, but its default implementation is installed by
