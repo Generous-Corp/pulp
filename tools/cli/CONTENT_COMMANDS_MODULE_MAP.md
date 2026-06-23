@@ -1,9 +1,9 @@
 # Content Commands Module Map
 
-This map is the Phase 1 contract for splitting
-`tools/cli/content_commands.cpp`. The broader
-`CLI_COMMAND_SURFACE_MAP.md` owns cross-command boundaries; this file owns the
-data-only `pulp content` implementation seam.
+This map records the ownership contract for `tools/cli/content_commands.cpp`
+and its extraction targets. The broader `CLI_COMMAND_SURFACE_MAP.md` owns
+cross-command boundaries; this file owns the data-only `pulp content`
+implementation seam.
 
 The file currently owns the entire content-pack workflow in one 1,150-line
 translation unit: content and plugin-runtime manifest parsing, archive hash
@@ -11,9 +11,9 @@ validation, safe extraction, data-root install/update/remove mutation, content
 index generation, preview compatibility policy, JSON rendering, and command
 dispatch.
 
-Future extraction PRs should preserve the contracts below or update this file,
+Extraction changes should preserve the contracts below or update this file,
 `CLI_COMMAND_SURFACE_MAP.md`, and the focused content tests in the same change.
-If a future change starts tracking `content_commands.cpp` in
+If a change starts tracking `content_commands.cpp` in
 `tools/scripts/hotspot_size_guard.json`, shrink that ceiling in the same PR that
 shrinks the file.
 

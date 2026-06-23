@@ -1,11 +1,10 @@
 # CLI Command Surface Map
 
-This map is the Phase 1 ownership contract for the Pulp C++ CLI command
-surface under `tools/cli/`. It complements the narrower
-`KIT_COMMANDS_MODULE_MAP.md`: that file owns the future split of the
-`pulp kit` implementation, while this file documents how the top-level command
-families relate to each other so future extraction PRs do not blur trust
-boundaries, docs ownership, or validation lanes.
+This map records ownership boundaries for the Pulp C++ CLI command surface
+under `tools/cli/`. It complements the narrower `KIT_COMMANDS_MODULE_MAP.md`:
+that file owns the `pulp kit` implementation split, while this file documents
+how the top-level command families relate to each other so CLI changes do not
+blur trust boundaries, docs ownership, or validation lanes.
 
 The C++ delegate still builds as one `pulp-cli` target from
 `tools/cli/CMakeLists.txt`, with the user-facing Rust CLI falling through to
@@ -15,9 +14,9 @@ cross-command: `kit`, `content`, `package/add/search/audit`, `import`, and
 `tool` all touch package-like concepts with different execution and mutation
 rules.
 
-Future CLI extraction PRs should preserve the contracts below or update this
-file, command docs, tests, and skill-sync/versioning expectations in the same
-change.
+CLI extraction and routing changes should preserve the contracts below or
+update this file, command docs, tests, and skill-sync/versioning expectations in
+the same change.
 
 ## Current Source Map
 
@@ -28,7 +27,7 @@ change.
 | Legacy package aliases | `pulp_cli.cpp` lines 121-140 and 533-540 | `pulp audit`, `pulp add`, `pulp remove`, `pulp update`, `pulp search`, `pulp list`, `pulp suggest`, and `pulp target` compatibility routing into package helpers. | Keep routing thin in `pulp_cli.cpp`; package behavior belongs in `package_commands_*`. |
 | Invocation/update wrapper | `pulp_cli.cpp` lines 493-560 | Process entry, update-banner suppression, and final dispatch across built-in, script, binary, package alias, audit, tool, legacy alias, help, and unknown-command paths. | Keep process-level concerns here; do not add package/content/kit/tool business rules. |
 | Kit trust-boundary lane | `kit_commands.cpp` lines 2708-3920, `kit_commands.hpp` lines 12-39, `KIT_COMMANDS_MODULE_MAP.md` | Manifest validation, inspect/plan/apply/remove, archive pack/publish/init, validation profiles, JSON output, and safety review boundaries for source/UI/template kits. | Follow `KIT_COMMANDS_MODULE_MAP.md`: split manifest, policy, registry manifest, archive, apply, profile, and dispatch modules. |
-| Content-pack lane | `content_commands.cpp` lines 36-52 and 700-1143, `content_commands.hpp` line 9 | Data-only content-pack validation, preview, install/update/list/rescan/remove/reveal, runtime content index writes, archive validation, and user-data filesystem mutation. | `content_manifest.{hpp,cpp}`, `content_archive.{hpp,cpp}`, `content_install.{hpp,cpp}`, `content_registry_writer.{hpp,cpp}`, and thin `content_command_dispatch.{hpp,cpp}`. |
+| Content-pack lane | `content_commands.cpp`, `content_commands.hpp`, and `CONTENT_COMMANDS_MODULE_MAP.md` | Data-only content-pack validation, preview, install/update/list/rescan/remove/reveal, runtime content index writes, archive validation, and user-data filesystem mutation. | Follow `CONTENT_COMMANDS_MODULE_MAP.md`: split manifest, runtime-manifest, archive, path, install, index, preview, and dispatch modules. |
 | Package lane | `package_commands_internal.hpp` lines 1-88, `package_commands_search.cpp` lines 106-396, `package_commands_add.cpp` lines 28-384, `package_commands.cpp` lines 25-145 | Third-party audio package search/list/suggest/target, add/remove/update mutation, CMake/dependency metadata edits, and package audit aliases. Already partially split by read-only, mutating, util, and audit concerns. | Preserve current split. If it grows, split target management out of `package_commands_search.cpp` before touching add/remove/update. |
 | Framework import lane | `cmd_import.cpp` lines 56-115 and `import_run.cpp` lines 469-563 | `pulp import detect/inspect/emit` argument parsing, vendor-free framework detection, importer SPI orchestration, terms gate, clean-room emission, and scaffold write planning. | Keep `cmd_import.cpp` as parse/dispatch only. Put new verb orchestration in `import_run.cpp` or focused `import_*` helpers. |
 | Tool/importer registry lane | `pulp_cli.cpp` line 541, `tool_registry.cpp`, and `importer_install.cpp` | Top-level `pulp tool` dispatch, add-on tool registry loading, importer install/locate helpers, and the `pulp add <importer>` alias used by package add. | Keep reusable registry mechanics separate from package/content/kit policy; package add may route to it but must not own tool installation. |

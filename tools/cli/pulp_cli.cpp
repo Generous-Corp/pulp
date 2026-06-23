@@ -59,8 +59,7 @@ static const Command commands[] = {
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
     {"project",  "Per-project SDK pin: bump, undo", cmd_project},
-    // Regression fix: the
-    // #562 PR added `{"config", ..., cmd_config}` to this dispatch
+    // Regression fix: #562 added `{"config", ..., cmd_config}` to this dispatch
     // table, but the #563 merge dropped the line, leaving `pulp config`
     // (and the update.mode / channel / check_interval_hours surface
     // it guards) completely unreachable. Restore so the
@@ -116,7 +115,7 @@ static int delegate_to_binary(const BinaryCommand& bc, const std::vector<std::st
                                     bc.extra_arg ? std::string(bc.extra_arg) : std::string{});
 }
 
-// ── Package Manager Commands ───────────────────────────────────────────��───
+// Package Manager Commands
 
 static int handle_audit(const std::vector<std::string>& args) {
     bool pkg_flag = false, plat_flag = false, lic_flag = false;
@@ -331,8 +330,8 @@ bool kick_auto_stage(const fs::path& marker_path,
     p.staged_at_epoch_sec = uc::now_epoch_sec();
     // Leave staged_binary_path empty — cmd_upgrade's next invocation
     // will perform the download + swap. The marker's purpose here is
-    // to signal intent; the binary path field is reserved for a
-    // future slice where the background download lands a file.
+    // to signal intent; the binary path field is reserved for a staged
+    // background download path.
     p.staged_binary_path = "";
     return um::write_pending_upgrade(marker_path, p);
 }

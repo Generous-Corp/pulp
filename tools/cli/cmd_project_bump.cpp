@@ -284,8 +284,8 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         // and a build. If either fails, roll back.
         //
         // This intentionally uses a throwaway build dir so the real
-        // `build/` stays untouched. The CLI doesn't try to honor a
-        // user-specified build dir here — that's a follow-up.
+        // `build/` stays untouched. This path intentionally does not honor a
+        // user-specified build dir.
         auto verify_build = project_path / "build-bump-verify";
         std::string cfg = "cmake -S " + shell_quote(project_path) +
                           " -B " + shell_quote(verify_build) +

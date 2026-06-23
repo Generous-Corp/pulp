@@ -125,10 +125,9 @@ target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::audi
 # that are unresolved AT THE TIME the archive is processed; symbols
 # referenced AFTER the archive go unresolved even if a later library
 # would have satisfied them. Adding `fontconfig` again here ensures it
-# appears AFTER `libskia.a` in the final link line. (`PkgConfig::FONTCONFIG`
-# is already wired PUBLIC on `pulp-canvas` per pulp #1962 follow-up, so
-# the include dirs and -L flags are already correct — this just nails
-# the link-line position down for ld.)
+# appears AFTER `libskia.a` in the final link line. `PkgConfig::FONTCONFIG`
+# is already wired PUBLIC on `pulp-canvas`, so the include dirs and -L flags
+# are already correct — this just nails the link-line position down for ld.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(PkgConfig)
     if(PkgConfig_FOUND)

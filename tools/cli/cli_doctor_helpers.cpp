@@ -963,7 +963,7 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
     return checks;
 }
 
-// ── pulp doctor ios (#60 follow-up) ─────────────────────────────────────────
+// ── pulp doctor ios ─────────────────────────────────────────────────────────
 
 std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter) {
     std::vector<DoctorCheck> checks;

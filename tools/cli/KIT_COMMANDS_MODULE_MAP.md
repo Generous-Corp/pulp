@@ -1,15 +1,14 @@
 # Kit Commands Module Map
 
-This map is the Phase 1 contract for splitting `tools/cli/kit_commands.cpp`.
-The file currently owns the whole local kit/package workflow in one 3,927-line
-translation unit: manifest validation, publish-policy checks, registry-manifest
-signature checks, archive hashing/extraction, apply/remove filesystem mutation,
-validation-profile verification, pack/publish/init helpers, and command
-dispatch.
+This map records the ownership contract for `tools/cli/kit_commands.cpp` and
+its extraction targets. The file currently owns the whole local kit/package
+workflow in one 3,927-line translation unit: manifest validation,
+publish-policy checks, registry-manifest signature checks, archive
+hashing/extraction, apply/remove filesystem mutation, validation-profile
+verification, pack/publish/init helpers, and command dispatch.
 
-Future extraction PRs should preserve the contracts below or update this file,
-the focused tests, and `tools/scripts/hotspot_size_guard.json` in the same
-change.
+Extraction changes should preserve the contracts below or update this file, the
+focused tests, and `tools/scripts/hotspot_size_guard.json` in the same change.
 
 ## Target Modules
 

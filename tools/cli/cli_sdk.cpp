@@ -29,7 +29,7 @@
 
 #include <pulp/runtime/system.hpp>
 
-// ── SDK / Config ──────────────��────────────────────────────���────────────────
+// SDK / Config
 
 fs::path pulp_home() {
     if (auto pulp_home_env = pulp::runtime::get_env("PULP_HOME"))
@@ -84,16 +84,15 @@ std::string detect_platform() {
 #endif
 }
 
-// ── #2087 follow-up: newer-SDK-available banner ─────────────────────────
+// ── Newer-SDK-available banner ──────────────────────────────────────────
 //
-// Pulp #2087 follow-up (#22): emit a one-line banner when a newer SDK
-// is available on GitHub Releases. To keep CLI invocations fast and
-// avoid hitting GitHub on every command, we cache the result at
-// `~/.pulp/cache/latest_release.txt` with a 24h TTL. Cache is plain
-// text — first line is the version string (no leading `v`), second
-// line is the Unix timestamp of the fetch. Cache miss / stale →
-// opportunistic refresh via curl with a hard 2s timeout so a slow
-// network never blocks the user.
+// Emit a one-line banner when a newer SDK is available on GitHub Releases. To
+// keep CLI invocations fast and avoid hitting GitHub on every command, we cache
+// the result at `~/.pulp/cache/latest_release.txt` with a 24h TTL. Cache is
+// plain text — first line is the version string (no leading `v`), second line
+// is the Unix timestamp of the fetch. Cache miss / stale → opportunistic
+// refresh via curl with a hard 2s timeout so a slow network never blocks the
+// user.
 
 namespace {
 
