@@ -17,7 +17,7 @@
 //!
 //! | Command  | Runtime behavior                                           |
 //! |----------|------------------------------------------------------------|
-//! | `build`  | Configure + build via `cmake`; watch/validate delegate.    |
+//! | `build`  | Configure + build via `cmake`; watch/validate/install delegate. |
 //! | `test`   | Delegates to `ctest --output-on-failure`.                  |
 //! | `run`    | Finds a standalone binary under `build/`.                  |
 //! | `clean`  | Removes `build/`.                                         |
@@ -30,6 +30,10 @@
 //!   `FSEvents` / `ReadDirectoryChangesW` / inotify polyfill. The Rust
 //!   path keeps normal configure/build native, but forwards watch mode
 //!   to `pulp-cpp`.
+//! - **`--install` delegates.** The C++ path owns the macOS plugin
+//!   install destinations and validation gate, so Rust recognizes the
+//!   flags and forwards the install branch rather than passing them to
+//!   `cmake --build`.
 //! - **No `--local` SDK build path.** That path calls
 //!   `ensure_checkout_sdk` which runs `setup.sh --deps-only` and a
 //!   bespoke `cmake --install` chain. The Rust port assumes a
@@ -49,11 +53,14 @@ use crate::project::{self, ActiveProject};
 
 /// Flag surface for `pulp-rs build`.
 ///
-/// `--watch` and `--validate` delegate to `pulp-cpp` for the C++
-/// watcher and validator chain. `--test` stays Rust-native and runs
-/// `ctest` after a successful build.
+/// `--watch`, `--validate`, and `--install` delegate to `pulp-cpp` for
+/// the C++ watcher, validator chain, and macOS install pipeline.
+/// `--test` stays Rust-native and runs `ctest` after a successful build.
 #[derive(Debug, Default, Clone)]
 pub struct BuildArgs {
+    /// Original CLI tail after `build`. Used to preserve spelling and
+    /// ordering when a delegated branch needs to call `pulp-cpp`.
+    pub raw_tail: Vec<String>,
     /// Extra args to pass to `cmake --build` (e.g. `--target`, `-j`).
     pub passthrough: Vec<String>,
     /// Forced JS engine selection (`auto|quickjs|jsc|v8`).
@@ -66,6 +73,12 @@ pub struct BuildArgs {
     /// (delegates to `pulp-cpp`; needs validator-chain parity to run
     /// Rust-native).
     pub validate: bool,
+    /// `--install` — after build, validate and copy plugin bundles to
+    /// the user's macOS plug-in folders. Delegates to `pulp-cpp`.
+    pub install: bool,
+    /// `--skip-validation` — debug-only escape hatch for `--install`.
+    /// Only valid when paired with `--install`.
+    pub skip_validation: bool,
     /// `--check-identity` — verify `.pulp/identity.lock` matches the
     /// current plugin identity before configuring.
     pub check_identity: bool,
@@ -79,11 +92,14 @@ pub struct BuildArgs {
 #[must_use]
 pub fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = BuildArgs::default();
+    out.raw_tail = args.to_vec();
     for a in args {
         match a.as_str() {
             "--watch" | "-w" => out.watch = true,
             "--test" | "-t" => out.test = true,
             "--validate" => out.validate = true,
+            "--install" => out.install = true,
+            "--skip-validation" => out.skip_validation = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             _ if a.starts_with("--js-engine=") => {
@@ -93,6 +109,41 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
         }
     }
     out
+}
+
+fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
+    let tail = if args.raw_tail.is_empty() {
+        let mut synthesized = Vec::new();
+        if args.watch {
+            synthesized.push("--watch".to_owned());
+        }
+        if args.test {
+            synthesized.push("--test".to_owned());
+        }
+        if args.validate {
+            synthesized.push("--validate".to_owned());
+        }
+        if args.install {
+            synthesized.push("--install".to_owned());
+        }
+        if args.skip_validation {
+            synthesized.push("--skip-validation".to_owned());
+        }
+        if let Some(engine) = &args.js_engine {
+            synthesized.push(format!("--js-engine={engine}"));
+        }
+        synthesized.extend(args.passthrough.clone());
+        synthesized
+    } else {
+        args.raw_tail.clone()
+    };
+
+    let mut argv = vec!["build".to_owned()];
+    argv.extend(
+        tail.into_iter()
+            .filter(|arg| arg != "--check-identity" && arg != "--allow-identity-change"),
+    );
+    argv
 }
 
 /// Run `pulp-rs build` with the system spawner.
@@ -126,6 +177,22 @@ pub fn build_with<S: Spawner>(
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
+    if args.skip_validation && !args.install {
+        return Err(CliError::BadUsage(
+            "--skip-validation only applies with --install".to_owned(),
+        ));
+    }
+
+    if args.install && args.watch {
+        // Preserve the C++ parser's exact rejection for the dangerous
+        // install+watch pairing.
+        let cpp_argv = build_delegate_argv(args);
+        let stub = "pulp-rs build --install --watch: install/watch validation stays on the \
+                    C++ parser; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
+    }
+
     if args.check_identity {
         // Refuse to configure / build when the project's current
         // plugin identity has drifted from `.pulp/identity.lock`
@@ -139,6 +206,17 @@ pub fn build_with<S: Spawner>(
         if rc != 0 {
             return Ok(rc);
         }
+    }
+
+    if args.install {
+        // C++ owns the validated install path. Keep Rust-only identity
+        // flags out of the delegated argv so `cmd_build.cpp` does not
+        // pass them through to `cmake --build`.
+        let cpp_argv = build_delegate_argv(args);
+        let stub =
+            "pulp-rs build --install: install pipeline is not ported; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
     }
 
     if args.watch {
@@ -1059,6 +1137,29 @@ fn io_err(e: std::io::Error) -> CliError {
 mod tests {
     use super::*;
     use crate::proc::testing::RecordingSpawner;
+    use std::ffi::OsString;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
@@ -1076,6 +1177,8 @@ mod tests {
             "--watch".to_owned(),
             "--test".to_owned(),
             "--validate".to_owned(),
+            "--install".to_owned(),
+            "--skip-validation".to_owned(),
             "--check-identity".to_owned(),
             "--allow-identity-change".to_owned(),
             "--js-engine=v8".to_owned(),
@@ -1083,9 +1186,28 @@ mod tests {
             "pulp-gain".to_owned(),
         ]);
         assert!(a.watch && a.test && a.validate);
+        assert!(a.install && a.skip_validation);
         assert!(a.check_identity && a.allow_identity_change);
         assert_eq!(a.js_engine.as_deref(), Some("v8"));
         assert_eq!(a.passthrough, vec!["--target", "pulp-gain"]);
+    }
+
+    #[test]
+    fn build_delegate_argv_strips_rust_only_identity_flags() {
+        let a = parse_build_args(&[
+            "--install".to_owned(),
+            "--check-identity".to_owned(),
+            "--allow-identity-change".to_owned(),
+            "--skip-validation".to_owned(),
+        ]);
+        assert_eq!(
+            build_delegate_argv(&a),
+            vec![
+                "build".to_owned(),
+                "--install".to_owned(),
+                "--skip-validation".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -1146,6 +1268,7 @@ mod tests {
 
     #[test]
     fn build_watch_errors() {
+        let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let proj = standalone_project(td.path());
         let spawner = RecordingSpawner::ok();
@@ -1161,6 +1284,27 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn build_skip_validation_without_install_errors_before_cmake() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let err = build_with(
+            &proj,
+            &BuildArgs {
+                skip_validation: true,
+                ..Default::default()
+            },
+            &spawner,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(msg) if msg.contains("--skip-validation")));
+        assert!(spawner.calls.borrow().is_empty());
     }
 
     #[test]

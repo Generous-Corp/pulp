@@ -91,9 +91,14 @@ pulp build --target PulpGain_VST3  # Build specific target
 pulp build -j8                # Parallel jobs
 pulp build --watch            # Build and watch for changes
 pulp build --watch --test     # Build, watch, run tests on change
+pulp build --watch --test-filter=Gain # Watch and run matching tests on change
+pulp build --watch --validate # Build, watch, run quick validation on change
+pulp build --install          # macOS: validate, then install built plugin bundles
+pulp build --install --skip-validation # macOS debug escape hatch; bypasses validation
 pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupported)
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
+pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
 ```
 
 Extra arguments are passed through to `cmake --build`.
@@ -101,6 +106,8 @@ Extra arguments are passed through to `cmake --build`.
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
 The `--watch` flag enters a file-watching loop after the initial build. It polls source files every 500ms and rebuilds on changes. Combine with `--test` to run tests after each successful rebuild and `--validate` to run quick dlopen checks.
+
+On macOS, `--install` runs the strict validator gate before copying AU, VST3, and CLAP bundles into the user's plug-in folders. `--skip-validation` is only accepted together with `--install` and is intended for adapter debugging; `--install` cannot be combined with `--watch`.
 
 For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 Before configure/build, `pulp build` also compares the active project's pinned `sdk_version` / `cli_min_version` against the running CLI. If the project is ahead, it fails fast and points at `pulp upgrade`; use `--allow-unsupported-sdk` only as an explicit unsupported escape hatch.

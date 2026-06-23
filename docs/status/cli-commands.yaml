@@ -9,6 +9,24 @@ commands:
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
+      - name: --watch
+        kind: flag
+        description: Enter a file-watching loop after the initial build and rebuild on source changes.
+      - name: --test
+        kind: flag
+        description: With `--watch`, run tests after each successful rebuild.
+      - name: --test-filter
+        kind: option
+        description: With `--watch --test`, run only tests matching the filter (`--test-filter=<pattern>`).
+      - name: --validate
+        kind: flag
+        description: With `--watch`, run quick validation after each successful rebuild.
+      - name: --install
+        kind: flag
+        description: "macOS only: after a successful build, run strict plugin validation and copy AU/VST3/CLAP bundles into the user's plug-in folders."
+      - name: --skip-validation
+        kind: flag
+        description: Debug-only escape hatch for `--install`; bypasses validation and is rejected unless paired with `--install`.
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)

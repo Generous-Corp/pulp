@@ -1705,6 +1705,14 @@ ordering, idempotency, and failure cases without writing to a real
 `~/Library` tree. CLI-surface contract is pinned by 2 shellout cases
 in `pulp-test-cli-ship-shellout`.
 
+The Rust front-end (`experimental/pulp-rs/src/cmd/orchestrate.rs`) must
+recognize `--install` and `--skip-validation` and delegate the install
+branch to `pulp-cpp`; do not let either flag pass through to
+`cmake --build`. If `--install` is paired with Rust-only
+`--check-identity`, Rust runs the identity check first and strips the
+identity flags from the delegated argv before handing the install path
+to C++.
+
 Gotchas:
 
 - **rm comes before cp**, not the other way around. A leftover bundle
