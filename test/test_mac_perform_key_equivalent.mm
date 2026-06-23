@@ -16,7 +16,7 @@
 //  3. Asserts the on_global_key callback fired AND received the
 //     (key=',', mods=kModCmd) event the lambda forwards into the bridge.
 //
-// Audio-observability Phase 4 sharpened the contract: the override now
+// The override now
 // HONORS consumption. A chord the root hook claims (on_global_key returns
 // true — e.g. CommandRegistry::dispatch_key_event found a handler) returns
 // YES and is NOT also fanned out to the script global-key dispatcher (no

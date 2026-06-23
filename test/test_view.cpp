@@ -456,7 +456,7 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     // No painting root supplied → hook receives nullptr (legacy/headless path).
     REQUIRE(last_painting_root == nullptr);
 
-    // WYSIWYG P2e: paint_overlays forwards the painting root to the hook so it
+    // paint_overlays forwards the painting root to the hook so it
     // can gate which root the inspector overlay paints into.
     View probe_root;
     View::set_inspector_paint_hook(
@@ -471,7 +471,7 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     View::set_inspector_paint_hook({});
 }
 
-// WYSIWYG P4 FIX 1 — the mouse / cursor / text inspector hooks now carry the
+// The mouse / cursor / text inspector hooks now carry the
 // event's root View so the installed hook can gate to the inspected canvas
 // root (mirroring the paint-hook root-gate above). This proves the call
 // forwards the root and that an installed gate dispatches only when the event
@@ -1088,7 +1088,7 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
 }
 
-// pulp #1171 (#1044) — uniform set_border_radius() followed
+// pulp #1171 — uniform set_border_radius() followed
 // by a single per-corner override must NOT zero the other three corners.
 // Previously: set_border_radius(10); set_corner_radius_tl(2);
 // rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
@@ -1448,7 +1448,7 @@ TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
     REQUIRE(registry.get("phase3.live.editor") == Catch::Approx(5.0f));
 }
 
-// Phase 3d (inspector roadmap) — per-component paint timing.
+// Per-component paint timing.
 // View::paint_all() now records nanoseconds spent inside paint() (self)
 // and the recursive children walk (with_children) so the inspector can
 // show per-view cost without adding new instrumentation per query.

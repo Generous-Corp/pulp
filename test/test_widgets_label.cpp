@@ -251,7 +251,7 @@ TEST_CASE("Label intrinsic_height counts explicit newlines on multi_line labels"
 
 TEST_CASE("Label intrinsic_height ignores a trailing newline (no phantom line)",
           "[view][widget][internal-74][issue-1969]") {
-    // PR #1969 Codex P2 — a string ending with `\n` used to count an
+    // A string ending with `\n` used to count an
     // extra line in the `\n`-count loop ("Title\n" → 2). But
     // Label::paint()'s split-and-emit loop stops once `pos ==
     // display_text.size()`, so it draws exactly one line. Yoga was

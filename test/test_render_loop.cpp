@@ -156,7 +156,7 @@ TEST_CASE("RenderLoop timer backend can restart with a new callback",
     REQUIRE(second.load(std::memory_order_relaxed) == 1);
 }
 
-// ── Slice 16 — VBlank-locked safe-repaint additions ─────────────────────
+// ── VBlank-locked safe-repaint additions ───────────────────────────────
 
 TEST_CASE("RenderLoop factory selects the timer backend under force-timer",
           "[render][loop][vblank][slice-16]") {
@@ -211,7 +211,7 @@ TEST_CASE("render_loop_backend_name covers every backend",
 
 TEST_CASE("DwmBackendTracker latches to the timer fallback once a vblank wait fails",
           "[render][loop][vblank][slice-16][issue-2580]") {
-    // Codex P2 #2580: the Windows loop sleeps on a ~60 Hz timer when
+    // The Windows loop sleeps on a ~60 Hz timer when
     // DwmFlush() fails, but backend() must then stop claiming dwm_flush so
     // render_loop_backend_is_vsync() callers can detect the fallback.
     DwmBackendTracker tracker;

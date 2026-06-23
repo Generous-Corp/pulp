@@ -72,7 +72,7 @@ void unset_env_var(const char* name) {
 
 }  // namespace
 
-// Regression: Codex PR #3021 review — MKL DftiSetValue is a variadic API.
+// Regression: MKL DftiSetValue is a variadic API.
 // Calling it through a fixed-signature `fn_set_f` reinterpret_cast was UB
 // on most ABIs (varargs uses different register/stack slots than typed args)
 // and would silently mis-pass the backward-scale float on platforms where
