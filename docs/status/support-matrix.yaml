@@ -201,7 +201,7 @@ rendering:
   dawn_vulkan:
     status: experimental
     platform: linux
-    notes: Surface creation via SDL3 X11/Wayland extraction implemented. Not runtime-validated on hardware.
+    notes: Surface creation via X11NativeHandle / SurfaceSourceXlibWindow implemented; SDL3 extracts X11 and Wayland handles, but GpuSurface consumes X11 only today. Not runtime-validated on hardware.
   coregraphics_fallback:
     status: usable
     platform: macos

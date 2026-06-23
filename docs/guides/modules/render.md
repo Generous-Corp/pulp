@@ -2,7 +2,7 @@
 
 The render module manages GPU surfaces and the Skia Graphite rendering context. It connects Dawn (WebGPU) to Skia for hardware-accelerated 2D rendering.
 
-**Status**: experimental — offscreen Graphite rendering works; on-screen presentation path exists on Apple but is not yet the default view host rendering mode
+**Status**: experimental — offscreen Graphite rendering works; on-screen presentation paths exist for Apple, Windows, Linux/X11, and Android, but desktop non-Apple paths are not yet hardware-validated and CoreGraphics remains the default macOS view host rendering mode
 **Dependencies**: runtime, canvas
 **Headers**: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 
@@ -12,7 +12,7 @@ The rendering stack has three layers with clear ownership:
 
 ```
 Platform (view host)
-  → owns native view/layer (NSView + CAMetalLayer on macOS, UIView + CAMetalLayer on iOS)
+  → owns native view/layer/window (CAMetalLayer on Apple, HWND on Windows, X11 window on Linux, ANativeWindow on Android)
   → provides the native layer handle to the render subsystem
   → handles size, scale, safe-area, and visibility events
 
@@ -109,23 +109,26 @@ The iOS render surface uses a `UIView` with `+layerClass` returning `CAMetalLaye
 
 | Component | State |
 |-----------|-------|
-| Dawn device bootstrap | Works on macOS and iOS |
-| GpuSurface presentable surface (macOS) | Infrastructure exists, not yet default render path |
-| GpuSurface presentable surface (iOS) | Infrastructure exists, not yet wired to view hosts |
+| Dawn device bootstrap | Works for offscreen Graphite tests; platform runtime validation varies by backend |
+| GpuSurface presentable surface (macOS) | Infrastructure exists and is available to GPU-capable hosts; CoreGraphics remains the default render path |
+| GpuSurface presentable surface (iOS) | Infrastructure and GPU-capable hosts exist; not yet runtime-validated on device |
+| GpuSurface presentable surface (Windows) | `HWND` / `SurfaceSourceWindowsHWND` path implemented; not yet runtime-validated on hardware |
+| GpuSurface presentable surface (Linux) | X11 handle / `SurfaceSourceXlibWindow` path implemented; SDL3 can extract Wayland handles, but `GpuSurface` consumes X11 only today |
+| GpuSurface presentable surface (Android) | `ANativeWindow` / Vulkan path implemented through `PulpSurfaceView`; Android smoke tooling checks the surface-ready marker |
 | Skia Graphite offscreen rendering | Works (tested) |
-| Skia Graphite → on-screen present | Requires GpuSurface with native_surface_handle; not yet default |
+| Skia Graphite → on-screen present | Requires `GpuSurface` with `native_surface_handle`; not yet default on macOS |
 | CoreGraphics fallback (macOS) | Works and is the current default render path |
-| View host GPU integration | Planned — view hosts currently use CoreGraphics only |
+| View host GPU integration | Partial and opt-in; CoreGraphics remains the default Apple desktop fallback |
 
 ## Cross-Platform GPU Rendering Model
 
-The same core rendering pipeline applies across macOS, iOS, Windows, and Linux. Only native surface creation and frame driving differ per platform.
+The same core rendering pipeline applies across macOS, iOS, Windows, Linux, and Android. Only native surface creation and frame driving differ per platform.
 
 **Shared architecture (all platforms):**
 
 1. **One Dawn device/queue** — `GpuSurface` creates and owns the Dawn instance, adapter, device, and queue. There is exactly one device per render context. `SkiaSurface` borrows this device; it does not create its own.
 
-2. **Platform-specific surface creation** — The platform host creates a native view or window and passes a handle to `GpuSurface::Config::native_surface_handle`. On macOS/iOS this is a `CAMetalLayer*`, on Windows an `HWND`, on Linux a handle extracted from SDL3 (X11, Wayland, or XCB). `GpuSurface` uses this to create a Dawn surface for on-screen presentation.
+2. **Platform-specific surface creation** — The platform host creates a native view or window and passes a handle to `GpuSurface::Config::native_surface_handle`. On macOS/iOS this is a `CAMetalLayer*`, on Windows an `HWND`, on Linux an `X11NativeHandle`, and on Android an `ANativeWindow*`. SDL3 extraction can report both X11 and Wayland handles on Linux, but `GpuSurface` only creates Dawn surfaces from X11 today. `GpuSurface` uses the supported handle types to create a Dawn surface for on-screen presentation.
 
 3. **Per-frame rendering flow:**
    - `GpuSurface::begin_frame()` — acquires the current presentable texture from the surface
@@ -136,7 +139,7 @@ The same core rendering pipeline applies across macOS, iOS, Windows, and Linux. 
 
 4. **Resize and DPI** — The platform host detects size and scale changes and calls `GpuSurface::resize()` + `SkiaSurface::resize()` before the next frame acquire. `GpuSurface` reconfigures the Dawn surface with the new dimensions. Format and present mode are selected from `Surface::GetCapabilities()`, not hardcoded.
 
-5. **Frame driving** — Each platform uses its own mechanism to pace frames. macOS uses `CVDisplayLink` (vsync-accurate). Windows and Linux use Dawn's `PresentMode::Fifo` for natural frame pacing. The platform host owns the frame loop; the render module does not assume a specific driver.
+5. **Frame driving** — Each platform uses its own mechanism to pace frames. macOS uses `CVDisplayLink`, iOS uses `CADisplayLink`, Android uses `AChoreographer`, Windows uses `DwmFlush`, and Linux uses the timer fallback until a native present-sync loop is wired. The platform host owns the frame loop; the render module does not assume a specific driver.
 
 **Responsibility boundaries:**
 
@@ -154,9 +157,10 @@ Dawn supports multiple backends, selected automatically per platform:
 | Platform | Backend | Status |
 |----------|---------|--------|
 | macOS | Metal | experimental — device and surface infrastructure exist |
-| iOS | Metal | experimental — CAMetalLayer helper exists, not yet active default |
-| Windows | D3D12 | planned — Dawn supports it, not yet integrated |
-| Linux | Vulkan | planned — Dawn supports it, not yet integrated |
+| iOS | Metal | experimental — GPU-capable hosts exist, not yet runtime-validated on device |
+| Windows | D3D12 | experimental — `HWND` surface creation implemented, not yet hardware-validated |
+| Linux | Vulkan | experimental — X11 surface creation implemented, Wayland presentation not yet wired |
+| Android | Vulkan | experimental — `ANativeWindow` surface creation implemented through the Android view host |
 | Web | WebGPU | planned |
 
 ## When to Use
@@ -164,6 +168,6 @@ Dawn supports multiple backends, selected automatically per platform:
 The render module is optional. Most of the framework works without it:
 
 - **With render**: GPU-accelerated UI via Skia Graphite, WebGPU effects, on-screen presentation
-- **Without render**: CoreGraphics canvas (macOS), headless testing, CLI tools
+- **Without render**: CoreGraphics canvas on macOS, headless testing, CLI tools
 
-Plugins can be built, tested, and shipped without linking the render module. The format and state subsystems have no dependency on it. The CoreGraphics fallback path is the current default and is production-ready.
+Plugins can be built, tested, and shipped without linking the render module. The format and state subsystems have no dependency on it. The macOS CoreGraphics fallback path is the current default and is production-ready.

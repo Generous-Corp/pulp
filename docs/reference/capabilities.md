@@ -316,7 +316,7 @@ Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp
 | Skia Graphite rendering | experimental | [render](modules.md#render) | |
 | Dawn/Metal iOS surface | experimental | [render](modules.md#render) | |
 | Dawn/D3D12 surface (Windows) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
-| Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
+| Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | X11 surface creation implemented; Wayland extraction exists but presentation is not wired; not runtime-validated |
 | CoreGraphics fallback | usable | [render](modules.md#render) | Default render path on macOS |
 
 Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
