@@ -165,6 +165,8 @@ pulp validate --all        # Also run vstvalidator and full AAX validation if in
 pulp validate --json       # Print JSON report to stdout
 pulp validate --report out.json  # Write JSON report to file
 pulp validate --strict     # CI gate: skipped-because-missing-tool ⇒ exit 1
+pulp validate --screenshot # Capture plugin editor PNGs under artifacts/screenshots/
+pulp validate --target standalone ./build/MyApp.app  # Validate an explicit macOS app bundle
 ```
 
 **Validator-discovery preflight.** Before launching any validator,
@@ -197,6 +199,9 @@ Flags:
 - `--all` — run every available validator, including `vstvalidator` and full AAX validation
 - `--json` — emit a machine-readable JSON report to stdout (conforms to `validation-report-v1.schema.json`)
 - `--report <path>` — write the JSON report to a file
+- `--strict` — treat skipped-because-missing-tool as a hard failure
+- `--screenshot` — capture plugin editor PNGs under `artifacts/screenshots/`
+- `--target <standalone|auv3|macho|all> <bundle...>` — run macOS runtime validators on explicit bundle paths instead of walking `build/{CLAP,VST3,AU,AAX}`
 
 When a validator tool is not installed, the check is reported as SKIPPED with a clear message.
 The JSON report conforms to `docs/contracts/validation-report-v1.schema.json`.
