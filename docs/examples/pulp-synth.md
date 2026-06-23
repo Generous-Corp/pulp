@@ -61,7 +61,6 @@ A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detun
 
 ## Known Limitations
 
-- CLAP build fails with a missing `pulp/signal/oscillator.hpp` include path. This is a known issue tracked in CLAUDE.md. Exclude from test runs with `ctest -E PulpSynth`.
 - Only CLAP format is configured. The CMakeLists.txt notes VST3 and AU will be added when validated.
 - No standalone target.
 
