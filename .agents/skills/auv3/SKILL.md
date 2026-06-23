@@ -306,10 +306,15 @@ to be right end-to-end:
 4. **Embedded `.appex` bundle ID must be a child of the HostApp's bundle
    ID.** Apple enforces parent-child: extension bundle ID must START
    with the containing app's bundle ID + `.` + suffix. Otherwise install
-   fails with **"Mismatched bundle IDs"**. The Pulp helper currently
-   derives the `.appex` bundle ID from the AUv3 target's `BUNDLE_ID` —
-   plug-in authors must set that arg to a child of the HostApp's
-   bundle ID, not to a sibling.
+   fails with **"Mismatched bundle IDs"**. The Pulp helper derives the
+   `.appex` bundle ID from the AUv3 target's `BUNDLE_ID` — plug-in
+   authors must set that arg to a child of the HostApp's bundle ID, not
+   to a sibling (and not equal to it). On iOS this is now enforced at
+   configure time: `pulp_add_ios_host_app` (`tools/cmake/PulpIosHostApp.cmake`)
+   FATAL_ERRORs ("must be nested under") if the extension id is not
+   strictly nested under the host id, so the mistake surfaces before any
+   build instead of at `xcrun simctl install`. Regression test:
+   `test/cmake/test_ios_hostapp_bundle_guard.sh`.
 
 5. **HostApp entitlements containing `com.apple.security.application-groups`
    require an explicit (non-wildcard) App ID with App Groups capability

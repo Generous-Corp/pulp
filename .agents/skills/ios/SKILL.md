@@ -129,6 +129,18 @@ xcrun simctl launch --console booted com.example.MyApp
 
 An AUv3 plugin on iOS ships as an **App Extension** bundled inside a **host app** (App Store requires a host container). Both targets must be in the same Xcode project.
 
+> **Bundle-id containment is enforced at configure time.** The AUv3
+> extension's bundle id (`pulp_add_ios_auv3(... BUNDLE_ID ...)`) must be
+> the host app's bundle id (`pulp_add_ios_host_app(... BUNDLE_ID ...)`)
+> plus at least one extra dot-component — e.g. host `com.example.host`,
+> extension `com.example.host.MySynth`. A sibling id, or an id equal to
+> the host's, builds fine but fails late at `xcrun simctl install` with
+> `IXErrorDomain code=2 / Mismatched bundle IDs`. `pulp_add_ios_host_app`
+> now FATAL_ERRORs at configure (`PulpIosHostApp.cmake`, "must be nested
+> under") so the mistake surfaces immediately instead of after a
+> multi-minute iOS build. Regression test:
+> `test/cmake/test_ios_hostapp_bundle_guard.sh`.
+
 Minimal structure:
 
 ```

@@ -97,8 +97,15 @@ if(APPLE AND NOT PULP_IOS)
         SKIP_RETURN_CODE 77
         TIMEOUT 2700
         LABELS slow)
+    # iOS HostApp/AUv3 bundle-id containment guard (configure-only, fast):
+    # rejects sibling or host-equal extension ids that only fail later at
+    # `simctl install`. See cmake/test_ios_hostapp_bundle_guard.sh.
+    add_test(NAME cmake-ios-hostapp-bundle-guard
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_hostapp_bundle_guard.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-ios-hostapp-bundle-guard PROPERTIES
+        LABELS "cmake;ios;auv3" TIMEOUT 60)
 endif()
-
 # AU v2 component-type selection smoke — hardens the aufx→aumf flip
 # for descriptor.accepts_midi=true. Runs under `cmake -P` so it works
 # on every platform without building the Pulp tree.
@@ -108,7 +115,6 @@ add_test(NAME cmake-au-v2-type-selection
 set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
-
 # pulp_add_binary_data Python encoder smoke — guards the issue #898 fix
 # (legacy CMake hex loop was O(n²) and pinned cmake configure for 10–22
 # minutes on a 1 MB asset). Verifies the encoder's output ABI, mtime
@@ -124,7 +130,6 @@ set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
     # all three platforms. Excluded from PR fast-CI.
     LABELS "cmake;binary-data;issue-898;slow"
     TIMEOUT 60)
-
 # Windows FetchContent base-dir smoke — guards the WebGPU prebuilt
 # subbuild path from exceeding MSBuild's MAX_PATH limit in deep Actions
 # workspaces. Runs under `cmake -P`, so it does not need a Windows host.
@@ -134,7 +139,6 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
-
 # Install-layout regression for issue #905: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call
@@ -151,7 +155,6 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     # but pays a configure-amortised cost — pull it out of PR fast-CI.
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
-
 # Install-layout regression for format helper sources used by
 # PulpAuv3.cmake / PulpPluginFormats.cmake from _PULP_FORMAT_SOURCE_DIR.
 # Without au_view_controller_mac.mm in the installed SDK, downstream
@@ -167,7 +170,6 @@ add_test(NAME cmake-pulp-install-format-sources
 set_tests_properties(cmake-pulp-install-format-sources PROPERTIES
     LABELS "cmake;sdk;auv3;chainer-cross;slow"
     TIMEOUT 120)
-
 # PULP_REQUIRE_GPU_FOR_SDK gate smoke (pulp #1817). Two full configures
 # in a tmpdir: ON+missing-skia must FAIL, OFF+missing-skia must SUCCEED.
 # Tagged `slow` because each configure pays the SDL3 / FetchContent cost.
@@ -179,7 +181,6 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
-
 # retry_git_clone unit test (setup.sh helper, #425): a partial clone target is
 # scrubbed between retries so attempt 2+ re-runs the fetch. Same UNIX block runs
 # the ensure_signing_ready.sh doctor test (PATH-shims security/xcrun, hermetic).
@@ -204,7 +205,6 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
                 $<TARGET_FILE:pulp-mcp>)
     set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
-
     # Visual-fidelity diff harness unit + integration tests (PIL-based). The
     # tool (tools/import-design/fidelity_diff.py) measures how close an
     # imported + rendered design is to its captured Figma references. The

@@ -127,8 +127,9 @@ function(pulp_add_ios_host_app target)
     get_target_property(_au_version_int   ${HOST_AUV3_EXTENSION} PULP_AUV3_VERSION_INT)
     get_target_property(_au_plugin_name   ${HOST_AUV3_EXTENSION} PULP_AUV3_PLUGIN_NAME)
     get_target_property(_au_manufacturer_name ${HOST_AUV3_EXTENSION} PULP_AUV3_MANUFACTURER_NAME)
+    get_target_property(_au_bundle_id     ${HOST_AUV3_EXTENSION} PULP_AUV3_BUNDLE_ID)
 
-    foreach(_var IN ITEMS _au_manufacturer _au_subtype _au_type _au_version_int _au_plugin_name _au_manufacturer_name)
+    foreach(_var IN ITEMS _au_manufacturer _au_subtype _au_type _au_version_int _au_plugin_name _au_manufacturer_name _au_bundle_id)
         if("${${_var}}" STREQUAL "${_var}-NOTFOUND")
             message(FATAL_ERROR
                 "pulp_add_ios_host_app(${target}): AUv3 extension target "
@@ -139,6 +140,31 @@ function(pulp_add_ios_host_app target)
                 "pulp_add_ios_host_app(...).")
         endif()
     endforeach()
+
+    # ── Enforce AUv3 .appex bundle-id containment ──────────────────────
+    # Apple requires an app extension's bundle id to be the containing
+    # app's bundle id plus at least one additional dot-component
+    # (host.suffix). A sibling id — or an id equal to the host's — passes
+    # CMake configure and Xcode build, then fails at `xcrun simctl install`
+    # while setting app-extension placeholders with IXErrorDomain code=2 /
+    # "Mismatched bundle IDs". Catch it at configure time so the failure is
+    # local and self-explanatory instead of surfacing as an opaque
+    # installer error after a multi-minute iOS build. The extension's id is
+    # the AUv3 target's BUNDLE_ID (stashed as PULP_AUV3_BUNDLE_ID by
+    # pulp_add_ios_auv3); the host's is this call's BUNDLE_ID.
+    string(FIND "${_au_bundle_id}" "${HOST_BUNDLE_ID}." _au_host_prefix_pos)
+    if(NOT _au_host_prefix_pos EQUAL 0)
+        message(FATAL_ERROR
+            "pulp_add_ios_host_app(${target}): AUv3 extension bundle id "
+            "'${_au_bundle_id}' must be nested under the containing HostApp "
+            "bundle id '${HOST_BUNDLE_ID}' — i.e. start with "
+            "'${HOST_BUNDLE_ID}.'. Use a child id such as "
+            "'${HOST_BUNDLE_ID}.${_au_plugin_name}' for "
+            "pulp_add_ios_auv3(... BUNDLE_ID ...). Otherwise "
+            "`xcrun simctl install` fails while setting app extension "
+            "placeholders with IXErrorDomain code=2 / Mismatched bundle "
+            "IDs.")
+    endif()
 
     # ── Generate HostApp Info.plist ─────────────────────────────────────
     set(PLUGIN_NAME                 "${HOST_NAME}")
