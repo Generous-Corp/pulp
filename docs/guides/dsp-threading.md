@@ -21,11 +21,13 @@ off the audio thread, then keep `process()` bounded and predictable.
    thread sends work to the main thread, it does so via a non-blocking
    queue.
 
-`pulp::runtime::ScopedNoAlloc` (debug builds) tracks rule #1 — Pulp
-wraps `View::paint_all` and every adapter's call to
-`Processor::process()` in one, so opt-in debug-allocator hooks can
-shout when rule #1 is violated. Tooling can read
-`pulp::runtime::is_in_no_alloc_scope()` to detect the protected region.
+`pulp::runtime::ScopedNoAlloc` tracks rule #1 — Pulp wraps
+`View::paint_all` and every adapter's call to `Processor::process()` in
+one, and tooling reads `pulp::runtime::is_in_no_alloc_scope()` to detect
+the protected region. The production guard is a no-op under `NDEBUG`
+(zero release cost); the *enforcement* lives in the test harness (see
+"Verifying the contract in tests" below), where an allocation or a
+blocking lock inside the scope aborts the binary.
 
 ## Budget prepare-time resources
 
@@ -411,6 +413,38 @@ Common recipes:
 * Sample import: decode, normalize, build loop metadata, and prefetch pages in
   the job. Publish a prepared sample-map revision atomically; treat cache misses
   as control-thread work, not audio-thread file I/O.
+
+## Verifying the contract in tests
+
+The no-alloc / no-lock contract is *enforced*, not just documented. On
+UNIX test builds, `test/native_components/rt_intercept_test_support.cpp`
+installs a strong `pulp_rt_trap_if_no_alloc_scope` plus global
+`operator new`/`new[]` overrides and `pthread` mutex/rwlock
+interposers. Inside a no-alloc scope, any heap allocation or blocking
+lock writes `[pulp-rt-trap] allocation inside no-alloc scope` and
+`abort()`s — so a violation fails the test by killing the process, not
+by a soft assertion. A Rust `#[global_allocator]` routes the checking
+core's allocations through the same trap. On non-UNIX builds the
+fallback `RtAllocationProbe` *counts* allocations instead.
+
+`test/harness/scoped_rt_process_probe.hpp` exposes the shared
+`pulp::test::ScopedRtProcessProbe`, which enters an always-on
+`RtNoAllocScope` (independent of `NDEBUG`, so the check is live even in
+Release test binaries) together with a `ScopedNoAlloc`. Wrap an RT path
+in it and assert `allocation_count() == 0`:
+
+```cpp
+pulp::test::ScopedRtProcessProbe probe;
+graph.process(out_view, in_view, num_frames);
+REQUIRE(probe.allocation_count() == 0);  // trap build also proves lock-freedom
+```
+
+To opt a test target into the trap, link
+`native_components/rt_intercept_test_support.cpp` on UNIX and define
+`PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1`. Current coverage:
+`StateStore` RT writes and `NativeCoreProcessor::process`
+(`test_rt_safety.cpp`), and the host graph hot path
+`SignalGraph::process()` (`test_signal_graph_rt_safety.cpp`).
 
 ## See also
 
