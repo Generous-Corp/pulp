@@ -49,7 +49,7 @@ static bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
     return def;
 }
 
-// ── Faithful-vector import (Plan B) enum<->id ───────────────────────────
+// ── Faithful-vector import enum<->id ────────────────────────────────────
 static NodeRenderMode render_mode_from_id(const std::string& s) {
     return s == "faithful_svg" ? NodeRenderMode::faithful_svg : NodeRenderMode::normal;
 }
@@ -806,7 +806,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.raw_source = std::string(obj["rawSource"].toString());
     }
 
-    // ── Faithful-vector import (Plan B): render mode + SVG asset + overlays ──
+    // ── Faithful-vector import: render mode + SVG asset + overlays ──
     for (const char* k : {"render_mode", "renderMode"}) {
         if (obj.hasObjectMember(k) && obj[k].isString()) {
             node.render_mode = render_mode_from_id(get_string(obj, k));
@@ -1143,7 +1143,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // which means we end up with width ≈ 5e-06 — invisible in any renderer.
     // Promote the stroke weight to the visible dimension and turn the
     // node into a colored rect (drop the empty PNG fill) so it actually
-    // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 1.
+    // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 0.5.
     {
         constexpr float kDegenerateAxis = 0.5f;
         constexpr float kMinStrokeWeight = 0.5f;  // Figma "1px" strokes
@@ -1779,7 +1779,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
         write_string_member(out, first, "raw_source", node.raw_source);
     }
 
-    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    // ── Faithful-vector import ───────────────────────────────────────────
     // Structural, not source-metadata: a faithful_svg node must round-trip
     // its render mode + asset + overlays regardless of metadata stripping.
     if (node.render_mode != NodeRenderMode::normal)

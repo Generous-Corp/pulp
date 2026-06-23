@@ -1035,7 +1035,7 @@ TEST_CASE("detect_audio_widget identifies widget types from names", "[view][impo
 }
 
 TEST_CASE("detect_audio_widget matches whole words not substrings", "[view][import]") {
-    // Regression (gap survey): substring matching promoted any name *containing*
+    // Regression: substring matching promoted any name *containing*
     // a keyword. These embed a keyword as a substring but are NOT audio widgets —
     // word-boundary tokenization must return none.
     REQUIRE(detect_audio_widget("Dialog") == AudioWidgetType::none);      // "dial"og

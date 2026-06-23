@@ -73,7 +73,7 @@ DesignIR build_swift_fixture() {
     ir.tokens.colors["accent"] = "#ff8800";           // base-only
     ir.tokens.dimensions["spacing.sm"] = 4.0f;
     ir.tokens.strings["font.body"] = "Inter";
-    // Adversarial token names (Codex review): a Swift keyword must be
+    // Adversarial token names: a Swift keyword must be
     // backtick-escaped, and two names that camel-case to the same identifier
     // must be de-duplicated — otherwise the generated PulpTheme.swift fails to
     // compile. The swiftc gate below proves the escaping/dedup works.
@@ -82,7 +82,7 @@ DesignIR build_swift_fixture() {
     ir.tokens.colors["foo-bar"] = "#222222";          // also fooBar → must dedup
     // Keyword dimension/string tokens WITH .dark overrides: the dark companion
     // must escape the full id ("switchDark"), not append Dark to the escaped
-    // base (the invalid `` `switch`Dark ``). (Codex review #2.)
+    // base (the invalid `` `switch`Dark ``).
     ir.tokens.dimensions["switch"] = 2.0f;            // keyword base → `switch`
     ir.tokens.dimensions["switch.dark"] = 3.0f;       // companion → switchDark
     ir.tokens.strings["class"] = "regular";           // keyword base → `class`
@@ -522,14 +522,14 @@ TEST_CASE("generate_pulp_swift flags per-side borders and multi/inset shadows",
     REQUIRE(has_kind(out.issues, "swiftui-per-side-border"));
     REQUIRE(has_kind(out.issues, "swiftui-multi-shadow"));
     // Both lose visible appearance (a dropped glow / a side's distinct stroke),
-    // so they are hard divergences --strict-fidelity must catch (Codex review).
+    // so they are hard divergences --strict-fidelity must catch.
     REQUIRE(count_strict_fidelity_failures(out.issues) >= 2);
 }
 
 TEST_CASE("generate_pulp_swift flags a per-side border that differs only in colour",
           "[view][import][swiftui]") {
     // Uniform widths but a distinct per-side colour still loses a side; the
-    // width-only check would have missed it (Codex review).
+    // width-only check would have missed it.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 60.0f, 60.0f, LayoutDirection::column);
@@ -545,7 +545,7 @@ TEST_CASE("generate_pulp_swift flags a single side overriding the border shortha
           "[view][import][swiftui]") {
     // border-color:#fff (shorthand) + border-top-color:#f00 → effective sides
     // [#f00, #fff, #fff, #fff]; comparing side overrides alone would miss it,
-    // so the effective-value comparison is what catches it (Codex review #2b).
+    // so the effective-value comparison is what catches it.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 60.0f, 60.0f, LayoutDirection::column);
@@ -574,7 +574,7 @@ TEST_CASE("generate_pulp_swift does not mis-parse repeating-linear-gradient as l
           "[view][import][swiftui]") {
     // `repeating-linear-gradient(...)` contains the substring `linear-gradient`;
     // fn_args' boundary check must reject it so it falls back to flat fill, not
-    // a silently-non-repeating LinearGradient (Codex review).
+    // a silently-non-repeating LinearGradient.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 50.0f, 50.0f, LayoutDirection::column);
@@ -589,7 +589,7 @@ TEST_CASE("generate_pulp_swift does not mis-parse repeating-linear-gradient as l
 TEST_CASE("generate_pulp_swift approximates single-child space-between as flex-start",
           "[view][import][swiftui]") {
     // CSS space-between with one item is flex-start; SwiftUI needs a trailing
-    // Spacer to push it to the main-axis start (Codex review).
+    // Spacer to push it to the main-axis start.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "Row", 200.0f, 40.0f, LayoutDirection::row);
@@ -685,7 +685,7 @@ TEST_CASE("generate_pulp_swift counts grid columns from repeat() and mixed track
     REQUIRE(count_items(grid_with("minmax(100px, 1fr) 2fr")) == 2);
     REQUIRE(count_items(grid_with("100px auto 1fr")) == 3);
     // repeat() followed by more tracks must SUM, not stop at the repeat count
-    // (Codex review): repeat(2,1fr) 2fr → 2 + 1 = 3.
+    // repeat(2,1fr) 2fr → 2 + 1 = 3.
     REQUIRE(count_items(grid_with("repeat(2, 1fr) 2fr")) == 3);
     REQUIRE(count_items(grid_with("repeat(2, 1fr 2fr)")) == 4);        // pattern has 2 tracks
     REQUIRE(count_items(grid_with("repeat(auto-fill, 120px)")) == 1);  // unknowable → pattern count
@@ -721,8 +721,7 @@ TEST_CASE("generate_pulp_swift emits no inf/nan for non-finite dimensions",
 TEST_CASE("generate_pulp_swift flags dropped grid item placement as a hard divergence",
           "[view][import][swiftui]") {
     // grid-column/grid-row item placement is lost in a LazyVGrid auto-flow, so
-    // it must be a hard (gating) fidelity issue, not the advisory track note
-    // (Codex review).
+    // it must be a hard (gating) fidelity issue, not the advisory track note.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "Grid", 300.0f, 200.0f, LayoutDirection::row);
@@ -741,7 +740,7 @@ TEST_CASE("generate_pulp_swift flags dropped grid item placement as a hard diver
 TEST_CASE("generate_pulp_swift flags an inline/data-URI image as a hard divergence",
           "[view][import][swiftui]") {
     // A data: URI has no catalog name and isn't remote, so Image("id") renders
-    // nothing — a hard divergence, not the advisory bundled-asset note (Codex).
+    // nothing — a hard divergence, not the advisory bundled-asset note.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("root", "R", 100.0f, 100.0f, LayoutDirection::column);
@@ -886,7 +885,7 @@ TEST_CASE("generate_pulp_swift binds meter/xy_pad/waveform/spectrum + emits text
 TEST_CASE("generate_pulp_swift renders a text button's label/icon children",
           "[view][import][swiftui]") {
     // A button with children must render them in the label closure, not drop
-    // them for a bare Text(name) (Codex review).
+    // them for a bare Text(name).
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("root", "R", 120.0f, 40.0f, LayoutDirection::column);

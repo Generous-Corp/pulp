@@ -1,6 +1,6 @@
 // test_design_import_jsx_runtime.cpp
 //
-// pulp jsx-instrument-import experiment slice (2026-05-17).
+// pulp jsx-instrument-import experiment slice.
 //
 // Validates that a pre-compiled JSX bundle (esbuild IIFE wrapping
 // React + either ReactDOM or the @pulp/react native bridge + the user's JSX)
@@ -293,10 +293,9 @@ TEST_CASE("[jsx-experiment] TypeScript .tsx bundle materializes through Claude r
           "[view][import][jsx][tsx]") {
     // Same shape as the JSX case but proves the esbuild 'tsx' loader strips
     // TypeScript correctly and the resulting JS round-trips through the
-    // runtime harness. Per Codex high-reasoning consult (2026-05-17): TSX
-    // is the dominant React file shape today; making the importer handle
-    // it lifts the experiment from "one hand-picked .jsx fixture" to the
-    // mainstream React export surface.
+    // runtime harness. TSX is the dominant React file shape today; making the
+    // importer handle it lifts the experiment from "one hand-picked .jsx
+    // fixture" to the mainstream React export surface.
     const char* bundle_path = std::getenv("PULP_TSX_BUNDLE");
     if (!bundle_path || !*bundle_path) {
         SUCCEED("PULP_TSX_BUNDLE not set — skipping. Run the Node transform first: "
