@@ -2,13 +2,12 @@
 
 The HTML oracle is a **static reference table** sourced from the WHATWG HTML
 living standard, the DOM standard, and Pulp's own DOM-lite shim
-(`core/view/js/web-compat-{element,document,dom-ops}.js`). For week-1 scope
-this is a simple JSON table — NOT a `jsdom` runtime. Upgrading to a real
-`jsdom` reference (the Week-3+ goal noted in
-`planning/pulp-agent-prompt-harness-week1.md`) would let us actually execute
-DOM operations and compare; this static oracle is the precondition.
+(`core/view/js/web-compat-{element,document,dom-ops}.js`). This is a simple
+JSON table, NOT a `jsdom` runtime. Upgrading to a real `jsdom` reference would
+let us execute DOM operations and compare traces; this static oracle is the
+precondition.
 
-We choose static over `jsdom` for week 1 because:
+We choose static over `jsdom` because:
 
 1. The DOM-lite surface Pulp consumes is small (~60 entries) and well-known.
 2. A static table keeps the harness a single `python3` invocation with no
@@ -71,7 +70,7 @@ The oracle is hand-maintained. To refresh:
 4. Mirror changes into `html-supported.json` and bump `version`.
 5. Run `python3 tools/harness/verifier.py --surface=html` and review the drift list.
 
-## Future upgrade path (Week 3+)
+## Future upgrade path
 
 Replace the static `entries` table with a `jsdom`-driven runner that:
 

@@ -1,7 +1,6 @@
 """Tests for the canvas2d catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" - this is the same-PR test surface
-for the canvas2d adapter.
+Exercises the Canvas2D adapter against focused fixtures before the full catalog run.
 
 Run via::
 

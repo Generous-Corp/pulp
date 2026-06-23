@@ -18,20 +18,18 @@ The CSS oracle is a static reference table sourced from three places:
 3. **`packages/pulp-react/src/prop-applier.ts`** — the alternative route
    for the same CSS surface. css/* entries can be reached either through
    `el.style.X` (web-compat) OR through `<View prop=...>` (React prop-
-   applier). For week-1 scope the harness treats the JS-side route as
-   authoritative; if the catalog claims supported and the JS route is
-   missing but prop-applier covers it, that surfaces as a DIVERGE drift
-   for further investigation.
+   applier). The harness treats the JS-side route as authoritative; if the
+   catalog claims supported and the JS route is missing but prop-applier covers
+   it, that surfaces as a DIVERGE drift for further investigation.
 
 Static-reference (versus Chromium-headless snapshotting) is the right
-choice for week 1 because:
+choice because:
 
 * `web-compat-style-decl.js` is the truth-of-record for what reaches the
   bridge — re-implementing it via headless Chrome would be measuring the
   spec, not Pulp.
 * CSS spec drift over Chromium versions would force an oracle-refresh
-  cadence we don't want yet (deferred to week 3+ when visual snapshot
-  testing comes online).
+  cadence we don't want in the static harness.
 * Pulp's CSS surface is bounded — we explicitly carve out 31 `wontfix`
   entries (table-layout, list-style, page-break, etc.) that no audio
   plugin UI consumer needs.

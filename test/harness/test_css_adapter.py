@@ -1,7 +1,6 @@
 """Tests for the css catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the css adapter (#1392, second of 5 surfaces).
+Exercises the CSS adapter against focused fixtures before the full catalog run.
 
 Run via::
 

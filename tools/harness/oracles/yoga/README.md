@@ -2,8 +2,7 @@
 
 The yoga oracle is a static reference table sourced from Yoga upstream
 (`facebook/yoga`, MIT) and `tools/import-design/catalogs/yoga.tsv`. We choose
-"static reference" over "shell out to the live Yoga library" for week 1
-because:
+"static reference" over "shell out to the live Yoga library" because:
 
 1. Pulp already vendors `yogacore` via FetchContent; we know the pin (`v3.2.1`)
    and the property surface is stable across minor releases.

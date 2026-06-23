@@ -1,9 +1,7 @@
 """Tests for the HTML catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the HTML adapter (#1392 partial, week 1 cut). Mirrors
-`test_yoga_adapter.py` so the test conventions stay aligned across
-parallel adapters (#1391 / #1392 / #1393).
+Mirrors `test_yoga_adapter.py` so the test conventions stay aligned across
+the surface adapters.
 
 Run via::
 

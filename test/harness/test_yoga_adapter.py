@@ -1,7 +1,6 @@
 """Tests for the yoga catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the verifier core (#1391) and yoga adapter (#1392, week 1 cut).
+Exercises the Yoga adapter against focused fixtures before the full catalog run.
 
 Run via::
 
@@ -185,11 +184,11 @@ class YogaAdapterClassifyTest(unittest.TestCase):
 class YogaAdapterEnumNormalizeTest(unittest.TestCase):
     """Annotated catalog values must normalize against bare oracle values.
 
-    Codex P1 follow-up on PR #1395 (issue #1413). The catalog frequently
-    decorates enum values with parenthetical context (``"flex (implicit)"``,
-    ``"none (via setVisible(false))"``). Before the fix, those entries
-    didn't string-equal the oracle's bare ``"flex"`` / ``"none"`` and were
-    misclassified as NOT-IMPL even when the adapter found a binding.
+    Catalog values frequently carry parenthetical context
+    (``"flex (implicit)"``, ``"none (via setVisible(false))"``). The adapter
+    normalizes those annotations before comparing against the oracle's bare
+    ``"flex"`` / ``"none"`` values so wired entries remain classified by their
+    bindings rather than by incidental label text.
     """
 
     @classmethod
@@ -203,7 +202,7 @@ class YogaAdapterEnumNormalizeTest(unittest.TestCase):
         self.assertEqual(YogaAdapter._normalize_enum_value("row-reverse (RTL)"), "row-reverse")
 
     def test_normalize_handles_nested_parens(self):
-        # The Codex P1 motivating example: yoga/display's "none (via setVisible(false))".
+        # Regression: yoga/display's annotated "none" value must match the oracle.
         self.assertEqual(
             YogaAdapter._normalize_enum_value("none (via setVisible(false))"),
             "none",
