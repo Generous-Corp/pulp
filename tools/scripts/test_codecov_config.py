@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Structural tests for codecov.yml.
 
-Regression coverage for the Codex post-merge sweep wave 3 findings on
-PR #578 (Codecov wiring, Phase 1 PR 2), plus the later `core/dsl`
-mapping drift caught on 2026-04-22:
+Structural invariants for codecov.yml:
 
-- P2: `ignore:` must be a TOP-LEVEL key in the Codecov YAML schema.
+- `ignore:` must be a TOP-LEVEL key in the Codecov YAML schema.
   Nesting it under `coverage:` silently no-ops, which would pollute
   the baseline coverage numbers with FetchContent sources and tests.
-- P1: Path-based coverage slicing across subsystem/platform/surface
+- Path-based coverage slicing across subsystem/platform/surface
   axes must be declared via `component_management`, not only via
   flag-level `paths:` on a multi-flag single upload. Components are
   Codecov's canonical path-slicing mechanism and trend-analysis

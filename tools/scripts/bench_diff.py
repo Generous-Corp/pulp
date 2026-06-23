@@ -172,11 +172,11 @@ def main() -> int:
         )
     )
 
-    # Codex P1 on #518: missing `memory_bandwidth_fraction` is UNKNOWN,
-    # not zero. Defaulting to 0.0 would silently emit "below threshold —
-    # ROI may be limited" for snapshots where the field was never
-    # captured (schema drift, partial profiling runs, etc.) and mask a
-    # real missing-data problem. Distinguish "absent" from "0%".
+    # Missing `memory_bandwidth_fraction` is UNKNOWN, not zero. Defaulting to
+    # 0.0 would silently emit "below threshold — ROI may be limited" for
+    # snapshots where the field was never captured (schema drift, partial
+    # profiling runs, etc.) and mask a real missing-data problem. Distinguish
+    # "absent" from "0%".
     base_mb = baseline.get("memory_bandwidth_fraction")
     curr_mb = current.get("memory_bandwidth_fraction")
     out.append("## Memory-bandwidth fraction")

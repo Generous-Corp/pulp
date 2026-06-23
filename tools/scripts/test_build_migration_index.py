@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Fixture tests for tools/scripts/build_migration_index.py.
 
-Regression coverage for the migration-index validation fixes from
-PR #571:
+Regression coverage for migration-index validation:
 
-- P2: `bool("false")` is True — if a schema-incorrect `breaking = "false"`
+- `bool("false")` is True — if a schema-incorrect `breaking = "false"`
   (quoted string) slipped through, the codegen silently emitted a
   `breaking = true` row. The generator must reject non-boolean values
   for a boolean field rather than coercing.
-- P2: `version = "abc"` or `version = "0.29"` was silently keyed as
+- `version = "abc"` or `version = "0.29"` was silently keyed as
   (0,0,0) in the sort, and the runtime hop-filter — which parses semver
   from the same string at load time — dropped the entry completely.
   Users would never see the note. Reject non-semver versions at
