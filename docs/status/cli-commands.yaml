@@ -1446,7 +1446,7 @@ commands:
       - name: model status
         summary: Show the configured model, resolved checkpoint, and whether it is loadable
       - name: model activate
-        summary: Select the active model and persist the state file
+        summary: Activate an installed audio model and persist the state file
       - name: excerpt-find
         summary: Rank WAV windows deterministically from a text query and emit an excerpt bundle with backend metadata
         args:
