@@ -925,7 +925,9 @@ frontmatter parse. See [`reference/imports/designmd.md`](imports/designmd.md).
 
 ### JS-scripted UI
 
-Write your entire plugin UI in JavaScript with hot-reload during development:
+Write your plugin UI in JavaScript. Live hot reload is validated in the macOS
+standalone development host; plugin targets can load the same `UI_SCRIPT`, but
+live reload is not yet guaranteed across hosts:
 
 ```javascript
 // plugin-ui.js
