@@ -1,8 +1,4 @@
-#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
-#include "native_components/rt_test_scope.hpp"
-#else
-#include "harness/rt_allocation_probe.hpp"
-#endif
+#include "harness/scoped_rt_process_probe.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/native_core_processor.hpp>
@@ -179,38 +175,7 @@ struct Block {
     }
 };
 
-class ScopedRtProcessProbe {
-public:
-    ScopedRtProcessProbe() = default;
-    ~ScopedRtProcessProbe() = default;
-
-    ScopedRtProcessProbe(const ScopedRtProcessProbe&) = delete;
-    ScopedRtProcessProbe& operator=(const ScopedRtProcessProbe&) = delete;
-
-    std::size_t allocation_count() const noexcept {
-#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
-        return 0;
-#else
-        return allocation_probe_.allocation_count();
-#endif
-    }
-
-    std::size_t allocated_bytes() const noexcept {
-#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
-        return 0;
-#else
-        return allocation_probe_.allocated_bytes();
-#endif
-    }
-
-private:
-#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
-    pulp::native_components::test::RtNoAllocScope rt_scope_;
-#else
-    pulp::test::RtAllocationProbe allocation_probe_;
-#endif
-    pulp::runtime::ScopedNoAlloc no_alloc_;
-};
+using pulp::test::ScopedRtProcessProbe;
 
 }  // namespace
 

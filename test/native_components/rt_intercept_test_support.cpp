@@ -193,11 +193,58 @@ void* operator new[](std::size_t n, const std::nothrow_t& nt) noexcept {
     return operator new(n, nt);
 }
 
+// Over-aligned (C++17 aligned-new) variants. Without these, an over-aligned
+// allocation inside a no-alloc scope would route to libc++'s default aligned
+// new and bypass the trap. Unix-only TU, so posix_memalign is available.
+namespace {
+void* trap_then_aligned_alloc(std::size_t n, std::align_val_t alignment) noexcept {
+    pulp_rt_trap_if_no_alloc_scope(0, n);
+    pulp::test::rt_allocation_probe_record(n);
+    if (n == 0) {
+        n = 1;
+    }
+    auto align = static_cast<std::size_t>(alignment);
+    if (align < sizeof(void*)) {
+        align = sizeof(void*);
+    }
+    void* p = nullptr;
+    if (::posix_memalign(&p, align, n) != 0) {
+        return nullptr;
+    }
+    return p;
+}
+}  // namespace
+
+void* operator new(std::size_t n, std::align_val_t a) {
+    void* p = trap_then_aligned_alloc(n, a);
+    if (p == nullptr) {
+        throw std::bad_alloc();
+    }
+    return p;
+}
+void* operator new[](std::size_t n, std::align_val_t a) { return operator new(n, a); }
+void* operator new(std::size_t n, std::align_val_t a, const std::nothrow_t&) noexcept {
+    return trap_then_aligned_alloc(n, a);
+}
+void* operator new[](std::size_t n, std::align_val_t a, const std::nothrow_t& nt) noexcept {
+    return operator new(n, a, nt);
+}
+
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete[](void* p, const std::nothrow_t&) noexcept {
+    std::free(p);
+}
+void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t, const std::nothrow_t&) noexcept {
+    std::free(p);
+}
+void operator delete[](void* p, std::align_val_t, const std::nothrow_t&) noexcept {
     std::free(p);
 }
