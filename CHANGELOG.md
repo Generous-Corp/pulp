@@ -8,6 +8,21 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04596"></a>
+## [0.459.6] - 2026-06-22
+
+- docs(view): trim lock-to-source provenance comments ([#4515](https://github.com/danielraffel/pulp/pull/4515))
+- docs(ci): trim stale runner provenance comments ([#4512](https://github.com/danielraffel/pulp/pull/4512))
+- test(view): trim stale provenance comments ([#4511](https://github.com/danielraffel/pulp/pull/4511))
+- chore(harness): trim stale provenance labels ([#4510](https://github.com/danielraffel/pulp/pull/4510))
+- docs(ci): trim workflow provenance comments ([#4509](https://github.com/danielraffel/pulp/pull/4509))
+- docs(tools): trim stale provenance comment labels ([#4507](https://github.com/danielraffel/pulp/pull/4507))
+- docs(view): trim source provenance comments ([#4506](https://github.com/danielraffel/pulp/pull/4506))
+- docs(tokens): fix export-token guide commands ([#4502](https://github.com/danielraffel/pulp/pull/4502))
+- fix(state): write content index atomically (temp + rename) ([#4498](https://github.com/danielraffel/pulp/pull/4498))
+- docs(templates): trim create scaffold provenance comments ([#4499](https://github.com/danielraffel/pulp/pull/4499))
+- docs(tooling): refresh guard script comments ([#4495](https://github.com/danielraffel/pulp/pull/4495))
+
 <a id="v04595"></a>
 ## [0.459.5] - 2026-06-22
 
@@ -4740,6 +4755,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.459.6]: https://github.com/danielraffel/pulp/releases/tag/v0.459.6
 [0.459.5]: https://github.com/danielraffel/pulp/releases/tag/v0.459.5
 [0.459.4]: https://github.com/danielraffel/pulp/releases/tag/v0.459.4
 [0.459.3]: https://github.com/danielraffel/pulp/releases/tag/v0.459.3
