@@ -1,8 +1,8 @@
 #pragma once
 
-// CodeEditorComponent — embeds a Monaco editor via WebView.
-// Provides syntax highlighting, line numbers, minimap, and language modes.
-// Uses the WebView bridge to communicate between native and editor.
+// CodeEditorComponent — native code editor view.
+// Provides text editing, line numbers, lightweight syntax coloring, and language modes.
+// Monaco-class editing can be built separately with the WebView bridge.
 
 #include <pulp/view/view.hpp>
 #include <string>
@@ -38,7 +38,7 @@ struct CodeEditorConfig {
     std::string font_family = "monospace";
 };
 
-/// Code editor widget — wraps Monaco editor in a WebView
+/// Native code editor widget with gutter, language mode, and lightweight token coloring
 class CodeEditor : public View {
 public:
     CodeEditor() = default;
@@ -75,7 +75,7 @@ public:
     /// Go to a specific line
     void go_to_line(int line);
 
-    /// Set error markers (line → message)
+    /// Accept error markers (line → message); native fallback currently treats them as a no-op.
     void set_markers(const std::vector<std::pair<int, std::string>>& markers);
 
     void paint(canvas::Canvas& canvas) override;

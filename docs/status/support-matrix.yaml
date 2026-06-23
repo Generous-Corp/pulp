@@ -473,7 +473,7 @@ widgets:
   code_editor:
     status: usable
     ci_test: pulp-test-code-editor
-    notes: Syntax-highlighted text editor with gutter and line numbers. See core/view/include/pulp/view/widgets/code_editor.hpp.
+    notes: Syntax-highlighted text editor with gutter and line numbers; CI coverage includes pulp-test-code-editor. See core/view/include/pulp/view/code_editor.hpp.
 
 js_authoring:
   web_compat_layer:
