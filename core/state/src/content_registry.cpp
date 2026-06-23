@@ -31,10 +31,31 @@ std::string read_text(const fs::path& path) {
 bool write_text(const fs::path& path, const std::string& body) {
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
-    std::ofstream f(path);
-    if (!f.is_open()) return false;
-    f << body;
-    return f.good();
+    // Atomic write: stage to a sibling temp file, fully flush it, then rename it
+    // onto the destination so a crash / power loss / full disk mid-write never
+    // truncates an existing file (e.g. the content index). Mirrors
+    // PropertiesFile::save_to and the skp_capture / audio_thumbnail_cache
+    // temp-then-rename convention.
+    fs::path tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream f(tmp);
+        if (!f.is_open()) return false;
+        f << body;
+        f.flush();
+        if (!f.good()) {
+            f.close();
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    fs::rename(tmp, path, ec);
+    if (ec) {
+        std::error_code rm_ec;
+        fs::remove(tmp, rm_ec);
+        return false;
+    }
+    return true;
 }
 
 std::string string_member(const choc::value::ValueView& object, std::string_view name) {

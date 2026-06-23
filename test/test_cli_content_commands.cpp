@@ -10,6 +10,8 @@
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/state/content_registry.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -169,6 +171,24 @@ TEST_CASE("pulp content installs, lists, reveals, and removes data-only packs",
                          "--version", "0.1.0", "--root", data.path.string(), "--yes"}) == 0);
     REQUIRE_FALSE(fs::exists(installed));
     REQUIRE(fs::exists(data.path / "Content" / plugin / "UserPresets" / "mine.json"));
+}
+
+TEST_CASE("pulp content install writes the index atomically with no temp sidecar",
+          "[cli][content][reliability]") {
+    TempDir data;
+    const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
+    const std::string plugin = "dev.pulp.fixtures.content-target";
+
+    REQUIRE(cmd_content({"install", fixture.string(), "--plugin", plugin,
+                         "--root", data.path.string(), "--yes"}) == 0);
+
+    const auto index = data.path / "Content" / "index.json";
+    REQUIRE(fs::exists(index));
+    // The atomic temp-then-rename must leave the index in place and never leak
+    // its sibling staging file.
+    REQUIRE_FALSE(fs::exists(data.path / "Content" / "index.json.tmp"));
+    // A fully-written (not truncated) index parses as valid JSON.
+    REQUIRE_NOTHROW(choc::json::parse(read_file(index)));
 }
 
 TEST_CASE("pulp content install refuses to overwrite an installed pack version",
