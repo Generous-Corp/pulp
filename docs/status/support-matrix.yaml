@@ -95,7 +95,8 @@ plugin_extensions:
 # confuse "the adapter compiles" with "the adapter is feature-complete."
 format_limitations:
   vst3:
-    - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
+    - "Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs (workstream 01)."
+    - "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation (workstream 01)."
   au_v2:
     - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
   clap:
@@ -864,16 +865,16 @@ limitations:
     - text: "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
   formats.vst3:
-    - text: "Only bus index 0 routed to process(); multi-bus + sidechain not wired."
+    - text: "Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
-    - text: "setBusArrangements forwards without validating channel counts or reading negotiated layout."
+    - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
-    - text: "MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed."
+    - text: "MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
   formats.au_v2:
     - text: "Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify)."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
-    - text: "MIDI input dead: AUEffectBase has no MIDI routing."
+    - text: "Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
   formats.auv3:
     - text: "Single input bus; no sidechain support."

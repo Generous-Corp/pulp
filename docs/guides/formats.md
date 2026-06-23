@@ -235,8 +235,8 @@ non-interactive runs do not launch editor windows.
 
 ### Known Limitations
 
-- Only the first input/output bus channels are passed to `process()`. Sidechain bus routing is declared but not yet connected.
-- Channel count in `setupProcessing()` defaults to 2; dynamic bus arrangement queries are not yet implemented.
+- Bus 0 and one sidechain input are routed through `ProcessBuffers`. Secondary output buses are zero-filled today rather than exposed as writable processor outputs.
+- Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation.
 
 ---
 
