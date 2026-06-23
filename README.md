@@ -74,7 +74,8 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Thread-safe parameter system with atomic reads and gesture-aware bindings
 - Headless audio processing for testing and offline rendering
 - MIDI I/O with full event parsing
-- Audio file read/write (WAV, AIFF, FLAC, MP3)
+- Audio file import for WAV, AIFF/AIFF-C, FLAC, MP3, Ogg Vorbis, and CoreAudio-backed Apple formats
+- Audio file export for WAV/AIFF, with optional FLAC, MP3, AAC, and ALAC encoders via `pulp add`
 - Multi-bus I/O with sidechain support
 
 **Rendering**
