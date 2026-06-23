@@ -541,8 +541,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             //     check needs to flag. The previous version used --jq
             //     '.secrets[].name' and gated on the output being non-empty,
             //     which made the bootstrap case (zero secrets) look the
-            //     same as the "gh failed" case and skipped silently. Codex
-            //     P1 on #149.
+            //     same as the "gh failed" case and skipped silently.
             auto raw = exec_output(
                 "gh api 'repos/" + repo_slug + "/actions/secrets' --paginate 2>/dev/null");
             if (!raw.empty()) {
@@ -828,7 +827,6 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
             // `Application Support`) would otherwise split on
             // whitespace and the probe would silently fail while
             // c.passed stayed true, producing a false positive.
-            // See #438 P2 Codex review on #442.
             auto detail = first_line(
                 exec_output(shell_quote(adb) + " version 2>&1"));
             // If the probe failed (empty output), don't claim pass —
@@ -855,8 +853,8 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
             else if (fs::exists(candidate))  emu = candidate.string();
         }
         if (!emu.empty()) {
-            // Shell-quote per #438 P2 Codex review on #442 — same
-            // argv-split risk as the adb fallback above. SDK paths
+            // Shell-quote for the same argv-split risk as the adb
+            // fallback above. SDK paths
             // with spaces would otherwise produce a misleading
             // "No AVDs configured" failure.
             auto avds = exec_output(shell_quote(emu) + " -list-avds 2>/dev/null");

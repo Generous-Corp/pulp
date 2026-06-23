@@ -117,8 +117,8 @@ int cmd_sdk(const std::vector<std::string>& args) {
         // ~/.pulp/cache/latest_release.txt with a 24h TTL — no
         // network call in the hot path most of the time.
         //
-        // Codex P2 on PR #2138: only fire the banner against an
-        // actually-installed SDK version. Falling back to
+        // Only fire the banner against an actually-installed SDK
+        // version. Falling back to
         // PULP_SDK_VERSION (the CLI's compile-time pin) here would
         // print contradictory output on a fresh machine: "No SDK
         // versions installed" followed by "installed: v..." against
@@ -146,8 +146,8 @@ int cmd_sdk(const std::vector<std::string>& args) {
                           + "/releases?per_page=30";
         std::string cmd = "curl -fsSL -H 'Accept: application/vnd.github+json' "
                           + shell_quote(url) + " 2>/dev/null";
-        // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping
-        // used elsewhere in tools/cli/ so this builds on the Windows
+        // Mirror the _WIN32 popen/pclose mapping used elsewhere in
+        // tools/cli/ so this builds on the Windows
         // CLI lane. Other call sites (cmd_overflow.cpp, cmd_macos.cpp,
         // update_check.cpp) carry the same pattern.
 #if defined(_WIN32)

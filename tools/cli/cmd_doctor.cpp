@@ -295,8 +295,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
             // pure data surface), but automation needs a usable exit
             // code so it can detect unhealthy state without parsing
             // the JSON. Mirror the human-readable mode: exit non-zero
-            // iff any entry is unhealthy. See Codex P2 review on
-            // PR #753.
+            // iff any entry is unhealthy.
             (void)fcc::render_report_json(entries, cache_root, std::cout);
             return fcc::any_unhealthy(entries) ? 1 : 0;
         }

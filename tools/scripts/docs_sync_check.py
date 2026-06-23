@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Docs-sync gate — #566 Phase 4 / #567.
+"""Docs-sync gate — #566 / #567.
 
 Generalizes the skill-sync pattern to arbitrary docs. Given a diff
 range (base..HEAD), assert that every doc whose mapped paths were

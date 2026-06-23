@@ -197,9 +197,9 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # doctor may exit 0 or 1 depending on environment, but should not
-    # crash and must always print the "Pulp Doctor" banner. Codex P2
-    # on PR #1278 — we previously gated this with SKIP_RETURN_CODE 1,
-    # but that turns the test into "Not Run" on exit-1 and silently
+    # crash and must always print the "Pulp Doctor" banner. We previously
+    # gated this with SKIP_RETURN_CODE 1, but that turns the test into
+    # "Not Run" on exit-1 and silently
     # bypasses PASS_REGULAR_EXPRESSION; a regression that swallowed
     # the banner while still returning 1 (a common path on hosts with
     # missing optional SDKs) would look like a skip in CI rather than
@@ -226,7 +226,7 @@ if(PULP_BUILD_TESTS)
     # CI mode may exit 1 if optional SDKs are missing — that's not a
     # crash. Pin the contract to "prints the Pulp Doctor banner" so a
     # regression that swallows output but still returns 1 fails the
-    # test rather than getting silently skipped (Codex P2 on PR #1278).
+    # test rather than getting silently skipped.
     # PASS_REGULAR_EXPRESSION wins over the exit code check, so the
     # test passes on exit 0 OR 1 as long as the banner is rendered.
     set_tests_properties(cli-doctor-ci PROPERTIES
@@ -244,7 +244,6 @@ if(PULP_BUILD_TESTS)
     # See the cli-doctor / cli-doctor-ci notes above — drop
     # SKIP_RETURN_CODE so the "Validators" banner contract is enforced
     # even when an optional validator is missing on the host (exit 1).
-    # Codex P2 on PR #1278.
     set_tests_properties(cli-doctor-validators PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Validators")

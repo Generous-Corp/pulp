@@ -330,8 +330,8 @@ std::vector<ValidatorReport> discover_validators(const DiscoveryEnv& env) {
         auto paths = validator_priority_paths(meta.name, env);
         for (const auto& p : paths) {
             if (!env.path_exists || !env.path_exists(p)) continue;
-            // P2 (Codex review on PR #749): require the candidate to
-            // be executable before selecting it. A stale non-exec
+            // Require the candidate to be executable before selecting
+            // it. A stale non-exec
             // file at a high-priority location (e.g. someone touched
             // /usr/local/bin/pluginval to a zero-byte placeholder)
             // would otherwise mask runnable copies further down the
@@ -408,8 +408,7 @@ FixOutcome apply_fixes(std::vector<ValidatorReport>& reports, bool dry_run) {
                         std::error_code ec;
                         fs::remove(r.path, ec);
                         if (ec) {
-                            // P1 (Codex review on PR #749): if
-                            // fs::remove fails (e.g. permission flip
+                            // If fs::remove fails (e.g. permission flip
                             // mid-doctor, sticky bit, racing process)
                             // the broken binary is still on disk and
                             // `pulp validate` will still abort on it

@@ -155,8 +155,8 @@ std::string latest_available_sdk_version() {
                       + "/releases/latest";
     std::string cmd = "curl -fsSL --max-time 2 -H 'Accept: application/vnd.github+json' "
                       + shell_quote(url) + " 2>/dev/null";
-    // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping used
-    // elsewhere in tools/cli/ so this builds on Windows.
+    // Mirror the _WIN32 popen/pclose mapping used elsewhere in
+    // tools/cli/ so this builds on Windows.
 #if defined(_WIN32)
     FILE* pipe = _popen(cmd.c_str(), "r");
 #else
@@ -642,8 +642,7 @@ bool cache_preflight_check(const fs::path& project_root,
     auto entries = fcc::discover_fetchcontent_cache(env);
     // Only gate on states that genuinely break configure/build —
     // StaleCommit entries are harmless because CMake's override path
-    // keys on the *current* sanitized ref. See blocks_preflight() and
-    // the Codex P1 review on PR #753.
+    // keys on the *current* sanitized ref. See blocks_preflight().
     if (!fcc::blocks_preflight(entries)) return true;
 
     std::cerr << "Error: " << command_name
