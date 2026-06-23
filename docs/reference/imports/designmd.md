@@ -5,7 +5,7 @@
 YAML-frontmatter + Markdown-body description of a design *system* — and
 emits a W3C Design Tokens Community Group (DTCG) `tokens.json`. The
 upstream spec is the source of truth for the format; this page documents
-the Pulp parser, its detection rules, and the Phase 1 contract.
+the Pulp parser, its detection rules, and the tokens-only import contract.
 
 Because DESIGN.md describes a system (colors, typography, spacing,
 component recipes), not a screen, the importer **does not** emit a
@@ -30,8 +30,9 @@ Produces:
 
 Does **not** produce:
 
-- `ui.js` — DESIGN.md has no screen. Phase 3 will scaffold widgets from
-  `components.*`, but Phase 1 stops at tokens.
+- `ui.js` — DESIGN.md has no screen. Component scaffolding from
+  `components.*` remains future work; the current importer stops at
+  tokens.
 - `classnames.json` — that artifact is specific to the `claude` source.
 - Any bridge or React scaffold — there's no view to render.
 
@@ -43,8 +44,8 @@ pulp import-design --from designmd --file DESIGN.md --detect-only
 
 ## Supported subset
 
-Phase 1 parses the canonical frontmatter keys. Everything else passes
-through as opaque strings, mirroring the upstream spec's "ignore
+The parser handles the canonical frontmatter keys. Everything else
+passes through as opaque strings, mirroring the upstream spec's "ignore
 unknowns" policy.
 
 | Key | Parsed | Notes |
@@ -61,9 +62,7 @@ unknowns" policy.
 | Unknown component properties | passthrough | Per the spec, unknown component props are preserved as opaque strings. |
 
 When frontmatter is present it is the sole token source; the Markdown body
-after the closing `---` fence is parsed for headings only (Phase 2's
-`pulp design lint` will use the body for cross-references between sections
-and prose).
+after the closing `---` fence is parsed for headings and lint context only.
 
 When a file has **no frontmatter**, the parser falls back to scanning the
 Markdown body so prose-authored files (common for Stitch / Brand-Kit
@@ -143,7 +142,7 @@ detected source: designmd
 | `1` | Usage error or write failure (missing `--file`, unwritable `--tokens` path, permission denied). |
 | `2` | Detect-only run found no match. |
 | `3` | Parse error — malformed YAML frontmatter, duplicate top-level section, missing closing fence. |
-| `4` | Unsupported feature — encountered a construct the parser explicitly rejects rather than silently dropping (reserved; nothing currently triggers it in Phase 1). |
+| `4` | Unsupported feature — encountered a construct the parser explicitly rejects rather than silently dropping (reserved; nothing currently triggers it). |
 
 ## Diagnostics
 
@@ -164,32 +163,31 @@ Example:
 `severity` is one of `error` (exit code 3 or 4), `warning` (does not
 affect exit code), or `info` (suppressed unless `--debug`).
 
-## Phase 1 contract
+## Current contract
 
-Phase 1 ships exactly the surface above:
+The import path ships exactly the surface above:
 
 - `pulp import-design --from designmd` → `tokens.json`.
 - Detection in `compat.json` with the strict fingerprint.
 - Test fixtures (paws-and-paths from upstream, plus a hand-authored
   edge-case fixture and three decoys).
 - This documentation page and the cross-references listed below.
+- `pulp design lint <DESIGN.md>` for DESIGN.md quality findings.
+- `pulp design diff <before.md> <after.md>` for semantic token diffs.
 
-Phase 2 will add `pulp design lint` (token coverage, broken refs,
-unused tokens, naming conventions, contrast ratios, body/frontmatter
-drift, unknown sections), `pulp design diff` (semantic diff between
-two DESIGN.md files), and Tailwind v3 + v4 exporters.
+Tailwind v3 + v4 exporters remain future work.
 
-Phase 3 will treat DESIGN.md as a project source of truth: `pulp
-design` hydrates the live theme from `DESIGN.md`; `pulp design save
---update-design-md` round-trips changes back. Component scaffolding
-from `components.*` into Pulp widgets lands in the same phase.
+Treating DESIGN.md as a project source of truth remains future work:
+`pulp design` does not yet hydrate the live theme from `DESIGN.md`, and
+`pulp design save --update-design-md` does not yet round-trip changes
+back. Component scaffolding from `components.*` into Pulp widgets is in
+the same future-work bucket.
 
 ## Not yet supported
 
-- Tailwind v3 / v4 export — Phase 2.
-- Live runtime hydration of Pulp's theme from a DESIGN.md file —
-  Phase 3.
-- Widget scaffolding from `components.*` — Phase 3.
+- Tailwind v3 / v4 export.
+- Live runtime hydration of Pulp's theme from a DESIGN.md file.
+- Widget scaffolding from `components.*`.
 - An `npx @google/design.md spec` equivalent — out of scope. Pulp
   ships the format documentation as this page; the upstream spec at
   [github.com/google-labs-code/design.md](https://github.com/google-labs-code/design.md)

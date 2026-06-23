@@ -65,8 +65,8 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Hot reload for rapid UI iteration (standalone host; plugin host support planned)
 - Screenshot capture and headless rendering
 - Component inspector for debugging view hierarchy
-- AI design tool (`pulp design`) for generating UIs from prompts
-- Import from Figma, Stitch, and Pencil via MCP
+- AI-assisted design tool (`pulp design`) for token, shader, and widget-style iteration
+- Design import from Figma/Figma plugin, Stitch, v0, Pencil/OpenPencil, Claude Design, and DESIGN.md exports
 - Agent-first motion observability — runtime traces, fixture record/replay/assert, visual analysis, Swift + Kotlin facades, scrubber, cost attribution ([guide](docs/guides/motion-observability.md))
 
 **DSP & Audio**

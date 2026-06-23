@@ -860,8 +860,8 @@ static void print_usage() {
     std::cout << "Usage:\n";
     std::cout << "  pulp import-design --from <source> [options]\n\n";
     std::cout << "Sources:\n";
-    std::cout << "  figma    Figma export JSON or MCP data\n";
-    std::cout << "  stitch   Google Stitch screen HTML or MCP data\n";
+    std::cout << "  figma, figma-plugin  Figma JSON/normalized IR, or Pulp plugin envelope\n";
+    std::cout << "  stitch   Google Stitch screen HTML or normalized IR file\n";
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
     std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
@@ -2113,7 +2113,7 @@ int main(int argc, char* argv[]) {
     auto source = parse_design_source(source_str);
     if (!source) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
-        std::cerr << "Valid sources: figma, stitch, v0, pencil, claude, designmd, jsx\n";
+        std::cerr << "Valid sources: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
     }
 
@@ -2975,8 +2975,8 @@ int main(int argc, char* argv[]) {
 
     // Write output files. DESIGN.md describes a system, not a screen —
     // there is no UI tree to scaffold, so skip the ui.js write entirely
-    // and emit only tokens.json. Phase 3 may add a `--with-scaffold` flag
-    // once name-based widget detection is consistent across sources.
+    // and emit only tokens.json. Future work may add a `--with-scaffold`
+    // flag once name-based widget detection is consistent across sources.
     if (*source != DesignSource::designmd) {
         if (!write_file(output_file, js)) return 1;
 
