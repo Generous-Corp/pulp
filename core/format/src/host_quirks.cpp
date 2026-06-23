@@ -100,20 +100,18 @@ namespace {
 // live here as private helpers until they are extracted. License-hygiene:
 // every flag flipped here (or in a per-host header) must be backed by a
 // host vendor doc + a reproducer Pulp issue. See the catalog at
-// `planning/2026-05-24-daw-host-quirks-inheritance.md`.
+// `core/format/host-quirks.json`.
 
 void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
     // Main 6 REAPER rows (15 + R1-R4 + R6).
     host_quirks::apply_reaper(q, v);
-    // Layer the iPlug2-audit keyboard-only-space lesson on top via the
-    // separate factory so its LessonOnly tier can evolve independently
-    // of the rest of the REAPER dispatch (Speculative).
+    // Layer the keyboard-only-space lesson on top so its LessonOnly
+    // tier can evolve independently of the rest of the REAPER dispatch.
     host_quirks::apply_reaper_keyboard(q, v);
-    // 2026-05-26 iPlug2-audit batch (Pulp #3044): REAPER hosts AU v3
-    // in-process and needs preferredContentSize set synchronously
-    // during audioUnitInitialized. Layered via a separate factory so
-    // the LessonOnly tier can evolve independently of the rest of the
-    // REAPER dispatch.
+    // Pulp #3044: REAPER hosts AU v3 in-process and needs
+    // preferredContentSize set synchronously during audioUnitInitialized.
+    // Layered separately so the LessonOnly tier can evolve independently
+    // of the rest of the REAPER dispatch.
     host_quirks::apply_reaper_auv3_in_process(q, v);
 }
 
