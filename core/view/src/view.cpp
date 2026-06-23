@@ -864,10 +864,9 @@ View* View::hit_test(Point local_point) {
     // a high-z popover could render on top yet have clicks fall through
     // to siblings beneath it.
     if (pointer_events_ != PointerEvents::box_only) {
-        auto paint_order = sorted_children_by_z_index();
-        for (auto it = paint_order.rbegin(); it != paint_order.rend(); ++it) {
-            View* child = *it;
-            if (!child->visible_) continue;
+        // Test one child; returns the hit (or nullptr to keep looking).
+        auto try_child = [&](View* child) -> View* {
+            if (!child->visible_) return nullptr;
 
             Point child_point = {local_point.x - child->bounds_.x,
                                 local_point.y - child->bounds_.y};
@@ -887,8 +886,24 @@ View* View::hit_test(Point local_point) {
             }
 
             if (in_bounds) {
-                auto* hit = child->hit_test(child_point);
-                if (hit) return hit;
+                if (auto* hit = child->hit_test(child_point)) return hit;
+            }
+            return nullptr;
+        };
+
+        // Topmost-first = highest z, latest insertion at equal z → reverse of
+        // the z-sorted order. When children are already in z-order (the common
+        // case), reverse-walking children_ is identical to reversing the
+        // stable-sorted copy, so skip the per-hit-test allocation — mirrors
+        // paint_all's fast path (children_in_z_order()).
+        if (children_in_z_order()) {
+            for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
+                if (auto* hit = try_child(it->get())) return hit;
+            }
+        } else {
+            auto paint_order = sorted_children_by_z_index();
+            for (auto it = paint_order.rbegin(); it != paint_order.rend(); ++it) {
+                if (auto* hit = try_child(*it)) return hit;
             }
         }
     }

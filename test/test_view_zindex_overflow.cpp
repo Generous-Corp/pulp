@@ -296,6 +296,39 @@ TEST_CASE("View::hit_test falls back to insertion-order topmost at equal z",
     REQUIRE(hit == b_ptr);
 }
 
+TEST_CASE("hit_test z-order fast path matches the sorted path on both branches",
+          "[view][perf][zorder-fastpath]") {
+    // hit_test reverse-walks children_ directly when children_in_z_order() (the
+    // common default-z case, no sorted-copy allocation), else uses the sorted
+    // copy. Both must return the same topmost child. Mirrors the paint_all
+    // fast-path; pins behavioral parity for both branches.
+    SECTION("in-order (fast path): topmost = last inserted at equal z") {
+        View parent;
+        parent.set_bounds({0, 0, 100, 100});
+        auto a = std::make_unique<View>(); a->set_bounds({0, 0, 100, 100});
+        auto b = std::make_unique<View>(); b->set_bounds({0, 0, 100, 100});
+        auto* b_ptr = b.get();
+        parent.add_child(std::move(a));
+        parent.add_child(std::move(b));
+        REQUIRE(parent.children_in_z_order());            // exercises the fast path
+        REQUIRE(parent.hit_test({50.0f, 50.0f}) == b_ptr);
+    }
+    SECTION("out-of-order z (slow path): topmost = highest z") {
+        View parent;
+        parent.set_bounds({0, 0, 100, 100});
+        auto a = std::make_unique<View>(); a->set_bounds({0, 0, 100, 100});
+        auto popover = std::make_unique<View>(); popover->set_bounds({0, 0, 100, 100});
+        popover->set_z_index(10);
+        auto* p_ptr = popover.get();
+        auto b = std::make_unique<View>(); b->set_bounds({0, 0, 100, 100});
+        parent.add_child(std::move(a));
+        parent.add_child(std::move(popover));   // high-z in the middle → out of order
+        parent.add_child(std::move(b));
+        REQUIRE_FALSE(parent.children_in_z_order());       // exercises the slow path
+        REQUIRE(parent.hit_test({50.0f, 50.0f}) == p_ptr);
+    }
+}
+
 // ── pulp #972 — overflow:visible default for absolute-positioned popovers ────
 // Symptom on Spectr's bandsMenu: a `position:absolute; top:28; right:0`
 // popover declared inside a 24px-tall flex parent renders nowhere because
