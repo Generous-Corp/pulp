@@ -1,11 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// WebGPU mock factories extracted from web-compat-document.js
+// WebGPU mock factories
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // The entire WebGPU mock surface used by the headless test harness +
-// fallback adapter path. Originally lived inline in
-// web-compat-document.js. It was the biggest self-contained subsystem
-// in that file, so extracting it keeps the document prelude focused.
+// fallback adapter path. This is the largest self-contained document
+// prelude subsystem, so it stays isolated from the style / selector surface.
 //
 // Embed order: loaded AFTER web-compat-document.js because
 //   * GPUTextureUsage / GPUBufferUsage / GPUShaderStage / GPUColorWrite

@@ -35,16 +35,14 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
-    # Events + Pointer-capture extracted from web-compat-element.js.
-    # Loaded AFTER the parent so the Element
-    # constructor + prototype are already defined when the extracted
-    # prototype overrides install.
+    # Events + pointer-capture prototype overrides. Loaded AFTER the
+    # parent so the Element constructor + prototype are already defined
+    # when the overrides install.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element-events.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
-    # Native GPU helpers extracted from web-compat-canvas.js.
-    # Loaded AFTER the parent so the
-    # CanvasRenderingContext2D constructor + window.pulp.gpu surface
-    # are in scope when GPU consumers call getContext("webgpu").
+    # Native GPU helpers. Loaded AFTER the parent so the
+    # CanvasRenderingContext2D constructor + window.pulp.gpu surface are
+    # in scope when GPU consumers call getContext("webgpu").
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
     # _PulpCanvasMatrix DOMMatrix-compat helper.
     # CanvasRenderingContext2D.getTransform() instantiates this lazily
@@ -75,13 +73,11 @@ set(PULP_JS_PRELUDES
     # walks the property list and installs reflection.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
-    # CSS selector engine extracted from web-compat-document.js.
-    # Loaded AFTER the parent so document +
-    # Element are in scope when underscore-prefixed selector helpers
-    # are dispatched from document.querySelector / .querySelectorAll.
+    # CSS selector engine. Loaded AFTER the parent so document + Element
+    # are in scope when underscore-prefixed selector helpers are
+    # dispatched from document.querySelector / .querySelectorAll.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
-    # WebGPU mock factories extracted from web-compat-document.js.
-    # Loaded AFTER the parent so GPU* usage
+    # WebGPU mock factories. Loaded AFTER the parent so GPU* usage
     # constants installed by document.js (GPUTextureUsage etc.) are in
     # scope when the factory bodies resolve them at call time.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-gpu-mock.js

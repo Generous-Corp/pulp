@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// Events + Pointer-capture support extracted from web-compat-element.js
+// Events + pointer-capture support
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Two coherent subsurfaces of the DOM Event surface:
@@ -16,9 +16,9 @@
 //      when capture is released.
 //
 // Embed order: loaded AFTER web-compat-element.js so the Element constructor
-// + prototype are already defined when the extracted prototype overrides
-// install. The functions on Element.prototype here can reference each other
-// freely; cross-prelude resolution happens at call time, not parse time.
+// + prototype are already defined when these prototype overrides install.
+// The functions on Element.prototype here can reference each other freely;
+// cross-prelude resolution happens at call time, not parse time.
 
 // ── Events ───────────────────────────────────────────────────────────────────
 

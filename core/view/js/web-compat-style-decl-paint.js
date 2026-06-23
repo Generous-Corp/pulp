@@ -1,13 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — paint domain handler split from _applyProperty
+// CSSStyleDeclaration — paint domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the paint-surface CSS properties: colors, borders, opacity,
 // box-shadow, filters, backgrounds, outline, visibility, clip-path /
 // mask cluster, mix-blend-mode, isolation, appearance, object-fit.
 // `_applyPaintProp(decl, id, key, resolved, value)` returns true if it
-// claimed the key, false otherwise. Each `case` body is byte-identical
-// to the matching arm of the pre-split `_applyProperty` switch.
+// claimed the key, false otherwise.
 //
 // `decl` carries the CSSStyleDeclaration `this`; the isolation case reads
 // `decl.__pulpId__`. Embed order: loaded AFTER web-compat-style-decl.js

@@ -1,10 +1,7 @@
 // skia_canvas_filter.cpp — CSS `filter` (Canvas2D `ctx.filter`) parser.
 //
-// Extracted from skia_canvas.cpp as part of the per-feature TU split
-// (see skia_canvas_text.cpp / skia_canvas_mask.cpp / skia_canvas_gradients.cpp
-// for the prior cuts). skia_canvas.cpp is a long-lived merge-conflict
-// hot spot; pulling the self-contained CSS-filter-parsing cluster into its
-// own TU means filter-parsing work no longer recompiles the whole file.
+// Self-contained filter parsing lives outside skia_canvas.cpp so changes here
+// do not recompile the full canvas backend.
 //
 // The cluster is pure free functions in an anonymous namespace — no
 // `SkiaCanvas::` members. The single symbol the rest of skia_canvas.cpp
@@ -42,10 +39,10 @@ inline void skip_ws(const std::string& s, size_t& i) {
 
 // Parse a single CSS filter <length-or-number-or-percentage> argument.
 // Returns the numeric value coerced into the unit the caller expects:
-//   * `expect_px` → drops a trailing "px" or treats bare numbers as px
-//     (used by blur / drop-shadow).
-//   * `expect_angle` → converts deg/rad/turn into radians (hue-rotate).
-//   * default → unitless multiplier; "%" divides by 100. Used by
+//   * `pixels` → drops a trailing "px" or treats bare numbers as px
+//     (used by blur).
+//   * `angle` → converts deg/rad/turn into radians (hue-rotate).
+//   * `multiplier` → unitless multiplier; "%" divides by 100. Used by
 //     brightness / contrast / saturate / opacity / invert / grayscale /
 //     sepia.
 //
@@ -349,6 +346,7 @@ sk_sp<SkImageFilter> color_matrix_filter(const SkColorMatrix& m) {
 //   opacity(<num|%>)          — alpha scale
 //   saturate(<num|%>)         — color matrix saturation
 //   sepia(<num|%>)            — color matrix sepia interpolation
+//   drop-shadow(<dx> <dy> <blur> <color>) — shadow image filter
 // Unknown or malformed functions are silently dropped (per CSS spec for
 // invalid filter-function-list — the entire chain falls back to none).
 sk_sp<SkImageFilter> parse_filter_chain(const std::string& src) {

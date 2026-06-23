@@ -1,12 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSS selector engine extracted from web-compat-document.js
+// CSS selector engine
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// web-compat-document.js splits naturally into four concerns:
-//   1. StyleSheet + style application (stays in parent)
-//   2. CSS parser (~150 lines, stays in parent for now)
-//   3. **Selector engine** (this file)
-//   4. getComputedStyle + global install (stays in parent)
 //
 // This file owns the minimal CSS selector parser + matcher used by
 // document.querySelector / document.querySelectorAll:

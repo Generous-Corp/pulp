@@ -1,13 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// Native GPU canvas helpers extracted from web-compat-canvas.js.
+// Native GPU canvas helpers.
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// Per the U-2 export map, the web-compat-canvas.js file (2,117 lines)
-// splits naturally into four concerns:
-//   1. Canvas2D core (~700 lines, stays in parent web-compat-canvas.js)
-//   2. Matrix / transform (~400 lines, stays in parent for now)
-//   3. **Native GPU helpers** (this file)
-//   4. Path / text / image methods (stays in parent for now)
 //
 // This file owns the GPU-related shims that React + WebGPU consumers
 // expect on window.pulp.gpu:

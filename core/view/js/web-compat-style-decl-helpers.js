@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration helpers extracted from web-compat-style-decl.js
+// CSSStyleDeclaration reflection helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Four orthogonal pieces live at this seam:
