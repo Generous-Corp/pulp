@@ -182,5 +182,7 @@ yet have a bridge primitive in Pulp or have only storage/subset support.
 - React Native's [View Style Props](https://reactnative.dev/docs/view-style-props)
   and [Text Style Props](https://reactnative.dev/docs/text-style-props) for
   the consumer-facing surface.
-- [JS Bridge API Reference](js-bridge.md) for the full bridge function
-  catalog, including non-style-prop primitives (createKnob, registerClick, etc.).
+- [JS Bridge API Reference](js-bridge.md) for the author-facing bridge overview,
+  including non-style-prop primitives (createKnob, registerClick, etc.). Use
+  `core/view/src/widget_bridge_api_manifest.tsv` for the exhaustive native
+  registration list.
