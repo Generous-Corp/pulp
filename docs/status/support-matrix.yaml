@@ -597,8 +597,8 @@ platform_maturity:
       Plugin editor native child-view embedding is built in on macOS and iOS.
       Windows/Linux/Android require a host-registered
       `PluginViewHost::Factory` that returns non-null native handles and
-      implements attach/bounds/detach; no first-party host implementation ships
-      yet for those platforms.
+      implements attach/bounds/detach; no first-party child-embedding
+      implementation ships yet for those platforms.
     platforms:
       macos: usable
       ios: usable

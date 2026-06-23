@@ -300,7 +300,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
 | File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
 | Drag and drop | usable | macOS | File + text drop targets |
-| Plugin view hosting | usable | macOS/iOS | Native NSView/UIView + Metal, including native child attach/bounds/detach. Windows/Linux/Android require a host-registered `PluginViewHost::Factory`. |
+| Plugin view hosting | usable | macOS/iOS, Windows, Linux | Native NSView/UIView/HWND/X11 plugin-editor hosts. Windows requires Skia; Linux requires Skia + X11 and degrades to headless capture when no display is available. Android/custom targets still require a host-registered `PluginViewHost::Factory`. Native child attach/bounds/detach inside plugin editors is built in on macOS/iOS only; non-Apple child embedding remains factory-backed. |
 | Native child view embedding (WindowHost) | partial | macOS + factory-backed non-Apple | Built-in standalone support is macOS-only. Built-in iOS `WindowHost` does not expose the embedding handles. Windows/Linux/Android require a host-registered `WindowHost::Factory` that implements attach/bounds/detach. |
 | SDL window host | partial | all | Cross-platform windowing via SDL3. SDL does not provide first-party native child embedding; non-Apple platforms require a host-registered `WindowHost::Factory` for native presentation. Recording-canvas-only for now. |
 

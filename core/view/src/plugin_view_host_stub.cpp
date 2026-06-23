@@ -1,8 +1,10 @@
-// Non-Apple PluginViewHost fallback. Apple platforms have
-// native NSView/UIView-backed impls in platform/mac / platform/ios.
-// On Windows/Linux/Android the host app registers a factory; without
-// one, create() returns nullptr explicitly. Factory-registration API
-// is compiled on every platform.
+// Non-Apple PluginViewHost fallback and registration path. Apple platforms have
+// native NSView/UIView-backed impls in platform/mac / platform/ios. Windows and
+// Linux Skia builds can auto-register built-in HWND/X11 hosts through
+// register_platform_plugin_view_host(); Android, custom targets, and builds
+// without a platform host require the app to register a factory. Without either
+// path, create() returns nullptr explicitly. Factory-registration API is
+// compiled on every platform.
 
 #include <pulp/view/plugin_view_host.hpp>
 
