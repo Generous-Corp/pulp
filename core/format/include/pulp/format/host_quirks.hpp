@@ -7,10 +7,10 @@
 /// `HostQuirks` struct at init time to switch between defensive defaults
 /// (always-on) and host-gated behaviors (only when a specific DAW /
 /// version is detected). The full catalog of accommodations lives in
-/// `planning/2026-05-24-daw-host-quirks-inheritance.md`.
+/// `core/format/host-quirks.json`.
 ///
-/// Reviewer decision (2026-05-25): cheap defenses are always-on, expensive
-/// defenses are host-gated. Always-on defaults are seeded by the
+/// Cheap defenses are always-on, and expensive defenses are host-gated.
+/// Always-on defaults are seeded by the
 /// default-constructed `HostQuirks`; host-gated flags are turned on by
 /// the per-host factory headers under `host_quirks/<host>.hpp`.
 ///
@@ -20,7 +20,7 @@
 /// is required (advisory pre-push warning hint will catch missing
 /// trailers on commits touching `core/format/host_quirks/`).
 ///
-/// ## Per-quirk validation tiers (2026-05-25)
+/// ## Per-quirk validation tiers
 ///
 /// Not every quirk has been bench-validated against a real DAW. We tag
 /// each flag with one of three `QuirkStatus` tiers so plugin authors
@@ -39,7 +39,7 @@
 ///
 /// See `docs/reference/host-quirks-policy.md` for the full opt-in /
 /// opt-out story (plugin-author surface) and
-/// `planning/host-quirks-log.md` for the discovery log.
+/// `core/format/host-quirks.json` for the current catalog.
 
 #include <pulp/format/host_type.hpp>
 #include <pulp/format/host_version.hpp>
@@ -170,10 +170,6 @@ struct HostQuirks {
     bool au_v3_bypass_dual_tracking = false;           ///< row 21
     bool au_v3_host_id_from_wrapper = false;           ///< row 22
 
-    // iPlug2-audit batch 2026-05-26: 4 additional lessons (Reaper AU v3
-    // in-process, Studio One restart-component threading, Digital
-    // Performer controller-swap, Cubase 13+ MIDI CC ID stability).
-
     /// Reaper's AU v3 host is **in-process** (it creates the
     /// `AUAudioUnit` on the main thread via
     /// `createAudioUnitWithComponentDescription`), unlike Logic /
@@ -224,13 +220,13 @@ struct HostQuirks {
 /// Field names match `HostQuirks` exactly. The constexpr
 /// `kHostQuirksMeta` instance documents the current tier of every
 /// flag; update the meta + the field's row in
-/// `planning/host-quirks-log.md` together when a quirk graduates from
+/// `core/format/host-quirks.json` together when a quirk graduates from
 /// `Speculative` to `Validated` (or down to `LessonOnly`).
 ///
 /// Cheap-defense fields (`synthesize_bypass_parameter`,
 /// `clamp_latency_to_nonneg`, `silence_unsupported_bus_arrangements`)
 /// are tagged `Validated` — they were the founding assumptions and
-/// have ridden the test bench since item 5.1.
+/// have ridden the test bench from the first cataloged defaults.
 ///
 /// The Logic channel-probe cap is a numeric field (not a bool) but
 /// carries a status tag like everything else; the filter helper resets
@@ -248,57 +244,56 @@ struct HostQuirksMeta {
 
     QuirkStatus live_vst3_canresize_ignore = QuirkStatus::Speculative;
     QuirkStatus live_vst3_windows_dpi_defer = QuirkStatus::Speculative;
-    // iPlug2-audit lesson (2026-05-25): exact-version Live 10.1.13
-    // getString buffer-doubling — documented from release notes +
-    // reproducer notes, no in-tree bench yet → LessonOnly.
+    // Exact-version Live 10.1.13 getString buffer-doubling —
+    // documented from release notes + reproducer notes, no in-tree
+    // bench yet → LessonOnly.
     QuirkStatus double_string_buffer_for_live_10_1_13 = QuirkStatus::LessonOnly;
 
     // Bitwig + FL Studio + Logic + AU v3 cross-host all have per-host
-    // headers under `host_quirks/<host>.hpp` (items 5.5 / 5.7 / 5.10 /
-    // 5.11), reproducer docs in the catalog, and isolation tests.
+    // headers under `host_quirks/<host>.hpp`, reproducer docs in the
+    // catalog, and isolation tests.
     // Bench evidence under the real DAW is still pending → Speculative.
     QuirkStatus bitwig_vst3_linux_repaint_after_resize = QuirkStatus::Speculative;
     QuirkStatus bitwig_vst3_setbusarrangements_while_active = QuirkStatus::Speculative;
 
-    // iPlug2-audit lesson (2026-05-25): Ardour + Mixbus 32C
-    // setBusArrangements bypass — documented from Ardour docs +
-    // reproducer notes, no in-tree bench yet → LessonOnly.
+    // Ardour + Mixbus 32C setBusArrangements bypass — documented from
+    // Ardour docs + reproducer notes, no in-tree bench yet → LessonOnly.
     QuirkStatus skip_bus_arrangement_call = QuirkStatus::LessonOnly;
 
     QuirkStatus wavelab_vst3_defer_activation = QuirkStatus::Speculative;
     QuirkStatus wavelab_state_blob_fallback = QuirkStatus::Speculative;
-    // iPlug2-audit lessons (2026-05-25): documented from Steinberg
-    // spec + reproducer notes, no in-tree bench yet → LessonOnly.
+    // Documented from Steinberg spec + reproducer notes, no in-tree
+    // bench yet → LessonOnly.
     QuirkStatus tolerate_state_read_nontrue_status = QuirkStatus::LessonOnly;
 
     QuirkStatus fl_studio_setactive_process_mutex = QuirkStatus::Speculative;
     QuirkStatus fl_studio_state_reader_skip = QuirkStatus::Speculative;
 
-    // Reaper rows now have a per-host header
-    // (`host_quirks/reaper.hpp`, item 5.8) + per-symptom isolation
-    // tests pinning the dispatch. Rows backed by checked-in REAPER 7.x
-    // DAW-bench evidence are Validated; the rest stay Speculative.
+    // Reaper rows have a per-host header (`host_quirks/reaper.hpp`) +
+    // per-symptom isolation tests pinning the dispatch. Rows backed by
+    // checked-in REAPER 7.x DAW-bench evidence are Validated; the rest
+    // stay Speculative.
     QuirkStatus reaper_vst3_gesture_ordering = QuirkStatus::Validated;
     QuirkStatus reaper_process_while_bypassed = QuirkStatus::Validated;
     QuirkStatus reaper_keyboard_passthrough = QuirkStatus::Speculative;
     QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::Validated;
     QuirkStatus reaper_anticipative_fx_buffer_variability = QuirkStatus::Speculative;
     QuirkStatus reaper_midsession_setstate = QuirkStatus::Speculative;
-    // iPlug2-audit lesson (2026-05-25): REAPER keyboard only-Space —
-    // documented across 5.x–7.x line, no in-tree bench yet → LessonOnly.
+    // REAPER keyboard only-Space — documented across 5.x–7.x line, no
+    // in-tree bench yet → LessonOnly.
     QuirkStatus reaper_keyboard_only_space = QuirkStatus::LessonOnly;
 
-    // Pro Tools AAX rows now have a per-host header
-    // (`host_quirks/pro_tools.hpp`, item 5.9) + per-symptom isolation
-    // tests. AAX adapter use is gated on the developer-supplied Avid
+    // Pro Tools AAX rows have a per-host header
+    // (`host_quirks/pro_tools.hpp`) + per-symptom isolation tests.
+    // AAX adapter use is gated on the developer-supplied Avid
     // SDK (`PULP_AAX_SDK`); the quirk dispatch itself is unconditional
     // so filter behavior matches across builds. In-DAW bench evidence
     // requires the SDK → Speculative until those rows ship.
     QuirkStatus pro_tools_aax_sidechain_negotiation = QuirkStatus::Speculative;
     QuirkStatus pro_tools_aax_latency_callback_push = QuirkStatus::Speculative;
     QuirkStatus pro_tools_aax_mono_second_bus = QuirkStatus::Speculative;
-    // iPlug2-audit lesson (2026-05-25): Pro Tools AAX vendor-version
-    // unreliability — documented via Avid AAX docs, no bench → LessonOnly.
+    // Pro Tools AAX vendor-version unreliability — documented via Avid
+    // AAX docs, no bench → LessonOnly.
     QuirkStatus aax_vendor_version_unknown = QuirkStatus::LessonOnly;
 
     QuirkStatus logic_au_channel_probe_cap = QuirkStatus::Speculative;
@@ -307,12 +302,11 @@ struct HostQuirksMeta {
     QuirkStatus au_v3_bypass_dual_tracking = QuirkStatus::Speculative;
     QuirkStatus au_v3_host_id_from_wrapper = QuirkStatus::Speculative;
 
-    // iPlug2-audit batch 2026-05-26: documented from each host's
-    // vendor docs + reproducer issue (Pulp #3044 / #3045 / #3046 /
-    // #3047), no in-tree bench yet → LessonOnly. Cubase 13+ MIDI CC
-    // ID stability lands as Speculative because it has a per-host
-    // header + per-symptom isolation test, mirroring the rest of the
-    // Cubase rows.
+    // Documented from each host's vendor docs + reproducer issue (Pulp
+    // #3044 / #3045 / #3046 / #3047), no in-tree bench yet →
+    // LessonOnly. Cubase 13+ MIDI CC ID stability lands as Speculative
+    // because it has a per-host header + per-symptom isolation test,
+    // mirroring the rest of the Cubase rows.
     QuirkStatus reaper_auv3_in_process_preferred_size_sync = QuirkStatus::LessonOnly;
     QuirkStatus studio_one_restart_component_ui_thread = QuirkStatus::LessonOnly;
     QuirkStatus digital_performer_param_list_reload = QuirkStatus::LessonOnly;
@@ -322,7 +316,7 @@ struct HostQuirksMeta {
 /// Authoritative meta for the in-tree `HostQuirks`. Plugin authors and
 /// tests should consult this rather than re-deriving the tier from
 /// the field name. Edited in lock-step with the file header summary
-/// and the row in `planning/host-quirks-log.md` for each promotion.
+/// and the row in `core/format/host-quirks.json` for each promotion.
 inline constexpr HostQuirksMeta kHostQuirksMeta{};
 
 /// Selection of validation tiers a `HostQuirks` instance may keep.
