@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04621"></a>
+## [0.462.1] - 2026-06-23
+
+- fix(cli): route build install through Rust fallthrough ([#4579](https://github.com/danielraffel/pulp/pull/4579))
+- test(rt-safety): cover SignalGraph::process() under the no-alloc trap ([#4583](https://github.com/danielraffel/pulp/pull/4583))
+- docs(ci): trim workflow comment breadcrumbs ([#4582](https://github.com/danielraffel/pulp/pull/4582))
+- chore: drop private project-importer consumers from public downstream manifests ([#4095](https://github.com/danielraffel/pulp/pull/4095))
+
 <a id="v04620"></a>
 ## [0.462.0] - 2026-06-23
 
@@ -4826,6 +4834,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.462.1]: https://github.com/danielraffel/pulp/releases/tag/v0.462.1
 [0.462.0]: https://github.com/danielraffel/pulp/releases/tag/v0.462.0
 [0.461.0]: https://github.com/danielraffel/pulp/releases/tag/v0.461.0
 [0.460.0]: https://github.com/danielraffel/pulp/releases/tag/v0.460.0
