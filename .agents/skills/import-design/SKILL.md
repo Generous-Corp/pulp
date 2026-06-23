@@ -1411,8 +1411,12 @@ preserves them all.
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
-- **Source**: figma, stitch, v0, pencil, rn, claude, or designmd
-- **Input**: file path, URL, or MCP live data (manual file only for claude; static file only for designmd)
+- **CLI source**: figma, figma-plugin, stitch, v0, pencil, claude, designmd, or jsx.
+  The runtime/source-contract lane also covers rn.
+- **Input**: file path, URL, or an exported/generated artifact. MCP tools are
+  acquisition helpers; do not pass raw provider MCP JSON to the CLI unless that
+  source contract explicitly documents the shape. Claude is manual-file only;
+  designmd is static-file only.
 
 ### Step 2: Read the design data
 

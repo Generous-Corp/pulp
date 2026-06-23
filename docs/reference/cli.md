@@ -1181,12 +1181,13 @@ file error.
 
 **Status**: experimental
 
-Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX, or
-Google DESIGN.md source files into generated Pulp UI code.
+Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
+React JSX, or Google DESIGN.md source files into generated Pulp UI code.
 
 ```bash
 pulp import-design --from figma --file frame.json
 pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'
+pulp import-design --from figma-plugin --file design.pulp.zip
 pulp import-design --from stitch --file screen.html --screen 'Main'
 pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
@@ -1197,7 +1198,7 @@ pulp import-design --from jsx --file bundle.js --mode live --emit js --output li
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `figma`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection), and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1207,7 +1208,7 @@ For `--from designmd`, the CLI emits **only** a `tokens.json` (W3C
 DTCG) — no `ui.js`, because DESIGN.md describes a design system, not
 a screen. See [Import: DESIGN.md](imports/designmd.md) for the full
 contract (supported subset, reference resolution, detection rules,
-exit codes, diagnostics, and the staged rollout split).
+exit codes, diagnostics, and current limitations).
 
 | Flag | Description |
 |------|-------------|
