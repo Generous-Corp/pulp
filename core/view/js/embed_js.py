@@ -2,10 +2,10 @@
 """Generate a C++ source file that DEFINES the JS preludes as externally
 linkable string constants.
 
-P8-5 (#2641): the preludes used to be emitted as `static const char*`
-definitions inside `web_compat_preludes_gen.hpp`, which was `#include`d
-directly by the 9,792-line widget_bridge.cpp. Every JS-prelude edit therefore
-recompiled widget_bridge.cpp (and re-tokenized ~458 KB of raw-string literals).
+The preludes used to be emitted as `static const char*` definitions inside
+`web_compat_preludes_gen.hpp`, which was `#include`d directly by
+widget_bridge.cpp. Every JS-prelude edit therefore recompiled the bridge and
+re-tokenized hundreds of KB of raw-string literals.
 
 Now the definitions live in this generated `.cpp` (its own translation unit)
 and the matching `extern const char* const` declarations live in
@@ -24,9 +24,8 @@ import sys
 
 # Keep raw string chunks comfortably below MSVC's per-literal limit.
 # The generator preserves exact JS bytes, so smaller chunks are safe.
-# (pulp #1382: slice on Python str — char-aware — so chunk boundaries never
-# split a UTF-8 multi-byte codepoint, which would corrupt the R"__JS__(...)"
-# delimiter and trip MSVC C2026.)
+# Slice on Python str, which is character-aware, so chunk boundaries never split
+# a UTF-8 multi-byte codepoint and corrupt the R"__JS__(...)" delimiter on MSVC.
 CHUNK_SIZE = 4000
 
 

@@ -665,6 +665,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         // stores the value on the physical edge today, which is correct for
         // LTR. When direction-aware mapping lands, only this dispatch table
         // needs to consult the View's writing direction.
+        // The two-edge shorthands below use expandShorthand, so `%` and
+        // `auto` are not preserved there. The per-edge start/end cases keep
+        // their string-aware `%` / `auto` handling.
         case "marginInline": {
             var mi = expandShorthand(resolved);
             setFlex(id, "margin_left", mi[0]); setFlex(id, "margin_right", mi[1]);

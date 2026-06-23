@@ -1,12 +1,11 @@
 // web-compat-runtime-apis.js — runtime API shims
 //
-// Extracted verbatim from the legacy web-compat.js bundle. Provides the
-// browser runtime globals: performance, navigator.clipboard, localStorage /
-// sessionStorage, Image, btoa / atob, console.time / timeEnd, crypto,
-// TextEncoder / TextDecoder, structuredClone, and fetch. This bundle is not
-// part of the runtime `PULP_JS_PRELUDES` chain (see core/view/CMakeLists.txt);
-// it is read verbatim by the harness html adapter
-// (tools/harness/adapters/html.py).
+// Provides the browser runtime globals used by the harness HTML adapter:
+// performance, navigator.clipboard, localStorage / sessionStorage, Image,
+// btoa / atob, console.time / timeEnd, crypto, TextEncoder / TextDecoder,
+// structuredClone, and fetch. This bundle is not part of the runtime
+// `PULP_JS_PRELUDES` chain (see core/view/CMakeLists.txt); it is read
+// verbatim by tools/harness/adapters/html.py.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Runtime APIs
@@ -187,7 +186,7 @@ function structuredClone(obj) {
     return JSON.parse(JSON.stringify(obj));
 }
 
-// fetch — minimal implementation via exec (P3)
+// fetch — minimal exec-backed implementation.
 function fetch(url, opts) {
     return new Promise(function(resolve, reject) {
         try {

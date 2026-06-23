@@ -345,9 +345,7 @@ Element.prototype.appendChild = function(child) {
         // First time: create directly under this parent (no remove+re-create)
         _reparentNative(child, this._id);
         if (child._textContent) setText(child._id, child._textContent);
-        // Defer style flush to reduce call stack depth
-        // child.style._flushAll();
-        // child._reapplyStylesheets();
+        // Defer style flush to reduce call stack depth.
     } else {
         // Already in tree: remove and re-parent
         removeWidget(child._id);
@@ -539,7 +537,7 @@ Element.prototype.dispatchEvent = function(event) {
     _dispatchEvent(this, event);
 };
 
-// ── P1: closest(), matches(), contains(), querySelector on elements ──────
+// ── Selector-backed Element traversal APIs ───────────────────────────────
 
 Element.prototype.closest = function(selector) {
     var parsed = _parseSelector(selector);
@@ -573,7 +571,7 @@ Element.prototype.querySelectorAll = function(selector) {
     return _querySelectorAll(this, selector);
 };
 
-// ── P1: innerHTML (simple HTML parser for common patterns) ───────────────
+// ── innerHTML / outerHTML for common markup patterns ─────────────────────
 
 Object.defineProperty(Element.prototype, "innerHTML", {
     get: function() {
@@ -659,7 +657,7 @@ function _parseAttrs(el, attrStr) {
     }
 }
 
-// ── P2: Modern DOM insertion methods ─────────────────────────────────────
+// ── DOM insertion convenience methods ────────────────────────────────────
 
 Element.prototype.append = function() {
     for (var i = 0; i < arguments.length; i++) {
@@ -734,7 +732,7 @@ Element.prototype.replaceWith = function() {
     }
 };
 
-// ── P2: focus() / blur() ─────────────────────────────────────────────────
+// ── focus() / blur() event shims ─────────────────────────────────────────
 
 Element.prototype.focus = function() {
     if (this._nativeCreated) {

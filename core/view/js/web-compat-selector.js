@@ -1,11 +1,11 @@
 // web-compat-selector.js — CSS selector parsing + matching engine
 //
-// Extracted verbatim from the legacy web-compat.js bundle. Provides the
-// `_parseSelector` / `_matchesSelector` / `_querySelector` / `_querySelectorAll`
-// helpers consumed by Element.prototype.closest/matches/querySelector and by
-// the StyleSheet rule engine. This bundle is not part of the runtime
-// `PULP_JS_PRELUDES` chain (see core/view/CMakeLists.txt); it is read
-// verbatim by the harness html adapter (tools/harness/adapters/html.py).
+// Provides the `_parseSelector` / `_matchesSelector` / `_querySelector` /
+// `_querySelectorAll` helpers consumed by
+// Element.prototype.closest/matches/querySelector and by the StyleSheet rule
+// engine. This bundle is not part of the runtime `PULP_JS_PRELUDES` chain
+// (see core/view/CMakeLists.txt); it is read verbatim by the harness HTML
+// adapter (tools/harness/adapters/html.py).
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Selector parsing and matching
@@ -260,4 +260,3 @@ function _findMatch(root, parsed, findAll) {
 
     return findAll ? results : null;
 }
-

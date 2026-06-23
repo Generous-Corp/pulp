@@ -508,8 +508,10 @@ export const PulpHostConfig: HostConfig<
         attach(parentInstance, child, beforeIdx >= 0 ? beforeIdx : undefined);
     },
     insertInContainerBefore(container, child, beforeChild) {
-        // Container has no per-instance childIds tracking by default —
-        // bridge handles ordering via insertChild on the root parent.
+        // Root container ordering is append-only on this path today:
+        // attachToRoot materializes under the bridge root and does not
+        // consult beforeChild. Non-root insertions preserve order via
+        // insertBefore's insertChild / moveWidget path above.
         attachToRoot(container, child, /* index */ -1, beforeChild);
     },
 
