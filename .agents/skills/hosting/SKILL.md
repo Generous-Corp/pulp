@@ -35,7 +35,10 @@ Everything else — tests, scanner, graph wiring — is format-agnostic.
 
 ## CLAP reference backend
 
-`plugin_slot_clap.cpp` is the one real backend today. Patterns to mirror:
+`plugin_slot_clap.cpp` is the simplest backend to study for dlopen,
+factory lifetime, parameter metadata, automation, MIDI, and state patterns.
+VST3 / AU / LV2 also have real loaders, so treat CLAP as a reference for
+its ABI shape rather than as the only implemented backend. Patterns to mirror:
 
 - `dlopen(RTLD_LAZY | RTLD_LOCAL)`; on macOS resolve
   `<bundle>.clap/Contents/MacOS/<name>` before `dlopen`.

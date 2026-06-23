@@ -4,9 +4,13 @@ Pulp can both *be* a plugin and *host* plugins. The hosting APIs live in
 `pulp::host` and let you load VST3 / AU / CLAP / LV2 binaries, wire them
 into a DAG, and process audio through the chain.
 
-Status today: CLAP loads and processes audio; VST3 / AU / LV2 loaders are
-stubbed and log a warning. The signal-graph topology (DAG + topological
-sort) is implemented; execution along the topology is in progress.
+Current scope: CLAP, VST3, AU, and LV2 have real `PluginSlot` loaders
+when the matching SDK or platform support is compiled in. Each loader can
+open a bundle, prepare it, and process audio through the common host
+interface. Feature depth still varies by format: parameter, MIDI, state,
+editor, and extension support are not identical across loaders.
+`SignalGraph` topology, block processing, automation routing, and delay
+compensation are implemented over the same `PluginSlot` interface.
 
 ## Quick start
 
@@ -96,9 +100,13 @@ These exist to smoke-test the loaders outside a full DAW context.
 
 ## Limits
 
-- CLAP events (note / param changes) are stubbed at empty streams — the
-  plugin still processes, but parameter automation isn't routed yet.
+- Feature coverage is format-specific. CLAP, VST3, and AU route parameter
+  automation through their native event paths; LV2 routes host parameter
+  events through block-rate control ports, so the last event in a block wins.
+- LV2 atom sysex and other variable-length atom events are not routed yet;
+  only short MIDI messages in the atom input sequence reach the processor.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Editor view creation (`create_editor_view()`) returns `nullptr`; hosting
-  UIs ships after ViewBridge lands.
+- Third-party hosted editor embedding is not wired in the current host
+  loaders; the typed hosted-editor API exists, but CLAP / VST3 / AU / LV2
+  slots still report no hosted editor.
