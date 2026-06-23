@@ -82,7 +82,7 @@ pulp add signalsmith-stretch
 ```
 
 This will:
-1. Check the license is compatible with Pulp's MIT license (reject GPL/LGPL/copyleft)
+1. Check the license and require explicit acceptance or a commercial-license override when the registry policy gates it
 2. Check platform support against your project's declared targets
 3. Warn if the package overlaps with Pulp built-in processors
 4. Generate or update `cmake/pulp-packages.cmake` with FetchContent declarations
@@ -210,10 +210,10 @@ Every `pulp add` checks the package's SPDX license identifier against a policy:
 |---------|----------|----------|
 | **Allowed** | MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, CC0-1.0 | Added without prompts |
 | **Review required** | MPL-2.0, other unlisted | Warning printed for manual review |
-| **Restricted** | GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, AGPL-3.0 (all variants) | Blocked unless you rerun with `--accept-license <SPDX>` after reviewing the CLI warning |
-| **Rejected** | SSPL-1.0, proprietary | Blocked. Cannot add. |
+| **Restricted** | GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, AGPL-3.0 (all variants) | Blocked unless you rerun with `--accept-license <SPDX>` after reviewing the CLI warning, or `--license-override commercial` when you have separate commercial terms |
+| **Rejected** | SSPL-1.0, proprietary | Blocked by default. The CLI also accepts `--license-override commercial`, records the package with a compliance warning, and leaves distribution responsibility with the project |
 
-The `--license-override commercial` flag can be used when you have a separate commercial license. It does not bypass truly rejected licenses.
+The `--license-override commercial` flag is a project-owned assertion that separate commercial terms cover the dependency. It records the current CLI behavior; it does not make that dependency redistributable by Pulp itself.
 
 License checking is also available standalone via `pulp audit --licenses` and the `tools/packages/validate_registry.py` script.
 

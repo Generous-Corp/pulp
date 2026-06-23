@@ -987,7 +987,7 @@ commands:
         description: Package slug from tools/packages/registry.json, or an importer id from tools/packages/tool-registry.json
       - name: --license-override
         kind: option
-        description: "Commercial-license override for restricted or review-required packages (value: commercial)"
+        description: "Commercial-license override for packages the registry policy would otherwise block or gate, including restricted/copyleft and rejected/proprietary entries (value: commercial)"
       - name: --accept-license
         kind: option
         description: "Explicitly accept the package's restricted SPDX license after reviewing the CLI warning"

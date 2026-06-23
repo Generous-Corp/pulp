@@ -107,8 +107,11 @@ MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages install without prompts.
 MPL-2.0 and other unlisted licenses require manual review. GPL/LGPL/AGPL
 packages are restricted: the CLI blocks until the user explicitly accepts the
 package SPDX with `--accept-license <SPDX>` or declares a commercial-license
-basis with `--license-override commercial`. SSPL and proprietary packages remain
-blocked. Prefer permissive alternatives from the registry when available.
+basis with `--license-override commercial`. SSPL and proprietary packages are
+blocked by default, but the current CLI also accepts
+`--license-override commercial` for them, records a compliance warning, and
+leaves distribution responsibility with the project. Prefer permissive
+alternatives from the registry when available.
 
 ## Attribution Audit
 

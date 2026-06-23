@@ -1856,7 +1856,7 @@ pulp add some-lib --platform-guard                 # add with platform guard
 pulp add dr-libs --no-cmake                        # metadata only, skip CMake wiring
 ```
 
-Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`.
+Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`. Restricted licenses require `--accept-license <SPDX>` after review. `--license-override commercial` is a project-owned assertion that separate commercial terms cover a package the registry policy would otherwise block.
 
 ### remove
 
