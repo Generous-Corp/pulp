@@ -54,9 +54,13 @@ cat tools/packages/registry.json | python3 -m json.tool
 
 A package that provides a custom control for the **design importer** declares it
 under the optional `design_controls` array on its registry entry
-(`registry-schema.json` → `design-control`). Each entry maps a Figma identity
-(`match.component_set_key` — authoritative — or `match.name_prefix` — fallback)
-to a `factory_id` the package's `pulp::view::View` registers at host startup via
+(`registry-schema.json` → `design-control`). Each entry is FLAT — a Figma identity
+(`component_set_key` — authoritative — or `name_prefix` — fallback) at the top
+level alongside `factory_id` (NOT nested under a `match` object). This shape is in
+lockstep with the TS `DesignControlEntry` (`library-registry.ts`) and the flat
+`library-manifest.json` convention; the schema's `anyOf` requires at least one
+identity field. Each entry maps that identity to
+a `factory_id` the package's `pulp::view::View` registers at host startup via
 `register_design_control_factory` (see the `import-design` skill, P7 Tier-3). When
 an imported design's node matches, the importer emits a `kind=custom` interactive
 element carrying that `factory_id`, and `DesignFrameView::build_overlays` builds

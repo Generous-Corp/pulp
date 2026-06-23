@@ -67,24 +67,21 @@
     },
     "design-control": {
       "type": "object",
-      "required": ["factory_id", "match"],
+      "description": "Maps a Figma identity to a factory_id. component_set_key is authoritative; name_prefix is the fallback. At least one identity field must be present. Shape matches the TS DesignControlEntry (tools/figma-plugin/src/library-registry.ts) and the flat library-manifest.json convention — keep them in lockstep.",
+      "required": ["factory_id"],
       "additionalProperties": false,
+      "anyOf": [
+        { "required": ["component_set_key"] },
+        { "required": ["name_prefix"] }
+      ],
       "properties": {
         "factory_id": {
           "type": "string",
           "minLength": 1,
           "description": "The id the package's View registers under (register_design_control_factory). Must match the id the importer stamps on the kind=custom element."
         },
-        "match": {
-          "type": "object",
-          "description": "How an imported Figma node is identified as this control. component_set_key is authoritative; name_prefix is the fallback. At least one must be present.",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "properties": {
-            "component_set_key": { "type": "string", "minLength": 1, "description": "Figma ComponentSetNode.key — authoritative identity match." },
-            "name_prefix": { "type": "string", "minLength": 1, "description": "Node-name prefix fallback (e.g. \"Acme / Spinner\")." }
-          }
-        },
+        "component_set_key": { "type": "string", "minLength": 1, "description": "Figma ComponentSetNode.key — authoritative identity match." },
+        "name_prefix": { "type": "string", "minLength": 1, "description": "Node-name prefix fallback (e.g. \"Acme / Spinner\")." },
         "description": { "type": "string" }
       }
     },

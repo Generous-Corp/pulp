@@ -1,6 +1,12 @@
-# AssertNoJsSymbols.cmake — build-time guard for native-only (PULP_ENABLE_JS=OFF)
-# builds. Fails the build if a binary that must be JS-free has linked the
-# pulp::view-script scripting layer (JS engine + web-compat + widget bridge).
+# AssertNoJsSymbols.cmake — BEST-EFFORT secondary native-only guard.
+#
+# IMPORTANT: this binary symbol-scan is NOT authoritative. pulp::view-script is a
+# static archive, so the linker drops any member whose symbols aren't referenced
+# — these markers can be absent from the final binary even when the archive WAS
+# linked, so the scan cannot reliably catch a stray link. The reliable guard is
+# the configure-time LINK_LIBRARIES assertion in core/view/CMakeLists.txt
+# (PULP_ENABLE_JS=OFF branch). This check is kept only as defence-in-depth: it
+# still catches a JS-layer symbol force-referenced / whole-archived into a binary.
 # Mirrors the MacGpuWindowHost nm-check convention used elsewhere in the tree.
 #
 # Invoked as a POST_BUILD step:
@@ -17,11 +23,12 @@ endif()
 
 execute_process(COMMAND "${NM_EXE}" "${BIN}" OUTPUT_VARIABLE _syms ERROR_QUIET)
 
-# pulp::view-script symbols — present iff the JS engine + widget bridge were
-# linked. Engine-agnostic: ScriptEngine/WidgetBridge/ScriptedUI are Pulp's own
-# classes (mangled names embed these substrings), and JS_NewRuntime/JS_NewContext
-# are QuickJS's C API. Any of them in a PULP_ENABLE_JS=OFF binary is a leak.
-set(_js_markers ScriptEngine WidgetBridge ScriptedUI JS_NewRuntime JS_NewContext)
+# pulp::view-script symbols. Engine-agnostic: ScriptEngine/WidgetBridge/ScriptedUi
+# are Pulp's own classes (mangled names embed these substrings), and
+# JS_NewRuntime/JS_NewContext are QuickJS's C API. Any of them in a
+# PULP_ENABLE_JS=OFF binary indicates a JS-layer leak that survived dead-strip.
+# (ScriptedUi: the class is ScriptedUiSession/ScriptedUiOptions — lowercase 'i'.)
+set(_js_markers ScriptEngine WidgetBridge ScriptedUi JS_NewRuntime JS_NewContext)
 set(_found "")
 foreach(_m IN LISTS _js_markers)
     string(FIND "${_syms}" "${_m}" _idx)

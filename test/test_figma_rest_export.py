@@ -700,6 +700,17 @@ class WidgetKindFromNameTest(unittest.TestCase):
         self.assertEqual(frx.widget_kind_from_name("Waveform"), "waveform")
         self.assertEqual(frx.widget_kind_from_name("Spectrum"), "spectrum")
 
+    def test_full_vocab_in_lockstep_with_cpp(self):
+        # These tokens are recognized by C++ detect_audio_widget and TS
+        # audioWidgetKindFromName; the Python lane was previously missing them,
+        # so a "Level"/"Oscilloscope"/"Analyzer"-named leaf was rasterized as a
+        # PNG sprite instead of promoted to a native widget. Pin parity here.
+        self.assertEqual(frx.widget_kind_from_name("Level Meter"), "meter")
+        self.assertEqual(frx.widget_kind_from_name("Output Level"), "meter")   # bare "level"
+        self.assertEqual(frx.widget_kind_from_name("Oscilloscope"), "waveform")
+        self.assertEqual(frx.widget_kind_from_name("Analyzer"), "spectrum")
+        self.assertEqual(frx.widget_kind_from_name("Spectrum Analyser"), "spectrum")  # British spelling
+
     def test_substring_false_positives_are_rejected(self):
         # These used to mis-resolve under the substring `in` match.
         self.assertIsNone(frx.widget_kind_from_name("Dialog"))    # was knob ("dial")

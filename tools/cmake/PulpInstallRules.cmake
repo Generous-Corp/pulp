@@ -28,9 +28,19 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
-    pulp-canvas pulp-view-core pulp-view-script pulp-view
+    pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
 )
+
+# pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
+# when PULP_ENABLE_JS=OFF (native-only build), so it is never built. Exporting
+# it unconditionally makes `cmake --install` abort on a missing archive
+# (libpulp-view-script.a) — the exact native-only packaging path PULP_ENABLE_JS
+# exists to enable. pulp-view PUBLIC-links view-script only in the JS-on path,
+# so it is only required in the export set then.
+if(PULP_ENABLE_JS)
+    list(APPEND PULP_SDK_TARGETS pulp-view-script)
+endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
 # defined in core/signal/CMakeLists.txt and ships a public header

@@ -369,12 +369,14 @@ def widget_kind_from_name(name):
     toks = set(_tokenize_name(name))
     def has(w):
         return w in toks or (w + "s") in toks
+    # Vocabulary kept in lockstep with C++ detect_audio_widget
+    # (core/view/src/design_import.cpp) and the TS audioWidgetKindFromName.
     if has("knob") or has("dial"): return "knob"
     if has("fader") or has("slider"): return "fader"
-    if has("meter") or has("vu"): return "meter"
+    if has("meter") or has("level") or has("vu"): return "meter"
     if (has("xy") and has("pad")) or has("xypad"): return "xy_pad"
-    if has("waveform"): return "waveform"
-    if has("spectrum"): return "spectrum"
+    if has("waveform") or has("oscilloscope"): return "waveform"
+    if has("spectrum") or has("analyzer") or has("analyser"): return "spectrum"
     return None
 
 # ── Faithful-vector import ──────────────────────────────────────────────────

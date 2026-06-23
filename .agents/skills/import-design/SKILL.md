@@ -400,7 +400,12 @@ mind when touching this:
   substring match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter
   (gap survey). Don't revert any lane to substring matching; add new keywords as
   tokens + a false-positive regression case (`test_design_import.cpp`,
-  `audio-widget-name.test.ts`, `test_figma_rest_export.py`). The faithful-vector
+  `audio-widget-name.test.ts`, `test_figma_rest_export.py`). Lockstep is on the
+  VOCABULARY too, not just the boundary rule: the meter/waveform/spectrum aliases
+  (`level`, `oscilloscope`, `analyzer`/`analyser`) must exist in all three lanes —
+  the Python lane silently lagged on these until an adversarial-review follow-up,
+  so when you add a token to one lane, add it to the other two and pin it in each
+  lane's test in the SAME change. The faithful-vector
   overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
   whole-word convention for its own (InteractiveElementKind) vocabulary.
 - **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →

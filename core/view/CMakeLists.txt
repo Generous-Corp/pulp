@@ -26,6 +26,20 @@ else()
     # default build and every binary, so no JS engine is compiled or shipped.
     target_link_libraries(pulp-view PUBLIC pulp::view-core)
     set_target_properties(pulp-view-script PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+    # Authoritative native-only guard. The binary nm-check (AssertNoJsSymbols.cmake)
+    # cannot catch a view-script leak: view-script is a static archive, so unless
+    # a symbol is referenced the linker drops it from the final binary even when
+    # the archive IS linked — the symbol-grep passes on a misconfigured build.
+    # The link INTERFACE is the reliable signal, available here at configure time.
+    get_target_property(_pv_links pulp-view LINK_LIBRARIES)
+    if(_pv_links MATCHES "view-script")
+        message(FATAL_ERROR
+            "PULP_ENABLE_JS=OFF but pulp-view links pulp-view-script "
+            "(LINK_LIBRARIES=${_pv_links}). The native-only build must not pull "
+            "the JS scripting layer. Remove the view-script link from the "
+            "PULP_ENABLE_JS=OFF path in core/view/CMakeLists.txt.")
+    endif()
 endif()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
