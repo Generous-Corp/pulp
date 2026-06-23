@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04633"></a>
+## [0.463.3] - 2026-06-23
+
+- fix(state): write finite param values in presets (NaN → param default) ([#4622](https://github.com/danielraffel/pulp/pull/4622))
+- docs(import): trim design codegen comment breadcrumbs ([#4618](https://github.com/danielraffel/pulp/pull/4618))
+- docs(audio): clarify model activation requires install ([#4616](https://github.com/danielraffel/pulp/pull/4616))
+- perf(view): extend the z-order fast path to hit_test (no per-event alloc) ([#4613](https://github.com/danielraffel/pulp/pull/4613))
+- docs(audio): clarify validate manifest scope ([#4615](https://github.com/danielraffel/pulp/pull/4615))
+- docs(import): trim test comment provenance breadcrumbs ([#4612](https://github.com/danielraffel/pulp/pull/4612))
+- docs(audio): clarify excerpt-find backend status ([#4614](https://github.com/danielraffel/pulp/pull/4614))
+
 <a id="v04632"></a>
 ## [0.463.2] - 2026-06-23
 
@@ -4863,6 +4874,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.463.3]: https://github.com/danielraffel/pulp/releases/tag/v0.463.3
 [0.463.2]: https://github.com/danielraffel/pulp/releases/tag/v0.463.2
 [0.463.1]: https://github.com/danielraffel/pulp/releases/tag/v0.463.1
 [0.463.0]: https://github.com/danielraffel/pulp/releases/tag/v0.463.0
