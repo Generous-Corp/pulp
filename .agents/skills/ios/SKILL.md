@@ -441,7 +441,7 @@ The required frameworks (`AVFoundation`, `CoreBluetooth`,
 ```cmake
 pulp_add_ios_auv3(
     NAME               PulpSineSynth
-    BUNDLE_ID          com.pulp.examples.sinesynth
+    BUNDLE_ID          com.pulp.examples.sinesynth.host.PulpSineSynth
     MANUFACTURER       Pulp
     MANUFACTURER_CODE  Pulp        # exactly 4 characters
     SUBTYPE_CODE       PsSn        # exactly 4 characters

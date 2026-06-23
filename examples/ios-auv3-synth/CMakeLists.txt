@@ -16,7 +16,7 @@ endif()
 # helper in tools/cmake/PulpUtils.cmake.
 pulp_add_ios_auv3(
     NAME            PulpSineSynth
-    BUNDLE_ID       com.pulp.examples.sinesynth
+    BUNDLE_ID       com.pulp.examples.sinesynth.host.PulpSineSynth
     MANUFACTURER    Pulp
     MANUFACTURER_CODE  Pulp
     SUBTYPE_CODE    PsSn

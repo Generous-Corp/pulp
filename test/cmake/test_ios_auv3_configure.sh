@@ -152,6 +152,12 @@ if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-1}" == "1" ]]; then
         echo "FAIL: Info.plist missing from built .appex"
         exit 1
     fi
+    if [[ "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${appex_path}/Info.plist" 2>/dev/null)" \
+            != "com.pulp.examples.sinesynth.host.PulpSineSynth.appex" ]]; then
+        echo "FAIL: Info.plist CFBundleIdentifier is not nested under the HostApp id"
+        /usr/bin/plutil -p "${appex_path}/Info.plist" >&2
+        exit 1
+    fi
     if ! /usr/bin/plutil -p "${appex_path}/Info.plist" | grep -q 'com.apple.AudioUnit-UI'; then
         echo "FAIL: Info.plist NSExtension does not declare com.apple.AudioUnit-UI"
         /usr/bin/plutil -p "${appex_path}/Info.plist" >&2
