@@ -377,7 +377,7 @@ def widget_kind_from_name(name):
     if has("spectrum"): return "spectrum"
     return None
 
-# ── Faithful-vector import (Plan B / B4) ────────────────────────────────────
+# ── Faithful-vector import ──────────────────────────────────────────────────
 # Geometry auto-detect of knobs in an exported frame SVG, ported verbatim from
 # the vector-knob PoC (examples/vector-knob parse_frame_knobs) and the C++
 # DesignFrameView convention. A knob DOME is a gradient-filled <circle>
@@ -556,7 +556,7 @@ def walk(n, parent, z, ctx):
     tiny = bb.get("width", 0) < 1 and bb.get("height", 0) < 1
     captured = False
     wkind = widget_kind_from_name(n.get("name", ""))
-    # Codex #3234 P2: only promote LEAF-ish nodes. A CONTAINER whose name merely
+    # Only promote LEAF-ish nodes. A CONTAINER whose name merely
     # contains a widget word (e.g. "Knob Row", "Fader Bank") must NOT be promoted
     # to a leaf widget — that would drop its children (the real knobs inside).
     # Mirrors the importer's detect_node_audio_widget has_child_containers rule.
@@ -631,8 +631,8 @@ def resolve_token(explicit):
 
 def parse_url(url):
     # https://figma.com/design/<KEY>/<name>?node-id=<a-b>  (node-id uses '-'; API uses ':')
-    # Codex #3225 P2: copied URLs commonly percent-encode the separator
-    # (node-id=3%3A42, or %2D); unquote first so the regex still matches.
+    # Copied URLs commonly percent-encode the separator (node-id=3%3A42, or
+    # %2D); unquote first so the regex still matches.
     import urllib.parse
     url = urllib.parse.unquote(url)
     m = re.search(r"/(?:design|file)/([A-Za-z0-9]+)", url)
@@ -647,8 +647,8 @@ def fetch_nodes(file_key, node_id, token):
         token=token, what="file nodes")
 
 def resolve_image_fills(file_key, refs, token, out_dir):
-    """Codex #3225 P2: resolve IMAGE-fill imageRefs into real assets. The image
-    fill on a node references a file image by `imageRef`; the file-images
+    """Resolve IMAGE-fill imageRefs into real assets. The image fill on a node
+    references a file image by `imageRef`; the file-images
     endpoint maps each ref to a (temporary) download URL. Download → assets/
     (sha256-named, like node captures) → return (manifest_entries, {ref: rel_path})
     so the caller can rewrite each node's `background_image: "pending:<ref>"` into
@@ -805,7 +805,7 @@ def parse_panel_bounds(svg):
 def detect_overlay_controls(figma_root, root_abs, panel_origin):
     """Detect NATIVE-OVERLAY controls (search/dropdown/tabs) from the Figma node
     tree by name/structure — source metadata, more reliable than SVG glyphs
-    (Codex review). Node coords are mapped into SVG space:
+    Node coords are mapped into SVG space:
       svg = (node_abs - root_abs) + panel_origin
     because the node tree is frame-local while the SVG export adds the drop-shadow
     margin (so the panel sits at panel_origin, not 0,0). text_field (search) +
@@ -1159,8 +1159,8 @@ def build_argparser():
     ap.add_argument("--token", help="Figma PAT (else $FIGMA_TOKEN or ~/.config/pulp/figma-token)")
     ap.add_argument("--no-assets", action="store_true", help="skip /images PNG capture (geometry+style only)")
     ap.add_argument("--node-json", help="use a pre-fetched /v1/.../nodes JSON instead of calling REST")
-    # Faithful-vector is the DEFAULT import lane (Plan B): it captures the frame's
-    # own SVG and renders it pixel-faithfully via DesignFrameView, overlaying the
+    # Faithful-vector is the DEFAULT import lane: it captures the frame's own
+    # SVG and renders it pixel-faithfully via DesignFrameView, overlaying the
     # auto-detected INTERACTIVE controls (knobs, search field, dropdowns, steppers,
     # tab groups). Without it the importer emits a flat, STATIC node tree with no
     # live widgets — which is almost never what a plugin UI wants — so it is opt-OUT
@@ -1207,8 +1207,8 @@ def main():
         asset_manifest_entries = export_assets(file_key, ctx.asset_ids, token, out_dir)
         print(f"  captured {len(asset_manifest_entries)} PNGs")
     # Resolve IMAGE-fill imageRefs → real assets, rewrite the dangling pending:
-    # markers (Codex #3225 P2). Even with --no-assets/--node-json we strip the
-    # pending: placeholders so the envelope never carries a dead reference.
+    # markers. Even with --no-assets/--node-json we strip the pending:
+    # placeholders so the envelope never carries a dead reference.
     if ctx.image_fills:
         ref_to_rel = {}
         if not args.no_assets and token:

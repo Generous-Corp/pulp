@@ -36,7 +36,7 @@
 #       columns) must have non-trivial pixel content above the near-black
 #       threshold. A blank canvas with intact chrome can pass an overall
 #       histogram diff because the chrome dominates the histogram. Probe 3
-#       calls diff_against_reference_regions.py (PR #1871) and inspects
+#       calls diff_against_reference_regions.py and inspects
 #       central_canvas.blank_candidate — fails if the canvas region is
 #       blank.
 #
@@ -61,8 +61,8 @@
 #   --require-trace
 #                 Treat missing __pulpRuntimeTrace__ lines as a hard FAIL
 #                 even when the log file exists. Default is to WARN — the
-#                 trace globals are still being wired into Spectr's bridge
-#                 (see spectr #TBD) so we don't want to block harness
+#                 trace globals are still being wired into Spectr's bridge,
+#                 so we don't want to block harness
 #                 adoption on instrumentation that doesn't ship yet.
 #   --json        Emit a single JSON object summarizing all probes
 #                 (overall_passed + per-probe verdicts). Default is
@@ -232,7 +232,7 @@ run_probe_2() {
 
 # ── Probe 3: central canvas region is non-blank ──────────────────────────
 #
-# Uses diff_against_reference_regions.py (PR #1871). Reads its --json
+# Uses diff_against_reference_regions.py. Reads its --json
 # output and asserts central_canvas.blank_candidate == false. We do not
 # require the region to *pass* the per-region threshold here — that's the
 # pixel-diff harness's job. We only require that *something* painted into

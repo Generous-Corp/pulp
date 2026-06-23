@@ -83,8 +83,8 @@ def build_montage(panels, out_path, labels=True, columns=1, title_height=36,
 
 def _parse_panel(spec):
     # "path:Label" → (label, path). Split on the FIRST ':' so a label that itself
-    # contains colons survives (Codex #3237: "x.png:1. Figma: source" must keep
-    # "1. Figma: source" as the label, not truncate at the last colon). Fall back
+    # contains colons survives ("x.png:1. Figma: source" must keep "1. Figma:
+    # source" as the label, not truncate at the last colon). Fall back
     # to treating the whole spec as a path when the head isn't an existing file
     # (bare path, or a path with no label).
     if os.path.exists(spec):                      # whole spec is a real path → no label

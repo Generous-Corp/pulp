@@ -1,13 +1,13 @@
 # pulp-import-design — design file import tool
 # Translates Figma/Stitch/v0/Pencil designs to Pulp web-compat JS.
-# pulp #1031 adds the versioned detect-only surface (import_detect.cpp);
-# the detector is intentionally self-contained so it can be linked into
-# the test target without dragging the full pulp::view pipeline along.
+# The versioned detect-only surface is intentionally self-contained so it can
+# be linked into the test target without dragging the full pulp::view pipeline
+# along.
 add_executable(pulp-import-design
     pulp_import_design.cpp
     import_detect.cpp
     # miniz lets the CLI auto-unpack .pulp.zip exports from the Figma
-    # plugin (issue #47). Compiled here rather than pulled from
+    # plugin. Compiled here rather than pulled from
     # pulp::runtime because that target's miniz include dirs are PRIVATE
     # and pulp::view doesn't re-export them.
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz.c
@@ -32,11 +32,10 @@ add_executable(pulp-svg-probe svg_probe.cpp)
 target_include_directories(pulp-svg-probe PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-svg-probe PRIVATE pulp::view pulp::state pulp::platform)
 
-# Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1986
-# follow-up): re-mention fontconfig AFTER pulp::view's transitive
-# skia::skia so the linker resolves SkFontMgr_New_FontConfig's Fc*
-# references. Caused v0.100.0 release-cli linux-x64 to fail; was
-# already in place for pulp-cli.
+# Link-order fix for libskia.a → fontconfig on Linux+GNU ld: re-mention
+# fontconfig AFTER pulp::view's transitive skia::skia so the linker resolves
+# SkFontMgr_New_FontConfig's Fc* references. Caused v0.100.0 release-cli
+# linux-x64 to fail; was already in place for pulp-cli.
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
 pulp_link_fontconfig_after_skia(pulp-import-design)
 pulp_link_fontconfig_after_skia(pulp-design-import-bench)

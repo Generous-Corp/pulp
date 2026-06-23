@@ -50,7 +50,7 @@ using namespace pulp::state;
 
 namespace {
 
-// ── Minimal PNG → RGBA8 decoder (pulp #3191) ────────────────────────────────
+// ── Minimal PNG → RGBA8 decoder ─────────────────────────────────────────────
 // AssetManager::decode_png only stores raw bytes + IHDR dims (the real decode
 // happens in the Skia renderer, which isn't linked in the GPU-off importer
 // build). For the fader/meter skin sampler we need actual pixels, so decode
@@ -844,7 +844,7 @@ SwiftOutputPaths resolve_swift_output_paths(const std::string& output_file) {
     // Theme artifact + type are derived per-view (`<RootView>Theme`) so two
     // SwiftUI imports never clobber a shared PulpTheme.swift on disk nor emit a
     // duplicate `enum PulpTheme` / dynamic-color symbol when compiled into one
-    // Swift target (Codex review). The theme file (<RootView>Theme.swift) is
+    // Swift target. The theme file (<RootView>Theme.swift) is
     // always distinct from the view (<RootView>.swift), so no path collision.
     paths.theme_type_name = paths.root_view_name + "Theme";
     paths.theme = paths.view.parent_path() / (paths.root_view_name + "Theme.swift");
@@ -981,7 +981,7 @@ static std::string read_file(const std::string& path) {
     return ss.str();
 }
 
-// ── .pulp.zip auto-unpack (issue #47) ──────────────────────────────────
+// ── .pulp.zip auto-unpack ───────────────────────────────────────────────
 //
 // The Pulp Figma plugin's "Export to Pulp" button emits a `.pulp.zip` that
 // contains scene.pulp.json + assets/*.png. Asking users to manually unzip
@@ -1677,8 +1677,8 @@ int main(int argc, char* argv[]) {
     // Per-node override: a Figma node name ending in `@sprite` or
     // `@silver` overrides the global default for THAT knob only.
     bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
-    bool skin_faders = true;         // pulp #3191; plain via --fader-style=default
-    bool skin_meters = true;         // pulp #3191; plain via --meter-style=default
+    bool skin_faders = true;         // plain via --fader-style=default
+    bool skin_meters = true;         // plain via --meter-style=default
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
@@ -1692,25 +1692,25 @@ int main(int argc, char* argv[]) {
     pulp::view::ScreenshotBackend screenshot_backend =
         pulp::view::ScreenshotBackend::skia;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
-    bool bridge_output_explicit = false;                 // pulp friction-fix #4
+    bool bridge_output_explicit = false;                 // bridge output was set explicitly
     bool emit_bridge_scaffold = true;                    // default on for --from claude
-    bool execute_bundle = false;                         // pulp #468 native-runtime path
-    std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
-    bool classnames_output_explicit = false;             // pulp friction-fix #4
+    bool execute_bundle = false;                         // native-runtime path
+    std::string classnames_output = "classnames.json";   // claude classname map
+    bool classnames_output_explicit = false;             // classname output was set explicitly
     bool emit_classnames = true;                          // default on for --from claude
-    // pulp #2116 V2 — keyboard shortcuts auto-imported from source.
+    // Keyboard shortcuts are auto-imported from source.
     // Default-on; opt out with --no-import-shortcuts.
     std::string shortcuts_output = "shortcuts.json";
     bool shortcuts_output_explicit = false;
     bool import_shortcuts = true;
-    // Phase A defaults — auto-bind platform conventions (Cmd+, → Settings,
+    // Auto-bind platform conventions (Cmd+, → Settings,
     // etc.) when the source has a high-confidence component match. Default-on;
     // `--no-default-shortcuts` opts out without affecting the source-extracted
     // path above.
     bool default_shortcuts = true;
-    bool output_explicit = false;                         // pulp friction-fix #4
-    bool tokens_file_explicit = false;                    // pulp friction-fix #4
-    // pulp #1031 — versioned detect surface
+    bool output_explicit = false;                         // output path was set explicitly
+    bool tokens_file_explicit = false;                    // tokens file was set explicitly
+    // Versioned detect surface.
     bool detect_only = false;
     bool report_new_format = false;
     std::string input_directory;                          // --directory: alternative to --file
@@ -1947,7 +1947,7 @@ int main(int argc, char* argv[]) {
 
     // --format css-variables emits a CSS file, so its sidecar defaults to
     // theme.css rather than tokens.json (the W3C default). The leaf name also
-    // feeds the friction-fix #4 anchoring below.
+    // feeds the sidecar anchoring below.
     const char* tokens_default_leaf =
         (export_format == "css-variables") ? "theme.css" : "tokens.json";
     if (export_format == "css-variables" && !tokens_file_explicit)
@@ -1964,8 +1964,8 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    // pulp friction-fix #4 — when the user passes --output <dir>/ui.js,
-    // anchor the sidecar files (bridge_handlers.cpp, classnames.json,
+    // When the user passes --output <dir>/ui.js, anchor the sidecar files
+    // (bridge_handlers.cpp, classnames.json,
     // tokens.json) to the same directory so they don't scatter to cwd.
     // Only applies when the sidecar flag wasn't given explicitly.
     if (output_explicit) {
@@ -2020,7 +2020,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── pulp #1031 — versioned detect-only path ─────────────────────────
+    // ── Versioned detect-only path ──────────────────────────────────────
     // Runs against compat.json without invoking the source parsers.
     if (detect_only) {
         namespace det = pulp::import_detect;
@@ -2250,8 +2250,8 @@ int main(int argc, char* argv[]) {
         } else {
             switch (*source) {
                 case DesignSource::figma:
-                    // Guardrail (pulp #41 follow-up): a Figma-plugin export
-                    // envelope passed to `--from figma` would otherwise be fed
+                    // Guardrail: a Figma-plugin export envelope passed to
+                    // `--from figma` would otherwise be fed
                     // to parse_figma_json, which finds none of its structure and
                     // silently yields an empty root-only import. Auto-route to
                     // the plugin parser and tell the user once.
@@ -2592,7 +2592,7 @@ int main(int argc, char* argv[]) {
     opts.skin_faders = skin_faders;
     opts.skin_meters = skin_meters;
 
-    // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
+    // Auto-import keyboard shortcuts from the source.
     // Default-on. Source-agnostic helper: the extractor takes a raw
     // TSX/JS/HTML string and regex-scans for `e.key === '…'` patterns,
     // so all source types (claude, v0, figma code blobs, stitch inline
@@ -2603,15 +2603,15 @@ int main(int argc, char* argv[]) {
     if (import_shortcuts) {
         detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
 
-        // Phase A defaults — only fire when the developer's React source
-        // has a high-confidence match. `apply_default_shortcuts` lowers
+        // Default shortcuts only fire when the developer's React source has a
+        // high-confidence match. `apply_default_shortcuts` lowers
         // accepted DefaultShortcutCandidates into the same DetectedShortcut
         // form so they ride V2's codegen path with no fork. Suppressed
         // chord-by-chord against `detected_shortcuts` so an extracted
         // binding always wins.
         //
-        // Codex P2 on #2128: the import CLI runs at build time, but the
-        // generated ui.js ships to many platforms (mac standalone, win
+        // The import CLI runs at build time, but the generated ui.js ships to
+        // many platforms (mac standalone, win
         // standalone, plugin hosts on either). Emit BOTH macOS and
         // Win/Linux variants — at runtime only the chord matching the
         // physical key press fires its registerShortcut entry, so the
@@ -2768,7 +2768,7 @@ int main(int argc, char* argv[]) {
                             }
                         }
 
-                        // pulp #3191 — derive a value-driven skin for recognised
+                        // Derive a value-driven skin for recognised
                         // faders/meters by SAMPLING the captured PNG (not baking
                         // it). The widget then redraws the recovered colours /
                         // gradient procedurally so the thumb/level still move
@@ -2803,7 +2803,7 @@ int main(int argc, char* argv[]) {
                                     // exports at 2× but we derive it from the
                                     // data rather than assume, so a re-scaled
                                     // export still maps art px → logical px.
-                                    // pulp #3191 width fix.
+                                    // Derive the asset scale from the captured width.
                                     float node_w = n.style.width.value_or(0.0f);
                                     float asset_scale =
                                         (node_w > 0.0f && img.width > 0)
@@ -3041,7 +3041,7 @@ int main(int argc, char* argv[]) {
         std::cout << ")\n";
     }
 
-    // Bridge handler scaffold for Claude Design imports (pulp #709).
+    // Bridge handler scaffold for Claude Design imports.
     // Only emitted for --from claude; other sources keep their existing
     // output shape unchanged.
     if (*source == DesignSource::claude && emit_bridge_scaffold) {
@@ -3052,7 +3052,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Classnames artifact for Claude Design imports (pulp #1035).
+    // Classnames artifact for Claude Design imports.
     // Spectr's `tools/extract-html-bundle/extract.mjs` emits the same
     // map by hand; pulling it into the CLI lets `@pulp/css-adapt`
     // consume the file directly without a separate Node-side pass.
@@ -3069,8 +3069,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // pulp #2116 V2 — shortcuts manifest alongside classnames. Mirror
-    // shape so a reviewer can audit what the auto-import will bind. The
+    // Shortcuts manifest alongside classnames. Mirror shape so a reviewer can
+    // audit what the auto-import will bind. The
     // generated ui.js already contains the matching registerShortcut(...)
     // calls; this file is for human/CI audit.
     if (import_shortcuts && !detected_shortcuts.empty()) {
@@ -3095,8 +3095,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Phase A — diagnostic dump of the defaults scan alongside the bound
-    // manifest. Writes even when no defaults fired, so a reviewer can see
+    // Diagnostic dump of the defaults scan alongside the bound manifest.
+    // Writes even when no defaults fired, so a reviewer can see
     // *why* (collisions, low confidence). Mirror naming convention.
     if (import_shortcuts && default_shortcuts &&
         (!default_scan.accepted.empty() || !default_scan.collisions.empty())) {
@@ -3114,8 +3114,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // pulp friction-fix #3 — native-react detection (heuristic shared
-    // with the lib so tests can exercise it directly; see
+    // Native-react detection (heuristic shared with the lib so tests can
+    // exercise it directly; see
     // design_import.hpp::looks_like_bundler_entry). When the static
     // parser produces only a handful of elements AND the HTML looks
     // like a JS-bundler entry, the user almost certainly wanted to run

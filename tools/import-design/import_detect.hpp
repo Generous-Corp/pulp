@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// pulp #1031 — three-layer versioned detection for `pulp import-design`.
+// Three-layer versioned detection for `pulp import-design`.
 //
 // Detects the (source, format-version, parser-version) tuple of an
 // external design export by walking a file or directory and matching

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// pulp #1031 — implementation of the versioned import detector.
+// Implementation of the versioned import detector.
 
 #include "import_detect.hpp"
 
