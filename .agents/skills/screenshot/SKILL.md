@@ -88,12 +88,20 @@ background differences — a visually faithful import can report a low % on a
 gradient-heavy design. Treat the % as a smoke signal; **eyeball the montage**
 (reference | render) for structure + assets. Build montages with PIL.
 
+`compare_screenshots` / `compare_screenshot_files` decode PNGs with
+CoreGraphics on Apple and Skia on non-Apple builds when `PULP_HAS_SKIA=1`.
+In a non-Apple no-Skia build, comparisons remain unavailable (`valid=false`,
+empty diff/crop output) because there is no PNG decoder; treat that as a
+missing comparison backend, not proof that the rendered PNG was empty.
+
 ## Capture options at a glance
 
 - **`render_to_png` / `render_to_file`** (`screenshot.hpp`) — headless raster of
-  a `View` tree, no window. macOS/iOS have native backends; Linux/Windows need a
-  host-registered provider via `set_screenshot_provider()` (else empty/"unsupported",
-  not a silent blank — #299). Probe `has_screenshot_provider()`.
+  a `View` tree, no window. macOS/iOS have native backends; Linux/Windows use
+  the built-in Skia raster path when `PULP_HAS_SKIA=1`, otherwise they need a
+  host-registered provider via `set_screenshot_provider()` (else
+  empty/"unsupported", not a silent blank — #299). Probe
+  `has_screenshot_provider()`.
 - **`WindowHost::capture_png()`** — reads the rendered frame from a live GPU host
   (`MacGpuWindowHost`). The most faithful (real paint path, GPU). Drive it from
   the design-tool example's `--no-show-window --automation-before <png>`
