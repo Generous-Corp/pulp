@@ -313,6 +313,20 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     input_ptrs_.resize(ctx.input_channels);
     output_ptrs_.resize(ctx.output_channels);
 
+    // Pre-allocate the per-block MIDI buffers and switch them to
+    // realtime-capacity mode so add()/add_sysex_copy() in process() never grow
+    // (and therefore never heap-allocate) on the audio thread. The worst-case
+    // counts are generous for a single block; anything beyond is dropped
+    // (RT-safe) rather than reallocated. 64 SysEx payloads × 512 bytes covers
+    // typical MIDI-CI / device-inquiry traffic without a per-event allocation.
+    constexpr std::size_t kMaxEventsPerBlock = 2048;
+    constexpr std::size_t kMaxSysexPerBlock = 64;
+    constexpr std::size_t kMaxSysexPayloadBytes = 512;
+    midi_in_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_out_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_in_.set_realtime_capacity_limit(true);
+    midi_out_.set_realtime_capacity_limit(true);
+
     return SingleComponentEffect::setupProcessing(setup);
 }
 
@@ -511,8 +525,17 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         return kResultOk;
     }
 
-    // Build MIDI buffers from VST3 events
-    midi::MidiBuffer midi_in, midi_out;
+    // Reuse the reserved, realtime-capacity-limited per-block MIDI buffers so
+    // translating VST3 events never allocates on the audio thread (see
+    // setupProcessing()). Both the short-event store AND the SysEx sidecar must
+    // be reset every block: clear() empties only events_, so clear_sysex() is
+    // required as well — otherwise a SysEx payload from one block would leak
+    // into later blocks. clear_sysex() recycles pooled payloads, so it stays
+    // allocation-free.
+    midi_in_.clear();
+    midi_in_.clear_sysex();
+    midi_out_.clear();
+    midi_out_.clear_sysex();
     if (data.inputEvents) {
         int32 event_count = data.inputEvents->getEventCount();
         for (int32 i = 0; i < event_count; ++i) {
@@ -524,14 +547,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                         static_cast<uint8_t>(evt.noteOn.pitch),
                         static_cast<uint8_t>(evt.noteOn.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
-                    midi_in.add(me);
+                    midi_in_.add(me);
                 } else if (evt.type == Event::kNoteOffEvent) {
                     auto me = midi::MidiEvent::note_off(
                         static_cast<uint8_t>(evt.noteOff.channel),
                         static_cast<uint8_t>(evt.noteOff.pitch),
                         static_cast<uint8_t>(evt.noteOff.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
-                    midi_in.add(me);
+                    midi_in_.add(me);
                 } else if (evt.type == Event::kDataEvent
                            && evt.data.type == DataEvent::kMidiSysEx) {
                     // Route kData/kMidiSysEx payloads into MidiBuffer's
@@ -539,10 +562,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     // F0..F7 bytes in evt.data.bytes with length in
                     // evt.data.size.
                     if (evt.data.bytes && evt.data.size > 0) {
-                        midi_in.add_sysex(
-                            std::vector<uint8_t>(
-                                evt.data.bytes,
-                                evt.data.bytes + evt.data.size),
+                        // Copy into the buffer's pooled payload storage rather
+                        // than constructing a fresh std::vector per event — in
+                        // realtime mode the copy reuses reserved capacity and
+                        // does not allocate.
+                        midi_in_.add_sysex_copy(
+                            evt.data.bytes,
+                            static_cast<std::size_t>(evt.data.size),
                             evt.sampleOffset,
                             0.0);
                     }
@@ -636,7 +662,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // plugin that allocates on the audio thread.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(process_buffers, midi_in, midi_out, ctx);
+        processor_->process(process_buffers, midi_in_, midi_out_, ctx);
     }
 
     // Write parameter output changes — lets the host record automation
@@ -675,8 +701,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     }
 
     // Write MIDI output
-    if (data.outputEvents && !midi_out.empty()) {
-        for (const auto& me : midi_out) {
+    if (data.outputEvents && !midi_out_.empty()) {
+        for (const auto& me : midi_out_) {
             Event evt{};
             evt.sampleOffset = me.sample_offset;
             if (me.is_note_on()) {

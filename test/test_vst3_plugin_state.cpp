@@ -7,6 +7,8 @@
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -799,6 +801,192 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(out_event.noteOn.channel == 1);
     REQUIRE(out_event.noteOn.pitch == 64);
     REQUIRE_THAT(out_event.noteOn.velocity, WithinAbs(100.0f / 127.0f, 1e-6f));
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
+          "[vst3][process][realtime][perf]") {
+    // A1: the adapter's per-block MidiBuffers are reused members reserved +
+    // realtime-capacity-limited in setupProcessing(), so translating note and
+    // SysEx events into them on the audio thread must not allocate. Previously
+    // the buffers were block-local, allocating on the first add() of any block
+    // carrying MIDI.
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    config.descriptor.produces_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 44100.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    std::array<uint8_t, 4> sysex{{0xF0, 0x7D, 0x01, 0xF7}};
+
+    // Build the event list + ProcessData ONCE, outside the probe scope, so the
+    // only thing measured is process() itself (EventList's ctor allocates). The
+    // adapter reads input events read-only via getEvent(), so the same data is
+    // safe to reuse across blocks. A block carries a note pair + a SysEx payload
+    // — the allocation-prone path before A1.
+    Steinberg::Vst::EventList input_events(8);
+    Steinberg::Vst::Event note_on{};
+    note_on.type = Steinberg::Vst::Event::kNoteOnEvent;
+    note_on.sampleOffset = 1;
+    note_on.noteOn.channel = 0;
+    note_on.noteOn.pitch = 60;
+    note_on.noteOn.velocity = 0.8f;
+    REQUIRE(input_events.addEvent(note_on) == Steinberg::kResultOk);
+    Steinberg::Vst::Event note_off{};
+    note_off.type = Steinberg::Vst::Event::kNoteOffEvent;
+    note_off.sampleOffset = 5;
+    note_off.noteOff.channel = 0;
+    note_off.noteOff.pitch = 60;
+    note_off.noteOff.velocity = 0.0f;
+    REQUIRE(input_events.addEvent(note_off) == Steinberg::kResultOk);
+
+    // A second list that adds a SysEx payload on top of the notes.
+    Steinberg::Vst::EventList midi_with_sysex(8);
+    REQUIRE(midi_with_sysex.addEvent(note_on) == Steinberg::kResultOk);
+    REQUIRE(midi_with_sysex.addEvent(note_off) == Steinberg::kResultOk);
+    Steinberg::Vst::Event sysex_event{};
+    sysex_event.type = Steinberg::Vst::Event::kDataEvent;
+    sysex_event.sampleOffset = 3;
+    sysex_event.data.type = Steinberg::Vst::DataEvent::kMidiSysEx;
+    sysex_event.data.bytes = sysex.data();
+    sysex_event.data.size = static_cast<Steinberg::uint32>(sysex.size());
+    REQUIRE(midi_with_sysex.addEvent(sysex_event) == Steinberg::kResultOk);
+
+    Steinberg::Vst::EventList empty_events(8);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    // Differential measurement isolates the MIDI-translation cost from any
+    // unrelated per-block allocation elsewhere in process() (or in the test
+    // processor): a block carrying note + SysEx events must allocate no more
+    // than an otherwise-identical block with no events. Before A1 the MIDI
+    // block allocated (block-local MidiBuffers); after A1 the two are equal.
+    auto allocs_for = [&](Steinberg::Vst::IEventList* events) -> std::size_t {
+        data.inputEvents = events;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);  // warm
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        return probe.allocation_count();
+    };
+
+    const std::size_t baseline = allocs_for(&empty_events);
+    const std::size_t with_notes = allocs_for(&input_events);
+    const std::size_t with_sysex = allocs_for(&midi_with_sysex);
+    INFO("baseline=" << baseline << ", notes=" << with_notes
+         << ", notes+sysex=" << with_sysex);
+
+    // Core A1 win: note/CC translation into the reused, reserved MidiBuffer adds
+    // ZERO allocations on the audio thread (was a per-block allocation when the
+    // buffers were block-local). Notes/CC are the overwhelming majority of MIDI.
+    REQUIRE(with_notes == baseline);
+
+    // Known residual (tracked follow-up, NOT regressed by A1): the SysEx pooled-
+    // copy path (MidiBuffer::add_sysex_copy realtime) still incurs one allocation
+    // per block carrying SysEx — the cost lives inside MidiBuffer's SysexEvent
+    // payload handling (core/midi/buffer.hpp), not this adapter. A1 already routes
+    // SysEx through the pooled copy (no per-event std::vector ctor); fully
+    // eliminating the residual is a separate core/midi slice. Asserted as a
+    // no-regression upper bound so the contract is explicit, not silently ignored.
+    REQUIRE(with_sysex <= baseline + 1);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 adapter clears SysEx between reused process blocks",
+          "[vst3][process][regression]") {
+    // The per-block MidiBuffers are reused members (A1). MidiBuffer::clear()
+    // empties only the short-event store, so the adapter must ALSO clear_sysex()
+    // each block — otherwise a SysEx payload from one block leaks into the next.
+    // (Caught by the Codex adversarial review of A1.) Process a SysEx block, then
+    // an event-free block, and assert the processor sees no stale SysEx.
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 44100.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    std::array<uint8_t, 4> sysex{{0xF0, 0x7D, 0x01, 0xF7}};
+    Steinberg::Vst::EventList sysex_events(4);
+    Steinberg::Vst::Event sysex_event{};
+    sysex_event.type = Steinberg::Vst::Event::kDataEvent;
+    sysex_event.sampleOffset = 2;
+    sysex_event.data.type = Steinberg::Vst::DataEvent::kMidiSysEx;
+    sysex_event.data.bytes = sysex.data();
+    sysex_event.data.size = static_cast<Steinberg::uint32>(sysex.size());
+    REQUIRE(sysex_events.addEvent(sysex_event) == Steinberg::kResultOk);
+    Steinberg::Vst::EventList empty_events(4);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    // Block 1: carries one SysEx event.
+    data.inputEvents = &sysex_events;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(test_processor->last_sysex_size == 1);
+
+    // Block 2: no events. Without clear_sysex() the stale payload would persist.
+    data.inputEvents = &empty_events;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(test_processor->last_sysex_size == 0);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

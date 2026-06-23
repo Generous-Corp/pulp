@@ -2157,7 +2157,7 @@ endif()
 
 if(PULP_HAS_VST3)
     add_executable(pulp-test-vst3-plugin-state
-        test_vst3_plugin_state.cpp
+        test_vst3_plugin_state.cpp harness/rt_allocation_probe.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
     )
     target_link_libraries(pulp-test-vst3-plugin-state PRIVATE pulp::format Catch2::Catch2WithMain)

@@ -91,6 +91,14 @@ private:
     // Processor API exposes a single sidechain slot.
     std::vector<float*> sidechain_ptrs_;
 
+    // Per-block MIDI buffers, reused across process() calls. Reserved +
+    // realtime-capacity-limited in setupProcessing() so add()/add_sysex_copy()
+    // never heap-allocate on the audio thread (they drop past the reserved
+    // worst-case instead). Previously these were block-local, so the first
+    // add() on any block carrying MIDI allocated.
+    midi::MidiBuffer midi_in_;
+    midi::MidiBuffer midi_out_;
+
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;

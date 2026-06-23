@@ -200,7 +200,7 @@ VST3 delivers note-on / note-off through `IEventList`:
 ```
 Event::kNoteOnEvent  → MidiEvent::note_on
 Event::kNoteOffEvent → MidiEvent::note_off
-Event::kDataEvent (type=kMidiSysEx) → midi_in.add_sysex(bytes, sampleOffset, 0.0)
+Event::kDataEvent (type=kMidiSysEx) → midi_in_.add_sysex_copy(bytes, size, sampleOffset, 0.0)
 ```
 
 Non-note short MIDI (CC, pitch bend, aftertouch) is **not** delivered
@@ -209,7 +209,23 @@ automation using `kIsMidiCC`-tagged parameters. If you need them, model
 them as Pulp parameters, not MIDI. See `docs/guides/formats.md`.
 
 MIDI output mirrors the inverse: note_on / note_off in
-`midi_out` are written back into `data.outputEvents`.
+`midi_out_` are written back into `data.outputEvents`.
+
+**Real-time-safe MIDI buffers (no per-block allocation).** `midi_in_` /
+`midi_out_` are reused `MidiBuffer` *members*, not block-local: `setupProcessing()`
+calls `reserve(events, sysex, sysexPayloadBytes)` + `set_realtime_capacity_limit(true)`
+so `add()` / `add_sysex_copy()` reuse reserved capacity and *drop* past the
+worst-case instead of growing on the audio thread. Two footguns:
+- **Reset BOTH stores every block.** `MidiBuffer::clear()` empties only the
+  short-event store; the SysEx sidecar needs `clear_sysex()` as well. Calling
+  only `clear()` leaks a block's SysEx payload into later blocks. `process()`
+  calls both at the top of the block.
+- **SysEx: use `add_sysex_copy(ptr, size, …)`, not `add_sysex(std::vector(…))`** —
+  the latter heap-allocates a fresh payload per event; the former copies into the
+  buffer's reserved payload pool (alloc-free in realtime mode).
+Prove no-alloc with the `RtAllocationProbe` harness (see
+`test_vst3_plugin_state.cpp` `[vst3][realtime][perf]`). Note: a pooled-SysEx
+residual allocation inside `MidiBuffer` itself is a known `core/midi` follow-up.
 
 ### Audio buses (incl. sidechain)
 
