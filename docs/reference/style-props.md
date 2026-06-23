@@ -155,10 +155,10 @@ JS callers and the bridge.
 | Theme tokens (color) | `setColorToken(name, color)` | Sets a theme color token; resolved via `View::resolve_color`. |
 | Theme tokens (dimension) | `setDimensionToken(name, n)` | |
 | Apply panel theme | `setPanelStyle(id, bgToken, borderToken, radius, width)` | |
-| Theme JSON (whole) | `setTheme(id, json)`, `getThemeJson()`, `applyTokenDiff(id, diffJson)` | |
+| Theme preset / overrides | `setTheme(name)`, `getThemeJson()`, `applyTokenDiff(jsonString)` | `setTheme` accepts built-in theme names such as `dark`, `light`, and `pro_audio`; `applyTokenDiff` applies JSON overrides to the current theme. |
 | Design tokens import / export | `importDesignTokens(json)` / `exportDesignTokens()` | |
 | Per-state style | `setStateStyle(id, state, prop, value)` | `:hover`, `:active`, `:focus`. |
-| Per-widget style | `setWidgetStyle(id, json)` | |
+| Per-widget style | `setWidgetStyle(id, mode)` | Switches render style for supported widgets; modes include `standard`, `minimal`, and `silver`. |
 
 ## Deferred / Partial
 
