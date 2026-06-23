@@ -696,16 +696,18 @@ configure time (for example, AU on Linux), the matching case in
 ```cpp
 void MyWidget::paint(Canvas& canvas) {
     // Background
-    canvas.set_fill_color(Color::rgba(30, 30, 40));
+    canvas.set_fill_color(Color::rgba8(30, 30, 40));
     canvas.fill_rounded_rect(0, 0, width, height, 8);
     
     // Gradient fill
-    canvas.set_fill_gradient(LinearGradient{0, 0, 0, height, 
-        Color::rgba(80, 120, 255), Color::rgba(40, 60, 180)});
+    const Color colors[] = {Color::rgba8(80, 120, 255), Color::rgba8(40, 60, 180)};
+    const float positions[] = {0.0f, 1.0f};
+    canvas.set_fill_gradient_linear(0, 0, 0, height, colors, positions, 2);
     canvas.fill_rect(10, 10, width - 20, 4);
+    canvas.clear_fill_gradient();
     
     // Text
-    canvas.set_fill_color(Color::rgba(220, 220, 230));
+    canvas.set_fill_color(Color::rgba8(220, 220, 230));
     canvas.set_font("Inter", 14);
     canvas.fill_text("Hello Pulp", 10, 30);
     
@@ -906,9 +908,9 @@ meter->style().set_height_percent(100);
 
 ```cpp
 Theme theme;
-theme.set("bg.surface", Color::rgba(25, 25, 35));
-theme.set("control.accent", Color::rgba(80, 130, 255));
-theme.set("text.primary", Color::rgba(220, 220, 230));
+theme.colors["bg.surface"] = Color::rgba8(25, 25, 35);
+theme.colors["control.accent"] = Color::rgba8(80, 130, 255);
+theme.colors["text.primary"] = Color::rgba8(220, 220, 230);
 
 // Widgets resolve tokens automatically:
 canvas.set_fill_color(resolve_color("bg.surface"));
