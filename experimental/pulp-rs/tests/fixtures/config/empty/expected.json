@@ -2,6 +2,11 @@
   "config_path": "<CONFIG_PATH>",
   "entries": [
     {
+      "key": "pr.workflow",
+      "value": "shipyard",
+      "default": true
+    },
+    {
       "key": "update.mode",
       "value": "prompt",
       "default": true
@@ -29,6 +34,11 @@
     {
       "key": "import_design.default_emit",
       "value": "js",
+      "default": true
+    },
+    {
+      "key": "claude.send_user_file",
+      "value": "on",
       "default": true
     }
   ]

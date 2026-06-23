@@ -22,9 +22,15 @@
 //!   channel                = stable | beta                     (default stable)
 //!   bump_projects          = prompt | auto | off               (default prompt)
 //!
+//! [pr]
+//!   workflow               = shipyard | github | manual         (default shipyard)
+//!
 //! [import_design]
 //!   default_mode           = live | baked                       (default live)
 //!   default_emit           = js | ir-json | cpp                 (default js)
+//!
+//! [claude]
+//!   send_user_file         = on | off                           (default on)
 //! ```
 //!
 //! # Invariants
@@ -107,12 +113,14 @@ pub struct ListEntry {
 /// Known keys + their hard-coded defaults. Single source of truth for
 /// both `list` and `get` — if you add a knob, add its default here.
 pub const KNOWN_KEYS: &[(&str, &str)] = &[
+    ("pr.workflow", "shipyard"),
     ("update.mode", "prompt"),
     ("update.check_interval_hours", "24"),
     ("update.channel", "stable"),
     ("update.bump_projects", "prompt"),
     ("import_design.default_mode", "live"),
     ("import_design.default_emit", "js"),
+    ("claude.send_user_file", "on"),
 ];
 
 /// Parse a dotted key (e.g. `update.mode`) into `(section, key)`.
@@ -152,6 +160,13 @@ pub fn is_allowed_key(section: &str, key: &str) -> bool {
 pub fn validate_value(section: &str, key: &str, value: &str) -> Result<()> {
     let bad = |msg: &str| CliError::BadUsage(msg.to_owned());
     match (section, key) {
+        ("pr", "workflow") => {
+            if matches!(value, "shipyard" | "github" | "manual") {
+                Ok(())
+            } else {
+                Err(bad("pr.workflow must be one of: shipyard, github, manual"))
+            }
+        }
         ("update", "mode") => {
             if matches!(value, "auto" | "prompt" | "manual" | "off") {
                 Ok(())
@@ -202,7 +217,67 @@ pub fn validate_value(section: &str, key: &str, value: &str) -> Result<()> {
                 ))
             }
         }
+        ("claude", "send_user_file") => {
+            if matches!(value, "on" | "off") {
+                Ok(())
+            } else {
+                Err(bad("claude.send_user_file must be one of: on, off"))
+            }
+        }
         _ => Ok(()), // allowed but unvalidated — future-proof for new keys
+    }
+}
+
+/// Effective PR workflow after applying env/config/default precedence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrWorkflowSelection {
+    /// Effective workflow, normalized to lowercase.
+    pub workflow: String,
+    /// Where the value came from.
+    pub source: String,
+    /// Validation error for a configured or environment-supplied value.
+    pub error: Option<String>,
+}
+
+fn normalize_pr_workflow(raw: &str) -> String {
+    raw.trim().trim_matches('"').to_ascii_lowercase()
+}
+
+fn make_pr_workflow_selection(raw: String, source: String) -> PrWorkflowSelection {
+    let workflow = normalize_pr_workflow(&raw);
+    let error = if matches!(workflow.as_str(), "shipyard" | "github" | "manual") {
+        None
+    } else {
+        Some("pr.workflow must be one of: shipyard, github, manual".to_owned())
+    };
+    PrWorkflowSelection {
+        workflow,
+        source,
+        error,
+    }
+}
+
+/// Resolve the PR workflow from `PULP_PR_WORKFLOW`, config, or default.
+#[must_use]
+pub fn effective_pr_workflow() -> PrWorkflowSelection {
+    if let Ok(env) = std::env::var("PULP_PR_WORKFLOW") {
+        if !env.is_empty() {
+            return make_pr_workflow_selection(env, "env:PULP_PR_WORKFLOW".to_owned());
+        }
+    }
+
+    let doc = config_path().as_deref().and_then(|p| read(p).ok());
+    if let Some(doc) = doc.as_ref() {
+        let configured = read_value(doc, "pr", "workflow");
+        if !configured.is_empty() {
+            return make_pr_workflow_selection(configured, "config:pr.workflow".to_owned());
+        }
+    }
+
+    PrWorkflowSelection {
+        workflow: "shipyard".to_owned(),
+        source: "default".to_owned(),
+        error: None,
     }
 }
 
@@ -486,6 +561,15 @@ mod tests {
     }
 
     #[test]
+    fn validate_pr_workflow_accepts_three_canonical_values() {
+        for v in ["shipyard", "github", "manual"] {
+            assert!(validate_value("pr", "workflow", v).is_ok(), "{v}");
+        }
+        let err = validate_value("pr", "workflow", "svn").unwrap_err();
+        assert!(err.to_string().contains("shipyard, github, manual"));
+    }
+
+    #[test]
     fn validate_interval_requires_non_negative_integer() {
         assert!(validate_value("update", "check_interval_hours", "24").is_ok());
         assert!(validate_value("update", "check_interval_hours", "0").is_ok());
@@ -538,8 +622,8 @@ x = 1
         let rows = list_all(&doc);
         assert_eq!(rows.len(), KNOWN_KEYS.len());
         assert!(rows.iter().all(|r| r.default));
-        assert_eq!(rows[0].key, "update.mode");
-        assert_eq!(rows[0].value, "prompt");
+        assert_eq!(rows[0].key, "pr.workflow");
+        assert_eq!(rows[0].value, "shipyard");
     }
 
     #[test]

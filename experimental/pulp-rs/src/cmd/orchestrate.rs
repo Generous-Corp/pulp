@@ -766,6 +766,7 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
     )
     .map_err(io_err)?;
 
+    write_pr_workflow_status(&proj, out)?;
     write_import_design_default_status(out)?;
 
     if proj.standalone {
@@ -775,6 +776,128 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
         write_plugin_format_availability(&proj, out)?;
     }
     Ok(())
+}
+
+fn write_pr_workflow_status(proj: &ActiveProject, out: &mut impl Write) -> Result<()> {
+    let workflow = crate::config::effective_pr_workflow();
+    if let Some(error) = workflow.error {
+        writeln!(out, "PR workflow: invalid ({})", workflow.source).map_err(io_err)?;
+        writeln!(out, "PR workflow detail: {error}").map_err(io_err)?;
+        return Ok(());
+    }
+
+    if proj.standalone {
+        writeln!(
+            out,
+            "PR workflow: project-owned (Pulp source ship flow not active)"
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+
+    writeln!(
+        out,
+        "PR workflow: {} ({})",
+        workflow.workflow, workflow.source
+    )
+    .map_err(io_err)?;
+
+    match workflow.workflow.as_str() {
+        "shipyard" => write_shipyard_status(&proj.root, out),
+        "github" => write_github_workflow_status(out),
+        "manual" => {
+            writeln!(
+                out,
+                "PR automation: manual (no push or PR creation by `pulp pr`)"
+            )
+            .map_err(io_err)?;
+            writeln!(out, "Shipyard tracking: disabled by pr.workflow=manual").map_err(io_err)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn write_shipyard_status(root: &Path, out: &mut impl Write) -> Result<()> {
+    let shipyard = crate::proc::which("shipyard");
+    let pinned = crate::cmd::pr::read_pinned_shipyard_version(root);
+
+    let Some(shipyard) = shipyard else {
+        writeln!(
+            out,
+            "Shipyard: missing (run `./tools/install-shipyard.sh` in this checkout)"
+        )
+        .map_err(io_err)?;
+        if let Some(pinned) = pinned {
+            writeln!(out, "Shipyard pinned: {pinned}").map_err(io_err)?;
+        }
+        return Ok(());
+    };
+
+    write!(out, "Shipyard: {}", shipyard.display()).map_err(io_err)?;
+    let actual = capture_shipyard_version(&shipyard);
+    if let Some(actual) = actual.as_ref() {
+        write!(out, " ({actual})").map_err(io_err)?;
+    }
+    if let Some(pinned) = pinned.as_ref() {
+        write!(out, " pinned {pinned}").map_err(io_err)?;
+        if actual.as_ref().is_some_and(|a| a != pinned) {
+            write!(out, " [pin mismatch]").map_err(io_err)?;
+        }
+    }
+    writeln!(out).map_err(io_err)?;
+    Ok(())
+}
+
+fn write_github_workflow_status(out: &mut impl Write) -> Result<()> {
+    if let Some(gh) = crate::proc::which("gh") {
+        writeln!(out, "GitHub CLI: {}", gh.display()).map_err(io_err)?;
+    } else {
+        writeln!(
+            out,
+            "GitHub CLI: missing (`gh` required for github workflow)"
+        )
+        .map_err(io_err)?;
+    }
+    writeln!(out, "Shipyard tracking: disabled by pr.workflow=github").map_err(io_err)
+}
+
+fn capture_shipyard_version(shipyard_bin: &Path) -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let output = Command::new(shipyard_bin)
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_shipyard_version_output(if stdout.trim().is_empty() {
+        stderr.trim()
+    } else {
+        stdout.trim()
+    })
+}
+
+fn parse_shipyard_version_output(output: &str) -> Option<String> {
+    let cleaned: String = output
+        .chars()
+        .map(|c| if matches!(c, ',' | '(' | ')') { ' ' } else { c })
+        .collect();
+    for raw in cleaned.split_whitespace() {
+        let token = raw.trim_end_matches([',', ';', ':']);
+        let check = token.strip_prefix('v').unwrap_or(token);
+        let first = check.chars().next()?;
+        if !first.is_ascii_digit() || !check.contains('.') {
+            continue;
+        }
+        return Some(if token.starts_with('v') {
+            token.to_owned()
+        } else {
+            format!("v{token}")
+        });
+    }
+    None
 }
 
 fn write_import_design_default_status(out: &mut impl Write) -> Result<()> {
@@ -1138,6 +1261,9 @@ mod tests {
     use super::*;
     use crate::proc::testing::RecordingSpawner;
     use std::ffi::OsString;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvVarGuard {
         key: &'static str,
@@ -1164,6 +1290,19 @@ mod tests {
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
         ActiveProject::new(root.to_path_buf(), true)
+    }
+
+    fn source_tree_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("core/runtime")).unwrap();
+        std::fs::write(root.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        std::fs::write(root.join("core/runtime/foo.cpp"), "").unwrap();
+        std::fs::write(root.join("core/runtime/foo.hpp"), "").unwrap();
+        std::fs::write(root.join("core/runtime/bar.h"), "").unwrap();
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(root.join("test/test_foo.cpp"), "").unwrap();
+        std::fs::write(root.join("test/test_bar.cpp"), "").unwrap();
+        std::fs::create_dir_all(root.join("examples/a")).unwrap();
+        std::fs::create_dir_all(root.join("examples/b")).unwrap();
     }
 
     fn configure_build(proj: &ActiveProject) {
@@ -1490,17 +1629,7 @@ mod tests {
     #[test]
     fn status_source_tree_reports_counts_and_formats() {
         let td = tempfile::tempdir().unwrap();
-        // Source-tree fixture: has `core/` + `CMakeLists.txt`.
-        std::fs::create_dir_all(td.path().join("core/runtime")).unwrap();
-        std::fs::write(td.path().join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
-        std::fs::write(td.path().join("core/runtime/foo.cpp"), "").unwrap();
-        std::fs::write(td.path().join("core/runtime/foo.hpp"), "").unwrap();
-        std::fs::write(td.path().join("core/runtime/bar.h"), "").unwrap();
-        std::fs::create_dir_all(td.path().join("test")).unwrap();
-        std::fs::write(td.path().join("test/test_foo.cpp"), "").unwrap();
-        std::fs::write(td.path().join("test/test_bar.cpp"), "").unwrap();
-        std::fs::create_dir_all(td.path().join("examples/a")).unwrap();
-        std::fs::create_dir_all(td.path().join("examples/b")).unwrap();
+        source_tree_fixture(td.path());
         let probe = StubGitProbe {
             branch: None,
             commit: None,
@@ -1515,6 +1644,86 @@ mod tests {
         assert!(s.contains("Plugin Formats:"));
         assert!(s.contains("VST3: SDK not found"));
         assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_source_tree_reports_manual_pr_workflow_from_config() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.toml"),
+            "[pr]\nworkflow = \"manual\"\n",
+        )
+        .unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", home.path().to_str().unwrap());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: manual (config:pr.workflow)"));
+        assert!(s.contains("Shipyard tracking: disabled by pr.workflow=manual"));
+        assert!(s.contains("Import design defaults:"));
+    }
+
+    #[test]
+    fn status_reports_invalid_pr_workflow_from_env() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "subversion");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: invalid (env:PULP_PR_WORKFLOW)"));
+        assert!(s.contains("pr.workflow must be one of: shipyard, github, manual"));
+    }
+
+    #[test]
+    fn status_source_tree_reports_github_pr_workflow_from_env() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "github");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: github (env:PULP_PR_WORKFLOW)"));
+        assert!(s.contains("GitHub CLI:"));
+        assert!(s.contains("Shipyard tracking: disabled by pr.workflow=github"));
+    }
+
+    #[test]
+    fn status_standalone_reports_project_owned_pr_workflow() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "sdk_version = \"9.9.9\"\n").unwrap();
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "manual");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: project-owned (Pulp source ship flow not active)"));
     }
 
     #[test]

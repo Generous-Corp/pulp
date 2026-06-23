@@ -82,10 +82,12 @@ fn list_human_lane_reports_keys_with_resolved_values() {
     assert!(output.status.success());
     let s = String::from_utf8(output.stdout).unwrap();
     assert!(s.contains("Pulp config ("));
+    assert!(s.contains("pr.workflow = shipyard")); // defaulted
     assert!(s.contains("update.mode = manual"));
     assert!(s.contains("update.channel = stable")); // defaulted
     assert!(s.contains("import_design.default_mode = live")); // defaulted
     assert!(s.contains("import_design.default_emit = js")); // defaulted
+    assert!(s.contains("claude.send_user_file = on")); // defaulted
 }
 
 #[test]
@@ -156,4 +158,17 @@ fn set_rejects_bad_value_with_exit_two() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("js, ir-json, cpp"));
+
+    let output = run(&["config", "set", "pr.workflow", "svn"], home.path());
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("shipyard, github, manual"));
+
+    let output = run(
+        &["config", "set", "claude.send_user_file", "true"],
+        home.path(),
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("on, off"));
 }
