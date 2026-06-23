@@ -47,10 +47,10 @@ TEST_CASE("partial-rendering POC: clear() resets dirty state and advances frame 
 
 TEST_CASE("partial-rendering POC: single request_repaint(rect) → union equals that rect, no full repaint",
           "[render][partial-render]") {
-    // This is the per-View / per-widget invalidation path the follow-up partial-rendering slice
-    // will plumb through. The the host wiring still calls
-    // invalidate_all(), but the tracker contract must support the
-    // rect path so the follow-up partial-rendering slice doesn't require a tracker API change.
+    // This is the per-View / per-widget invalidation path used by
+    // partial repaint callers. Host wiring may still choose
+    // invalidate_all(), but the tracker contract must keep the rect
+    // path stable so callers do not need a tracker API change.
     DirtyTracker dt;
     dt.clear();  // start clean
 
@@ -93,12 +93,11 @@ TEST_CASE("partial-rendering POC: two disjoint invalidations coalesce to boundin
 
 TEST_CASE("partial-rendering POC: invalidate_all() always wins, matching the pump-driver path",
           "[render][partial-render]") {
-    // Codex review correction 2: animation / FrameClock pump drivers
-    // call tracker_.invalidate_all() because they mutate visual state
-    // without going through request_repaint(). This test pins that
-    // contract: invalidate_all() must override and clear any pending
-    // partial rects so the the follow-up partial-rendering slice clip would degrade to full-screen
-    // (which is safe; better than missing pixels).
+    // Animation / FrameClock pump drivers call tracker_.invalidate_all()
+    // because they mutate visual state without going through
+    // request_repaint(). This test pins that contract: invalidate_all()
+    // must override and clear any pending partial rects so clipping
+    // degrades to full-screen, which is safe and avoids missed pixels.
     DirtyTracker dt;
     dt.clear();
     dt.set_viewport(800, 600);
@@ -115,9 +114,9 @@ TEST_CASE("partial-rendering POC: invalidate_all() always wins, matching the pum
 
 TEST_CASE("partial-rendering POC: area threshold escalates partial → full when many rects accumulate",
           "[render][partial-render]") {
-    // The host pushes one invalidate_all per repaint() today, so the
-    // area-threshold escalation is mostly a the follow-up partial-rendering slice concern. Test it
-    // here anyway so the contract doesn't quietly drift.
+    // The host pushes one invalidate_all per repaint() today, so
+    // area-threshold escalation mostly protects partial repaint callers.
+    // Test it here anyway so the contract does not quietly drift.
     DirtyTracker dt;
     dt.clear();
     dt.set_viewport(100, 100);  // tiny viewport, 60% = 6000 sq px

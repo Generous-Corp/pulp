@@ -71,7 +71,7 @@ echo "   .appex     = $APPEX"
 echo "   .framework = $FRAMEWORK"
 echo "   cert       = $APP_CERT"
 
-# Default entitlements — match the templates shipped with Phase 3.5.
+# Entitlement paths are opt-in; empty values sign without an entitlements file.
 APPEX_ENTITLEMENTS="${APPEX_ENTITLEMENTS:-}"
 HOST_ENTITLEMENTS="${HOST_ENTITLEMENTS:-}"
 
