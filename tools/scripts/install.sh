@@ -112,12 +112,10 @@ if [ -x "${INSTALL_DIR}/pulp-mcp" ]; then
     info "Installed: pulp-mcp (Claude Code plugin MCP server)"
 fi
 
-# #2087: Pulp users running `curl install.sh | sh` historically ended
-# up with a fresh CLI but no SDK. Any project then built against
-# whatever stale ~/.pulp/sdk/<old>/ they had — sometimes months behind
-# — silently missing every framework fix in between (Spectr was the
-# visible victim). Auto-install the latest SDK matching the CLI's own
-# version so install.sh leaves the user with a coherent CLI+SDK pair.
+# The installer must leave curl-installed users with a coherent CLI+SDK
+# pair. Without the matching SDK install, existing projects can build
+# against an old ~/.pulp/sdk/<old>/ and silently miss framework fixes
+# even though the CLI itself updated successfully.
 #
 # Failure mode: SDK install can fail on a transient network error.
 # Don't fail the whole install — the CLI is still usable; the user can

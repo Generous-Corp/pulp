@@ -53,11 +53,11 @@ class VersionFileIoTests(unittest.TestCase):
             self.assertIsNone(vbc.read_version(repo, vbc.VersionFile("missing", "json_field", "version")))
 
     def test_json_path_kind_walks_nested_arrays_and_objects(self) -> None:
-        # pulp #1962-followup — marketplace.json has both a top-level
-        # `.version` and a nested `.plugins[0].version`. The Claude Code
-        # marketplace reads the nested one, so plugin bumps must update
-        # both. Cover read + write + the missing-segment fallthrough that
-        # keeps the gate advisory rather than crashing on shape drift.
+        # marketplace.json has both a top-level `.version` and a nested
+        # `.plugins[0].version`. The Claude Code marketplace reads the
+        # nested one, so plugin bumps must update both. Cover read + write
+        # + the missing-segment fallthrough that keeps the gate advisory
+        # rather than crashing on shape drift.
         with tempfile.TemporaryDirectory() as td:
             repo = pathlib.Path(td)
             (repo / "marketplace.json").write_text(
@@ -88,11 +88,11 @@ class VersionFileIoTests(unittest.TestCase):
             self.assertFalse(vbc.write_version(repo, empty, "9.9.9"))
 
     def test_marketplace_plugins_version_stays_in_sync_with_top_level(self) -> None:
-        # pulp #1962-followup — assert versioning.json registers BOTH the
-        # top-level marketplace.json `.version` AND the nested
-        # `.plugins[0].version` for the plugin surface. If a future
-        # refactor drops the nested entry, Claude Code's marketplace
-        # silently ships a stale plugin version and we never notice.
+        # Assert versioning.json registers BOTH the top-level
+        # marketplace.json `.version` AND the nested `.plugins[0].version`
+        # for the plugin surface. If a future refactor drops the nested
+        # entry, Claude Code's marketplace silently ships a stale plugin
+        # version and we never notice.
         repo = pathlib.Path(vbc.__file__).resolve().parents[2]
         cfg_path = repo / "tools/scripts/versioning.json"
         cfg = json.loads(cfg_path.read_text())
