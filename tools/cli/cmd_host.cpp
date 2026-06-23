@@ -172,11 +172,10 @@ int cmd_scan(const std::vector<std::string>& args) {
             // (scanner_au.mm), so scan_au covers both. The actual
             // PluginInfo.format is already tagged per-entry by
             // scanner_au.mm's infer_format(), which lets us narrow the
-            // results to exactly AU v2 or exactly AUv3 below. Codex P2 on
-            // PR #531 / #500: without that post-scan filter, a user who
-            // asked for `--format au` still got mixed AU/AUv3 results,
-            // contradicting the docs and making plugin selection
-            // unreliable.
+            // results to exactly AU v2 or exactly AUv3 below. Without that
+            // post-scan filter, a user who asked for `--format au` still got
+            // mixed AU/AUv3 results, contradicting the docs and making plugin
+            // selection unreliable.
             opts.scan_au   = (f == PluginFormat::AudioUnit || f == PluginFormat::AudioUnitV3);
             opts.scan_clap = (f == PluginFormat::CLAP);
             opts.scan_lv2  = (f == PluginFormat::LV2);
@@ -312,13 +311,12 @@ int cmd_host(const std::vector<std::string>& args) {
 #if !PULP_HOST_HAS_AU
             case PluginFormat::AudioUnit:
             case PluginFormat::AudioUnitV3:
-                // Codex 2026-04-21 wave 2 P2 on #557: the AU loader is
-                // gated by AudioUnitSDK presence (`PULP_HAS_AUSDK`,
-                // auto-detected when external/AudioUnitSDK exists) +
-                // the APPLE platform, NOT a `PULP_HAS_AU` option —
-                // that flag does not exist in the build system, so
-                // the old hint was not actionable. Point users at the
-                // real fix: clone the AudioUnitSDK (macOS only).
+                // The AU loader is gated by AudioUnitSDK presence
+                // (`PULP_HAS_AUSDK`, auto-detected when
+                // external/AudioUnitSDK exists) plus the APPLE platform, not a
+                // `PULP_HAS_AU` option. That flag does not exist in the build
+                // system, so the old hint was not actionable. Point users at
+                // the real fix: clone the AudioUnitSDK (macOS only).
                 std::fprintf(stderr, "  AU host loader not available in this build (macOS only).\n"
                                      "  Rebuild on macOS with external/AudioUnitSDK present\n"
                                      "  (git clone https://github.com/apple/AudioUnitSDK external/AudioUnitSDK).\n");

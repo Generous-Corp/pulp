@@ -426,13 +426,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
         return 0;
 #else
-        // macOS / Linux. On macOS we honour the item 7.5 per-artifact
-        // selection: `.pkg` for AU/VST3/CLAP plugin bundles, `.dmg`
-        // for `.app` standalones. `--pkg` and `--dmg` flags override
-        // the per-artifact default for the entire run (e.g. `--dmg`
-        // wraps even plugin bundles in a disk image when that's
-        // explicitly requested, useful for the "drag to Plug-Ins"
-        // distribution pattern).
+        // macOS / Linux. On macOS we honour the per-artifact selection:
+        // `.pkg` for AU/VST3/CLAP plugin bundles, `.dmg` for `.app`
+        // standalones. `--pkg` and `--dmg` flags override the per-artifact
+        // default for the entire run (e.g. `--dmg` wraps even plugin bundles
+        // in a disk image when that's explicitly requested, useful for the
+        // "drag to Plug-Ins" distribution pattern).
 #if defined(__linux__)
         // Linux: produce a real `.deb` from the plugin bundles via the
         // first-party helper in ship/platform/linux/package_linux.cpp. The
@@ -1014,7 +1013,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
 
         // Stage 2: package. The pkg vs dmg decision lives in cmd_ship
-        // 'package' itself (item 7.5 wiring below).
+        // 'package' itself.
         //
         // We notarize the *distributable* (the `.dmg`/`.pkg` this stage
         // produces), not the loose plugin bundles — otherwise `release
@@ -1150,7 +1149,7 @@ int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
-    // ── auv3-xcodeproj (item 3.10 follow-up: one-click Xcode flow) ──────────
+    // ── auv3-xcodeproj (one-click Xcode flow) ───────────────────────────────
     //
     // Thin wrapper around `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` that
     // generates an Xcode project ready to "Run" on an iOS Simulator or a
@@ -1283,10 +1282,9 @@ int cmd_ship(const std::vector<std::string>& args) {
         // `<...>/Xcode*.app/Contents/Developer`. We must NOT hard-match
         // the literal substring `Xcode.app` because beta-channel users
         // run `Xcode-beta.app`, `Xcode_15.app`, etc., and the previous
-        // check blocked all of them. Regression: #2969 / Codex comment
-        // 3305628892. We still reject the command-line-tools-only
-        // selection (`/Library/Developer/CommandLineTools`) by requiring
-        // both `.app/` AND `/Contents/Developer` in the path.
+        // check blocked all of them. We still reject the command-line-tools-only
+        // selection (`/Library/Developer/CommandLineTools`) by requiring both
+        // `.app/` AND `/Contents/Developer` in the path.
         std::string xcselect = exec_output("xcode-select -p 2>/dev/null");
         // trim trailing newline
         while (!xcselect.empty() &&

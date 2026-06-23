@@ -53,7 +53,7 @@ std::string first_line(std::string text) {
 }
 }  // namespace
 
-// ── Doctor checks ───────────────���──────────────────────��────────────────────
+// -- Doctor checks -------------------------------------------------------------
 
 static bool sdk_config_ready(const fs::path& sdk_dir) {
     if (sdk_dir.empty()) return false;
@@ -815,7 +815,7 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
         if (adb.empty() && !sdk.empty()) {
             // Default Android SDK installs ship adb.exe on Windows,
             // adb on macOS / Linux — probe both so the fallback
-            // doesn't miss a perfectly valid SDK. #438 P2 for #389.
+            // doesn't miss a perfectly valid SDK.
             auto candidate = sdk / "platform-tools" / "adb";
             auto candidate_exe = sdk / "platform-tools" / "adb.exe";
             if (fs::exists(candidate_exe)) adb = candidate_exe.string();
