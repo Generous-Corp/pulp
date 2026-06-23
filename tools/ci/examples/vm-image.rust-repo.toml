@@ -1,6 +1,5 @@
 # Example vm-image manifest for a SECOND, non-Pulp repo — proves the golden
-# image template generalizes (planning/2026-06-01-macos-ci-isolation-plan.md,
-# Phase 3 "reusable template" acceptance criterion).
+# image template generalizes.
 #
 # This is a light Rust profile (e.g. a `shipyard-build-base`): same Tier 0
 # universal base, but NO Xcode and NO Skia — just the rust toolchain. A new

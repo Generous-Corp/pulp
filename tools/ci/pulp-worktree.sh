@@ -2,13 +2,12 @@
 # pulp-worktree.sh — per-branch git worktrees with isolated build dirs and a
 # SHARED build cache, so parallel branch work never churns one build/ dir
 # (which caused ODR heap corruption: a hung free() in View::~View when objects
-# compiled against different IRStyle layouts were mixed — see
-# planning/2026-06-01-macos-ci-isolation-plan.md, Phase 1).
+# compiled against different IRStyle layouts were mixed).
 #
 # Each worktree gets its OWN build/, but ccache + Skia + FetchContent sources
 # are shared from one cache root. ccache is configured to actually share across
-# worktrees (Codex review): CCACHE_BASEDIR points at the common worktree PARENT
-# (not a single workspace) so absolute paths normalize and hit-rates hold.
+# worktrees: CCACHE_BASEDIR points at the common worktree PARENT, not a single
+# workspace, so absolute paths normalize and hit-rates hold.
 #
 # Build dirs are disposable; ccache is the durable artifact. `gc` reclaims disk.
 #

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # tart-runner.sh — ephemeral, per-job GitHub Actions runner on Tart.
 #
-# This is the "right long-term" execution model from
-# planning/2026-06-01-macos-ci-isolation-plan.md: every CI job runs in a FRESH
-# clone of the runner golden, then the VM is destroyed. No build-dir churn, no
-# state drift, no ODR class of bug (the 0x3f800000 crash) — ever. The host stays
-# responsive because builds never touch it directly.
+# Every CI job runs in a fresh clone of the runner golden, then the VM is
+# destroyed. No build-dir churn, no state drift, no ODR class of bug (the
+# 0x3f800000 crash). The host stays responsive because builds never touch it
+# directly.
 #
 # Mechanism: mint a Just-In-Time (JIT) runner config from GitHub (inherently
 # single-job / ephemeral), clone pulp-build-runner, boot it with the host ccache
@@ -16,10 +15,10 @@
 # free on that host. To exceed 2 concurrent, run this supervisor on multiple
 # Macs (the same hosts that run the bare-metal runners today) or enable the
 # Appendix-D quota override on the dedicated Studio.
-# CAPACITY+QUEUE-AWARE --loop (#3299): the loop boots a VM only when there is
+# CAPACITY+QUEUE-AWARE --loop: the loop boots a VM only when there is
 # queued workflow work AND running_macos_vms < cap (PULP_VM_CAP,
-# default 2). It cooperates with tools/scripts/macos_reroute_watcher.py (task
-# #22), whose capacity check is likewise VM-slot-aware ("free VM slot", not
+# default 2). It cooperates with tools/scripts/macos_reroute_watcher.py, whose
+# capacity check is likewise VM-slot-aware ("free VM slot", not
 # single-runner busy/idle). Together they close the loop the operator described:
 # when the host frees up later, drain still-queued GitHub macOS jobs locally
 # instead of leaving them on cloud — without overbooking the 2-VM kernel cap.
@@ -48,13 +47,13 @@ WORKFLOW_NAME="${PULP_RUNNER_WORKFLOW_NAME:-Build and Test}"
 MATCH_LABELS="${PULP_RUNNER_QUEUE_MATCH_LABELS:-0}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 LOOP=0
-CAP="${PULP_VM_CAP:-2}"          # macOS 2-VM kernel cap per host (plan Appendix D)
+CAP="${PULP_VM_CAP:-2}"          # macOS 2-VM kernel cap per host
 POLL="${PULP_VM_POLL:-20}"       # seconds to wait when there's no work or no free slot
 # Static, machine-recognizable runner name (see derive_runner_name below).
-# These were the `ephr-$$-$i` churn before #3299-follow-up: the PID changed on
-# every launchd restart and the index grew per job, so the same physical Mac
-# showed up under a new throwaway name each time. A static name per (host, slot)
-# is the operator's preference and mirrors the bare-metal lane
+# The old `ephr-$$-$i` names changed on every launchd restart and the index grew
+# per job, so the same physical Mac showed up under a new throwaway name each
+# time. A static name per (host, slot) is the operator's preference and mirrors
+# the bare-metal lane
 # (bootstrap-macos-host.sh registers pulp-studio-01 with config.sh --replace).
 RUNNER_NAME="${PULP_RUNNER_NAME:-}"            # full override; wins if set
 RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-}"  # else "<prefix>-<slot>"
