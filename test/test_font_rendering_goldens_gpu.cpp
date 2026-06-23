@@ -43,8 +43,8 @@
 //  4. Determinism probe — same GPU surface, two consecutive frames,
 //     byte-exact pixel equality. A failure here means the GPU
 //     rendering pipeline has stateful drift between frames (lazy
-//     glyph-cache warming, residual atlas state, …). STOP and
-//     escalate via codex-consult; do NOT relax tolerances.
+//     glyph-cache warming, residual atlas state, …). Treat it as a
+//     render-pipeline investigation; do NOT relax tolerances.
 //
 //  5. Cross-backend tolerance probe — render "Hello" once on
 //     raster, once on GPU, and assert the two digests are within

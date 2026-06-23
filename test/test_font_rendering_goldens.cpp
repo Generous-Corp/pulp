@@ -27,7 +27,7 @@
 //     Skia point releases, hinter changes, and AMD/Intel/Apple
 //     subpixel rounding — and we already have a stricter
 //     "did this render at all" guard from the parity harness.
-//     The cross-backend slice wants "the cascade picked the
+//     The cross-backend guard wants "the cascade picked the
 //     right typeface and produced ink in the expected
 //     neighbourhood", which is what a structural digest answers.
 //
@@ -42,8 +42,8 @@
 //     the same process must produce *bit-identical* pixels.
 //     If that ever fails, it's a render-pipeline non-determinism
 //     bug (e.g. uninitialised glyph-cache state, racy lazy init)
-//     and not a golden-file issue. Stop and escalate to codex-consult
-//     rather than relaxing the golden.
+//     and not a golden-file issue. Treat it as a render-pipeline
+//     investigation rather than relaxing the golden.
 //
 //  5. On mismatch we dump the actual bitmap to a stable path
 //     so a developer can eyeball the diff. We bypass
@@ -355,9 +355,9 @@ TEST_CASE("font v2 Slice 3.4 — render pipeline is deterministic in-process",
 
     // Byte-exact pixel comparison. If this fails, something in
     // the render pipeline is racy / lazily-initialised / depends
-    // on global state — STOP and escalate (codex-consult); do
-    // not paper over by relaxing the golden tolerance, that is
-    // a different bug class.
+    // on global state. Treat that as a render-pipeline bug; do
+    // not paper over by relaxing the golden tolerance, that is a
+    // different bug class.
     const size_t total_bytes = pma.rowBytes() * pma.height();
     REQUIRE(std::memcmp(pma.addr(), pmb.addr(), total_bytes) == 0);
 }

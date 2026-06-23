@@ -61,7 +61,7 @@ TEST_CASE("TextEditor caret X comes from shaped offsets, not summed glyph widths
     editor.paint(canvas);
 
     const auto rect = editor.caret_rect();
-    // Shaped offset for byte 2 is 502; the pre-fix glyph-sum path would put it near 16.
+    // Shaped offset for byte 2 is 502; a glyph-sum path would put it near 16.
     REQUIRE(rect.x > 400.0f);
 }
 

@@ -11,7 +11,7 @@
 //
 // Current coverage is width parity over a hand-picked sample set
 // representative of the CHAIN INFO / CROSSOVER / MID-SIDE-WIDTH
-// regressions that drove this harness. The fuller 60-entry multilingual
+// regressions this harness guards. The fuller 60-entry multilingual
 // corpus lives in test/text_corpus/corpus.json; wiring that loader and
 // per-TextAnchor bbox assertions needs a JSON parser linked into this
 // test target.

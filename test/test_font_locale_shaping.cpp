@@ -112,9 +112,9 @@ TEST_CASE("word_break_step: backward from end yields offset < end", "[font][loca
 // Regression for pulp #2249: byte offsets that land strictly inside
 // a multi-byte UTF-8 scalar must be mapped to the
 // FLOOR UTF-16 index (the scalar that contains the offset), not the
-// next scalar's start. With the pre-fix `lower_bound` mapping a
-// mid-codepoint cursor jumped *past* the codepoint, and the off-by-
-// one cascaded through every word-break call. Verify with U+00E9 'é'
+// next scalar's start. A `lower_bound` mapping makes a mid-codepoint
+// cursor jump *past* the codepoint, and the off-by-one cascades
+// through every word-break call. Verify with U+00E9 'é'
 // (UTF-8 `0xC3 0xA9`): step forward from byte offset 1 (the middle
 // of the scalar) and assert the returned position is on a cluster
 // boundary — i.e. either 0 (start of é) or 2 (end of é), never 1.
@@ -145,10 +145,10 @@ TEST_CASE("word_break_step: mid-codepoint cursor rounds down to cluster boundary
 
 // Regression for pulp #2249: malformed UTF-8 lead bytes whose
 // continuation bytes don't match `0b10xxxxxx` must be advanced by
-// exactly 1 byte (matching ICU's U+FFFD substitution length). A
-// pre-fix `utf8_scalar_len` that accepted `0xC2 0x41` as a 2-byte
-// scalar desynced the bridge: build_bridge advanced 2, ICU advanced
-// 1, and subsequent byte→UTF-16 lookups returned wrong offsets.
+// exactly 1 byte (matching ICU's U+FFFD substitution length).
+// `utf8_scalar_len` must not accept `0xC2 0x41` as a 2-byte scalar;
+// that desyncs the bridge because build_bridge advances 2, ICU
+// advances 1, and subsequent byte→UTF-16 lookups return wrong offsets.
 // Verify with `"\xC2A"` — a lead byte claiming 2 bytes followed by
 // ASCII 'A'. Calling word_break_step over this input must not crash,
 // must return a valid offset in [0, text.size()], and must treat the
