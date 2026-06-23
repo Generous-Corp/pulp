@@ -1319,7 +1319,10 @@ commands:
         description: Search query string
       - name: --format
         kind: option
-        description: "Output format (text or json)"
+        description: "Output JSON; omit for default text output"
+      - name: --refresh
+        kind: flag
+        description: Force-refresh the remote registry cache while searching
     docs: reference/cli.md#search
 
   - name: update
@@ -1344,9 +1347,12 @@ commands:
       - name: --alternative
         kind: option
         description: Find alternatives to a specific package
+      - name: --include-license-gated
+        kind: flag
+        description: Include packages that require license review or commercial override
       - name: --format
         kind: option
-        description: "Output format (text or json)"
+        description: "Output JSON; omit for default text output"
     docs: reference/cli.md#suggest
 
   - name: target

@@ -1891,7 +1891,12 @@ Search the package registry.
 pulp search "pitch detection"
 pulp search dsp
 pulp search fft --format json
+pulp search fft --refresh
 ```
+
+Use `--refresh` with a query to bypass the remote-registry cache while
+searching. `--format json` emits machine-readable output; omit `--format` for
+the default text output.
 
 ### update
 
@@ -1914,7 +1919,13 @@ Context-aware package recommendations.
 pulp suggest --description "pitch shifting"
 pulp suggest --analyze src/my_processor.cpp
 pulp suggest --alternative pffft
+pulp suggest --description "onset detection" --include-license-gated
 ```
+
+Suggestions omit packages that require license review or a commercial override
+by default. Pass `--include-license-gated` when you explicitly want those
+candidates included. `--format json` emits machine-readable output; omit
+`--format` for the default text output.
 
 ### target
 

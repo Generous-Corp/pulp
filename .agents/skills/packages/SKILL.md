@@ -25,8 +25,14 @@ Search the registry for packages matching a need:
 
 ```bash
 ./build/pulp search "<query>"
+./build/pulp search "<query>" --refresh
 ./build/pulp suggest --description "<what the user needs>"
+./build/pulp suggest --description "<what the user needs>" --include-license-gated
 ```
+
+`pulp suggest` hides packages that require license review or a commercial
+override by default. Add `--include-license-gated` only when the user explicitly
+wants to inspect those candidates; otherwise prefer permissive defaults.
 
 Or read the registry directly for full details:
 

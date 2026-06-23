@@ -95,6 +95,7 @@ This will:
 pulp search "pitch detection"
 pulp search dsp
 pulp search fft --format json
+pulp search fft --refresh
 ```
 
 ### Get recommendations
@@ -103,7 +104,12 @@ pulp search fft --format json
 pulp suggest --description "I need pitch shifting"
 pulp suggest --analyze src/my_processor.cpp
 pulp suggest --alternative pffft
+pulp suggest --description "onset detection" --include-license-gated
 ```
+
+`pulp suggest` omits packages that require license review or a commercial
+override by default. Use `--include-license-gated` when you explicitly want to
+inspect those candidates alongside the permissive defaults.
 
 ### List installed packages
 
@@ -196,7 +202,7 @@ The package registry supports both local and remote modes:
 
 - **Local registry**: `tools/packages/registry.json` in the Pulp repo. This is the source of truth for the curated package list.
 - **Remote registry**: Hosted at `https://raw.githubusercontent.com/danielraffel/pulp-packages/main/registry.json` (the `pulp-packages` public repo). `pulp search` can query this remote registry, with results cached locally with a configurable TTL (default: 24 hours).
-- **Cache management**: Remote registry data is cached in the default cache directory. Use `pulp search --refresh` to force a cache refresh.
+- **Cache management**: Remote registry data is cached in the default cache directory. Use `pulp search <query> --refresh` to force a cache refresh while searching.
 
 The remote registry follows the same v2 schema as the local registry. Package submissions to the remote registry go through PR review with automated validation (license, schema, build).
 
