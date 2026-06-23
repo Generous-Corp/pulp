@@ -73,7 +73,7 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - 30+ signal processors: oscillator, filters, compressor, reverb, delay, FFT, envelope follower, and more
 - Thread-safe parameter system with atomic reads and gesture-aware bindings
 - Headless audio processing for testing and offline rendering
-- MIDI I/O with full event parsing
+- MIDI I/O with parsed short messages, SysEx, UMP helpers, and documented backend limits
 - Audio file import for WAV, AIFF/AIFF-C, FLAC, MP3, Ogg Vorbis, and CoreAudio-backed Apple formats
 - Audio file export for WAV/AIFF, with optional FLAC, MP3, AAC, and ALAC encoders via `pulp add`
 - Multi-bus I/O with sidechain support
