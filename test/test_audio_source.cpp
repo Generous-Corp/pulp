@@ -3,14 +3,140 @@
 #include <pulp/audio/source.hpp>
 #include <pulp/audio/source_player.hpp>
 #include <pulp/audio/transport_source.hpp>
+#include <pulp/audio/format_reader_source.hpp>
+#include <pulp/audio/mmap_reader.hpp>
+#include <pulp/audio/audio_file.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
 #include <vector>
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+std::filesystem::path fr_tmp_wav() {
+    static std::atomic<int> counter{0};
+    return std::filesystem::temp_directory_path() /
+           ("pulp_fmt_reader_src_" + std::to_string(counter.fetch_add(1)) + ".wav");
+}
+
+// Deterministic, channel-distinct, 16-bit-PCM-friendly generator.
+float fr_sample(std::uint64_t frame, std::uint32_t ch) {
+    return (static_cast<float>(frame % 97) / 97.0f) * 0.5f - 0.25f
+         + static_cast<float>(ch) * 0.1f;
+}
+
+bool fr_near(float a, float b) { return std::fabs(a - b) < 3e-4f; }
+
+}  // namespace
+
+TEST_CASE("AudioFormatReaderSource decodes blocks, offsets, EOF, loop, scratch growth",
+          "[audio][source][format-reader]") {
+    constexpr std::uint32_t channels = 2;
+    constexpr std::uint64_t total = 200;
+
+    const auto path = fr_tmp_wav();
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels.resize(channels);
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        data.channels[ch].resize(total);
+        for (std::uint64_t f = 0; f < total; ++f)
+            data.channels[ch][f] = fr_sample(f, ch);
+    }
+    REQUIRE(write_wav_file(path.string(), data));
+
+    auto reader = std::make_shared<MemoryMappedAudioReader>();
+    REQUIRE(reader->open(path.string()));
+
+    AudioFormatReaderSource src(reader);
+    src.prepare_to_play(64, 48000.0);
+    REQUIRE(src.get_total_length() == total);  // guards the num_frames field fix
+    REQUIRE(src.get_next_read_position() == 0);
+
+    // A block carrying `nch` channels over a `start+count`-long backing; the
+    // source writes [start, start+count). Returns the backing buffers.
+    auto run_block = [&](std::uint32_t nch, int start, int count)
+        -> std::vector<std::vector<float>> {
+        std::vector<std::vector<float>> back(
+            nch, std::vector<float>(static_cast<std::size_t>(start + count), -9.0f));
+        std::vector<float*> ptrs(nch);
+        for (std::uint32_t c = 0; c < nch; ++c) ptrs[c] = back[c].data();
+        BufferView<float> view(ptrs.data(), nch,
+                               static_cast<std::size_t>(start + count));
+        src.get_next_audio_block(view, start, count);
+        return back;
+    };
+
+    // Consecutive blocks reconstruct the file in order and advance position.
+    auto b0 = run_block(channels, 0, 64);
+    for (std::uint32_t ch = 0; ch < channels; ++ch)
+        for (int i = 0; i < 64; ++i)
+            REQUIRE(fr_near(b0[ch][i], fr_sample(static_cast<std::uint64_t>(i), ch)));
+    REQUIRE(src.get_next_read_position() == 64);
+
+    // start_sample offset: only [8,24) is written; the rest stays sentinel.
+    src.set_next_read_position(0);
+    auto off = run_block(channels, 8, 16);
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        for (int i = 0; i < 8; ++i) REQUIRE(off[ch][i] == -9.0f);
+        for (int i = 8; i < 24; ++i)
+            REQUIRE(fr_near(off[ch][i], fr_sample(static_cast<std::uint64_t>(i - 8), ch)));
+    }
+
+    // EOF zero-fill: 10 real frames then 30 silent, non-looping.
+    src.set_looping(false);
+    src.set_next_read_position(total - 10);
+    auto tail = run_block(channels, 0, 40);
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        for (int i = 0; i < 10; ++i)
+            REQUIRE(fr_near(tail[ch][i], fr_sample(total - 10 + i, ch)));
+        for (int i = 10; i < 40; ++i) REQUIRE(tail[ch][i] == 0.0f);
+    }
+
+    // Looping wraps the read head to 0 mid-block.
+    src.set_looping(true);
+    src.set_next_read_position(total - 4);
+    auto loop = run_block(channels, 0, 8);
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        for (int i = 0; i < 4; ++i)
+            REQUIRE(fr_near(loop[ch][i], fr_sample(total - 4 + i, ch)));
+        for (int i = 4; i < 8; ++i)
+            REQUIRE(fr_near(loop[ch][i], fr_sample(static_cast<std::uint64_t>(i - 4), ch)));
+    }
+    REQUIRE(src.get_next_read_position() == 4);
+
+    // Scratch growth: request MORE channels than prepare_to_play sized for; the
+    // persistent pointer scratch must resize and the file channels still decode.
+    src.set_looping(false);
+    src.set_next_read_position(0);
+    auto wide = run_block(3, 0, 32);
+    for (std::uint32_t ch = 0; ch < channels; ++ch)
+        for (int i = 0; i < 32; ++i)
+            REQUIRE(fr_near(wide[ch][i], fr_sample(static_cast<std::uint64_t>(i), ch)));
+
+    // Detached source (no reader) zero-fills regardless of scratch state.
+    AudioFormatReaderSource detached;
+    detached.prepare_to_play(32, 48000.0);
+    REQUIRE(detached.get_total_length() == 0);
+    std::vector<float> l(16, 0.7f), r(16, 0.7f);
+    float* dptrs[2] = {l.data(), r.data()};
+    BufferView<float> dview(dptrs, 2, 16);
+    detached.get_next_audio_block(dview, 0, 16);
+    for (int i = 0; i < 16; ++i) { REQUIRE(l[i] == 0.0f); REQUIRE(r[i] == 0.0f); }
+
+    reader->close();
+    std::filesystem::remove(path);
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // macOS plan item 1.8 — AudioSource hierarchy
