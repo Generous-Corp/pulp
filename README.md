@@ -19,7 +19,7 @@ Then:
 pulp create my-plugin && cd my-plugin && pulp run
 ```
 
-Three commands from zero to a working plugin in all formats.
+Three commands from zero to a working native plugin for your platform.
 
 The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use **Claude Code**, you can additionally install the [Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin) for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP server:
 
@@ -51,7 +51,7 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Optional AAX support via external SDK
 
 **Create & Build**
-- `pulp create` scaffolds a full plugin project with all format targets
+- `pulp create` scaffolds a full plugin project with the default native targets for your platform
 - `pulp build` builds all formats in one pass
 - `pulp test` runs the local test suite (`ctest` over the project's build directory); cross-platform execution and coverage roll up to CI — coverage is tracked at [codecov.io/gh/danielraffel/pulp](https://app.codecov.io/gh/danielraffel/pulp)
 - `pulp run` launches standalone for quick iteration
