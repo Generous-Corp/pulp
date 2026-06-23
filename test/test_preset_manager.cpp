@@ -229,11 +229,18 @@ TEST_CASE("PresetManager escapes metadata so special characters stay valid JSON"
 
     // Manufacturer / plugin / preset name carrying quotes and backslashes used
     // to produce a corrupt, unparseable preset file via raw `<<` interpolation.
+    // Windows preset filenames cannot contain quotes or backslashes, so keep
+    // the preset name filesystem-safe there while still exercising metadata
+    // escaping through the manufacturer and plugin fields.
     PresetManager pm(store, R"(Acme "Audio" \ Co)", R"(Plug"in)");
-    REQUIRE(pm.save(R"(My "Best" \ Preset)"));
+#ifdef _WIN32
+    const std::string preset_name = "My Best Preset";
+#else
+    const std::string preset_name = R"(My "Best" \ Preset)";
+#endif
+    REQUIRE(pm.save(preset_name));
 
-    const fs::path preset =
-        fs::path(pm.user_presets_dir()) / R"(My "Best" \ Preset.json)";
+    const fs::path preset = fs::path(pm.user_presets_dir()) / (preset_name + ".json");
     REQUIRE(fs::exists(preset));
 
     std::ifstream f(preset);
@@ -246,7 +253,7 @@ TEST_CASE("PresetManager escapes metadata so special characters stay valid JSON"
     REQUIRE(doc.isObject());
     REQUIRE(std::string(doc["manufacturer"].getString()) == R"(Acme "Audio" \ Co)");
     REQUIRE(std::string(doc["plugin"].getString()) == R"(Plug"in)");
-    REQUIRE(std::string(doc["name"].getString()) == R"(My "Best" \ Preset)");
+    REQUIRE(std::string(doc["name"].getString()) == preset_name);
 }
 
 TEST_CASE("PresetManager unsaved changes tracking", "[state][preset]") {
