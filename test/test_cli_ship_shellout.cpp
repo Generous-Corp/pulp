@@ -765,7 +765,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif
 
-// Item 7.5 (macos-plugin-authoring-plan): per-artifact .pkg / .dmg
+// macOS authoring item 7.5: per-artifact .pkg / .dmg
 // selection. The parser-level checks belong here next to the other
 // `ship package` arg cases; real codesign + pkgbuild integration
 // runs on the self-hosted Mac runner.
@@ -785,7 +785,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// Item 7.4 (macos-plugin-authoring-plan): `pulp ship release` orchestrates
+// macOS authoring item 7.4: `pulp ship release` orchestrates
 // sign → package → notarize → staple as one command. The shellout
 // covers argv parsing and the macOS-only guard; the real signing /
 // notarization round-trip lives on the self-hosted Mac runner because
@@ -878,7 +878,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// Item 7.4b (macos-plugin-authoring-plan): `pulp build --install` exists
+// macOS authoring item 7.4b: `pulp build --install` exists
 // and rejects invalid flag combinations before touching the filesystem.
 // The end-to-end install path is unit-tested via install_paths_mac;
 // here we cover the CLI-surface contract.
@@ -1010,7 +1010,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// ── ASC API key notary flow (2026-05-26) ────────────────────────────
+// ── ASC API key notary flow ─────────────────────────────────────────
 //
 // `pulp ship notarize --dry-run` prints the resolved `xcrun notarytool`
 // argv without contacting Apple. These tests pin the resolution
@@ -1252,7 +1252,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto root = make_fake_project("notarize-path-app", true);
     auto appp = (root / "Demo.app").string();
 
-    // notarytool can't submit a bare .app (Codex P2). Reject it with a
+    // notarytool can't submit a bare .app (P2). Reject it with a
     // pointer to `share`, before any submission — even in --dry-run.
     auto r = run_pulp_in(root, {"ship", "notarize", "--path", appp, "--dry-run"});
     REQUIRE_FALSE(r.timed_out);
@@ -1279,7 +1279,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
       out << "<plist><dict></dict></plist>\n"; }
 
     // --skip-sign leaves the dmg unsigned. The signature guard must skip it
-    // rather than submit an unsigned image to notarytool (Codex P1 fix:
+    // rather than submit an unsigned image to notarytool (P1 fix:
     // never route an unsigned .pkg/.dmg to notarization).
     auto r = run_pulp_in(root, {"ship", "release", "--dmg", "--skip-sign"}, 90000);
     REQUIRE_FALSE(r.timed_out);

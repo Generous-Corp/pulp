@@ -266,7 +266,7 @@ TEST_CASE("pulp import-design --from claude emits classnames.json by default",
 
 TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean import",
           "[cli][import-design][fidelity][shellout]") {
-    // Codex #3267: the dry-run branch must honor --strict-fidelity (return
+    // #3267: the dry-run branch must honor --strict-fidelity (return
     // fidelity_failed ? 4 : 0), not an unconditional 0. A clean import has no
     // hard findings, so a harness running --dry-run --strict-fidelity sees 0 —
     // and the new return path is exercised. (The failure→4 path needs real
@@ -440,14 +440,10 @@ TEST_CASE("pulp import-design respects explicit sidecar paths over --output anch
     REQUIRE_FALSE(fs::exists(tmp / "classnames.json"));
 }
 
-// NOTE: Codex-P1 tests for the package.json overwrite + vendor-source
-// hard-fail (added to #1060) were pulled because they failed flakily on
-// Linux/macOS in CI even with the production fix in place, and the
-// vendor test failed to compile on Windows MSVC (setenv/unsetenv are
-// POSIX-only). The production fix at
-// `tools/import-design/pulp_import_design.cpp` is preserved; tests
-// tracked under #1180 (env-aware ProcessResult) for later restoration
-// once we can deterministically influence the child's getenv() lookups.
+// Package.json overwrite and vendor-source hard-fail coverage from #1060 is
+// deferred until #1180 gives shellout tests env-aware ProcessResult support.
+// The production fix remains in tools/import-design/pulp_import_design.cpp;
+// the earlier vendor test used POSIX-only setenv/unsetenv and broke MSVC.
 
 // ── pulp #41 follow-up: --from figma auto-routes a figma-plugin envelope ──
 // A Figma-plugin export passed to `--from figma` used to be fed to
@@ -668,7 +664,7 @@ TEST_CASE("pulp import-design lowers an SVG path node to a native SvgPath (end-t
 
 TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no silent drop)",
           "[cli][import-design][sprite][shellout]") {
-    // Codex P2 on the hoist: a knob exported as MULTIPLE asset-backed image
+    // Hoist regression: a knob exported as MULTIPLE asset-backed image
     // layers (body + logo/highlight) can't be a single-frame sprite skin, and
     // the leaf knob codegen would silently drop every layer after the first.
     // So when there is >1 asset-image child the importer DEMOTES to a plain

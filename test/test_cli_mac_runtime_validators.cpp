@@ -1,7 +1,6 @@
-// test_cli_mac_runtime_validators.cpp — Phase 5 chainer plan
+// test_cli_mac_runtime_validators.cpp
 //
-// Hermetic unit tests for `pulp validate --target {standalone|auv3|macho}`
-// (see planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md).
+// Hermetic unit tests for `pulp validate --target {standalone|auv3|macho}`.
 // Uses the MacValidatorEnv injection seam to stub every shell-out and
 // filesystem probe, so these tests run on any host — including Linux
 // CI legs — without needing real .app/.appex/auval.
@@ -142,7 +141,7 @@ TEST_CASE("standalone validator: surfaces non-zero exit",
     REQUIRE(r.summary.find("Library not loaded") != std::string::npos);
 }
 
-// Regression: Codex PR #3005 P1. The smoke command must pass
+// Regression: PR #3005 P1. The smoke command must pass
 // PULP_SCREENSHOT alongside PULP_HEADLESS so `run_with_editor` doesn't
 // early-fail on the missing screenshot path (see
 // core/format/src/standalone.cpp:264). Without PULP_SCREENSHOT, every
@@ -171,7 +170,7 @@ TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
     REQUIRE(cmd.find("PULP_HEADLESS=1") != std::string::npos);
 }
 
-// Regression: Codex PR #3005 P2. A `.app` bundle that exists but has no
+// Regression: PR #3005 P2. A `.app` bundle that exists but has no
 // runnable binary inside is a packaging regression. Previously this
 // returned `skip` (exit 0 unless --strict), letting malformed standalone
 // artifacts sneak past `pulp validate --target standalone`. Now it
