@@ -7,6 +7,7 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/platform/file_dialog.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -393,7 +394,14 @@ bool StandaloneApp::start() {
             }
         }
 
-        processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
+        {
+            // Flush denormals to zero for the DSP callback so quiet tails in
+            // recursive filter/reverb state can't stall the audio thread, then
+            // restore the host's FP mode. See docs/guides/dsp-threading.md
+            // "Numeric mode".
+            pulp::signal::ScopedFlushDenormals flush_denormals;
+            processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
+        }
 
         const size_t out_ch = std::min(output.num_channels(), output_meter_ptrs_.size());
         for (size_t c = 0; c < out_ch; ++c)
