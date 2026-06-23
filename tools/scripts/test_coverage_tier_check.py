@@ -748,8 +748,8 @@ def _enumerate_first_party_sources() -> list[str]:
 class TierCoverageCompleteness(unittest.TestCase):
     """Audit gate (#1056): every tier matches ≥1 file, every file → 1 tier.
 
-    Mirrors the structural lock-in pattern from #1005 (commits efefe144 +
-    b258730c) and the inspect classification fix from #842. Two failure
+    Mirrors the structural lock-in pattern from #1005 and the inspect
+    classification fix from #842. Two failure
     modes the runtime gate cannot catch on its own:
 
     1. A tier whose globs match nothing (silent no-op — the floor never

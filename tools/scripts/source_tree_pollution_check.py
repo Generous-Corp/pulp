@@ -28,8 +28,6 @@ Modes:
                          (CI workflow use — pass the PR diff file list).
   --mode=root-allowlist  inspect top-level paths on `--rev` (default HEAD)
                          and fail if any are not in ALLOWED_ROOT_PATHS.
-                         Companion-track U-1 — see
-                         planning/2026-05-17-refactor-roadmap-final.md.
 
 Exit codes:
   0  no pollution detected
@@ -101,7 +99,6 @@ ALLOWED_ROOT_PATHS = frozenset({
     "apple",
     # Design-system source assets (vendored token JSON/CSS + fidelity
     # reference renders that core/view theming and import tooling consume).
-    # See planning/Design-System-Import-Plan.md Phase 0.
     "assets",
     "bindings",
     "ci",

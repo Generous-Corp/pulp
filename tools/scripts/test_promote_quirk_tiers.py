@@ -164,7 +164,7 @@ class LogParseTests(unittest.TestCase):
             log = _write(tmp, "random-other-file.txt", "garbage\n")
             self.assertEqual(pqt.parse_log_results(log), {})
 
-    # Regression: #2971 / Codex comment 3305857871 — filename regex used to
+    # Regression: #2971 — filename regex used to
     # reject host segments containing spaces, so real bench output from
     # `FL Studio`, `Ableton Live`, `Logic Pro`, `Studio One`, `Bitwig Studio`,
     # and `Pro Tools` was silently skipped (the bench plugin writes filenames
@@ -188,7 +188,7 @@ class LogParseTests(unittest.TestCase):
                     f"filename {name!r} should parse",
                 )
 
-    # Regression: #2971 / Codex comment 3305857884 — host names emitted by
+    # Regression: #2971 — host names emitted by
     # `host_type_name()` (e.g. "REAPER", "WaveLab", "Logic Pro", "FL Studio")
     # never matched rule keys like `Reaper`/`Wavelab`/`LogicPro`. Without
     # normalization, only the `*` rule fired and host-specific promotions
