@@ -911,6 +911,8 @@ Modes:
   (`validation-report-v1.schema.json`).
 - `--screenshot` — capture plugin editor PNGs under
   `artifacts/screenshots/`.
+- `--target {standalone|auv3|macho|all} <bundle...>` — run macOS runtime
+  validators on explicit bundle paths instead of walking `build/`.
 
 Gotchas:
 
@@ -935,6 +937,13 @@ Gotchas:
   stderr). If you add a new validator to `cmd_validate.cpp`, also
   add it to the priority list in `tools/cli/validator_discovery.cpp`
   so the preflight covers it.
+- **Keep `/validate` and the plugin guide current.** The slash command and
+  `docs/guides/claude-code-plugin.md` command table must describe the same
+  validator set and options as `cmd_validate.cpp`,
+  `docs/reference/cli.md#validate`, and `docs/status/cli-commands.yaml`.
+  Do not describe `pulp validate` as only `auval` / `clap-validator` /
+  `pluginval`; AAX, optional `vstvalidator`, reports, screenshots, strict
+  mode, and `--target` are part of the current surface.
 
 ### `pulp doctor --validators`
 

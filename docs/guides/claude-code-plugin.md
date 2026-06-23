@@ -60,7 +60,7 @@ Then restart Claude Code or run `/reload-plugins` to activate.
 | `/test [pattern]` | Run tests, optionally filtered by pattern |
 | `/create <name>` | Scaffold a new plugin or app project |
 | `/status` | Show project status, build state, configuration |
-| `/validate` | Run plugin format validators (auval, clap-validator) |
+| `/validate` | Run plugin format validators and validation reports |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
 | `/import-design` | Import from Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX |
