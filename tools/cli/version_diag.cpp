@@ -56,8 +56,8 @@ fs::path user_home_dir_local() {
 // translation unit has no link dependency on cli_common.cpp, which
 // would pull in the entire CLI runtime.
 //
-// Codex 2026-04-21 review on #546: the earlier version matched any
-// substring containing `key`, so a commented example like
+// The earlier version matched any substring containing `key`, so a
+// commented example like
 // `# cli_min_version = "0.24.0"` triggered a false skew warning. Now
 // we strip the line's `#` comment first, then insist the key appears
 // as a full token (preceded by line-start/whitespace and followed by
@@ -108,7 +108,7 @@ std::string read_toml_scalar(const fs::path& toml, const std::string& key) {
 // are unset` so `pulp doctor --versions` stays script-friendly when
 // piped into CI logs. Matches the rest of the CLI's
 // cli_common::init_color() policy without pulling the whole runtime
-// into this TU. Codex 2026-04-21 review on #546.
+// into this TU.
 bool should_emit_color() {
     static const bool enabled = []() {
         // NO_COLOR (https://no-color.org/) — any non-empty value disables.

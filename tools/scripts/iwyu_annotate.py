@@ -13,7 +13,7 @@ IWYU prints per-file suggestions like:
     ...
     ---
 
-Issue #594 Phase 2 only cares about the "should add" section — that is
+Issue #594 only cares about the "should add" section — that is
 the class of bug (transitive-include) that keeps reaching main. "Should
 remove" is the minimal-include class of suggestion IWYU is famous for,
 and #594 explicitly calls it a non-goal.
