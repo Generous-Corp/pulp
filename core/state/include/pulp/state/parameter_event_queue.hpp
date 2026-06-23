@@ -4,7 +4,15 @@
 //
 // Ordering contract: events are sorted by sample_offset ascending before
 // being handed to consumers. Callers that append events unordered must call
-// sort() before passing the queue on.
+// sort() before passing the queue on. sort() is a stable insertion sort:
+// equal sample_offsets keep their push order. It is tuned for the common case
+// where hosts deliver automation already in (or near) sample-offset order —
+// O(n) on sorted input, O(n*shift) in general, and O(n^2) only on a fully
+// reversed adversarial flood. n is bounded by kCapacity, so even the worst
+// case is a bounded, allocation-free pass on the audio thread; there is no
+// unbounded blowup. If a future audio-rate source can deliver large reverse-
+// ordered batches, switch to a counting/bucket sort keyed on sample_offset
+// (offsets are bounded by the block size) rather than raising kCapacity.
 //
 // Realtime contract: fixed-capacity storage only. push(), clear(), sort(),
 // iteration, and events() do not allocate; overflow is reported through
