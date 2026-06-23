@@ -1698,7 +1698,7 @@ pulp help
 
 **Status**: usable
 
-Show, bump, or check version consistency across all surfaces (CMakeLists.txt, SDK constant, CHANGELOG, AU Info.plist).
+Show, bump, or check version consistency across the framework, plugin, changelog, and generated metadata surfaces.
 
 ```bash
 pulp version                  # Show current SDK and project versions
@@ -1706,6 +1706,7 @@ pulp version bump patch       # Increment patch version
 pulp version bump minor       # Increment minor version
 pulp version bump major --plugin  # Bump plugin version (pulp_add_plugin VERSION)
 pulp version check            # Verify version consistency
+pulp version check --with-bump-check  # Also run the PR version-bump gate report
 ```
 
 The `bump` subcommand updates `CMakeLists.txt project(VERSION)` and adds a CHANGELOG.md entry. The SDK version constant is derived from CMake via `configure_file`, so a rebuild picks up the change automatically. Use `--plugin` to bump the `pulp_add_plugin(... VERSION ...)` line instead.
@@ -1714,6 +1715,10 @@ The `check` subcommand verifies:
 - SDK version constant matches CMakeLists.txt
 - AU Info.plist template uses a computed version integer (not hardcoded)
 - CHANGELOG latest heading matches CMakeLists.txt
+- Claude plugin manifest version is valid semver
+- Claude marketplace top-level version matches the plugin manifest
+- Claude marketplace `plugins[0].version` matches the plugin manifest
+- `--with-bump-check` also runs `tools/scripts/version_bump_check.py --mode=report`
 
 ### kit
 

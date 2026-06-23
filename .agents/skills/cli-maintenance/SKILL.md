@@ -1047,13 +1047,17 @@ Gotchas:
 
 ## `pulp version check`
 
-Validates consistency across the three version-bearing surfaces:
+Validates consistency across the version-bearing surfaces:
 
 - SDK: `CMakeLists.txt` `project(... VERSION x.y.z ...)` ↔ compile-time `PULP_SDK_VERSION` constant.
+- AU metadata: the AU Info.plist template must use the computed integer form instead of a hardcoded version.
+- Changelog: the latest `CHANGELOG.md` heading must match the framework version.
 - Claude plugin: top-level `"version"` in `.claude-plugin/plugin.json` (semver).
 - Marketplace: top-level `"version"` in `.claude-plugin/marketplace.json` (must match `plugin.json`).
+- Marketplace entry: `.claude-plugin/marketplace.json` `plugins[0].version` (must match `plugin.json`).
+- Optional bump gate: `--with-bump-check` also runs `tools/scripts/version_bump_check.py --mode=report`.
 
-Gotcha: JSON files can have multiple `"version"` fields (e.g. `metadata.version`, `plugins[0].version`). The check anchors on the top-level field via a `^(?:  )?"version":` regex — don't introduce a JSON parser unless you genuinely need schema validation.
+Gotcha: JSON files can have multiple `"version"` fields (for example, top-level `version`, `metadata.version`, and `plugins[0].version`). The check uses the in-repo JSON parser so top-level and marketplace-entry versions stay distinct; do not replace that with ad hoc regex extraction.
 
 
 ### Note: pulp scan / pulp host added
