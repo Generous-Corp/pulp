@@ -533,12 +533,23 @@ commands:
 
   - name: version
     status: usable
-    summary: Show, bump, or check version consistency across Pulp framework and plugin version surfaces.
+    summary: Show, bump, or check version consistency across Pulp framework, plugin, changelog, and generated metadata surfaces.
     subcommands:
       - name: bump
         summary: Increment the framework version, or plugin version when --plugin is set
+        args:
+          - name: component
+            kind: positional
+            description: Version component to increment: patch, minor, or major.
+          - name: --plugin
+            kind: flag
+            description: Bump the plugin version declared in `pulp_add_plugin(... VERSION ...)` instead of the framework version.
       - name: check
-        summary: Verify version consistency across CMake, generated SDK constants, changelog, and AU metadata
+        summary: Verify version consistency across CMake, generated SDK constants, changelog, AU metadata, plugin metadata, and marketplace metadata.
+        args:
+          - name: --with-bump-check
+            kind: flag
+            description: Also run the PR version-bump gate report.
     docs: reference/cli.md#version
 
   - name: config
