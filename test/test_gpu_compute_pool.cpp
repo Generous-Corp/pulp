@@ -1,7 +1,4 @@
-// test_gpu_compute_pool.cpp — unit tests for the staging buffer pool
-// introduced in Slice 1 of the zero-copy ralph loop.
-//
-// Design reference: planning/zero-copy-slice-1-design-2026-04-20.md
+// test_gpu_compute_pool.cpp — unit tests for the staging buffer pool.
 //
 // Tests live here (not in test_gpu_compute.cpp) because they exercise
 // the pool in isolation using a real Dawn device obtained from
@@ -307,13 +304,12 @@ TEST_CASE("StagingBufferPool clear() drops all tracked buffers",
 
 TEST_CASE("StagingBufferPool::discard drops in_flight slot without recycling",
           "[render][gpu][pool][codex-560]") {
-    // Codex 2026-04-21 wave 2 P1 on #560: on MapAsync timeout the
-    // caller cannot hand the buffer back via release() (the GPU may
-    // still be mapping it) but must drop the pool's reference so
-    // subsequent acquires don't grow in_flight_ without bound. This
-    // test hammers that path: 32 discarded buffers must leave both
-    // free_count() and in_flight_count() bounded; without discard()
-    // in_flight_count() would grow linearly.
+    // On MapAsync timeout, the caller cannot hand the buffer back via
+    // release() (the GPU may still be mapping it) but must drop the
+    // pool's reference so subsequent acquires don't grow in_flight_
+    // without bound. This test hammers that path: 32 discarded buffers
+    // must leave both free_count() and in_flight_count() bounded;
+    // without discard(), in_flight_count() would grow linearly.
     auto env = make_dawn_env();
     if (!env.valid()) {
         WARN("no Dawn device available; skipping");

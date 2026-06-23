@@ -1,4 +1,4 @@
-// Phase 6.5 — Dawn GPU timestamp queries.
+// Dawn GPU timestamp queries.
 //
 // These tests cover the *pure* resolution layer of `gpu_timestamps.hpp`:
 // the nanosecond-tick -> millisecond conversion, the `decode_resolved_
@@ -10,7 +10,7 @@
 // `decode_resolved_ticks` is the seam `GpuTimestamps::resolve()` uses to
 // turn a mapped Dawn readback buffer into ticks — covering it here is
 // what proves `read_back()` surfaces populated, correctly-converted
-// numbers rather than the empty vector the Phase 6.5 P1 review flagged.
+// numbers rather than the empty vector returned by the earlier path.
 //
 // Live-device smoke (a real `wgpu::QuerySet` resolved against Metal/
 // Vulkan via `resolve()`) is deferred to CI's GPU matrix; the math and
@@ -94,12 +94,12 @@ TEST_CASE("timestamp_pair_to_ms treats an equal pair as zero duration",
 
 // ── decode_resolved_ticks — mapped-buffer byte decode ───────────────────────
 //
-// This is the seam the Phase 6.5 P1 review flagged: before this layer
-// existed, `GpuTimestamps::read_back()` returned an internal vector that
-// nothing ever populated, so GPU timings never surfaced even when the
-// device supported `timestamp-query`. `resolve()` now decodes the
-// mapped readback buffer through `decode_resolved_ticks`; these cases
-// pin that decode against the byte layout a real mapped buffer carries.
+// Before this layer existed, `GpuTimestamps::read_back()` returned an
+// internal vector that nothing ever populated, so GPU timings never
+// surfaced even when the device supported `timestamp-query`. `resolve()`
+// now decodes the mapped readback buffer through `decode_resolved_ticks`;
+// these cases pin that decode against the byte layout a real mapped
+// buffer carries.
 
 TEST_CASE("decode_resolved_ticks decodes a mapped timestamp buffer",
           "[render][gpu-timestamps]") {

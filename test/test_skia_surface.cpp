@@ -183,10 +183,9 @@ TEST_CASE("SkiaSurface null without Skia", "[render][skia]") {
 // ---------------------------------------------------------------------------
 // SkPicture (.skp) serialization on the Graphite backend
 //
-// Phase 6.4 spike (inspector roadmap): the planned "capture Skia frame"
-// feature wants to write a `.skp` artifact that the Skia team's own
-// `skiadebugger` can replay. Pulp renders through the Graphite backend
-// (skgpu::graphite::Context) — `.skp` / SkPicture is the legacy
+// The frame-capture path writes a `.skp` artifact that the Skia team's
+// own `skiadebugger` can replay. Pulp renders through the Graphite
+// backend (skgpu::graphite::Context) — `.skp` / SkPicture is the legacy
 // SkPicture serialization format, so we must verify the two compose.
 //
 // Verdict from these tests: `SkPicture` is backend-independent. An
@@ -196,8 +195,8 @@ TEST_CASE("SkiaSurface null without Skia", "[render][skia]") {
 // process is running. The single caveat is documented in SkPicture.h: the
 // default serializer encodes embedded `SkImage`s as nullptr unless the
 // caller supplies `SkSerialProcs::fImageProc`. That is format policy, not a
-// Graphite limitation — Phase 6.4 must set fImageProc to capture frames
-// that embed images. These tests pin both facts.
+// Graphite limitation: callers must set fImageProc to capture frames that
+// embed images. These tests pin both facts.
 // ---------------------------------------------------------------------------
 #ifdef PULP_HAS_SKIA
 
@@ -286,7 +285,7 @@ TEST_CASE("SkPicture round-trips through an SkStream", "[render][skia][skp]") {
     sk_sp<SkPicture> picture = record_vector_scene();
     REQUIRE(picture != nullptr);
 
-    // serialize(SkWStream*) is the path Phase 6.4 will use to write a file.
+    // serialize(SkWStream*) is the file-write path.
     SkDynamicMemoryWStream out;
     picture->serialize(&out);
     REQUIRE(out.bytesWritten() > 0);
@@ -302,11 +301,10 @@ TEST_CASE("SkPicture round-trips through an SkStream", "[render][skia][skp]") {
 }
 
 TEST_CASE("SkPicture serialization is independent of any GPU context", "[render][skia][skp]") {
-    // The whole point of the Phase 6.4 spike: prove SkPicture works without
-    // — and regardless of — a live Graphite context. A picture recorded and
-    // serialized with no GPU context whatsoever still round-trips, which is
-    // exactly why it is safe on the Graphite backend (Graphite never touches
-    // the SkPicture pipeline).
+    // SkPicture must work without — and regardless of — a live Graphite
+    // context. A picture recorded and serialized with no GPU context
+    // whatsoever still round-trips, which is exactly why it is safe on the
+    // Graphite backend (Graphite never touches the SkPicture pipeline).
     sk_sp<SkPicture> picture = record_vector_scene();
     sk_sp<SkData> blob = picture->serialize();
     REQUIRE(blob != nullptr);
@@ -320,10 +318,10 @@ TEST_CASE("SkPicture serialization is independent of any GPU context", "[render]
 TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
           "[render][skia][skp]") {
     // SkPicture.h documents: "The default behavior for serializing SkImages
-    // is to encode a nullptr." This is the one real caveat for Phase 6.4 —
-    // a captured frame that embeds images must supply SkSerialProcs so the
-    // image survives the round trip. This test pins that contract so the
-    // Phase 6.4 implementation does not silently ship null-image captures.
+    // is to encode a nullptr." A captured frame that embeds images must
+    // supply SkSerialProcs so the image survives the round trip. This test
+    // pins that contract so frame capture does not silently ship null-image
+    // captures.
 
     // A tiny raster image (the kind a real frame would embed; Graphite frames
     // upload raster sources, so this mirrors the captured-frame case).
@@ -390,14 +388,14 @@ TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
 #endif  // PULP_HAS_SKIA
 
 // ---------------------------------------------------------------------------
-// SkpFrameCapture — Phase 6.4 `.skp` frame-capture API (core/render)
+// SkpFrameCapture — `.skp` frame-capture API (core/render)
 //
 // These exercise the public capture surface in
 // core/render/include/pulp/render/skp_capture.hpp: record a frame's
 // draw ops through the capture's pulp::canvas::Canvas, serialize a
 // `.skp` artifact, and prove the round trip — including the load-bearing
-// embedded-image-pixel assertion the spike pinned (cullRect equality
-// alone is insufficient). The capture path is GPU-backend-agnostic and
+// embedded-image-pixel assertion (cullRect equality alone is insufficient).
+// The capture path is GPU-backend-agnostic and
 // needs no live GPU context, so these run on the CI matrix even without
 // a GPU adapter.
 // ---------------------------------------------------------------------------
@@ -499,8 +497,8 @@ TEST_CASE("SkpFrameCapture writes a loadable .skp file", "[render][skia][skp]") 
 
 TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
           "[render][skia][skp]") {
-    // The load-bearing Phase 6.4 assertion: a frame that embeds an image
-    // must survive the .skp round trip with its pixels intact.
+    // A frame that embeds an image must survive the .skp round trip with its
+    // pixels intact.
     // SkpFrameCapture sets SkSerialProcs::fImageProc (PNG encode); if it
     // did not, the embedded image would deserialize to null and the
     // replay would be blank. Replay + pixel-sample is what proves the
@@ -612,11 +610,11 @@ TEST_CASE("SkiaCanvas fill-rule punches an even-odd hole in compound paths",
 
 TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
           "[render][skia][skp]") {
-    // Codex P1: SkPicture::serialize()'s image proc must not silently drop
-    // GPU-texture-backed embedded images. SkpFrameCapture rasterizes them
-    // via the Graphite Context threaded through the capture, so a frame
-    // that embeds a GPU image survives the .skp round trip with pixels
-    // intact. Requires a live GPU adapter — skips cleanly without one.
+    // SkPicture::serialize()'s image proc must not silently drop GPU-texture-
+    // backed embedded images. SkpFrameCapture rasterizes them via the
+    // Graphite Context threaded through the capture, so a frame that embeds
+    // a GPU image survives the .skp round trip with pixels intact. Requires
+    // a live GPU adapter — skips cleanly without one.
     auto gpu = GpuSurface::create_dawn();
     if (!gpu) return;
     GpuSurface::Config gpu_config{};
@@ -678,10 +676,9 @@ TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
 
 TEST_CASE("SkpFrameCapture writes atomically — a failed write leaves no file",
           "[render][skia][skp]") {
-    // Codex P2: the .skp must never land half-written and must never
-    // clobber a previously-valid capture. The write goes to a sibling
-    // <dest>.tmp and is renamed onto the destination only on full
-    // success.
+    // The .skp must never land half-written and must never clobber a
+    // previously-valid capture. The write goes to a sibling <dest>.tmp
+    // and is renamed onto the destination only on full success.
 
     SECTION("failed write does not create the destination file") {
         // A path inside a directory that does not exist: opening the

@@ -232,15 +232,14 @@ TEST_CASE("GpuCompute benchmark magnitude", "[render][gpu][compute][benchmark]")
     REQUIRE(results.size() == sizes.size());
 }
 
-// ── Slice 1 acceptance: staging buffer pool reuse ───────────────────────────
+// ── Staging buffer pool reuse ───────────────────────────────────────────────
 //
-// Before Slice 1 landed, compute_magnitude() created a fresh wgpu::Buffer on
-// every call — steady-state GPU memory kept climbing because Dawn can't
-// immediately reclaim backing storage on release, and the bench harness
-// reveals this as an allocator-churn hotspot. With the StagingBufferPool,
-// buffers of the same size/usage are recycled; 1000 iterations should reach
-// steady state after the first 2–3 calls and produce a flat allocation
-// profile. See planning/zero-copy-slice-1-design-2026-04-20.md.
+// Without the pool, compute_magnitude() created a fresh wgpu::Buffer on every
+// call — steady-state GPU memory kept climbing because Dawn can't immediately
+// reclaim backing storage on release, and the bench harness reveals this as an
+// allocator-churn hotspot. With the StagingBufferPool, buffers of the same
+// size/usage are recycled; 1000 iterations should reach steady state after the
+// first 2–3 calls and produce a flat allocation profile.
 //
 // Verifies:
 // - No correctness regression under sustained hot-loop usage
@@ -281,7 +280,7 @@ TEST_CASE("GpuCompute magnitude hot loop reuses pool buffers",
     // ceiling instead of tripping the sentinel, and the flake window widens on a
     // slow/virtualized overflow runner. 5 * 100 = 500 submits → ~240 ms/call
     // ceiling, comfortably above the 100 ms sentinel. (Was 5 * 1000 = 5000 →
-    // ~24 ms ceiling, below the sentinel — see #3411 review r3352262249.)
+    // ~24 ms ceiling, below the sentinel — see #3411.)
     constexpr int kBatches = 5;
     constexpr int kItersPerBatch = 100;
     std::vector<double> per_call_us_samples;
