@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template (#4101).
+"""Tests for tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template.
 
 The sanitizer VM lane is a SECONDARY macOS lane sharing a 2-guest-capped host
 with the required `macos` gate. Two contracts keep it from repeating the
@@ -8,7 +8,7 @@ are encoded in this launchd template:
 
   1. TCC-safe home-path shape — launchd (macOS TCC) cannot read scripts or a VM
      store under /Volumes, so EVERY path must be under $HOME. A /Volumes path is
-     exactly what crash-looped the pre-#4087 coverage template.
+     exactly what crash-looped the earlier coverage template.
   2. Gate-protecting routing — a dedicated label (never the pulp-build gate
      pool), cap=1, and the tartci idle-gate env (yield to "Build and Test") so
      the lane stands down whenever the required gate has work.
@@ -64,7 +64,7 @@ class SanitizerTemplateTests(unittest.TestCase):
 
     # ── Contract 1: TCC-safe, fully under $HOME ──────────────────────────────
     def test_no_volumes_path_in_any_value(self) -> None:
-        # A /Volumes path in any plist VALUE is the TCC crash-loop bug (#4087).
+        # A /Volumes path in any plist VALUE is the TCC crash-loop bug.
         for v in _string_values(self.plist):
             self.assertNotIn("/Volumes", v, f"value {v!r} is under /Volumes")
 
@@ -139,7 +139,7 @@ class SanitizerTemplateTests(unittest.TestCase):
 
 class AllTartRunnerTemplatesTCCSafe(unittest.TestCase):
     """Cheap regression net across every Tart macOS runner template: none may
-    carry a /Volumes path (the #4087 crash-loop class) and all must parse."""
+    carry a /Volumes path (the TCC crash-loop class) and all must parse."""
 
     def test_every_tart_macos_template_is_volumes_free_and_parses(self) -> None:
         templates = sorted(LAUNCHD.glob("pulp-tart-runner-*macos*.plist.template"))

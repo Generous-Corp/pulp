@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # tart-provision.sh — build/refresh layered "golden master" Tart VMs for CI,
-# and resize them. Encodes the tier checklist from
-# planning/2026-06-01-macos-ci-isolation-plan.md as reproducible steps (the
-# "defined and easy" template), so a new golden master is `tart-provision <tier>`
-# rather than hand-clicking.
+# and resize them. Encodes the tier checklist as reproducible steps, so a new
+# golden master is `tart-provision <tier>` rather than hand-clicking.
 #
 # Images (date-tag with the `tag` subcommand):
 #   macos-build-base   Tier 0: sshd+key, auto-login, brew(git gh rsync ccache jq
@@ -46,7 +44,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
 warn(){ printf '\033[33m⚠ %s\033[0m\n' "$*" >&2; }
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
-need_tart(){ command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart (plan Phase 3)"; }
+need_tart(){ command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart"; }
 have_sshpass(){ command -v sshpass >/dev/null 2>&1; }
 
 # Run a command inside a booted VM over ssh. Prefer key auth (present after Tier
@@ -253,7 +251,7 @@ cmd_resize(){ # $1=vm  $2=GB  — VM must be stopped; guest-agent grows APFS on 
 
 cmd_list(){ need_tart; tart list; echo "--- store (du) ---"; du -sh "$TART_HOME"/vms/* 2>/dev/null || true; }
 
-# ── manifest-driven bake (the reusable template; plan Phase 3) ──────────────
+# ── manifest-driven bake ───────────────────────────────────────────────────
 # Reads a per-repo .shipyard/vm-image.toml and bakes (or configures-on-boot) a
 # golden image with ZERO hand-provisioning. Same script serves any repo: Pulp
 # (Xcode+Skia) and e.g. a light rust profile (no Xcode) both come from one file.
