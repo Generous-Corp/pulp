@@ -2,6 +2,7 @@
 #include <pulp/state/content_registry.hpp>
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -106,7 +107,21 @@ bool PresetManager::save(const std::string& name, const std::string& folder) {
     auto params = store_.all_params();
     for (size_t i = 0; i < params.size(); ++i) {
         if (i > 0) out << ",";
-        out << "\n    \"" << params[i].name << "\": " << store_.get_value(params[i].id);
+        // Emit a finite number always: a non-finite param value would stream as
+        // the bare token `nan`/`inf`, producing an unparseable preset file.
+        // std::clamp turns ±inf into a finite range bound but returns NaN
+        // unchanged, so a NaN set_value (misbehaving setter / corrupt restore)
+        // survives into get_value() here. Substitute the parameter's registered
+        // default (the plugin's intended safe value, not a blanket 0 which could
+        // be out-of-range / clamp to the range min on reload); guard the default
+        // itself too. The isfinite check also covers any ±inf that reaches here
+        // via a path that bypassed clamping.
+        float value = store_.get_value(params[i].id);
+        if (!std::isfinite(value)) {
+            const float def = params[i].range.default_value;
+            value = std::isfinite(def) ? def : 0.0f;
+        }
+        out << "\n    \"" << params[i].name << "\": " << value;
     }
     out << "\n  }\n";
     out << "}\n";
