@@ -8,7 +8,7 @@
 //
 //   - multi-read sysex spanning separate parse() calls
 //   - realtime bytes interleaved INSIDE a sysex run (MIDI 1.0 §3.1)
-//   - aborted sysex recovery (#406 Codex P2): a non-realtime status
+//   - aborted sysex recovery (#406): a non-realtime status
 //     byte arriving mid-F0 must not swallow the next real message
 //   - runaway sysex cap (kRawMidiSysexLimit)
 

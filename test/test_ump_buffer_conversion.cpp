@@ -172,7 +172,7 @@ TEST_CASE("midi1_event_to_ump2 handles note-off aliases and raw fallbacks",
 
 TEST_CASE("System real-time and common round-trip as UMP Type 0x1",
           "[midi][ump][pr3781]") {
-    // Codex #3781 P2: system messages (clock/start/stop, song position) must
+    // System messages (clock/start/stop, song position) must
     // encode as UMP Type 0x1 (System), not Type 0x2 (MIDI 1.0 Channel Voice),
     // and must survive UMP→MIDI1 conversion (the WinRT input path was dropping
     // them via the channel-voice-only decoder).
@@ -419,7 +419,7 @@ TEST_CASE("MpeVoiceTracker applies UMP channel pitch bend to all notes on channe
 }
 
 TEST_CASE("MpeVoiceTracker routes UMP per-note CC 74 by controller index", "[midi][ump][mpe]") {
-    // Regression for PR #141 Codex P1: the per-note controller index lives
+    // Regression: the per-note controller index lives
     // in byte 3 (bits 0-7) of word 0, NOT byte 2 (which is the note number).
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
     tracker.process(UmpPacket::note_on_2(0, 1, 60, 0x8000));

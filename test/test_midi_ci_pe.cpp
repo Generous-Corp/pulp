@@ -1,6 +1,5 @@
 // MIDI-CI Property Exchange (PE) — framing, Mcoded7, chunker, reassembly,
-// JSON header, subscription manager. Targets the spec-compliance gap from
-// macOS plugin authoring plan item 8.4.
+// JSON header, subscription manager.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -397,7 +396,7 @@ TEST_CASE("PE chunked Get round-trips against an in-process virtual responder",
     REQUIRE(status == 200);
 }
 
-// ── pe_compress / pe_decompress (macOS plan §8.4, zlib payload) ─────────
+// ── pe_compress / pe_decompress (zlib payload) ──────────────────────────
 
 TEST_CASE("pe_compress round-trips random payloads",
           "[midi][ci][pe][zlib][issue-84]") {
@@ -440,7 +439,7 @@ TEST_CASE("pe_decompress rejects garbage input",
     REQUIRE_FALSE(out.has_value());
 }
 
-// ── CiDiscovery Subscribe/Notify dispatcher (macOS plan §8.4) ────────────
+// ── CiDiscovery Subscribe/Notify dispatcher ─────────────────────────────
 
 TEST_CASE("CiDiscovery wires Subscribe to PeSubscriptionManager",
           "[midi][ci][pe][subscribe][issue-84]") {
@@ -641,7 +640,7 @@ TEST_CASE("CiDiscovery PropertyNotify filtered by destination MUID",
     REQUIRE(fires == 2);
 }
 
-// ── RT-safety annotation regression tests (plan item 8.4 follow-up) ─────
+// ── RT-safety annotation regression tests ───────────────────────────────
 //
 // Every public CI / PE entry point is annotated RT-safe vs NOT RT-safe
 // in the headers. These tests pin the trickier "looks RT-safe but isn't"

@@ -9,7 +9,7 @@
 using namespace pulp::midi;
 
 // ────────────────────────────────────────────────────────────────────────
-// macOS plan item 8.6 — MIDI 1.0 backend audit on macOS.
+// MIDI 1.0 backend audit on macOS.
 //
 // These tests don't open real OS MIDI ports (CI has none) — they
 // confirm that the MidiSystem / MidiInput / MidiOutput contract is
@@ -74,7 +74,7 @@ TEST_CASE("MIDI 1.0 backend: open() with bogus port id fails gracefully",
 
     auto input = system->create_input();
     REQUIRE(input != nullptr);
-    // Codex P1 on #2857 — the Windows backend parses port_id via
+    // #2857 — the Windows backend parses port_id via
     // std::stoul into a UINT (uint32_t). Use a value that is numeric,
     // in-range for uint32_t, and very unlikely to match a real device
     // id so all backends reject it cleanly (CoreMIDI / ALSA do string
