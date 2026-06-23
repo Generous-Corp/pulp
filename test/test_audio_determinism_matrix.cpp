@@ -1,11 +1,9 @@
 // Deterministic-matrix sweep harness for the audio engine contract.
 //
-// Closes stage-1 items 1 + 2 + 6 (sample-rate sweep, buffer-size sweep,
-// first stateless-example cell of the golden breadth) from #356
-// audio-validation-audit. The harness verifies the invariants every
-// shipping example must hold regardless of host-reported SR or block
-// size, using PulpGain (known SR-independent + stateless in its unity
-// path) and PulpTone (instrument silence invariant).
+// Verifies the invariants every shipping example must hold regardless
+// of host-reported SR or block size, using PulpGain (known
+// SR-independent + stateless in its unity path) and PulpTone
+// (instrument silence invariant).
 //
 // Invariants this pins:
 //   1. Unity gain is bit-exact pass-through at every (SR, block) cell.
@@ -21,8 +19,7 @@
 // Note: these are *structural* invariants of the framework layer, not
 // signal fidelity of a given DSP block. Fidelity / impulse-response
 // golden tests belong in test_golden_audio.cpp and per-processor golden
-// files. #48 / #356 follow-ups expand to PulpEffect/Compressor/Drums/
-// Synth (tracked in the umbrella).
+// files.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -34,7 +31,7 @@
 #include <cmath>
 #include <vector>
 
-// Shared sine generator (test/support/) — harness PR 1B conversion.
+// Shared sine generator (test/support/).
 #include "support/audio_test_signals.hpp"
 
 #include "pulp_gain.hpp"
@@ -105,8 +102,7 @@ TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR x block",
             // 8192 is the smallest multiple of every block size we
             // sweep (including 4096) that guarantees the largest cell
             // runs at least two full-size blocks rather than short-
-            // blocking the last call to min(block, total-pos). The
-            // earlier total=2048 silently short-blocked the 4096 cell.
+            // blocking the last call to min(block, total-pos).
             constexpr int total = 8192;
             auto in_L = make_sine_vec(total, 440.0f, sr);
             auto in_R = make_sine_vec(total, 660.0f, sr);

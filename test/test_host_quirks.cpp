@@ -102,10 +102,12 @@ TEST_CASE("Nuendo treats as Cubase for quirk purposes",
     REQUIRE(q.cubase10_async_view_resize_queue == true);
 }
 
-// ── macOS plan items 5.2 / 5.3 — Cubase header extraction. The Cubase
-//    factory lives at `core/format/include/pulp/format/host_quirks/cubase.hpp`;
-//    these isolation tests pin that Cubase doesn't fire other hosts'
-//    flags, and that the version bands behave as documented. ──
+// ── Cubase host-quirk dispatch ──────────────────────────────────────────
+//
+// The Cubase factory lives at
+// `core/format/include/pulp/format/host_quirks/cubase.hpp`; these
+// isolation tests pin that Cubase doesn't fire other hosts' flags, and
+// that the version bands behave as documented.
 
 TEST_CASE("make_quirks_for Cubase 10 does not fire Live / Wavelab / Bitwig flags",
           "[format][host-quirks][isolation]") {
@@ -139,8 +141,9 @@ TEST_CASE("make_quirks_for Cubase with unknown version stays defensive-default",
     REQUIRE(q.clamp_latency_to_nonneg == true);
 }
 
-// ── macOS plan item 5.4 — Ableton Live header extraction. Factory at
-//    `core/format/include/pulp/format/host_quirks/ableton_live.hpp`. ──
+// ── Ableton Live host-quirk dispatch ────────────────────────────────────
+//
+// Factory: `core/format/include/pulp/format/host_quirks/ableton_live.hpp`.
 
 TEST_CASE("make_quirks_for Ableton Live leaves Cubase / Wavelab flags off",
           "[format][host-quirks][isolation]") {
@@ -154,9 +157,10 @@ TEST_CASE("make_quirks_for Ableton Live leaves Cubase / Wavelab flags off",
     REQUIRE(q.reaper_process_while_bypassed == false);
 }
 
-// ── macOS plan item 5.6 — Wavelab dispatch (DAW-quirks rows 10 + 11).
-//    New `HostType::Wavelab` + per-host header at
-//    `core/format/include/pulp/format/host_quirks/wavelab.hpp`. ──
+// ── Wavelab host-quirk dispatch ─────────────────────────────────────────
+//
+// `HostType::Wavelab` routes through
+// `core/format/include/pulp/format/host_quirks/wavelab.hpp`.
 
 TEST_CASE("make_quirks_for Wavelab 11.1 fires both Wavelab flags",
           "[format][host-quirks][wavelab]") {
@@ -192,8 +196,9 @@ TEST_CASE("make_quirks_for Wavelab unknown version keeps state-blob fallback on,
     REQUIRE(q.wavelab_vst3_defer_activation == false);
 }
 
-// ── macOS plan item 5.5 — Bitwig dispatch (DAW-quirks rows 8 + 9).
-//    Factory extracted to `core/format/include/pulp/format/host_quirks/bitwig.hpp`. ──
+// ── Bitwig host-quirk dispatch ──────────────────────────────────────────
+//
+// Factory: `core/format/include/pulp/format/host_quirks/bitwig.hpp`.
 
 TEST_CASE("make_quirks_for Bitwig unknown version treats as legacy (workaround on)",
           "[format][host-quirks][bitwig]") {
@@ -222,8 +227,9 @@ TEST_CASE("make_quirks_for Bitwig leaves Cubase / Live / FL flags off",
     REQUIRE(q.logic_au_channel_probe_cap == 64);
 }
 
-// ── macOS plan item 5.7 — FL Studio dispatch (DAW-quirks rows 13 + 14).
-//    Factory at `core/format/include/pulp/format/host_quirks/fl_studio.hpp`. ──
+// ── FL Studio host-quirk dispatch ───────────────────────────────────────
+//
+// Factory: `core/format/include/pulp/format/host_quirks/fl_studio.hpp`.
 
 TEST_CASE("make_quirks_for FL Studio fires mutex + state-reader-skip flags",
           "[format][host-quirks][fl-studio]") {
@@ -252,9 +258,9 @@ TEST_CASE("make_quirks_for FL Studio leaves other hosts' flags off",
     REQUIRE(q.au_v3_bypass_dual_tracking == false);
 }
 
-// ── macOS plan item 5.10 — Logic Pro AU dispatch (DAW-quirks rows
-//    19 + 20). Factory extracted to
-//    `core/format/include/pulp/format/host_quirks/logic_pro.hpp`. ──
+// ── Logic Pro AU host-quirk dispatch ────────────────────────────────────
+//
+// Factory: `core/format/include/pulp/format/host_quirks/logic_pro.hpp`.
 
 TEST_CASE("make_quirks_for Logic Pro keeps channel cap + tail-time conversion on",
           "[format][host-quirks][logic]") {
@@ -288,10 +294,10 @@ TEST_CASE("make_quirks_for Logic Pro leaves other hosts' flags off",
     REQUIRE(q.reaper_process_while_bypassed == false);
 }
 
-// ── macOS plan item 5.11 — AU v3 cross-host dispatch (DAW-quirks rows
-//    21 + 22). Helper at
-//    `core/format/include/pulp/format/host_quirks/auv3_cross_host.hpp`,
-//    layered on Logic + GarageBand which expose an AU v3 surface. ──
+// ── AU v3 cross-host dispatch ───────────────────────────────────────────
+//
+// Helper: `core/format/include/pulp/format/host_quirks/auv3_cross_host.hpp`,
+// layered on Logic + GarageBand which expose an AU v3 surface.
 
 TEST_CASE("make_quirks_for Logic Pro layers AU v3 cross-host flags on top",
           "[format][host-quirks][auv3]") {
@@ -334,11 +340,12 @@ TEST_CASE("AU v3 cross-host flags stay off for non-AU-v3 hosts",
     REQUIRE(fl.au_v3_host_id_from_wrapper == false);
 }
 
-// ── macOS plan item 5.12 — Cross-format defensive defaults (DAW-quirks
-//    rows 23-30). The cheap always-on defenses are seeded by the
-//    default-constructed `HostQuirks`; this group of tests pins that
-//    every host dispatch path (including the unknown / default lane)
-//    leaves them on, and that `detect_quirks()` preserves them too. ──
+// ── Cross-format defensive defaults ─────────────────────────────────────
+//
+// The cheap always-on defenses are seeded by the default-constructed
+// `HostQuirks`; this group of tests pins that every host dispatch path
+// (including the unknown / default lane) leaves them on, and that
+// `detect_quirks()` preserves them too.
 
 TEST_CASE("cross-format defensive defaults are on for every host",
           "[format][host-quirks][defaults]") {
@@ -552,12 +559,13 @@ TEST_CASE("make_quirks_for Pro Tools with unknown version still sets the version
     REQUIRE(q.aax_vendor_version_unknown == true);
 }
 
-// ── macOS plan item 5.8 — REAPER per-host header extraction (DAW-quirks
-//    rows 15 + R1-R7). Main dispatch moved to
-//    `core/format/include/pulp/format/host_quirks/reaper.hpp::apply_reaper`,
-//    with the iPlug2-audit `apply_reaper_keyboard` factory layered on
-//    top. These isolation tests pin each symptom row to its own assertion
-//    so a regression localizes to the exact REAPER quirk that broke. ──
+// ── REAPER per-host dispatch ────────────────────────────────────────────
+//
+// Main dispatch lives in
+// `core/format/include/pulp/format/host_quirks/reaper.hpp::apply_reaper`,
+// with the iPlug2-audit `apply_reaper_keyboard` factory layered on top.
+// These isolation tests pin each symptom row to its own assertion so a
+// regression localizes to the exact REAPER quirk that broke.
 
 TEST_CASE("apply_reaper fires row 15 (VST3 gesture ordering) standalone",
           "[format][host-quirks][reaper][isolation]") {
@@ -671,12 +679,12 @@ TEST_CASE("make_quirks_for Reaper routes through the extracted header",
     REQUIRE(dispatched.synthesize_bypass_parameter == true);
 }
 
-// ── macOS plan item 5.9 — Pro Tools / AAX per-host header extraction
-//    (DAW-quirks rows 16 + 17 + 18, gated on Avid SDK at the adapter
-//    surface). Main dispatch moved to
-//    `core/format/include/pulp/format/host_quirks/pro_tools.hpp::apply_pro_tools`
-//    with the iPlug2-audit `apply_pro_tools_aax_vendor_version_unknown`
-//    factory layered on top. Per-symptom isolation pins each row. ──
+// ── Pro Tools / AAX per-host dispatch ───────────────────────────────────
+//
+// Main dispatch lives in
+// `core/format/include/pulp/format/host_quirks/pro_tools.hpp::apply_pro_tools`
+// with the iPlug2-audit `apply_pro_tools_aax_vendor_version_unknown`
+// factory layered on top. Per-symptom isolation pins each row.
 
 TEST_CASE("apply_pro_tools fires row 16 (sidechain negotiation) standalone",
           "[format][host-quirks][protools][isolation]") {
@@ -771,7 +779,7 @@ TEST_CASE("make_quirks_for_validated_only on Pro Tools leaves only cheap defense
     REQUIRE(q.aax_vendor_version_unknown == false);
 }
 
-// ── Validation-tier API (2026-05-25, item 5.15) ──
+// ── Validation-tier API ─────────────────────────────────────────────────
 //
 // Per-quirk validation tiers + the filter + the validated-only factory
 // + the default-policy compile-time switch. The intent is that plugin
@@ -780,10 +788,8 @@ TEST_CASE("make_quirks_for_validated_only on Pro Tools leaves only cheap defense
 
 TEST_CASE("kHostQuirksMeta tags cheap defenses as Validated",
           "[format][host-quirks][tiers]") {
-    // Cheap defenses (rows 23–28) have been on the test bench since
-    // item 5.1 — they're the founding assumption + are covered by the
-    // "cross-format defensive defaults are on for every host" case
-    // above.
+    // Cheap defenses are covered by the "cross-format defensive
+    // defaults are on for every host" case above.
     STATIC_REQUIRE(kHostQuirksMeta.synthesize_bypass_parameter
                    == QuirkStatus::Validated);
     STATIC_REQUIRE(kHostQuirksMeta.clamp_latency_to_nonneg
@@ -1243,9 +1249,8 @@ TEST_CASE("kHostQuirksMeta tags the 4 new iPlug2-audit rows correctly",
                    == QuirkStatus::Speculative);
 }
 
-// Header includes for the new per-host modules — kept inline at the
-// bottom rather than mixed with the original includes so the diff
-// stays localized to the batch.
+// Header includes for per-host modules kept inline with the tests that
+// exercise them.
 
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1390,8 +1395,8 @@ TEST_CASE("enumerate_quirk_fields enforced reflects the int channel-probe cap",
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// P3: clamp_latency_to_nonneg enforcement — the accommodation helper that
-// the VST3 / CLAP / AU adapters consume. (2026-05-30 enforcement goal)
+// clamp_latency_to_nonneg enforcement — the accommodation helper that
+// the VST3 / CLAP / AU adapters consume.
 // ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("reported_latency_samples clamps negatives only when the quirk is on",
@@ -1425,7 +1430,7 @@ TEST_CASE("latency clamp follows the runtime policy via resolved_quirks",
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// P3b: maybe_synthesize_bypass helper (synthesize_bypass_parameter).
+// maybe_synthesize_bypass helper (synthesize_bypass_parameter).
 // ─────────────────────────────────────────────────────────────────────
 
 #include <pulp/format/quirk_apply.hpp>

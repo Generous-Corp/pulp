@@ -318,7 +318,7 @@ TEST_CASE("PluginManagerPanel text input appends to the filter "
     REQUIRE(panel.filter() == "gl");
 }
 
-// ── Item 4.3: drag-add into SignalGraph ──────────────────────────────────
+// ── Drag-add into SignalGraph ────────────────────────────────────────────
 
 TEST_CASE("PluginManagerRow round-trips into a PluginInfo for the graph",
           "[view][plugin_manager][issue-4-3]")
