@@ -8,10 +8,9 @@
 # phase reached). This script complements the pixel diff with three semantic
 # assertions over artifacts produced by an earlier Spectr launch.
 #
-# This is a codex-required addition to
-# planning/spectr-validated-runtime-import-product-spec.md — pixel diff is
-# necessary but not sufficient. The probes below catch failure modes the
-# diff cannot:
+# This complements
+# planning/spectr-validated-runtime-import-product-spec.md: pixel diff is
+# necessary but not sufficient, and these probes catch failure modes it cannot:
 #
 #   Probe 1 (runtime-import soft error)
 #       __pulpRuntimeImportErr__ is set when the C++ bridge's
@@ -193,9 +192,8 @@ run_probe_1() {
 # token. The harness can also accept structured JSON entries with a
 # "phase":"mounted" field.
 #
-# Default behavior is WARN if missing (trace wiring is still landing — see
-# spectr issue tracker for status). Pass --require-trace once the trace
-# globals are uniformly present.
+# Default behavior is WARN if missing while trace wiring is still landing. Pass
+# --require-trace once the trace globals are uniformly present.
 run_probe_2() {
   if [[ ! -f "$LOG_PATH" ]]; then
     record "runtime_import_trace" "skip" "log file not found: $LOG_PATH"

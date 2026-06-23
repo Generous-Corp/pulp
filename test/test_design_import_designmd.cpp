@@ -358,7 +358,6 @@ TEST_CASE("lint_designmd flags orphaned color tokens",
 // parse-recorded reference set (`referenced_color_tokens`) rather than
 // re-scanning post-resolution strings. Without the fix, `primary` would
 // be flagged as orphaned despite being used by every component.
-// (Codex P1 review on PR #1934.)
 TEST_CASE("lint_designmd does NOT flag referenced color as orphan after resolution",
           "[view][import][designmd][phase2][regression][issue-1434]") {
     std::string text =
@@ -452,7 +451,6 @@ TEST_CASE("export_tailwind_v4_css emits @theme block with --color/--radius/--spa
 // Regression: Tailwind v3 + v4 export MUST include typography mappings
 // (fontFamily, fontSize, fontWeight, lineHeight, letterSpacing).
 // Without the fix these tokens are silently dropped from the output.
-// (Codex P2 review on PR #1934.)
 TEST_CASE("export_tailwind_v3_json includes typography fontFamily/fontSize/fontWeight/etc",
           "[view][import][designmd][phase2][regression][issue-1434]") {
     auto parsed = parse_designmd(

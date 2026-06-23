@@ -46,7 +46,7 @@ class CodexP2FollowupTest(unittest.TestCase):
     # explicit side-effect accumulators — no module globals to clear.
 
     def test_container_named_like_widget_not_promoted(self):
-        # Codex #3234: a "Knob Row" frame holding Knob instances must NOT be
+        # #3234: a "Knob Row" frame holding Knob instances must NOT be
         # promoted to a leaf widget (which would drop its children).
         container = {"type": "FRAME", "name": "Knob Row", "id": "1:1",
                      "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 60},

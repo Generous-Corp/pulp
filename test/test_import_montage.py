@@ -59,7 +59,7 @@ class MontageTest(unittest.TestCase):
 
 class LabelColonTest(unittest.TestCase):
     def test_label_with_colon_survives(self):
-        # Codex #3237: a label containing a colon must not be truncated.
+        # #3237: a label containing a colon must not be truncated.
         import tempfile, os
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "ref.png"); Image.new("RGB", (10, 10)).save(p)
