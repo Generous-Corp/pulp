@@ -2,7 +2,7 @@
 
 The Pulp package manager makes it easy to add vetted, license-compatible third-party audio libraries to a Pulp project. It handles discovery, fetching, CMake wiring, license checking, and platform compatibility -- so you can focus on building your plugin.
 
-**Status:** This is an evolving feature on the `develop/package-manager` branch. It is functional but still being refined. See the [Phase Roadmap](#phase-roadmap) at the bottom of this document.
+**Status:** The package manager ships on `main` as the usable curated-dependency lane for Pulp projects. It remains optional, and the live package inventory is driven by `tools/packages/registry.json`.
 
 **Isolation guarantee:** The package manager is fully self-contained and removable. No core subsystem depends on it. No example project requires it. No format adapter references it. If you want to remove it entirely, see [REMOVAL.md](REMOVAL.md).
 
@@ -36,14 +36,15 @@ The package registry lives at `tools/packages/registry.json`. It is a JSON file 
 - **Audio-specific fields**: `rt_safe` flag, `provides` capabilities, `overlaps_with_builtin` mapping, `unique_value` description, `alternatives`, `migration_notes`
 - **Verification**: last verified date, build status per platform-arch pair
 
-The registry currently contains 10 packages across 4 categories:
+The registry currently contains 36 package entries across 5 categories:
 
 | Category | Packages |
 |----------|----------|
-| DSP | signalsmith-stretch, signalsmith-dsp, cycfi-q, pffft, daisysp |
-| Audio I/O | dr-libs, libsamplerate, r8brain-free-src |
+| DSP | aubio, btrack, cycfi-q, daisysp, essentia, fftw, fluidsynth, freeverb, kfr, kissfft, libpd, pffft, rnnoise, rubber-band, signalsmith-dsp, signalsmith-stretch, soundtouch, speexdsp, stk, tinysoundfont |
+| Audio I/O | alac, dr-libs, fdk-aac, lame, libflac, libsamplerate, libsndfile, libvorbis, miniaudio, oboe, opus, r8brain-free-src |
 | ML | rtneural |
 | UI | fontaudio |
+| Utilities | libremidi, rtmidi |
 
 ### Lock File
 
@@ -156,7 +157,7 @@ All of these are cleaned up by `pulp remove` when the last package is removed.
 
 ### CLI Integration
 
-The package manager adds seven top-level commands (`add`, `remove`, `list`, `search`, `update`, `suggest`, `target`) and three audit flags (`--packages`, `--platforms`, `--licenses`) to the `pulp` CLI. These are dispatched from `tools/cli/pulp_cli.cpp` and implemented in `tools/cli/package_commands.cpp` and `tools/cli/package_registry.cpp`.
+The package manager adds seven top-level commands (`add`, `remove`, `list`, `search`, `update`, `suggest`, `target`) and three audit flags (`--packages`, `--platforms`, `--licenses`) to the `pulp` CLI. These are dispatched from `tools/cli/pulp_cli.cpp` and implemented in the split package command files (`package_commands_add.cpp`, `package_commands_search.cpp`, `package_commands_util.cpp`, `package_commands.cpp`) plus `package_registry.cpp`.
 
 ### Doctor Integration
 
@@ -208,10 +209,11 @@ Every `pulp add` checks the package's SPDX license identifier against a policy:
 | Verdict | Licenses | Behavior |
 |---------|----------|----------|
 | **Allowed** | MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, CC0-1.0 | Added without prompts |
-| **Review required** | MPL-2.0, other unlisted | Warning printed, `--license-override` flag required |
-| **Rejected** | GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, AGPL-3.0, SSPL-1.0 (all variants) | Blocked. Cannot add. |
+| **Review required** | MPL-2.0, other unlisted | Warning printed for manual review |
+| **Restricted** | GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, AGPL-3.0 (all variants) | Blocked unless you rerun with `--accept-license <SPDX>` after reviewing the CLI warning |
+| **Rejected** | SSPL-1.0, proprietary | Blocked. Cannot add. |
 
-The `--license-override commercial` flag can bypass review-required licenses for projects with commercial license agreements, but cannot bypass rejected licenses.
+The `--license-override commercial` flag can be used when you have a separate commercial license. It does not bypass truly rejected licenses.
 
 License checking is also available standalone via `pulp audit --licenses` and the `tools/packages/validate_registry.py` script.
 
@@ -224,10 +226,11 @@ The package manager is designed for clean removal. Here is what it touches and w
 ### What it touches
 
 - `tools/cli/pulp_cli.cpp` -- seven command dispatch lines, two include lines, doctor check block, audit flag block
-- `tools/cli/CMakeLists.txt` -- two source files in the build list
-- `tools/cli/package_commands.{hpp,cpp}` -- command implementations (own files)
+- `tools/cli/CMakeLists.txt` -- package command and registry source files in the CLI build list
+- `tools/cli/package_commands*.{hpp,cpp}` -- command implementations (own files split by query, mutation, utilities, and audit)
 - `tools/cli/package_registry.{hpp,cpp}` -- registry data structures (own files)
-- `tools/packages/` -- entire directory is package-manager-specific
+- `tools/packages/registry.json`, package schemas, validation scripts, freshness checks, and package test stubs
+- `tools/packages/tool-registry.json` is shared with the separate `pulp tool` / importer lane; package add only uses it for the `pulp add <importer>` alias
 - `docs/guides/packages/` -- entire directory is package-manager-specific
 - `docs/reference/cli.md` -- eight CLI reference sections
 - `docs/status/cli-commands.yaml` -- seven command entries
@@ -241,7 +244,7 @@ The package manager is designed for clean removal. Here is what it touches and w
 - No format adapters (VST3, AU, CLAP)
 - No `external/` vendored dependencies
 - No build system root `CMakeLists.txt`
-- No test harness files
+- No shared test harness files outside package-specific registry tests and stubs
 - No shipping/signing code
 - No other CLI commands (build, test, validate, doctor logic beyond the two added checks, ship, etc.)
 
@@ -251,7 +254,7 @@ For a complete removal checklist, see [REMOVAL.md](REMOVAL.md).
 
 ## Per-Package Guides
 
-Each package has a detailed integration guide in this directory:
+The current registry is larger than the hand-written guide set. These detailed guides cover the original curated packages; use `pulp search <query>` or inspect `tools/packages/registry.json` for the full package inventory:
 
 | Package | Guide |
 |---------|-------|
@@ -270,27 +273,27 @@ See also [index.md](index.md) for a categorized overview.
 
 ---
 
-## Phase Roadmap
+## Current Roadmap
 
-The package manager is being built in phases. Each phase is self-contained and lands via PR to `develop/package-manager`, then merges to `main` at phase boundaries.
+The package manager landed in phases. Keep this section as a status snapshot rather than a branch plan.
 
 ### Phase 1: Integration Guides + Registry
 
-Registry format design, initial 10-package registry, per-package integration guides, JSON schema validation, Tier 1 freshness CI workflow, manual build verification across macOS/Windows/Linux.
+Registry format design, initial curated registry, per-package integration guides for the original package set, JSON schema validation, Tier 1 freshness CI workflow, manual build verification across macOS/Windows/Linux.
 
-**Status:** Complete on `develop/package-manager`.
+**Status:** Complete on `main`.
 
 ### Phase 2: CLI + Claude Plugin Integration
 
 `pulp add/remove/list/search/update/suggest/target` commands, license checking, platform compatibility analysis, overlap detection, CMake generation, lock file management, `pulp doctor` checks, `pulp audit` extensions, Claude Code skill, Tier 2 build validation CI.
 
-**Status:** Complete on `develop/package-manager`.
+**Status:** Complete on `main`.
 
 ### Phase 3: Community Registry + Web Discovery
 
 `pulp-packages` public repo, community submission workflow, remote registry search with local caching, semver constraint resolution, static site generator for package browsing, quality scores, verification badges.
 
-**Status:** Partially implemented on `develop/package-manager` (remote search, semver, quality scores are in; web UI and community submission workflow are not yet started).
+**Status:** Partially implemented on `main` (remote search, semver, and quality scores are in; web UI and community submission workflow are not yet started).
 
 ### Phase 4: Extended Ecosystem
 

@@ -38,10 +38,11 @@ cat tools/packages/registry.json | python3 -m json.tool
 
 | Category | Packages | What They Provide |
 |----------|----------|-------------------|
-| dsp | signalsmith-stretch, signalsmith-dsp, cycfi-q, pffft, daisysp | Pitch/time stretch, filters, FFT, pitch detection, physical modeling |
-| audio-io | dr-libs, libsamplerate, r8brain-free-src | File decoding, sample rate conversion |
+| dsp | aubio, btrack, cycfi-q, daisysp, essentia, fftw, fluidsynth, freeverb, kfr, kissfft, libpd, pffft, rnnoise, rubber-band, signalsmith-dsp, signalsmith-stretch, soundtouch, speexdsp, stk, tinysoundfont | Pitch/time stretch, filters, FFT, pitch detection, physical modeling, noise reduction, synthesis |
+| audio-io | alac, dr-libs, fdk-aac, lame, libflac, libsamplerate, libsndfile, libvorbis, miniaudio, oboe, opus, r8brain-free-src | File codecs, sample-rate conversion, device/audio I/O |
 | ml | rtneural | Real-time neural network inference |
 | ui | fontaudio | Audio icon font |
+| utilities | libremidi, rtmidi | MIDI I/O helpers |
 
 ### Custom design-import controls (P8)
 
@@ -66,7 +67,7 @@ the "give-back" path's long tail: an obvious common control is promoted into cor
 ```
 
 This will:
-1. Check license compatibility (reject GPL/LGPL)
+1. Check license compatibility and require explicit review for restricted licenses
 2. Check platform support against project targets
 3. Warn about overlaps with Pulp built-ins
 4. Generate `cmake/pulp-packages.cmake` with FetchContent declarations
@@ -89,7 +90,9 @@ Before suggesting a package, check if Pulp's built-in `core/signal/` already cov
 
 ## Browsing Guides
 
-Each package has a detailed integration guide:
+The hand-written guide set covers the original curated packages. The registry is
+larger, so use `pulp search <query>` or inspect `tools/packages/registry.json`
+for the full inventory:
 
 ```
 docs/guides/packages/index.md          — category overview
@@ -100,7 +103,12 @@ Read these to answer questions about specific packages.
 
 ## License Policy
 
-Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registry enforces this. If a user asks about a GPL library, explain the incompatibility and suggest the MIT-licensed alternative from the registry.
+MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages install without prompts.
+MPL-2.0 and other unlisted licenses require manual review. GPL/LGPL/AGPL
+packages are restricted: the CLI blocks until the user explicitly accepts the
+package SPDX with `--accept-license <SPDX>` or declares a commercial-license
+basis with `--license-override commercial`. SSPL and proprietary packages remain
+blocked. Prefer permissive alternatives from the registry when available.
 
 ## Attribution Audit
 

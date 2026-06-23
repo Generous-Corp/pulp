@@ -1850,7 +1850,8 @@ Add a curated third-party dependency from the Pulp package registry.
 
 ```bash
 pulp add signalsmith-stretch                       # add a package
-pulp add rtneural --license-override commercial    # accept a non-standard license
+pulp add lame --accept-license LGPL-2.0            # accept a restricted copyleft license after review
+pulp add rubber-band --license-override commercial # use a separate commercial license
 pulp add some-lib --platform-guard                 # add with platform guard
 pulp add dr-libs --no-cmake                        # metadata only, skip CMake wiring
 ```

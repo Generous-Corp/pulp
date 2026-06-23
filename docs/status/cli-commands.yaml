@@ -987,7 +987,10 @@ commands:
         description: Package slug from tools/packages/registry.json, or an importer id from tools/packages/tool-registry.json
       - name: --license-override
         kind: option
-        description: "Accept a rejected license (value: commercial)"
+        description: "Commercial-license override for restricted or review-required packages (value: commercial)"
+      - name: --accept-license
+        kind: option
+        description: "Explicitly accept the package's restricted SPDX license after reviewing the CLI warning"
       - name: --platform-guard
         kind: flag
         description: Add with platform guard (skip prompt for unsupported targets)
