@@ -958,23 +958,28 @@ Open Sound Control messaging for networked audio control.
 
 ```cpp
 #include <pulp/osc/osc.hpp>
+#include <pulp/osc/bundle.hpp>
 
 // Send
-Sender sender;
+pulp::osc::Sender sender;
 sender.connect("192.168.1.100", 9000);
-sender.send("/synth/freq", 440.0f);
-sender.send("/synth/gate", 1);
+sender.send(pulp::osc::Message("/synth/freq").add(440.0f));
+sender.send(pulp::osc::Message("/synth/gate").add(1));
 
 // Receive
-Receiver receiver;
-receiver.bind(9000);
-receiver.on_message = [](const Message& msg) {
+pulp::osc::Receiver receiver;
+receiver.listen(9000, [](const pulp::osc::Message& msg) {
     if (msg.address == "/synth/freq")
-        set_frequency(msg.args[0].as_float());
-};
+        set_frequency(msg.get_float(0, 440.0f));
+});
+
+// Bundle
+pulp::osc::Bundle bundle;
+bundle.add(pulp::osc::Message("/synth/freq").add(880.0f));
+sender.send(bundle);
 ```
 
-Supports bundles with timetags and address pattern matching (`*`, `?`, `[...]`, `{a,b}`).
+Supports bundles with timetags, the optional OSC RGBA colour tag (`r`), raw datagram sends, and address pattern matching (`*`, `?`, `[...]`, `{a,b}`) through receiver routes.
 
 ---
 
