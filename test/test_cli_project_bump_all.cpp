@@ -1,9 +1,8 @@
 // test_cli_project_bump_all.cpp — Batch / --all behavior for
 // `pulp project bump`.
 //
-// Release-discovery Slice 7 (#564 / parent #499). These tests exercise
-// the batch-level invariants that hold regardless of where the project
-// list comes from (registry or the single CWD):
+// Exercises the batch-level invariants that hold regardless of where the
+// project list comes from (registry or the single CWD):
 //
 //   - Partial-failure isolation: one "failed" entry in a batch does
 //     not corrupt the undo file for the other entries.
@@ -11,8 +10,7 @@
 //     disk become "failed" rows without mutating anything.
 //   - Undo round-trip across a multi-entry batch.
 //   - Stale-registry policy: a batch that encounters a missing
-//     project does NOT remove the project from the registry (matches
-//     the Slice 1b "never silently mutate the user's registry" rule).
+//     project does NOT remove the project from the registry.
 //
 // The tests simulate the bump flow by driving `find_pin_site` +
 // `rewrite_pin` + undo I/O directly. This mirrors the
@@ -228,8 +226,7 @@ TEST_CASE("bump all tolerates partial failure and keeps batch intact",
     REQUIRE(bumped == 4);
     REQUIRE(failed == 1);
 
-    // Ghost failure must not have removed the entry from the
-    // registry — Slice 1b policy is "never silently mutate".
+    // Ghost failure must not silently remove the entry from the registry.
     auto after = prjreg::read_registry(reg);
     REQUIRE(after.size() == 5);
 

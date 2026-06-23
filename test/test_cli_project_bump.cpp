@@ -1,7 +1,6 @@
 // test_cli_project_bump.cpp — Unit tests for `pulp project bump`.
 //
-// Release-discovery Slice 7 (#564 / parent #499). Exercises the
-// pure-logic core in tools/cli/project_bump.{hpp,cpp}:
+// Exercises the pure-logic core in tools/cli/project_bump.{hpp,cpp}:
 //
 //   - CMakeLists pin detection (FetchContent, pulp_add_project,
 //     project() VERSION variants)
