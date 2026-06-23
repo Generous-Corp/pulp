@@ -88,8 +88,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
             if (value.empty()) w->clear_fill_gradient();
             else               w->set_fill_gradient(std::move(value));
         }
-        // SvgRect / SvgLine - gradient fills follow up; bridge fn is a
-        // no-op for those widget types so consumers don't crash.
+        // SvgRect / SvgLine gradient fills are intentionally a no-op for those
+        // widget types so consumers don't crash.
         return choc::value::Value();
     });
 

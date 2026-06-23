@@ -11,8 +11,7 @@ namespace pulp::view {
 // One interactive element overlaid on a faithfully-rendered design frame. The
 // element list is TYPED and supplied by the importer (source-side semantics) —
 // DesignFrameView does NOT guess from the SVG. Bounds/coords are in the SVG's own
-// coordinate space. (Per the Plan-B review: real behavior comes from source
-// metadata, not SVG structure.)
+// coordinate space. Real behavior comes from source metadata, not SVG structure.
 struct DesignFrameElement {
     // `knob` is SVG-patch (rotates its needle path in the SVG). `text_field` /
     // `dropdown` / `tab_group` / `stepper` are NATIVE-OVERLAY: an opaque child
@@ -44,8 +43,8 @@ struct DesignFrameElement {
     // [x,y,w,h] moves the puck element (needle_d) to follow — `value` is the X
     // position (0→left, 1→right), `value_y` the Y (0→top, 1→bottom). cx/cy = the
     // puck's baked center.
-    // `custom` is a registered native control (P7 Tier-3): the overlay is built
-    // by a factory looked up under `factory_id` in the design-control registry
+    // `custom` is a registered native control: the overlay is built by a factory
+    // looked up under `factory_id` in the design-control registry
     // (register_design_control_factory). If no factory is registered the element
     // renders inert (the baked SVG underneath always shows) and the importer
     // diagnoses it — a custom control never blanks or silently mis-renders.
@@ -130,12 +129,11 @@ struct DesignFrameElement {
     std::string source_node_id;
 };
 
-// ── Custom-control factory registry (P7 Tier-3) ──────────────────────────────
-// The "one piece neither glint nor reflex provides": a runtime name→View table
-// so a design's genuinely-novel control resolves to a registered native view
-// instead of a silent-knob. A host (or a shared package — P8) registers a factory
-// under an id; the importer emits a Kind::custom element carrying that id; the
-// DesignFrameView builds the overlay by looking the factory up.
+// ── Custom-control factory registry ──────────────────────────────────────────
+// Runtime name→View table for genuinely novel controls in imported designs. A
+// host or shared package registers a factory under an id; the importer emits a
+// Kind::custom element carrying that id; DesignFrameView builds the overlay by
+// looking the factory up.
 
 // Geometry + opaque props handed to a custom-control factory so it can build and
 // bind its View. Panel coordinates (the same space DesignFrameView positions
@@ -198,10 +196,9 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 // typed element list. This is the faithful-vector design-import lane's view: the
 // importer materializes one of these per imported frame.
 //
-// B1 scope: render + crop + interactive knobs (drag to turn). Each drag patches
-// only the dragged knob's needle in the SVG and repaints. The SVG is currently
-// re-rendered per repaint (SkSVGDOM rebuilds the DOM each draw_svg call) — fine
-// at interactive rates here, but a parsed-DOM cache is a planned optimization.
+// Each drag patches only the dragged knob's needle in the SVG and repaints. The
+// SVG is currently re-rendered per repaint (SkSVGDOM rebuilds the DOM each
+// draw_svg call), which is acceptable at interactive rates for this view.
 class DesignFrameView : public View {
 public:
     // `svg` is the full SVG document. The panel (the design body the window
@@ -399,7 +396,8 @@ private:
 // control drawn opaque over the design's tab strip (so it replaces the baked
 // tabs + highlight). Clicking a slot selects it and moves the highlight — the
 // "regular selection state" a static SVG can't provide. Styling approximates the
-// design's dark strip; pixel-exact theming is a follow-up.
+// design's dark strip; it is intentionally an approximation rather than
+// pixel-exact theming.
 class DesignTabGroup : public View {
 public:
     DesignTabGroup(std::vector<std::string> labels, int selected);

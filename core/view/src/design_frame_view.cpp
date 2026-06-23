@@ -16,7 +16,7 @@
 
 namespace pulp::view {
 
-// ── Custom-control factory registry (P7 Tier-3) ──────────────────────────────
+// ── Custom-control factory registry ──────────────────────────────────────────
 // UI-thread-only (see the header contract), so a plain function-local static map
 // with no locking is correct: registration at startup and lookup at overlay
 // build both run on the UI thread.
@@ -388,11 +388,10 @@ void DesignFrameView::build_overlays() {
             stepper->on_select = [this, i](int idx) { notify_choice(i, idx); };
             widget = std::move(stepper);
         } else if (e.kind == DesignFrameElement::Kind::custom) {
-            // P7 Tier-3: a registered native control. Build the overlay via the
-            // factory looked up under factory_id. If none is registered the
-            // element stays inert — the baked SVG underneath still renders, so a
-            // custom control never blanks (the importer diagnosed the gap at
-            // materialize time). UI-thread-only, matching the registry contract.
+            // Registered native control. Build the overlay via the factory
+            // looked up under factory_id. If none is registered the element stays
+            // inert — the baked SVG underneath still renders, so a custom control
+            // never blanks. UI-thread-only, matching the registry contract.
             auto& reg = design_control_registry();
             const auto it = reg.find(e.factory_id);
             if (it != reg.end() && it->second) {

@@ -132,9 +132,8 @@ WebViewOptions::FetchResource make_webview_directory_resource_fetcher(
 ///   * `"none"`        — `PULP_BUILD_WEBVIEW=OFF` or no runtime backend
 ///                       resolved on this OS at process start.
 ///
-/// Useful for the gap-doc audit (which backends actually wire up on the
-/// platforms Pulp ships to) and for callers that need to surface a clear
-/// "no embedded browser available on this OS" message.
+/// Useful for callers that need to surface a clear "no embedded browser
+/// available on this OS" message.
 std::string detect_webview_backend();
 
 /// Returns true if the host process has a usable WebView backend.

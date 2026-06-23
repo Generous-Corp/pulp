@@ -1,5 +1,5 @@
-// Visualizer widget implementations split from widgets.cpp. Public
-// declarations stay in core/view/include/pulp/view/widgets.hpp.
+// Visualizer widget implementations. Public declarations stay in
+// core/view/include/pulp/view/widgets.hpp.
 
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
@@ -381,10 +381,7 @@ void Meter::paint(canvas::Canvas& canvas) {
         // So sample the gradient across the FILL region (0 at the fill bottom,
         // 1 at the fill top) rather than against absolute meter height. That
         // makes the fill top read warm/red — matching the capture — while the
-        // fill still reveals more of the SAME ramp as the level moves. pulp
-        // #3191 follow-up: previously `pos` was keyed off absolute meter height,
-        // so a partial fill only ever exposed the lower (green→yellow) stops and
-        // the warm top was clipped away above the fill.
+        // fill still reveals more of the SAME ramp as the level moves.
         //
         // Horizontal inset is derived from the captured bar-vs-housing ratio so
         // the colored bar reads as a narrower fill recessed inside the darker

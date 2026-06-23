@@ -4,10 +4,9 @@
 // which on Linux uses WebKitGTK (`libwebkit2gtk-4.1.so.0`) plus GTK 3.
 // CHOC handles instantiation; this translation unit exists so:
 //
-//   1. The gap-doc audit can confirm WebKitGTK is actually resolvable at
-//      runtime on the user's distro (Ubuntu 22.04+, Fedora 38+, etc.
-//      ship 4.1 by default; some long-tail distros still carry only the
-//      legacy 4.0 ABI).
+//   1. The runtime probe can confirm WebKitGTK is actually resolvable on the
+//      user's distro (Ubuntu 22.04+, Fedora 38+, etc. ship 4.1 by default;
+//      some long-tail distros still carry only the legacy 4.0 ABI).
 //   2. `pulp::view::detect_webview_backend()` returns a stable identifier
 //      callers can use to surface a clear "WebKitGTK 4.1 not installed"
 //      message instead of crashing inside CHOC.
@@ -32,8 +31,8 @@ namespace {
 
 // Probe-once cache. We try the modern 4.1 ABI first (current stable),
 // then fall back to the legacy 4.0 ABI for older LTS distros. Either
-// works behind CHOC's WebKitGTK adapter — the gap-doc row only cares
-// that *some* WebKitGTK is reachable.
+// works behind CHOC's WebKitGTK adapter; callers only need to know that *some*
+// WebKitGTK ABI is reachable.
 struct WebKitGtkProbe {
     bool available = false;
     const char* soname = nullptr;

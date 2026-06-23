@@ -30,9 +30,9 @@
 /// the dragged view's bounds; tests can call `start_dragging` /
 /// `drag_view` directly without simulating real mouse events.
 ///
-/// License-lineage note: the name is Pulp-native per the gap-doc rule —
-/// the behavior mirrors a well-trodden idiom across UI toolkits, but the
-/// implementation here is independent.
+/// License-lineage note: the name is Pulp-native. The behavior mirrors a
+/// well-trodden idiom across UI toolkits, but the implementation here is
+/// independent.
 
 #include <algorithm>
 #include <pulp/view/geometry.hpp>

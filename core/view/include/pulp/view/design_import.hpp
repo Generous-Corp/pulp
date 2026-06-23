@@ -41,10 +41,10 @@ class TextEditor;
 class XYPad;
 class WaveformView;
 
-// ── P7 import report ─────────────────────────────────────────────────────────
-// Surfaces the per-control resolution provenance the IR carries (P7-F0/F2) so a
-// low-confidence or conflicted control is SEEN at import time — in the CLI and as
-// a machine-readable JSON a CI gate can threshold — instead of discovered later.
+// ── Import report ────────────────────────────────────────────────────────────
+// Surfaces the per-control resolution provenance the IR carries so a
+// low-confidence or conflicted control is SEEN at import time — in the CLI and
+// as machine-readable JSON a CI gate can threshold — instead of discovered later.
 struct ImportReportEntry {
     std::string source_node_id;       ///< Figma node id (empty if unknown)
     std::string kind;                 ///< resolved interactive-element kind
@@ -74,16 +74,16 @@ ImportReport collect_import_report(const IRNode& root,
 std::string import_report_to_json(const ImportReport& report);
 std::string import_report_to_text(const ImportReport& report);
 
-// P7 render-placement verification (the structural half of the render-golden
-// gate). Walks the IR and flags interactive overlays that cannot render where
+// Render-placement verification. Walks the IR and flags interactive overlays
+// that cannot render where
 // they claim to: a degenerate extent (no hit radius and a zero-area box), or a
 // box that falls entirely outside the node's own render region [0,0,frame_w,
 // frame_h] (when the frame size is known, >0). A flagged control gets
 // verification_pass=false plus a recorded conflict, so collect_import_report
 // surfaces it and --fail-on-unresolved can gate on it. Mutates `root` in place;
 // returns the number of controls newly flagged. frame_w/h <= 0 means "unknown"
-// (skip the bounds half, keep the degenerate-extent check). The full pixel-level
-// golden diff is the render-path follow-up; this is the geometry-level check.
+// (skip the bounds half, keep the degenerate-extent check). This is a
+// geometry-level check, not a pixel diff.
 int apply_placement_verification(IRNode& root, float frame_w = 0.0f, float frame_h = 0.0f);
 
 struct NativeMaterializeOptions {

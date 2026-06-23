@@ -24,7 +24,7 @@
 /// Headless-friendly: pages register `View` content but `PreferencesPanel`
 /// never paints in tests — it just owns the registry + active-index state.
 ///
-/// License-lineage note: the name is Pulp-native per the gap-doc rule.
+/// License-lineage note: the name is Pulp-native.
 
 #include <algorithm>
 #include <functional>

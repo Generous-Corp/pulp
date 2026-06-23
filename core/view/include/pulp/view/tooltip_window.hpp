@@ -27,7 +27,7 @@
 /// related is driven by `tick(dt)`, so unit tests can drain timers
 /// without sleeping.
 ///
-/// License-lineage note: the name is Pulp-native per the gap-doc rule.
+/// License-lineage note: the name is Pulp-native.
 
 #include <algorithm>
 #include <functional>

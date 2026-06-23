@@ -951,7 +951,7 @@ std::string asset_uri(const IRAssetRef& asset) {
     return {};
 }
 
-// ── Faithful-vector import (Plan B): resolve an SVG asset to its document text ─
+// ── Faithful-vector import: resolve an SVG asset to its document text ─────────
 // Percent-decode a `data:` payload (`%3C` → `<`, `+` stays literal in data URIs).
 std::string svg_percent_decode(std::string_view in) {
     std::string out;
@@ -1034,7 +1034,7 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.text = e.text;
         el.value_left_align = e.value_left_align;
         el.value_y = e.default_value_y;
-        // custom (P7 Tier-3) — the factory id + opaque props.
+        // custom native control — the factory id + opaque props.
         el.factory_id = e.factory_id;
         el.custom_props = e.custom_props;
         // Carry the design-source node id to the live element so the inspector's
@@ -1068,9 +1068,9 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
             asset_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
         return nullptr;
     }
-    // P7 Tier-3: a custom control whose factory isn't registered renders inert
-    // (the baked SVG underneath still shows). Diagnose it so the gap is SEEN and
-    // never becomes a silent knob.
+    // A custom control whose factory isn't registered renders inert (the baked
+    // SVG underneath still shows). Diagnose it so the gap is SEEN and never
+    // becomes a silent knob.
     for (const auto& ie : node.interactive_elements) {
         if (ie.kind != InteractiveElementKind::custom) continue;
         if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
@@ -1747,10 +1747,10 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
                                        std::string_view path,
                                        std::optional<LayoutDirection> parent_direction,
                                        std::vector<ImportDiagnostic>& diagnostics) {
-    // Faithful-vector lane (Plan B): render this node's own SVG export via
-    // DesignFrameView and overlay native interaction from the typed element
-    // list. Falls through to normal materialization (with a diagnostic) if the
-    // SVG asset can't be resolved, so a bad asset degrades rather than blanks.
+    // Faithful-vector lane: render this node's own SVG export via DesignFrameView
+    // and overlay native interaction from the typed element list. Falls through
+    // to normal materialization (with a diagnostic) if the SVG asset can't be
+    // resolved, so a bad asset degrades rather than blanks.
     if (node.render_mode == NodeRenderMode::faithful_svg) {
         if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
             return frame;

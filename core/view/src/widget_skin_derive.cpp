@@ -97,8 +97,8 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         out.track_color = to_color(low_sat[low_sat.size() / 6].second);
         out.has_track = true;
 
-        // Track outline (pulp #3192): the captured empty track is a dark
-        // channel that the design draws with a slightly lighter edge so it
+        // Track outline: the captured empty track is a dark channel that the
+        // design draws with a slightly lighter edge so it
         // doesn't read as a flat slab. We first try to RECOVER that edge by
         // scanning across a representative dark track row for the brightest
         // low-saturation pixel and comparing it to the fill at the row centre —
@@ -188,7 +188,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
     // deepest stop and over-saturates the derived colour vs the fill's dominant
     // mid tone. Collect the saturated rows (sat > 40) and take the MEDIAN by
     // saturation so the derived colour is the dominant mid blue — matching the
-    // reference palette the harness compares against. pulp #3191 colour fix.
+    // reference palette the harness compares against.
     {
         std::vector<RGB> colored;
         for (auto& r : rows)
@@ -201,7 +201,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
     }
 
-    // ── Horizontal widths (pulp #3191) ───────────────────────────────────────
+    // ── Horizontal widths ───────────────────────────────────────────────────
     // Thumb width: the widest opaque row in the art region (the silver slab).
     // Track width: the opaque width at rows away from the thumb (the thin
     // track/fill column). Measured outward from cx so disjoint glyphs never
@@ -236,7 +236,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
     }
 
     // Housing height = the control art region (track + thumb), excluding the
-    // value-stack text the design tool bakes below it. pulp #3191 follow-up.
+    // value-stack text the design tool bakes below it.
     if (bottom > top) {
         out.housing_height_px = static_cast<float>(bottom - top);
         out.has_housing_height = true;
@@ -283,7 +283,7 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
 
     // How far the captured gradient filled the bar (0 = empty, 1 = full) — seed
     // the imported meter's initial level from this rather than a linear dB→
-    // position map. pulp #3191.
+    // position map.
     if (bottom > top + 1) {
         out.fill_level = std::clamp(
             static_cast<float>(fill_h) / static_cast<float>(bottom - top), 0.0f, 1.0f);
@@ -301,7 +301,7 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         out.gradient.push_back(to_color(pixel(img, cx, y)));
     }
 
-    // ── Bar / housing widths (pulp #3191) ─────────────────────────────────────
+    // ── Bar / housing widths ─────────────────────────────────────────────────
     // The captured art has TWO widths: the dark HOUSING slot (the full opaque
     // run in [top, bottom)) and the narrower COLOURED bar recessed inside it
     // (the saturated fill in [fill_top, fill_bottom]). The widget box should be
@@ -349,8 +349,7 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         }
     }
     // Housing height = the control art region (dark channel + coloured fill),
-    // excluding the value-stack text the design tool bakes below it. pulp #3191
-    // follow-up.
+    // excluding the value-stack text the design tool bakes below it.
     if (bottom > top) {
         out.housing_height_px = static_cast<float>(bottom - top);
         out.has_housing_height = true;
