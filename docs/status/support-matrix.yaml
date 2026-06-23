@@ -108,6 +108,7 @@ format_limitations:
     - "Custom editor surface not wired — Pro Tools shows the auto-generated parameter strip rather than a Pulp ViewBridge editor (followups plan, row 7)."
     - "AudioSuite role is declared but not exercised end-to-end (followups plan, row 13)."
   auv3:
+    - "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet (workstream 01)."
     - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
@@ -877,7 +878,7 @@ limitations:
     - text: "Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
   formats.auv3:
-    - text: "Single input bus; no sidechain support."
+    - text: "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
     - text: "MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"

@@ -424,6 +424,17 @@ each event into the realtime `ParameterEventQueue` and also updates
 capacity are dropped from the sparse queue and counted as overflow, while the
 latest value still reaches `StateStore` for block-rate reads.
 
+### Multi-Bus / Sidechain
+
+AU v3 exposes descriptor input bus 0 as the main input and descriptor input bus
+1 as an optional sidechain `AUAudioUnitBus` when it has a positive channel
+count. The render block pulls input bus 1 separately, publishes it through
+`Processor::set_sidechain()`, and includes it as the sidechain bus in
+`ProcessBuffers`.
+
+Additional input buses and secondary output buses are not exposed through the
+AUv3 adapter surface yet; the adapter creates one main output bus.
+
 ---
 
 ## LV2
@@ -756,19 +767,19 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 
 ## Comparison Table
 
-| Feature | CLAP | VST3 | AU v2 |
-|---|---|---|---|
-| Entry macro | `PULP_CLAP_PLUGIN` | `PULP_VST3_PLUGIN` | `PULP_AU_PLUGIN` / `PULP_AU_INSTRUMENT` |
-| Param values | Raw float | Normalized 0-1 | Raw float |
-| Param modulation | Yes (`PARAM_MOD` events) | No | No |
-| Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) |
-| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes |
-| State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` |
-| Multi-bus declared | Yes | Yes | No |
-| Plugin-side param output | Yes | Yes | Not yet |
-| Latency reporting | Yes | Yes | Yes (seconds) |
-| Tail reporting | Yes | Yes | Yes (seconds) |
-| Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist |
+| Feature | CLAP | VST3 | AU v2 | AU v3 |
+|---|---|---|---|---|
+| Entry macro | `PULP_CLAP_PLUGIN` | `PULP_VST3_PLUGIN` | `PULP_AU_PLUGIN` / `PULP_AU_INSTRUMENT` | `pulp_add_plugin(... FORMATS AUv3 ...)` |
+| Param values | Raw float | Normalized 0-1 | Raw float | Raw float |
+| Param modulation | Yes (`PARAM_MOD` events) | No | No | No |
+| Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
+| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
+| State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
+| Multi-bus declared | Yes | Yes | No | Main input + sidechain input |
+| Plugin-side param output | Yes | Yes | Not yet | Yes |
+| Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
+| Tail reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
+| Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist | Bundle identifier |
 
 Optional AAX uses its own runtime and follows the constraints listed
 in the AAX section above.

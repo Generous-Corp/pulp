@@ -90,6 +90,11 @@ public:
             audio.main_output() ? audio.main_output()->num_channels() : 0;
         last_process_buffers_sidechain_channels =
             audio.sidechain_input() ? audio.sidechain_input()->num_channels() : 0;
+        last_process_buffers_sidechain_first_sample =
+            (audio.sidechain_input() && audio.sidechain_input()->num_channels() > 0 &&
+             audio.sidechain_input()->num_samples() > 0)
+                ? audio.sidechain_input()->channel(0)[0]
+                : 0.0f;
 
         auto* output = audio.main_output();
         pulp::audio::BufferView<const float> empty_input;
@@ -121,6 +126,7 @@ public:
     std::size_t last_process_buffers_main_input_channels = 0;
     std::size_t last_process_buffers_main_output_channels = 0;
     std::size_t last_process_buffers_sidechain_channels = 0;
+    float last_process_buffers_sidechain_first_sample = 0.0f;
     std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
@@ -205,6 +211,15 @@ public:
     }
 };
 
+class TestAUSidechainEffectProcessor : public TestAUEffectProcessor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.input_buses = {{"Audio In", 2}, {"Sidechain", 1, true}};
+        return d;
+    }
+};
+
 class TestAULatencyTailEffectProcessor : public TestAUEffectProcessor {
 public:
     TestAULatencyTailEffectProcessor()
@@ -253,6 +268,10 @@ std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
     return std::make_unique<TestAUWideEditorProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_sidechain_effect_processor() {
+    return std::make_unique<TestAUSidechainEffectProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_latency_tail_effect_processor() {
@@ -640,6 +659,115 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
         REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:1] == 5);
         REQUIRE([unit pulpLastParameterEventRampDurationAtIndex:1] == 2);
         REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:1], WithinAbs(-12.0f, 1e-6f));
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 exposes and routes descriptor-declared sidechain input",
+          "[au][auv3][audio][sidechain]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstS';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_sidechain_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        REQUIRE([unit inputBusses] != nil);
+        REQUIRE([unit inputBusses].count == 2u);
+        REQUIRE([unit outputBusses] != nil);
+        REQUIRE([unit outputBusses].count == 1u);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        constexpr UInt32 kFrames = 8;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        __block NSInteger main_pull_count = 0;
+        __block NSInteger sidechain_pull_count = 0;
+        AURenderPullInputBlock pull = ^AUAudioUnitStatus(
+            AudioUnitRenderActionFlags*,
+            const AudioTimeStamp*,
+            AUAudioFrameCount frameCount,
+            NSInteger inputBusNumber,
+            AudioBufferList* inputData) {
+            if (inputBusNumber == 0) {
+                ++main_pull_count;
+                for (UInt32 ch = 0; ch < inputData->mNumberBuffers; ++ch) {
+                    auto* samples = static_cast<float*>(inputData->mBuffers[ch].mData);
+                    for (AUAudioFrameCount frame = 0; frame < frameCount; ++frame) {
+                        samples[frame] = ch == 0 ? 0.125f : -0.125f;
+                    }
+                }
+                return noErr;
+            }
+            if (inputBusNumber == 1) {
+                ++sidechain_pull_count;
+                REQUIRE(inputData->mNumberBuffers == 1u);
+                auto* samples = static_cast<float*>(inputData->mBuffers[0].mData);
+                for (AUAudioFrameCount frame = 0; frame < frameCount; ++frame) {
+                    samples[frame] = 0.75f;
+                }
+                return noErr;
+            }
+            return kAudioUnitErr_InvalidElement;
+        };
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        timestamp.mSampleTime = 400;
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        auto status = block(&flags,
+                            &timestamp,
+                            kFrames,
+                            0,
+                            &output.list,
+                            nil,
+                            pull);
+        REQUIRE(status == noErr);
+
+        REQUIRE(main_pull_count == 1);
+        REQUIRE(sidechain_pull_count == 1);
+        REQUIRE(processor->process_buffers_count == 1);
+        REQUIRE(processor->process_count == 1);
+        REQUIRE(processor->last_process_buffers_layout_ok);
+        REQUIRE(processor->last_process_buffers_storage_ok);
+        REQUIRE(processor->last_process_buffers_input_count == 2);
+        REQUIRE(processor->last_process_buffers_output_count == 1);
+        REQUIRE(processor->last_process_buffers_main_input_channels == 2);
+        REQUIRE(processor->last_process_buffers_main_output_channels == 2);
+        REQUIRE(processor->last_process_buffers_sidechain_channels == 1);
+        REQUIRE_THAT(processor->last_process_buffers_sidechain_first_sample,
+                     WithinAbs(0.75f, 1e-6f));
 
         [unit deallocateRenderResources];
         [unit release];

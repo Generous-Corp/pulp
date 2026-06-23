@@ -24,7 +24,7 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.vst3` | MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
 | `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.auv3` | Single input bus; no sidechain support. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../planning/production-readiness/01-format-adapters.md#1.5) |
