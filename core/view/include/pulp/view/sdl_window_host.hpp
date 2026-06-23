@@ -33,6 +33,12 @@ public:
     // Run the event loop (blocks until window closed)
     virtual void run_event_loop() = 0;
 
+    // Native content-view handle for outbound file drag (mirrors
+    // WindowHost::native_content_view_handle). X11 Window id on Linux, HWND on
+    // Windows; nullptr where unsupported so the drag degrades to false. The SDL
+    // backend overrides this; the default keeps non-drag SDL hosts buildable.
+    virtual void* native_content_view_handle() const { return nullptr; }
+
     // Set close callback
     virtual void set_close_callback(std::function<void()> cb) = 0;
 };
