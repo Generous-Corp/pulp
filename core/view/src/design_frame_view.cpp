@@ -534,7 +534,7 @@ View* DesignFrameView::overlay_widget(int i) const {
 void DesignFrameView::layout_children() {
     // Position each native overlay over its element's rect, mapped through the
     // SAME panel transform paint() uses, so the widget tracks the design exactly
-    // as the window scales (Codex: layout_children is the hook hosts/screenshots
+    // as the window scales (layout_children is the hook hosts/screenshots
     // call before paint; set_bounds only fires on_resized).
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0) return;

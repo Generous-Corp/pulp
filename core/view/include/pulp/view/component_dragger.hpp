@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file component_dragger.hpp
-/// ComponentDragger — drag-to-move helper for any View
-/// (closes the gap-doc P2 row "Drag & drop ComponentDragger utility").
+/// ComponentDragger — drag-to-move helper for any View.
 ///
 /// A `ComponentDragger` adds "click and drag to move me within my parent"
 /// behavior to any `View`. It is intentionally a free helper (not a mixin)

@@ -1,6 +1,6 @@
 // WebView embedding implementation
 // Wraps CHOC's native WebView layer (WKWebView / WebView2 / WebKitGTK) and
-// adds a small structured bridge on top for Pulp's Phase 7 interop needs.
+// adds a small structured bridge on top for Pulp's interop needs.
 
 #include <pulp/view/web_view.hpp>
 #include <pulp/view/asset_manager.hpp>

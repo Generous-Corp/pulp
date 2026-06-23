@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file tooltip_window.hpp
-/// TooltipWindow — transient floating tooltip near the cursor
-/// (closes the gap-doc P2 row "TooltipWindow").
+/// TooltipWindow — transient floating tooltip near the cursor.
 ///
 /// A `TooltipWindow` is a tiny stateful holder that drives a tooltip
 /// "popup" near a pointer:

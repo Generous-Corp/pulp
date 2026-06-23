@@ -198,7 +198,7 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 void WidgetBridge::register_storage_key_value_api() {
     BridgeApiContext api{engine_};
 
-    // P2: localStorage equivalent - file-based key-value in plugin data dir.
+    // localStorage equivalent - file-based key-value in plugin data dir.
     register_bridge_function(api, "storageGetItem", [](choc::javascript::ArgumentList args) {
         auto key = args.get<std::string>(0, "");
         if (key.empty()) return choc::value::createString("");
@@ -270,8 +270,8 @@ void WidgetBridge::register_font_assets_api() {
     // registerFont(family, path) - register a bundled .ttf/.otf with the text
     // renderer under `family`, so set_font() / Label font_family resolve to the
     // shipped face instead of a same-named system font (or a generic fallback).
-    // figma-import #43b: codegen emits these from the envelope's
-    // font_family_assets before any setFontFamily.
+    // Codegen emits these from the envelope's font_family_assets before any
+    // setFontFamily.
     register_bridge_function(api, "registerFont", [](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");

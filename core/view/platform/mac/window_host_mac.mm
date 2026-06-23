@@ -1273,7 +1273,7 @@ static void install_app_menu(NSString* appName) {
     }
 }
 
-// ── Trackpad gestures (P4: pinch/rotate) ───────────────────────────
+// ── Trackpad gestures (pinch/rotate) ───────────────────────────────
 
 - (void)magnifyWithEvent:(NSEvent*)event {
     if (!self.rootView) return;

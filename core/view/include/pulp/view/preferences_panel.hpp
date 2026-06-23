@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file preferences_panel.hpp
-/// PreferencesPanel — sidebar-of-pages container for app preferences
-/// (closes the gap-doc P3 row "PreferencesPanel").
+/// PreferencesPanel — sidebar-of-pages container for app preferences.
 ///
 /// `PreferencesPanel` is a `View` subclass that hosts a sidebar of named
 /// "pages". Each page is a (title, icon, content) tuple; the panel

@@ -128,8 +128,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         const std::string& fit = object_fit();
 
         // Default `fill` (CSS spec): stretch to the box, full src.
-        // Same applies when `object-fit` is unset or unknown — the
-        // pre-#1737 behaviour.
+        // Same applies when `object-fit` is unset or unknown.
         if (fit.empty() || fit == "fill") {
             return {dst, src};
         }

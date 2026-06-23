@@ -4,7 +4,7 @@
 // which on Windows talks to Microsoft Edge WebView2 (via the
 // `Microsoft.Web.WebView2.Loader` COM shim distributed with the Edge
 // runtime). CHOC handles the heavy lifting — this translation unit
-// exists so the gap-doc audit can confirm:
+// exists to confirm:
 //
 //   1. The WebView2 runtime is locatable at process start (so the build
 //      isn't silently emitting CHOC code that will fail to instantiate),
@@ -23,14 +23,14 @@
 //     channel, not as part of the Windows SDK, so vendor-pinned headers
 //     would add a needless build dependency.
 //
-// What's *not* in this file (deferred follow-up):
+// What's *not* in this file:
 //   * Full WebView2 environment setup (`CreateCoreWebView2Environment`,
 //     `ICoreWebView2Controller2`, the per-user data folder convention).
 //     CHOC already takes that path inside `choc::ui::WebView`; this
 //     module just confirms the loader DLL is reachable.
 //   * Custom-scheme / `WebResourceRequested` interception. CHOC's
 //     `customSchemeURI` + `fetchResource` already cover the
-//     `ResourceProvider`-style intercept use case for the gap-doc row.
+//     `ResourceProvider`-style intercept use case.
 
 #include <pulp/view/web_view.hpp>
 
