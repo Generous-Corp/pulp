@@ -1,9 +1,6 @@
-// Phase 4a — Lock-to-source, Path A (generated-TSX/JS rewrite).
+// Lock-to-source, Path A (generated-TSX/JS rewrite).
 //
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md,
-//       "Phase 4 — Lock-to-source" / "Phase 4a — Path A".
-//
-// These tests prove the round-trip the roadmap calls for:
+// These tests prove the lock-to-source round-trip:
 //   tweak (anchor_id → property_path → value)
 //     → lock-to-source
 //     → generated source now carries the new value at the right line
@@ -210,7 +207,7 @@ TEST_CASE("lock_property_to_style_name maps dotted paths", "[lock-to-source][iss
     SECTION("nested layout path is out of Path A scope") {
         REQUIRE_FALSE(lock_property_to_style_name("layout.padding.top").has_value());
     }
-    // WYSIWYG T4 — reorder + proportional-resize edits round-trip to source.
+    // Reorder and proportional-resize edits round-trip to source.
     SECTION("layout.order maps to the order style property") {
         REQUIRE(lock_property_to_style_name("layout.order") == "order");
     }
@@ -473,10 +470,10 @@ TEST_CASE("reparent_in_source physically relocates the child subtree",
     REQUIRE(r.source.find(card_var + ".appendChild(") != std::string::npos);
 }
 
-// WYSIWYG sweep P1 — the reparent edit carries an insertion SLOT. When the
-// edit names a preceding sibling (insert_after_anchor_id), the moved block must
-// land right AFTER that sibling's subtree under the new parent — not always as
-// the parent's first child (the prior behavior that discarded the drop slot).
+// The reparent edit carries an insertion slot. When the edit names a preceding
+// sibling (`insert_after_anchor_id`), the moved block must land right AFTER that
+// sibling's subtree under the new parent — not always as the parent's first
+// child.
 TEST_CASE("reparent_in_source honors the requested insertion slot",
           "[lock-to-source][wysiwyg][issue-wysiwyg-reflow-slot]") {
     // Root → { Card, Panel{ PanelA, PanelB } }. Reparent Card under Panel,
@@ -579,17 +576,17 @@ TEST_CASE("reparent_in_source relocation is idempotent",
     REQUIRE(again.source == first.source);  // byte-identical — no drift
 }
 
-// WYSIWYG T5 gap #2 — guard: a reparent that cannot be safely relocated must
-// skip the physical block move WITHOUT corrupting source. Dropping a parent
-// INSIDE its own descendant (Panel under Card, when Card is Panel's ancestor)
-// is the canonical unsafe case; the engine rewrites the receiver but leaves the
-// block in place, and the source stays well-formed (every anchor still present).
+// Guard: a reparent that cannot be safely relocated must skip the physical
+// block move without corrupting source. Dropping a parent inside its own
+// descendant (Panel under Card, when Card is Panel's ancestor) is the canonical
+// unsafe case; the engine rewrites the receiver but leaves the block in place,
+// and the source stays well-formed (every anchor still present).
 TEST_CASE("reparent_in_source refuses cyclic reparent (parent inside subtree)",
           "[lock-to-source][wysiwyg][t5]") {
     // Build Root → Outer → Inner. Try to reparent Outer UNDER Inner (its own
     // descendant). The live gesture would never allow this (is_self_or_ancestor),
-    // but the source engine must defend too. WYSIWYG sweep P2 fix: rewriting the
-    // receiver alone would emit `inner.appendChild(outer);` — appending a node
+    // but the source engine must defend too. Rewriting the receiver alone would
+    // emit `inner.appendChild(outer);` — appending a node
     // into its own descendant, which is cyclic/invalid source. The engine must
     // rewrite NOTHING and return a non-mutating failure with source UNCHANGED.
     IRNode root;
@@ -839,12 +836,11 @@ TEST_CASE("lock_tweaks_into_source chains multiple tweaks", "[lock-to-source][is
 
 // ── Full round-trip: tweak → lock → re-import yields the tweaked value ──
 //
-// The roadmap's acceptance criterion: after locking, a fresh re-import /
-// re-codegen of the (now tweaked) design must reproduce the tweaked
-// value. Path A's "source" IS the generated artifact, so the round-trip
-// is: locking the tweak into the generated text must produce exactly the
-// text that codegen would emit had the IR carried the tweaked value all
-// along.
+// After locking, a fresh re-import / re-codegen of the (now tweaked) design
+// must reproduce the tweaked value. Path A's "source" IS the generated
+// artifact, so the round-trip is: locking the tweak into the generated text
+// must produce exactly the text that codegen would emit had the IR carried the
+// tweaked value all along.
 
 TEST_CASE("lock-to-source round-trips against a re-codegen of the tweaked IR", "[lock-to-source][issue-1307]") {
     CodeGenOptions opts;
@@ -894,4 +890,3 @@ TEST_CASE("lock-to-source round-trips a style-color tweak against re-codegen", "
 
     REQUIRE(locked.source == regen);
 }
-

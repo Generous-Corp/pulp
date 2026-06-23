@@ -6,7 +6,6 @@
 // are orphaned (the anchor itself is gone). This is the CLI mirror of
 // the inspector overlay's drift drawer — same TweakStore::diff() logic
 // underneath, so the two surfaces never disagree.
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
 //
 // The design snapshot is supplied via `--design <file>`, a small JSON
 // "anchors manifest" in one of three accepted shapes:

@@ -1,7 +1,6 @@
-// test_token_lock.cpp — Phase 4c token lock-to-source test suite.
+// test_token_lock.cpp — token lock-to-source test suite.
 //
-// Covers planning/2026-05-18-inspector-direct-manipulation-roadmap.md
-// Phase 4c: locking a token-typed inspector tweak rewrites exactly one
+// Locking a token-typed inspector tweak rewrites exactly one
 // token value in DESIGN.md, preserving every other byte (prose, comments,
 // key order, indentation), and fails conservatively when the token
 // cannot be located unambiguously.
@@ -104,12 +103,12 @@ TEST_CASE("classify_token_tweak falls back to the designtoken: anchor",
 
 TEST_CASE("classify_token_tweak rejects element-only tweaks",
           "[view][token-lock][issue-1307]") {
-    // paint/layout/text paths are the Phase 4a/4b domain, not tokens.
+    // paint/layout/text paths belong to element lock-to-source, not tokens.
     CHECK_FALSE(classify_token_tweak("anchor:abc123",
                                      "paint.backgroundColor").has_value());
     CHECK_FALSE(classify_token_tweak("anchor:abc123",
                                      "layout.padding").has_value());
-    // `components` is deliberately excluded from Phase 4c.
+    // `components` is deliberately excluded from token lock-to-source.
     CHECK_FALSE(classify_token_tweak("", "components.button-primary.padding")
                     .has_value());
     // A flat group token whose name contains a dot is an element path.
@@ -280,7 +279,7 @@ TEST_CASE("lock_token_in_designmd refuses a non-token (element) tweak",
 
 TEST_CASE("lock_token_in_designmd refuses a nested color palette",
           "[view][token-lock][issue-1307]") {
-    // `brand` is a nested palette (shade map), not a scalar — Phase 4c
+    // `brand` is a nested palette (shade map), not a scalar. Token lock-to-source
     // does not lock into nested palettes, it must fail clearly.
     std::string md =
         "---\nname: Nested\ncolors:\n  brand:\n    500: \"#ff0000\"\n---\n";

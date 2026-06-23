@@ -1,4 +1,4 @@
-// token_lock.cpp — Phase 4c token lock-to-source via DESIGN.md export.
+// token_lock.cpp — token lock-to-source via DESIGN.md export.
 //
 // See token_lock.hpp for the design rationale. Summary: locking a
 // token-typed inspector tweak rewrites exactly one token value in the
@@ -253,7 +253,7 @@ TokenLocation locate_token(const YAML::Node& root, const TokenTarget& target) {
             loc.error = std::string("token `") + group_key + "." +
                         target.name +
                         "` is not a scalar value (nested palettes are not "
-                        "lockable in Phase 4c)";
+                        "lockable design tokens)";
             return loc;
         }
         loc.value_line = token.Mark().line;
