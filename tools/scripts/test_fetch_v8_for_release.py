@@ -275,7 +275,7 @@ class BakedV8FastPath(unittest.TestCase):
 
     Skips the download only when the baked stamp matches the current pin AND
     the library is present; falls through to a normal fetch otherwise. None of
-    these branches were covered before (greptile P1 on this file)."""
+    these branches were covered before."""
 
     @contextlib.contextmanager
     def _env(self, **kv):

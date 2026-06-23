@@ -3,7 +3,7 @@
 
 Reskinnable widgets must resolve their colours from theme tokens
 (`resolve_color("token", fallback)`); a bare colour literal in paint code can
-never be restyled by a theme/token swap (Design-System-Import-Plan Phase 2).
+never be restyled by a theme/token swap.
 
 This is a RATCHET, not an absolute gate. It freezes the current per-file count
 of non-`resolve_color` colour literals in the view layer as a baseline and fails

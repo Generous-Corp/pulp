@@ -93,12 +93,12 @@ class TestCheckTemplateDir(unittest.TestCase):
             self.assertEqual(failures, [])
 
     def test_flags_unknown_var_in_nested_template(self) -> None:
-        # Regression: Codex PR #3002 review (P1 + P2). The previous
-        # implementation called `glob("*.template")` and missed nested
-        # template trees like `tools/templates/android/app/src/main/...`
-        # and `tools/templates/standalone/<type>/CMakeLists.txt.template`.
-        # A bad placeholder in those files would silently ship to users.
-        # This test plants a nested template with an unknown var and
+        # Regression: the previous implementation called `glob("*.template")`
+        # and missed nested template trees like
+        # `tools/templates/android/app/src/main/...` and
+        # `tools/templates/standalone/<type>/CMakeLists.txt.template`. A bad
+        # placeholder in those files would silently ship to users. This test
+        # plants a nested template with an unknown var and
         # asserts the checker now catches it.
         with TemporaryDirectory() as td:
             root = Path(td)
@@ -118,10 +118,10 @@ class TestCheckTemplateDir(unittest.TestCase):
                           failures[0])
 
     def test_discovers_subtree_without_top_level_templates(self) -> None:
-        # Regression: Codex PR #3002 P1. `tools/templates/standalone/`
-        # contains no top-level *.template files (only nested subdirs).
-        # The previous iterdir filter (`any(d.glob("*.template"))`)
-        # excluded it entirely, leaving the standalone subtree unchecked.
+        # Regression: `tools/templates/standalone/` contains no top-level
+        # *.template files (only nested subdirs). The previous iterdir filter
+        # (`any(d.glob("*.template"))`) excluded it entirely, leaving the
+        # standalone subtree unchecked.
         with TemporaryDirectory() as td:
             root = Path(td)
             # Build a fake `standalone/` shaped like the real one.
