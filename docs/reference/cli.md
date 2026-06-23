@@ -1300,7 +1300,7 @@ Repo-level audio analysis tooling. Manages offline audio model metadata, reads r
 pulp audio                                      # Show help
 pulp audio model list [--json]                  # List registered models
 pulp audio model status [--json]                # Show configured + resolved model
-pulp audio model activate <model-id> [--json]   # Pick the active model
+pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
@@ -1317,7 +1317,7 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 |------------|-------------|
 | `model list` | List all registered audio models with backend and tags |
 | `model status` | Show the configured model, resolved checkpoint, and whether it is loadable |
-| `model activate <id>` | Select the active model and persist the state file |
+| `model activate <id>` | Activate an installed audio model and persist the state file |
 | `excerpt-find` | Rank WAV windows deterministically from a text query, then emit an excerpt bundle with backend metadata |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
