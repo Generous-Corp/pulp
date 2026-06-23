@@ -1,8 +1,7 @@
-// HostedEditor → WindowHost migration (item 4.4 macOS plan).
+// HostedEditor to WindowHost attachment contract.
 //
 // Exercises pulp::view::EditorAttachment — the RAII wrapper that walks a
-// PluginSlot's typed HostedEditor onto WindowHost::attach_native_child_view
-// (the canonical native-window contract from PR #2844).
+// PluginSlot's typed HostedEditor onto WindowHost::attach_native_child_view.
 
 #include <catch2/catch_test_macros.hpp>
 

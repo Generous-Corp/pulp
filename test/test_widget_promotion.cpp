@@ -5,9 +5,9 @@
 // role="button", cursor:pointer) to "button" so the importer doesn't
 // drop the user's interactive intent on the floor.
 //
-// pulp-internal task #84 (follow-up to issue #1814). Covers the four
-// promotion paths plus the non-promotion guardrails: explicit
-// role="presentation", non-frame node types, and already-typed widgets.
+// Covers the four promotion paths plus the non-promotion guardrails:
+// explicit role="presentation", non-frame node types, and already-typed
+// widgets.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
@@ -178,11 +178,9 @@ TEST_CASE("widget_promotion: promoted parent stops descendant promotion — no n
 
 TEST_CASE("widget_promotion: iterative walker handles deep IR without stack blowup",
           "[import][widget][issue-1814]") {
-    // The prior implementation called itself recursively despite a
-    // comment claiming "iterative walk." On a
-    // 5000-deep linear IR (within reason for some Figma exports
-    // post-flatten), recursive descent would stack-overflow on most
-    // hosts. The worklist-based pass should handle it cleanly.
+    // The worklist-based pass must handle deep imports without recursive
+    // stack growth. A 5000-deep linear IR is within reason for some
+    // post-flatten Figma exports.
     //
     // Tree shape: a 5000-deep linear chain with NO promotable nodes,
     // capped by a single promotable leaf. If the walker stack-

@@ -4,7 +4,7 @@
 ///   - Off by default — no samples until set_enabled(true).
 ///   - Each tick produces one CostSample when enabled.
 ///   - active_trace_ids reflects which traces emitted on the tick.
-///   - active_provenance carries the Phase 9 envelope per trace.
+///   - active_provenance carries source metadata per trace.
 ///   - Render-cost fields populate from a CostProbe.
 ///   - Graceful degradation when no probe is wired.
 ///   - JSONL serialization round-trips a stream.
@@ -427,7 +427,7 @@ TEST_CASE("serialize_cost_sample emits valid JSON shape", "[motion-cost]") {
     REQUIRE(line.find("\"source_kind\":\"css-transition\"") != std::string::npos);
 }
 
-// ── Bug-sweep regressions (pre-merge sweep #2142) ────────────────────
+// ── Motion-cost regression coverage ───────────────────────────────────
 
 // serialize_cost_sample used to emit raw doubles, so a single bad
 // render-stat tick (NaN / Inf) produced invalid JSON tokens (`nan` /
@@ -464,11 +464,9 @@ TEST_CASE("serialize_cost_sample emits NaN/Inf as quoted sentinels",
     std::remove(path.c_str());
 }
 
-// load_cost_stream's active_provenance loop used line.find('}', pos)
-// to locate each object's end. A literal `}` inside a source_file
-// path (legal JSON — only `"` and `\\` are escaped) truncated the
-// entry mid-string and corrupted every following provenance object.
-// The fix is brace-depth + string-aware scanning.
+// active_provenance object scanning must be brace-depth + string aware:
+// a literal `}` inside a source_file path is legal JSON and must not
+// truncate the entry or corrupt following provenance objects.
 TEST_CASE("load_cost_stream parses provenance objects whose strings contain '}'",
           "[motion-cost][bug-sweep]") {
     CostSample s;

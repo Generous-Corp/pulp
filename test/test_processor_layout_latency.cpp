@@ -93,7 +93,7 @@ public:
 
 } // namespace
 
-// ── Item 3.7 — bus layout validation ──────────────────────────────────────
+// ── Bus layout validation ─────────────────────────────────────────────────
 
 TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo "
           "matching the descriptor's bus count",
@@ -160,22 +160,20 @@ TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
     REQUIRE_FALSE(p.is_bus_layout_supported(mismatched_out));
 }
 
-// ── Item 3.8 — processBlock precision contract ────────────────────────────
+// ── processBlock precision contract ───────────────────────────────────────
 
 TEST_CASE("Processor::process is declared with float-precision BufferView. "
           "All four adapters today route only float buffers; double-"
           "precision support is opt-in per future Processor overload.",
           "[processor][precision][item-3.8]") {
-    // The contract under audit: the single virtual `process()` on
-    // pulp::format::Processor is `BufferView<float>` only — there is
+    // The single virtual `process()` on pulp::format::Processor is
+    // `BufferView<float>` only — there is
     // no `BufferView<double>` overload. Adapters wire float input ↔
     // output buffers in every format (VST3 channelBuffers32, AU
     // float32 render block, CLAP audio_buffer_t.data32, AAX float
     // pages). A regression that adds a second virtual or that
     // changes the element type to a wider scalar would silently
-    // un-implement every adapter; this static_assert pins the
-    // contract until item 3.8's follow-up adds an explicit double
-    // overload.
+    // un-implement every adapter; this static_assert pins that contract.
     using ProcessSig = void (Processor::*)(
         pulp::audio::BufferView<float>&,
         const pulp::audio::BufferView<const float>&,
@@ -486,7 +484,7 @@ TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
     REQUIRE(ctx.should_render_tail_only());
 }
 
-// ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────
+// ── Latency / tail change notifications (RT-safe) ─────────────────────────
 
 TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "
           "yields exactly one consume per flag",

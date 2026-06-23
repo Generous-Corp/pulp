@@ -1490,7 +1490,7 @@ TEST_CASE("StateTreeSynchroniser detaches removed subtrees before later mutation
     REQUIRE(sync.take_deltas().empty());
 }
 
-// ── StateTreeSynchroniser nested-node routing (P7-3) ────────────────────
+// ── StateTreeSynchroniser nested-node routing ───────────────────────────
 //
 // Regression tests for two defects: deltas captured on a nested node must
 // (1) record a path that identifies that node, not a bare type name, and
@@ -1944,9 +1944,8 @@ TEST_CASE("SyncedClone detach survives removed-and-dropped child subtree",
     child.reset();
     src->remove_child(0);
 
-    // Detach must not crash on the now-dead wiring entry. Before the
-    // fix this dereferenced a dangling raw pointer; after the fix the
-    // weak_ptr lock returns null and the entry is skipped.
+    // Detach must not crash on the now-dead wiring entry; the weak_ptr
+    // lock returns null and the entry is skipped.
     REQUIRE_NOTHROW(sync.detach());
     REQUIRE_FALSE(sync.is_attached());
 }
