@@ -361,9 +361,7 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
     REQUIRE_THAT(fb.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
 }
 
-// pulp #1638 baseline-corruption: title was `strokeText` but body
-// tests arcTo (the title shifted from a parallel block during merge).
-// Renamed to match the body. Wave 5 cleanup.
+// pulp #1638 — ctx.arcTo records a single path_arc_to with the radius.
 TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to with the radius (recovered from #1638)",
           "[view][bridge][canvas][wave3-canvas2d][wave5-recovered]") {
     ScriptEngine engine;

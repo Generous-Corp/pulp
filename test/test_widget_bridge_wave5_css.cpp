@@ -91,10 +91,9 @@ TEST_CASE("Wave5 css/backgroundSize wires JS → bridge → View slot",
     REQUIRE(p->background_size() == "50% 75%");
 }
 
-// Cat-3 — textShadow CSS shorthand. The shim parses
-// `<dx>px <dy>px <blur>px <color>` and calls setTextShadow(); the
-// bridge fn was unregistered before Wave 5 css.5. The new fn fans out
-// into the existing 3 per-attribute slots so React's setTextShadow*
+// textShadow CSS shorthand. The shim parses
+// `<dx>px <dy>px <blur>px <color>` and calls setTextShadow(), which
+// fans out into the 3 per-attribute slots so React's setTextShadow*
 // props keep working unchanged.
 TEST_CASE("Wave5 css/textShadow CSS shorthand fans into per-attribute slots",
           "[view][bridge][css][wave5][issue-1649]") {
@@ -151,8 +150,8 @@ TEST_CASE("Wave5 css/border shorthand routes per-attribute (preserves radius)",
     REQUIRE(p->has_border());
     REQUIRE_THAT(p->border_width(), WithinAbs(3.0f, 1e-5f));
     REQUIRE(p->border_color().r8() == 0xff);
-    // The Wave 5 audit confirms the per-attribute fix from #1169:
-    // setting `border` shorthand does NOT zero a previously-set radius.
+    // Per-attribute fix from #1169: setting the `border` shorthand does
+    // NOT zero a previously-set radius.
     REQUIRE_THAT(p->corner_radius(), WithinAbs(12.0f, 1e-5f));
 }
 

@@ -238,13 +238,12 @@ TEST_CASE("WidgetBridge per-side setBorder*Color / Width route to BorderSide",
     REQUIRE(w->border_bottom_color().r8() == 0xff);
 }
 
-// pulp #1027 (audit PR #1166 finding #4) — Interleaved single-attribute
-// border setters MUST preserve siblings. Audit found that the JS shim's
-// `el.style.borderRadius='8px'; el.style.borderColor='red'` sequence
-// silently dropped radius back to 0, because both lowered to
-// setBorder(id, color, width, radius) with 0 for unset args. After the
-// fix, the JS shim routes through setBorderColor / setBorderWidth /
-// setBorderRadius which mutate exactly one slot.
+// pulp #1027 / #1166 — Interleaved single-attribute border setters MUST
+// preserve siblings. The `el.style.borderRadius='8px';
+// el.style.borderColor='red'` sequence used to silently drop radius
+// back to 0, because both lowered to setBorder(id, color, width, radius)
+// with 0 for unset args. The JS shim now routes through setBorderColor /
+// setBorderWidth / setBorderRadius, each mutating exactly one slot.
 TEST_CASE("WidgetBridge interleaved setBorderColor/Width/Radius preserves siblings",
           "[view][bridge][issue-1027][issue-1166]") {
     ScriptEngine engine;
@@ -284,8 +283,8 @@ TEST_CASE("WidgetBridge interleaved setBorderColor/Width/Radius preserves siblin
     }
 
     SECTION("audit failing case: set radius first, then color via setBorderColor") {
-        // This is the exact case the audit called out: setting radius then
-        // color used to leave width=1, radius=0 in the broken JS shim.
+        // Setting radius then color used to leave width=1, radius=0 in the old
+        // JS shim.
         // With the bridge setters routed correctly, radius survives.
         bridge.load_script("setBorderRadius('k', 8.0)");
         REQUIRE_THAT(w->corner_radius(), WithinAbs(8.0f, 1e-5f));
@@ -358,7 +357,7 @@ TEST_CASE("CSS shim: setting borderRadius then borderColor preserves radius",
     );
     REQUIRE(w->border_color().r8() == 0xff);
     REQUIRE(w->border_color().g8() == 0x00);
-    // The audit's failing case — radius MUST survive the borderColor write.
+    // Radius MUST survive the borderColor write.
     REQUIRE_THAT(w->corner_radius(), WithinAbs(8.0f, 1e-5f));
 
     // Reverse order: borderColor first, then borderRadius. Both must stick.
@@ -382,11 +381,11 @@ TEST_CASE("CSS shim: setting borderRadius then borderColor preserves radius",
     REQUIRE_THAT(w->corner_radius(), WithinAbs(12.0f, 1e-5f)); // preserved
 }
 
-// pulp #1027 — Codex P1 review on PR #1166 follow-up: CSS per-side flat
-// props must NOT clobber the unrelated attribute. Before the fix, the
-// JS shim lowered `borderTopWidth: '2px'` to `setBorderSide(id, 'top', 2, "")`
-// which reset the side's color, and `borderTopColor: 'red'` to
-// `setBorderSide(id, 'top', 0, 'red')` which reset the side's width.
+// pulp #1027 / #1166 — CSS per-side flat props must NOT clobber the
+// unrelated attribute. The JS shim used to lower `borderTopWidth: '2px'`
+// to `setBorderSide(id, 'top', 2, "")` (resetting the side's color) and
+// `borderTopColor: 'red'` to `setBorderSide(id, 'top', 0, 'red')`
+// (resetting the side's width).
 TEST_CASE("CSS shim: per-side flat props preserve unset attribute",
           "[view][bridge][web-compat][issue-1027][issue-1166]") {
     ScriptEngine engine;
@@ -554,11 +553,10 @@ TEST_CASE("WidgetBridge claimOverlay installs dismiss callback that fires "
 }
 
 // pulp #1420 — `display` CSS values translate to native bridge calls.
-// Spectr triage of yoga drift (post-#1395 harness) showed 5 display
-// values across 79 sites: flex (63), block (10), inline-block (3),
-// none (2), inline-flex (1). Before this fix, inline-block and
-// inline-flex were silently dropped. After: inline-block ≡ block,
-// inline-flex ≡ flex (matches RN + CSS spec for non-text-flowing
+// Five display values are observed in imports: flex, block, inline-block,
+// none, inline-flex. inline-block and inline-flex were previously dropped;
+// they now collapse to inline-block ≡ block and inline-flex ≡ flex
+// (matches RN + CSS spec for non-text-flowing
 // formatting contexts).
 TEST_CASE("CSSStyleDeclaration display routes none/flex/block/inline-block/inline-flex correctly",
           "[view][bridge][css][issue-1420]") {

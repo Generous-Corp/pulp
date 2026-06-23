@@ -308,12 +308,8 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
 // dispatch for the new value forms so DIVERGE doesn't silently
 // regress when the catalog claims them.
 //
-// Wave 3 c2d follow-up — the second half of the #1638 css test bundle
-// (mixBlendMode / borderWidth / fontStyle / top em / margin shorthand)
-// landed with the bridge-setup boilerplate stripped from the diff,
-// breaking the test build. Restoring the four well-formed tests here
-// (width%, fontSize em, lineHeight, gap two-value); the remaining five
-// will be re-filed in a follow-up with full setup boilerplate.
+// CSS value-coverage round-trips through the shim -> translator -> View
+// slot (width%, fontSize em, lineHeight, gap two-value).
 
 TEST_CASE("CSSStyleDeclaration forwards width percent via el.style",
           "[view][bridge][css][wave2-css]") {
@@ -438,11 +434,10 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
     REQUIRE_THAT(f.column_gap, WithinAbs(20.0f, 0.001f));
 }
 
-// Codex #1616 P1 on #1638 — single-token `gap` was leaving prior
-// row_gap/column_gap intact; FlexStyle::effective_gap prefers per-axis
-// when ≥0, so `gap: 5px` after `gap: 10px 20px` was reading 10/20
-// instead of 5/5. The fix resets per-axis to the -1 sentinel before
-// writing the shared slot.
+// pulp #1638 — single-token `gap` must clear prior row_gap/column_gap.
+// FlexStyle::effective_gap prefers per-axis when ≥0, so `gap: 5px`
+// after `gap: 10px 20px` would read 10/20 instead of 5/5 unless the
+// per-axis slots reset to the -1 sentinel before writing the shared slot.
 TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
           "[view][bridge][css][issue-1638][codex-p1]") {
     ScriptEngine engine;
@@ -475,11 +470,10 @@ TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
                  WithinAbs(5.0f, 0.001f));
 }
 
-// Codex P2 followup on #1700 (#1707) — single-token gap with invalid
-// input must NOT clobber prior 2-token state. The earlier ordering
-// reset row_gap/column_gap before parsing; if the parse failed, the
-// per-axis slots were nuked silently. Fix parses first, only resets
-// per-axis if the new value is valid.
+// pulp #1707 — single-token gap with invalid input must NOT clobber
+// prior 2-token state. Parse first; only reset the per-axis slots when
+// the new value is valid (an earlier ordering reset them before parsing,
+// nuking the per-axis state silently on a failed parse).
 TEST_CASE("CSSStyleDeclaration single-token gap with invalid input preserves prior 2-token state",
           "[view][bridge][css][issue-1707]") {
     ScriptEngine engine;
@@ -835,7 +829,7 @@ TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
     CHECK(lbl->attributed_span_count() == 2);  // "Hello" styled run + " world" gap
 }
 
-// Codex #3336: a plain set_text() must supersede prior per-range runs. The old
+// pulp #3336: a plain set_text() must supersede prior per-range runs. The old
 // spans index into the OLD string, so leaving has_attributed_ set would paint
 // stale, mis-indexed runs over the new text.
 TEST_CASE("set_text clears stale attributed runs (Codex #3336)",
@@ -856,7 +850,7 @@ TEST_CASE("set_text clears stale attributed runs (Codex #3336)",
     CHECK_FALSE(lbl->has_attributed_string());  // runs dropped → single-style path
 }
 
-// Codex #3336: paint_attributed_ must honor the text-align cascade instead of
+// pulp #3336: paint_attributed_ must honor the text-align cascade instead of
 // hard-coding a left/x=0 anchor. RecordingCanvas measures 7px/char, so the two
 // spans ("Hello"+" world" = 11 chars) span 77px inside a 200px-wide label.
 TEST_CASE("paint_attributed_ honors text-align (Codex #3336)",

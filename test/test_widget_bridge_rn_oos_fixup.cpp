@@ -1,6 +1,6 @@
 // WidgetBridge RN-OOS fixup tests for pulp #1737.
 //
-// Multiple final-sweep entries from the RN-OOS catalog reconciliation:
+// RN out-of-scope (OOS) slots that round-trip or fall back through the bridge:
 //   * Material shim's rn/elevation
 //   * includeFontPadding round-trip
 //   * pulp #1812 borderCurve squircle paint dispatch
@@ -35,10 +35,10 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11) ──────────────────
-// Followup wave: 4 RN box-shadow longhand setters + 2 CSS scroll-behavior
-// slots. All 6 cited in compat.json mapsTo claims — these tests pin the
-// bridge fn surface so the audit's catalog claims are evidence-backed.
+// ── pulp #1737 RN-OOS slots ─────────────────────────────────────────────
+// 4 RN box-shadow longhand setters + 2 CSS scroll-behavior slots, all
+// cited in compat.json mapsTo claims. These tests pin the bridge fn
+// surface so the catalog claims have an executable round-trip.
 
 TEST_CASE("WidgetBridge setShadowColor mutates View::shadow_.color + activates has_shadow_",
           "[view][bridge][issue-1737]") {
@@ -153,7 +153,7 @@ TEST_CASE("WidgetBridge setOverscrollBehavior stores the keyword on View",
     REQUIRE(w->overscroll_behavior() == "none");
 }
 
-// pulp #1737 RN-OOS-fixup final sweep — rn/elevation Material shim.
+// pulp #1737 — rn/elevation Material shim.
 TEST_CASE("WidgetBridge setElevation shims to Material-approx box-shadow",
           "[view][bridge][issue-1737]") {
     using Catch::Matchers::WithinAbs;
@@ -186,7 +186,7 @@ TEST_CASE("WidgetBridge setElevation shims to Material-approx box-shadow",
     REQUIRE_THAT(w->box_shadow().color.a, WithinAbs(0.30f, 0.001f));
 }
 
-// pulp #1737 RN-OOS-fixup (final sweep) — includeFontPadding round-trip.
+// pulp #1737 — includeFontPadding round-trip.
 TEST_CASE("WidgetBridge setIncludeFontPadding stores the keyword on View (round-trip only)",
           "[view][bridge][issue-1737]") {
     ScriptEngine engine;
@@ -214,7 +214,7 @@ TEST_CASE("WidgetBridge setIncludeFontPadding stores the keyword on View (round-
     REQUIRE(w->include_font_padding() == true);
 }
 
-// pulp #1737 RN-OOS-fixup #1812 — borderCurve squircle paint dispatch.
+// pulp #1737 / #1812 — borderCurve squircle paint dispatch.
 TEST_CASE("WidgetBridge setBorderCurve toggles between circular and continuous",
           "[view][bridge][issue-1737]") {
     ScriptEngine engine;
@@ -239,7 +239,7 @@ TEST_CASE("WidgetBridge setBorderCurve toggles between circular and continuous",
     REQUIRE(w->border_curve() == View::BorderCurve::circular);
 }
 
-// pulp #1737 RN-OOS-fixup (final round) — isolation honest CSS-subset.
+// pulp #1737 — isolation honest CSS-subset.
 TEST_CASE("WidgetBridge setIsolation round-trips on View slot (no paint impact)",
           "[view][bridge][issue-1737]") {
     ScriptEngine engine;
@@ -401,8 +401,8 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
         var sd2 = new CSSStyleDeclaration({ _id: 'mh-pct', _nativeCreated: true });
         sd2._applyProperty('minHeight', '33%');
 
-        // calc-family % path — Codex P2: calc(50%) must reach the
-        // bridge as a percent, not absolute px.
+        // calc-family % path: calc(50%) must reach the bridge as a percent,
+        // not absolute px.
         createPanel('xw-calc-pct', '');
         var sd3 = new CSSStyleDeclaration({ _id: 'xw-calc-pct', _nativeCreated: true });
         sd3._applyProperty('maxWidth', 'min(50%, 75%)');
@@ -428,7 +428,7 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
     REQUIRE(mh_pct->flex().dim_min_height.unit == DimensionUnit::percent);
     REQUIRE_THAT(mh_pct->flex().dim_min_height.value, WithinAbs(33.0f, 0.001f));
 
-    // calc-family % survives — Codex P2 pin (min(50%, 75%) = 50%).
+    // calc-family % survives (min(50%, 75%) = 50%).
     REQUIRE(xw_calc_pct->flex().dim_max_width.unit  == DimensionUnit::percent);
     REQUIRE_THAT(xw_calc_pct->flex().dim_max_width.value, WithinAbs(50.0f, 0.001f));
 
@@ -444,8 +444,7 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
 // (Cmd+S, Cmd+,) are always-global by design and must still fire when an
 // input is focused.
 //
-// Prereq for the default-shortcuts pass (planning/2026-05-16-default-
-// keyboard-shortcuts.md), which adds a bare-`?` cheatsheet binding.
+// The default shortcut set includes a bare-`?` cheatsheet binding.
 TEST_CASE("WidgetBridge focus-guard: bare-key shortcuts suppressed while text input focused",
           "[view][bridge][shortcuts][focus-guard]") {
     using namespace pulp::view;
@@ -506,7 +505,7 @@ TEST_CASE("WidgetBridge focus-guard: bare-key shortcuts suppressed while text in
     }
 
     SECTION("non-text focusable (knob/button) focused: bare-key still fires") {
-        // Codex review pin (#2120): `focused_input_` is claimed by any
+        // pulp #2120: `focused_input_` is claimed by any
         // focusable widget, not just text inputs. The guard MUST check
         // `accepts_text_input()` — otherwise clicking a knob would kill
         // every global single-key shortcut until focus moved away.

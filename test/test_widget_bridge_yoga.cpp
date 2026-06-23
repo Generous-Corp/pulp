@@ -371,9 +371,9 @@ TEST_CASE("setFlex justify_content accepts the alias set",
 // the default Yoga `YGAlignBaseline` already computes, so collapsing it
 // is observable-behaviour-preserving.
 //
-// Codex P1 on PR #1853: `last baseline` is NOT aliased because Yoga
-// has no last-baseline support — aliasing would silently misrender
-// multi-line flex containers that depend on bottom-baseline alignment.
+// `last baseline` is NOT aliased because Yoga has no last-baseline
+// support — aliasing would silently misrender multi-line flex
+// containers that depend on bottom-baseline alignment.
 // `last baseline` stays in compat.json/unsupportedValues with a note.
 // This test pins both the supported alias AND the "last baseline"
 // fall-through (becomes FlexAlign::stretch via the default branch) so
@@ -401,9 +401,8 @@ TEST_CASE("setFlex align_items: first baseline aliases to baseline; last baselin
     REQUIRE(al("c") == FlexAlign::stretch);
 }
 
-// pulp #1434 Tier 1 (css/justifyContent) — Codex P1 on PR #1853 flagged
-// TWO separate overclaims; tightened scope leaves only the safe sanity
-// pins:
+// pulp #1434 (css/justifyContent) — direction-dependent keywords are
+// documented unsupported; this leaves only the safe sanity pins:
 //
 //   `left` / `right`  — direction-context-dependent. CSS spec: on a row
 //                       container, `right` ≡ flex-end (LTR); on a column
