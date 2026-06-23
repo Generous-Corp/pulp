@@ -1,4 +1,4 @@
-"""HTML surface adapter — week 1 deliverable (one of five).
+"""HTML surface adapter.
 
 Classifies each `html/*` entry in compat.json against three layers of
 evidence:
@@ -20,9 +20,9 @@ evidence:
 The verdict is PASS / DIVERGE / NO-OP / NOT-IMPL / OOS — see
 `tools/harness/status.py` for the full taxonomy.
 
-Like the yoga adapter, this is a static-evidence classifier. The Week-3+
-upgrade path replaces the oracle table with a `jsdom`-driven trace
-comparator (see `tools/harness/oracles/html/README.md`).
+Like the yoga adapter, this is a static-evidence classifier. A future upgrade
+path replaces the oracle table with a `jsdom`-driven trace comparator (see
+`tools/harness/oracles/html/README.md`).
 """
 
 from __future__ import annotations
@@ -78,20 +78,18 @@ class HtmlAdapter(AdapterBase):
         # second pass after element.js loads), and the legacy
         # web-compat.js bundle (still hosts a few entries). Concatenate
         # them once so the prototype-evidence regex sees the full surface.
-        # P5-7 follow-up (PR #2337) extracted Element.prototype's Event +
+        # web-compat-element-events.js hosts Element.prototype's Event +
         # Pointer-capture methods (addEventListener / removeEventListener /
         # dispatchEvent / setPointerCapture / releasePointerCapture /
-        # hasPointerCapture + the synthetic event payloads) into
-        # web-compat-element-events.js. Without it in the union, the
-        # `html/Element_setPointerCapture` oracle false-classifies as
-        # NOT_IMPL (Codex P2 on PR #2337 — same class as #2253's
-        # canvas2d adapter gap fixed by #2317).
+        # hasPointerCapture + synthetic event payloads). It must stay in the
+        # union or `html/Element_setPointerCapture` and related entries
+        # false-classify as NOT_IMPL.
         #
         # The legacy web-compat.js bundle was further split: the CSS
-        # selector engine moved to web-compat-selector.js and the Phase 9
-        # runtime API shims moved to web-compat-runtime-apis.js. Both
-        # siblings join the union so the prototype/selector evidence
-        # regexes still see the full surface after the split.
+        # selector engine moved to web-compat-selector.js and the runtime API
+        # shims moved to web-compat-runtime-apis.js. Both siblings join the
+        # union so the prototype/selector evidence regexes still see the full
+        # surface after the split.
         self._element_js = "\n".join(
             self._read(p)
             for p in (

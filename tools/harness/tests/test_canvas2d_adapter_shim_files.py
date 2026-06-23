@@ -1,12 +1,11 @@
-"""Regression test for the Canvas2dAdapter shim-file union (post-P5-6 split).
+"""Regression test for the Canvas2dAdapter shim-file union.
 
-Pulp #2253 (P5-6 follow-up) extracted `measureText` / `drawImage` /
-`setLineDash` / `getLineDash` / `getImageData` / `putImageData` out of
-`web-compat-canvas.js` into a sibling prelude `web-compat-canvas-image.js`,
-and `_PulpCanvasMatrix` into `web-compat-canvas-matrix.js`. The harness
-adapter previously read only `web-compat-canvas.js`, so the canvas2d
-compat verifier mis-classified the six extracted APIs as `NOT-IMPL`
-(Codex P1 on PR #2253).
+`measureText` / `drawImage` / `setLineDash` / `getLineDash` /
+`getImageData` / `putImageData` live in the sibling prelude
+`web-compat-canvas-image.js`, and `_PulpCanvasMatrix` lives in
+`web-compat-canvas-matrix.js`. The adapter must read those files alongside
+`web-compat-canvas.js`, or the canvas2d compat verifier mis-classifies those
+APIs as `NOT-IMPL`.
 
 This test pins the contract that the adapter's shim text is the *union*
 of the parent file + its sibling preludes — if a future split moves a

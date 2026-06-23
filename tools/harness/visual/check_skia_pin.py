@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lint: the visual-harness Dockerfile must match the canonical Skia pin.
 
-Roadmap P9-4. The visual harness builds a deterministic raster image inside
+The visual harness builds a deterministic raster image inside
 ``ci/visual-harness.Dockerfile``, which downloads a pinned ``linux/amd64`` Skia
 archive via ``ARG`` lines. The canonical, machine-readable Skia pin lives in
 ``tools/deps/manifest.json`` under the ``Skia`` dependency's ``determinism``

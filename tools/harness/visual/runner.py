@@ -435,10 +435,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("error: pass --all OR --entry, not both", file=sys.stderr)
         return 2
 
-    # Codex P2 on PR #1598 — `--all` was previously redundant: omitting
-    # `--entry` ALSO returned every fixture, so `--generate` could
-    # silently rewrite all goldens for a surface without an explicit
-    # opt-in. Tighten the contract:
+    # `--all` was previously redundant: omitting `--entry` ALSO returned every
+    # fixture, so `--generate` could silently rewrite all goldens for a surface
+    # without an explicit opt-in. Tighten the contract:
     #
     #   --generate REQUIRES --all OR --entry. Bulk golden rewrites
     #     are now explicit; a forgotten `--entry` no longer triggers
@@ -453,7 +452,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "error: --generate requires either --all (regenerate every "
             "fixture for the selected surface) or --entry NAME [--entry NAME ...]"
             " (regenerate the listed fixtures). Refusing to silently "
-            "rewrite every golden — Codex P2 on PR #1598.",
+            "rewrite every golden.",
             file=sys.stderr,
         )
         return 2

@@ -1,18 +1,15 @@
-"""Regression test for the HtmlAdapter element-shim union (post-P5-7 split).
+"""Regression test for the HtmlAdapter element-shim union.
 
-Pulp #2337 extracted Element.prototype's Event + Pointer-capture methods
-(addEventListener / removeEventListener / dispatchEvent /
-setPointerCapture / releasePointerCapture) out of
-`web-compat-element.js` into a sibling prelude
-`web-compat-element-events.js`. The harness `HtmlAdapter` previously
-unioned only the parent file + web-compat-dom-ops.js + the legacy
-web-compat.js bundle, so the `html/Element_setPointerCapture` oracle
-would false-classify as NOT_IMPL after the split (Codex P2 on #2337).
+Element.prototype's Event + Pointer-capture methods (addEventListener /
+removeEventListener / dispatchEvent / setPointerCapture /
+releasePointerCapture) live in the sibling prelude
+`web-compat-element-events.js`. The harness `HtmlAdapter` must union the
+element prelude files, or the `html/Element_setPointerCapture` oracle
+false-classifies as NOT_IMPL.
 
 This test pins the contract that the adapter's element-shim text is
-the *union* of the four prelude files — if a future split moves a
-prototype method into another file that isn't in the union, this
-fails loudly. Mirrors the canvas2d-adapter regression test from #2317.
+the *union* of the prelude files — if a future split moves a prototype method
+into another file that isn't in the union, this fails loudly.
 """
 
 from __future__ import annotations

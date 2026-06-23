@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Coverage-matrix report renderer (roadmap P9-3).
+"""Coverage-matrix report renderer.
 
-Extracted from ``verifier.py`` as a focused validator-report module.
-Turns the per-surface :class:`~tools.harness.adapters.base.Result` lists
-into the two artefacts the harness publishes:
+Focused validator-report module for the harness coverage matrix. Turns the
+per-surface :class:`~tools.harness.adapters.base.Result` lists into the two
+artefacts the harness publishes:
 
 * :func:`render_markdown` — the human-readable coverage matrix mirrored to
   ``build/harness-coverage.md`` and ``docs/reports/harness-coverage.md``.
 * :func:`render_json`     — the machine-readable
   ``build/harness-coverage-<sha>.json`` payload.
 
-This is a pure mechanical move — the code is byte-identical to the
-``verifier.py`` original. ``verifier.py`` re-imports both functions so
-existing ``from tools.harness.verifier import render_json`` (etc.) call
-sites keep working unchanged.
+``verifier.py`` re-imports both functions so existing
+``from tools.harness.verifier import render_json`` (etc.) call sites keep
+working unchanged.
 """
 
 from __future__ import annotations

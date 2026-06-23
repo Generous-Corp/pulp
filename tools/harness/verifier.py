@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Catalog verifier orchestrator — pulp #1391, refactored P9-3.
+"""Catalog verifier orchestrator.
 
 Walks `compat.json`, dispatches each entry to its surface adapter, and
 aggregates the results into a coverage matrix.
@@ -16,10 +16,9 @@ Their public symbols are re-imported here so existing
 ``from tools.harness.verifier import ...`` call sites (CLI, adapter
 tests, the harness test suite) keep working unchanged.
 
-Adapter auto-discovery (the import-time `@register_adapter` side effect,
-pulp #1401) deliberately stays in this module — see ``_discover_adapters``
-below — because that side effect must fire when ``verifier.py`` is
-imported.
+Adapter auto-discovery (the import-time `@register_adapter` side effect)
+deliberately stays in this module — see ``_discover_adapters`` below —
+because that side effect must fire when ``verifier.py`` is imported.
 
 Outputs:
 * `build/harness-coverage-<sha>.json`     machine-readable
@@ -86,7 +85,7 @@ KNOWN_SURFACES = ["yoga", "css", "rn", "html", "canvas2d", "imports"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Adapter auto-discovery (pulp #1401)
+# Adapter auto-discovery
 #
 # Each adapter module under ``tools/harness/adapters/`` is imported in
 # alphabetical order. The :func:`tools.harness.adapters.base.register_adapter`
@@ -95,8 +94,8 @@ KNOWN_SURFACES = ["yoga", "css", "rn", "html", "canvas2d", "imports"]
 # with anything that imported the symbol from the old hand-rolled registry.
 #
 # A broken adapter module (raises on import) is logged and skipped; it does
-# not crash the verifier or other surfaces. This is the property covered by
-# the issue's "verifier still works when one adapter throws on import" test.
+# not crash the verifier or other surfaces. The harness test suite covers this
+# degraded-import behavior.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -326,7 +325,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     elif args.surface:
         surfaces = list(args.surface)
     else:
-        # Default: yoga only this week — same as `--surface=yoga`.
+        # Default: yoga — same as `--surface=yoga`.
         surfaces = ["yoga"]
 
     for s in surfaces:
