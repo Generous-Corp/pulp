@@ -204,8 +204,7 @@ TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
         }
     }
     REQUIRE(stroke_count == 2);
-    // strokeText must NOT have leaked into fill_text — that's the
-    // pre-#1525 approximation we're explicitly replacing.
+    // strokeText must NOT leak into fill_text; it has its own command lane.
     REQUIRE(fill_text_count == 0);
     REQUIRE(seen_max_width == Catch::Approx(80.0f));
 }
@@ -360,12 +359,9 @@ TEST_CASE("SkiaCanvas::stroke_text honors sticky line_join state",
 //
 // The JS shim now routes ctx.arc / arcTo / ellipse / roundRect through the
 // new canvasPathArc / canvasPathArcTo / canvasPathEllipse /
-// canvasPathRoundRect bridge fns. Before this PR the shim emitted
-// canvasMoveTo + canvasCubicTo (arc / ellipse) or canvasLineTo (arcTo /
-// roundRect) — N approximation segments per arc. After this PR each call
-// emits exactly one path_arc / path_arc_to / path_ellipse /
-// path_round_rect command, and the cubic_to / line_to fallbacks no
-// longer fire from the arc family.
+// canvasPathRoundRect bridge fns. Each call emits exactly one path_arc /
+// path_arc_to / path_ellipse / path_round_rect command; the cubic_to /
+// line_to approximation fallbacks must not fire from the arc family.
 TEST_CASE("Canvas2D arc shim emits path_arc, not bezier approximation",
           "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
@@ -526,9 +522,9 @@ TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
 //   * sticky flush of filter setter before fill / drawImage
 //   * cache invalidation across save/restore
 // SkImageFilter chain rasterisation parity is intentionally not asserted
-// here — the parser is exercised by the [issue-1520] subset; full visual
-// parity with Chrome is a follow-up shared with #1503's element-side
-// CSS filter parser.
+// here — the parser is exercised by the [issue-1520] subset, while full
+// visual parity with Chrome belongs with #1503's element-side CSS filter
+// parsing.
 
 TEST_CASE("Canvas2D shim exposes direction property as round-trip field",
           "[view][canvas2d][issue-1520]") {

@@ -72,9 +72,8 @@ TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
     REQUIRE(surface->peekPixels(&pm));
     SkColor c = pm.getColor(kW / 2, kH / 2);
     // contrast(0) collapses any input color to 0.5 * 255 = 128 on every
-    // RGB channel. Pre-fix the bias was normalized 0..1 so output landed
-    // at ~1/255 (effectively black). Allow a tolerance for premultiplied
-    // round-tripping.
+    // RGB channel. This pins the bias in 8-bit color space, with tolerance
+    // for premultiplied round-tripping.
     REQUIRE(SkColorGetR(c) >= 120);
     REQUIRE(SkColorGetR(c) <= 136);
     REQUIRE(SkColorGetG(c) >= 120);
@@ -110,8 +109,8 @@ TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
     SkPixmap pm;
     REQUIRE(surface->peekPixels(&pm));
     SkColor c = pm.getColor(kW / 2, kH / 2);
-    // invert(1) on black = white. Pre-fix the bias was 1.0 (normalized)
-    // instead of 255 so the output stayed near black (0..1).
+    // invert(1) on black = white. The bias must be 255, not normalized
+    // 0..1, or the output stays near black.
     REQUIRE(SkColorGetR(c) >= 250);
     REQUIRE(SkColorGetG(c) >= 250);
     REQUIRE(SkColorGetB(c) >= 250);
@@ -293,8 +292,7 @@ Px apply_matrix(const float m[20], Px in) {
 }
 
 // Mirrors the contrast(c) matrix construction in
-// core/canvas/src/skia_canvas.cpp. Pre-fix `t` was `0.5*(1-c)` (0..1),
-// post-fix it is `0.5*(1-c)*255` (0..255).
+// core/canvas/src/skia_canvas.cpp: `t` is an 8-bit-space bias.
 void build_contrast_matrix(float c, float m[20]) {
     const float t = 0.5f * (1.0f - c) * 255.0f;
     float src[20] = {
@@ -320,7 +318,7 @@ void build_invert_matrix(float amount, float m[20]) {
     for (int i = 0; i < 20; ++i) m[i] = src[i];
 }
 
-// Mirrors the opacity(amount) matrix construction (post-P2 fix).
+// Mirrors the opacity(amount) matrix construction.
 void build_opacity_matrix(float amount, float m[20]) {
     const float a = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount);
     float src[20] = {
@@ -355,8 +353,7 @@ TEST_CASE("Filter chain: contrast(0) bias lands at mid-gray (~128)",
     REQUIRE(orr.r == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.g == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.b == Catch::Approx(127.5f).margin(0.5f));
-    // Pre-fix the bias was 0.5 (0..1 space), so `apply_matrix` would have
-    // produced ~0 on every channel, NOT 128.
+    // A normalized 0..1 bias would produce ~0 on every channel, not 128.
 }
 
 TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
@@ -375,9 +372,8 @@ TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
     REQUIRE(ow.r == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.g == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.b == Catch::Approx(0.0f).margin(0.5f));
-    // Pre-fix the bias was 1.0 (0..1 space), so black->white would have
-    // produced ~1 on every channel — effectively still black after clamp
-    // to 8-bit.
+    // A normalized 0..1 bias would produce ~1 on every channel,
+    // effectively still black after clamp to 8-bit.
 }
 
 TEST_CASE("Filter chain: invert(0) is identity",

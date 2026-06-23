@@ -46,7 +46,7 @@ TEST_CASE("design-tool platform key wire-up fires registerShortcut + __global__ 
             events.push(e.key + ':ctrl=' + (!!e.ctrlKey) + ':meta=' + (!!e.metaKey));
         });
 
-        // Also register a native shortcut callback like V2/Phase A emit:
+        // Also register a native shortcut callback like codegen emits:
         var settings_opened = 0;
         function openSettings() { settings_opened++; }
         registerShortcut(44, 16, 'openSettings');  // Cmd+, → kModCmd mask
@@ -69,7 +69,7 @@ TEST_CASE("design-tool platform key wire-up fires registerShortcut + __global__ 
     REQUIRE(count() == 0);
     REQUIRE(settings() == 0);
 
-    // *** Simulate what PulpView::keyDown: would do post-wireup. ***
+    // *** Simulate what PulpView::keyDown: does through the platform hook. ***
     SECTION("bare S key — Spectr-style mode-switch shortcut") {
         KeyEvent e;
         e.key = static_cast<KeyCode>('s');
@@ -123,12 +123,9 @@ TEST_CASE("design-tool platform key wire-up fires registerShortcut + __global__ 
     }
 }
 
-// The E2E test that loaded a Phase-A-generated ui.js + simulated
-// platform key presses lives on #2128's branch (it needs
-// `detect_default_shortcuts` / `apply_default_shortcuts` / `TargetPlatform`
-// from the Phase A defaults work). This PR ships the platform wire-up
-// in isolation so it can merge ahead of #2128. The first TEST_CASE
-// above already exercises the wire-up directly via `registerShortcut`
-// + `window.addEventListener` — no Phase-A symbol dependency. The
-// imported-ui.js E2E will be re-added on top of this PR once #2128
-// merges.
+// Keep this test independent of imported-ui fixture generation while #2128's
+// default-shortcut codegen symbols (`detect_default_shortcuts`,
+// `apply_default_shortcuts`, `TargetPlatform`) settle. The case above
+// exercises the platform wire-up directly via `registerShortcut` +
+// `window.addEventListener`; the imported-ui.js E2E belongs with that
+// generated-shortcut coverage.

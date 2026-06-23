@@ -58,12 +58,9 @@ TEST_CASE("WidgetBridge setClipPath stores SVG-path-d on the View",
     REQUIRE_FALSE(panel->has_clip_path());
 }
 
-// pulp #1656 Tier-2 follow-up — `setUserSelect` was a literal `(void)args`
-// no-op; #1656 walked the catalog claim back to `partial`. This Tier-2
-// PR wires the keyword to View::user_select_ for real, flips the catalog
-// back to `supported` with this test as evidence, and exercises the
-// new #1657 control #1 evidence gate end-to-end (a `supported` claim
-// now requires real test coverage of the bridge fn).
+// `setUserSelect` routes the CSS keyword to View::user_select_ and backs
+// the compat catalog's `supported` claim with bridge-level coverage. This
+// is the #1657 evidence gate for claims promoted out of `partial`.
 TEST_CASE("WidgetBridge setUserSelect routes all 5 CSS keywords to View::user_select_",
           "[view][bridge][css][issue-1656-tier2-userSelect]") {
     using US = pulp::view::View::UserSelect;
@@ -134,9 +131,9 @@ TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",
     REQUIRE(panel->mask_image().empty());
 }
 
-// pulp #1515 followup — `mask-size` pairs with mask-image. Storage-only;
-// the slot round-trips through View::mask_size() so authors can set/get
-// it and a future paint slice can honor it without a JS-side change.
+// `mask-size` pairs with mask-image. Storage-only; the slot round-trips
+// through View::mask_size() so authors can set/get it and later paint
+// support can honor it without a JS-side change.
 TEST_CASE("WidgetBridge setMaskSize round-trips on the View",
           "[view][bridge][css][issue-1707-followup-maskSize]") {
     ScriptEngine engine;
@@ -207,9 +204,9 @@ TEST_CASE("WidgetBridge setAppearance round-trips on the View",
     REQUIRE(panel->appearance() == "menulist-button");
 }
 
-// CSS `object-fit` storage round-trip (paint-time consumption is a
-// planned follow-up that needs ImageView access to decoded image
-// natural size; status is `partial` until paint lands).
+// CSS `object-fit` storage round-trip. Paint-time consumption needs
+// ImageView access to decoded image natural size; status remains `partial`
+// until paint lands.
 TEST_CASE("WidgetBridge setObjectFit round-trips on the View",
           "[view][bridge][css][issue-1707-followup-objectFit]") {
     ScriptEngine engine;
@@ -428,20 +425,19 @@ TEST_CASE("setBoxSizing border-box / content-box round-trips onto FlexStyle",
     REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::border_box);
     REQUIRE(bridge.widget("b")->flex().box_sizing == BoxSizing::content_box);
 
-    // Unknown keyword falls back to content-box. The default for an
-    // unset slot is border-box (matches Yoga 3.x and pulp's implicit
-    // pre-#1516 behavior), but `setBoxSizing` with an explicit unknown
-    // keyword resolves to content-box rather than silently keeping the
-    // prior value — that way `setBoxSizing('id', 'wat')` is a clear
-    // observable rather than a quiet no-op.
+    // Unknown keyword falls back to content-box. The default for an unset
+    // slot is border-box (matching Yoga 3.x), but `setBoxSizing` with an
+    // explicit unknown keyword resolves to content-box rather than silently
+    // keeping the prior value — that way `setBoxSizing('id', 'wat')` is a
+    // clear observable rather than a quiet no-op.
     bridge.load_script("setBoxSizing('a', 'wat')");
     REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::content_box);
 }
 
-// Codex #1616 P1 — `box-sizing: inherit` must walk the parent chain
-// instead of silently coercing to content-box. Reproduces the common
-// reset pattern `html { box-sizing: border-box }` + descendants
-// `* { box-sizing: inherit }` that gets imported from web designs.
+// `box-sizing: inherit` must walk the parent chain instead of silently
+// coercing to content-box. Reproduces the common reset pattern
+// `html { box-sizing: border-box }` + descendants `* { box-sizing: inherit }`
+// that gets imported from web designs.
 TEST_CASE("setBoxSizing 'inherit' resolves to parent's box_sizing",
           "[view][bridge][css][issue-1538][codex-p1]") {
     ScriptEngine engine;
@@ -498,8 +494,7 @@ TEST_CASE("border-box vs content-box layout math via Yoga",
         setFlex('bb', 'width',  100);
         setFlex('bb', 'height', 100);
         setFlex('bb', 'padding', 10);
-        // bb stays default border-box (matches pulp's pre-#1516 implicit
-        // behavior and Yoga 3.x's own default).
+        // bb stays default border-box, matching Yoga 3.x's own default.
         setFlex('cb', 'width',  100);
         setFlex('cb', 'height', 100);
         setFlex('cb', 'padding', 10);

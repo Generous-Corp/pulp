@@ -26,12 +26,6 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ──────────────────────────────────────────────────────────────────────
-// Runtime path (JS shim → bridge → View slot) coverage for each catalog claim.
-// A future drift between catalog metadata and shipped behavior should surface as
-// a CI failure rather than silent paper coverage.
-// ──────────────────────────────────────────────────────────────────────
-
 // backgroundPosition / backgroundSize are referenced from
 // web-compat-style-decl.js inside `typeof set... === "function"` guards. The
 // registered bridge functions make the catalog claim an honest round-trip.
@@ -1138,12 +1132,10 @@ TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
 // the inheritable cascade. A Label
 // that set its own text color via setTextColor stores it in
 // Label::text_color_ (has_own_text_color_=true) and does NOT touch the
-// inheritable slot. Pre-fix, the resolver called inheritable_text_color()
-// which skipped the Label and climbed to the parent's inheritable color
-// — so setOutlineColor(label, 'currentColor') resolved to the parent's
-// color, contradicting CSS (own color always wins for currentColor on
-// that element) AND contradicting Label::paint() which prefers
-// has_own_text_color_ first.
+// inheritable slot. The resolver must check the Label's own color before
+// climbing to the parent's inheritable color, or
+// setOutlineColor(label, 'currentColor') resolves to the wrong element and
+// disagrees with Label::paint(), which prefers has_own_text_color_ first.
 TEST_CASE("setOutlineColor currentColor honors Label's own text color over parent inheritance",
           "[view][bridge][rn][issue-1728][outline-currentcolor]") {
     using namespace pulp::view;

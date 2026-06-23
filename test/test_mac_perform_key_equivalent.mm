@@ -16,11 +16,10 @@
 //  3. Asserts the on_global_key callback fired AND received the
 //     (key=',', mods=kModCmd) event the lambda forwards into the bridge.
 //
-// The override now
-// HONORS consumption. A chord the root hook claims (on_global_key returns
-// true — e.g. CommandRegistry::dispatch_key_event found a handler) returns
-// YES and is NOT also fanned out to the script global-key dispatcher (no
-// double-fire). An unconsumed chord keeps the original additive behavior:
+// The override honors consumption. A chord the root hook claims (on_global_key
+// returns true — e.g. CommandRegistry::dispatch_key_event found a handler)
+// returns YES and is NOT also fanned out to the script global-key dispatcher
+// (no double-fire). An unconsumed chord keeps the original additive behavior:
 // script fan-out runs and the override returns NO so AppKit menu shortcuts
 // (Cmd+W, Cmd+Q) still work. The cases below pin both sides.
 
@@ -141,9 +140,9 @@ TEST_CASE("performKeyEquivalent: routes Cmd-modified chord to rootView->on_globa
     }
 
     // The whole point: AppKit calls -performKeyEquivalent: for any chord
-    // with Cmd held. Pre-fix, PulpView had no override and the chord was
-    // consumed by the responder chain. Post-fix, the override routes it
-    // into rootView->on_global_key. Spy on the script fan-out too: an
+    // with Cmd held. PulpView's override must route the chord into
+    // rootView->on_global_key instead of letting the responder chain consume
+    // it. Spy on the script fan-out too: an
     // UNCONSUMED chord must keep the additive behavior — script dispatch
     // fires AND the override returns NO so menu shortcuts still work.
     g_script_hits = 0;

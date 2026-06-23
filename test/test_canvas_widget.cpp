@@ -915,8 +915,8 @@ TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the brid
 
     auto* cw = dynamic_cast<CanvasWidget*>(bridge.widget("cv"));
     REQUIRE(cw != nullptr);
-    // Pre-fix the shim's fillRect produces zero commands. The fix wires
-    // canvasFillRect at the bridge so the call is actually recorded.
+    // The shim's fillRect must wire through canvasFillRect at the bridge so
+    // the call is actually recorded.
     REQUIRE(cw->command_count() >= 1);
 
     RecordingCanvas rc;
@@ -1138,9 +1138,8 @@ TEST_CASE("CanvasWidget::paint skips save_layer when bounds are degenerate",
 
     cw.paint(rc);
 
-    // No layer push, no draws, no saves. Pre-fix this also held; the
-    // assertion now also holds post-fix because of the degenerate-bounds
-    // guard in CanvasWidget::paint.
+    // No layer push, no draws, no saves: degenerate bounds keep
+    // CanvasWidget::paint from emitting a save layer.
     int save_count_in_stream = 0;
     for (const auto& cmd : rc.commands()) {
         if (cmd.type == DrawCommand::Type::save) ++save_count_in_stream;
@@ -1221,10 +1220,9 @@ TEST_CASE("Two sibling CanvasWidgets each open their own backing store",
 
 // Visual sibling isolation. Two CanvasWidgets paint against a shared parent
 // surface; sibling-2 starts its frame with
-// clearRect over its full bounds. Pre-fix, the clearRect zeroed the
-// shared parent texels and erased sibling-1's pixels. Post-fix, each
-// canvas paints into its own save_layer-backed offscreen so kClear
-// only affects the layer and sibling-1's draws survive.
+// clearRect over its full bounds. Each canvas paints into its own
+// save_layer-backed offscreen so kClear only affects that layer and
+// sibling-1's draws survive.
 TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels",
           "[canvas_widget][skia][issue-1368]") {
     SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
@@ -1249,9 +1247,8 @@ TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels"
     }
 
     // Sibling 2: starts its frame with clearRect over its full bounds
-    // (mirrors a JS canvas idiom). Pre-fix this kClear nuked sibling 1's
-    // red on the shared parent. Post-fix, kClear is contained to
-    // sibling 2's own layer and the parent surface keeps sibling 1's red.
+    // (mirrors a JS canvas idiom). kClear is contained to sibling 2's own
+    // layer and the parent surface keeps sibling 1's red.
     auto cw2 = std::make_unique<CanvasWidget>();
     cw2->set_bounds({0, 0, 64, 64});
     {

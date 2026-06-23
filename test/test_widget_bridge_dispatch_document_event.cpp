@@ -4,10 +4,10 @@
 // Architecture in brief:
 //
 //   React popovers commonly close via the `document.addEventListener
-//   ('mousedown', onDoc)` click-outside idiom. Pre-fix, Pulp's JS
-//   `document.addEventListener` used to be a NO-OP to silence Three.js
-//   OrbitControls cleanup. With the no-op, every React popover using
-//   click-outside was silently dead.
+//   ('mousedown', onDoc)` click-outside idiom. Pulp's JS
+//   `document.addEventListener` must be a real registration surface. A no-op
+//   may silence OrbitControls cleanup, but it leaves every React popover using
+//   click-outside silently dead.
 //
 //   This test pins two contracts:
 //   1. `document.addEventListener('mousedown', fn)` actually registers

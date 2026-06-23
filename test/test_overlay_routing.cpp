@@ -161,9 +161,8 @@ TEST_CASE("View::overlay_contains includes overflow:visible child painted "
     //
     // A click at (100, 70) is INSIDE the popover but OUTSIDE the parent
     // (parent's right edge is 260, but 100 < 200 so the click is left of
-    // the parent's left edge). Pre-fix: overlay_contains returns false.
-    // Post-fix: overlay_contains returns true because the painted union
-    // of the parent + overflow:visible children covers that pixel.
+    // the parent's left edge). The painted union of the parent plus
+    // overflow:visible children must cover that pixel.
     TestView parent;
     parent.set_bounds({200.0f, 33.0f, 60.0f, 22.0f});
     parent.set_overflow(View::Overflow::visible);
