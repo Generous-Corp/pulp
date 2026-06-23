@@ -251,7 +251,7 @@
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
 #
-# v0.56.2 (current pin) — completes and hardens the self-hosted-runner
+# v0.56.2 — completes and hardens the self-hosted-runner
 # operational toolkit (prevent → recover → maintain) shipped 2026-05-13:
 #   v0.53.0 — `shipyard rescue <PR>`: one-shot recovery for queued runs.
 #             Replaces the legacy 5-step `runner-watchdog --fix` →
@@ -320,7 +320,7 @@
 #   to recover a saturated/timed-out macOS gate. Plus self-hosted empty-log
 #   diagnostics now point at the uploaded ctest-logs artifact (Shipyard #344).
 #   These three (#344/#345/#346) are why Pulp jumps to this pin.
-# v0.68.0 — durable-queue dead-worker recovery (Shipyard #351): a killed
+# v0.68.0 (current pin) — durable-queue dead-worker recovery (Shipyard #351): a killed
 #   `shipyard ship`/`pr` worker left its job stuck `running` in the queue,
 #   which blocked every later same-PR ship with `SamePrShipRunning` —
 #   unrecoverable without hand-editing `queue.json` (the startup reaper only

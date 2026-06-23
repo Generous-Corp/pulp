@@ -3,7 +3,7 @@ name: Coverage
 # Non-blocking coverage artifact. Informational only; no merge gate.
 # Local equivalent: scripts/run_coverage.sh.
 # Full design: planning/coverage-sanitizers-spec-2026-04-16.md
-#              planning/coverage-tooling-decision-2026-04-21.md (Phase 0 spike)
+#              planning/coverage-tooling-decision-2026-04-21.md
 #
 # Per-PR coverage is macOS-only. Pulp's team actively develops and tests
 # on macOS, so per-PR coverage measures the macOS development surface —
@@ -69,19 +69,16 @@ concurrency:
   # stale commits but guarantees every push ends with a real conclusion
   # (success/failure) for the required `Diff coverage required` check.
   #
-  # KNOWN LIMITATION (codex P2 on pulp#1911): GitHub Actions concurrency
-  # only exposes `group` and `cancel-in-progress`. There is no
-  # `queue: max` / queue-depth knob — when `cancel-in-progress: false`
-  # and a run is already in progress, only ONE additional run is queued
-  # per group; any further pushes during that window REPLACE the queued
-  # run (they are silently dropped, NOT queued behind it). So a rapid
-  # push, push, push burst is observed as: run #1 active, run #3 queued,
-  # run #2 cancelled before it started. The final commit always runs,
-  # which is what required-gate semantics actually need (we only block
-  # merge on the head SHA), but intermediate SHAs do not get their own
-  # coverage report. If you need a coverage report for an intermediate
-  # SHA, re-run the workflow manually via `workflow_dispatch` after the
-  # active run finishes. Upstream tracking:
+  # Known GitHub Actions limitation: concurrency only exposes `group`
+  # and `cancel-in-progress`. There is no `queue: max` / queue-depth
+  # knob — when `cancel-in-progress: false` and a run is already in
+  # progress, only ONE additional run is queued per group; any further
+  # pushes during that window REPLACE the queued run. The final commit
+  # still runs, which is what required-gate semantics need, but
+  # intermediate SHAs do not get their own coverage report. If you need
+  # a coverage report for an intermediate SHA, re-run the workflow
+  # manually via `workflow_dispatch` after the active run finishes.
+  # Upstream tracking:
   #   https://github.com/orgs/community/discussions/12835
   #
   # DELIBERATELY kept `false` (not flipped to `true`): the Coverage-run
@@ -143,8 +140,7 @@ jobs:
   # On `pull_request`, this job inspects the diff and only sets
   # `outputs.ios=true` when iOS-relevant files changed. On `push` to
   # main and `workflow_dispatch`, `outputs.ios` is forced to `true` so
-  # the full iOS try-compile still runs on the canonical lanes (Phase 3
-  # of the spec — "always run on main + nightly"). The downstream
+  # the full iOS try-compile still runs on the canonical lanes. The downstream
   # macOS-leg Swift step + Apple LCOV verify/upload all gate on this
   # output, so a TS-only PR exits the macOS leg in <20 min instead of
   # ~45-60 min.
@@ -549,11 +545,10 @@ jobs:
           PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON' || '' }}
           PULP_COVERAGE_CTEST_ARGS: ${{ matrix.os == 'macos' && '-LE validation' || '' }}
           # Coverage workflow targets C++ source coverage. The Rust CLI
-          # (#778, Phase 8 PR #1) gets its own `cli-rust` Codecov tier
-          # via a separate cargo-llvm-cov job (planned in PR #783) —
-          # this job doesn't need the Rust binary built. Skipping
-          # avoids macOS-runner ring-crate build failure (#785) without
-          # losing C++ coverage data.
+          # gets its own `cli-rust` Codecov tier via a separate
+          # cargo-llvm-cov job, so this job doesn't need the Rust
+          # binary built. Skipping avoids macOS-runner ring-crate build
+          # failure (#785) without losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
         # Bound the run with an INTERNAL budget below the job's
         # `timeout-minutes: 150`. The os-windows instrumented build + ~9k tests
@@ -818,12 +813,11 @@ jobs:
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload coverage to Codecov
-        # #566 Phase 1 PR 4 adds a per-OS flag on each matrix leg
-        # (`os-linux`, `os-macos`, `os-windows`) so Codecov can
-        # cross-filter coverage by OS. Cross-OS unions of the same
-        # file happen at the Codecov flag layer — NOT via
-        # llvm-profdata merge, which is not architecture-portable
-        # (see planning decision doc §7).
+        # Each matrix leg uploads one per-OS flag (`os-linux`,
+        # `os-macos`, `os-windows`) so Codecov can cross-filter
+        # coverage by OS. Cross-OS unions of the same file happen at
+        # the Codecov flag layer, not via llvm-profdata merge, which
+        # is not architecture-portable (see planning decision doc §7).
         #
         # Subsystem / platform / surface breakdown comes from the
         # `component_management` block in codecov.yml, which slices
@@ -833,9 +827,9 @@ jobs:
         # upload."). A single per-OS flag per upload is the
         # supported shape.
         #
-        # fail_ci_if_error: false — coverage is still advisory in
-        # Phase 1. Phase 3 adds a diff-cover gate for per-PR
-        # enforcement (see coverage-diff-gate below, pinned to Linux).
+        # fail_ci_if_error: false keeps upload outages from failing
+        # this artifact job. Per-PR enforcement happens in the
+        # coverage-diff gate below.
         if: always()
         uses: codecov/codecov-action@v5
         with:
@@ -849,7 +843,7 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-  # ── Queued-leg watchdog (codex P1 on pulp#2521) ────────────────────────
+  # ── Queued-leg watchdog ────────────────────────────────────────────────
   # `timeout-minutes` on the `coverage` matrix job ONLY bounds execution
   # AFTER a runner is assigned — it does NOT expire a leg still sitting
   # `queued` waiting for a runner. When the macOS coverage leg is routed
@@ -1303,10 +1297,9 @@ jobs:
       - name: Evaluate coverage gate preconditions
         id: gate_preconditions
         # The REQUIRED diff-coverage gate has exactly three terminal cases
-        # (Codex-validated). This step decides which one applies and sets
-        # `native_required` for the step-level `if:` on every diff-cover
-        # step below. The real diff-cover work runs ONLY when
-        # native_required == 'true'.
+        # This step decides which one applies and sets `native_required`
+        # for the step-level `if:` on every diff-cover step below. The
+        # real diff-cover work runs ONLY when native_required == 'true'.
         #
         #   1. classify did not succeed       → fail RED (untrusted output;
         #                                        fail the required gate closed)
@@ -1439,8 +1432,7 @@ jobs:
         # from the macOS XML are surfaced per-PR by the "Note
         # platform-specific paths…" step, not gated here.
         #
-        # Exit-code policy (Codex P1 reviews on PR #654 + PR #660):
-        # The script uses a DEDICATED exit code (2) for the
+        # Exit-code policy: the script uses a DEDICATED exit code (2) for the
         # "every input XML missing/empty" case; exit 1 is the
         # conventional Python "real error" code (uncaught exception,
         # ParseError on a malformed Cobertura artifact, etc.).
@@ -1476,10 +1468,10 @@ jobs:
 
       - name: Run diff-cover (required)
         id: diff_cover
-        # Phase 3: sub-threshold diff coverage hard-fails this job.
-        # The job still posts a summary comment via the downstream
-        # "Render PR comment body" step so contributors see the
-        # number alongside the failed check.
+        # Sub-threshold diff coverage hard-fails this job. The job
+        # still posts a summary comment via the downstream "Render PR
+        # comment body" step so contributors see the number alongside
+        # the failed check.
         # Reads the MERGED XML produced by the previous step (#635).
         #
         # Threshold comes from tools/scripts/coverage_config.json so the
@@ -1539,9 +1531,8 @@ jobs:
             cat coverage-diff.md
             echo "----- end coverage-diff.md -----"
           fi
-          # Phase 3 (landed): propagate the diff-cover exit code so
-          # sub-threshold coverage fails the step AND the job, hard-blocking
-          # the PR. continue-on-error was removed at the step level above.
+          # Propagate the diff-cover exit code so sub-threshold coverage
+          # fails the step AND the job, hard-blocking the PR.
           exit "$rc"
 
       - name: Install PyYAML (#566 Phase 2)
@@ -1570,11 +1561,10 @@ jobs:
         # Files that don't match any tier fall back to the global
         # diff-cover floor — no double gate, no gap.
         #
-        # continue-on-error: true during the Phase 2 bring-up. The
-        # tier-check fails loudly in logs but doesn't block merges
-        # until we've observed a couple of cycles and confirmed the
-        # tier definitions classify files correctly. Phase 2 flip
-        # to required is a one-line removal of this continue-on-error.
+        # The tier-check fails loudly in logs but does not block
+        # merges until the tier definitions are stable enough for
+        # required-check enforcement. The flip to required is a
+        # one-line removal of this continue-on-error.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
         continue-on-error: true
         shell: bash
@@ -1595,20 +1585,19 @@ jobs:
         # Required-gate failures (diff_cover exit_code != 0) used to skip
         # this step under the default `if: success()` rule, meaning
         # contributors got a red check with no comment explaining which
-        # lines were uncovered. Codex #611 P2 — render + upsert on failure
-        # too so the PR comment always reflects the real result.
+        # lines were uncovered. Render and upsert on failure too, so
+        # the PR comment always reflects the real result.
         # Threshold is read from tools/scripts/coverage_config.json — the
         # same source diff-cover uses one step up — so the rendered
         # banner can never drift from the actual gate.
         #
-        # `always() && native_required` — render on diff-cover failure
-        # (Codex #611 P2) but skip entirely on classifier-approved
-        # skip-safe PRs, where there is no coverage report to comment on.
+        # `always() && gate_ready` — render on diff-cover failure but
+        # skip entirely on classifier-approved skip-safe PRs, where
+        # there is no coverage report to comment on.
         if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
         run: |
-          # Phase 3 landed: gate is required. --no-advisory flips the
-          # banner to the required-gate form; the --flip-date argument
-          # is no longer needed (no upcoming flip to announce).
+          # The gate is required. --no-advisory selects the
+          # required-gate banner form.
           THRESHOLD=$(jq -r '.diff_coverage_fail_under' tools/scripts/coverage_config.json)
           python3 tools/scripts/coverage_diff_comment.py \
               --report coverage-diff.md \
@@ -1616,8 +1605,8 @@ jobs:
               --threshold "${THRESHOLD}" \
               --no-advisory \
               --out coverage-diff-comment.md
-          # Append the per-tier section (#566 Phase 2) if the tier
-          # check produced a report.
+          # Append the per-tier section if the tier check produced a
+          # report.
           if [ -s coverage-tier.md ]; then
             printf '\n\n' >> coverage-diff-comment.md
             cat coverage-tier.md >> coverage-diff-comment.md
@@ -1715,9 +1704,8 @@ jobs:
         # Skip fork PRs where GITHUB_TOKEN is read-only — posting would
         # hard-fail with a 403 even though this whole job is advisory.
         # `always() && …` so required-gate failures still upsert the
-        # explanatory comment (Codex #611 P2); the fork guard stays.
-        # Also gated on native_required — skip-safe PRs have no coverage
-        # comment to post.
+        # explanatory comment; the fork guard stays. Also gated on
+        # native_required — skip-safe PRs have no coverage comment to post.
         if: always() && steps.gate_preconditions.outputs.gate_ready == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         env:

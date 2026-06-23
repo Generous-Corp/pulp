@@ -1,18 +1,18 @@
 name: IWYU advisory
 
-# include-what-you-use advisory gate for issue #594 Phase 2.
+# include-what-you-use advisory gate for issue #594.
 #
 # Transitive-include bugs (code that uses std::X but only picks up
 # X's header transitively) keep reaching main because Apple Clang's
 # libc++ tolerates the miss while Linux Clang + MSVC reject. Three
-# incidents on 2026-04-21 (#540, Slice 4 <atomic>, #593) triggered
-# this gate. Phase 1 (#593) tightened the coverage-build gate so the
-# bugs can't hide silently. This workflow catches them earlier — at
-# IWYU-analysis time — before they reach the cross-platform matrix.
+# incidents on 2026-04-21 (#540, <atomic>, #593) triggered this
+# gate. The coverage-build gate catches the same bug class later in
+# the matrix; this workflow catches it earlier, at IWYU-analysis time,
+# before it reaches the cross-platform matrix.
 #
-# Advisory until 2026-05-05: continue-on-error is true, PR diff
-# gets inline annotations, merge is not blocked. After the FP rate
-# settles (Phase 3 of #594), this flips to blocking.
+# Still advisory: continue-on-error is true, PR diffs get inline
+# annotations, and merges are not blocked. Flip to blocking only after
+# the false-positive rate is low enough for required-check enforcement.
 #
 # Scope:
 #   - PR events  → analyze only files changed vs origin/<base>
@@ -64,8 +64,8 @@ jobs:
   iwyu:
     name: IWYU (Linux, Clang) — advisory
     runs-on: ubuntu-24.04
-    # Phase 2 advisory period — do NOT block PR merges.
-    # Flip to false on 2026-05-05 after FP rate < 5% per #594.
+    # Advisory period — do NOT block PR merges until the false-positive
+    # rate is low enough for required-check enforcement.
     continue-on-error: true
     permissions:
       contents: read
@@ -212,8 +212,8 @@ jobs:
 
       - name: Upload full IWYU report (push-to-main scan)
         # On push-to-main we retain the full scan output so we can
-        # track the FP rate over the 2-week advisory window and
-        # decide when to flip to blocking (Phase 3 of #594).
+        # track the false-positive rate and decide when to flip to
+        # blocking.
         if: always() && steps.files.outputs.scope == 'full'
         uses: actions/upload-artifact@v6
         with:

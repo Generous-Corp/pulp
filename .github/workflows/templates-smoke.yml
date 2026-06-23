@@ -17,12 +17,9 @@ name: Templates smoke
 # binaries, and runs in seconds. Hosts that cannot build the full
 # GPU-gated CLI (e.g. linux-arm64 without a Skia binary in the deps
 # manifest) can still validate template integrity this way.
-#
-# This unblocks Chainer Phase 1 ("Materialize Chainer Project") in
-# `planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md`: the
-# materializer is only deterministic if the template tree it walks is
-# itself shaped correctly. Confirmed working on the real Ubuntu 24.04
-# arm64 host the cross lane uses (2026-05-26).
+# The materializer is only deterministic if the template tree it walks
+# is itself shaped correctly, so this smoke stays separate from the
+# full CLI build and gives template-only PRs a fast structural signal.
 
 on:
   pull_request:
