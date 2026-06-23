@@ -136,7 +136,9 @@ half-valid buffer.
 - Bus 0 and one sidechain input are routed. Additional input buses and
   secondary output buses are not exposed through the simple `Processor`
   callback.
-- No GUI extension is wired.
+- Desktop CLAP plugin targets expose `CLAP_EXT_GUI` when built with
+  `PULP_CLAP_GUI=1`; headless/CI/test environments and WCLAP builds do not
+  expose a live desktop editor.
 - Per-note modulation (`note_id`, `port_index`, `channel`, `key` fields in
   param mod events) is accepted but not per-note routed.
 
