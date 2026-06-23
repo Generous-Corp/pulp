@@ -100,13 +100,16 @@ auto decrypted = aes_decrypt(encrypted->data(), encrypted->size(), key32, iv16);
 
 ### Licensing — Plugin copy protection
 
-RSA-signed license keys with online activation. The public key lives in your plugin; the private key stays on your server.
+Current license keys are v2 AES-256-GCM payloads validated with a 32-byte
+shared secret. Legacy v1 RSA-signed keys remain supported for migration and
+compatibility. Online activation returns the license key string that your
+plugin then validates locally.
 
 ```cpp
 #include <pulp/runtime/license.hpp>
 
 LicenseValidator validator;
-validator.set_public_key(my_rsa_public_key_pem);
+validator.set_shared_secret(shared_secret_32, 32);
 
 auto status = validator.validate(license_key_string);
 if (status == LicenseStatus::Valid) { /* unlocked */ }
@@ -114,6 +117,9 @@ if (status == LicenseStatus::Expired) { /* show renewal dialog */ }
 
 auto info = validator.validate_and_parse(key);
 // info->product_id, info->user_email, info->edition
+
+// Legacy v1 keys can still be validated with the RSA public key.
+validator.set_public_key(my_rsa_public_key_pem);
 ```
 
 ### i18n — String translation
@@ -147,7 +153,7 @@ eval.evaluate("x * 100 + 10");  // 60.0
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log("preset_load", {{"name", "Init"}})` |
+| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log_event("preset_load", {{"name", "Init"}})` |
 | Base64 | `base64.hpp` | `base64_encode(data)` / `base64_decode(text)` |
 | BigInteger | `big_integer.hpp` | Arbitrary-precision math for RSA — `a.mod_pow(exp, modulus)` |
 | Child Process | `child_process.hpp` | `run_process("/usr/bin/auval", {"-a"})` with stdout capture |
