@@ -5,8 +5,36 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <type_traits>
+#include <array>
 
 using namespace pulp::midi;
+
+TEST_CASE("realtime SysEx pool recycles payloads so SysEx is never dropped across blocks",
+          "[midi][buffer][sysex]") {
+    // RT contract for the pooled SysEx-copy path the VST3 adapter (PR #4564)
+    // relies on: in realtime-capacity mode add_sysex_copy() reuses a reserved
+    // payload pool that is replenished by clear_sysex() each block. The critical
+    // correctness property is that this never silently DROPS SysEx across blocks —
+    // i.e. the pool does not deplete cycle over cycle. (Steady-state allocation
+    // freedom holds too, but the exact alloc count is build/allocator-dependent
+    // — first-reuse lazy growth, Debug vs Release — so it isn't asserted here;
+    // the VST3 adapter's RtAllocationProbe test covers the on-thread alloc path.)
+    MidiBuffer buf;
+    buf.reserve(/*events*/ 8, /*sysex slots*/ 4, /*payload bytes*/ 64);
+    buf.set_realtime_capacity_limit(true);
+    const std::array<uint8_t, 4> sysex{{0xF0, 0x7D, 0x01, 0xF7}};
+
+    // Many more fill→reset cycles than the pool has slots: if clear_sysex() did
+    // not recycle, the pool would deplete and later appends would be dropped.
+    for (int cycle = 0; cycle < 64; ++cycle) {
+        REQUIRE(buf.add_sysex_copy(sysex.data(), sysex.size(), 0, 0.0));
+        REQUIRE(buf.sysex_size() == 1);
+        REQUIRE(buf.sysex()[0].data.size() == sysex.size());
+        REQUIRE(buf.dropped_sysex_count() == 0);
+        buf.clear();
+        buf.clear_sysex();
+    }
+}
 
 TEST_CASE("MidiBuffer starts with no sysex events", "[midi][buffer][sysex]") {
     MidiBuffer buf;
