@@ -13,7 +13,7 @@ ships today, per backend.
 |--------------------|-------------------------------------------------|------------|-------------|---------|------------------------|----------------|
 | macOS — CoreMIDI   | `core/midi/platform/mac/coremidi_device.mm`     | yes (UMP sysex7 reassembled) | yes | yes (CoreMIDI notify) | CoreMIDI thread (high QoS) | sub-ms typical |
 | iOS — CoreMIDI     | shared with macOS path                          | yes (UMP sysex7 reassembled) | yes | yes | CoreMIDI thread        | sub-ms typical |
-| Linux — ALSA seq   | `core/midi/platform/linux/alsa_midi_device.cpp` | yes (raw-byte stream + `SysexAccumulator`) | yes | partial (poll on next port enum) | dedicated `std::thread` per port | ~1 ms (`poll()` driven) |
+| Linux — ALSA raw MIDI | `core/midi/platform/linux/alsa_midi_device.cpp` | yes (raw-byte stream + `SysexAccumulator`) | yes | partial (runtime libudev monitor; manual re-enumeration fallback) | dedicated `std::thread` per port | ~1 ms (`poll()` driven) |
 | Windows — mmeapi   | `core/midi/platform/win/winmidi_device.cpp`     | yes (MIM_LONGDATA buffer queue) | yes | no (mmeapi has no notify; re-enumerate) | OS callback thread (`midiInOpen` CALLBACK_FUNCTION) | ~1 ms (mmeapi tick) |
 | Windows — WinRT    | `core/midi/platform/win/winrt_midi_device.cpp`  | yes | yes | yes (Windows.Devices.Midi watcher) | WinRT ThreadPool | sub-ms typical |
 | Android — AMidi    | `core/midi/platform/android/android_midi.cpp`   | yes (raw stream → `AndroidMidiFifo`) | yes | partial (USB host events; BT MIDI via separate path) | JNI thread → SPSC FIFO → caller drains | depends on caller drain cadence |
@@ -44,16 +44,15 @@ enumerate returns sane port descriptors, `create_input()` /
 - **UMP**: same backend supports UMP via `ump_session_coremidi.mm`
   (CoreMIDI 2.0 path on macOS 11+ / iOS 14+).
 
-### Linux — ALSA sequencer
+### Linux — ALSA raw MIDI
 
 - **Sysex**: byte-stream from ALSA → `raw_midi_parser` →
   `SysexAccumulator`. Running-status interleave + realtime byte
   interleave handled by `core/midi/include/pulp/midi/running_status.hpp`.
-- **Hotplug**: ALSA's `snd_seq_event_input` does report
-  `SND_SEQ_EVENT_PORT_START` / `SND_SEQ_EVENT_PORT_EXIT`. Pulp's backend
-  treats those as "re-enumerate on next call" rather than
-  surfacing them as events; Linux hot-unplug recovery is not exposed as a
-  callback-level event.
+- **Hotplug**: `set_port_change_callback()` starts a runtime-loaded libudev
+  monitor on the `sound` subsystem. If libudev or udevd is unavailable, the
+  callback is stored but no event fires; clients that need portable hotplug
+  awareness should still tolerate manual re-enumeration.
 - **Threading**: each opened input port owns a `std::thread`
   (`read_thread_func`) that blocks on `poll()` and dispatches to the
   user's callback. Callback runs on that worker thread — not the audio
