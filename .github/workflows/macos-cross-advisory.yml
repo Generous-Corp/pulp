@@ -27,15 +27,14 @@ name: macOS Cross (advisory)
 #  - Validate signatures.
 #
 # These steps require either licensed Apple inputs (SDK) or a real Mac
-# (`codesign`, AU registration, `auval`). Promotion to a full advisory
-# build job (Phase 5 step 3 in the plan) is gated on standing up a
+# (`codesign`, AU registration, `auval`). Promotion to a real cross-build
+# job is gated on standing up a
 # self-hosted Linux runner that already has the private SDK and
 # osxcross prefix on disk. When that runner exists, add a second
 # `cross-build` job that calls into the private infra repo's scripts;
 # do not inline the bootstrap here.
 #
 # Plan: planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md
-# Phase: 5 — CI and artifact publication (scaffold step).
 
 on:
   pull_request:
@@ -124,7 +123,7 @@ jobs:
           an osxcross prefix, which live in a private infra repo and
           on the private Linux host.
 
-          Promotion path (planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md):
+          Promotion path:
           1. **(this job)** scaffold check, advisory.
           2. Self-hosted Linux runner with pinned osxcross + private
              SDK calls into the private infra scripts.
