@@ -237,8 +237,8 @@ TEST_CASE("Yoga: absolute child with inset:0 fills parent regardless of flex sib
     auto* wrapPtr = wrap.get();
     parent.add_child(std::move(wrap));
 
-    // A normal flow header sibling — pre-fix this was eating the wrap's main
-    // axis space and pushing the absolute wrap to y=44, height=816.
+    // A normal flow header sibling must not eat the absolute wrap's main
+    // axis space or push it to y=44, height=816.
     auto header = std::make_unique<View>();
     header->flex().preferred_height = 44;
     parent.add_child(std::move(header));
@@ -559,7 +559,7 @@ TEST_CASE("Viewport reconcile: content already inside viewport is untouched",
 
 TEST_CASE("Viewport reconcile: explicit right:0 / bottom:0 is edge-anchored, not clamped",
           "[layout][viewport-reconcile][screenshot][issue-1906]") {
-    // pulp #1906 Codex P2 — distinguish `right:auto` from explicit `right:0`.
+    // pulp #1906 — distinguish `right:auto` from explicit `right:0`.
     // A child with explicit `right:0` / `bottom:0` is anchored to the
     // opposite edge: the source explicitly declared edge-anchoring intent
     // and Yoga will honour it via the inset → size derivation. The

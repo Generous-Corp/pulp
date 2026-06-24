@@ -47,8 +47,8 @@ TEST_CASE("SvgPathWidget intrinsic size reflects viewBox", "[svg_path][issue-72]
     REQUIRE(w.intrinsic_width() == 24.0f);
     REQUIRE(w.intrinsic_height() == 16.0f);
 
-    // Zero / negative viewBox stays at 0 (caller must provide explicit size,
-    // matching pre-fix behavior for the no-viewBox case).
+    // Zero / negative viewBox stays at 0; callers must provide explicit size
+    // for the no-viewBox case.
     w.set_viewbox(0.0f, 0.0f);
     REQUIRE(w.intrinsic_width() == 0.0f);
     REQUIRE(w.intrinsic_height() == 0.0f);

@@ -137,10 +137,10 @@ TEST_CASE("createDocumentFragment reports nodeType=11",
     REQUIRE(result == "11|#document-fragment");
 }
 
-// Codex P1 on PR #730: DocumentFragment MUST flatten on insert — the
-// fragment's children move into the parent and the fragment node itself
-// is never inserted. React 18's reconciler stages commits in fragments,
-// so without this the materialized tree has phantom wrapper divs.
+// DocumentFragment MUST flatten on insert: the fragment's children move
+// into the parent and the fragment node itself is never inserted. React
+// 18's reconciler stages commits in fragments, so phantom wrapper divs
+// must not appear in the materialized tree.
 TEST_CASE("appendChild(fragment) flattens fragment children into the parent",
           "[view][web-compat][issue-468]") {
     auto result = run_in_bridge(R"(
@@ -511,11 +511,11 @@ TEST_CASE("pump_message_loop transitively drains microtasks scheduled from micro
     REQUIRE(std::string(v.getString()) == "5");
 }
 
-// Codex P2 on PR #769: an earlier 4096-job hard cap silently returned
-// after 4096 iterations, leaving a larger Promise/microtask chain
-// half-drained. The cap is gone — pump now drains to empty (rc == 0).
-// Verify by scheduling 5000 microtasks (≥ the old cap) in one chain
-// and asserting every one of them executed before the pump returns.
+// The message-loop pump must drain to empty (rc == 0), not return after
+// an arbitrary job count with a Promise/microtask chain half-drained.
+// Verify by scheduling 5000 microtasks (past the old 4096-job cutoff)
+// in one chain and asserting every one of them executed before the pump
+// returns.
 TEST_CASE("pump_message_loop drains a long chain past the old 4096-job cutoff",
           "[view][web-compat][issue-746][issue-769]") {
     ScriptEngine engine;
@@ -538,10 +538,9 @@ TEST_CASE("pump_message_loop drains a long chain past the old 4096-job cutoff",
     REQUIRE(std::string(v.getString()) == "5000");
 }
 
-// Codex P1 on PR #874 (issue #902): the unbounded `for (;;)` introduced
-// by #874 hard-freezes the UI thread when JS schedules a self-rearming
-// microtask. The fix re-introduces a bound (1M jobs) and logs a warning
-// when it fires. This test pins that bound: a microtask that always
+// issue #902: a self-rearming microtask must not hard-freeze the UI
+// thread. The pump is bounded (1M jobs) and logs a warning when that
+// bound fires. This test pins the bound: a microtask that always
 // re-queues itself must NOT hang `pump_message_loop()`.
 //
 // We can't drive the pump from a worker thread — QuickJS's JSContext
@@ -616,9 +615,9 @@ TEST_CASE("MessageChannel constructs, exposes port1/port2, and postMessage doesn
     REQUIRE(result == "ok");
 }
 
-// Codex P2 on PR #730: React 18's scheduler specifically checks
-// `window.postMessage` (not just `globalThis.postMessage`). `window` is a
-// distinct object in this runtime, so the scheduler shim needs to mirror.
+// React 18's scheduler specifically checks `window.postMessage` (not just
+// `globalThis.postMessage`). `window` is a distinct object in this runtime,
+// so the scheduler shim needs to mirror.
 TEST_CASE("postMessage is available on both globalThis AND window",
           "[view][web-compat][issue-468]") {
     auto result = run_in_bridge(R"(
