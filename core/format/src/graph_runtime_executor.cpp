@@ -53,9 +53,18 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 // raw mono slots — the intended lift point if routing later moves to
 // core/graph (it has no ProcessBlock dependency except the bus copy).
 
-// Zero each input slot (unconnected ports stay silent) then sum every
-// non-feedback, non-event inbound audio connection from its upstream output
-// slot. Topological order guarantees those upstream slots are already filled.
+// Zero each input slot (unconnected ports stay silent) then sum every inbound
+// audio connection into the dest input slot. Feedforward edges read the
+// upstream output slot (topological order guarantees it is already filled this
+// block); feedback edges read their dedicated previous-block slot (last block's
+// captured source output), matching SignalGraph's one-block feedback_prev. Event
+// edges carry no audio and are skipped.
+//
+// Deferred: feedforward edges are summed with no plug-in delay compensation.
+// SignalGraph applies a per-connection PDC ring when a node reports latency
+// (signal_graph.cpp); the executor must grow the same before 4f migrates
+// latency-reporting graphs onto it. Current routing parity holds because the
+// tested nodes report zero latency.
 void gather_node_inputs(const graph::GraphRuntimePlan& plan,
                         const graph::GraphRuntimeBufferAssignment& assignment,
                         GraphRuntimeBufferPool& pool,
@@ -71,12 +80,36 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (conn.feedback || conn.event) continue;
-        const auto& src_slots = assignment.nodes[conn.source_index];
-        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        if (conn.event) continue;
+        const float* src = nullptr;
+        if (conn.feedback) {
+            src = pool.slot_data(assignment.feedback_prev_slot[conn_index]);
+        } else {
+            const auto& src_slots = assignment.nodes[conn.source_index];
+            src = pool.slot_data(src_slots.output_base + conn.source_port);
+        }
         float* dst = pool.slot_data(slots.input_base + conn.dest_port);
         if (src == nullptr || dst == nullptr) continue;
         for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+    }
+}
+
+// After all nodes run, capture each feedback edge's current source output into
+// its previous-block slot for the next block (the source's output slot is final
+// once the block's walk completes). One-block delay, matching SignalGraph.
+void capture_feedback(const graph::GraphRuntimePlan& plan,
+                      const graph::GraphRuntimeBufferAssignment& assignment,
+                      GraphRuntimeBufferPool& pool,
+                      std::uint32_t frames) noexcept {
+    if (!assignment.has_feedback) return;
+    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+        const auto& conn = plan.connections[i];
+        if (!conn.feedback) continue;
+        const auto& src_slots = assignment.nodes[conn.source_index];
+        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        float* prev = pool.slot_data(assignment.feedback_prev_slot[i]);
+        if (src == nullptr || prev == nullptr) continue;
+        std::copy_n(src, frames, prev);
     }
 }
 
@@ -299,14 +332,6 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     const auto& assignment = snapshot.buffer_assignment();
     const auto frames = block.frame_count;
 
-    if (assignment.has_feedback) {
-        // Feedback needs previous-block slot capture (a later phase); the serial
-        // gather would otherwise read silence on the feedback edge and silently
-        // diverge from the host graph. Fail loudly instead.
-        GraphRuntimeExecutorResult fail;
-        fail.error = GraphRuntimeExecutorErrorCode::UnsupportedFeedbackEdge;
-        return fail;
-    }
     if (!pool.fits(snapshot, frames)) {
         GraphRuntimeExecutorResult fail;
         fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
@@ -391,6 +416,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         ++result.nodes_processed;
         nodes_processed_.fetch_add(1, std::memory_order_relaxed);
     }
+
+    capture_feedback(plan, assignment, pool, frames);
 
     blocks_processed_.fetch_add(1, std::memory_order_relaxed);
     return result;

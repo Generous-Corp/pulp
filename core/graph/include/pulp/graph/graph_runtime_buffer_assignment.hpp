@@ -27,6 +27,8 @@ namespace pulp::graph {
 // needs to publish where each node's port regions live and how many slots the
 // pool must hold.
 
+inline constexpr std::uint32_t kGraphRuntimeNoSlot = 0xFFFFFFFFu;
+
 struct GraphRuntimeNodeSlots {
     // Base scratch-slot index of this node's input region; the input port p
     // occupies slot (input_base + p). Meaningful only when input_ports > 0.
@@ -40,11 +42,15 @@ struct GraphRuntimeBufferAssignment {
     std::uint32_t slot_count = 0;
     // Indexed by dense node index (matches GraphRuntimePlan::nodes order).
     std::vector<GraphRuntimeNodeSlots> nodes;
-    // True if the plan has any feedback connection. The serial routing executor
-    // gathers only feedforward edges (topological order guarantees their source
-    // slots are filled first); feedback needs previous-block slot capture, which
-    // is a later phase. Routing rejects such plans loudly rather than silently
-    // diverging from the host graph.
+    // Indexed by connection index (matches GraphRuntimePlan::connections). For a
+    // feedback connection, the dedicated previous-block storage slot (one mono
+    // slot per feedback edge, appended after the node port regions and persisted
+    // across blocks); kGraphRuntimeNoSlot for every non-feedback connection.
+    // The executor gathers feedback as dst += prev_slot (last block) and copies
+    // the source's output slot into prev_slot after the block — a one-block
+    // delay matching host::SignalGraph's feedback_prev.
+    std::vector<std::uint32_t> feedback_prev_slot;
+    // True if the plan has any feedback connection.
     bool has_feedback = false;
     bool ok = false;
 };

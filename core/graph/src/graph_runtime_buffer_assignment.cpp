@@ -7,8 +7,10 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
     GraphRuntimeBufferAssignment assignment;
     try {
         assignment.nodes.resize(plan.nodes.size());
+        assignment.feedback_prev_slot.assign(plan.connections.size(), kGraphRuntimeNoSlot);
     } catch (...) {
         assignment.nodes.clear();
+        assignment.feedback_prev_slot.clear();
         assignment.slot_count = 0;
         assignment.ok = false;
         return assignment;
@@ -27,13 +29,15 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         cursor += node.output_ports;
     }
 
-    assignment.slot_count = cursor;
-    for (const auto& conn : plan.connections) {
-        if (conn.feedback) {
+    // Append one persistent previous-block storage slot per feedback edge.
+    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+        if (plan.connections[i].feedback) {
+            assignment.feedback_prev_slot[i] = cursor++;
             assignment.has_feedback = true;
-            break;
         }
     }
+
+    assignment.slot_count = cursor;
     assignment.ok = true;
     return assignment;
 }

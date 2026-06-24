@@ -184,6 +184,39 @@ std::vector<float> signal_graph_diamond(float g1, float g2, double sr, int frame
     return yo;
 }
 
+// Reference feedback graph: in -> A(gain) -> out, plus A -> A feedback (mono).
+// Per block, A's input = in + previous block's A output, so A_out[n] =
+// g * (in[n] + A_out[n-1]). Returns this block's output; call across blocks
+// with the same graph to drive the recurrence.
+struct SignalGraphFeedback {
+    pulp::host::SignalGraph g;
+    pulp::host::NodeId gn = 0;
+    int frames = 0;
+    void build(float gain, double sr, int frames_) {
+        frames = frames_;
+        const auto n_in = g.add_input_node(1, "In");
+        gn = g.add_gain_node("A");
+        const auto n_out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(n_in, 0, gn, 0));
+        REQUIRE(g.connect(gn, 0, n_out, 0));
+        REQUIRE(g.connect_feedback(gn, 0, gn, 0));
+        REQUIRE(g.set_node_gain(gn, gain));
+        REQUIRE(g.prepare(sr, frames));
+    }
+    std::vector<float> block(const std::vector<float>& x) {
+        std::vector<float> xi = x;
+        std::vector<float> yo(static_cast<std::size_t>(frames), 0.0f);
+        std::array<const float*, 1> in_ch{xi.data()};
+        std::array<float*, 1> out_ch{yo.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                     static_cast<std::uint32_t>(frames));
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 1,
+                                                static_cast<std::uint32_t>(frames));
+        g.process(out_view, in_view, frames);
+        return yo;
+    }
+};
+
 constexpr double kSr = 48000.0;
 
 } // namespace
@@ -282,8 +315,13 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-o
     }
 }
 
-TEST_CASE("GraphRuntimeExecutor routing rejects feedback graphs until 4d",
-          "[host][graph][executor][routing][phase4]") {
+TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a feedback loop",
+          "[host][graph][executor][routing][phase4][parity][feedback]") {
+    // in -> A(gain) -> out, with A -> A one-block feedback. The feedback is a
+    // whole-block delay (not a per-sample IIR): block n's A input at sample i is
+    // in[n][i] + A_out[n-1][i], so out[n][i] = g*(in[n][i] + A_out[n-1][i]).
+    // This must match SignalGraph block-for-block, proving the previous-block
+    // capture + gather are correct and stateful across blocks.
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
         GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
@@ -294,24 +332,38 @@ TEST_CASE("GraphRuntimeExecutor routing rejects feedback graphs until 4d",
         GraphRuntimeConnectionSpec{2, 0, 3, 0},
         GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
     };
-    GainState s;
-    const std::array bindings = {
-        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
-        GraphRuntimeNodeBinding{2, routing_gain, &s, true},
-        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
-    };
-    GraphRuntimeSnapshot snapshot;
-    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
-    CHECK(snapshot.buffer_assignment().has_feedback);
-    auto pool = make_pool(snapshot, 64);
+    constexpr int kFrames = 64;
+    for (float gain : {0.5f, 0.3f, 0.0f}) {
+        CAPTURE(gain);
+        GainState s{gain};
+        const std::array bindings = {
+            GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+            GraphRuntimeNodeBinding{2, routing_gain, &s, true},
+            GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+        };
+        GraphRuntimeSnapshot snapshot;
+        REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+        CHECK(snapshot.buffer_assignment().has_feedback);
+        auto pool = make_pool(snapshot, kFrames);  // persists across blocks
+        GraphRuntimeExecutor exec;
 
-    const std::vector<std::vector<float>> in{std::vector<float>(64, 0.5f)};
-    RoutedHarness h(kSr, 64, in, 1);
-    GraphRuntimeExecutor exec;
-    const auto result = h.run(exec, snapshot, pool);
-    CHECK_FALSE(result.ok());
-    CHECK(result.error ==
-          pulp::format::GraphRuntimeExecutorErrorCode::UnsupportedFeedbackEdge);
+        SignalGraphFeedback ref;
+        ref.build(gain, kSr, kFrames);
+
+        // Drive the recurrence over several blocks with distinct inputs.
+        for (int blk = 0; blk < 6; ++blk) {
+            CAPTURE(blk);
+            const std::vector<std::vector<float>> in{
+                test_signal(kFrames, 0.4f + 0.1f * static_cast<float>(blk))};
+            RoutedHarness h(kSr, kFrames, in, 1);
+            REQUIRE(h.run(exec, snapshot, pool).ok());
+            const auto r = ref.block(in[0]);
+            REQUIRE(r.size() == h.outs[0].size());
+            for (std::size_t i = 0; i < r.size(); ++i) {
+                REQUIRE(r[i] == h.outs[0][i]);  // bit-exact across the recurrence
+            }
+        }
+    }
 }
 
 TEST_CASE("GraphRuntimeExecutor routing process path does not allocate",
@@ -345,6 +397,46 @@ TEST_CASE("GraphRuntimeExecutor routing process path does not allocate",
     GraphRuntimeExecutor exec;
     REQUIRE(h.run(exec, snapshot, pool).ok());  // warm-up outside the probe
     {
+        pulp::test::RtAllocationProbe probe;
+        const auto result = h.run(exec, snapshot, pool);
+        REQUIRE(result.ok());
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("GraphRuntimeExecutor feedback routing path does not allocate",
+          "[host][graph][executor][routing][phase4][rt-safety][feedback]") {
+    // Feedback adds the gather-from-prev-slot read and the end-of-block capture
+    // copy; both must stay allocation-free on the RT thread.
+    constexpr int kFrames = 128;
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
+    };
+    GainState s{0.5f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &s, true},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    auto pool = make_pool(snapshot, kFrames);
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.7f)};
+    GraphRuntimeExecutor exec;
+    {
+        RoutedHarness warm(kSr, kFrames, in, 1);
+        REQUIRE(warm.run(exec, snapshot, pool).ok());  // warm-up outside the probe
+    }
+    {
+        RoutedHarness h(kSr, kFrames, in, 1);
         pulp::test::RtAllocationProbe probe;
         const auto result = h.run(exec, snapshot, pool);
         REQUIRE(result.ok());

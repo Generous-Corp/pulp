@@ -94,6 +94,45 @@ TEST_CASE("Buffer assignment slot_count equals total ports across all plans",
     }
 }
 
+TEST_CASE("Buffer assignment appends one previous-block slot per feedback edge",
+          "[graph][buffer-assignment][phase4][feedback]") {
+    // in -> A -> out, with A -> A feedback. Port slots = 0+1 (in) + 1+1 (A) +
+    // 1+0 (out) = 4, plus one feedback prev slot = 5 total.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
+    };
+    auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto a = build_graph_runtime_buffer_assignment(plan.plan);
+    REQUIRE(a.ok);
+    CHECK(a.has_feedback);
+    REQUIRE(a.feedback_prev_slot.size() == plan.plan.connections.size());
+
+    // Exactly the feedback connection gets a prev slot; it is a fresh slot
+    // beyond the 4 port slots and within slot_count.
+    std::uint32_t feedback_slots = 0;
+    for (std::size_t i = 0; i < plan.plan.connections.size(); ++i) {
+        const bool fb = plan.plan.connections[i].feedback;
+        if (fb) {
+            CHECK(a.feedback_prev_slot[i] != pulp::graph::kGraphRuntimeNoSlot);
+            CHECK(a.feedback_prev_slot[i] >= 4u);
+            CHECK(a.feedback_prev_slot[i] < a.slot_count);
+            ++feedback_slots;
+        } else {
+            CHECK(a.feedback_prev_slot[i] == pulp::graph::kGraphRuntimeNoSlot);
+        }
+    }
+    CHECK(feedback_slots == 1);
+    CHECK(a.slot_count == 5);
+}
+
 TEST_CASE("Buffer assignment of an empty plan is valid and empty",
           "[graph][buffer-assignment][phase4]") {
     auto plan = build_graph_runtime_plan(

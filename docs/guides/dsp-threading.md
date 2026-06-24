@@ -276,10 +276,14 @@ from its upstream output slot, then either copies the main I/O bus (AudioInput /
 AudioOutput nodes) or hands the binding `node_inputs` / `node_outputs` views over
 its scratch slots. The routed path allocates and locks nothing on the RT thread
 (the pool must already `fits()` the snapshot for the block) and matches
-`host::SignalGraph` bit-for-bit on feedforward graphs. A plan with any feedback
-connection is rejected with `UnsupportedFeedbackEdge` — feedback delay storage,
-single-writer ownership, slot reuse, and the `SignalGraph` walk migration belong
-to later graph-runtime slices.
+`host::SignalGraph` bit-for-bit. Feedback connections are honored as a one-block
+delay: the assignment appends one persistent previous-block slot per feedback
+edge, gather adds that slot (last block's captured source output), and after the
+walk the source's output is captured into it — mirroring SignalGraph's
+`feedback_prev`, with the pool's zero-init giving the first block silent
+feedback. Per-connection PDC delay lines, sidechain/MIDI/automation edge
+routing, slot reuse, and the `SignalGraph` walk migration belong to later
+graph-runtime slices.
 
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an

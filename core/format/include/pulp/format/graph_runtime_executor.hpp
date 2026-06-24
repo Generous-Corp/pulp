@@ -29,7 +29,6 @@ enum class GraphRuntimeExecutorErrorCode : std::uint8_t {
     NodeProcessorFailed,
     BufferPoolTooSmall,
     NodePortLimitExceeded,
-    UnsupportedFeedbackEdge,
 };
 
 struct GraphRuntimeCommandDecision {
@@ -254,10 +253,11 @@ public:
     // node_outputs pointed at their scratch slots before the binding runs.
     // Allocation-free: `pool` must already fit() the snapshot for this block.
     //
-    // Feedforward graphs only. A plan with any feedback connection is rejected
-    // with UnsupportedFeedbackEdge (feedback needs previous-block slot capture,
-    // a later phase) rather than silently producing a feedback-edge-is-silence
-    // result that diverges from the host graph.
+    // Feedback connections are honored as a one-block delay: gather adds each
+    // feedback edge's previous-block slot, and after the walk the source's
+    // output is captured into that slot for the next block (matching
+    // host::SignalGraph's feedback_prev). The pool's zero-init gives the first
+    // block silent feedback.
     GraphRuntimeExecutorResult process_routed(
         ProcessBlock& block,
         const GraphRuntimeSnapshot& snapshot,

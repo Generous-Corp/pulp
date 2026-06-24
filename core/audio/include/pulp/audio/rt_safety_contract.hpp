@@ -604,10 +604,10 @@ inline constexpr std::array kCoreRuntimeRtSafetyContracts{
         false,
         true,
         "audio thread over a prepared snapshot + pre-sized GraphRuntimeBufferPool",
-        "Routes feedforward inter-node audio through caller-allocated scratch "
-        "slots: gather/scatter are bounded fills and copies, no allocation or "
-        "lock. The snapshot's buffer assignment and the pool are built off the "
-        "callback; pool.fits() must hold for the block."),
+        "Routes inter-node audio through caller-allocated scratch slots: "
+        "gather/scatter and the one-block feedback capture are bounded fills and "
+        "copies, no allocation or lock. The snapshot's buffer assignment and the "
+        "pool are built off the callback; pool.fits() must hold for the block."),
 };
 
 [[nodiscard]] constexpr std::span<const RtSafetyContract>
