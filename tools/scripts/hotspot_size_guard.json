@@ -97,8 +97,8 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2289,
-      "note": "DesignIR serialization contract hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 2179,
+      "note": "DesignIR serialization contract hotspot; lowered after extracting the import-report + placement-verify analysis passes to design_ir_analysis.cpp"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
