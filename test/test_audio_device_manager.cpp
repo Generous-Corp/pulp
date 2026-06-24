@@ -550,7 +550,7 @@ TEST_CASE("AudioDeviceManager MIDI endpoint delta tracking fires per change",
     REQUIRE(mgr.midi_endpoints()[0].id == "ep:mini");
 }
 
-// Regression for issue #2976 / PR #2970 Codex P1 finding:
+// Regression for issue #2976 / PR #2970:
 // subscribe_midi() and subscribe_midi_endpoints() previously used two
 // independent counters that both started at 1. unsubscribe_midi()
 // erases by id from BOTH maps, so destroying the endpoint token (id=1)
@@ -623,7 +623,7 @@ TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load"
     // thread-safe, so a REQUIRE inside the worker can race or otherwise
     // wedge the harness in nondeterministic ways. Track the failure as
     // an atomic flag here and assert it on the test thread after join()
-    // (Codex PR #3001 review).
+    // (PR #3001).
     std::atomic<int> inactive_token_count{0};
 
     auto worker = [&](bool use_endpoints) {

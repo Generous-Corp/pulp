@@ -1,7 +1,7 @@
 // Tests for SysExAccumulator (#86).
 //
 // Verifies the state machine handles the cases called out in the header
-// and referenced by the Codex audit on #406 (aborted F0 recovery):
+// and referenced by the audit on #406 (aborted F0 recovery):
 //
 //   - single-packet sysex
 //   - sysex spanning multiple feed() calls
@@ -437,7 +437,7 @@ TEST_CASE("SysexAccumulator: large sysex (>1KB) accumulates correctly",
 
 TEST_CASE("SysexAccumulator: reserved 0xF9/0xFD pass through mid-sysex",
           "[midi][sysex][issue-500]") {
-    // Regression for the Codex P2 finding on #484 / #500: 0xF9 and 0xFD
+    // Regression for #484 / #500: 0xF9 and 0xFD
     // are MIDI-1.0-undefined codes in the System Realtime range. The
     // accumulator's pass-through contract covers all of F8-FF except F7,
     // but an earlier is_realtime() carved out 0xF9 and 0xFD, which sent

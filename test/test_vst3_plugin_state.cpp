@@ -927,7 +927,7 @@ TEST_CASE("VST3 adapter clears SysEx between reused process blocks",
     // The per-block MidiBuffers are reused members (A1). MidiBuffer::clear()
     // empties only the short-event store, so the adapter must ALSO clear_sysex()
     // each block — otherwise a SysEx payload from one block leaks into the next.
-    // (Caught by the Codex adversarial review of A1.) Process a SysEx block, then
+    // Process a SysEx block, then
     // an event-free block, and assert the processor sees no stale SysEx.
     TestVst3Config config;
     config.descriptor.accepts_midi = true;
@@ -1572,7 +1572,7 @@ TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
     }
 }
 
-// Codex review on #3235: the silence accommodation must NOT override a
+// Regression (#3235): the silence accommodation must NOT override a
 // processor's veto of a mono/stereo layout (a real contract, e.g. linked
 // main/sidechain counts) — there are no extra channels to silence, so
 // running process() under it would be a correctness bug. The veto is

@@ -293,7 +293,7 @@ TEST_CASE("MpeVoiceTracker reset clears all state", "[midi][mpe]") {
 }
 
 TEST_CASE("MpeVoiceTracker reset clears per-channel expression caches", "[midi][mpe]") {
-    // Regression for Codex P2: notes added after reset() must not inherit
+    // Regression: notes added after reset() must not inherit
     // stale bend/pressure/timbre values from a previous session.
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
     tracker.process(MidiEvent::pitch_bend(1, 16383));  // member pitch bend

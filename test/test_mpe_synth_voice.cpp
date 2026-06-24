@@ -387,7 +387,7 @@ TEST_CASE("MpeVoiceAllocator reports last_was_glide", "[midi][mpe]") {
 }
 
 TEST_CASE("MpeVoiceAllocator steal does not double-decrement glide on later note-off", "[midi][mpe]") {
-    // Regression for PR #138 Codex P2: if a voice is stolen mid-life, the
+    // Regression for PR #138: if a voice is stolen mid-life, the
     // deferred NoteOff for that note must not decrement the glide
     // refcount again (its channel is already released by the steal path).
     MpeVoiceAllocator<TestVoice> alloc{1};
@@ -409,7 +409,7 @@ TEST_CASE("MpeVoiceAllocator steal does not double-decrement glide on later note
 }
 
 TEST_CASE("MpeVoiceAllocator steal path decrements glide refcount", "[midi][mpe]") {
-    // Regression for Codex P2: when a steal retires a held note on some
+    // Regression: when a steal retires a held note on some
     // channel, subsequent note-ons on that channel must not be flagged as
     // glide because the stolen note's refcount stayed elevated.
     MpeVoiceAllocator<TestVoice> alloc{1};

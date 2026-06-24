@@ -2,7 +2,7 @@
 //
 // Extracted from vst3_adapter.cpp into a Steinberg-SDK-free helper so
 // the table is unit-testable without the VST3 SDK. Pins the
-// regression for #2963 (Codex comment 3305434120): a `framesPerSecond
+// regression for #2963: a `framesPerSecond
 // == 60` mapping that also matched 59.94 (= 60 + pulldown).
 
 #include <catch2/catch_test_macros.hpp>
@@ -34,7 +34,7 @@ TEST_CASE("vst3_frame_rate — 23.976 / 29.97 / 29.97-drop / 30-drop",
     REQUIRE(vst3_frame_rate(30, false, true) == FR::fps_30_drop);
 }
 
-// Regression: #2963 / Codex comment 3305434120 — the VST3 mapper used
+// Regression: #2963 — the VST3 mapper used
 // `else if (fps == 60)`, which also matched 59.94 (= 60 + pulldown).
 // 59.94 sessions became indistinguishable from true 60fps and broke
 // SMPTE / timecode math in plug-ins that trust ctx.frame_rate. The fix

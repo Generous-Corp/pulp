@@ -665,7 +665,7 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
     std::filesystem::remove_all(cache_dir, ec);
 }
 
-// Regression: #2966 / Codex comment 3305530564 — clear_disk_cache() is
+// Regression: #2966 — clear_disk_cache() is
 // documented as best-effort/no-op but the range-for over
 // `directory_iterator(dir, ec)` still used the THROWING increment path,
 // so a permission error or concurrent filesystem change mid-iteration
@@ -705,7 +705,7 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
     std::filesystem::remove_all(empty_dir, ec);
 }
 
-// Regression: #2966 / Codex comment 3305530560 — load_from_disk() used to
+// Regression: #2966 — load_from_disk() used to
 // trust the .thumb file size and allocate a `std::vector<uint8_t>` of that
 // exact size with no upper bound. A corrupt or hostile oversized cache
 // file would throw `std::bad_alloc` (or trip OOM-killer) instead of being
