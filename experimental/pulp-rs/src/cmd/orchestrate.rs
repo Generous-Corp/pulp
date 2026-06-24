@@ -1094,13 +1094,40 @@ pub enum CacheSub {
 /// # Errors
 ///
 /// Returns [`CliError::UnknownSubcommand`] for any unrecognised
-/// keyword.
+/// keyword and [`CliError::BadUsage`] for extra positional args.
 pub fn parse_cache_sub(args: &[String]) -> Result<CacheSub> {
     match args.first().map(String::as_str) {
-        None | Some("help" | "--help" | "-h") => Ok(CacheSub::Help),
-        Some("status") => Ok(CacheSub::Status),
-        Some("clean") => Ok(CacheSub::Clean),
+        None => Ok(CacheSub::Help),
+        Some("help" | "--help" | "-h") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache help argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Help)
+        }
+        Some("status") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache status argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Status)
+        }
+        Some("clean") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache clean argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Clean)
+        }
         Some("fetch") => {
+            if let Some(extra) = args.get(2) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache fetch argument: {extra}"
+                )));
+            }
             let asset = args.get(1).cloned().unwrap_or_default();
             Ok(CacheSub::Fetch(asset))
         }
@@ -1857,6 +1884,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_cache_sub_rejects_extra_args_for_single_word_commands() {
+        let status = parse_cache_sub(&["status".to_owned(), "extra".to_owned()]).unwrap_err();
+        assert!(matches!(
+            status,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache status argument: extra")
+        ));
+
+        let clean = parse_cache_sub(&["clean".to_owned(), "extra".to_owned()]).unwrap_err();
+        assert!(matches!(
+            clean,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache clean argument: extra")
+        ));
+    }
+
+    #[test]
     fn parse_cache_sub_fetch_with_and_without_asset() {
         match parse_cache_sub(&["fetch".to_owned(), "skia".to_owned()]).unwrap() {
             CacheSub::Fetch(a) => assert_eq!(a, "skia"),
@@ -1866,6 +1908,16 @@ mod tests {
             CacheSub::Fetch(a) => assert!(a.is_empty()),
             other => panic!("expected Fetch with empty asset, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_cache_sub_fetch_rejects_extra_arg() {
+        let err = parse_cache_sub(&["fetch".to_owned(), "skia".to_owned(), "extra".to_owned()])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache fetch argument: extra")
+        ));
     }
 
     #[test]
