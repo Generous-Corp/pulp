@@ -170,7 +170,7 @@ TEST_CASE("ScrollView: hit testing follows scrolled content", "[scrollview]") {
 
 // ── pulp #1170: ScrollView honors React Native pointerEvents ───────────────
 //
-// Codex P1 follow-up on #1044 — ScrollView::hit_test shadowed View::hit_test
+// Regression for #1044 / #1170: ScrollView::hit_test shadowed View::hit_test
 // without honoring pointer_events(), so setPointerEvents("box-only"/"box-none"
 // /"none") was a silent no-op for any scrollable container.
 

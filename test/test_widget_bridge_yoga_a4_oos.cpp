@@ -469,13 +469,13 @@ TEST_CASE("View::tick_animations honors paused play_state",
     REQUIRE_THAT(v->active_animations()[0].elapsed_seconds, WithinAbs(0.5f, 0.001f));
 }
 
-// pulp #1508 Codex audit (P1 #2) — animationDuration in @pulp/react's
-// prop-applier was routing to setTransitionDuration, which mutated
-// transition timing on the same View. The fix routes through the
-// legacy 2-arg setAnimation control-token form. Mirror of the TS test
-// in packages/pulp-react/test/prop-applier-animation.test.ts on the
-// C++ side: confirm the bridge handles `setAnimation(id, "duration",
-// seconds)` without touching the View's transition slot.
+// Regression for pulp #1508: animationDuration in @pulp/react's prop-applier
+// was routing to setTransitionDuration, which mutated transition timing on the
+// same View. The fix routes through the legacy 2-arg setAnimation control-token
+// form. Mirror of the TS test in
+// packages/pulp-react/test/prop-applier-animation.test.ts on the C++ side:
+// confirm the bridge handles `setAnimation(id, "duration", seconds)` without
+// touching the View's transition slot.
 TEST_CASE("setAnimation duration token does not perturb transition slot",
           "[view][bridge][css][css-animations-tail][issue-1508]") {
     ScriptEngine engine;

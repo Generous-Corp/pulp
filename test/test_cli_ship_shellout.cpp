@@ -1279,8 +1279,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
       out << "<plist><dict></dict></plist>\n"; }
 
     // --skip-sign leaves the dmg unsigned. The signature guard must skip it
-    // rather than submit an unsigned image to notarytool (P1 fix:
-    // never route an unsigned .pkg/.dmg to notarization).
+    // rather than submit an unsigned image to notarytool: never route an
+    // unsigned .pkg/.dmg to notarization.
     auto r = run_pulp_in(root, {"ship", "release", "--dmg", "--skip-sign"}, 90000);
     REQUIRE_FALSE(r.timed_out);
     auto combined = r.stdout_output + r.stderr_output;
