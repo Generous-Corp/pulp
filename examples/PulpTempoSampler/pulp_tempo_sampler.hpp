@@ -704,9 +704,19 @@ public:
     /// GPU (use_gpu = true) — a CPU host renders it blank (mirrors mtk-demo).
     void toggle_keyboard_window() {
         if (kb_window_ && kb_window_->is_visible()) {
-            // Hiding: release any keys still held on the keyboard's lit display so
-            // nothing lingers lit when it is shown again. (Typed notes also get a
-            // key-up through the editor; this is the belt-and-suspenders clear.)
+            // Hiding. Two things must happen so NO MIDI lingers after the keyboard
+            // is dismissed:
+            //  1) Drop the keyboard's self-capture — set_input_capture(false) fires
+            //     on_note_off for every key the keyboard was holding (a key still
+            //     physically down when the window hides never gets its own key-up,
+            //     since a hidden window receives no keys), routing each through
+            //     keyboard_play_off → ui_note_off. Without this the held note's
+            //     voice sustained forever (the "QWERTY keeps sending MIDI after the
+            //     keyboard is closed" bug).
+            //  2) Belt-and-suspenders: release any note still in the UI-held set and
+            //     clear the lit display so nothing lingers lit on the next open.
+            if (kb_) kb_->set_input_capture(false);
+            for (int n : held_notes_ui_) ui_note_off(n);
             held_notes_ui_.clear();
             push_keyboard_lights();
             kb_window_->hide();
@@ -750,7 +760,7 @@ public:
             };
             // 'a' plays slice 0 (note = ROOT). A live listener (create_view) keeps
             // this synced if ROOT changes while the window is open.
-            kb_->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
+            kb_->set_base_note(static_cast<int>(state().get_value(kRootNote)));
 
             const float w = kb_->panel_width(), h = kb_->panel_height();
             view::WindowOptions opts;
@@ -775,7 +785,10 @@ public:
             kb_window_->set_close_callback([] {});
         }
         // Re-sync ROOT each open (it may have changed while the window was hidden).
-        if (kb_) kb_->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
+        if (kb_) {
+            kb_->set_base_note(static_cast<int>(state().get_value(kRootNote)));
+            kb_->set_input_capture(true);   // re-arm self-capture (dropped on the last hide)
+        }
         kb_window_->show();
     }
 
@@ -1009,7 +1022,7 @@ public:
         // inline editor typing. toggle_keyboard_window() also sets it on open.
         root->listeners.push_back(state().add_listener(
             [this](state::ParamID id, float v) {
-                if (id == kRootNote && kb_) kb_->controller().set_base_note(static_cast<int>(v));
+                if (id == kRootNote && kb_) kb_->set_base_note(static_cast<int>(v));
             },
             state::ListenerThread::Main));
 

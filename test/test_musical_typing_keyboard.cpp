@@ -124,6 +124,37 @@ TEST_CASE("MusicalTypingKeyboard: piano frame has the chromatic span C2..B4",
         REQUIRE(std::count(piano.begin(), piano.end(), n) == 1);
 }
 
+// Regression: the piano playable window must stay a contiguous 36-key window over
+// C-2..G8 regardless of the controller base note. midi_for_element used to offset
+// by (note - base_note), so a sampler root of C3 (60) shifted the whole window
+// down 12 semitones — the top reached only ~D#7 instead of G8, and the lowest
+// visible key was C-1 not C-2. It must map by the frame-intrinsic low note (48).
+TEST_CASE("MusicalTypingKeyboard: piano window is base-independent (C-2..G8)",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.controller().set_base_note(60);   // C3 root, like the tempo sampler
+    kb.set_mode(Mode::piano);
+    auto window = [&] {
+        int lo = 999, hi = -1;
+        for (int i = 0; i < kb.element_count(); ++i)
+            if (kb.element_kind(i) == K::momentary && kb.element_note(i) >= 0) {
+                const int m = kb.midi_for_element(i);
+                lo = std::min(lo, m); hi = std::max(hi, m);
+            }
+        return std::pair<int, int>{lo, hi};
+    };
+    // Far LEFT: window bottoms on C-2 (MIDI 0); still 36 contiguous keys.
+    kb.controller().set_octave_shift(-99);
+    auto [lo1, hi1] = window();
+    REQUIRE(lo1 == 0);                 // C-2
+    REQUIRE(hi1 - lo1 == 35);          // 36-key contiguous window
+    // Far RIGHT: window tops out on G8 (MIDI 127).
+    kb.controller().set_octave_shift(99);
+    auto [lo2, hi2] = window();
+    REQUIRE(hi2 == 127);               // G8
+    REQUIRE(hi2 - lo2 == 35);
+}
+
 TEST_CASE("MusicalTypingKeyboard: toggle swaps the frame AND the intrinsic size",
           "[view][musical-typing][toggle]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
@@ -266,6 +297,27 @@ TEST_CASE("MusicalTypingKeyboard: input_capture gates self-play of typed keys",
     REQUIRE(ons == std::vector<int>{48});          // 'a' = C2
     REQUIRE(kb.on_key_event(press(KeyCode::num2)));
     REQUIRE_FALSE(bends.empty());                  // pitch-bend control fired
+}
+
+// Regression: dropping self-capture must RELEASE any note still held, firing
+// on_note_off. The tempo sampler calls set_input_capture(false) when the keyboard
+// window is dismissed; without the release a key held at close time never got its
+// key-up (a hidden window receives no keys) and its voice sustained forever — the
+// "QWERTY keeps sending MIDI after the keyboard is closed" bug.
+TEST_CASE("MusicalTypingKeyboard: dropping capture releases held notes (close path)",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons, offs;
+    kb.on_note_on  = [&](int n, float) { ons.push_back(n); };
+    kb.on_note_off = [&](int n) { offs.push_back(n); };
+
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;
+    REQUIRE(kb.on_key_event(a));                    // 'a' held, no key-up sent
+    REQUIRE(ons == std::vector<int>{48});
+    REQUIRE(offs.empty());
+
+    kb.set_input_capture(false);                    // dismiss → must release the held note
+    REQUIRE(offs == std::vector<int>{48});
 }
 
 TEST_CASE("MusicalTypingKeyboard: z/x shift the typed octave",

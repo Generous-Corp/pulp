@@ -98,6 +98,11 @@ public:
     void set_input_capture(bool capture);
     bool input_capture() const { return input_capture_; }
 
+    // Set the controller's base note (e.g. a sampler's root) AND refresh the
+    // OCTAVE readout + overview highlight. Prefer this over controller().
+    // set_base_note(), which leaves the readout showing the previous octave.
+    void set_base_note(int note);
+
     // Computer-keyboard playing while focused (when input_capture is on):
     // a w s e d f t g y h u j k o l p play notes, z/x shift the octave. Returns
     // true when consumed (false when capture is off, so the host keeps the key).
@@ -116,6 +121,11 @@ public:
     void on_mouse_up(Point pos) override;
     void on_hover_move(Point pos) override;
     void on_mouse_leave() override;
+
+    // MIDI note an element maps to: in the typing frame, base+octave+semitone; in
+    // the piano frame, the windowed note (frame-low-note 48 offset onto the live
+    // octave window). Public so callers/tests can resolve a key's current pitch.
+    int midi_for_element(int index) const;
 
 protected:
     // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
@@ -178,10 +188,6 @@ private:
     void apply_held_notes();
     // Typing element (note == relative semitone 0..17) for a QWERTY semitone, or -1.
     int typing_element_for_semitone(int semitone) const;
-    // MIDI note an element maps to: in the typing frame, base+octave+semitone; in
-    // the piano frame, the element's absolute MIDI note. Used so clicks emit the
-    // right note. Discriminates by active frame, NOT by note magnitude.
-    int midi_for_element(int index) const;
     void light_typing_semitone(int semitone, bool on);
 };
 

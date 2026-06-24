@@ -131,9 +131,9 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
         // label. The value_label renderer auto-shrinks any reading wider than its
         // rect, so a 3-char value fits the gap instead of overflowing onto the
         // neighbouring button/label. (Boxes widened from the 1–2 char baked slots.)
-        add("octave",   68, 211, 34, 21);   // "OCTAVE C2/C-2"  right edge 102 (z pad @114)
-        add("velocity", 280, 211, 34, 21);  // "VELOCITY 98/106" right edge 314 (c pad @321)
-        add("pitchbend", 88, 66, 18, 18);   // "PITCH BEND 0/−20" right edge 106 (1-pad @108)
+        add("octave",   72, 211, 34, 21);   // "OCTAVE C2/C-2"  right edge 106 (z pad @114)
+        add("velocity", 284, 211, 34, 21);  // "VELOCITY 98/106" right edge 318 (c pad @321)
+        add("pitchbend", 76, 66, 30, 18);   // "PITCH BEND 0/−20" right edge 106 (1-pad @108)
     }
     // piano: no value_labels (range shown by the overview highlight only)
 }
@@ -179,6 +179,13 @@ std::vector<DesignFrameElement> build_typing_frame() {
 // Piano-mode playable keys, frame-1 (732×176) coords extracted from Figma node
 // 187:349. `note` is the ABSOLUTE MIDI number (C2=48 … B4=83). Black keys are
 // narrower/shorter so the smallest-area hit tiebreak picks them.
+// The piano frame's lowest baked key carries note 48; all 36 keys are stored as
+// ascending absolute notes 48..83. midi_for_element maps them onto the live
+// window relative to THIS frame-intrinsic low note (NOT the runtime base note),
+// so the visible window is correct regardless of the controller's base — a
+// sampler root of C3 (60) must not shift the window off the C-2..G8 range.
+constexpr int kPianoFrameLowNote = 48;
+
 std::vector<DesignFrameElement> build_piano_frame() {
     struct K { int note; float x, y, w, h; };
     static const K keys[] = {
@@ -406,6 +413,12 @@ void MusicalTypingKeyboard::set_input_capture(bool capture) {
     if (!capture) controller_.all_notes_off();  // stop our own QWERTY-held notes
 }
 
+void MusicalTypingKeyboard::set_base_note(int note) {
+    controller_.set_base_note(note);
+    update_readouts();   // the OCTAVE readout + overview highlight track the base; a
+    request_repaint();   // bare controller().set_base_note() would leave them stale.
+}
+
 bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
     if (!input_capture_) return false;  // host feeds QWERTY itself — don't double-trigger
     // Number row + tab mirror the on-screen controls exactly: 1/2 = momentary
@@ -486,9 +499,12 @@ int MusicalTypingKeyboard::midi_for_element(int index) const {
     // octave, e.g. MIDI C-1..B0, as a typing semitone.)
     if (active_frame() == kTypingFrame)
         return controller_.base_note() + controller_.octave_shift() * 12 + note;
-    // Piano: the 36 keys are a WINDOW over the full range — shift their absolute
-    // MIDI by the window's low note (octave-driven, clamped at the G8 top).
-    return piano_window_lo() + (note - controller_.base_note());
+    // Piano: the 36 keys are a WINDOW over the full range. Map each key by its
+    // offset from the FRAME's intrinsic low note (48), not the runtime base note,
+    // so the window stays on C-2..G8 whatever the base is. (Using base_note here
+    // shifted the whole window by base-48 — e.g. a C3 root pushed the top down to
+    // ~D#7 instead of G8 and desynced the keys from the overview highlight.)
+    return piano_window_lo() + (note - kPianoFrameLowNote);
 }
 
 int MusicalTypingKeyboard::piano_window_lo() const {
@@ -562,12 +578,14 @@ int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
     const int span = (active_frame() == kTypingFrame) ? kPlaySpan : kPianoSpan;
     const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + span, x0, x1)) * 0.5f;
     const float step = midi_to_x(base + 12, x0, x1) - midi_to_x(base, x0, x1);  // one octave
-    // Typing reaches +5 so its play-window top hits G8 on the strip; the piano
-    // window already saturates at +4 (piano_window_lo clamps to MIDI 92), so its
-    // far-right drag stops there. The bottom is base-relative (matches
-    // MusicalTypingController::set_octave_shift) so the window low can drag down to
-    // C-2 even when base > C2 (e.g. a sampler root of C3 → low bound −5).
-    const int top = (active_frame() == kTypingFrame) ? 5 : 4;
+    // Both bounds are base-relative so the window reaches the true range edges
+    // whatever the base note is. Bottom: the most-negative shift that lands the
+    // window low on C-2 (MIDI 0). Top (piano): enough to bring the window low to
+    // G8−35 = MIDI 92, where piano_window_lo saturates so the rightmost key is G8;
+    // typing keeps +5 so its 18-key play-window top reaches G8 on the strip. A
+    // fixed −4/+4 bottomed out at C-1 and topped out short of G8 for a C3 root.
+    const int top = (active_frame() == kTypingFrame) ? 5
+                                                     : std::max(0, (92 - base + 11) / 12);
     const int bot = -((base + 11) / 12);
     return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), bot, top);
 }

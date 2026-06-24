@@ -2013,6 +2013,14 @@ public:
         // link here, guarded so the primary (which already started its link in
         // run_event_loop()) is untouched.
         if (!display_link_) start_display_link();
+        // Make the Metal view the first responder so the window receives key
+        // events on its FIRST show. Only run_event_loop() (the PRIMARY window)
+        // did this; a SECONDARY window (e.g. the MusicalTypingKeyboard popout)
+        // showed via show() and never became first responder, so typed keys were
+        // dropped until some later interaction (a click/toggle) focused it — the
+        // "first ⌘K open doesn't register QWERTY until a piano/typing toggle" bug.
+        // makeFirstResponder is idempotent, so re-showing is harmless.
+        [window_ makeFirstResponder:metal_view_];
     }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
