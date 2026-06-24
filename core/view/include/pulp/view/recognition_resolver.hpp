@@ -43,6 +43,7 @@
 
 #include <pulp/view/design_ir.hpp>
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -159,5 +160,57 @@ struct UnmatchedComponent {
 int apply_recognition_resolver(IRNode& root,
                                const RecognitionResolver& resolver,
                                std::vector<UnmatchedComponent>* unmatched_out = nullptr);
+
+// ── Installed-package custom-control source (the P8 merge half) ───────────────
+// Gather every installed package's `design_controls` fragments into recognition
+// sources the resolver consumes. A package declares custom controls in its
+// registry entry under `design_controls`: an array of
+//   { "factory_id": "<id>", "component_set_key"?: "<key>", "name_prefix"?: "<p>" }
+// each mapping a Figma identity to the `factory_id` the package's
+// `pulp::view::View` registers via `register_design_control_factory`. The merge
+// reads two project-local files:
+//   - the lockfile (packages.lock.json): WHICH packages are installed, by id;
+//   - the registry (registry.json): each package's `design_controls` fragment.
+// One `RecognitionSource` is produced per installed package that declares any
+// design control, named by package id so a wired control's provenance is
+// traceable. A package with no `design_controls` contributes nothing — so with
+// no custom-control package installed the result is empty and behavior is
+// unchanged.
+//
+// Reads files directly with choc::json (no CLI dependency) so the importer can
+// build the merged table without linking the package CLI. Missing/empty/invalid
+// files yield an empty result (with an optional human-readable warning), never
+// an error — a malformed registry must not break an import.
+struct PackageDesignControlSources {
+    std::vector<RecognitionSource> sources;
+    std::vector<std::string> warnings;  ///< non-fatal parse/skip notes
+};
+
+// Build the per-package custom-control sources from explicit file paths. Either
+// file may be absent. Use this overload in tests and when the paths are known.
+PackageDesignControlSources gather_package_design_controls(
+    const std::filesystem::path& lockfile_path,
+    const std::filesystem::path& registry_path);
+
+// Discover the project's packages.lock.json and registry.json by walking up
+// from `start_dir` (looking for a sibling pair), then gather. Returns an empty
+// result when no lockfile is found. Convenience wrapper used by the importer.
+PackageDesignControlSources discover_package_design_controls(
+    const std::filesystem::path& start_dir);
+
+// ── Materialize half: stamp resolved custom controls onto the IR ─────────────
+// Walk the IR and, for every node the resolver stamped with a custom-control
+// `recognitionFactoryId` (see apply_recognition_resolver), append a
+// `kind=custom` IRInteractiveElement carrying that `factory_id` so the native
+// materializer builds the registered overlay — or renders inert + diagnoses
+// when the factory is unregistered (P7 Tier-3, never a silent knob). Geometry
+// is taken from the node's own box; `source_node_id` is carried so the
+// inspector can map the control back to its design node.
+//
+// Idempotent and strictly additive: a node that already carries a custom
+// interactive element for the same factory_id is not double-stamped, and a node
+// without a `recognitionFactoryId` is untouched. Returns the number of custom
+// elements newly materialized.
+int materialize_recognized_custom_controls(IRNode& root);
 
 } // namespace pulp::view

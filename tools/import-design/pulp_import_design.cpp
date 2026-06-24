@@ -2466,9 +2466,41 @@ int main(int argc, char* argv[]) {
             resolver.add_source(std::move(*user_source));
         }
 
+        // Installed-package custom controls (P8): gather each installed
+        // package's `design_controls` fragment and add it as its own source,
+        // MERGED OVER the built-in library and the user manifest. With no
+        // custom-control package installed this contributes nothing, so behavior
+        // is unchanged. Discovery walks up from the design's directory for a
+        // packages.lock.json / registry.json pair (a project root).
+        {
+            // Anchor discovery at the OUTPUT location (the user's project), not
+            // the input file (which may be a temp/extracted export). Fall back to
+            // cwd when no output directory is set (dry-run / stdout).
+            fs::path search_start = fs::path(output_file).parent_path();
+            if (search_start.empty()) search_start = fs::current_path();
+            auto pkg_sources =
+                pulp::view::discover_package_design_controls(search_start);
+            for (auto& w : pkg_sources.warnings)
+                std::cerr << "recognition: " << w << "\n";
+            for (auto& s : pkg_sources.sources) {
+                const auto entry_count = s.entries.size();
+                const std::string pkg_name = s.name;
+                resolver.add_source(std::move(s));
+                std::cerr << "recognition: merged " << entry_count
+                          << " custom control"
+                          << (entry_count == 1 ? "" : "s") << " from package '"
+                          << pkg_name << "'\n";
+            }
+        }
+
         std::vector<pulp::view::UnmatchedComponent> unmatched;
         const int wired = pulp::view::apply_recognition_resolver(
             ir.root, resolver, &unmatched);
+        // Materialize half: turn resolved custom-control matches (stamped as the
+        // `recognitionFactoryId` node attribute) into kind=custom interactive
+        // elements the native materializer builds — or renders inert + diagnoses
+        // when the factory isn't registered (never a silent knob).
+        pulp::view::materialize_recognized_custom_controls(ir.root);
         if (wired > 0)
             std::cerr << "recognition: wired " << wired
                       << " control" << (wired == 1 ? "" : "s")
