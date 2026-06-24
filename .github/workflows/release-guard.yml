@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # #318 Codex P2s (2):
+          # #318 (2 findings):
           # 1. "grace window": wait 30 minutes before alerting on a
           #    missing release. release-cli.yml takes ~20 minutes
           #    across 5 platforms; a tag that just got pushed is

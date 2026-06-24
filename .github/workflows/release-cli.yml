@@ -45,7 +45,7 @@ env:
   # `shipyard changelog regenerate --release-notes` produces the
   # same output as the hook that writes CHANGELOG.md. Must track
   # tools/shipyard.toml to avoid split behavior between local flows
-  # and release-time jobs (Codex P1 on PR #719).
+  # and release-time jobs (PR #719).
   SHIPYARD_VERSION: "0.68.0"
 
 jobs:
@@ -765,7 +765,7 @@ jobs:
           # regenerate_changelog.py --release-notes walks `git tag` +
           # tag-to-tag ranges; default shallow checkout has no tags so
           # the script falls back to "See CHANGELOG.md" and the release
-          # body loses its per-release content. (#265 Codex P2.)
+          # body loses its per-release content. (#265.)
           fetch-depth: 0
           fetch-tags: true
 

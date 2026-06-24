@@ -86,7 +86,7 @@ jobs:
           #   search backend do the time filter server-side, eliminating
           #   the `--limit 100` hard cap that was a silent data-loss
           #   risk in a busy 48h window.
-          # - Explicit `--limit 500` (Codex P2 on PR #515 / #500):
+          # - Explicit `--limit 500` (PR #515 / #500):
           #   `gh pr list`'s default is 30 items even when `--search` is
           #   used. Without an explicit high limit, the sweep silently
           #   inspected at most 30 PRs in a busy window and delayed bot
