@@ -416,6 +416,12 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
             writeln!(out, "    (pulp-cpp installed alongside)")
                 .map_err(|e| CliError::io("<stdout>", e))?;
         }
+        if report.mcp_replaced {
+            writeln!(out, "    (pulp-mcp replaced)").map_err(|e| CliError::io("<stdout>", e))?;
+        } else if report.mcp_created {
+            writeln!(out, "    (pulp-mcp installed alongside)")
+                .map_err(|e| CliError::io("<stdout>", e))?;
+        }
     }
     Ok(())
 }
@@ -847,16 +853,16 @@ mod tests {
 
     /// Real install path via the tarball-dir test seam — no network,
     /// no extraction, but the dual-binary swap logic runs end-to-end.
-    /// Verifies that `pulp` and `pulp-cpp` both land in the planned
-    /// destinations and the legacy delegate path is no longer touched.
+    /// Verifies that `pulp`, `pulp-cpp`, and `pulp-mcp` all land in the
+    /// planned destinations and the legacy delegate path is no longer touched.
     #[test]
-    fn install_replaces_both_binaries_via_tarball_dir_seam() {
+    fn install_replaces_release_binaries_via_tarball_dir_seam() {
         let (_td, _g) = isolated_env();
         // Pre-populate the cache with a "newer" version so the
         // discovery step picks it up.
         let fake = OkFetcher::new("0.50.0", "https://x");
 
-        // Stage a fake archive containing both pulp and pulp-cpp.
+        // Stage a fake archive containing the release binaries.
         let archive_dir = tempfile::tempdir().unwrap();
         std::fs::write(
             archive_dir.path().join(crate::install::pulp_basename()),
@@ -868,14 +874,21 @@ mod tests {
             b"new-cpp-bytes",
         )
         .unwrap();
+        std::fs::write(
+            archive_dir.path().join(crate::install::mcp_basename()),
+            b"new-mcp-bytes",
+        )
+        .unwrap();
 
-        // Stage a fake "current install" — pulp + pulp-cpp on disk
+        // Stage a fake "current install" — release binaries on disk
         // somewhere away from the test binary.
         let bin_dir = tempfile::tempdir().unwrap();
         let pulp_dst = bin_dir.path().join(crate::install::pulp_basename());
         let cpp_dst = bin_dir.path().join(crate::install::cpp_basename());
+        let mcp_dst = bin_dir.path().join(crate::install::mcp_basename());
         std::fs::write(&pulp_dst, b"old-pulp").unwrap();
         std::fs::write(&cpp_dst, b"old-cpp").unwrap();
+        std::fs::write(&mcp_dst, b"old-mcp").unwrap();
 
         // Hand-build a plan pointing at our staged paths so we don't
         // touch the test binary.
@@ -885,6 +898,7 @@ mod tests {
             asset: "ignored".into(),
             self_path: pulp_dst.clone(),
             cpp_path: Some(cpp_dst.clone()),
+            mcp_path: Some(mcp_dst.clone()),
             is_zip: false,
         };
         // Drive the install module directly — the tarball-dir env
@@ -896,8 +910,10 @@ mod tests {
 
         assert!(report.pulp_replaced);
         assert!(report.cpp_replaced);
+        assert!(report.mcp_replaced);
         assert_eq!(std::fs::read(&pulp_dst).unwrap(), b"new-pulp-bytes");
         assert_eq!(std::fs::read(&cpp_dst).unwrap(), b"new-cpp-bytes");
+        assert_eq!(std::fs::read(&mcp_dst).unwrap(), b"new-mcp-bytes");
         // No `pending-upgrade` marker should be written when the real
         // install path runs.
         let _ = fake; // silence unused warning

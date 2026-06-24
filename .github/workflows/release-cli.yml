@@ -828,9 +828,9 @@ jobs:
             irm https://www.generouscorp.com/pulp/install.ps1 | iex
             ```
 
-            These installers place the Rust `pulp` CLI and the C++ `pulp-cpp`
-            delegate on your PATH. Or download the binary archive for your
-            platform below.
+            These installers place the Rust `pulp` CLI, the C++ `pulp-cpp`
+            delegate, and the Claude Code `pulp-mcp` server on your PATH.
+            Or download the binary archive for your platform below.
           files: |
             artifacts/**/*
           # On a tag PUSH, keep the release a DRAFT so the parallel
