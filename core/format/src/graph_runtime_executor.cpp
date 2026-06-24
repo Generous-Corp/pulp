@@ -44,6 +44,71 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
     return event;
 }
 
+// --- Routing helpers (Phase 4) -------------------------------------------
+//
+// These are factored out of process_routed so the serial loop reads as
+// gather -> dispatch -> (binding | bus copy), so 4d (feedback gather) and
+// Phase 5 (parallelize run_routed_node across workers) have a localized seam
+// instead of a 100-line monolith to fork. gather/run are pure over the pool's
+// raw mono slots — the intended lift point if routing later moves to
+// core/graph (it has no ProcessBlock dependency except the bus copy).
+
+// Zero each input slot (unconnected ports stay silent) then sum every
+// non-feedback, non-event inbound audio connection from its upstream output
+// slot. Topological order guarantees those upstream slots are already filled.
+void gather_node_inputs(const graph::GraphRuntimePlan& plan,
+                        const graph::GraphRuntimeBufferAssignment& assignment,
+                        GraphRuntimeBufferPool& pool,
+                        const graph::GraphRuntimeNodePlan& node,
+                        const graph::GraphRuntimeNodeSlots& slots,
+                        std::uint32_t frames) noexcept {
+    for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+        if (float* dst = pool.slot_data(slots.input_base + p)) {
+            std::fill_n(dst, frames, 0.0f);
+        }
+    }
+    for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+        const auto conn_index =
+            plan.inbound_connection_indices[node.first_inbound_connection + c];
+        const auto& conn = plan.connections[conn_index];
+        if (conn.feedback || conn.event) continue;
+        const auto& src_slots = assignment.nodes[conn.source_index];
+        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        float* dst = pool.slot_data(slots.input_base + conn.dest_port);
+        if (src == nullptr || dst == nullptr) continue;
+        for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+    }
+}
+
+// AudioInput copies the main input bus into its output slots; AudioOutput
+// writes its gathered input slots to the main output bus. The only
+// format/bus-aware step in routing.
+void copy_io_bus(graph::GraphRuntimeNodeKind kind,
+                 GraphRuntimeBufferPool& pool,
+                 const graph::GraphRuntimeNodePlan& node,
+                 const graph::GraphRuntimeNodeSlots& slots,
+                 const BusBuffer* in_bus, BusBuffer* out_bus,
+                 std::uint32_t frames) noexcept {
+    if (kind == graph::GraphRuntimeNodeKind::AudioInput) {
+        for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+            float* dst = pool.slot_data(slots.output_base + p);
+            if (dst == nullptr) continue;
+            if (in_bus != nullptr && p < in_bus->input.num_channels()) {
+                std::copy_n(in_bus->input.channel_ptr(p), frames, dst);
+            } else {
+                std::fill_n(dst, frames, 0.0f);
+            }
+        }
+    } else {  // AudioOutput
+        for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+            if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
+            const float* src = pool.slot_data(slots.input_base + p);
+            if (src == nullptr) continue;
+            std::copy_n(src, frames, out_bus->output.channel_ptr(p));
+        }
+    }
+}
+
 } // namespace
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
@@ -79,6 +144,10 @@ bool GraphRuntimeSnapshot::reset(
     }
 
     try {
+        // The buffer assignment is a pure function of the plan, so it is built
+        // here off the audio thread alongside plan validation. Phase 5 per-worker
+        // scratch sizing depends on worker count, not the plan — it belongs to
+        // the executor/pool, NOT here.
         auto assignment = graph::build_graph_runtime_buffer_assignment(plan);
         if (!assignment.ok) {
             clear();
@@ -269,85 +338,53 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             return result;
         }
 
-        // Gather: zero each input slot (unconnected ports stay silent), then
-        // sum every non-feedback audio connection from its upstream output slot.
-        for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-            if (float* dst = pool.slot_data(slots.input_base + p)) {
-                std::fill_n(dst, frames, 0.0f);
-            }
-        }
-        for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
-            const auto conn_index =
-                plan.inbound_connection_indices[node.first_inbound_connection + c];
-            const auto& conn = plan.connections[conn_index];
-            if (conn.feedback || conn.event) continue;
-            const auto& src_slots = assignment.nodes[conn.source_index];
-            const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
-            float* dst = pool.slot_data(slots.input_base + conn.dest_port);
-            if (src == nullptr || dst == nullptr) continue;
-            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
-        }
+        gather_node_inputs(plan, assignment, pool, node, slots, frames);
 
-        switch (node.kind) {
-            case graph::GraphRuntimeNodeKind::AudioInput: {
-                for (std::uint32_t p = 0; p < node.output_ports; ++p) {
-                    float* dst = pool.slot_data(slots.output_base + p);
-                    if (dst == nullptr) continue;
-                    if (in_bus != nullptr && p < in_bus->input.num_channels()) {
-                        std::copy_n(in_bus->input.channel_ptr(p), frames, dst);
-                    } else {
-                        std::fill_n(dst, frames, 0.0f);
-                    }
-                }
-                break;
-            }
-            case graph::GraphRuntimeNodeKind::AudioOutput: {
-                for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-                    if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
-                    const float* src = pool.slot_data(slots.input_base + p);
-                    if (src == nullptr) continue;
-                    std::copy_n(src, frames, out_bus->output.channel_ptr(p));
-                }
-                break;
-            }
-            default: {
-                const auto& binding = bindings[node_index];
-                if (!binding.process) {
-                    if (binding.required) {
-                        result.error =
-                            GraphRuntimeExecutorErrorCode::MissingRequiredProcessor;
-                        result.failed_node_index = node_index;
-                        node_failures_.fetch_add(1, std::memory_order_relaxed);
-                        return result;
-                    }
-                    break;  // optional no-op; its output slots stay silent
-                }
-
-                std::array<const float*, kMaxRoutedPortsPerNode> in_ptrs{};
-                std::array<float*, kMaxRoutedPortsPerNode> out_ptrs{};
-                for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-                    in_ptrs[p] = pool.slot_data(slots.input_base + p);
-                }
-                for (std::uint32_t p = 0; p < node.output_ports; ++p) {
-                    out_ptrs[p] = pool.slot_data(slots.output_base + p);
-                }
-
-                GraphRuntimeNodeProcessContext context;
-                context.plan = &plan;
-                context.node = &node;
-                context.node_index = node_index;
-                context.command_results = command_results.first(commands.size());
-                context.node_inputs = audio::BufferView<const float>(
-                    in_ptrs.data(), node.input_ports, frames);
-                context.node_outputs = audio::BufferView<float>(
-                    out_ptrs.data(), node.output_ports, frames);
-                if (!binding.process(block, context, binding.user_data)) {
-                    result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
+        if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
+            node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
+            copy_io_bus(node.kind, pool, node, slots, in_bus, out_bus, frames);
+        } else {
+            const auto& binding = bindings[node_index];
+            if (!binding.process) {
+                if (binding.required) {
+                    result.error =
+                        GraphRuntimeExecutorErrorCode::MissingRequiredProcessor;
                     result.failed_node_index = node_index;
                     node_failures_.fetch_add(1, std::memory_order_relaxed);
                     return result;
                 }
-                break;
+                // optional no-op; its output slots stay silent
+                ++result.nodes_processed;
+                nodes_processed_.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+
+            // Marshal the node's mono slots into contiguous channel views. This
+            // is the per-node body Phase 5 will schedule onto worker threads.
+            std::array<const float*, kMaxRoutedPortsPerNode> in_ptrs{};
+            std::array<float*, kMaxRoutedPortsPerNode> out_ptrs{};
+            for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+                in_ptrs[p] = pool.slot_data(slots.input_base + p);
+            }
+            for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+                out_ptrs[p] = pool.slot_data(slots.output_base + p);
+            }
+
+            GraphRuntimeNodeProcessContext context;
+            context.plan = &plan;
+            context.node = &node;
+            context.node_index = node_index;
+            context.command_results = command_results.first(commands.size());
+            context.routed = true;
+            context.node_inputs = audio::BufferView<const float>(
+                in_ptrs.data(), node.input_ports, frames);
+            context.node_outputs = audio::BufferView<float>(
+                out_ptrs.data(), node.output_ports, frames);
+            if (!binding.process(block, context, binding.user_data)) {
+                result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
+                result.failed_node_index = node_index;
+                node_failures_.fetch_add(1, std::memory_order_relaxed);
+                return result;
             }
         }
 

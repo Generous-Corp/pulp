@@ -42,10 +42,16 @@ struct GraphRuntimeNodeProcessContext {
     const graph::GraphRuntimeNodePlan* node = nullptr;
     std::uint32_t node_index = 0;
     std::span<const GraphRuntimeCommandDecision> command_results;
-    // Per-node routed I/O, populated only by the routing process() path; empty
-    // on the shared-block path. A routing binding reads `node_inputs` (already
-    // gathered from upstream output slots) and writes `node_outputs` (its
-    // assigned scratch slots). Channels are mono slots from the buffer pool.
+    // True when this context came from process_routed(): node_inputs/node_outputs
+    // are populated and a binding MUST read/write them rather than the block's
+    // buses. False on the shared-block process() path, where they are empty and
+    // a binding works the buses directly. A binding should assert the mode it
+    // expects — once the SignalGraph walk migrates onto routing (Phase 4f) the
+    // shared-block path is slated to retire and this flag/dual-mode collapses.
+    bool routed = false;
+    // Per-node routed I/O (valid only when `routed`). A routing binding reads
+    // `node_inputs` (already gathered from upstream output slots) and writes
+    // `node_outputs` (its assigned scratch slots). Channels are mono slots.
     audio::BufferView<const float> node_inputs;
     audio::BufferView<float> node_outputs;
 };
@@ -146,9 +152,14 @@ struct GraphRuntimeExecutorResult {
 
 /// Pre-allocated scratch buffers backing the routing process() path.
 ///
-/// One slot is a mono buffer of `max_frames` floats. The caller sizes the pool
+/// One slot is a mono buffer of `max_frames` floats — the same "slot" the
+/// snapshot's GraphRuntimeBufferAssignment indexes. The caller sizes the pool
 /// off-RT from a snapshot's buffer_slot_count() and the maximum block size, then
 /// reuses it across realtime blocks. The executor never resizes it.
+///
+/// Scope: this is the SHARED inter-node routing scratch for one serial walk.
+/// Phase 5 per-worker scratch is a separate concern and must not be overloaded
+/// onto this pool.
 class GraphRuntimeBufferPool {
 public:
     // Off-RT: (re)allocate storage for `slot_count` mono slots of `max_frames`.
