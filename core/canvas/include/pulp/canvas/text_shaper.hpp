@@ -177,4 +177,13 @@ private:
 /// Global text shaper singleton (uses the best available backend)
 TextShaper& global_text_shaper();
 
+/// Monotonic count of TextShaper::prepare() invocations across all shapers.
+///
+/// Always compiled (a single relaxed atomic increment per prepare() — cheap
+/// enough for release). Exposed so widget-level layout caches (e.g. Label's
+/// shaped-layout cache) can be proven in headless tests: paint a cached widget
+/// twice and assert the counter advanced by exactly one. Not part of the
+/// rendering contract — purely an observability hook for tests/diagnostics.
+std::uint64_t text_shaper_prepare_call_count();
+
 }  // namespace pulp::canvas

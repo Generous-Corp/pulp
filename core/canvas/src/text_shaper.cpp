@@ -12,6 +12,7 @@
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <sstream>
 #include <numeric>
@@ -48,6 +49,17 @@
 #endif
 
 namespace pulp::canvas {
+
+namespace {
+// Monotonic prepare() invocation counter. Relaxed ordering: tests only need
+// the delta across two synchronous paints on one thread, and the value carries
+// no cross-thread happens-before contract. Function-local static avoids any
+// static-init-order dependency on the (header-declared) free accessor.
+std::atomic<std::uint64_t>& detail_prepare_calls() {
+    static std::atomic<std::uint64_t> calls{0};
+    return calls;
+}
+}  // namespace
 
 // ── Shared: PreText-style arithmetic line breaking ──────────────────────
 // This is the "cheap" path — just arithmetic over cached segment widths.
@@ -754,6 +766,7 @@ TextShaper::~TextShaper() = default;
 
 PreparedText TextShaper::prepare(std::string_view text, std::string_view font_family,
                                   float font_size) {
+    detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     PreparedText result;
     result.font_family_ = std::string(font_family);
     result.font_size_ = font_size;
@@ -816,6 +829,7 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
 }
 
 PreparedText TextShaper::prepare(const AttributedString& text) {
+    detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     // For attributed strings, prepare each span separately
     PreparedText result;
     if (text.empty()) return result;
@@ -877,6 +891,10 @@ bool TextShaper::uses_real_shaping() const {
 TextShaper& global_text_shaper() {
     static TextShaper shaper;
     return shaper;
+}
+
+std::uint64_t text_shaper_prepare_call_count() {
+    return detail_prepare_calls().load(std::memory_order_relaxed);
 }
 
 }  // namespace pulp::canvas
