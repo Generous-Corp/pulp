@@ -1,4 +1,4 @@
-// `pulp projects list` and `pulp scan` shell-out tests:
+// `pulp projects list`, `pulp scan`, and `pulp host` shell-out tests:
 //
 //   * `pulp projects list --json` emits valid JSON for empty + non-empty
 //     registries; reports missing_on_disk for deleted projects.
@@ -6,6 +6,8 @@
 //   * `pulp scan --help` / `--no-load` / `--format`. Covers filesystem-
 //     only enumeration, HOME-derived CLAP entries, lv2 rich-scanner
 //     path, and single-bucket restriction.
+//   * `pulp host --help` / parser validation. Covers supported formats,
+//     descriptor ids, and AU bundle id discovery before loading.
 
 #include "test_cli_shellout_helpers.hpp"
 
@@ -248,6 +250,20 @@ TEST_CASE("pulp host validates parser errors before plugin loading",
         REQUIRE(r.stderr_output.find("failed to load") == std::string::npos);
         REQUIRE(r.stdout_output.find("Loaded:") == std::string::npos);
     }
+}
+
+TEST_CASE("pulp host help lists every supported format and descriptor id flag",
+          "[cli][shellout][host][help]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto r = run_pulp({"host", "--help"}, /*timeout_ms=*/10000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("clap|vst3|au|auv3|lv2") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--id <unique-id>") != std::string::npos);
+    REQUIRE(r.stdout_output.find("LV2") != std::string::npos);
+    REQUIRE(r.stdout_output.find("multi-plugin CLAP") != std::string::npos);
+    REQUIRE(r.stdout_output.find("clap-id") == std::string::npos);
 }
 
 TEST_CASE("pulp host derives AU id from bundle Info.plist",
