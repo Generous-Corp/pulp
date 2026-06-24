@@ -252,7 +252,14 @@ bool walk_riff_chunks(const std::vector<uint8_t>& bytes, F&& visitor) {
         const uint8_t* id = bytes.data() + off;
         uint32_t sz = rd_u32(bytes.data() + off + 4);
         const uint8_t* payload = bytes.data() + off + 8;
-        // Guard against malformed sz that runs past EOF.
+        // Clamp a chunk size that overruns the buffer to the bytes actually
+        // present. A too-large size is not always corruption: RF64/BW64 files
+        // (accepted by the magic check above) store 0xFFFFFFFF as the
+        // RIFF/data-size placeholder — the real 64-bit size lives in the
+        // 'ds64' chunk — and tools that backfill size fields last can leave an
+        // over-advertised size in an otherwise-readable file. Walking only the
+        // bytes we have lets us still extract the metadata chunks instead of
+        // bailing or reading past EOF.
         if (sz > bytes.size() - (off + 8)) {
             sz = static_cast<uint32_t>(bytes.size() - (off + 8));
         }
