@@ -1105,6 +1105,31 @@ TEST_CASE("MCP docs_search and create quote user arguments",
 #endif
 }
 
+TEST_CASE("MCP docs_check runs the project docs check script",
+          "[mcp][tools][docs][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project With Docs Check";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "tools");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    {
+        std::ofstream script(project / "tools" / "check-docs.sh");
+        script << "#!/bin/sh\n"
+               << "printf 'fake-docs-check [%s]\\n' \"$PWD\"\n";
+    }
+
+    ScopedCurrentPath cwd(project);
+    auto response = handle_request(tool_call("44", "pulp_docs_check"));
+    require_contains(response, R"JSON("id":44)JSON");
+    require_contains(response, "fake-docs-check");
+    REQUIRE(response.find("Error: not in a Pulp project") == std::string::npos);
+#endif
+}
+
 TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
           "[mcp][tools][packages][workflow]") {
 #if defined(_WIN32)
@@ -1660,6 +1685,36 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
         require_contains(response, "Error: not in a Pulp project");
         REQUIRE(response.find("Unknown tool") == std::string::npos);
     }
+}
+
+TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable text",
+          "[mcp][tools][inspect][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    make_fake_pulp_cli(project.path);
+
+    ScopedCurrentPath cwd(project.path);
+
+    auto evaluate = handle_request(tool_call(
+        "50", "pulp_inspect_evaluate",
+        R"JSON({"expression":"window.title + ' ok'"})JSON"));
+    require_contains(evaluate, R"JSON("id":50)JSON");
+    require_contains(evaluate, "fake-pulp [inspect] [--command] [Runtime.evaluate] [--params]");
+    require_contains(evaluate, R"JSON([{\"expression\":\"window.title + ' ok'\"}])JSON");
+    REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON")
+            == std::string::npos);
+
+    auto screenshot = handle_request(tool_call("51", "pulp_inspect_screenshot"));
+    require_contains(screenshot, R"JSON("id":51)JSON");
+    require_contains(screenshot, R"JSON("type":"text")JSON");
+    require_contains(screenshot, "fake-pulp [inspect] [--command] [Capture.screenshot]");
+    REQUIRE(screenshot.find(R"JSON("type":"image")JSON") == std::string::npos);
+    REQUIRE(screenshot.find(R"JSON("mimeType":"image/png")JSON") == std::string::npos);
+#endif
 }
 
 TEST_CASE("MCP validate only passes --all for the explicit all flag",

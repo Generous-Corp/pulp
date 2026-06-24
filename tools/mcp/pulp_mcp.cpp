@@ -128,8 +128,8 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_inspect_dom","description":"Get the view tree of a running plugin's UI via the inspector protocol","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_params","description":"Get all parameter info and current values from a running plugin","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_set_param","description":"Set a parameter value on a running plugin (standalone host) via the inspector. Wraps the write in a host gesture so DAW undo/automation grouping behaves like a user edit. Numeric parameters only; errors on an unknown parameter id. Note: the inspector is wired into the standalone host, not plugin formats loaded in a third-party DAW.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_screenshot","description":"Capture a screenshot from a running plugin via the inspector","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_evaluate","description":"Evaluate a JS expression in a running plugin's script engine","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},)JSON";
+    out += R"JSON({"name":"pulp_inspect_screenshot","description":"Request an inspector screenshot. Currently returns the inspector unavailable error until WindowHost capture wiring lands.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_inspect_evaluate","description":"Request Runtime.evaluate in a running plugin. Currently returns the inspector unavailable error until ScriptEngine wiring lands.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_performance","description":"Get render performance metrics from a running plugin","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_audio","description":"Get audio configuration from a running plugin via Audio.getConfig","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_start_trace","description":"Start a motion trace via the inspector Motion.startTrace protocol. Attaches one or more metric probes (geometry / scroll-geometry) on a target view and begins streaming Motion.sample events. Enables tracing on the Coordinator if it is currently off. Returns the assigned trace_id.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}}}}},)JSON";
@@ -445,7 +445,10 @@ static std::string handle_request_raw(const std::string& json) {
             else if (name == "pulp_inspect_evaluate") {
                 inspector_method = "Runtime.evaluate";
                 auto expr = extract_string(args_json, "expression");
-                if (!expr.empty()) inspector_params = " {\"expression\":" + json_string(expr) + "}";
+                if (!expr.empty()) {
+                    auto params_json = std::string("{\"expression\":") + json_string(expr) + "}";
+                    inspector_params = " --params " + shell_quote(params_json);
+                }
             }
             else if (name == "pulp_inspect_performance") inspector_method = "Performance.getMetrics";
             else if (name == "pulp_inspect_audio")   inspector_method = "Audio.getConfig";
@@ -456,12 +459,7 @@ static std::string handle_request_raw(const std::string& json) {
             } else {
                 auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
                 auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
-                if (name == "pulp_inspect_screenshot") {
-                    // Screenshot returns base64 PNG — escape for safe JSON embedding
-                    result = "{\"content\":[{\"type\":\"image\",\"data\":" + json_string(output) + ",\"mimeType\":\"image/png\"}]}";
-                } else {
-                    result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
-                }
+                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
         else return json_error(id, -32601, "Unknown tool: " + name);

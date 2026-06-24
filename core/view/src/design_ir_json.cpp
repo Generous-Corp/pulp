@@ -78,7 +78,7 @@ static InteractiveElementKind interactive_kind_from_id(const std::string& s,
     if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
-static const char* interactive_kind_id(InteractiveElementKind k) {
+const char* interactive_kind_id(InteractiveElementKind k) {
     switch (k) {
         case InteractiveElementKind::fader:       return "fader";
         case InteractiveElementKind::toggle:      return "toggle";
@@ -901,6 +901,27 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.style.mix_blend_mode =
             normalize_blend_mode(std::string(obj["figma"]["blend_mode"].toString()));
     }
+    // Preserve the Figma component identity the serializer packs into the
+    // `figma` block (serialize.ts: component_key / main_component_name). The
+    // built-in TS lane only stamps `audio_widget` for Pulp-Library keys, so a
+    // THIRD-PARTY design's instances reach the importer with this identity but
+    // NO audio_widget. The recognition resolver (recognition_resolver.hpp)
+    // re-resolves these against the merged manifest set after parse, so a user
+    // manifest can wire a designer's own component-set keys. Stored verbatim in
+    // attributes (free-form passthrough) — keyed on the canonical token, never
+    // a layer name. Additive: absent for non-figma-plugin sources.
+    if (obj.hasObjectMember("figma") && obj["figma"].isObject()) {
+        const auto fig = obj["figma"];
+        if (fig.hasObjectMember("component_key") && fig["component_key"].isString()) {
+            auto key = std::string(fig["component_key"].toString());
+            if (!key.empty()) node.attributes["figmaComponentKey"] = std::move(key);
+        }
+        if (fig.hasObjectMember("main_component_name") &&
+            fig["main_component_name"].isString()) {
+            auto name = std::string(fig["main_component_name"].toString());
+            if (!name.empty()) node.attributes["figmaMainComponentName"] = std::move(name);
+        }
+    }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);
     // Resize constraints. Figma carries them at node level as
@@ -1474,7 +1495,7 @@ ImportDiagnostic make_import_diagnostic(ImportDiagnosticSeverity severity,
     return diagnostic;
 }
 
-static std::string json_escape(std::string_view text) {
+std::string json_escape(std::string_view text) {
     std::ostringstream out;
     for (unsigned char c : text) {
         switch (c) {
@@ -2174,116 +2195,6 @@ DesignIR parse_design_ir_json(const std::string& json) {
         ImportDiagnosticKind::legacy_field_shortcut));
     promote_interactive_frames(ir.root);
     return ir;
-}
-
-// ── import report ────────────────────────────────────────────────────────────
-static void collect_report_visit(const IRNode& node, ImportReport& report,
-                                 float low_confidence_threshold) {
-    for (const auto& e : node.interactive_elements) {
-        ImportReportEntry entry;
-        entry.source_node_id = e.source_node_id.value_or("");
-        entry.kind = interactive_kind_id(e.kind);
-        entry.resolution_rung = e.resolution_rung;
-        entry.confidence_score = e.confidence_score;
-        entry.conflict_signals = e.conflict_signals;
-        entry.verification_pass = e.verification_pass;
-        if (!entry.conflict_signals.empty()) report.conflicted++;
-        if (entry.confidence_score < low_confidence_threshold) report.low_confidence++;
-        if (entry.resolution_rung == 5) report.unresolved++;  // inert (warn) rung
-        report.controls.push_back(std::move(entry));
-    }
-    for (const auto& c : node.children)
-        collect_report_visit(c, report, low_confidence_threshold);
-}
-
-ImportReport collect_import_report(const IRNode& root, float low_confidence_threshold) {
-    ImportReport report;
-    collect_report_visit(root, report, low_confidence_threshold);
-    return report;
-}
-
-// Render-placement verification (structural half of the render-golden gate).
-static int verify_placement_visit(IRNode& node, float fw, float fh) {
-    int flagged = 0;
-    for (auto& e : node.interactive_elements) {
-        // A knob/fader/xy_pad carries its hit circle (hit_radius); the overlays
-        // carry a box (w,h). A control with neither can't render anywhere.
-        const bool has_box = e.w > 0.0f && e.h > 0.0f;
-        const bool has_radius = e.hit_radius > 0.0f;
-        std::string issue;
-        if (!has_box && !has_radius) {
-            issue = "control has no renderable extent (zero hit-radius and zero-area box)";
-        } else if (fw > 0.0f && fh > 0.0f) {
-            // Does the control's region fall ENTIRELY outside the frame [0,0,fw,fh]?
-            float x0, y0, x1, y1;
-            if (has_box) {
-                x0 = e.x; y0 = e.y; x1 = e.x + e.w; y1 = e.y + e.h;
-            } else {
-                x0 = e.cx - e.hit_radius; y0 = e.cy - e.hit_radius;
-                x1 = e.cx + e.hit_radius; y1 = e.cy + e.hit_radius;
-            }
-            if (x1 <= 0.0f || y1 <= 0.0f || x0 >= fw || y0 >= fh)
-                issue = "control falls entirely outside the frame render region";
-        }
-        if (!issue.empty()) {
-            e.verification_pass = false;
-            e.conflict_signals.push_back(issue);
-            ++flagged;
-        }
-    }
-    // Overlays are checked against the ROOT faithful frame's region. The importer
-    // emits interactive_elements only on the single top-level faithful_svg node
-    // (children carry none), so the root frame is the correct coordinate space.
-    // If nested faithful_svg nodes ever carry their own overlays, pass each such
-    // node's own render dimensions here instead of inheriting the root's.
-    for (auto& c : node.children) flagged += verify_placement_visit(c, fw, fh);
-    return flagged;
-}
-
-int apply_placement_verification(IRNode& root, float frame_w, float frame_h) {
-    return verify_placement_visit(root, frame_w, frame_h);
-}
-
-std::string import_report_to_json(const ImportReport& r) {
-    std::ostringstream out;
-    out << "{\"summary\":{\"total\":" << r.controls.size()
-        << ",\"conflicted\":" << r.conflicted
-        << ",\"low_confidence\":" << r.low_confidence
-        << ",\"unresolved\":" << r.unresolved
-        << ",\"ok\":" << (r.ok() ? "true" : "false") << "},\"controls\":[";
-    for (size_t i = 0; i < r.controls.size(); ++i) {
-        const auto& c = r.controls[i];
-        if (i) out << ',';
-        out << "{\"source_node_id\":\"" << json_escape(c.source_node_id) << "\""
-            << ",\"kind\":\"" << c.kind << "\""
-            << ",\"resolution_rung\":" << c.resolution_rung
-            << ",\"confidence_score\":" << c.confidence_score
-            << ",\"verification_pass\":" << (c.verification_pass ? "true" : "false")
-            << ",\"conflict_signals\":[";
-        for (size_t j = 0; j < c.conflict_signals.size(); ++j) {
-            if (j) out << ',';
-            out << '"' << json_escape(c.conflict_signals[j]) << '"';
-        }
-        out << "]}";
-    }
-    out << "]}";
-    return out.str();
-}
-
-std::string import_report_to_text(const ImportReport& r) {
-    std::ostringstream out;
-    out << "import report: " << r.controls.size() << " control(s), "
-        << r.conflicted << " conflicted, " << r.low_confidence << " low-confidence, "
-        << r.unresolved << " unresolved (inert)\n";
-    for (const auto& c : r.controls) {
-        out << "  - " << (c.source_node_id.empty() ? "?" : c.source_node_id)
-            << "  kind=" << c.kind << " rung=" << c.resolution_rung
-            << " confidence=" << c.confidence_score
-            << (c.verification_pass ? "" : " [verify-FAIL]") << '\n';
-        for (const auto& cf : c.conflict_signals)
-            out << "      conflict: " << cf << '\n';
-    }
-    return out.str();
 }
 
 }  // namespace pulp::view

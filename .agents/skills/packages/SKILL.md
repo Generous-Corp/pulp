@@ -61,14 +61,20 @@ lockstep with the TS `DesignControlEntry` (`library-registry.ts`) and the flat
 `library-manifest.json` convention; the schema's `anyOf` requires at least one
 identity field. Each entry maps that identity to
 a `factory_id` the package's `pulp::view::View` registers at host startup via
-`register_design_control_factory` (see the `import-design` skill, P7 Tier-3). When
-an imported design's node matches, the importer emits a `kind=custom` interactive
-element carrying that `factory_id`, and `DesignFrameView::build_overlays` builds
-the package's control; an unregistered factory renders inert + diagnoses (never a
-silent knob). The TS resolver is `customControlFactoryId` in `library-registry.ts`
-(merge the installed packages' fragments, then resolve a node's identity). This is
-the "give-back" path's long tail: an obvious common control is promoted into core
-`pulp::view` + the shipped `library-manifest.json` instead.
+`register_design_control_factory` (see the `import-design` skill, P7 Tier-3).
+
+End-to-end the importer consumes these fragments automatically: when it resolves
+a design, it discovers the project's `packages.lock.json` + `registry.json`,
+gathers each installed package's `design_controls` into the recognition merge
+layer (`RecognitionResolver::add_source`, one source per package), and when an
+imported node's identity matches, emits a `kind=custom` interactive element
+carrying that `factory_id`. `DesignFrameView::build_overlays` then builds the
+package's control; an unregistered factory renders inert + diagnoses (never a
+silent knob). With no custom-control package installed, nothing is gathered and
+import behavior is unchanged. The TS resolver `customControlFactoryId` in
+`library-registry.ts` mirrors the same flat-entry shape for the in-Figma plugin
+lane. This is the "give-back" path's long tail: an obvious common control is
+promoted into core `pulp::view` + the shipped `library-manifest.json` instead.
 
 ## Adding a Package
 

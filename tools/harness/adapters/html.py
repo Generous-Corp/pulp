@@ -14,7 +14,8 @@ evidence:
    * `core/view/js/web-compat-element.js` — Element.prototype.* methods and
      `Object.defineProperty(Element.prototype, ...)` properties.
    * `core/view/js/web-compat-document.js` — `document = { ... }` members.
-   * `core/view/src/widget_bridge.cpp` — `engine_.register_function("...")`
+   * `core/view/src/widget_bridge.cpp` and `core/view/src/widget_bridge/*.cpp`
+     — `engine_.register_function("...")` / `register_bridge_function(api, "...")`
      calls. We grep for these once at adapter init.
 
 The verdict is PASS / DIVERGE / NO-OP / NOT-IMPL / OOS — see
@@ -113,7 +114,7 @@ class HtmlAdapter(AdapterBase):
             )
         )
         self._dom_ops_js = self._read("core/view/js/web-compat-dom-ops.js")
-        self._bridge_cpp = self._read("core/view/src/widget_bridge.cpp")
+        self._bridge_cpp = self._read_bridge_sources()
 
     # ── Oracle + source loading ──────────────────────────────────────
 
@@ -134,6 +135,18 @@ class HtmlAdapter(AdapterBase):
         if not p.exists():
             return ""
         return p.read_text(encoding="utf-8", errors="replace")
+
+    def _read_bridge_sources(self) -> str:
+        sources: list[Path] = []
+        monolith = self.repo_root / "core" / "view" / "src" / "widget_bridge.cpp"
+        if monolith.exists():
+            sources.append(monolith)
+        split_dir = self.repo_root / "core" / "view" / "src" / "widget_bridge"
+        if split_dir.exists():
+            sources.extend(sorted(split_dir.glob("*.cpp")))
+        return "\n".join(
+            p.read_text(encoding="utf-8", errors="replace") for p in sources
+        )
 
     # ── Evidence helpers ─────────────────────────────────────────────
 
@@ -172,11 +185,12 @@ class HtmlAdapter(AdapterBase):
         return False
 
     def _bridge_registers(self, fn_name: str) -> bool:
-        """True if widget_bridge.cpp has `engine_.register_function("<fn_name>", ...)`."""
+        """True if a widget bridge source registers `<fn_name>`."""
         if not self._bridge_cpp or not fn_name:
             return False
         pattern = (
-            rf'register_function\(\s*"{re.escape(fn_name)}"'
+            rf'(?:register_function|register_bridge_function)\(\s*'
+            rf'(?:[^,"\n]+,\s*)?"{re.escape(fn_name)}"'
         )
         return bool(re.search(pattern, self._bridge_cpp))
 

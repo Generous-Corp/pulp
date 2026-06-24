@@ -113,6 +113,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas_gradients.cpp
         src/skia_canvas_box_shadow.cpp
         src/box_shadow_cache.cpp
+        src/svg_dom_cache.cpp
         src/skia_canvas_opacity.cpp
         src/skia_canvas_shaders.cpp
         src/bundled_fonts.cpp

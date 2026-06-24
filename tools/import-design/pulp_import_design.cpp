@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/recognition_resolver.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -911,6 +912,11 @@ static void print_usage() {
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
     std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
     std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
+    std::cout << "  --recognition-manifest <path>\n";
+    std::cout << "                    User recognition manifest (flat library-manifest shape) mapping\n";
+    std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
+    std::cout << "                    kinds; merged OVER the built-in Pulp Figma Library so the importer\n";
+    std::cout << "                    wires controls on third-party designs. figma / figma-plugin only.\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
@@ -1724,6 +1730,12 @@ int main(int argc, char* argv[]) {
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
     std::unordered_map<std::string, std::string> expected_asset_hashes;
+    // --recognition-manifest: a user-supplied recognition manifest mapping the
+    // designer's OWN Figma component-set keys (and/or name prefixes) to Pulp
+    // control kinds, MERGED OVER the built-in Pulp Figma Library. Lets the
+    // importer wire controls on third-party designs that don't use the
+    // published Pulp library. See recognition_resolver.hpp for the merge module.
+    std::string recognition_manifest_path;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -1765,6 +1777,8 @@ int main(int argc, char* argv[]) {
             diff_output = argv[++i];
         } else if (std::strcmp(argv[i], "--import-report") == 0 && i + 1 < argc) {
             import_report_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--recognition-manifest") == 0 && i + 1 < argc) {
+            recognition_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
@@ -2413,6 +2427,105 @@ int main(int argc, char* argv[]) {
     // Store frame/screen selection metadata
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
+
+    // ── Extensible key-based recognition (issue #4676) ───────────────────────
+    // Re-resolve each Figma component instance's component-set key / name prefix
+    // against the MERGED recognition table (built-in Pulp Figma Library + the
+    // user-supplied --recognition-manifest, the latter merged OVER the former),
+    // and stamp `audio_widget` on any instance that matched but the in-Figma TS
+    // plugin did not already recognize. This wires controls on a THIRD-PARTY
+    // design whose instances carry their own component-set keys.
+    //
+    // Only the figma sources carry the component identity the resolver reads
+    // (parse_ir_node stamps figmaComponentKey / figmaMainComponentName from the
+    // envelope's `figma` block). For every other source the resolver is empty of
+    // matchable nodes, so this is a no-op there.
+    //
+    // Strictly additive: NO --recognition-manifest and a design with no
+    // resolvable third-party keys leaves behavior exactly as before (the built-in
+    // library path stays authoritative; an already-stamped audio_widget is never
+    // overridden). Unmatched-but-present component instances are surfaced as an
+    // import diagnostic — never guessed into a wrong kind (P7).
+    if (*source == DesignSource::figma_plugin || *source == DesignSource::figma) {
+        auto resolver = pulp::view::RecognitionResolver::with_builtin_library();
+        if (!recognition_manifest_path.empty()) {
+            const std::string manifest_json = read_file(recognition_manifest_path);
+            if (manifest_json.empty()) {
+                std::cerr << "Error: could not read --recognition-manifest "
+                          << recognition_manifest_path << "\n";
+                return 2;
+            }
+            std::string parse_err;
+            auto user_source = pulp::view::RecognitionResolver::parse_manifest_json(
+                manifest_json, "user-manifest", &parse_err);
+            if (!user_source) {
+                std::cerr << "Error: invalid --recognition-manifest "
+                          << recognition_manifest_path << ": " << parse_err << "\n";
+                return 2;
+            }
+            resolver.add_source(std::move(*user_source));
+        }
+
+        // Installed-package custom controls (P8): gather each installed
+        // package's `design_controls` fragment and add it as its own source,
+        // MERGED OVER the built-in library and the user manifest. With no
+        // custom-control package installed this contributes nothing, so behavior
+        // is unchanged. Discovery walks up from the design's directory for a
+        // packages.lock.json / registry.json pair (a project root).
+        {
+            // Anchor discovery at the OUTPUT location (the user's project), not
+            // the input file (which may be a temp/extracted export). Fall back to
+            // cwd when no output directory is set (dry-run / stdout).
+            fs::path search_start = fs::path(output_file).parent_path();
+            if (search_start.empty()) search_start = fs::current_path();
+            auto pkg_sources =
+                pulp::view::discover_package_design_controls(search_start);
+            for (auto& w : pkg_sources.warnings)
+                std::cerr << "recognition: " << w << "\n";
+            for (auto& s : pkg_sources.sources) {
+                const auto entry_count = s.entries.size();
+                const std::string pkg_name = s.name;
+                resolver.add_source(std::move(s));
+                std::cerr << "recognition: merged " << entry_count
+                          << " custom control"
+                          << (entry_count == 1 ? "" : "s") << " from package '"
+                          << pkg_name << "'\n";
+            }
+        }
+
+        std::vector<pulp::view::UnmatchedComponent> unmatched;
+        const int wired = pulp::view::apply_recognition_resolver(
+            ir.root, resolver, &unmatched);
+        // Materialize half: turn resolved custom-control matches (stamped as the
+        // `recognitionFactoryId` node attribute) into kind=custom interactive
+        // elements the native materializer builds — or renders inert + diagnoses
+        // when the factory isn't registered (never a silent knob).
+        pulp::view::materialize_recognized_custom_controls(ir.root);
+        if (wired > 0)
+            std::cerr << "recognition: wired " << wired
+                      << " control" << (wired == 1 ? "" : "s")
+                      << " from the recognition manifest set\n";
+        // Surface present-but-unmatched component instances so they are SEEN
+        // (a candidate for a --recognition-manifest entry), never silently
+        // rendered inert (P7 never-silent-knob). Recorded in the IR diagnostics
+        // AND printed directly to stderr — the shared print helper drops `info`
+        // severity, and a missing knob the user must notice is not "info noise".
+        for (const auto& u : unmatched) {
+            ir.diagnostics.push_back(make_cli_diagnostic(
+                ImportDiagnosticSeverity::info,
+                ImportDiagnosticKind::unknown,
+                "unmapped-component",
+                "<component>",
+                "component '" + u.name + "' (key " + u.component_key +
+                    ") is present in the design but not mapped by any "
+                    "recognition manifest; add it to --recognition-manifest "
+                    "to wire it as a control"));
+            std::cerr << "recognition: unmapped component '" << u.name
+                      << "' (key " << u.component_key << ") — present in the "
+                      << "design but mapped by no recognition manifest; add it "
+                      << "to --recognition-manifest to wire it as a control\n";
+        }
+    }
 
     // P7 import report — surface every interactive control's resolution provenance
     // (rung / confidence / conflicts / verification) for EVERY output mode (codegen
