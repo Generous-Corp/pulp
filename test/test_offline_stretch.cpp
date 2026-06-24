@@ -443,3 +443,47 @@ TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[of
     CHECK(fr > 880.0);
     CHECK(fr < 1120.0);
 }
+
+// recommend_window picks the material-adaptive STFT geometry the sampler now
+// wires: a percussive (high-crest) signal -> 1024/128 (sharp attacks, the
+// "drum_pl" reference), a bass-heavy signal -> 8192/512 (resolve low partials),
+// tonal/mid -> {0,0} (engine default 4096/512). Regression for the sampler having
+// rendered every loop at the fixed default window (smeared drums).
+TEST_CASE("recommend_window adapts to material", "[offline-stretch][window]") {
+    const double sr = 48000.0;
+    const long n = static_cast<long>(sr); // 1 s
+
+    SECTION("percussive (high crest) -> 1024/128") {
+        std::vector<float> x(static_cast<size_t>(n), 0.0f);
+        // sparse sharp hits: a fast-decaying burst every 0.25 s
+        unsigned seed = 12345u;
+        auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return (static_cast<float>(seed >> 9) / 8388608.0f) - 1.0f; };
+        for (int hit = 0; hit < 4; ++hit) {
+            const long p = static_cast<long>(hit * 0.25 * sr);
+            for (long j = 0; j < static_cast<long>(0.1 * sr) && p + j < n; ++j)
+                x[static_cast<size_t>(p + j)] = std::exp(-static_cast<float>(j) / (0.01f * static_cast<float>(sr))) * rnd() * 0.7f;
+        }
+        const float* ch[1] = {x.data()};
+        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+        CHECK(w.fft_size == 1024);
+        CHECK(w.analysis_hop == 128);
+    }
+    SECTION("bass-heavy (low-band) -> 8192/512") {
+        std::vector<float> x(static_cast<size_t>(n));
+        for (long i = 0; i < n; ++i)   // steady 60 Hz sine = low-fundamental, low crest
+            x[static_cast<size_t>(i)] = 0.5f * std::sin(2.0f * 3.14159265f * 60.0f * static_cast<float>(i) / static_cast<float>(sr));
+        const float* ch[1] = {x.data()};
+        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+        CHECK(w.fft_size == 8192);
+        CHECK(w.analysis_hop == 512);
+    }
+    SECTION("tonal mid (neither) -> default {0,0}") {
+        std::vector<float> x(static_cast<size_t>(n));
+        for (long i = 0; i < n; ++i)   // steady 1 kHz sine = mid, low crest, low lo-band
+            x[static_cast<size_t>(i)] = 0.5f * std::sin(2.0f * 3.14159265f * 1000.0f * static_cast<float>(i) / static_cast<float>(sr));
+        const float* ch[1] = {x.data()};
+        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+        CHECK(w.fft_size == 0);
+        CHECK(w.analysis_hop == 0);
+    }
+}

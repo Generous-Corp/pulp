@@ -1371,8 +1371,22 @@ private:
         std::vector<float*> outp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) { inp[c] = raw_copy[static_cast<size_t>(c)].data(); outp[c] = stretched[static_cast<size_t>(c)].data(); }
 
+        // Material-adaptive FFT window — analyze the loop and size the STFT to its
+        // character instead of the fixed 4096/512 default: a percussive break gets
+        // 1024/128 (sharp, bright attacks — the "drum_pl" reference render), a
+        // bass-heavy loop gets 8192/512 (resolves low partials, no wobble). This is
+        // the adaptive-FFT the engine implements but the sampler had never wired, so
+        // every loop was rendered at one window — smeary on drums. Pass the window
+        // (and the engine's prepared range) to the worker-local engine's prepare().
+        const auto win = signal::OfflineStretch::recommend_window(
+            inp.data(), frames, ch, static_cast<double>(host_sample_rate_));
+        o.fft_size = win.fft_size;
+        o.analysis_hop = win.analysis_hop;
+        o.max_time_ratio = engine_.max_time_ratio();
+        o.max_pitch_semitones = engine_.max_pitch_semitones();
+
         signal::OfflineStretch local;          // worker-local engine instance
-        local.prepare(static_cast<double>(host_sample_rate_), ch);
+        local.prepare(static_cast<double>(host_sample_rate_), ch, o);
         std::string err;
         if (!local.process(inp.data(), frames, outp.data(), out_frames, o, &err)) return;
 
