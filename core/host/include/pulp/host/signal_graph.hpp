@@ -18,6 +18,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -417,6 +418,26 @@ public:
     // can pin the lifetime of the gain atomics it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
 
+    // Opt in to driving the audio callback through the canonical
+    // GraphRuntimeExecutor when the live snapshot is executor-eligible (only
+    // AudioInput/AudioOutput/Gain nodes, plain audio connections). Default OFF:
+    // the legacy walk runs. Ineligible graphs always fall back to the legacy
+    // walk regardless of this flag. The flag is a control-thread toggle read
+    // relaxed on the audio thread. The two paths produce bit-identical output
+    // per block for eligible graphs, so toggling mid-stream is RT-safe and
+    // seamless for feedforward graphs. For graphs with FEEDBACK, the legacy walk
+    // and the executor keep INDEPENDENT one-block-delay state (the legacy
+    // ConnectionDelay::feedback_prev vs the executor's per-edge prev slot), so a
+    // mid-stream switch resets feedback history to whatever the destination path
+    // last wrote — a one-block transient, not a crash or a permanent divergence.
+    // Pick a path before starting a feedback graph and keep it for the stream.
+    void set_use_executor(bool enabled) noexcept {
+        use_executor_.store(enabled, std::memory_order_relaxed);
+    }
+    bool uses_executor() const noexcept {
+        return use_executor_.load(std::memory_order_relaxed);
+    }
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
@@ -624,6 +645,24 @@ private:
                                    // into samples.
         int64_t total_latency_samples = 0;
         MidiBlockSnapshot midi_publish_scratch;
+
+        // Immutable canonical-executor routing for this snapshot, built in
+        // compile_() when the topology is eligible (only AudioInput/AudioOutput/
+        // Gain, plain audio connections). Empty/invalid otherwise. Its Gain
+        // bindings reference this snapshot's own `runtime[id].gain` atomics, so
+        // it carries no keepalive — it lives and dies exactly with this
+        // CompiledGraph, published atomically with it via live_raw_. The mutable
+        // scratch pool that drives it is audio-thread-owned on SignalGraph, NOT
+        // here, so a retired snapshot never shares mutable render state.
+        format::GraphRuntimeSnapshot routing_snapshot;
+        bool routing_valid = false;
+        // Per-snapshot scratch pool driving the routed path, sized in compile_()
+        // to routing_snapshot's slot count × max_block_size. Owned by THIS
+        // snapshot (like the legacy per-node runtime scratch), so a re-prepare
+        // builds a fresh pool on a fresh cg and never mutates the buffers an
+        // in-flight audio-thread reader is using on a retired snapshot. Feedback
+        // previous-block state lives here and resets with the snapshot.
+        format::GraphRuntimeBufferPool exec_pool;
     };
 
     std::vector<GraphNode> nodes_;
@@ -638,6 +677,16 @@ private:
     std::shared_ptr<CompiledGraph> live_;
     std::atomic<CompiledGraph*> live_raw_{nullptr};
     std::vector<std::shared_ptr<CompiledGraph>> retired_snapshots_;
+
+    // Canonical-executor opt-in (control toggle, read relaxed on the audio
+    // thread). One long-lived executor whose telemetry survives re-prepare; it
+    // is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
+    // pool as arguments) and prepare() never mutates it, so the single audio
+    // thread is its only writer (relaxed stat counters). The mutable scratch
+    // pool is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool)
+    // so it rides the existing RCU lifetime and is never resized under a reader.
+    std::atomic<bool> use_executor_{false};
+    format::GraphRuntimeExecutor executor_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};

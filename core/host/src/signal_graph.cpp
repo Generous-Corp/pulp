@@ -9,6 +9,7 @@
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
 #include <algorithm>
 #include <array>
@@ -1139,6 +1140,28 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     }
 
     compute_latencies_for_(*cg, connections_);
+
+    // Build the canonical-executor routing for this snapshot when the topology
+    // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
+    // (valid for cg's whole lifetime), so the embedded snapshot needs no
+    // keepalive. Ineligible graphs leave routing_valid false and use the walk.
+    {
+        CompiledGraph& cgr = *cg;
+        cg->routing_valid = build_executor_snapshot(
+            nodes_, connections_,
+            [&cgr](NodeId id) -> std::atomic<float>* {
+                auto it = cgr.runtime.find(id);
+                return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
+            },
+            cg->routing_snapshot);
+        // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
+        // snapshot via RCU — never resized under an in-flight reader).
+        if (cg->routing_valid && max_block_size > 0) {
+            cg->routing_valid = cg->exec_pool.reset(
+                cg->routing_snapshot.buffer_slot_count(),
+                static_cast<std::uint32_t>(max_block_size));
+        }
+    }
     return cg;
 }
 
@@ -1434,6 +1457,29 @@ void SignalGraph::process(audio::BufferView<float>& output,
             std::memset(output.channel_ptr(c), 0,
                         sizeof(float) * static_cast<size_t>(num_samples));
         return;
+    }
+
+    // Canonical-executor path (opt-in): for an eligible snapshot, route the
+    // block through GraphRuntimeExecutor instead of the legacy walk. The
+    // executor zeroes the output bus and accumulates AudioOutput itself, so this
+    // returns before the legacy zero+walk below. The dispatch stays inside the
+    // ProcessReadGuard, so `cg` (and its routing snapshot + gain atomics) is
+    // pinned for the whole routed call.
+    if (use_executor_.load(std::memory_order_relaxed) && cg->routing_valid &&
+        cg->exec_pool.fits(cg->routing_snapshot, static_cast<std::uint32_t>(num_samples))) {
+        pulp::format::BusBufferSet buses;
+        if (buses.add_input("main", input, pulp::format::BusRole::Main) &&
+            buses.add_output("main", output, pulp::format::BusRole::Main)) {
+            pulp::format::ProcessBlock block;
+            block.sample_rate = cg->sample_rate;
+            block.frame_count = static_cast<std::uint32_t>(num_samples);
+            block.buses = &buses;
+            if (block.validate() &&
+                executor_.process_routed(block, cg->routing_snapshot, cg->exec_pool).ok()) {
+                return;
+            }
+        }
+        // Any setup failure falls through to the legacy walk (safe).
     }
 
     // Clear the final destination; AudioOutput nodes accumulate into it.

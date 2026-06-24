@@ -230,6 +230,15 @@ predictable output, no MIDI.
   depends on the node-type restriction guaranteeing zero latency — only Plugin
   nodes add latency, so the executor (which has no per-connection delay
   compensation yet) stays correct for the subset.
+  `SignalGraph::set_use_executor(true)` opts the live `process()` callback onto
+  this path for eligible graphs (default OFF → legacy walk; ineligible graphs
+  always fall back). The routing snapshot AND its scratch pool are built in
+  `compile_()` and embedded per-snapshot in the published `CompiledGraph` (NOT a
+  shared `SignalGraph` member), so a re-prepare builds them on a fresh snapshot
+  and never resizes a buffer an in-flight audio reader holds — the same
+  RCU/retire discipline the legacy per-node scratch relies on. The long-lived
+  `GraphRuntimeExecutor` is a `SignalGraph` member (prepare never mutates it; the
+  single audio thread is its only writer).
 
 ## Common tripwires
 

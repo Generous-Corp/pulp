@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 
 namespace pulp::host {
@@ -14,7 +13,7 @@ namespace {
 namespace fmt = pulp::format;
 namespace gr = pulp::graph;
 
-// Gain binding: out = in * *gain, reading the LIVE compiled snapshot's atomic so
+// Gain binding: out = in * *gain, reading the live compiled snapshot's atomic so
 // set_node_gain() is honored without a re-prepare. Mirrors SignalGraph's Gain
 // node exactly (same scalar multiply, same min(in,out) channel count).
 bool gain_binding(fmt::ProcessBlock&,
@@ -56,24 +55,28 @@ bool connection_eligible(const Connection& c) noexcept {
 
 } // namespace
 
-bool signal_graph_executor_eligible(const SignalGraph& graph) {
-    if (!graph.is_prepared()) return false;
-    for (const auto& node : graph.nodes()) {
+bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
+                                             std::span<const Connection> connections) {
+    for (const auto& node : nodes) {
         if (!node_type_eligible(node.type)) return false;
     }
-    for (const auto& c : graph.connections()) {
+    for (const auto& c : connections) {
         if (!connection_eligible(c)) return false;
     }
     return true;
 }
 
-bool build_signal_graph_executor_routing(const SignalGraph& graph,
-                                          SignalGraphExecutorRouting& out) {
-    out = SignalGraphExecutorRouting{};
-    if (!signal_graph_executor_eligible(graph)) return false;
+bool signal_graph_executor_eligible(const SignalGraph& graph) {
+    if (!graph.is_prepared()) return false;
+    return signal_graph_topology_executor_eligible(graph.nodes(), graph.connections());
+}
 
-    const auto& nodes = graph.nodes();
-    const auto& connections = graph.connections();
+bool build_executor_snapshot(std::span<const GraphNode> nodes,
+                             std::span<const Connection> connections,
+                             const std::function<std::atomic<float>*(NodeId)>& gain_for,
+                             fmt::GraphRuntimeSnapshot& out) {
+    out.clear();
+    if (!signal_graph_topology_executor_eligible(nodes, connections)) return false;
 
     // Node specs in nodes() order; the plan resolves connections by NodeId, so
     // bindings just need to match plan.nodes order (== spec order).
@@ -104,22 +107,21 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
     if (!plan.ok()) return false;
 
     // Bindings in plan.nodes order (build_graph_runtime_plan preserves spec
-    // order). AudioInput/AudioOutput are executor-handled (null binding);
-    // Gain binds the live gain atomic.
+    // order). AudioInput/AudioOutput are executor-handled (null binding); Gain
+    // binds its live gain atomic.
     std::vector<fmt::GraphRuntimeNodeBinding> bindings;
     bindings.reserve(plan.plan.nodes.size());
     for (const auto& pnode : plan.plan.nodes) {
         const NodeId id = pnode.id;
-        // Find the source node (small N; nodes() is the authoritative list).
         const GraphNode* src = nullptr;
         for (const auto& n : nodes) {
             if (n.id == id) { src = &n; break; }
         }
         if (src == nullptr) return false;
         if (src->type == NodeType::Gain) {
-            std::atomic<float>* atomic = graph.live_gain_atomic(id);
-            // The contract is "bit-identical or return false": a Gain node with
-            // no live atomic would silently fall back to unity gain and diverge.
+            std::atomic<float>* atomic = gain_for ? gain_for(id) : nullptr;
+            // Contract is "bit-identical or fail": a Gain with no live atomic
+            // would silently fall back to unity gain and diverge.
             if (atomic == nullptr) return false;
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, gain_binding, atomic, /*required=*/true});
@@ -129,7 +131,20 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
         }
     }
 
-    if (!out.snapshot.reset(std::move(plan.plan), bindings)) return false;
+    return out.reset(std::move(plan.plan), bindings);
+}
+
+bool build_signal_graph_executor_routing(const SignalGraph& graph,
+                                          SignalGraphExecutorRouting& out) {
+    out = SignalGraphExecutorRouting{};
+    if (!graph.is_prepared()) return false;
+
+    if (!build_executor_snapshot(
+            graph.nodes(), graph.connections(),
+            [&graph](NodeId id) { return graph.live_gain_atomic(id); },
+            out.snapshot)) {
+        return false;
+    }
 
     const int max_block = graph.prepared_max_block_size();
     if (max_block <= 0) return false;
