@@ -307,8 +307,12 @@ TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes"
     REQUIRE(decoded.get_int(0) == 42);
 }
 
-TEST_CASE("OSC decode truncated typed payloads return safe defaults",
+TEST_CASE("OSC decode rejects truncated typed payloads as malformed",
           "[osc][codec][coverage]") {
+    // A type tag string (",ifsb") with a truncated payload is malformed: the
+    // decoder must fail closed to the empty-address sentinel rather than
+    // fabricate 0/default args that would dispatch a real control change. The
+    // receiver and bundle paths already treat empty-address as malformed.
     std::vector<uint8_t> data;
     append_osc_string(data, "/truncated");
     append_osc_string(data, ",ifsb");
@@ -316,12 +320,8 @@ TEST_CASE("OSC decode truncated typed payloads return safe defaults",
 
     auto decoded = decode(data.data(), data.size());
 
-    REQUIRE(decoded.address == "/truncated");
-    REQUIRE(decoded.args.size() == 4);
-    REQUIRE(decoded.get_int(0, -1) == 0);
-    REQUIRE_THAT(decoded.get_float(1, -1.0f), WithinAbs(0.0, 0.001));
-    REQUIRE(decoded.get_string(2, "fallback").empty());
-    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[3]).empty());
+    REQUIRE(decoded.address.empty());
+    REQUIRE(decoded.args.empty());
 }
 
 TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
@@ -1401,7 +1401,7 @@ TEST_CASE("OSC decode skips unknown type tags without crashing",
     REQUIRE(decoded.get_int(0) == 42);
 }
 
-TEST_CASE("OSC decode of truncated int argument returns the int-typed default",
+TEST_CASE("OSC decode of truncated int argument fails closed",
           "[osc][codec][decode-edge]") {
     Message msg("/t");
     msg.add(0x01020304);
@@ -1410,13 +1410,11 @@ TEST_CASE("OSC decode of truncated int argument returns the int-typed default",
     // Lop off the int bytes so the int tag points past the buffer end.
     auto truncated = std::vector<uint8_t>(data.begin(), data.end() - 4);
     auto decoded = decode(truncated.data(), truncated.size());
-    REQUIRE(decoded.address == "/t");
-    REQUIRE(decoded.args.size() == 1);
-    // read_int32 bounds-checks and returns 0 when the span is short.
-    REQUIRE(decoded.get_int(0) == 0);
+    REQUIRE(decoded.address.empty());   // malformed → empty-address sentinel
+    REQUIRE(decoded.args.empty());
 }
 
-TEST_CASE("OSC decode of truncated float argument returns the float-typed default",
+TEST_CASE("OSC decode of truncated float argument fails closed",
           "[osc][codec][decode-edge]") {
     Message msg("/f");
     msg.add(1.25f);
@@ -1425,12 +1423,11 @@ TEST_CASE("OSC decode of truncated float argument returns the float-typed defaul
     // Keep the float tag but remove the payload bytes.
     auto truncated = std::vector<uint8_t>(data.begin(), data.end() - 4);
     auto decoded = decode(truncated.data(), truncated.size());
-    REQUIRE(decoded.address == "/f");
-    REQUIRE(decoded.args.size() == 1);
-    REQUIRE(decoded.get_float(0) == 0.0f);
+    REQUIRE(decoded.address.empty());
+    REQUIRE(decoded.args.empty());
 }
 
-TEST_CASE("OSC decode of truncated blob payload yields empty blob",
+TEST_CASE("OSC decode of truncated blob payload fails closed",
           "[osc][codec][decode-edge]") {
     Message msg("/b");
     msg.add(std::vector<uint8_t>{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF});
@@ -1438,13 +1435,11 @@ TEST_CASE("OSC decode of truncated blob payload yields empty blob",
     // Chop off the trailing blob bytes so the prefixed size walks off the end.
     auto truncated = std::vector<uint8_t>(data.begin(), data.begin() + (data.size() - 4));
     auto decoded = decode(truncated.data(), truncated.size());
-    REQUIRE(decoded.address == "/b");
-    REQUIRE(decoded.args.size() == 1);
-    auto& blob = std::get<std::vector<uint8_t>>(decoded.args[0]);
-    REQUIRE(blob.empty());
+    REQUIRE(decoded.address.empty());
+    REQUIRE(decoded.args.empty());
 }
 
-TEST_CASE("OSC decode of negative blob size yields empty blob",
+TEST_CASE("OSC decode of negative blob size fails closed",
           "[osc][codec][decode-edge]") {
     std::vector<uint8_t> buf;
     const char addr[] = "/bad-blob";
@@ -1457,13 +1452,11 @@ TEST_CASE("OSC decode of negative blob size yields empty blob",
     buf.insert(buf.end(), negative_size, negative_size + sizeof(negative_size));
 
     auto decoded = decode(buf.data(), buf.size());
-    REQUIRE(decoded.address == "/bad-blob");
-    REQUIRE(decoded.args.size() == 1);
-    auto& blob = std::get<std::vector<uint8_t>>(decoded.args[0]);
-    REQUIRE(blob.empty());
+    REQUIRE(decoded.address.empty());   // negative/impossible blob size → malformed
+    REQUIRE(decoded.args.empty());
 }
 
-TEST_CASE("OSC decode of truncated string argument consumes bounded payload",
+TEST_CASE("OSC decode of unterminated string argument fails closed",
           "[osc][codec][decode-edge]") {
     std::vector<uint8_t> buf;
     const char addr[] = "/string";
@@ -1472,12 +1465,27 @@ TEST_CASE("OSC decode of truncated string argument consumes bounded payload",
     const char tags[] = ",s";
     buf.insert(buf.end(), tags, tags + sizeof(tags));
     while (buf.size() % 4 != 0) buf.push_back(0);
-    buf.insert(buf.end(), {'u', 'n', 't', 'e', 'r', 'm'});
+    buf.insert(buf.end(), {'u', 'n', 't', 'e', 'r', 'm'});  // no null terminator
 
     auto decoded = decode(buf.data(), buf.size());
-    REQUIRE(decoded.address == "/string");
-    REQUIRE(decoded.args.size() == 1);
-    REQUIRE(decoded.get_string(0) == "unterm");
+    REQUIRE(decoded.address.empty());   // unterminated string payload → malformed
+    REQUIRE(decoded.args.empty());
+}
+
+TEST_CASE("OSC decode of truncated colour argument fails closed",
+          "[osc][codec][decode-edge]") {
+    std::vector<uint8_t> buf;
+    const char addr[] = "/c";
+    buf.insert(buf.end(), addr, addr + sizeof(addr));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+    const char tags[] = ",r";
+    buf.insert(buf.end(), tags, tags + sizeof(tags));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+    buf.insert(buf.end(), {0x11, 0x22});  // only 2 of the 4 colour bytes
+
+    auto decoded = decode(buf.data(), buf.size());
+    REQUIRE(decoded.address.empty());   // truncated 32-bit colour → malformed
+    REQUIRE(decoded.args.empty());
 }
 
 TEST_CASE("OSC encode/decode of empty blob preserves emptiness",
@@ -1607,7 +1615,7 @@ TEST_CASE("OSC decode preserves empty strings and padded string arguments", "[os
     REQUIRE(decoded.get_string(2) == "abcd");
 }
 
-TEST_CASE("OSC decode of truncated string argument returns empty string", "[osc][codec][issue-644]") {
+TEST_CASE("OSC decode of string argument with no payload fails closed", "[osc][codec][issue-644]") {
     std::vector<uint8_t> buf;
     const char addr[] = "/truncated";
     buf.insert(buf.end(), addr, addr + sizeof(addr));
@@ -1615,11 +1623,11 @@ TEST_CASE("OSC decode of truncated string argument returns empty string", "[osc]
     const char tags[] = ",s";
     buf.insert(buf.end(), tags, tags + sizeof(tags));
     while (buf.size() % 4 != 0) buf.push_back(0);
+    // ',s' tag but no string payload at all → malformed, not an empty-string arg.
 
     auto decoded = decode(buf.data(), buf.size());
-    REQUIRE(decoded.address == "/truncated");
-    REQUIRE(decoded.args.size() == 1);
-    REQUIRE(decoded.get_string(0, "fallback").empty());
+    REQUIRE(decoded.address.empty());
+    REQUIRE(decoded.args.empty());
 }
 
 TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][issue-644]") {
