@@ -345,6 +345,7 @@ pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
 pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
 pulp doctor quirks                   # synonym for --host-quirks
+pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
 ```
 
 `pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
@@ -367,6 +368,13 @@ Per-quirk provenance — `source_type`, `evidence`, and `last_verified`
 dates — lives in `core/format/host-quirks.json`. See
 [host-quirks policy](host-quirks-policy.md) for the full opt-in / opt-out
 story and the precedence rules.
+
+`pulp doctor --au-cache` refreshes macOS Audio Unit registration metadata by
+stopping `AudioComponentRegistrar` so macOS respawns it on the next AU host scan.
+Use it after changing AU `Info.plist` metadata such as type, manufacturer, or
+description when `auval` or a DAW still sees stale values. `--dry-run` prints
+the command instead of running it. On non-macOS hosts the flag is accepted as a
+no-op and exits 0 so cross-platform scripts do not need OS conditionals.
 
 Checks are platform-gated — only relevant checks run on each OS:
 - **macOS**: git, compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, optional AAX SDK/validator, build state
