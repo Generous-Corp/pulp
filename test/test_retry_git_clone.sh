@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# Unit test for retry_git_clone (setup.sh). Verifies the P1 Codex
-# finding from #425 is actually fixed: a retry_git wrapping git clone
-# fails on attempt 2+ with "destination path already exists" unless
-# the partial target is scrubbed between attempts. retry_git_clone
-# scrubs; this test asserts that the scrub happened and the final
-# clone succeeded at the expected attempt count.
+# Unit test for retry_git_clone (setup.sh). Verifies #425: a
+# retry_git wrapping git clone fails on attempt 2+ with "destination
+# path already exists" unless the partial target is scrubbed between
+# attempts. retry_git_clone scrubs; this test asserts that the scrub
+# happened and the final clone succeeded at the expected attempt count.
 #
 # Run directly:
 #   bash test/test_retry_git_clone.sh

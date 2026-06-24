@@ -154,11 +154,11 @@ TEST_CASE("FontOptions hash includes scalar style and render policy fields",
 
 TEST_CASE("FontOptions hash canonicalizes signed zero on float members",
           "[canvas][font][options][coverage][issue-2169]") {
-    // Codex P2 on #2169 — `FontOptions::operator==` is `= default` (per-member
-    // float comparison). IEEE-754 reports `+0.0f == -0.0f` as true, so two
-    // FontOptions whose only difference is a signed-zero float field must
-    // ALSO hash equal — otherwise unordered caches keyed on FontOptions
-    // would create duplicate-equivalent entries or miss lookups.
+    // Regression for #2169: `FontOptions::operator==` is `= default`
+    // (per-member float comparison). IEEE-754 reports `+0.0f == -0.0f` as
+    // true, so two FontOptions whose only difference is a signed-zero float
+    // field must ALSO hash equal — otherwise unordered caches keyed on
+    // FontOptions would create duplicate-equivalent entries or miss lookups.
     //
     // The float fields in FontOptions are: weight, width, oblique_angle,
     // size, letter_spacing, word_spacing, and the per-axis value in

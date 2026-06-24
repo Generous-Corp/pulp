@@ -77,9 +77,9 @@ TEST_CASE("Url rejects malformed input", "[runtime][url]") {
     REQUIRE_FALSE(Url::is_valid("not a url"));
 }
 
-// Regression for the Codex P2 review comment "Reject non-numeric URL
-// ports" — strtol() alone accepted "80abc" as a valid port-80 URL.
-// After the fix the entire port_text must be all decimal digits.
+// Regression for non-numeric URL ports: strtol() alone accepted "80abc" as a
+// valid port-80 URL. After the fix the entire port_text must be all decimal
+// digits.
 TEST_CASE("Url rejects port with trailing junk", "[runtime][url][codex-p2]") {
     REQUIRE_FALSE(Url::parse("http://example.com:80abc/path").has_value());
     REQUIRE_FALSE(Url::parse("http://example.com:8080x/").has_value());

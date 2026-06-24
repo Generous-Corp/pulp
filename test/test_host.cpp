@@ -57,13 +57,13 @@ TEST_CASE("PluginScanner bundle detection", "[host][scanner]") {
 
 TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavour",
           "[host][scanner][issue-500]") {
-    // Regression for the Codex P2 finding on PR #531 / #500: `pulp scan`
-    // advertised `--format au` and `--format auv3` as mutually-exclusive
-    // filters, but both values set the same ScanOptions::scan_au flag,
-    // and PluginScanner::scan_audio_units() returns mixed AU + AUv3
-    // entries. The CLI now runs a post-scan narrowing step — this test
-    // models that step on a synthetic mixed slice so the narrowing
-    // logic is covered independently of any installed AudioComponents.
+    // Regression for PR #531 / #500: `pulp scan` advertised `--format au`
+    // and `--format auv3` as mutually-exclusive filters, but both values
+    // set the same ScanOptions::scan_au flag, and PluginScanner::
+    // scan_audio_units() returns mixed AU + AUv3 entries. The CLI now runs
+    // a post-scan narrowing step — this test models that step on a
+    // synthetic mixed slice so the narrowing logic is covered independently
+    // of any installed AudioComponents.
     std::vector<PluginInfo> mixed;
     PluginInfo v2;  v2.format = PluginFormat::AudioUnit;    v2.name = "EffectV2";
     PluginInfo v3;  v3.format = PluginFormat::AudioUnitV3;  v3.name = "EffectV3";
@@ -103,20 +103,6 @@ TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {
     REQUIRE(plugins.size() >= 0);
 }
 
-// Regression test for the scanner_clap.cpp `dlerror()` double-call SEGV
-// caught by ASan on PR #1862's macOS ARM64 lane (2026-05-12). The
-// defensive #812 fallback path in `scan_clap_bundle_descriptors` logs
-// the dlerror() string when dlopen fails, but the original code called
-// `dlerror()` TWICE in a `cond ? dlerror() : "..."` ternary. POSIX
-// dlerror() clears its internal buffer after each call, so the second
-// invocation returns nullptr — which `std::format`'s
-// `string_view(char const*)` ctor then passes to `strlen(nullptr)`,
-// crashing under ASan with a SEGV on libsystem_platform's
-// _platform_strlen.
-//
-// Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
-// and (b) the filename-fallback path produces a single PluginInfo so
-// users see SOMETHING in the catalog instead of a silent drop.
 TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
           "[host][scanner][issue-2703]") {
     using pulp::host::cap_clap_plugin_count;
@@ -132,6 +118,20 @@ TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
     REQUIRE(cap_clap_plugin_count(0xFFFFFFFFu) == 1024);
 }
 
+// Regression test for #1862: scanner_clap.cpp hit a `dlerror()`
+// double-call SEGV under ASan. The defensive #812 fallback path in
+// `scan_clap_bundle_descriptors` logs the dlerror() string when dlopen
+// fails, but the original code called `dlerror()` TWICE in a
+// `cond ? dlerror() : "..."` ternary. POSIX
+// dlerror() clears its internal buffer after each call, so the second
+// invocation returns nullptr — which `std::format`'s
+// `string_view(char const*)` ctor then passes to `strlen(nullptr)`,
+// crashing under ASan with a SEGV on libsystem_platform's
+// _platform_strlen.
+//
+// Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
+// and (b) the filename-fallback path produces a single PluginInfo so
+// users see SOMETHING in the catalog instead of a silent drop.
 TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail path)",
           "[host][scanner][issue-1862][coverage]") {
     namespace fs = std::filesystem;
@@ -165,8 +165,7 @@ TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail p
     // the malformed bundle is discovered through the normal scan path
     // and we exercise the dlopen-fail branch deterministically without
     // requiring a system CLAP folder. `only_extra_paths = true` keeps
-    // the test from walking the dev's installed CLAP collection (per
-    // Codex 2026-04-21 review on #545).
+    // the test from walking the dev's installed CLAP collection (#545).
     PluginScanner scanner;
     ScanOptions opts;
     opts.scan_vst3 = false;

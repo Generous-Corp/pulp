@@ -213,10 +213,10 @@ TEST_CASE("Spectr regression: registerPointer / registerWheel are idempotent acr
     // guards with `pointer_registered_` / `wheel_registered_` sets and
     // each widget only carries one lambda.
     //
-    // Codex P2 on PR #1827 — exercise the wheel path too, not just
-    // the pointer path. The mount script calls `registerWheel(...)`
-    // twice; if the gate regresses, a single wheel event would land
-    // in `trace.wheels` twice (or `trace.wraps_wheel` would be 2N).
+    // PR #1827 regression coverage: exercise the wheel path too, not just
+    // the pointer path. The mount script calls `registerWheel(...)` twice;
+    // if the gate regresses, a single wheel event would land in `trace.wheels`
+    // twice (or `trace.wraps_wheel` would be 2N).
     SpectrFixture fix;
     auto* canvas = fix.widget("editor-canvas");
     auto* wrap = fix.widget("editor-wrap");
