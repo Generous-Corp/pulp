@@ -80,10 +80,10 @@ struct ScriptedBridge {
 // ── pulp #1525 — fillText / strokeText maxWidth + glyph cluster handling ──
 //
 // The catalog marks canvas2d/fillText and canvas2d/strokeText as supported.
-// Pre-#1525 the JS shim accepted `maxWidth` as a 4th arg but discarded it
-// (`void maxWidth;`) and `strokeText` re-routed through `fillText` with the
-// strokeStyle as the fill colour — visually approximate but spec-incompatible
-// (no real outlined glyphs, no horizontal squeeze).
+// The JS shim must forward `maxWidth` and route `strokeText` through the
+// dedicated stroke path; rerouting through `fillText` with strokeStyle as the
+// fill colour is visually approximate but spec-incompatible (no real outlined
+// glyphs, no horizontal squeeze).
 //
 // These tests cover the full JS → bridge → CanvasDrawCmd surface that backs
 // the supported catalog entries.
@@ -169,12 +169,10 @@ TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentin
 
 TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
           "[view][canvas2d][issue-1525]") {
-    // Pre-#1525: strokeText re-routed through canvasFillText with
-    // strokeStyle as the fill colour, recording a fill_text cmd. Post-
-    // #1525: strokeText records a dedicated stroke_text cmd carrying
-    // the strokeStyle in cmd.color and the optional maxWidth in cmd.w
-    // — the paint loop dispatches to Canvas::stroke_text for true
-    // outlined-glyph rendering (Skia / CG override).
+    // strokeText records a dedicated stroke_text cmd carrying the strokeStyle
+    // in cmd.color and the optional maxWidth in cmd.w — the paint loop dispatches
+    // to Canvas::stroke_text for true outlined-glyph rendering (Skia / CG
+    // override).
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
@@ -1099,11 +1097,10 @@ TEST_CASE("Canvas2D resetTransform returns matrix to identity",
 // The fix forwards the FULL composed matrix via canvasSetTransform.
 TEST_CASE("Canvas2D transform() concats on right and forwards to bridge",
           "[view][canvas2d][issue-1348][codex-p1]") {
-    // Scale * translate: result must be the JS-side composed matrix,
-    // and getTransform() must reflect that (post-fix the bridge state
-    // matches; pre-fix only the JS mirror was correct, but
-    // getTransform() reads from the JS mirror anyway, so the failure
-    // mode was a *paint-time* divergence, not a getTransform read).
+    // Scale * translate: result must be the JS-side composed matrix, and
+    // getTransform() must reflect that. Because getTransform() reads from the JS
+    // mirror, the guarded failure mode is a *paint-time* divergence, not a
+    // getTransform read.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe';

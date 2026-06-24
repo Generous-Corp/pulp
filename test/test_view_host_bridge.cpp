@@ -491,22 +491,20 @@ TEST_CASE("Non-Apple host factories can supply native child embedding",
     WindowHost::clear_factory();
 }
 
-// #313 Codex P2: providers must be invoked OUTSIDE the registration
-// mutex so they can safely re-enter the bridge API (check state,
-// take long actions, etc.). If the mutex were still held, calling
-// set_screenshot_provider from inside a running provider would
-// deadlock. This test would hang before the fix; it returns quickly
-// after.
+// #313: providers must be invoked OUTSIDE the registration mutex so they can
+// safely re-enter the bridge API (check state, take long actions, etc.).
+// If the mutex were still held, calling set_screenshot_provider from inside a
+// running provider would deadlock. This test pins that re-entrant path.
 TEST_CASE("Non-Apple screenshot provider can re-enter the bridge API",
           "[view][hosts][issue-313]") {
     clear_screenshot_provider();
 
     bool reentered = false;
     set_screenshot_provider([&](View&, uint32_t, uint32_t, float, ScreenshotBackend) {
-        // If the old code held g_provider_mu during this callback, the
-        // has_screenshot_provider() call below would deadlock on a
-        // recursive acquire (or, with std::mutex on some platforms,
-        // UB). The fix copies the provider out before release.
+        // Holding g_provider_mu during this callback would make the
+        // has_screenshot_provider() call below deadlock on a recursive
+        // acquire (or, with std::mutex on some platforms, UB). The provider
+        // must be copied out before release.
         REQUIRE(has_screenshot_provider());
         reentered = true;
         return std::vector<uint8_t>{};

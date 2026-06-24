@@ -1,6 +1,6 @@
-// Cross-platform a11y test harness (workstream 04 slice 4.4).
-// Verifies snapshot_accessibility_tree walks the View tree and captures
-// role/label/value metadata without needing a platform screen reader.
+// Cross-platform a11y test harness. Verifies snapshot_accessibility_tree walks
+// the View tree and captures role/label/value metadata without needing a
+// platform screen reader.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/accessibility.hpp>
@@ -250,8 +250,8 @@ TEST_CASE("snapshot captures nested range metadata", "[a11y][harness]") {
 // aria-disabled, aria-hidden) must surface through the cross-platform
 // AccessibilityNodeSnapshot so AT bridges (NSAccessibility today;
 // AT-SPI / UIA when wired per #217) and offline tests can read them.
-// Pre-fix the View slots existed but the snapshot only carried role/
-// label/value — assistive tech never saw the state.
+// The View state slots must be carried into the snapshot, otherwise assistive
+// tech sees only role/label/value and misses pressed/checked/disabled/hidden.
 TEST_CASE("Accessibility snapshot surfaces ARIA state attributes",
           "[a11y][issue-1737]") {
     using namespace pulp::view;
@@ -349,7 +349,7 @@ TEST_CASE("Accessibility helper interfaces expose default selection behavior",
     REQUIRE(cell.get_cell_span(0, 0) == std::pair<int, int>{1, 1});
 }
 
-// ── Linux AT-SPI per-widget tree loopback (workstream 04 slice L7b) ──────────
+// ── Linux AT-SPI per-widget tree loopback ───────────────────────────────────
 //
 // The Linux provider (accessibility_linux.cpp) exports one D-Bus object per
 // accessible View implementing org.a11y.atspi.Accessible + Component. This is
@@ -604,10 +604,10 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
     shutdown_accessibility(handle);
 }
 
-// ── Linux AT-SPI Value interface + event signals loopback (slice L7c) ────────
+// ── Linux AT-SPI Value interface + event signals loopback ───────────────────
 //
 // Builds a value-bearing widget (RangeProbe implements AccessibilityValueInterface
-// — the SAME interface the Windows W6 provider dynamic_casts to), exports it on
+// — the same interface the Windows provider dynamic_casts to), exports it on
 // the session bus via the test seam, then acts as an AT-SPI client:
 //   * Properties.Get(Value, CurrentValue/MinimumValue/MaximumValue/
 //     MinimumIncrement) — assert the doubles match the View's value interface.

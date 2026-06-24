@@ -872,22 +872,18 @@ TEST_CASE("mac harness honors caller-provided window options size",
     REQUIRE(content.height >= 400);
 }
 
-// ── Regression contract: scroll deltas + button routing (PR #2009) ───────
+// ── Regression contract: scroll deltas + button routing ──────────────────
 //
-// Before these fixes:
-//   1. `build_event` constructed scroll wheel events via
-//      `+[NSEvent mouseEventWithType:]`, which does not carry
-//      `scrollingDeltaX/Y`. `PulpView::scrollWheel:` reads those, so the
-//      synthetic event delivered a zero-delta wheel — scroll tests
-//      passed without ever exercising real scroll math.
-//   2. `simulate_mouse` routed every phase through `mouseDown:` /
-//      `mouseUp:` / `mouseDragged:` regardless of `event.button`, so a
-//      right-click in a test reached the left-click selector instead of
-//      `rightMouseDown:` (which is what triggers the context-menu path).
+// These tests pin two platform-harness contracts:
+//   1. `build_event` must construct scroll wheel events that carry
+//      `scrollingDeltaX/Y`, because `PulpView::scrollWheel:` reads those
+//      fields and the synthetic event must exercise real scroll math.
+//   2. `simulate_mouse` must route right-click phases through
+//      `rightMouseDown:` rather than the left-click selectors, which is what
+//      triggers the context-menu path.
 //
-// These two tests pin both behaviors. They build a hidden GPU window,
-// install a child view with a known hit-test rect, and assert the
-// production selectors actually fired.
+// They build a hidden GPU window, install a child view with a known hit-test
+// rect, and assert the production selectors actually fired.
 
 TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
           "[mac][platform-harness][issue-2001]") {

@@ -73,8 +73,8 @@ TEST_CASE("truncate_to_width returns lone ellipsis when ellipsis itself doesn't 
 
 TEST_CASE("truncate_to_width returns ellipsis when available_width is non-positive",
           "[view][text-overflow][issue-1407]") {
-    // Codex post-merge sweep: a TextButton with width <= 16 px passes 0
-    // (or negative) here after subtracting its 8 px horizontal padding.
+    // A TextButton with width <= 16 px passes 0 (or negative) here after
+    // subtracting its 8 px horizontal padding.
     // Returning the original string would visibly leak the unwrapped
     // label past the button's rounded background — exactly the symptom
     // pulp #1407 is meant to eliminate.

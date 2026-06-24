@@ -1,4 +1,4 @@
-// Slice 16 — WindowHost::mark_dirty() VBlank-locked safe-repaint routing.
+// WindowHost::mark_dirty() VBlank-locked safe-repaint routing.
 //
 // mark_dirty() is the consumer entry point for "something changed, redraw".
 // When a RenderLoop is attached it must coalesce every call between two
@@ -106,9 +106,9 @@ TEST_CASE("WindowHost::mark_dirty routes through an attached RenderLoop",
 
 TEST_CASE("WindowHost::mark_dirty falls through to repaint when the attached loop is not running",
           "[view][window-host][vblank][slice-16][issue-2580]") {
-    // Codex P1 #2580: a loop attached but not running has a no-op
-    // request_frame(), so routing through it would silently drop the dirty
-    // update and freeze the UI. mark_dirty() must guard on is_running().
+    // #2580: a loop attached but not running has a no-op request_frame(), so
+    // routing through it would silently drop the dirty update and freeze the UI.
+    // mark_dirty() must guard on is_running().
     CountingWindowHost host;
     auto loop = pulp::render::RenderLoop::create_timer_loop();
     REQUIRE(loop != nullptr);

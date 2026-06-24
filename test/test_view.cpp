@@ -1286,10 +1286,10 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
 }
 
 
-// ── pulp #1368 round 2 — absolute children with inset:0 + explicit height ──
+// ── pulp #1368 — absolute children with inset:0 + explicit height ─────────
 //
-// Spectr filterbank repro per round-2 investigation. Two `<canvas>` siblings
-// share the same wrap parent (1320×860) with `position: absolute; inset: 0`
+// Spectr filterbank repro. Two `<canvas>` siblings share the same wrap parent
+// (1320×860) with `position: absolute; inset: 0`
 // (top/right/bottom/left = 0), but each has an explicit setFlex height —
 // pr_1 = 760, pr_2 = 860. The visible-rendering symptom on the live plugin
 // is consistent with pr_1's bounds_.y landing above the visible window
@@ -1304,8 +1304,8 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
 // the box to the bottom because inset top:0 + bottom:0 conflicts with the
 // explicit height), the Spectr symptom reappears.
 //
-// As of v0.74.0 this test is expected to FAIL when the resolved y is
-// non-zero — the FAIL is the round-2 reproduction.
+// This test must fail when the resolved y is non-zero; that is the off-window
+// paint-position regression.
 
 TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
           "[view][issue-1368][round2]") {
@@ -1345,9 +1345,9 @@ TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
          << "," << pr2_ptr->bounds().width << "," << pr2_ptr->bounds().height << ")");
 
     // Both children must paint flush with the parent's top-left. Negative or
-    // shifted y values reproduce the #1368 round-2 hypothesis: parent's
-    // translate(bounds_.x, bounds_.y) in View::paint_all pushes the canvas
-    // child off-window so fillRect at (50, 50) lands in the title-bar region.
+    // shifted y values reproduce #1368: parent's translate(bounds_.x, bounds_.y)
+    // in View::paint_all pushes the canvas child off-window so fillRect at
+    // (50, 50) lands in the title-bar region.
     REQUIRE(pr1_ptr->bounds().x == 0.0f);
     REQUIRE(pr1_ptr->bounds().y == 0.0f);
     REQUIRE(pr2_ptr->bounds().x == 0.0f);
@@ -1548,10 +1548,9 @@ TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override view
     // Use the BASE pulp::view::View (no paint() override) but set a
     // background color so the framework's background fill runs in
     // paint_all() between save() and the (no-op) paint() call. The
-    // pre-fix implementation timed only the paint() override and
-    // reported ~0ns; the post-fix implementation times the whole
-    // paint_all body, so we should see > 0ns even for a no-override
-    // styled View.
+    // Timing only the paint() override reports ~0ns for this case; timing the
+    // whole paint_all body should report > 0ns even for a no-override styled
+    // View.
     auto v = std::make_unique<pulp::view::View>();
     v->set_bounds({0, 0, 200, 200});
     v->set_background_color(pulp::canvas::Color::rgba(0.5f, 0.3f, 0.7f, 1.0f));
@@ -1559,8 +1558,8 @@ TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override view
     pulp::canvas::RecordingCanvas canvas;
     v->paint_all(canvas);
 
-    // The whole paint_all body has run on the way out — self_ns must
-    // be > 0 even though paint() was a no-op. Pre-fix this was ~0.
+    // The whole paint_all body has run on the way out — self_ns must be > 0
+    // even though paint() was a no-op.
     REQUIRE(v->last_paint_self_ns() > 0u);
     REQUIRE(v->last_paint_with_children_ns() >= v->last_paint_self_ns());
 }

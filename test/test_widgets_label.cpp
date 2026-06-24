@@ -484,8 +484,8 @@ TEST_CASE("Label intrinsic_width matches text after rebuild / re-measure",
 
 TEST_CASE("Label intrinsic_width handles vertical text direction",
           "[view][widget][issue-945][issue-943]") {
-    // pulp #943 P2 (#935 finding 1): when text_direction_ is vertical,
-    // paint() rotates the canvas 90° so the horizontal footprint is the
+    // pulp #943: when text_direction_ is vertical, paint() rotates the canvas
+    // 90° so the horizontal footprint is the
     // line height, not the shaped string advance. Reporting the advance
     // here would make Yoga reserve enormous width for a vertical label
     // and starve sibling columns.
@@ -514,10 +514,9 @@ TEST_CASE("Label intrinsic_width handles vertical text direction",
 
 TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
           "[view][widget][issue-945][issue-943]") {
-    // pulp #943 P2 (#935 finding 2): letter_spacing was multiplied by
-    // (display_text.size() - 1), counting raw UTF-8 bytes instead of
-    // code points. A 4-character CJK string takes 12 bytes in UTF-8,
-    // so spacing was over-applied 3x and the label inflated.
+    // pulp #943: letter_spacing must count code points, not raw UTF-8 bytes.
+    // A 4-character CJK string takes 12 bytes in UTF-8, so byte-counted spacing
+    // would be over-applied 3x and inflate the label.
     //
     // ASCII baseline — both strings are 4 ASCII chars, so byte count
     // and glyph count match. This anchors the comparison.
