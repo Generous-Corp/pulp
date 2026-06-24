@@ -480,12 +480,20 @@ set_target_properties(pulp-test-cli-run-fixture PROPERTIES
     OUTPUT_NAME "pulp-cli-run-fixture")
 
 # CLI shell-out behaviour tests — launches the built `pulp` binary.
-# Depends on pulp-cli so the binary exists at test time.
+function(pulp_bind_cli_shellout_target target)
+    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
+        set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
+        if(CMAKE_CONFIGURATION_TYPES)
+            set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/$<CONFIG>/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
+        endif()
+        target_compile_definitions(${target} PRIVATE
+            PULP_CLI_BINARY="${_pulp_cli_path}")
+    endif()
+endfunction()
+
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-shellout pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 # pulp #914 — depend on the fixture binary so the headless/screenshot
 # end-to-end test has its target ready in the build tree.
 if(TARGET pulp-test-cli-run-fixture)
@@ -502,9 +510,7 @@ if(TARGET pulp::inspect)
         pulp::platform
         pulp::inspect
         Catch2::Catch2WithMain)
-    if(TARGET pulp-cli)
-        add_dependencies(pulp-test-cli-inspect-shellout pulp-cli)
-    endif()
+    pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
 
@@ -512,18 +518,14 @@ endif()
 # with the parent CLI shell-out target and the scan/projects sibling.
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-shellout-loop pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-shellout-loop)
 catch_discover_tests(pulp-test-cli-shellout-loop)
 
 # `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
 # shell-out helpers with the sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-shellout-scan-projects pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-shellout-scan-projects)
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 
 # `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
@@ -531,9 +533,7 @@ catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 # sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
 target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-shellout-pr pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-shellout-pr)
 catch_discover_tests(pulp-test-cli-shellout-pr)
 
 # CLI lifecycle-command shell-out tests: pulp doctor / pulp dev /
@@ -541,9 +541,7 @@ catch_discover_tests(pulp-test-cli-shellout-pr)
 # diagnostics surface of the CLI.
 add_executable(pulp-test-cli-shellout-lifecycle test_cli_shellout_lifecycle.cpp)
 target_link_libraries(pulp-test-cli-shellout-lifecycle PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-shellout-lifecycle pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-shellout-lifecycle)
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 
 # `pulp tweaks diff` shell-out tests. Drives the built binary against
@@ -551,9 +549,7 @@ catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 # drifted / orphaned exit-code contract.
 add_executable(pulp-test-cli-tweaks-shellout test_cli_tweaks_shellout.cpp)
 target_link_libraries(pulp-test-cli-tweaks-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-tweaks-shellout pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-tweaks-shellout)
 catch_discover_tests(pulp-test-cli-tweaks-shellout)
 
 # pulp #776 — pin shell_quote's per-platform contract so it can't
@@ -5723,9 +5719,7 @@ target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/ex
 catch_discover_tests(pulp-test-audio-doctor)
 add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
 target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-audio-validate pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
 catch_discover_tests(pulp-test-cli-audio-validate)
 # Audio-probe RT output-boundary allocation counters.
 add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
