@@ -6,6 +6,7 @@
 // parameters, and toggle bypass.
 
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <clap/clap.h>
@@ -97,6 +98,23 @@ public:
         } else {
             processing_ = true;
         }
+        // Reserve per-block scratch so the graph-driven RT path never
+        // reallocates in process(). Channels match the slot's declared port
+        // counts (the graph sizes node buffers from these, floored at stereo);
+        // events cover pending host edits + a full sample-accurate
+        // parameter-event queue + the graph's realtime MIDI cap. A direct
+        // caller passing more channels or an un-capacity-limited MidiBuffer is
+        // outside this contract; the PULP_DBG_ASSERTs in process() flag it in
+        // debug builds.
+        constexpr int kMinReservedChannels = 2;
+        constexpr std::size_t kReservedMidiEvents = 1024;
+        in_ptrs_.reserve(
+            static_cast<std::size_t>(std::max(info_.num_inputs, kMinReservedChannels)));
+        out_ptrs_.reserve(
+            static_cast<std::size_t>(std::max(info_.num_outputs, kMinReservedChannels)));
+        in_event_storage_.reserve(params_.size()
+                                  + ParameterEventQueue::kCapacity
+                                  + kReservedMidiEvents);
         return true;
     }
 
@@ -126,10 +144,14 @@ public:
         const uint32_t nch_out = (uint32_t)output.num_channels();
         const uint32_t nch_in = (uint32_t)input.num_channels();
 
+        PULP_DBG_ASSERT(in_ptrs_.capacity() >= nch_in,
+                        "CLAP slot in_ptrs_ would grow on the audio thread");
         in_ptrs_.resize(nch_in);
         for (uint32_t c = 0; c < nch_in; ++c) {
             in_ptrs_[c] = const_cast<float*>(input.channel_ptr(c));
         }
+        PULP_DBG_ASSERT(out_ptrs_.capacity() >= nch_out,
+                        "CLAP slot out_ptrs_ would grow on the audio thread");
         out_ptrs_.resize(nch_out);
         for (uint32_t c = 0; c < nch_out; ++c) {
             out_ptrs_[c] = output.channel_ptr(c);
@@ -148,6 +170,9 @@ public:
         // event-pointer array keyed by sample_offset so the plugin can
         // iterate them in time order.
         in_event_storage_.clear();
+        // Capacity is reserved in prepare(); capturing it lets the assert after
+        // the emplace loops prove no reallocation happened on the audio thread.
+        const std::size_t reserved_event_capacity = in_event_storage_.capacity();
         // Drain host-initiated set_parameter edits as time=0 events. Uses
         // try_lock so the audio thread never blocks on the host side;
         // if contended, pending edits ride to the next block.
@@ -204,6 +229,8 @@ public:
             ev.data[2] = msg.size() > 2 ? msg.data()[2] : 0;
             in_event_storage_.emplace_back(EventAny{.midi = ev, .kind = EventKind::Midi});
         }
+        PULP_DBG_ASSERT(in_event_storage_.capacity() == reserved_event_capacity,
+                        "CLAP slot in_event_storage_ reallocated on the audio thread");
         // Sort by header.time.
         std::sort(in_event_storage_.begin(), in_event_storage_.end(),
                   [](const EventAny& a, const EventAny& b) {
