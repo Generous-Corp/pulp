@@ -208,6 +208,112 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a two-gain chain
     }
 }
 
+namespace {
+
+// Reference diamond: in -> {g1, g2} -> out, where out's single input port
+// receives BOTH g1 and g2 (fan-in sum). Mono. Output = in*g1 + in*g2.
+std::vector<float> run_signal_graph_diamond(float g1, float g2, double sr, int frames,
+                                            const std::vector<float>& x) {
+    pulp::host::SignalGraph g;
+    const auto in = g.add_input_node(1, "In");
+    const auto gn1 = g.add_gain_node("G1");
+    const auto gn2 = g.add_gain_node("G2");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, gn1, 0));
+    REQUIRE(g.connect(in, 0, gn2, 0));
+    REQUIRE(g.connect(gn1, 0, out, 0));
+    REQUIRE(g.connect(gn2, 0, out, 0));
+    REQUIRE(g.set_node_gain(gn1, g1));
+    REQUIRE(g.set_node_gain(gn2, g2));
+    REQUIRE(g.prepare(sr, frames));
+
+    std::vector<float> xi = x;
+    std::vector<float> yo(static_cast<std::size_t>(frames), 0.0f);
+    std::array<const float*, 1> in_ch{xi.data()};
+    std::array<float*, 1> out_ch{yo.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 1,
+                                            static_cast<std::uint32_t>(frames));
+    g.process(out_view, in_view, frames);
+    return yo;
+}
+
+} // namespace
+
+TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-out + fan-in)",
+          "[host][graph][executor][routing][phase4][parity]") {
+    constexpr double kSr = 48000.0;
+    GraphRuntimeExecutor exec;
+    for (int frames : {1, 64, 512}) {
+        for (auto gains : {std::array<float, 2>{1.0f, 1.0f},
+                           std::array<float, 2>{0.5f, 0.25f},
+                           std::array<float, 2>{0.75f, 0.0f},
+                           std::array<float, 2>{2.0f, 1.5f}}) {
+            CAPTURE(frames);
+            CAPTURE(gains[0]);
+            CAPTURE(gains[1]);
+            const auto x = test_signal(frames, 0.8f);
+
+            // Executor diamond: same topology as the reference.
+            GainState s1{gains[0]};
+            GainState s2{gains[1]};
+            const std::array nodes = {
+                GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+                GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+                GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+                GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+            };
+            const std::array conns = {
+                GraphRuntimeConnectionSpec{1, 0, 2, 0},
+                GraphRuntimeConnectionSpec{1, 0, 3, 0},
+                GraphRuntimeConnectionSpec{2, 0, 4, 0},
+                GraphRuntimeConnectionSpec{3, 0, 4, 0},  // fan-in: g1 and g2 -> out:0
+            };
+            auto plan = pulp::graph::build_graph_runtime_plan(nodes, conns);
+            REQUIRE(plan.ok());
+            const std::array bindings = {
+                GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+                GraphRuntimeNodeBinding{2, routing_gain, &s1, true},
+                GraphRuntimeNodeBinding{3, routing_gain, &s2, true},
+                GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+            };
+            GraphRuntimeSnapshot snapshot;
+            REQUIRE(snapshot.reset(std::move(plan.plan), bindings));
+            GraphRuntimeBufferPool pool;
+            REQUIRE(pool.reset(snapshot.buffer_slot_count(),
+                               static_cast<std::uint32_t>(frames)));
+
+            std::vector<float> xi = x;
+            std::vector<float> yo(static_cast<std::size_t>(frames), 0.0f);
+            std::array<const float*, 1> in_ch{xi.data()};
+            std::array<float*, 1> out_ch{yo.data()};
+            pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                         static_cast<std::uint32_t>(frames));
+            pulp::audio::BufferView<float> out_view(out_ch.data(), 1,
+                                                    static_cast<std::uint32_t>(frames));
+            BusBufferSet buses;
+            REQUIRE(buses.add_input("main", in_view, BusRole::Main));
+            REQUIRE(buses.add_output("main", out_view, BusRole::Main));
+            ProcessBlock block;
+            block.sample_rate = kSr;
+            block.frame_count = static_cast<std::uint32_t>(frames);
+            block.buses = &buses;
+            REQUIRE(block.validate());
+            const auto result = exec.process_routed(block, snapshot, pool);
+            REQUIRE(result.ok());
+
+            const auto ref = run_signal_graph_diamond(gains[0], gains[1], kSr, frames, x);
+            REQUIRE(ref.size() == yo.size());
+            for (std::size_t i = 0; i < yo.size(); ++i) {
+                // 2-way fan-in: a+b == b+a in IEEE-754, so bit-exact regardless
+                // of gather order.
+                REQUIRE(ref[i] == yo[i]);
+            }
+        }
+    }
+}
+
 TEST_CASE("GraphRuntimeExecutor routing rejects feedback graphs until 4d",
           "[host][graph][executor][routing][phase4]") {
     // in -> A -> out, plus a feedback edge out-of-band (A -> A feedback). The
