@@ -1029,6 +1029,15 @@ Gotchas:
   unchanged. Full precedence + the override API live in
   `docs/reference/host-quirks-policy.md`.
 
+### `pulp doctor --au-cache`
+
+`cmd_doctor.cpp` accepts `--au-cache` to refresh macOS AU registration metadata
+by stopping `AudioComponentRegistrar`; `--dry-run` prints the command instead.
+The flag is accepted on every platform and is a no-op with exit 0 outside
+macOS so cross-platform scripts do not need OS conditionals. Keep this flag in
+`docs/reference/cli.md#doctor`, `docs/status/cli-commands.yaml`, and
+`.claude/commands/doctor.md` whenever the behavior changes.
+
 ## `pulp upgrade` — self-update
 
 Lives in `tools/cli/cmd_upgrade.cpp` (moved out of `cmd_misc.cpp` in

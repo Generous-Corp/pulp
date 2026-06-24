@@ -22,8 +22,9 @@ Options:
 - `pulp doctor --fix` — auto-fix issues where possible
 - `pulp doctor --ci` — CI mode, exit codes only
 - `pulp doctor --dry-run` — show what --fix would do
-- `pulp doctor --validators` — verify auval / pluginval / clap-validator are installed and have intact code signatures (#743)
+- `pulp doctor --validators` — verify auval / pluginval / clap-validator are installed and have intact code signatures
 - `pulp doctor --validators --fix` — also remove broken user-owned validator copies; root-owned breakage prints a sudo one-liner
+- `pulp doctor --au-cache --dry-run` — preview macOS AudioComponentRegistrar refresh after AU metadata changes
 
 Checks include: CMake version, C++ compiler, git-lfs, Skia binaries, VST3 SDK, AudioUnit SDK, platform-specific dependencies (ALSA on Linux, Xcode CLI tools on macOS).
 
