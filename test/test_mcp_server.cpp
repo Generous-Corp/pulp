@@ -1662,6 +1662,36 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
     }
 }
 
+TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable text",
+          "[mcp][tools][inspect][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    make_fake_pulp_cli(project.path);
+
+    ScopedCurrentPath cwd(project.path);
+
+    auto evaluate = handle_request(tool_call(
+        "50", "pulp_inspect_evaluate",
+        R"JSON({"expression":"window.title + ' ok'"})JSON"));
+    require_contains(evaluate, R"JSON("id":50)JSON");
+    require_contains(evaluate, "fake-pulp [inspect] [--command] [Runtime.evaluate] [--params]");
+    require_contains(evaluate, R"JSON([{\"expression\":\"window.title + ' ok'\"}])JSON");
+    REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON")
+            == std::string::npos);
+
+    auto screenshot = handle_request(tool_call("51", "pulp_inspect_screenshot"));
+    require_contains(screenshot, R"JSON("id":51)JSON");
+    require_contains(screenshot, R"JSON("type":"text")JSON");
+    require_contains(screenshot, "fake-pulp [inspect] [--command] [Capture.screenshot]");
+    REQUIRE(screenshot.find(R"JSON("type":"image")JSON") == std::string::npos);
+    REQUIRE(screenshot.find(R"JSON("mimeType":"image/png")JSON") == std::string::npos);
+#endif
+}
+
 TEST_CASE("MCP validate only passes --all for the explicit all flag",
           "[mcp][tools][validate][coverage]") {
 #if defined(_WIN32)
