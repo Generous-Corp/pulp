@@ -97,6 +97,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Remove build directory",
     },
     Entry {
+        name: "fmt",
+        summary: "Run clang-format on the source tree",
+    },
+    Entry {
         name: "cache",
         summary: "Manage SDK and asset cache",
     },
