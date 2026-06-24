@@ -415,6 +415,10 @@ void MusicalTypingKeyboard::set_input_capture(bool capture) {
 
 void MusicalTypingKeyboard::set_base_note(int note) {
     controller_.set_base_note(note);
+    // Re-clamp the shift to the new base's range — set_base_note alone leaves a
+    // previously-valid octave_shift that may now fall outside [floor, top] for the
+    // new base, which would push the play-window off C-2..G8.
+    controller_.set_octave_shift(controller_.octave_shift());
     update_readouts();   // the OCTAVE readout + overview highlight track the base; a
     request_repaint();   // bare controller().set_base_note() would leave them stale.
 }
