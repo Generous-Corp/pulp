@@ -14,6 +14,11 @@ SKIP_SLASH_COMMANDS = {
     "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "search", "suggest",
     "target", "update",
+    # `pulp macos` and `pulp overflow` are CI runner-pool operator
+    # commands. They're covered by the CLI reference, `--help`, the
+    # ci skill, and the cli-maintenance skill; slash commands would
+    # duplicate policy/workflow surfaces instead of helping agents.
+    "macos", "overflow",
     # `pulp projects` is a registry-management plumbing command; it's
     # adequately documented via `--help` and the cli-maintenance
     # skill. Adding a slash command for pure plumbing would clutter

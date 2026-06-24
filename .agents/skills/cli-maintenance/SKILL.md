@@ -43,7 +43,7 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, projects, project
+audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, macos, overflow, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
