@@ -4513,7 +4513,7 @@ pulp_add_test_suite(pulp-test-audio-source LIBRARIES pulp::audio)
 
 # Foundation DSP/runtime/state tests
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-denormal SOURCES test_denormal.cpp test_scoped_flush_denormals.cpp LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-normalisable-range LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-adsr LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-high-resolution-timer LIBRARIES pulp::runtime)

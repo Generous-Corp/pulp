@@ -29,6 +29,42 @@ the protected region. The production guard is a no-op under `NDEBUG`
 "Verifying the contract in tests" below), where an allocation or a
 blocking lock inside the scope aborts the binary.
 
+## Numeric mode: denormals & determinism
+
+Denormal (subnormal) floats stall the audio thread when they enter
+recursive state — IIR/SVF filter memory, reverb/delay feedback, envelope
+tails decaying toward silence. Pulp addresses this at two levels:
+
+1. **Per-value (opt-in):** `pulp::signal::snap_to_zero` (denormal.hpp)
+   snaps a value or buffer below ~-300 dB FS to exactly zero. Use it at
+   the end of each recursive state update. It is the portable baseline
+   and works regardless of CPU mode.
+2. **Callback-scope (hardware):** `pulp::signal::ScopedFlushDenormals`
+   (scoped_flush_denormals.hpp) sets the CPU flush-to-zero mode — MXCSR
+   FTZ on x86-64, FPCR.FZ on AArch64 — for the lifetime of the
+   scope, then restores the caller's previous mode. It protects *all*
+   DSP in the callback, including code that forgot rule-1's
+   `snap_to_zero`. Wrap the callback body alongside `ScopedNoAlloc`:
+
+   ```cpp
+   pulp::signal::ScopedFlushDenormals flush_denormals;
+   processor.process(...);
+   ```
+
+   On targets without a hardware mode (e.g. MSVC/ARM64) the guard is a
+   correct no-op (`kHardwareFlushSupported == false`); `snap_to_zero`
+   remains the safety net there. The standalone host wraps its process
+   call in this guard; format adapters wrap theirs where supported.
+
+**Determinism contract.** Flush-to-zero changes denormal results to
+zero, so a flushed render is *not bit-identical* to an unflushed one for
+signals that decay into the denormal range — but it is the audibly
+correct, stall-free result, and it is deterministic given a fixed
+numeric mode. Offline/golden renders therefore fix the numeric mode they
+assert against. A future parallel graph mode that reorders summation
+will be documented as *sample-equivalent*, not bit-identical, unless it
+pins a deterministic reduction order.
+
 ## Budget prepare-time resources
 
 `format::PrepareContext` carries optional `resource_limits` for hosts and test
@@ -454,6 +490,8 @@ To opt a test target into the trap, link
 * [`core/audio/include/pulp/audio/load_measurer.hpp`](../../core/audio/include/pulp/audio/load_measurer.hpp)
   — load, peak-load, and overload-count snapshots.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
+* [`core/signal/include/pulp/signal/scoped_flush_denormals.hpp`](../../core/signal/include/pulp/signal/scoped_flush_denormals.hpp)
+  — hardware flush-to-zero guard for the callback boundary.
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
 * [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
