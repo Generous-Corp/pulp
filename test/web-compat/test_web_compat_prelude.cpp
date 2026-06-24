@@ -753,8 +753,8 @@ TEST_CASE("WebCompat: display:none does not change flex direction", "[webcompat]
 }
 
 TEST_CASE("WebCompat: flexFlow:wrap before display:flex still defaults to row", "[webcompat][style][issue-1147]") {
-    // Codex review flag: `flex-flow: wrap` does NOT specify a direction —
-    // CSS shorthand semantics keep the default direction (row). Without the
+    // `flex-flow: wrap` does NOT specify a direction; CSS shorthand
+    // semantics keep the default direction (row). Without the
     // content-aware check, the display handler would treat any flexFlow as
     // explicit and skip the row default, leaving the widget at column.
     TestEnvironment env;
@@ -1080,9 +1080,9 @@ TEST_CASE("WebCompat: matrix() preserves all 6 components verbatim",
 
 TEST_CASE("WebCompat: matrix() with zero scale (a=b=0) preserves the collapse",
           "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p2]") {
-    // P2 fix: an intentional zero-scale collapse (a=b=0) used to be
-    // masked by the decomposition computing sx=1 fallback. With direct
-    // setTransform passthrough, a=b=0 reaches the bridge unchanged.
+    // An intentional zero-scale collapse (a=b=0) must not be masked by
+    // decomposition computing an sx=1 fallback. With direct setTransform
+    // passthrough, a=b=0 reaches the bridge unchanged.
     TestEnvironment env;
     env.engine.evaluate(R"JS(
         var __setTransformCalls = [];
@@ -1408,7 +1408,7 @@ TEST_CASE("WebCompat: setProperty('--name') routes to motion-token bridge (issue
     REQUIRE(roundTrip.getWithDefault<double>(-1.0) == 128.0);
 }
 
-// pulp #1918 (Codex review P2) — when a custom property is reassigned
+// pulp #1918 — when a custom property is reassigned
 // from one value type to another (string ↔ length) the stale slot
 // from the prior assignment must be cleared. The resolver checks
 // theme.strings before theme.dimensions, so without slot-clearing a
@@ -1635,9 +1635,9 @@ TEST_CASE("resolveCSSLength: P1 — malformed calc-family returns null, never cr
             .getWithDefault<bool>(false);
     };
 
-    // Empty parens — pre-fix these reached evaluateCalc and tripped the
-    // nested-function regex into infinite recursion (RangeError: maximum
-    // call stack size exceeded). Post-fix they return null cleanly.
+    // Empty parens return null cleanly instead of reaching evaluateCalc
+    // and tripping the nested-function regex into infinite recursion
+    // (RangeError: maximum call stack size exceeded).
     REQUIRE(returns_null("min()"));
     REQUIRE(returns_null("max()"));
     REQUIRE(returns_null("clamp()"));
