@@ -8,6 +8,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04634"></a>
+## [0.463.4] - 2026-06-23
+
+- fix(cli): expose tool info in rust frontend ([#4638](https://github.com/danielraffel/pulp/pull/4638))
+- docs(ci): refresh workflow comment provenance ([#4639](https://github.com/danielraffel/pulp/pull/4639))
+- docs(tools): refresh regression comment provenance ([#4636](https://github.com/danielraffel/pulp/pull/4636))
+- test(state): flood-test ParameterEventQueue sort() worst case + document it ([#4619](https://github.com/danielraffel/pulp/pull/4619))
+- docs(inspect): refresh inspector regression comment anchors ([#4635](https://github.com/danielraffel/pulp/pull/4635))
+- docs(cli): list docs build subcommands ([#4634](https://github.com/danielraffel/pulp/pull/4634))
+- docs(audio): refresh regression test comment anchors ([#4633](https://github.com/danielraffel/pulp/pull/4633))
+- test(cli): cover clean command success path ([#4629](https://github.com/danielraffel/pulp/pull/4629))
+- docs(view): refresh view test comment wording ([#4632](https://github.com/danielraffel/pulp/pull/4632))
+- docs(webcompat): refresh svg bridge test comments ([#4628](https://github.com/danielraffel/pulp/pull/4628))
+- feat(signal): add ScopedFlushDenormals and flush denormals in standalone host ([#4604](https://github.com/danielraffel/pulp/pull/4604))
+- docs(font): refresh text rendering test comments ([#4626](https://github.com/danielraffel/pulp/pull/4626))
+- docs(cli): align version command docs ([#4620](https://github.com/danielraffel/pulp/pull/4620))
+- docs(view): refresh canvas test comment wording ([#4625](https://github.com/danielraffel/pulp/pull/4625))
+- fix(design-import): adversarial-review follow-ups (P5 install + nm-guard, P8 schema↔TS, P2 vocab) ([#4624](https://github.com/danielraffel/pulp/pull/4624))
+
 <a id="v04633"></a>
 ## [0.463.3] - 2026-06-23
 
@@ -4874,6 +4893,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.463.4]: https://github.com/danielraffel/pulp/releases/tag/v0.463.4
 [0.463.3]: https://github.com/danielraffel/pulp/releases/tag/v0.463.3
 [0.463.2]: https://github.com/danielraffel/pulp/releases/tag/v0.463.2
 [0.463.1]: https://github.com/danielraffel/pulp/releases/tag/v0.463.1
