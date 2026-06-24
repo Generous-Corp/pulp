@@ -530,8 +530,12 @@ fn real_main() -> Result<(), ExitCode> {
             if let Some(ref a) = args.arg {
                 slice.push(a.clone());
             }
-            let sub = cmd::orchestrate::parse_cache_sub(&slice).map_err(|_| {
-                eprintln!("pulp-rs cache: unknown subcommand");
+            let sub = cmd::orchestrate::parse_cache_sub(&slice).map_err(|e| {
+                match e {
+                    CliError::UnknownSubcommand => eprintln!("pulp-rs cache: unknown subcommand"),
+                    CliError::BadUsage(msg) => eprintln!("{msg}"),
+                    other => eprintln!("pulp-rs cache: {other}"),
+                }
                 ExitCode::from(2)
             })?;
             cmd::orchestrate::cache(&sub, args.json, &mut out).map_err(|e| map_err(&e))
