@@ -134,7 +134,11 @@ registers into. Beyond the usual atomic chain, the two exhaustive
 (`element_value`/`set_element_value`) need the `custom` case, and the inspector's
 `frame_element_kind_name` switch in `inspect/src/inspector_window.cpp`.
 
-**Import report (P7).** `collect_import_report(ir.root)` (`design_import.hpp`)
+**Import report (P7).** Implementations of the import-report and
+placement-verification passes live in `core/view/src/design_ir_analysis.cpp`
+(extracted from `design_ir_json.cpp`, which is the IR JSON serialization
+*contract* — keep the analysis passes there, not in the serializer).
+`collect_import_report(ir.root)` (`design_import.hpp`)
 walks the IR's interactive elements and surfaces each control's resolution
 provenance — `{source_node_id, kind, resolution_rung, confidence_score,
 conflict_signals, verification_pass}` — plus summary counts (`conflicted` /

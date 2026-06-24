@@ -97,8 +97,8 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2310,
-      "note": "DesignIR serialization contract hotspot; +21 for parse_ir_node preserving component_key for the recognition resolver (issue #4676)"
+      "max_loc": 2200,
+      "note": "DesignIR serialization contract hotspot; net after extracting the analysis passes to design_ir_analysis.cpp (-) and parse_ir_node preserving component_key for the recognition resolver (+21)"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
