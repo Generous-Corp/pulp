@@ -50,6 +50,12 @@ pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::gr
 pulp_add_test_suite(pulp-test-graph-executor-routing
     SOURCES test_graph_executor_routing.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Differential routing parity: random audio-only DAGs driven through both
+# SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
+# fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
+pulp_add_test_suite(pulp-test-graph-routing-differential-parity
+    SOURCES test_graph_routing_differential_parity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
