@@ -362,8 +362,12 @@ fs::path write_project(const std::string& lock_packages_json,
              << lock_packages_json << " }";
     }
     {
-        std::ofstream reg(dir / "registry.json", std::ios::binary);
-        reg << R"({ "registry_version": 1, "packages": )"
+        // The registry lives at <root>/tools/packages/registry.json — the real
+        // CLI layout (find_registry_path), NOT a sibling of the lockfile. Writing
+        // it here is what makes this fixture exercise the production discovery path.
+        fs::create_directories(dir / "tools" / "packages");
+        std::ofstream reg(dir / "tools" / "packages" / "registry.json", std::ios::binary);
+        reg << R"({ "registry_version": 2, "packages": )"
             << registry_packages_json << " }";
     }
     return dir;
