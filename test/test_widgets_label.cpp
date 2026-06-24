@@ -755,6 +755,16 @@ TEST_CASE("Label re-shapes when a font registration bumps the generation",
 
     // The generation bump alone must invalidate the cache → exactly one
     // fresh prepare(). (Before the font_gen key field, this was 0 — stale.)
-    REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
+    //
+    // This guarantee only holds when a real shaping backend is present. In a
+    // no-Skia / no-GPU build (uses_real_shaping() == false) the wrapped label
+    // measures via the character-width fallback, which never populates the
+    // soft-wrap shaped-layout cache — so a font-registration generation bump
+    // has no cached layout to invalidate and prepare() is not re-invoked. The
+    // fill_text assertion below still verifies the label re-paints in every
+    // build configuration.
+    if (pulp::canvas::global_text_shaper().uses_real_shaping()) {
+        REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
+    }
     REQUIRE(commands_of(after, DrawCommand::Type::fill_text).size() >= 2);
 }

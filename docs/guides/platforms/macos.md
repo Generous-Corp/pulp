@@ -30,9 +30,10 @@ You need a "Developer ID Application" certificate from Apple. Check available id
 
 ```bash
 security find-identity -v -p codesigning
-# or
-pulp ship check
 ```
+
+`pulp ship check` verifies built plugin signatures after signing; it does not list
+available certificates.
 
 ### Signing Plugins
 

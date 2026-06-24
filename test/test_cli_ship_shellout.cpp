@@ -215,16 +215,16 @@ struct ShipShelloutFixture {
 }  // namespace
 
 TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship outside a project directory errors out",
+                 "pulp ship default help does not require a project directory",
                  "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship"});
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code != 0);
-    auto combined = r.stdout_output + r.stderr_output;
-    // The handler early-exits with "not in a Pulp project directory"
-    // — that wording is the contract hosts/users rely on.
-    REQUIRE(contains(combined, "Pulp project"));
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "Subcommands:"));
+    REQUIRE(contains(r.stdout_output, "check"));
+    REQUIRE_FALSE(contains(r.stderr_output, "Build directory not found"));
+    REQUIRE_FALSE(contains(r.stderr_output, "not in a Pulp project"));
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
@@ -267,6 +267,30 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship", "check"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship help does not require a project or build directory",
+                 "[cli][shellout][ship][help][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    auto outside = run_pulp_in(fs::temp_directory_path(), {"ship", "--help"});
+    REQUIRE_FALSE(outside.timed_out);
+    REQUIRE(outside.exit_code == 0);
+    REQUIRE(contains(outside.stdout_output, "Subcommands:"));
+    REQUIRE(contains(outside.stdout_output, "check"));
+    REQUIRE_FALSE(contains(outside.stderr_output, "Build directory not found"));
+    REQUIRE_FALSE(contains(outside.stderr_output, "not in a Pulp project"));
+
+    auto root = make_fake_project("help-no-build", false);
+    auto in_project = run_pulp_in(root, {"ship"});
+    REQUIRE_FALSE(in_project.timed_out);
+    REQUIRE(in_project.exit_code == 0);
+    REQUIRE(contains(in_project.stdout_output, "Subcommands:"));
+    REQUIRE(contains(in_project.stdout_output, "check"));
+    REQUIRE_FALSE(contains(in_project.stderr_output, "Build directory not found"));
+
+    fs::remove_all(root);
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
