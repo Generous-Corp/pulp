@@ -59,7 +59,22 @@ class PitchShifter : public pulp::Processor {
 
 ## Pulp Overlap
 
-None. Pulp does not have built-in pitch/time stretching.
+**Pulp ships its own MIT-licensed pitch/time stretching** in `core/signal`, so for
+most cases you do not need an external library:
+
+- **`pulp::signal::OfflineStretch`** — whole-buffer (offline) tempo-stretch + pitch
+  shift with exact output length, material-adaptive FFT windowing
+  (`recommend_window()`: sharp 1024/128 for percussion, 8192/512 for bass), formant
+  modes, repitch-linked resampling, and character modes (`clean` peak-locked phase
+  vocoder, `varispeed` tape). This is what **PulpTempoSampler** uses.
+- **`pulp::signal::RealtimePitchTimeProcessor`** — the streaming, hop-quantized
+  realtime core (Laroche-Dolson phase propagation with identity phase locking),
+  used for live pitch/time.
+
+Reach for **Signalsmith Stretch** when you specifically want its algorithm/voicing,
+a drop-in header, or to A/B against Pulp's engine. Both are MIT, so either is fine
+for a shipped MIT plugin. See the [Time-Stretch & Pitch guide](../time-stretch.md)
+for Pulp's engine, character modes, the A/B harness, and tunable presets.
 
 ## Attribution
 
