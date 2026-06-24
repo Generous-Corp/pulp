@@ -2,6 +2,7 @@
 // Show, bump, and verify version consistency across all surfaces.
 
 #include "cli_common.hpp"
+#include "cmd_version_internal.hpp"
 #include "json_parser.hpp"
 
 #include <cstdlib>
@@ -44,10 +45,7 @@ static bool write_cmake_project_version(const fs::path& cmake_path,
         if (pos == std::string::npos) return false;
         content.replace(pos, old_ver.size(), new_ver);
     }
-    std::ofstream f(cmake_path);
-    if (!f) return false;
-    f << content;
-    return true;
+    return pulp::cli::version_internal::write_text_file_checked(cmake_path, content);
 }
 
 struct SemVer {
@@ -156,10 +154,11 @@ static int version_bump(const std::vector<std::string>& args) {
             } else {
                 cl_content = new_entry + cl_content;
             }
-            std::ofstream f(changelog);
-            if (f) {
-                f << cl_content;
+            if (pulp::cli::version_internal::write_text_file_checked(changelog, cl_content)) {
                 print_ok("Added CHANGELOG.md entry for " + new_str);
+            } else {
+                std::cerr << "Warning: failed to write CHANGELOG.md entry for "
+                          << new_str << "\n";
             }
         }
 

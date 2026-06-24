@@ -677,12 +677,12 @@ target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(pulp-test-cli-json-parser PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-json-parser)
 
-# CLI version diagnostics (#499): pure-logic tests for the semver
-# parser, plugin.json scraper, and skew analyzer behind
-# `pulp doctor --versions`. version_diag is deliberately free of
-# cli_common link deps so we can compile it straight into the test.
+# CLI version diagnostics (#499) + checked version-write primitive (#290):
+# pure-logic, cli_common-free tests for the semver/skew analyzer and the
+# `pulp version` bump file writer (header-only). Compiled straight in.
 add_executable(pulp-test-cli-version-diag
     test_cli_version_diag.cpp
+    test_cli_version_write.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
 )
 target_include_directories(pulp-test-cli-version-diag PRIVATE
