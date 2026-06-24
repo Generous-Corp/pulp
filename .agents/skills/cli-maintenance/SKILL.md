@@ -352,6 +352,17 @@ Gotchas / invariants when touching this surface:
   `pulp-test-cli-tool-registry` and `pulp-test-cli-importer-install` link all
   three TUs. Adding a symbol used by `cmd_tool` means updating both targets.
 
+### `pulp tool info` — Rust/C++ parity
+
+`pulp-cpp tool info <tool-id> [--json]` prints the same descriptor metadata
+that installer add-on workflows need when deciding whether a registry entry is
+a machine-scoped tool add-on, importer package, or legacy validator. The Rust
+front-end owns `pulp tool` dispatch for installed users, so adding descriptor
+fields or subcommands to `tool_registry.cpp` must be mirrored in
+`experimental/pulp-rs/src/tool_registry.rs` and
+`experimental/pulp-rs/src/cmd/tool.rs`; otherwise Rust `pulp tool <subcommand>`
+can reject a command that the C++ delegate and tests already support.
+
 ### Package suggestion and analyzer metadata commands
 
 Package search/suggestion code (`tools/cli/package_commands_search.cpp`) is a

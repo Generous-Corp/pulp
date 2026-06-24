@@ -1727,6 +1727,15 @@ commands:
     subcommands:
       - name: list
         summary: Show every registered tool and its install state
+      - name: info
+        summary: Show install/package metadata for one registered tool
+        args:
+          - name: tool-id
+            kind: positional
+            required: true
+          - name: --json
+            kind: flag
+            required: false
       - name: install
         summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
         args:

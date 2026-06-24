@@ -1544,6 +1544,8 @@ Manage the third-party developer tools Pulp can optionally use (formatters, vali
 ```bash
 pulp tool                           # Show help
 pulp tool list                      # Show every registered tool and its install state
+pulp tool info video-proof          # Show one tool's install/package metadata
+pulp tool info video-proof --json   # Emit the same metadata as JSON
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install --all             # Install every tool available on the current platform
 pulp tool install <id> --force      # Reinstall even if already present

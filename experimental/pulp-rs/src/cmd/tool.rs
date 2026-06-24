@@ -1,4 +1,4 @@
-//! `pulp-rs tool` — list / install / uninstall / path / run / doctor.
+//! `pulp-rs tool` — list / info / install / uninstall / path / run / doctor.
 //!
 //! # Runtime shape
 //!
@@ -7,6 +7,7 @@
 //! | Subcommand  | Status      | Notes                                        |
 //! |-------------|-------------|----------------------------------------------|
 //! | `list`      | Ported      | Two-column table; color-aware.               |
+//! | `info`      | Ported      | Tool metadata text / JSON.                   |
 //! | `uninstall` | Ported      | `rm -rf` of `$PULP_HOME/tools/<id>`.          |
 //! | `path`      | Ported      | Prints absolute path via `locate_tool`.      |
 //! | `run`       | Ported      | Exec via `Spawner`.                          |
@@ -35,6 +36,13 @@ pub enum Sub {
     Help,
     /// `list`.
     List,
+    /// `info <id> [--json]`.
+    Info {
+        /// Tool id to inspect.
+        id: String,
+        /// Emit JSON instead of text.
+        json: bool,
+    },
     /// `install <id>` / `install --all` / `install <id> --force`.
     Install {
         /// Tool id to install, `None` when `--all` is set.
@@ -72,6 +80,25 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
     };
     match first.as_str() {
         "list" => Ok(Sub::List),
+        "info" => {
+            let mut id = None;
+            let mut json = false;
+            for a in &args[1..] {
+                if a == "--json" {
+                    json = true;
+                } else if id.is_none() {
+                    id = Some(a.clone());
+                } else {
+                    return Err(CliError::BadUsage(
+                        "Usage: pulp tool info <tool-id> [--json]".to_owned(),
+                    ));
+                }
+            }
+            let id = id.ok_or_else(|| {
+                CliError::BadUsage("Usage: pulp tool info <tool-id> [--json]".to_owned())
+            })?;
+            Ok(Sub::Info { id, json })
+        }
         "install" => {
             let mut id = None;
             let mut all = false;
@@ -136,6 +163,7 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
     match sub {
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
+        Sub::Info { id, json } => info(&reg, id, *json, out),
         Sub::Install { id, all, force: _ } => install(id.as_deref(), *all, out),
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
@@ -158,6 +186,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         b"Usage: pulp tool <command> [options]\n\n\
         Commands:\n\
         \x20 list                    Show available and installed tools\n\
+        \x20 info <tool> [--json]    Show install/package metadata for one tool\n\
         \x20 install <tool>          Download and install a tool\n\
         \x20 install --all           Install all tools for current platform\n\
         \x20 uninstall <tool>        Remove a pulp-managed tool\n\
@@ -195,6 +224,12 @@ fn list(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
     Ok(0)
 }
 
+fn tool_available_on_platform(tool: &ToolDescriptor, platform: &str) -> bool {
+    tool.binary_sources.contains_key(platform)
+        || tool.install_method == "python_pip"
+        || tool.install_method == "npm_package"
+}
+
 fn status_label(
     tool: &ToolDescriptor,
     loc: &tool_registry::LocateResult,
@@ -209,7 +244,7 @@ fn status_label(
             loc.path.display(),
             color::reset()
         )
-    } else if tool.binary_sources.contains_key(platform) || tool.install_method == "python_pip" {
+    } else if tool_available_on_platform(tool, platform) {
         format!("{}available{}", color::dim(), color::reset())
     } else {
         format!(
@@ -218,6 +253,129 @@ fn status_label(
             color::reset()
         )
     }
+}
+
+fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Result<i32> {
+    let Some(tool) = reg.tools.get(id) else {
+        writeln!(
+            out,
+            "{red}✗{reset} Tool '{id}' not found",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    };
+    let platform = current_platform_key();
+    let loc = locate_tool(tool);
+    if json {
+        let body = serde_json::json!({
+            "id": tool.id,
+            "display_name": tool.display_name,
+            "category": tool.category,
+            "description": tool.description,
+            "install_method": tool.install_method,
+            "install_scope": tool.install_scope,
+            "distribution_lane": tool.distribution_lane,
+            "package_format": tool.package_format,
+            "artifact_status": tool.artifact_status,
+            "artifact_policy": tool.artifact_policy,
+            "artifact_pack_command": tool.artifact_pack_command,
+            "artifact_pack_npm_script": tool.artifact_pack_npm_script,
+            "artifact_verify_command": tool.artifact_verify_command,
+            "artifact_manifest_schema": tool.artifact_manifest_schema,
+            "pinned_version": tool.pinned_version,
+            "bundleable": tool.bundleable,
+            "managed_by_pulp": tool.managed_by_pulp,
+            "platform": platform,
+            "available_on_platform": tool_available_on_platform(tool, platform),
+            "installed": loc.found,
+            "location_source": loc.source,
+            "path": loc.path.to_string_lossy(),
+        });
+        let rendered = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned());
+        writeln!(out, "{rendered}").map_err(io)?;
+        return Ok(0);
+    }
+
+    let name = if tool.display_name.is_empty() {
+        id
+    } else {
+        &tool.display_name
+    };
+    writeln!(out, "{name} {}({id}){}\n", color::dim(), color::reset()).map_err(io)?;
+    if !tool.description.is_empty() {
+        writeln!(out, "{}\n", tool.description).map_err(io)?;
+    }
+    writeln!(out, "Install method: {}", tool.install_method).map_err(io)?;
+    if !tool.install_scope.is_empty() {
+        writeln!(out, "Install scope: {}", tool.install_scope).map_err(io)?;
+    }
+    if !tool.distribution_lane.is_empty() {
+        writeln!(out, "Distribution lane: {}", tool.distribution_lane).map_err(io)?;
+    }
+    if !tool.package_format.is_empty() {
+        writeln!(out, "Package format: {}", tool.package_format).map_err(io)?;
+    }
+    if !tool.artifact_status.is_empty() {
+        writeln!(out, "Artifact status: {}", tool.artifact_status).map_err(io)?;
+    }
+    if !tool.artifact_policy.is_empty() {
+        writeln!(out, "Artifact policy: {}", tool.artifact_policy).map_err(io)?;
+    }
+    if !tool.artifact_pack_command.is_empty() {
+        writeln!(out, "Artifact pack command: {}", tool.artifact_pack_command).map_err(io)?;
+    }
+    if !tool.artifact_pack_npm_script.is_empty() {
+        writeln!(
+            out,
+            "Artifact pack npm script: {}",
+            tool.artifact_pack_npm_script
+        )
+        .map_err(io)?;
+    }
+    if !tool.artifact_verify_command.is_empty() {
+        writeln!(
+            out,
+            "Artifact verify command: {}",
+            tool.artifact_verify_command
+        )
+        .map_err(io)?;
+    }
+    if !tool.artifact_manifest_schema.is_empty() {
+        writeln!(
+            out,
+            "Artifact manifest schema: {}",
+            tool.artifact_manifest_schema
+        )
+        .map_err(io)?;
+    }
+    if !tool.pinned_version.is_empty() {
+        writeln!(out, "Pinned version: {}", tool.pinned_version).map_err(io)?;
+    }
+    writeln!(out, "Platform: {platform}").map_err(io)?;
+    writeln!(
+        out,
+        "Available: {}",
+        if tool_available_on_platform(tool, platform) {
+            "yes"
+        } else {
+            "no"
+        }
+    )
+    .map_err(io)?;
+    if loc.found {
+        writeln!(
+            out,
+            "Installed: yes ({}, {})",
+            loc.source,
+            loc.path.display()
+        )
+        .map_err(io)?;
+    } else {
+        writeln!(out, "Installed: no").map_err(io)?;
+    }
+    Ok(0)
 }
 
 fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
@@ -345,8 +503,7 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
             )
             .map_err(io)?;
         } else {
-            let available =
-                tool.binary_sources.contains_key(platform) || tool.install_method == "python_pip";
+            let available = tool_available_on_platform(tool, platform);
             if available {
                 writeln!(
                     out,
@@ -383,7 +540,39 @@ pub(crate) fn registry_at(p: &std::path::Path) -> Result<ToolRegistry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::fs;
+    use std::sync::MutexGuard;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     fn plant_project(body: &str) -> tempfile::TempDir {
         let td = tempfile::tempdir().unwrap();
@@ -420,9 +609,46 @@ mod tests {
         }"#
     }
 
+    fn info_registry_body() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "tools": {
+                "video-proof": {
+                    "display_name": "Video Proof",
+                    "description": "npm package fixture",
+                    "install_method": "npm_package",
+                    "npm_package_root": "tools/local-ci",
+                    "npm_default_script": "smoke-video-proof",
+                    "pinned_version": "0.0.0",
+                    "install_scope": "machine",
+                    "distribution_lane": "tool_addon",
+                    "package_format": "not_pulp_add",
+                    "artifact_status": "source_tree_iteration",
+                    "artifact_policy": "Keep video proof tooling outside projects.",
+                    "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+                    "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+                    "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
+                    "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
+                }
+            }
+        }"#
+    }
+
     #[test]
     fn parse_list_simple() {
         assert_eq!(parse_sub(&["list".into()]).unwrap(), Sub::List);
+    }
+
+    #[test]
+    fn parse_info_captures_id_and_json_flag() {
+        let s = parse_sub(&["info".into(), "video-proof".into(), "--json".into()]).unwrap();
+        assert_eq!(
+            s,
+            Sub::Info {
+                id: "video-proof".to_owned(),
+                json: true,
+            }
+        );
     }
 
     #[test]
@@ -478,6 +704,47 @@ mod tests {
     }
 
     #[test]
+    fn info_renders_json_metadata() {
+        let td = plant_project(info_registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let mut buf = Vec::new();
+        let rc = info(&reg, "video-proof", true, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let value: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(value["id"], "video-proof");
+        assert_eq!(value["display_name"], "Video Proof");
+        assert_eq!(value["install_method"], "npm_package");
+        assert_eq!(value["install_scope"], "machine");
+        assert_eq!(value["distribution_lane"], "tool_addon");
+        assert_eq!(value["package_format"], "not_pulp_add");
+        assert_eq!(value["artifact_status"], "source_tree_iteration");
+        assert_eq!(
+            value["artifact_manifest_schema"],
+            "pulp.video-proof-tool-package.v1"
+        );
+        assert_eq!(value["available_on_platform"], true);
+        assert_eq!(value["installed"], false);
+    }
+
+    #[test]
+    fn info_renders_text_metadata() {
+        let td = plant_project(info_registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let mut buf = Vec::new();
+        let rc = info(&reg, "video-proof", false, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Install method: npm_package"));
+        assert!(s.contains("Install scope: machine"));
+        assert!(s.contains("Distribution lane: tool_addon"));
+        assert!(s.contains("Package format: not_pulp_add"));
+        assert!(s.contains("Artifact status: source_tree_iteration"));
+        assert!(s.contains("Artifact manifest schema: pulp.video-proof-tool-package.v1"));
+        assert!(s.contains("Available: yes"));
+        assert!(s.contains("Installed: no"));
+    }
+
+    #[test]
     fn doctor_reports_zero_issues_when_nothing_marked_unavailable() {
         let td = plant_project(registry_body());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
@@ -502,6 +769,7 @@ mod tests {
 
     #[test]
     fn install_prints_stub_notice() {
+        let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let mut buf = Vec::new();
         let rc = install(Some("uv"), false, &mut buf).unwrap();
         assert_eq!(rc, 1);
@@ -514,7 +782,15 @@ mod tests {
         let mut buf = Vec::new();
         print_help(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        for cmd in ["list", "install", "uninstall", "path", "run", "doctor"] {
+        for cmd in [
+            "list",
+            "info",
+            "install",
+            "uninstall",
+            "path",
+            "run",
+            "doctor",
+        ] {
             assert!(s.contains(cmd), "missing {cmd}");
         }
     }
@@ -531,6 +807,18 @@ mod tests {
     fn parse_sub_list() {
         let s = parse_sub(&["list".to_owned()]).unwrap();
         assert!(matches!(s, Sub::List));
+    }
+
+    #[test]
+    fn parse_sub_info_requires_id() {
+        let err = parse_sub(&["info".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool info"));
+    }
+
+    #[test]
+    fn parse_sub_info_rejects_extra_positional() {
+        let err = parse_sub(&["info".to_owned(), "uv".to_owned(), "extra".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool info"));
     }
 
     #[test]
@@ -625,8 +913,7 @@ mod tests {
     #[test]
     fn parse_sub_unknown_top_level_errors() {
         let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand)
-                || err.to_string().contains("unknown"));
+        assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
     }
 
     #[test]
@@ -638,6 +925,9 @@ mod tests {
         let rc = run(&Sub::Help, &spawner, &mut buf).unwrap();
         assert_eq!(rc, 0);
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("Usage: pulp tool"), "missing usage in help: {s:?}");
+        assert!(
+            s.contains("Usage: pulp tool"),
+            "missing usage in help: {s:?}"
+        );
     }
 }
