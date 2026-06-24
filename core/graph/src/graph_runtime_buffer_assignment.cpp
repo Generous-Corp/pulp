@@ -1,43 +1,141 @@
 #include <pulp/graph/graph_runtime_buffer_assignment.hpp>
 
+#include <algorithm>
+#include <array>
+#include <vector>
+
 namespace pulp::graph {
+namespace {
+
+// Free-list of contiguous scratch regions bucketed by size. A region of size
+// k is recycled only as a size-k region, which keeps each node's input/output
+// region contiguous (so the executor can keep addressing slots as base + port)
+// while still reusing scratch across non-overlapping lifetimes. Region sizes
+// are port counts, bounded by GraphRuntimeLimits::max_ports_per_node.
+class RegionAllocator {
+public:
+    // Allocate a contiguous region of `size` slots, reusing a freed same-size
+    // region if available, else bumping the high-water mark.
+    std::uint32_t alloc(std::uint32_t size) {
+        if (size == 0) return high_water_;  // empty region: no storage
+        if (size < free_by_size_.size() && !free_by_size_[size].empty()) {
+            const std::uint32_t base = free_by_size_[size].back();
+            free_by_size_[size].pop_back();
+            return base;
+        }
+        const std::uint32_t base = high_water_;
+        high_water_ += size;
+        return base;
+    }
+    void free(std::uint32_t base, std::uint32_t size) {
+        if (size == 0 || size >= free_by_size_.size()) return;
+        free_by_size_[size].push_back(base);
+    }
+    std::uint32_t high_water() const noexcept { return high_water_; }
+
+private:
+    // Index by region size; sizes are bounded by max_ports_per_node (<= 64),
+    // but use a generous fixed bound so an out-of-spec plan never indexes OOB.
+    static constexpr std::size_t kMaxRegionSize = 256;
+    std::array<std::vector<std::uint32_t>, kMaxRegionSize> free_by_size_{};
+    std::uint32_t high_water_ = 0;
+};
+
+} // namespace
 
 GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
     const GraphRuntimePlan& plan) {
     GraphRuntimeBufferAssignment assignment;
+    const std::size_t node_count = plan.nodes.size();
     try {
-        assignment.nodes.resize(plan.nodes.size());
+        assignment.nodes.resize(node_count);
         assignment.feedback_prev_slot.assign(plan.connections.size(), kGraphRuntimeNoSlot);
     } catch (...) {
-        assignment.nodes.clear();
-        assignment.feedback_prev_slot.clear();
-        assignment.slot_count = 0;
+        assignment = {};
         assignment.ok = false;
         return assignment;
     }
 
-    // Lay out each node's input region then output region contiguously. The
-    // running cursor is the next free slot, so the final value is the total
-    // slot count the backing pool must provide.
-    std::uint32_t cursor = 0;
-    for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
-        const auto& node = plan.nodes[i];
-        auto& slots = assignment.nodes[i];
-        slots.input_base = cursor;
-        cursor += node.input_ports;
-        slots.output_base = cursor;
-        cursor += node.output_ports;
+    // A node's output region is live from when it is produced until its last
+    // feedforward consumer runs. A feedback source's output must survive until
+    // the end-of-block capture, so it is pinned past every position. An input
+    // region is live only while its own node runs. We free regions at the END
+    // of the position that last needs them, so a freed region is reused only by
+    // strictly-later nodes — never aliasing a value still being read this block.
+    if (plan.processing_order_indices.size() != node_count) {
+        // Defensive: a malformed plan (validated elsewhere) — fall back to the
+        // unique-slot layout rather than mis-free.
+        assignment = {};
+        assignment.ok = false;
+        return assignment;
     }
 
-    // Append one persistent previous-block storage slot per feedback edge.
-    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
-        if (plan.connections[i].feedback) {
-            assignment.feedback_prev_slot[i] = cursor++;
-            assignment.has_feedback = true;
+    try {
+        std::vector<std::uint32_t> pos(node_count, 0);
+        for (std::uint32_t t = 0; t < plan.processing_order_indices.size(); ++t) {
+            pos[plan.processing_order_indices[t]] = t;
         }
+
+        // last_use[n] = topo position after which node n's OUTPUT region is dead.
+        // Default to the node's own position (no consumer -> dead immediately).
+        std::vector<std::uint32_t> last_use(node_count);
+        for (std::size_t n = 0; n < node_count; ++n) last_use[n] = pos[n];
+        const std::uint32_t pinned = static_cast<std::uint32_t>(node_count);  // never freed in-block
+        // Connection plans store dense node indices in source_index/dest_index.
+        for (const auto& conn : plan.connections) {
+            if (conn.event) continue;
+            if (conn.feedback) {
+                last_use[conn.source_index] = pinned;
+            } else {
+                last_use[conn.source_index] =
+                    std::max(last_use[conn.source_index], pos[conn.dest_index]);
+            }
+        }
+
+        // Regions to free at the end of each topo position.
+        struct FreeReq { std::uint32_t base; std::uint32_t size; };
+        std::vector<std::vector<FreeReq>> frees_at(node_count + 1);
+
+        RegionAllocator alloc;
+        for (std::uint32_t t = 0; t < plan.processing_order_indices.size(); ++t) {
+            const auto node_index = plan.processing_order_indices[t];
+            const auto& node = plan.nodes[node_index];
+            auto& slots = assignment.nodes[node_index];
+
+            slots.input_base = alloc.alloc(node.input_ports);
+            slots.output_base = alloc.alloc(node.output_ports);
+
+            // Input region dies after this node runs.
+            if (node.input_ports > 0) {
+                frees_at[t].push_back({slots.input_base, node.input_ports});
+            }
+            // Output region dies after its last consumer (or never, if pinned).
+            if (node.output_ports > 0) {
+                const std::uint32_t death = last_use[node_index];
+                if (death < node_count) {
+                    frees_at[death].push_back({slots.output_base, node.output_ports});
+                }
+            }
+
+            for (const auto& f : frees_at[t]) alloc.free(f.base, f.size);
+        }
+
+        std::uint32_t cursor = alloc.high_water();
+        // Append one persistent previous-block slot per feedback edge (cross-
+        // block state — never recycled).
+        for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+            if (plan.connections[i].feedback) {
+                assignment.feedback_prev_slot[i] = cursor++;
+                assignment.has_feedback = true;
+            }
+        }
+        assignment.slot_count = cursor;
+    } catch (...) {
+        assignment = {};
+        assignment.ok = false;
+        return assignment;
     }
 
-    assignment.slot_count = cursor;
     assignment.ok = true;
     return assignment;
 }

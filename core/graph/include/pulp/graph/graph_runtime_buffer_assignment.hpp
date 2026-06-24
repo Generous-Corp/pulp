@@ -10,17 +10,18 @@ namespace pulp::graph {
 // Off-RT buffer assignment for the canonical graph executor's routing path.
 //
 // A "slot" is one mono scratch channel buffer (sized max_frames by the pool
-// that backs it). This v1 assignment is correct-but-not-minimal: every node
-// gets a contiguous input region (one slot per input port) and output region
-// (one slot per output port), all distinct. Slot reuse via liveness
-// ref-counting is a later optimization that only shrinks slot_count; consumers
-// read only `slots.input_base + p` / `slots.output_base + p` and slot_count, so
-// the data model below is reuse-ready without churn.
+// that backs it). Each node gets a contiguous input region (one slot per input
+// port) and output region (one slot per output port); a node's own two regions
+// are always disjoint so a binding can read inputs while writing outputs.
 //
-// 4e precondition: reuse means a producer's output slot and a later consumer's
-// input slot may ALIAS. The executor's gather currently zeroes each input slot
-// before summing, which assumes input slots are private scratch — keep input
-// regions private under reuse, or revisit the gather, when liveness lands.
+// Scratch is REUSED across non-overlapping lifetimes (liveness allocation): a
+// region is recycled only by strictly-later nodes in topological order, after
+// its last reader this block, so it never aliases a value still in use. Reuse is
+// size-bucketed to keep regions contiguous, so the executor keeps addressing
+// slots as `slots.input_base + p` / `slots.output_base + p` — reuse only shrinks
+// slot_count, the consumption contract is unchanged. A feedback source's output
+// region is pinned live to end-of-block (the feedback capture reads it), and the
+// per-edge feedback previous-block slots are never recycled (cross-block state).
 //
 // The executor reads inter-node routing straight from the plan's connection
 // table (inbound_connection_indices + connections), so the assignment only
