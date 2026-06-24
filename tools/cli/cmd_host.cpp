@@ -330,7 +330,7 @@ int cmd_host(const std::vector<std::string>& args) {
 #endif
             default:
                 std::fprintf(stderr, "  The plug-in bundle may be malformed, unsigned, or ABI-incompatible.\n"
-                                     "  Re-scan with `pulp host scan` for a structured diagnosis.\n");
+                                     "  Re-scan with `pulp scan` for a structured diagnosis.\n");
                 break;
         }
         return 1;
