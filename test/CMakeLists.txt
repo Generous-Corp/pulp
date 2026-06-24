@@ -4973,6 +4973,15 @@ pulp_add_test_suite(pulp-test-design-import
     TEST_SPEC "~[network]"
     LABELS "parser-import")
 
+# Key-based recognition merge layer (issue #4676): the single module that merges
+# the built-in Pulp Figma Library + user recognition manifests into one resolved
+# component_set_key -> kind table.
+add_executable(pulp-test-recognition-resolver test_recognition_resolver.cpp)
+target_link_libraries(pulp-test-recognition-resolver PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-recognition-resolver PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-recognition-resolver PROPERTIES LABELS "parser-import")
+
 # Reference-free import-fidelity self-checks (core/view/src/design_fidelity.cpp).
 add_executable(pulp-test-design-fidelity test_design_fidelity.cpp)
 target_link_libraries(pulp-test-design-fidelity PRIVATE pulp::view Catch2::Catch2WithMain)

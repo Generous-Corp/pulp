@@ -515,6 +515,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_import.cpp
         src/design_binding_metadata.cpp
         src/design_ir_json.cpp
+        src/recognition_resolver.cpp
         src/design_import_v0_tsx.cpp
         src/design_import_native_common.cpp
         src/design_cpp_codegen.cpp
