@@ -1740,8 +1740,8 @@ TEST_CASE("current_auv3_wrapper_identifier — Apple bundle inspection",
     REQUIRE((id.empty() || !id.empty()));  // tautology — pins no-throw.
 }
 
-// Regression: #2967 / Codex comment 3305508749 — main_is_extension used to
-// test `[bundleIdentifier hasSuffix:@".appex"]`, but bundle IDENTIFIERS are
+// Regression: #2967 — main_is_extension used to test
+// `[bundleIdentifier hasSuffix:@".appex"]`, but bundle IDENTIFIERS are
 // reverse-DNS strings and never carry `.appex`. The check was always false
 // inside real AUv3 extension processes, so detect_host_type() leaked the
 // extension's own bundle id as the host id, breaking host classification.

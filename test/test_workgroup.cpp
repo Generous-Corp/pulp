@@ -38,8 +38,8 @@ TEST_CASE("AudioWorkgroup join without workgroup uses fallback", "[audio][workgr
     }
 }
 
-// Regression: #2970 / Codex comment 3305855151 — the CoreAudio render
-// callback used to set `wg_joined_` to true UNCONDITIONALLY, even if
+// Regression: #2970 — the CoreAudio render callback used to set `wg_joined_`
+// to true UNCONDITIONALLY, even if
 // `join_from_audio_thread()` returned false (a transient failure on the
 // first render call). After that, every later render skipped the join,
 // permanently leaving the audio thread without workgroup membership /

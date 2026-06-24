@@ -153,12 +153,11 @@ TEST_CASE("PluginViewHost::Size custom values", "[ios][view]") {
 
 // ── Platform-specific feature flags ─────────────────────────────────────────
 
-// ── AUv3 HostApp template shape (PR #3095, Codex P2) ───────────────────────
+// ── AUv3 HostApp template shape (PR #3095) ─────────────────────────────────
 //
-// Regression test for the Codex review finding on
-// templates/ios-auv3/HostApp/ContentView.swift:99: "Match the embedded
-// component descriptor exactly". The previous template filtered AUv3
-// components by Pulp manufacturer only and returned the first hit,
+// Regression test for templates/ios-auv3/HostApp/ContentView.swift:99:
+// "Match the embedded component descriptor exactly". The previous template
+// filtered AUv3 components by Pulp manufacturer only and returned the first hit,
 // which made the picker non-deterministic when more than one Pulp AUv3
 // was installed on the same device or simulator. The fix reads the
 // HostApp's own Info.plist AudioComponents[0] entry (mirrored from

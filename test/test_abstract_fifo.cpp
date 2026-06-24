@@ -138,8 +138,8 @@ TEST_CASE("AbstractFifo finish_* with non-positive args is a no-op",
     REQUIRE(fifo.free_space() == 3);
 }
 
-// Regression: Codex PR #2985 review. The previous `next -= capacity_`
-// only handled one overflow span. A finish_write/finish_read advance
+// Regression: PR #2985. The previous `next -= capacity_` only handled one
+// overflow span. A finish_write/finish_read advance
 // larger than one buffer span (which is a caller bug, but the header
 // promised "clamped to keep the fifo coherent") would leave the cursor
 // out of range, and the next prepare_to_* call would return invalid
