@@ -74,6 +74,17 @@ bool is_asset_reference_key(std::string_view key);
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
 IRNode parse_ir_node(const choc::value::ValueView& obj);
 
+// Minimal JSON string escaper; defined in design_ir_json.cpp. Shared with
+// design_ir_report.cpp (the import-report JSON emitter) so the report analysis
+// pass can live in its own TU without duplicating the escaper.
+std::string json_escape(std::string_view text);
+
+// InteractiveElementKind → stable wire id (the recognition kind table); defined
+// in design_ir_json.cpp. Shared with design_ir_report.cpp. (The kind↔id table is
+// a recognition concern slated to move to the recognition module; this
+// declaration keeps the report pass decoupled in the meantime.)
+const char* interactive_kind_id(InteractiveElementKind k);
+
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);
 
