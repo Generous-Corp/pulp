@@ -34,6 +34,9 @@ pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::v
 
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
 pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
+# Sibling drift check for the core-runtime RT-safety contract registry
+# (lock-free primitives, automation queue, graph walk, Processor entry).
+pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

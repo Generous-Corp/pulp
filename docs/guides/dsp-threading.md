@@ -290,6 +290,16 @@ When adding sampler/looper DSP helpers, add or update a contract row and prefer
 conservative `may_allocate`, `may_lock`, and `may_block` flags unless the
 implementation and its callees have been audited.
 
+The same header's `core_runtime_rt_safety_contracts()` is the sibling registry
+for the core RT runtime — the lock-free primitives (`SeqLock`, `TripleBuffer`,
+`SpscQueue`), `ParameterEventQueue`, `AudioProcessLoadMeasurer`,
+`ScopedFlushDenormals`, `SignalGraph::process`, and `Processor::process`. Both
+tables are drift-checked against the same well-formedness invariants
+(audio-callback-allowed ⇒ no alloc/lock/block; lock ⇒ block; unique rows) in
+`test_sampler_rt_safety_contract.cpp` / `test_core_runtime_rt_safety_contract.cpp`.
+The labels are descriptive; the *enforcement* is the no-alloc/no-lock abort-trap
+(see "Verifying the contract in tests").
+
 `pulp::audio::SampleZoneMap` is the prepared sampler mapping primitive for
 key zones, velocity zones, fixed-pitch triggers, chromatic keytracking,
 round-robin groups, slices, and loop metadata. Build or rebuild maps off the

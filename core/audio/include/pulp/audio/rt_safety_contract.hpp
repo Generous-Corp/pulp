@@ -473,4 +473,143 @@ sampler_looper_rt_safety_contracts() noexcept {
     return nullptr;
 }
 
+// Core realtime-runtime callback-boundary contracts. Companion to the
+// sampler/looper table above, extending the codified RT-safety registry beyond
+// the sampler to the lock-free primitives, the per-block automation queue, the
+// host graph walk, the load-telemetry counter, the denormal-mode guard, and
+// the Processor DSP entry point. These labels are DESCRIPTIVE — the actual
+// enforcement is the no-alloc/no-lock abort-trap in
+// test/native_components/rt_intercept_test_support.cpp plus the per-primitive
+// no-alloc tests; the same well-formedness invariants the sampler table is
+// drift-checked against (see test_sampler_rt_safety_contract.cpp) apply here
+// and are asserted in test_core_runtime_rt_safety_contract.cpp.
+inline constexpr std::array kCoreRuntimeRtSafetyContracts{
+    detail::make_rt_safety_contract(
+        "SeqLock",
+        "read",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "one writer thread; any number of reader threads",
+        "Lock-free coherent snapshot via acquire/release seq counter; readers "
+        "bounded-spin-retry on a concurrent write, never block on a lock."),
+    detail::make_rt_safety_contract(
+        "SeqLock",
+        "write",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "single writer thread",
+        "Byte-wise volatile copy bracketed by an odd/even seq increment; cost "
+        "scales with sizeof(T), so keep T small for audio-thread writers."),
+    detail::make_rt_safety_contract(
+        "TripleBuffer",
+        "read_write",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "one writer thread and one reader thread",
+        "Lock-free latest-value publication via a dirty-bit CAS; the writer "
+        "copies whole T into the back buffer, so bound sizeof(T)."),
+    detail::make_rt_safety_contract(
+        "SpscQueue",
+        "try_push_pop",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "one producer thread and one consumer thread",
+        "Wraps choc SingleReaderSingleWriterFIFO; fixed capacity, overflow is "
+        "counted and the push fails rather than allocating."),
+    detail::make_rt_safety_contract(
+        "ParameterEventQueue",
+        "push_sort_clear",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "per-block automation owner on the audio thread",
+        "Fixed-capacity (kCapacity) std::array storage; push/sort/clear never "
+        "allocate, overflow is dropped and counted. sort() is a stable "
+        "insertion sort tuned for near-sorted host automation."),
+    detail::make_rt_safety_contract(
+        "AudioProcessLoadMeasurer",
+        "begin_end",
+        RtSafetyClass::RealtimeTelemetryOnly,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "one measuring thread; any number of polling threads",
+        "steady_clock delta plus relaxed-atomic latest-value stores; emits "
+        "telemetry only, performs no signal processing or control mutation."),
+    detail::make_rt_safety_contract(
+        "ScopedFlushDenormals",
+        "scope",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "audio callback boundary owner",
+        "Sets the CPU flush-to-zero FP mode (MXCSR FTZ / FPCR.FZ) on entry and "
+        "restores the caller's mode on exit; no allocation, lock, or syscall."),
+    detail::make_rt_safety_contract(
+        "SignalGraph",
+        "process",
+        RtSafetyClass::AudioCallbackSafeAfterPrepare,
+        true,
+        false,
+        false,
+        false,
+        true,
+        "audio thread over a prepared, published CompiledGraph snapshot",
+        "Loads the live snapshot via an atomic raw pointer under a reader-count "
+        "guard (deliberately not atomic<shared_ptr>), then walks ordered_runtime "
+        "single-threaded; topology mutation happens off the callback."),
+    detail::make_rt_safety_contract(
+        "Processor",
+        "process",
+        RtSafetyClass::AudioCallbackSafeAfterPrepare,
+        true,
+        false,
+        false,
+        false,
+        true,
+        "audio thread; format adapter sets RT sidecars before the call",
+        "The plugin DSP entry point: no allocation, lock, I/O, or exceptions. "
+        "Adapters wrap it in ScopedNoAlloc; prepare() must run first."),
+};
+
+[[nodiscard]] constexpr std::span<const RtSafetyContract>
+core_runtime_rt_safety_contracts() noexcept {
+    return kCoreRuntimeRtSafetyContracts;
+}
+
+[[nodiscard]] constexpr const RtSafetyContract* find_core_runtime_rt_safety_contract(
+    std::string_view component,
+    std::string_view operation) noexcept {
+    for (const auto& contract : kCoreRuntimeRtSafetyContracts) {
+        if (contract.component == component && contract.operation == operation) {
+            return &contract;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace pulp::audio
