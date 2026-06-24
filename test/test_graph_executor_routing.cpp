@@ -217,6 +217,37 @@ struct SignalGraphFeedback {
     }
 };
 
+// Reference split-lifetime graph: in -> A; A -> B -> out and A -> out. A's
+// output feeds an EARLY consumer (B) and a LATE consumer (out's fan-in), so A's
+// scratch must stay live across the intervening node while other regions are
+// recycled. out:0 = A + B = a*in + b*a*in. Mono.
+std::vector<float> signal_graph_split(float a, float b, double sr, int frames,
+                                      const std::vector<float>& x) {
+    pulp::host::SignalGraph g;
+    const auto n_in = g.add_input_node(1, "In");
+    const auto na = g.add_gain_node("A");
+    const auto nb = g.add_gain_node("B");
+    const auto n_out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(n_in, 0, na, 0));
+    REQUIRE(g.connect(na, 0, nb, 0));
+    REQUIRE(g.connect(nb, 0, n_out, 0));
+    REQUIRE(g.connect(na, 0, n_out, 0));  // A also feeds out (late consumer)
+    REQUIRE(g.set_node_gain(na, a));
+    REQUIRE(g.set_node_gain(nb, b));
+    REQUIRE(g.prepare(sr, frames));
+
+    std::vector<float> xi = x;
+    std::vector<float> yo(static_cast<std::size_t>(frames), 0.0f);
+    std::array<const float*, 1> in_ch{xi.data()};
+    std::array<float*, 1> out_ch{yo.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 1,
+                                            static_cast<std::uint32_t>(frames));
+    g.process(out_view, in_view, frames);
+    return yo;
+}
+
 constexpr double kSr = 48000.0;
 
 } // namespace
@@ -310,6 +341,50 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-o
             for (std::size_t i = 0; i < ref.size(); ++i) {
                 // 2-way fan-in is commutative in IEEE-754 -> bit-exact.
                 REQUIRE(ref[i] == h.outs[0][i]);
+            }
+        }
+    }
+}
+
+TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a split-lifetime fan-out",
+          "[host][graph][executor][routing][phase4][parity]") {
+    // A's output feeds B (early) and out (late); slot reuse must keep A's
+    // scratch live across B. out:0 = A + B.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},  // A
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},  // B
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},  // in -> A
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},  // A -> B (early)
+        GraphRuntimeConnectionSpec{3, 0, 4, 0},  // B -> out
+        GraphRuntimeConnectionSpec{2, 0, 4, 0},  // A -> out (late; fan-in with B)
+    };
+    GraphRuntimeExecutor exec;
+    for (int frames : {1, 64, 256}) {
+        for (auto gains : {std::array<float, 2>{0.5f, 0.5f},
+                           std::array<float, 2>{0.8f, 0.3f},
+                           std::array<float, 2>{1.0f, 0.0f}}) {
+            CAPTURE(frames, gains[0], gains[1]);
+            GainState sa{gains[0]}, sb{gains[1]};
+            const std::array bindings = {
+                GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+                GraphRuntimeNodeBinding{2, routing_gain, &sa, true},
+                GraphRuntimeNodeBinding{3, routing_gain, &sb, true},
+                GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+            };
+            GraphRuntimeSnapshot snapshot;
+            REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+            auto pool = make_pool(snapshot, frames);
+            const std::vector<std::vector<float>> in{test_signal(frames, 0.7f)};
+            RoutedHarness h(kSr, frames, in, 1);
+            REQUIRE(h.run(exec, snapshot, pool).ok());
+            const auto ref = signal_graph_split(gains[0], gains[1], kSr, frames, in[0]);
+            REQUIRE(ref.size() == h.outs[0].size());
+            for (std::size_t i = 0; i < ref.size(); ++i) {
+                REQUIRE(ref[i] == h.outs[0][i]);  // bit-exact under reuse
             }
         }
     }
