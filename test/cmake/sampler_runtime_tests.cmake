@@ -38,6 +38,12 @@ pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
 # (lock-free primitives, automation queue, graph walk, Processor entry).
 pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
 
+# Phase 4 serial-parity baseline: the canonical GraphRuntimeExecutor gain must
+# match SignalGraph bit-for-bit (the regression baseline for converging the
+# host graph onto the executor seam).
+pulp_add_test_suite(pulp-test-graph-executor-parity
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
 pulp_add_test_suite(pulp-test-planar-audio-ring-buffer LIBRARIES pulp::audio)
