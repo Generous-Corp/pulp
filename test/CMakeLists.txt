@@ -5790,7 +5790,7 @@ pulp_add_test_suite(pulp-test-mpe-synth-voice
     LIBRARIES pulp::midi)
 
 # Plugin hosting tests (scanner, signal graph)
-add_executable(pulp-test-host test_host.cpp)
+add_executable(pulp-test-host test_host.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
 # Point the integration test at the locally-built PulpGain.clap so the CLAP
 # loader runs against a known real plugin.

@@ -3,6 +3,10 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/midi/buffer.hpp>
+#include "harness/rt_allocation_probe.hpp"
+#include <array>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -411,6 +415,71 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
         REQUIRE_THAT(after, WithinAbs(before, 1e-6f));
     }
 }
+
+#ifdef PULP_TEST_CLAP_PATH
+// PulpGain.clap is Pulp's own alloc-free gain effect, so any heap allocation
+// during slot->process() is attributable to the host-side ClapSlot wrapper —
+// exactly the in_ptrs_/out_ptrs_/in_event_storage_ vectors that prepare() now
+// reserves. Asserts a steady-state block allocates zero times.
+TEST_CASE("ClapSlot::process is allocation-free after prepare() reserves",
+          "[host][slot][clap][rt-safety][no-alloc]") {
+    namespace fs = std::filesystem;
+    if (!fs::exists(PULP_TEST_CLAP_PATH)) {
+        SUCCEED("PulpGain.clap not built — skipping ClapSlot process no-alloc test");
+        return;
+    }
+
+    PluginInfo info;
+    info.name = "PulpGain";
+    info.path = PULP_TEST_CLAP_PATH;
+    info.format = PluginFormat::CLAP;
+
+    auto slot = PluginSlot::load(info);
+    if (!slot) {
+        SUCCEED("PulpGain.clap not loadable in this environment");
+        return;
+    }
+
+    constexpr int kFrames = 128;
+    REQUIRE(slot->prepare(48000.0, kFrames));
+
+    std::vector<float> l_in(kFrames, 0.25f), r_in(kFrames, 0.25f);
+    std::vector<float> l_out(kFrames, 0.0f), r_out(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l_in.data(), r_in.data()};
+    std::array<float*, 2> out_ch{l_out.data(), r_out.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    // Populate parameter + MIDI events so the first block also exercises the
+    // in_event_storage_ emplace path, not just the channel-pointer vectors.
+    ParameterEventQueue param_events;
+    const auto params = slot->parameters();
+    if (!params.empty()) {
+        param_events.push(pulp::state::ParameterEvent{
+            .param_id = params.front().id, .sample_offset = 0, .value = 0.5f});
+    }
+    pulp::midi::MidiBuffer midi_in;
+    midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    midi_in.add(pulp::midi::MidiEvent::cc(0, 1, 64));
+    pulp::midi::MidiBuffer midi_out;
+
+    // Measure the FIRST block after prepare(), deliberately with no warm-up:
+    // that is exactly where the prepare()-time reserve pays off. Without it,
+    // the first in_ptrs_/out_ptrs_ resize (from capacity 0) and the first
+    // in_event_storage_ emplace would each grow-and-allocate; a warmed-up
+    // block would hide that because the vectors would already hold capacity.
+    // PulpGain's gain process() is itself allocation-free, so any allocation
+    // here is attributable to the host-side ClapSlot wrapper.
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        slot->process(out_view, in_view, midi_in, midi_out, param_events, kFrames);
+        allocation_count = probe.allocation_count();
+    }
+
+    REQUIRE(allocation_count == 0);
+}
+#endif  // PULP_TEST_CLAP_PATH
 
 // #297 regression: VST3 set_parameter must mirror to the controller AND
 // queue an edit for processor delivery in the next block. The processor

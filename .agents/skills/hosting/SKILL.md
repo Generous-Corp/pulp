@@ -228,6 +228,30 @@ predictable output, no MIDI.
   Keep the loader's magic-byte preflight before `dlopen` / `LoadLibrary` so
   invalid modules fail quickly and consistently on Windows instead of waiting
   on the platform loader.
+- A slot's per-block scratch must be reserved in `prepare()`, not grown in
+  `process()`. The CLAP slot fills `in_ptrs_`/`out_ptrs_` and emplaces into
+  `in_event_storage_` each block; on a default-constructed vector the first
+  `resize`/`emplace_back` allocates on the audio thread. Reserve the channel
+  vectors from `PluginInfo::num_inputs/num_outputs` (the graph sizes node
+  buffers from these, floored at stereo) and the event scratch for
+  `params_.size() + ParameterEventQueue::kCapacity +` the realtime MIDI cap.
+  Guard with a `PULP_DBG_ASSERT(capacity >= needed)` tripwire (debug-only).
+  This holds for the graph-driven path; a direct caller passing more channels
+  or an un-capacity-limited `MidiBuffer` is outside the contract. No-alloc
+  coverage lives in `test_host.cpp` ("ClapSlot::process is allocation-free
+  after prepare() reserves"), gated on `PULP_TEST_CLAP_PATH`.
+- The VST3 slot has the same channel-vector issue *plus* extra per-block
+  allocation inside the Steinberg helper containers it builds each block
+  (`Vst::ParameterChanges` / `EventList` from `public.sdk/.../hosting`), so
+  reserving `in_ptrs_`/`out_ptrs_` alone does NOT make `Vst3Slot::process`
+  allocation-free — a `PULP_TEST_VST3_PATH` no-alloc test against
+  `PulpGain.vst3` still trips. Making the VST3 slot RT-safe needs those SDK
+  containers pre-sized too; tracked as a follow-up, not yet done.
+- Fixture wiring (`PULP_TEST_CLAP_PATH`, future `PULP_TEST_VST3_PATH`) lives in
+  the ROOT `CMakeLists.txt` block *after* `add_subdirectory(examples)` — NOT in
+  `test/CMakeLists.txt`, which is registered before `examples/` so it cannot
+  see the `PulpGain_*` targets at configure time. A guard placed in `test/`
+  silently never runs (its define just appears stale in an incremental build).
 
 ## Audio-thread snapshot contracts
 
