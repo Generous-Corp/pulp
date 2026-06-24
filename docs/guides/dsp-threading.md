@@ -264,9 +264,22 @@ audio thread by binding one process callback per dense graph node, then pass the
 active snapshot into each executor call. Do not reset or clear a snapshot while
 any realtime call may still reference it. The executor validates the block,
 drains graph queues without heap allocation, emits bounded command
-accepted/rejected events, and visits nodes in plan order. Snapshot
-publication/lifetime policy, audio-buffer routing, feedback delay storage, and
-`SignalGraph` mutation belong to later graph-runtime migration slices.
+accepted/rejected events, and visits nodes in plan order.
+
+`GraphRuntimeExecutor::process_routed()` adds inter-node audio routing on top of
+that walk for feedforward graphs. The snapshot computes a
+`graph::GraphRuntimeBufferAssignment` off the audio thread (one mono scratch
+slot per node input/output port); the caller pre-allocates a
+`GraphRuntimeBufferPool` of that many slots and reuses it across blocks. Per
+node the executor gathers (zero then sum) each non-feedback inbound connection
+from its upstream output slot, then either copies the main I/O bus (AudioInput /
+AudioOutput nodes) or hands the binding `node_inputs` / `node_outputs` views over
+its scratch slots. The routed path allocates and locks nothing on the RT thread
+(the pool must already `fits()` the snapshot for the block) and matches
+`host::SignalGraph` bit-for-bit on feedforward graphs. A plan with any feedback
+connection is rejected with `UnsupportedFeedbackEdge` — feedback delay storage,
+single-writer ownership, slot reuse, and the `SignalGraph` walk migration belong
+to later graph-runtime slices.
 
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an

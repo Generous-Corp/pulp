@@ -1,6 +1,8 @@
 #pragma once
 
+#include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
+#include <pulp/graph/graph_runtime_buffer_assignment.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
 
@@ -25,6 +27,9 @@ enum class GraphRuntimeExecutorErrorCode : std::uint8_t {
     CommandScratchTooSmall,
     MissingRequiredProcessor,
     NodeProcessorFailed,
+    BufferPoolTooSmall,
+    NodePortLimitExceeded,
+    UnsupportedFeedbackEdge,
 };
 
 struct GraphRuntimeCommandDecision {
@@ -37,6 +42,12 @@ struct GraphRuntimeNodeProcessContext {
     const graph::GraphRuntimeNodePlan* node = nullptr;
     std::uint32_t node_index = 0;
     std::span<const GraphRuntimeCommandDecision> command_results;
+    // Per-node routed I/O, populated only by the routing process() path; empty
+    // on the shared-block path. A routing binding reads `node_inputs` (already
+    // gathered from upstream output slots) and writes `node_outputs` (its
+    // assigned scratch slots). Channels are mono slots from the buffer pool.
+    audio::BufferView<const float> node_inputs;
+    audio::BufferView<float> node_outputs;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -83,9 +94,18 @@ public:
     }
     std::uint32_t node_count() const noexcept { return plan_.node_count(); }
 
+    // Scratch-slot layout for the routing process() path, computed off-RT in
+    // reset() from the plan. slot_count() is the number of mono slots a backing
+    // GraphRuntimeBufferPool must provide.
+    const graph::GraphRuntimeBufferAssignment& buffer_assignment() const noexcept {
+        return assignment_;
+    }
+    std::uint32_t buffer_slot_count() const noexcept { return assignment_.slot_count; }
+
 private:
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
+    graph::GraphRuntimeBufferAssignment assignment_;
 };
 
 struct GraphRuntimeEventSink {
@@ -124,9 +144,49 @@ struct GraphRuntimeExecutorResult {
     }
 };
 
+/// Pre-allocated scratch buffers backing the routing process() path.
+///
+/// One slot is a mono buffer of `max_frames` floats. The caller sizes the pool
+/// off-RT from a snapshot's buffer_slot_count() and the maximum block size, then
+/// reuses it across realtime blocks. The executor never resizes it.
+class GraphRuntimeBufferPool {
+public:
+    // Off-RT: (re)allocate storage for `slot_count` mono slots of `max_frames`.
+    // Zero-fills, so the first block (and any feedback edge) reads silence.
+    // Returns false on allocation failure or zero max_frames with slots.
+    bool reset(std::uint32_t slot_count, std::uint32_t max_frames);
+    void clear() noexcept;
+
+    std::uint32_t slot_count() const noexcept { return slot_count_; }
+    std::uint32_t max_frames() const noexcept { return max_frames_; }
+
+    // RT-safe: mono buffer for slot `index`, or nullptr if out of range.
+    float* slot_data(std::uint32_t index) noexcept {
+        if (index >= slot_count_) return nullptr;
+        return storage_.data() + static_cast<std::size_t>(index) * max_frames_;
+    }
+    const float* slot_data(std::uint32_t index) const noexcept {
+        if (index >= slot_count_) return nullptr;
+        return storage_.data() + static_cast<std::size_t>(index) * max_frames_;
+    }
+
+    // True when the pool can back `snapshot`'s routing for a block of `frames`.
+    bool fits(const GraphRuntimeSnapshot& snapshot, std::uint32_t frames) const noexcept {
+        return slot_count_ >= snapshot.buffer_slot_count() && frames <= max_frames_;
+    }
+
+private:
+    std::vector<float> storage_;
+    std::uint32_t slot_count_ = 0;
+    std::uint32_t max_frames_ = 0;
+};
+
 class GraphRuntimeExecutor {
 public:
     static constexpr std::size_t kMaxInlineCommandCapacity = 256;
+    // Upper bound on ports per node for the routing path's on-stack channel
+    // pointer arrays. Matches GraphRuntimeLimits::max_ports_per_node.
+    static constexpr std::uint32_t kMaxRoutedPortsPerNode = 64;
 
     GraphRuntimeExecutor() = default;
 
@@ -175,6 +235,27 @@ public:
                        sink);
     }
 
+    // Routing process() path: routes inter-node audio through `pool` per the
+    // snapshot's buffer_assignment(). AudioInput nodes read the block's main
+    // input bus into their output slots; AudioOutput nodes write their gathered
+    // input slots to the main output bus; all other nodes have their
+    // node_inputs gathered (summed) from upstream output slots and their
+    // node_outputs pointed at their scratch slots before the binding runs.
+    // Allocation-free: `pool` must already fit() the snapshot for this block.
+    //
+    // Feedforward graphs only. A plan with any feedback connection is rejected
+    // with UnsupportedFeedbackEdge (feedback needs previous-block slot capture,
+    // a later phase) rather than silently producing a feedback-edge-is-silence
+    // result that diverges from the host graph.
+    GraphRuntimeExecutorResult process_routed(
+        ProcessBlock& block,
+        const GraphRuntimeSnapshot& snapshot,
+        GraphRuntimeBufferPool& pool,
+        std::span<const graph::GraphTimedCommand> commands = {},
+        std::span<GraphRuntimeCommandDecision> command_results = {},
+        GraphRuntimeCommandHandler command_handler = {},
+        GraphRuntimeEventSink event_sink = {}) noexcept;
+
     GraphRuntimeExecutorStats stats() const noexcept;
     void reset_stats() noexcept;
 
@@ -182,6 +263,17 @@ private:
     GraphRuntimeExecutorResult fail_invalid_block() noexcept;
     GraphRuntimeExecutorResult fail_invalid_snapshot() noexcept;
     GraphRuntimeExecutorResult fail_command_scratch_too_small() noexcept;
+
+    // Shared command-drain used by both process() paths; fills command_results
+    // and updates result + stats. Returns false if command_results is too small.
+    bool drain_commands(
+        ProcessBlock& block,
+        const graph::GraphRuntimePlan& plan,
+        std::span<const graph::GraphTimedCommand> commands,
+        std::span<GraphRuntimeCommandDecision> command_results,
+        GraphRuntimeCommandHandler command_handler,
+        GraphRuntimeEventSink event_sink,
+        GraphRuntimeExecutorResult& result) noexcept;
 
     std::atomic<std::uint64_t> blocks_processed_{0};
     std::atomic<std::uint64_t> nodes_processed_{0};

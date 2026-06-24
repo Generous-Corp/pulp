@@ -594,6 +594,20 @@ inline constexpr std::array kCoreRuntimeRtSafetyContracts{
         "audio thread; format adapter sets RT sidecars before the call",
         "The plugin DSP entry point: no allocation, lock, I/O, or exceptions. "
         "Adapters wrap it in ScopedNoAlloc; prepare() must run first."),
+    detail::make_rt_safety_contract(
+        "GraphRuntimeExecutor",
+        "process_routed",
+        RtSafetyClass::AudioCallbackSafeAfterPrepare,
+        true,
+        false,
+        false,
+        false,
+        true,
+        "audio thread over a prepared snapshot + pre-sized GraphRuntimeBufferPool",
+        "Routes feedforward inter-node audio through caller-allocated scratch "
+        "slots: gather/scatter are bounded fills and copies, no allocation or "
+        "lock. The snapshot's buffer assignment and the pool are built off the "
+        "callback; pool.fits() must hold for the block."),
 };
 
 [[nodiscard]] constexpr std::span<const RtSafetyContract>

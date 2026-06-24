@@ -43,6 +43,13 @@ pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::au
 # host graph onto the executor seam).
 pulp_add_test_suite(pulp-test-graph-executor-parity
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Phase 4a: off-RT scratch-slot buffer-assignment layout.
+pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
+# Phase 4b: executor routing path moves audio between nodes (two-gain chain
+# parity vs SignalGraph) and is allocation-free on the RT thread.
+pulp_add_test_suite(pulp-test-graph-executor-routing
+    SOURCES test_graph_executor_routing.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

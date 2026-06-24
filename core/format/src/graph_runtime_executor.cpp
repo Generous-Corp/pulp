@@ -1,6 +1,7 @@
 #include <pulp/format/graph_runtime_executor.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace pulp::format {
@@ -45,6 +46,25 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 
 } // namespace
 
+bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
+    if (slot_count > 0 && max_frames == 0) return false;
+    try {
+        storage_.assign(static_cast<std::size_t>(slot_count) * max_frames, 0.0f);
+    } catch (...) {
+        clear();
+        return false;
+    }
+    slot_count_ = slot_count;
+    max_frames_ = max_frames;
+    return true;
+}
+
+void GraphRuntimeBufferPool::clear() noexcept {
+    storage_.clear();
+    slot_count_ = 0;
+    max_frames_ = 0;
+}
+
 bool GraphRuntimeSnapshot::reset(
     graph::GraphRuntimePlan plan,
     std::span<const GraphRuntimeNodeBinding> bindings) {
@@ -59,8 +79,14 @@ bool GraphRuntimeSnapshot::reset(
     }
 
     try {
+        auto assignment = graph::build_graph_runtime_buffer_assignment(plan);
+        if (!assignment.ok) {
+            clear();
+            return false;
+        }
         plan_ = std::move(plan);
         bindings_.assign(bindings.begin(), bindings.end());
+        assignment_ = std::move(assignment);
     } catch (...) {
         clear();
         return false;
@@ -71,11 +97,13 @@ bool GraphRuntimeSnapshot::reset(
 void GraphRuntimeSnapshot::clear() noexcept {
     plan_.clear();
     bindings_.clear();
+    assignment_ = {};
 }
 
 bool GraphRuntimeSnapshot::valid() const noexcept {
     if (bindings_.size() != plan_.nodes.size()) return false;
     if (plan_.processing_order_indices.size() != plan_.nodes.size()) return false;
+    if (assignment_.nodes.size() != plan_.nodes.size()) return false;
     for (std::uint32_t i = 0; i < plan_.nodes.size(); ++i) {
         if (bindings_[i].node_id != plan_.nodes[i].id) return false;
     }
@@ -85,21 +113,16 @@ bool GraphRuntimeSnapshot::valid() const noexcept {
     return true;
 }
 
-GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
+bool GraphRuntimeExecutor::drain_commands(
     ProcessBlock& block,
-    const GraphRuntimeSnapshot& snapshot,
+    const graph::GraphRuntimePlan& plan,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
-    GraphRuntimeEventSink event_sink) noexcept {
-    if (!block.validate()) return fail_invalid_block();
-    if (!snapshot.valid()) return fail_invalid_snapshot();
-    if (command_results.size() < commands.size()) return fail_command_scratch_too_small();
+    GraphRuntimeEventSink event_sink,
+    GraphRuntimeExecutorResult& result) noexcept {
+    if (command_results.size() < commands.size()) return false;
 
-    const auto& plan = snapshot.plan();
-    const auto bindings = snapshot.bindings();
-
-    GraphRuntimeExecutorResult result;
     result.commands_drained = static_cast<std::uint32_t>(commands.size());
     commands_drained_.fetch_add(result.commands_drained, std::memory_order_relaxed);
 
@@ -135,6 +158,27 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
             events_dropped_.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    return true;
+}
+
+GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
+    ProcessBlock& block,
+    const GraphRuntimeSnapshot& snapshot,
+    std::span<const graph::GraphTimedCommand> commands,
+    std::span<GraphRuntimeCommandDecision> command_results,
+    GraphRuntimeCommandHandler command_handler,
+    GraphRuntimeEventSink event_sink) noexcept {
+    if (!block.validate()) return fail_invalid_block();
+    if (!snapshot.valid()) return fail_invalid_snapshot();
+
+    const auto& plan = snapshot.plan();
+    const auto bindings = snapshot.bindings();
+
+    GraphRuntimeExecutorResult result;
+    if (!drain_commands(block, plan, commands, command_results, command_handler,
+                        event_sink, result)) {
+        return fail_command_scratch_too_small();
+    }
 
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
@@ -160,6 +204,151 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
             result.failed_node_index = node_index;
             node_failures_.fetch_add(1, std::memory_order_relaxed);
             return result;
+        }
+
+        ++result.nodes_processed;
+        nodes_processed_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    blocks_processed_.fetch_add(1, std::memory_order_relaxed);
+    return result;
+}
+
+GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
+    ProcessBlock& block,
+    const GraphRuntimeSnapshot& snapshot,
+    GraphRuntimeBufferPool& pool,
+    std::span<const graph::GraphTimedCommand> commands,
+    std::span<GraphRuntimeCommandDecision> command_results,
+    GraphRuntimeCommandHandler command_handler,
+    GraphRuntimeEventSink event_sink) noexcept {
+    if (!block.validate()) return fail_invalid_block();
+    if (!snapshot.valid()) return fail_invalid_snapshot();
+
+    const auto& plan = snapshot.plan();
+    const auto bindings = snapshot.bindings();
+    const auto& assignment = snapshot.buffer_assignment();
+    const auto frames = block.frame_count;
+
+    if (assignment.has_feedback) {
+        // Feedback needs previous-block slot capture (a later phase); the serial
+        // gather would otherwise read silence on the feedback edge and silently
+        // diverge from the host graph. Fail loudly instead.
+        GraphRuntimeExecutorResult fail;
+        fail.error = GraphRuntimeExecutorErrorCode::UnsupportedFeedbackEdge;
+        return fail;
+    }
+    if (!pool.fits(snapshot, frames)) {
+        GraphRuntimeExecutorResult fail;
+        fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
+        return fail;
+    }
+
+    GraphRuntimeExecutorResult result;
+    if (!drain_commands(block, plan, commands, command_results, command_handler,
+                        event_sink, result)) {
+        return fail_command_scratch_too_small();
+    }
+
+    const BusBuffer* in_bus =
+        block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
+    BusBuffer* out_bus =
+        block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+
+    for (const auto node_index : plan.processing_order_indices) {
+        if (node_index >= bindings.size()) return fail_invalid_snapshot();
+
+        const auto& node = plan.nodes[node_index];
+        const auto& slots = assignment.nodes[node_index];
+
+        if (node.input_ports > kMaxRoutedPortsPerNode ||
+            node.output_ports > kMaxRoutedPortsPerNode) {
+            result.error = GraphRuntimeExecutorErrorCode::NodePortLimitExceeded;
+            result.failed_node_index = node_index;
+            node_failures_.fetch_add(1, std::memory_order_relaxed);
+            return result;
+        }
+
+        // Gather: zero each input slot (unconnected ports stay silent), then
+        // sum every non-feedback audio connection from its upstream output slot.
+        for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+            if (float* dst = pool.slot_data(slots.input_base + p)) {
+                std::fill_n(dst, frames, 0.0f);
+            }
+        }
+        for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+            const auto conn_index =
+                plan.inbound_connection_indices[node.first_inbound_connection + c];
+            const auto& conn = plan.connections[conn_index];
+            if (conn.feedback || conn.event) continue;
+            const auto& src_slots = assignment.nodes[conn.source_index];
+            const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+            float* dst = pool.slot_data(slots.input_base + conn.dest_port);
+            if (src == nullptr || dst == nullptr) continue;
+            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+        }
+
+        switch (node.kind) {
+            case graph::GraphRuntimeNodeKind::AudioInput: {
+                for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+                    float* dst = pool.slot_data(slots.output_base + p);
+                    if (dst == nullptr) continue;
+                    if (in_bus != nullptr && p < in_bus->input.num_channels()) {
+                        std::copy_n(in_bus->input.channel_ptr(p), frames, dst);
+                    } else {
+                        std::fill_n(dst, frames, 0.0f);
+                    }
+                }
+                break;
+            }
+            case graph::GraphRuntimeNodeKind::AudioOutput: {
+                for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+                    if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
+                    const float* src = pool.slot_data(slots.input_base + p);
+                    if (src == nullptr) continue;
+                    std::copy_n(src, frames, out_bus->output.channel_ptr(p));
+                }
+                break;
+            }
+            default: {
+                const auto& binding = bindings[node_index];
+                if (!binding.process) {
+                    if (binding.required) {
+                        result.error =
+                            GraphRuntimeExecutorErrorCode::MissingRequiredProcessor;
+                        result.failed_node_index = node_index;
+                        node_failures_.fetch_add(1, std::memory_order_relaxed);
+                        return result;
+                    }
+                    break;  // optional no-op; its output slots stay silent
+                }
+
+                std::array<const float*, kMaxRoutedPortsPerNode> in_ptrs{};
+                std::array<float*, kMaxRoutedPortsPerNode> out_ptrs{};
+                for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+                    in_ptrs[p] = pool.slot_data(slots.input_base + p);
+                }
+                for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+                    out_ptrs[p] = pool.slot_data(slots.output_base + p);
+                }
+
+                GraphRuntimeNodeProcessContext context;
+                context.plan = &plan;
+                context.node = &node;
+                context.node_index = node_index;
+                context.command_results = command_results.first(commands.size());
+                context.node_inputs = audio::BufferView<const float>(
+                    in_ptrs.data(), node.input_ports, frames);
+                context.node_outputs = audio::BufferView<float>(
+                    out_ptrs.data(), node.output_ports, frames);
+                if (!binding.process(block, context, binding.user_data)) {
+                    result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
+                    result.failed_node_index = node_index;
+                    node_failures_.fetch_add(1, std::memory_order_relaxed);
+                    return result;
+                }
+                break;
+            }
         }
 
         ++result.nodes_processed;
