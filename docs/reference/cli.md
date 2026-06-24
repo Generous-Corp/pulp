@@ -996,7 +996,7 @@ Notes:
 
 **Status**: usable
 
-Browse local documentation and status manifests. All subcommands read from local files in `docs/` only -- no web calls.
+Browse local documentation and status manifests. Reader subcommands read from local files in `docs/` only -- no web calls. Build subcommands invoke the local docs tooling.
 
 ```bash
 pulp docs                         # Show help
@@ -1008,6 +1008,8 @@ pulp docs show command <name>     # Look up a CLI command
 pulp docs show cmake <name>       # Look up a CMake function
 pulp docs show style              # Show code style rules
 pulp docs check                   # Validate docs consistency
+pulp docs build-site              # Generate the static docs site
+pulp docs build-api               # Generate API reference docs
 ```
 
 **Subcommands**:
@@ -1022,6 +1024,8 @@ pulp docs check                   # Validate docs consistency
 | `show cmake <name>` | Look up a CMake function from `cmake-functions.yaml` |
 | `show style` | Display style rules from `style-rules.yaml` with links to policy docs |
 | `check` | Validate docs consistency: manifest links, index completeness, status vocabulary, module dependencies vs CMake |
+| `build-site` | Generate the static docs site through MkDocs |
+| `build-api` | Generate API reference docs through Doxygen |
 
 ### design
 
