@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04640"></a>
+## [0.464.0] - 2026-06-24
+
+- feat(graph): inter-node audio routing through the canonical executor (Phase 4a/4b) ([#4680](https://github.com/danielraffel/pulp/pull/4680))
+- test(host): SignalGraph<->GraphRuntimeExecutor gain output-parity (Phase 4) ([#4675](https://github.com/danielraffel/pulp/pull/4675))
+- feat(audio): extend RT-safety contract registry to the core runtime ([#4672](https://github.com/danielraffel/pulp/pull/4672))
+- docs(cli): document doctor au cache flag ([#4671](https://github.com/danielraffel/pulp/pull/4671))
+- tools(cli): classify shellout commands as slashless ([#4669](https://github.com/danielraffel/pulp/pull/4669))
+- tools(cli): classify macos overflow as slashless ([#4668](https://github.com/danielraffel/pulp/pull/4668))
+- docs(cli): remove stale pulp new references ([#4666](https://github.com/danielraffel/pulp/pull/4666))
+- feat(host): per-node CPU-load telemetry via SignalGraph::node_loads() ([#4662](https://github.com/danielraffel/pulp/pull/4662))
+
 <a id="v04639"></a>
 ## [0.463.9] - 2026-06-23
 
@@ -4925,6 +4937,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.464.0]: https://github.com/danielraffel/pulp/releases/tag/v0.464.0
 [0.463.9]: https://github.com/danielraffel/pulp/releases/tag/v0.463.9
 [0.463.8]: https://github.com/danielraffel/pulp/releases/tag/v0.463.8
 [0.463.7]: https://github.com/danielraffel/pulp/releases/tag/v0.463.7
