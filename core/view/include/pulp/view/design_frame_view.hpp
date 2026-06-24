@@ -196,9 +196,15 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 // typed element list. This is the faithful-vector design-import lane's view: the
 // importer materializes one of these per imported frame.
 //
-// Each drag patches only the dragged knob's needle in the SVG and repaints. The
-// SVG is currently re-rendered per repaint (SkSVGDOM rebuilds the DOM each
-// draw_svg call), which is acceptable at interactive rates for this view.
+// Each drag patches only the dragged knob's needle in the SVG and repaints.
+// Canvas::draw_svg parses the SVG into an SkSVGDOM keyed on the document bytes
+// (process-wide SvgDomCache), so a repaint of an UNCHANGED document — static
+// chrome, or a frame whose only motion is a native-overlay child — reuses the
+// parsed DOM instead of rebuilding it. A render-patched document (rotated knob
+// needle, translated fader/xy_pad thumb, toggle-switch slide) is a different
+// string, so it misses the cache and rebuilds, keeping the dragged element
+// live. The rasterized output is byte-identical to the uncached path; only the
+// parse step is skipped on a hit.
 class DesignFrameView : public View {
 public:
     // `svg` is the full SVG document. The panel (the design body the window

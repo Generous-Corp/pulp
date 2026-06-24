@@ -53,8 +53,11 @@ The plugin extends Claude Code with:
   the CLI.
 - **MCP server**: Claude can call build/test/inspect tools as MCP
   tool calls instead of shell-and-parse. Highest value for the
-  inspector tools (`pulp_inspect_dom`, `pulp_inspect_evaluate`,
+  inspector tools (`pulp_inspect_dom`, `pulp_inspect_params`,
   etc.) which wrap the running-plugin inspector socket protocol.
+  `pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently
+  return explicit unavailable errors until script-engine and
+  host-capture wiring lands.
 - **Setup hook**: when a Claude Code session starts in a project that
   has the plugin installed but `pulp` is not on PATH, prints a
   one-time install banner. Informational, never blocks the session.

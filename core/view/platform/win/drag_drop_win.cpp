@@ -21,14 +21,16 @@
 
 namespace pulp::view {
 
-bool begin_file_drag(void* /*native_view*/, const FileDragRequest& request) {
+bool begin_file_drag(void* native_view, const FileDragRequest& request) {
+    if (native_view == nullptr) return false;
     if (request.file_paths.empty()) return false;
     // DoDragDrop requires the calling thread to be an OLE-initialized STA. A
     // standalone app's UI thread usually already is (SDL initializes OLE for its
-    // own drag-drop), but OleInitialize is ref-counted — S_FALSE when already
-    // initialized — and the paired OleUninitialize merely decrements, so this is
-    // safe whether or not the host set it up. native_view (the HWND) is unused:
-    // DoDragDrop tracks the live mouse itself and needs no source window.
+    // own drag-drop), but OleInitialize is ref-counted: S_FALSE when already
+    // initialized, and the paired OleUninitialize merely decrements, so this is
+    // safe whether or not the host set it up. After the null-handle contract is
+    // satisfied, native_view (the HWND) is unused: DoDragDrop tracks the live
+    // mouse itself and needs no source window.
     const HRESULT oi = OleInitialize(nullptr);
     const bool did_init = (oi == S_OK || oi == S_FALSE);
     const bool ok = win_drag::win_run_file_drag(request);

@@ -6531,9 +6531,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
-        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_css_per_edge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"addEventListener('drop', fn) routes through registerDrop\""
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 `wheel` and `drag*`/`drop` event types are now routed through `registerWheel` / `registerDrop` from inside `_registerNativeEvent`, so DOM consumers no longer need to call the platform-specific bridge fns directly. The full multi-stage drag lifecycle (native drag-image rendering, dragstart/drag/dragend on the source element) remains a roadmap item \u2014 the bridge fires a single `drop` callback at completion and we synthesize a DragEvent-shaped object for the target element. Hover events fixed earlier in PR #1173 (pulp #1149 part a).",
       "issue": "1149"

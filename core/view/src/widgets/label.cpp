@@ -5,6 +5,7 @@
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>  // font_registration_generation() for the shaped-layout cache key
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -694,12 +695,34 @@ void Label::paint(canvas::Canvas& canvas) {
         multi_line_ &&
         bounds().width > 0.0f;
 
-    canvas::ShapedLayout shaped_layout;
+    // Reuse the cached shaped layout when nothing the shaper depends on has
+    // changed, so paint() avoids re-running prepare() + layout_with_lines()
+    // (which allocate a PreparedText and per-line strings) every frame inside
+    // View::paint_all's no-alloc region. The key captures every shaper input:
+    // display_text, the resolved family/size, the wrap width (bounds().width,
+    // which changes on every resize), the resolved line height, and the break
+    // mode. max_lines is always 0 here. On a hit the layout is read in place
+    // (no copy, no re-shape); the output is byte-identical to a recompute.
+    const canvas::ShapedLayout* shaped_layout = nullptr;
     if (use_shaper_wrap) {
-        auto& shaper = canvas::global_text_shaper();
-        auto prepared = shaper.prepare(display_text, family, effective_font_size);
-        shaped_layout = shaper.layout_with_lines(
-            prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+        // font_registration_generation() is part of the key because the
+        // shaper's measure_segment() resamples the resolved typeface (and thus
+        // glyph advances → wrap points) whenever a font is (re)registered —
+        // e.g. an async register_font_url() completing after the first paint.
+        // Without it a Label that first shaped against the fallback face would
+        // serve that stale wrap until some other key field happened to change.
+        ShapedLayoutKey key{display_text, family, effective_font_size,
+                            bounds().width, lh, static_cast<int>(break_mode),
+                            canvas::font_registration_generation()};
+        if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
+            auto& shaper = canvas::global_text_shaper();
+            auto prepared = shaper.prepare(display_text, family, effective_font_size);
+            shaped_cache_layout_ = shaper.layout_with_lines(
+                prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+            shaped_cache_key_ = std::move(key);
+            shaped_cache_valid_ = true;
+        }
+        shaped_layout = &shaped_cache_layout_;
     }
 
     // When line-clamp drops source lines, the painted block height must
@@ -719,7 +742,7 @@ void Label::paint(canvas::Canvas& canvas) {
     // shaped_layout.line_count is the count the shaper actually produced.
     int source_lines = multi_line_
         ? (use_shaper_wrap
-               ? std::max(1, shaped_layout.line_count)
+               ? std::max(1, shaped_layout->line_count)
                : static_cast<int>(std::count(display_text.begin(),
                                              display_text.end(), '\n')) + 1
                  - (!display_text.empty() && display_text.back() == '\n' ? 1 : 0))
@@ -814,7 +837,7 @@ void Label::paint(canvas::Canvas& canvas) {
             // of `\n`-splitting. Line-clamp + ellipsis logic is identical,
             // driven by source_lines (= shaped_layout.line_count) and
             // visible_lines.
-            for (const auto& shaped_line : shaped_layout.lines) {
+            for (const auto& shaped_line : shaped_layout->lines) {
                 if (emitted >= visible_lines) break;
                 std::string line = shaped_line.text;
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {

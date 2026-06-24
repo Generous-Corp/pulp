@@ -117,7 +117,8 @@ struct FileDragRequest {
 // Returns true if the platform started a drag session. Returns false when the
 // platform is unsupported, the handle is null, there are no files, or there is
 // no active mouse event to anchor the drag. Implemented per-platform alongside
-// register_drop_target (macOS today; a no-op stub elsewhere).
+// register_drop_target (macOS, Windows, and Linux/X11 today; a no-op stub
+// elsewhere).
 bool begin_file_drag(void* native_view, const FileDragRequest& request);
 
 // Process-global outbound file-drag backend for HOSTLESS platforms — Android,
