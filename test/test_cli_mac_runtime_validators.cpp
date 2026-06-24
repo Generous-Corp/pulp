@@ -141,7 +141,7 @@ TEST_CASE("standalone validator: surfaces non-zero exit",
     REQUIRE(r.summary.find("Library not loaded") != std::string::npos);
 }
 
-// Regression: PR #3005 P1. The smoke command must pass
+// Regression: PR #3005. The smoke command must pass
 // PULP_SCREENSHOT alongside PULP_HEADLESS so `run_with_editor` doesn't
 // early-fail on the missing screenshot path (see
 // core/format/src/standalone.cpp:264). Without PULP_SCREENSHOT, every
@@ -170,7 +170,7 @@ TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
     REQUIRE(cmd.find("PULP_HEADLESS=1") != std::string::npos);
 }
 
-// Regression: PR #3005 P2. A `.app` bundle that exists but has no
+// Regression: PR #3005. A `.app` bundle that exists but has no
 // runnable binary inside is a packaging regression. Previously this
 // returned `skip` (exit 0 unless --strict), letting malformed standalone
 // artifacts sneak past `pulp validate --target standalone`. Now it

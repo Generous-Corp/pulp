@@ -247,8 +247,8 @@ TEST_CASE("IirDesign elliptic_lowpass passband ripple matches spec",
     REQUIRE((max_db - min_db) <= Rp + 0.5);
 }
 
-// Regression: #2964 / Codex comment 3305447117 — `elliptic_cascade()` used
-// `jacobi_asn(1/ε, k1²)` directly, but `jacobi_asn` clamps to [−1, 1]. For
+// Regression: #2964 — `elliptic_cascade()` used `jacobi_asn(1/ε, k1²)`
+// directly, but `jacobi_asn` clamps to [−1, 1]. For
 // any reasonable spec (Rp < ~3 dB ⇒ ε < 1 ⇒ 1/ε > 1) the input was clamped
 // to 1, collapsing v0 to a constant independent of `passband_ripple_db`.
 // In practice the designed ripple stuck near ~0.75 dB regardless of the

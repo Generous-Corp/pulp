@@ -189,8 +189,8 @@ TEST_CASE("TiffWriter rejects mismatched buffer sizes",
     REQUIRE(encoded.empty());
 }
 
-// Regression: Codex PR #3017 review — big-endian inline TIFF SHORT values
-// were read as low 16 bits of value_or_offset, which returns 0 in MM files
+// Regression: PR #3017 — big-endian inline TIFF SHORT values were read as
+// low 16 bits of value_or_offset, which returns 0 in MM files
 // (where SHORT is left-justified in the 4-byte slot). This caused valid
 // big-endian baseline TIFFs to be rejected or decoded incorrectly. Build a
 // minimal 2×1 grayscale uncompressed MM TIFF by hand and prove the

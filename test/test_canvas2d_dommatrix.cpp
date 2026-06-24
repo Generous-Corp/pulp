@@ -216,7 +216,7 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix inverse of singular matrix returns NaN wit
     )");
     // All six fields NaN, is2D explicitly false (so callers can
     // distinguish "successful 2D inverse" from "singular failure" —
-    // the Codex P2 follow-up on #1754).
+    // the #1754 follow-up).
     REQUIRE(out == "true,true,true,true,true,true,false");
 }
 
@@ -240,8 +240,8 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix toJSON honors actual is2D state (Codex P2 
         var n = ctx.getTransform();
         var inv = n.inverse();
         var j = inv.toJSON();
-        // The Codex P2 follow-up on #1754: toJSON must report is2D
-        // false when the inverse was singular (not hard-code true).
+        // The #1754 follow-up: toJSON must report is2D false when the
+        // inverse was singular (not hard-code true).
         return j.is2D + ',' + j.isIdentity;
     )");
     REQUIRE(out == "false,false");
@@ -258,8 +258,8 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array length is 16",
 TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array serialization order "
           "(non-identity matrix detects transposition — Codex P2 on #2387)",
           "[canvas2d][dommatrix][issue-1527]") {
-    // Codex P2: the identity matrix is symmetric, so row-major vs
-    // column-major output looks identical. To make ordering bugs
+    // The identity matrix is symmetric, so row-major vs column-major output
+    // looks identical. To make ordering bugs
     // observable we use a translate(10,20) × scale(2,3) where the
     // translation lives in m41/m42 and the scale on the diagonal.
     // DOMMatrix uses column-major (WebGL / CSS convention): the
