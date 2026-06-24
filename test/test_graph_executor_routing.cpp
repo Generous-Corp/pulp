@@ -11,6 +11,7 @@
 // just "topology + bindings + assertion"; new topologies add cases without
 // re-hand-rolling the plumbing.
 
+#include "harness/graph_routing_harness.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -29,103 +30,23 @@
 
 namespace {
 
-using pulp::format::BusBufferSet;
-using pulp::format::BusRole;
-using pulp::format::GraphRuntimeBufferPool;
 using pulp::format::GraphRuntimeExecutor;
-using pulp::format::GraphRuntimeExecutorResult;
 using pulp::format::GraphRuntimeNodeBinding;
-using pulp::format::GraphRuntimeNodeProcessContext;
 using pulp::format::GraphRuntimeSnapshot;
-using pulp::format::ProcessBlock;
 using pulp::graph::GraphRuntimeConnectionSpec;
 using pulp::graph::GraphRuntimeNodeKind;
 using pulp::graph::GraphRuntimeNodeSpec;
 
-struct GainState {
-    float gain = 1.0f;
-};
-
-// Routing-path gain binding: reads the gathered per-node input view, writes the
-// per-node output view. Bus-agnostic — routing is the executor's job.
-bool routing_gain(ProcessBlock&,
-                  const GraphRuntimeNodeProcessContext& ctx,
-                  void* user_data) noexcept {
-    const float gain = static_cast<const GainState*>(user_data)->gain;
-    const auto& in = ctx.node_inputs;
-    auto out = ctx.node_outputs;  // copy the view so channel_ptr() yields float*
-    const std::size_t chs = std::min(in.num_channels(), out.num_channels());
-    const std::size_t frames = out.num_samples();
-    for (std::size_t c = 0; c < chs; ++c) {
-        const float* ip = in.channel_ptr(c);
-        float* op = out.channel_ptr(c);
-        for (std::size_t i = 0; i < frames; ++i) op[i] = ip[i] * gain;
-    }
-    return true;
-}
-
-std::vector<float> test_signal(int n, float seed) {
-    std::vector<float> v(static_cast<std::size_t>(n));
-    for (int i = 0; i < n; ++i) {
-        v[static_cast<std::size_t>(i)] =
-            (static_cast<float>((i * 2654435761u) & 0xFFFF) / 32768.0f - 1.0f) * seed;
-    }
-    return v;
-}
-
-bool make_snapshot(GraphRuntimeSnapshot& snapshot,
-                   std::span<const GraphRuntimeNodeSpec> nodes,
-                   std::span<const GraphRuntimeConnectionSpec> conns,
-                   std::span<const GraphRuntimeNodeBinding> bindings) {
-    auto plan = pulp::graph::build_graph_runtime_plan(nodes, conns);
-    if (!plan.ok()) return false;
-    return snapshot.reset(std::move(plan.plan), bindings);
-}
-
-// Owns the input/output channel storage + buses + block for one routed call.
-// `inputs` is one buffer per main-input channel; the harness drives the routed
-// executor and exposes per-channel output.
-struct RoutedHarness {
-    std::vector<std::vector<float>> ins;
-    std::vector<std::vector<float>> outs;
-    std::vector<const float*> in_ptrs;
-    std::vector<float*> out_ptrs;
-    BusBufferSet buses;
-    ProcessBlock block;
-    int frames = 0;
-
-    RoutedHarness(double sr, int frames_,
-                  const std::vector<std::vector<float>>& inputs,
-                  std::size_t out_channels)
-        : ins(inputs),
-          outs(out_channels, std::vector<float>(static_cast<std::size_t>(frames_), 0.0f)),
-          frames(frames_) {
-        for (auto& c : ins) in_ptrs.push_back(c.data());
-        for (auto& c : outs) out_ptrs.push_back(c.data());
-        pulp::audio::BufferView<const float> in_view(
-            in_ptrs.data(), in_ptrs.size(), static_cast<std::uint32_t>(frames));
-        pulp::audio::BufferView<float> out_view(
-            out_ptrs.data(), out_ptrs.size(), static_cast<std::uint32_t>(frames));
-        REQUIRE(buses.add_input("main", in_view, BusRole::Main));
-        REQUIRE(buses.add_output("main", out_view, BusRole::Main));
-        block.sample_rate = sr;
-        block.frame_count = static_cast<std::uint32_t>(frames);
-        block.buses = &buses;
-        REQUIRE(block.validate());
-    }
-
-    GraphRuntimeExecutorResult run(GraphRuntimeExecutor& exec,
-                                   const GraphRuntimeSnapshot& snapshot,
-                                   GraphRuntimeBufferPool& pool) {
-        return exec.process_routed(block, snapshot, pool);
-    }
-};
-
-GraphRuntimeBufferPool make_pool(const GraphRuntimeSnapshot& snapshot, int frames) {
-    GraphRuntimeBufferPool pool;
-    REQUIRE(pool.reset(snapshot.buffer_slot_count(), static_cast<std::uint32_t>(frames)));
-    return pool;
-}
+// Shared routing plumbing: per-node gain state + binding, deterministic input
+// signal, snapshot/pool construction, and the per-call buffer/bus/block harness
+// all live in the harness header so the fixed-shape and differential-parity
+// suites build the routed executor the same way.
+using pulp::test::graph_routing::GainState;
+using pulp::test::graph_routing::make_pool;
+using pulp::test::graph_routing::make_snapshot;
+using pulp::test::graph_routing::RoutedHarness;
+using pulp::test::graph_routing::routing_gain;
+using pulp::test::graph_routing::test_signal;
 
 // Reference: input -> gain g1 -> gain g2 -> output (stereo). Per-channel output.
 std::vector<std::vector<float>> signal_graph_chain(float g1, float g2, double sr, int frames,

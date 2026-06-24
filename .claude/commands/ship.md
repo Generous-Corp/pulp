@@ -44,8 +44,8 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
 
 1. **Build** — `pulp build` (must complete before signing)
 2. **Sign** — `pulp ship sign` (must sign before notarizing)
-3. **Notarize** — `pulp ship notarize` (macOS only, after signing)
-4. **Package** — `pulp ship package` (creates installer from signed bundles)
+3. **Package** — `pulp ship package` (creates installer from signed bundles)
+4. **Notarize** — `pulp ship notarize --path <pkg|dmg|zip>` (macOS only, after packaging)
 5. **Appcast** — `pulp ship appcast` (generate update feed pointing to packaged artifact)
 
 Or collapse 2–4 into one command: `pulp ship release --pkg` / `--dmg` signs,
@@ -65,10 +65,14 @@ Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android
 - `pulp ship sign --path MyApp.app` — sign one explicit `.app`/`.dmg`/bundle (not the whole build dir)
 
 **Notarization (macOS only):**
-- `pulp ship notarize` — uses apple_id/team_id from config
-- `pulp ship notarize --apple-id you@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD`
+- `pulp ship notarize --path MyPlugin-1.0.pkg` — picks credentials up from config/env/notary.env
+- `pulp ship notarize --path MyPlugin-1.0.pkg --apple-id you@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD`
 - `pulp ship notarize --path MyApp-1.0.dmg` — notarize + staple one explicit artifact (repeatable)
 - `pulp ship notarize --staple` — staple only (skip submission)
+
+Prefer `pulp ship release` or `notarize --path <pkg|dmg|zip>` for distribution.
+Loose plugin bundle scans are a legacy low-level path; package the artifact you
+will hand to users before notarizing.
 
 **Release pipeline (macOS only):**
 - `pulp ship release --pkg --identity "Developer ID Application: ..." --installer-identity "Developer ID Installer: ..."` — sign, package, notarize, and staple the installer it builds

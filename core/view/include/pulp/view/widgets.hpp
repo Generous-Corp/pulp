@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <pulp/view/view.hpp>
 #include <pulp/canvas/attributed_string.hpp>
+#include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/sprite_strip.hpp>
@@ -11,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <functional>
 #include <array>
@@ -276,6 +278,30 @@ private:
     bool has_own_font_weight_ = false;
     bool has_own_letter_spacing_ = false;
     bool has_own_text_align_ = false;
+
+    // Cache of the soft-wrap shaped layout so paint() reuses it instead of
+    // re-running the expensive TextShaper prepare()+layout each frame. Keyed on
+    // every input the shaper reads; a key mismatch recomputes, so no stale hit
+    // is possible. Weight/style/letter-spacing are intentionally absent — they
+    // affect rasterization, not line breaking.
+    struct ShapedLayoutKey {
+        std::string display_text;  // text_ after text-transform
+        std::string family;        // resolved family ("Inter" fallback)
+        float font_size = 0.0f;
+        float width = 0.0f;        // bounds().width — changes every resize
+        float line_height = 0.0f;
+        int break_mode = 0;        // canvas::BreakMode as int
+        std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
+        bool operator==(const ShapedLayoutKey& o) const {
+            return display_text == o.display_text && family == o.family &&
+                   font_size == o.font_size && width == o.width &&
+                   line_height == o.line_height && break_mode == o.break_mode &&
+                   font_gen == o.font_gen;
+        }
+    };
+    ShapedLayoutKey shaped_cache_key_;
+    canvas::ShapedLayout shaped_cache_layout_;
+    bool shaped_cache_valid_ = false;
 
 public:
     /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).
