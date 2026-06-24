@@ -210,7 +210,7 @@ commands:
           - name: --sign-key
             required: false
       - name: check
-        summary: Check signing status of built plugins or Android artifacts
+        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts
         args:
           - name: --target
             required: false

@@ -856,7 +856,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
-| `check`    | Check signing status of all built plugins |
+| `check`    | Check signing status of built desktop plugins or Android APK/AAB artifacts |
 | `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
 
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
@@ -2013,5 +2013,7 @@ Color output is auto-detected based on TTY. Non-TTY environments (pipes, CI) get
 - Standalone projects are detected by walking up from the current directory looking for `pulp.toml` without `core/`.
 - If both a standalone project and a parent Pulp repo are present, the standalone project wins.
 - Pulp repo mode is detected by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
-- The `ship` subcommands are macOS-specific (they use `codesign` and `pkgbuild`).
+- Most `ship` subcommands are platform-specific: macOS signing/notarization uses
+  `codesign`, `pkgbuild`, and `notarytool`; Windows signing uses `signtool`;
+  Android packaging/signing uses Gradle and Android SDK build tools.
 - `pulp upgrade` requires internet access and `curl` (macOS/Linux) or PowerShell (Windows).
