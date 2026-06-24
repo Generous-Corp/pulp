@@ -322,7 +322,7 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # CLI shell-out tests (cmd_coverage.cpp, cmd_loop.cpp, etc.) never
 # propagates, and any first-party file exercised end-to-end through
 # pulp-cli / pulp-standalone / pulp-inspect is silently dropped from
-# the diff-cover gate. See issue #919 (Codex review on PR #919).
+# the diff-cover gate. See issue #919.
 BINARIES=()
 
 # 1. Test executables — primary coverage drivers. Keep them before

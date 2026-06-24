@@ -251,7 +251,7 @@ TEST_CASE("pulp-screenshot help option short-circuits parsing entirely",
     REQUIRE(options.backend_was_defaulted);
 }
 
-// Regression: #2956 / Codex comment 3304939247 — the previous fix
+// Regression: #2956 / review comment 3304939247 — the previous fix
 // (#2957) set `options.help = true` and continued the parse loop, so
 // malformed numeric options ANYWHERE in argv (including BEFORE `--help`)
 // still ran std::stoi / std::stof and threw, surfacing an error instead

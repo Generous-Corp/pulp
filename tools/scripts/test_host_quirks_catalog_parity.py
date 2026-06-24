@@ -96,8 +96,8 @@ def parse_macro_fields() -> set[str]:
     """Return the field names in the ``PULP_HOST_QUIRK_FIELDS`` X-macro.
 
     This is the THIRD list (host_quirks.cpp) that drives apply_filter, the
-    per-quirk overrides, and `pulp doctor` enumeration. Codex review on
-    #3240: comparing only struct↔meta↔JSON misses the case where a field is
+    per-quirk overrides, and `pulp doctor` enumeration. #3240 showed that
+    comparing only struct↔meta↔JSON misses the case where a field is
     added everywhere EXCEPT this macro — then apply_filter / overrides /
     enumerate silently skip it while every other parity check passes and the
     self-counting `static_assert(count_quirk_fields() == N)` stays valid
@@ -191,7 +191,7 @@ class StructMetaParity(unittest.TestCase):
 class MacroFieldParity(unittest.TestCase):
     """The PULP_HOST_QUIRK_FIELDS X-macro lists EXACTLY the struct fields.
 
-    Closes the last drift axis (Codex review on #3240): a field added to the
+    Closes the last drift axis (#3240): a field added to the
     struct + meta + JSON but omitted from the X-macro would otherwise be
     silently inert in apply_filter / overrides / enumerate, with every other
     parity check + the self-counting static_assert still green.

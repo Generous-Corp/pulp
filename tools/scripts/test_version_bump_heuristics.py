@@ -171,7 +171,7 @@ class VersionBumpHeuristicsTests(GateFixtureTestCase):
             ("CMakeLists.txt", "core/**"),
             # Prefix that looks like a subdir but isn't.
             ("coretools/foo.cpp", "core/**"),
-            # Codex 2026-04-21 review on #554 — zero-segment '**'
+            # Regression #554: zero-segment '**'
             # collapse must preserve the surrounding '/' boundaries.
             # `tools/cli/**/*.cpp` must NOT match `tools/clicmd.cpp`
             # (the '/' after `cli` is a required anchor).

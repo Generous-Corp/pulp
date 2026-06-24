@@ -136,7 +136,7 @@ def glob_to_regex(pattern: str) -> "re.Pattern[str]":
         * ``?``  matches exactly one character within a single segment.
         * Patterns are anchored at both ends.
 
-    Slash handling around ``**`` (post-#554 Codex review): when ``**``
+    Slash handling around ``**`` (post-#554): when ``**``
     spans zero segments at the join point, the surrounding slashes
     collapse so ``tools/cli/**/*.cpp`` does NOT match
     ``tools/clicmd.cpp``.

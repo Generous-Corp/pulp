@@ -47,8 +47,7 @@ pass "syntax: bash -n clean"
 # Use POSIX `[[:space:]]`, not GNU `\s`. BSD/macOS grep does not honor
 # `\s` as whitespace, so the regex would silently miss an indented
 # `screencapture -x "$OUT"` line and the regression check would
-# *pass* even when the harness had reintroduced the bug. See Codex P2
-# on PR #1849.
+# *pass* even when the harness had reintroduced the bug. See PR #1849.
 if grep -E '^[[:space:]]*screencapture -x "\$OUT"[[:space:]]*$' "$HARNESS" >/dev/null; then
     fail "found bare unconditional fullscreen screencapture (re-introduces task #81 regression)"
 fi

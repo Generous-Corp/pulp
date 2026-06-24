@@ -103,7 +103,7 @@ TEST_CASE("per-edge borderTopWidth / borderBottomWidth set Yoga insets",
     REQUIRE_THAT(child->bounds().width,  WithinAbs(100.0f, 0.5f));
 }
 
-// pulp #1566 (Codex P2 follow-up to #1543) — an explicit per-edge
+// pulp #1566 (follow-up to #1543) — an explicit per-edge
 // `borderTopWidth: 0` MUST override the uniform `borderWidth: 10`
 // shorthand on that edge. Pre-#1566, apply_border_widths treated a
 // per-side value of 0 as "unset" and silently fell back to the

@@ -364,7 +364,7 @@ clean_shutdown() {
     # fires on a real onDestroy not on force-stop, so we don't require
     # that marker here.
     #
-    # Codex 2026-04-21 review on #556: a naive `grep FATAL EXCEPTION`
+    # #556 showed that a naive `grep FATAL EXCEPTION`
     # over a shared emulator's full logcat dump treats every other
     # process's crash as a Pulp regression and exits 8. Correlate with
     # the AndroidRuntime process line so only our package counts. We
