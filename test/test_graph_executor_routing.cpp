@@ -346,6 +346,51 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-o
     }
 }
 
+TEST_CASE("GraphRuntimeExecutor routing sums multiple AudioOutput nodes into the bus",
+          "[host][graph][executor][routing][phase4][parity]") {
+    // in -> A -> out1 and in -> B -> out2; out1 and out2 are SEPARATE
+    // AudioOutput nodes both driving main-output channel 0. SignalGraph zeroes
+    // the output bus once and each output node accumulates, so bus = A + B.
+    // This is the case the AudioOutput accumulate (+=) + zero-bus-once change
+    // exists for; overwrite semantics would be last-writer-wins (= B only).
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},   // A
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},   // B
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},  // in -> A
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},  // in -> B
+        GraphRuntimeConnectionSpec{2, 0, 4, 0},  // A -> out1
+        GraphRuntimeConnectionSpec{3, 0, 5, 0},  // B -> out2
+    };
+    constexpr int kFrames = 64;
+    const float a = 0.5f, b = 0.25f;
+    GainState sa{a}, sb{b};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &sa, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &sb, true},
+        GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{5, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    auto pool = make_pool(snapshot, kFrames);
+    const auto x = test_signal(kFrames, 0.8f);
+    const std::vector<std::vector<float>> in{x};
+    RoutedHarness h(kSr, kFrames, in, 1);
+    GraphRuntimeExecutor exec;
+    REQUIRE(h.run(exec, snapshot, pool).ok());
+    for (int i = 0; i < kFrames; ++i) {
+        const float expected = x[static_cast<std::size_t>(i)] * a +
+                               x[static_cast<std::size_t>(i)] * b;
+        REQUIRE(h.outs[0][static_cast<std::size_t>(i)] == expected);
+    }
+}
+
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a split-lifetime fan-out",
           "[host][graph][executor][routing][phase4][parity]") {
     // A's output feeds B (early) and out (late); slot reuse must keep A's

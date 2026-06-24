@@ -114,8 +114,13 @@ void capture_feedback(const graph::GraphRuntimePlan& plan,
 }
 
 // AudioInput copies the main input bus into its output slots; AudioOutput
-// writes its gathered input slots to the main output bus. The only
+// ACCUMULATES its gathered input slots into the main output bus. The only
 // format/bus-aware step in routing.
+//
+// AudioOutput accumulates (+=), not overwrites, because the host graph it
+// mirrors (SignalGraph) zeroes the output bus once per block and lets every
+// AudioOutput node sum into it — so N output nodes mix rather than last-writer-
+// wins. process_routed zeroes the main output bus once before the walk to match.
 void copy_io_bus(graph::GraphRuntimeNodeKind kind,
                  GraphRuntimeBufferPool& pool,
                  const graph::GraphRuntimeNodePlan& node,
@@ -137,7 +142,8 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
             if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
             const float* src = pool.slot_data(slots.input_base + p);
             if (src == nullptr) continue;
-            std::copy_n(src, frames, out_bus->output.channel_ptr(p));
+            float* dst = out_bus->output.channel_ptr(p);
+            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
         }
     }
 }
@@ -348,6 +354,15 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+
+    // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
+    // output nodes mix (and any output channel no node drives stays silent),
+    // matching the host graph this executor mirrors.
+    if (out_bus != nullptr) {
+        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        }
+    }
 
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
