@@ -13,7 +13,6 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/utils/SkParsePath.h"
-#include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
@@ -43,6 +42,7 @@
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/svg_dom_cache.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
@@ -802,8 +802,8 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
 bool SkiaCanvas::draw_svg(const std::string& svg_document,
                           float x, float y, float w, float h) {
     if (!canvas_ || svg_document.empty() || w <= 0.0f || h <= 0.0f) return false;
-    SkMemoryStream stream(svg_document.data(), svg_document.size(), /*copyData=*/false);
-    auto dom = SkSVGDOM::Builder().make(stream);
+    // Parse via SvgDomCache (content-keyed; patched docs re-parse). See header.
+    auto dom = SvgDomCache::instance().get_or_build(svg_document);
     if (!dom) return false;
     // Scale the SVG's intrinsic size to the [x,y,w,h] box. Prefer the document's
     // own intrinsic size; fall back to the requested box so a viewBox-only SVG
