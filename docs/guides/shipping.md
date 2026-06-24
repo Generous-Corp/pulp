@@ -131,12 +131,16 @@ security set-key-partition-list -S apple-tool:,apple: -s -k "$LOGIN_PW" "$KC"
 unset LOGIN_PW
 ```
 
-## Step 4: Notarize
+## Step 4: Notarize Packaged Artifacts
 
-The preferred CLI path uses an App Store Connect API key (`.p8`):
+Use this after `pulp ship package`, or use `pulp ship release` to run the
+sign/package/notarize stages in one command. The preferred CLI path uses an App
+Store Connect API key (`.p8`) and points at the packaged `.pkg`, `.dmg`, or
+`.zip` artifact:
 
 ```bash
-pulp ship notarize --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                   --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
                    --api-key-id XXX \
                    --api-issuer 5e8f0b95-3e2f-48e7-b7c2-52e7c220502a
 ```
@@ -154,14 +158,15 @@ PULP_NOTARY_ISSUER_ID="5e8f0b95-3e2f-48e7-b7c2-52e7c220502a"
 Then:
 
 ```bash
-pulp ship notarize             # picks creds up from notary.env automatically
-pulp ship notarize --dry-run   # print the resolved notarytool argv, no submit
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg --dry-run
 ```
 
 The legacy Apple-ID + app-specific-password lane still works:
 
 ```bash
-pulp ship notarize --apple-id you@example.com --team-id ABCDE12345
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                   --apple-id you@example.com --team-id ABCDE12345
 # password defaults to @keychain:AC_PASSWORD — store via
 #   security add-generic-password -s AC_PASSWORD -a you@example.com -w
 ```
@@ -171,19 +176,22 @@ Programmatic API:
 ```cpp
 #include <pulp/ship/codesign.hpp>
 
+// Submit the distributable archive you will ship, such as the .pkg or .dmg
+// produced by packaging. Do not submit a raw .clap/.vst3/.component directory.
+const char* archive = "artifacts/MyPlugin-1.0.0.pkg";
+
 // App Store Connect API key (preferred)
 auto uuid = pulp::ship::notarize_submit_asc(
-    "build/CLAP/MyPlugin.clap",
+    archive,
     "/path/to/AuthKey_XXX.p8", "XXX", "5e8f0b95-...");
 
 // Legacy Apple-ID flow
 // auto uuid = pulp::ship::notarize_submit(
-//     "build/CLAP/MyPlugin.clap", "you@apple.id", "TEAMID",
-//     "@keychain:AC_PASSWORD");
+//     archive, "you@apple.id", "TEAMID", "@keychain:AC_PASSWORD");
 
 auto status = pulp::ship::notarize_check_asc(
     *uuid, "/path/to/AuthKey_XXX.p8", "XXX", "5e8f0b95-...");
-pulp::ship::notarize_staple("build/CLAP/MyPlugin.clap");
+pulp::ship::notarize_staple(archive);
 ```
 
 The CI workflow (`sign-and-release.yml`) automates this on tag pushes.
@@ -248,8 +256,18 @@ Creates a DMG with an Applications alias for drag-to-install.
 ### Combined Multi-Format Installer
 
 ```cpp
+#include <pulp/ship/codesign.hpp>
+#include <vector>
+
+std::vector<pulp::ship::InstallComponent> components = {
+    {"build/VST3/MyPlugin.vst3", "/Library/Audio/Plug-Ins/VST3", "VST3"},
+    {"build/CLAP/MyPlugin.clap", "/Library/Audio/Plug-Ins/CLAP", "CLAP"},
+    {"build/AU/MyPlugin.component",
+     "/Library/Audio/Plug-Ins/Components", "Audio Unit (AU)"},
+};
+
 pulp::ship::create_combined_pkg(
-    {"build/VST3/MyPlugin.vst3", "build/CLAP/MyPlugin.clap", "build/AU/MyPlugin.component"},
+    components,
     "artifacts/MyPlugin-1.0.0-All.pkg",
     "com.mycompany.myplugin",
     "1.0.0"

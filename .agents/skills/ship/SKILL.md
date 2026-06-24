@@ -225,13 +225,13 @@ accepts `iphonesimulator`, `iphoneos`, or `macosx`; the default output is
 `build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake invocation
 without requiring Xcode.
 
-### macOS: Build → Sign → Notarize → Package → Appcast
+### macOS: Build → Sign → Package → Notarize → Appcast
 
 ```bash
 pulp build                                              # Must build first
 pulp ship sign                                          # Uses identity from config
-pulp ship notarize                                      # Reads ASC key from notary.env (preferred)
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
 ```
 
@@ -245,7 +245,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 
    ```bash
    # One-shot CLI form
-   pulp ship notarize --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                      --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
                       --api-key-id XXX --api-issuer <uuid>
 
    # Persisted form (recommended) — store once, reuse forever:
@@ -253,8 +254,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
    #   PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
    #   PULP_NOTARY_KEY_ID="XXX"
    #   PULP_NOTARY_ISSUER_ID="<issuer-uuid>"
-   pulp ship notarize                  # picks creds up from notary.env
-   pulp ship notarize --dry-run        # prints resolved notarytool argv, no submit
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg --dry-run
    ```
 
    For the full reusable dev-signing stub (schema template + sourceable
@@ -264,7 +265,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 2. **Legacy Apple-ID + app-specific password** — kept working as a fallback.
 
    ```bash
-   pulp ship notarize --apple-id you@example.com --team-id ABCDE12345
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                      --apple-id you@example.com --team-id ABCDE12345
    # password defaults to @keychain:AC_PASSWORD — store via
    #   security add-generic-password -s AC_PASSWORD -a you@example.com -w
    ```
