@@ -653,6 +653,40 @@ TEST_CASE("pulp status and clean reject unexpected arguments before side effects
             std::string::npos);
 }
 
+TEST_CASE("pulp clean removes the active project build directory",
+          "[cli][shellout][misc][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto project = unique_temp_dir("pulp-clean-shellout");
+    auto nested = project / "nested";
+    write_text(project / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
+    write_text(project / "build" / "CMakeCache.txt", "# fixture cache\n");
+    write_text(project / "build" / "artifact.bin", "generated\n");
+    write_text(nested / "build" / "keep.txt", "not the active project build\n");
+    write_text(project / "source.txt", "source file\n");
+
+    auto clean = run_pulp_in_directory(nested, {"clean"});
+    REQUIRE_FALSE(clean.timed_out);
+    REQUIRE(clean.exit_code == 0);
+    REQUIRE(clean.stderr_output.empty());
+    REQUIRE(clean.stdout_output.find("Removing build directory") !=
+            std::string::npos);
+    REQUIRE(clean.stdout_output.find("Clean.") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(project / "build"));
+    REQUIRE(fs::exists(nested / "build" / "keep.txt"));
+    REQUIRE(fs::exists(project / "source.txt"));
+
+    auto clean_again = run_pulp_in_directory(nested, {"clean"});
+    REQUIRE_FALSE(clean_again.timed_out);
+    REQUIRE(clean_again.exit_code == 0);
+    REQUIRE(clean_again.stderr_output.empty());
+    REQUIRE(clean_again.stdout_output.find("Nothing to clean.") !=
+            std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
+
 TEST_CASE("pulp status reports invalid and github PR workflow modes",
           "[cli][shellout][pr-workflow]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
