@@ -43,7 +43,15 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, macos, overflow, projects, project
+audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, macos, overflow, projects, project, tool, tweaks
+
+`project`, `tool`, and `tweaks` intentionally stay slashless: `project`
+is a per-project SDK pin helper, `tool` is registry/install plumbing
+for optional developer tools and importer add-ons, and `tweaks` is a
+local `pulp-tweaks.json` drift diagnostic that mirrors the inspector
+drawer. Agents call these CLIs directly. Keep this classification in
+sync with `tools/scripts/cli_sync_check.py` and
+`tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect

@@ -24,6 +24,15 @@ SKIP_SLASH_COMMANDS = {
     # skill. Adding a slash command for pure plumbing would clutter
     # the slash-command surface for agents. #552
     "projects",
+    # `pulp project` is a per-project SDK pin helper; agents call it
+    # directly when bumping/undoing project pins.
+    "project",
+    # `pulp tool` is registry/install plumbing for optional developer
+    # tools and importer add-ons; agents shell out directly.
+    "tool",
+    # `pulp tweaks` is a local pulp-tweaks.json drift diagnostic that
+    # mirrors the inspector drawer; agents shell out directly.
+    "tweaks",
     # `pulp coverage` is the parent CLI command; the user-facing slash
     # command is the more descriptive `/coverage-diff`, which invokes
     # the same underlying script (tools/scripts/local_diff_cover.sh).
