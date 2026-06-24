@@ -125,12 +125,15 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
     // (#82): the bottom-left readouts are the single source now. Piano shows no
     // OCTAVE readout — the overview highlight reflects the range (Logic-style).
     if (std::string(who) == "typing") {
-        add("octave", 75, 211, 17, 21);   // bottom "OCTAVE C2"  (y −8 post-#82)
-        add("velocity", 282, 211, 17, 21);// bottom "VELOCITY 98"
-        // PITCH BEND value — LEFT-aligned just after the "PITCH BEND" label so a
-        // wide value (−20 / +20) grows rightward into empty space instead of
-        // overflowing left over the label.
-        add("pitchbend", 92, 66, 30, 18, /*left=*/true);
+        // All three readouts are RIGHT-aligned with a fixed right edge that sits in
+        // the gap between the baked label and the next control, so a wide reading
+        // ("C-2", "106", "−20") lines up on the right and never jumps left over its
+        // label. The value_label renderer auto-shrinks any reading wider than its
+        // rect, so a 3-char value fits the gap instead of overflowing onto the
+        // neighbouring button/label. (Boxes widened from the 1–2 char baked slots.)
+        add("octave",   68, 211, 34, 21);   // "OCTAVE C2/C-2"  right edge 102 (z pad @114)
+        add("velocity", 280, 211, 34, 21);  // "VELOCITY 98/106" right edge 314 (c pad @321)
+        add("pitchbend", 88, 66, 18, 18);   // "PITCH BEND 0/−20" right edge 106 (1-pad @108)
     }
     // piano: no value_labels (range shown by the overview highlight only)
 }
@@ -561,9 +564,12 @@ int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
     const float step = midi_to_x(base + 12, x0, x1) - midi_to_x(base, x0, x1);  // one octave
     // Typing reaches +5 so its play-window top hits G8 on the strip; the piano
     // window already saturates at +4 (piano_window_lo clamps to MIDI 92), so its
-    // far-right drag stops there.
+    // far-right drag stops there. The bottom is base-relative (matches
+    // MusicalTypingController::set_octave_shift) so the window low can drag down to
+    // C-2 even when base > C2 (e.g. a sampler root of C3 → low bound −5).
     const int top = (active_frame() == kTypingFrame) ? 5 : 4;
-    return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, top);
+    const int bot = -((base + 11) / 12);
+    return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), bot, top);
 }
 
 void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
@@ -635,8 +641,13 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
         hlo = piano_window_lo();
         hhi = hlo + kPianoSpan;
     }
+    // midi_to_x(m) is the LEFT edge of key m, so the window [hlo, hhi] is fully
+    // enclosed only when the right edge sits at the left edge of the key AFTER the
+    // last one (hhi+1). Without the +1 the highlight stopped at the last key's left
+    // edge — visibly ~half a key short of the piano window's right edge. Clamped to
+    // the ruler max so the top window (…hhi=127=G8) still ends exactly at the strip.
     const float hx0 = vx(midi_to_x(std::clamp(hlo, kRulerLo, kRulerHi), x0, x1));
-    const float hx1 = vx(midi_to_x(std::clamp(hhi, kRulerLo, kRulerHi), x0, x1));
+    const float hx1 = vx(midi_to_x(std::clamp(hhi + 1, kRulerLo, kRulerHi), x0, x1));
     const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,        // token-lint:allow (derived from resolved accent)

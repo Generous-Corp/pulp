@@ -238,6 +238,36 @@ TEST_CASE("MusicalTypingKeyboard: computer keyboard plays + lights typing keys",
     REQUIRE_FALSE(kb.on_key_event(cmdA));
 }
 
+// Regression: input_capture gates whether the keyboard plays its OWN typed keys.
+// The tempo sampler's popout keyboard window had it set to false (display-only),
+// so when that window was focused EVERY typed key was dropped (the dead-keyboard
+// bug). With it true the keyboard self-captures: letters play notes and numbers
+// 1–8 route to pitch-bend / modulation controls.
+TEST_CASE("MusicalTypingKeyboard: input_capture gates self-play of typed keys",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    std::vector<float> bends;
+    kb.on_note_on    = [&](int n, float) { ons.push_back(n); };
+    kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
+
+    auto press = [](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = true; return e; };
+
+    // Display-only: on_key_event is a no-op and plays nothing.
+    kb.set_input_capture(false);
+    REQUIRE_FALSE(kb.on_key_event(press(KeyCode::a)));
+    REQUIRE_FALSE(kb.on_key_event(press(KeyCode::num2)));
+    REQUIRE(ons.empty());
+    REQUIRE(bends.empty());
+
+    // Self-capture: a letter plays its note; number 2 drives pitch-bend up.
+    kb.set_input_capture(true);
+    REQUIRE(kb.on_key_event(press(KeyCode::a)));
+    REQUIRE(ons == std::vector<int>{48});          // 'a' = C2
+    REQUIRE(kb.on_key_event(press(KeyCode::num2)));
+    REQUIRE_FALSE(bends.empty());                  // pitch-bend control fired
+}
+
 TEST_CASE("MusicalTypingKeyboard: z/x shift the typed octave",
           "[view][musical-typing][wiring]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
@@ -607,6 +637,21 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     kb.on_mouse_drag({700.0f, 33.0f});
     REQUIRE(kb.controller().octave_shift() == 5);
     kb.on_mouse_up({700.0f, 33.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: strip drag reaches C-2 even when base > C2",
+          "[view][musical-typing][overview]") {
+    // A sampler sets the keyboard base to the sample root (often C3). The strip's
+    // far-left drag must still bottom the play-window low note on C-2 (MIDI 0); a
+    // fixed −4 floor would stop at C-1 (the overview-highlight-can't-reach-C-2 bug).
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.controller().set_base_note(60);              // C3 root, like the tempo sampler
+    refit(kb);
+    kb.on_mouse_down({400.0f, 30.0f});              // grab the strip
+    kb.on_mouse_drag({120.0f, 33.0f});              // drag hard left
+    REQUIRE(kb.controller().octave_shift() == -5);  // 60 − 60 = MIDI 0 = C-2
+    REQUIRE(kb.controller().base_note() + kb.controller().octave_shift() * 12 == 0);
+    kb.on_mouse_up({120.0f, 33.0f});
 }
 
 TEST_CASE("MusicalTypingKeyboard: the overview highlight is coupled to z/x + the arrows",

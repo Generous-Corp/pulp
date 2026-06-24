@@ -91,7 +91,13 @@ class SamplerSampleStore : public audio::PublishedSampleStore {
 public:
     static constexpr std::uint32_t kSlotCount = 2;
     static constexpr std::uint32_t kMaxChannels = 2;
-    static constexpr std::uint64_t kMaxFrames = 48000ull * 60ull;
+    // Per-slot frame capacity. A sample whose STRETCHED length exceeds this can't
+    // be published, so its slices map past the buffer and trigger silence — the
+    // longer-sample-won't-play bug. 60 s was too small for full-length sources;
+    // 4 min covers typical loops/songs. render_to_tempo additionally clamps the
+    // publish to this cap so anything longer degrades gracefully (the head plays)
+    // instead of silent-failing. (~184 MB preallocated across 2 stereo slots.)
+    static constexpr std::uint64_t kMaxFrames = 48000ull * 240ull;
     bool prepare() {
         return audio::PublishedSampleStore::prepare(
             audio::PublishedSampleStoreConfig{kSlotCount, kMaxChannels, kMaxFrames});
@@ -207,12 +213,15 @@ public:
 
 private:
     static bool is_audio_ext(const std::string& path) {
-        static const char* kExts[] = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg"};
+        // Accept exactly what the FormatRegistry can DECODE on this platform —
+        // including .m4a / .aac / .alac / .caf via the macOS CoreAudio reader.
+        // Sourcing the allow-list from the registry keeps drag-drop, the Open
+        // dialog, and the decoders from drifting apart (the m4a-won't-open bug:
+        // the decoder supported it but a hardcoded list here rejected the drop).
         std::string lower = path;
         std::transform(lower.begin(), lower.end(), lower.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        for (const char* e : kExts) {
-            const std::string es = e;
+        for (const auto& es : audio::FormatRegistry::instance().supported_read_extensions()) {
             if (lower.size() >= es.size() &&
                 lower.compare(lower.size() - es.size(), es.size(), es) == 0)
                 return true;
@@ -377,11 +386,12 @@ public:
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
     // True while the SDK MusicalTypingKeyboard's own window is on-screen. The
-    // editor's typing is the SINGLE QWERTY source and only plays slices (and
-    // lights the keyboard) while that window is visible — when the keyboard is
-    // hidden, QWERTY triggers nothing. The keyboard never plays itself
-    // (set_input_capture(false)). create_view() wires this to
-    // `kb_window_ && kb_window_->is_visible()`; tests inject a bool.
+    // editor's typing only plays slices (and lights the keyboard) while that
+    // window is visible — when the keyboard is hidden, QWERTY triggers nothing.
+    // This gates the MAIN-window typing path; when the keyboard's OWN window is
+    // focused it self-captures keys instead (set_input_capture(true)), so the two
+    // paths cover the two focus cases without overlapping. create_view() wires
+    // this to `kb_window_ && kb_window_->is_visible()`; tests inject a bool.
     std::function<bool()> keyboard_window_visible;
     // Toggle the SDK MusicalTypingKeyboard's own secondary GPU window (Cmd-K /
     // Ctrl+K, and the toolbar "Keyboard" button). The keyboard is NOT inline —
@@ -656,8 +666,9 @@ public:
     // route here. Each call plays/stops the slice via the lock-free UI→audio
     // queue AND maintains a set of currently-held MIDI notes that is pushed to
     // the keyboard (set_active_notes) so the matching keys light/unlight live.
-    // The keyboard never plays itself (set_input_capture(false)); this held set
-    // is the single source of truth for what the keyboard shows lit. Host MIDI
+    // When the MAIN editor window is focused this held set is the source of truth
+    // for the keyboard's lit keys; when the keyboard's OWN window is focused it
+    // self-captures keys (set_input_capture(true)) and routes them here too. Host MIDI
     // arrives on the audio thread and is not reflected here (no UI-thread hook).
     void keyboard_play_on(int note, float velocity) {
         ui_note_on(note, velocity);
@@ -703,15 +714,21 @@ public:
         }
         if (!kb_window_) {
             kb_ = std::make_unique<view::MusicalTypingKeyboard>();
-            // Single-input design: the on-screen keyboard is DISPLAY-ONLY for
-            // QWERTY. The app (the editor's MusicalTypingController) is the sole
-            // computer-keyboard source — it plays slices AND lights this keyboard
-            // via set_active_notes. set_input_capture(false) stops the keyboard
-            // from independently capturing/playing keys (no double-trigger) and
-            // drops its key focusability. CLICKS on the keys still play + light;
-            // they flow through the same held-note path the typing source uses, so
-            // the lit set stays the single source of truth.
-            kb_->set_input_capture(false);
+            // The keyboard self-captures QWERTY (set_input_capture(true), the SDK
+            // default + focusable). This matters because the keyboard lives in its
+            // OWN secondary window: macOS routes typed keys to whichever window is
+            // key, so when this window is focused, ONLY its root sees the keys —
+            // the main editor's on_global_key does not fire (it's per-window). With
+            // capture OFF the root was also non-focusable, so a focused keyboard
+            // window dropped EVERY key (letters, numbers 1–8, tab) — dead typing.
+            // Capture ON routes letters → on_note_on → keyboard_play_on (plays the
+            // slice + lights via the held-note set) and numbers 1–8 / tab through
+            // the SDK's control_press (pitch-bend / modulation / sustain buttons),
+            // matching the click path. No double-trigger: only one window is key at
+            // a time, so the editor's typing source (which plays + lights via
+            // set_active_notes while the MAIN window is focused) and this keyboard
+            // never both fire for the same keystroke.
+            kb_->set_input_capture(true);
             kb_->on_note_on  = [this](int note, float vel) { keyboard_play_on(note, vel); };
             kb_->on_note_off = [this](int note) { keyboard_play_off(note); };
             // ⌘K / ⌘W / Escape while the keyboard window is front HIDE it (the
@@ -719,9 +736,8 @@ public:
             // MAIN editor window, so the keyboard could be shown but never hidden
             // once it became key. on_global_key is the keyboard ROOT's hook: the
             // mac host fires it for Escape (keyDown) and Cmd-chords
-            // (performKeyEquivalent). The keyboard never sounds a note from a key
-            // (set_input_capture(false) makes on_key_event a no-op), so there is no
-            // risk of a chord playing before we intercept it.
+            // (performKeyEquivalent). performKeyEquivalent runs BEFORE keyDown, so
+            // ⌘K / ⌘W are intercepted here and never reach on_key_event as a note.
             kb_->on_global_key = [this](const view::KeyEvent& e) -> bool {
                 if (!e.is_down || e.is_repeat) return false;
                 const uint16_t cmd = view::kModCmd | view::kModCtrl;
@@ -954,9 +970,17 @@ public:
         // always-visible Open button (so you can load/replace even with a sample
         // already loaded, where a waveform tap auditions a slice instead).
         auto do_browse = [this] {
+            // Filter from the registry's decodable extensions (incl. m4a/aac/alac/
+            // caf on macOS) — strip the leading dot for the dialog's "ext;ext" form.
+            std::string pattern;
+            for (const auto& e : audio::FormatRegistry::instance().supported_read_extensions()) {
+                std::string s = (!e.empty() && e.front() == '.') ? e.substr(1) : e;
+                if (s.empty()) continue;
+                if (!pattern.empty()) pattern += ';';
+                pattern += s;
+            }
             auto picked = platform::FileDialog::open_file(
-                "Load a sample",
-                {{"Audio Files", "wav;aif;aiff;flac;mp3;ogg"}}, "");
+                "Load a sample", {{"Audio Files", pattern}}, "");
             if (picked && !picked->empty()) request_load_path(*picked);
         };
         wf->on_browse = do_browse;
@@ -1302,6 +1326,13 @@ private:
 
         const long out_frames = signal::offline_stretch_output_frames(frames, R);
         if (out_frames <= 0) return;
+        // The published store has a fixed per-slot capacity; a stretched length
+        // beyond it would be REJECTED by load_*, skipping the publish and leaving
+        // every slice silent (the longer-sample bug). Clamp the published length
+        // so an oversize sample plays its head instead of nothing — slices past
+        // pub_frames map past the buffer and region_for_note already silences them.
+        const long pub_frames =
+            std::min<long>(out_frames, static_cast<long>(SamplerSampleStore::kMaxFrames));
 
         // Refresh the slice boundaries into the stretched buffer FIRST, before the
         // audio re-publish below. A sensitivity-only re-slice keeps the same
@@ -1316,7 +1347,7 @@ private:
             std::vector<long> scaled;
             scaled.reserve(slices.size());
             for (long s : slices)
-                scaled.push_back(std::min<long>(out_frames, static_cast<long>(std::llround(s * R))));
+                scaled.push_back(std::min<long>(pub_frames, static_cast<long>(std::llround(s * R))));
             std::lock_guard<std::mutex> lock(slice_mutex_);
             slices_stretched_ = std::move(scaled);
         }
@@ -1337,15 +1368,15 @@ private:
         const auto gen = audio_ack_generation_.load(std::memory_order_acquire);
         bool ok = false;
         if (ch == 1) {
-            ok = store_.load_mono(stretched[0].data(), static_cast<int>(out_frames),
+            ok = store_.load_mono(stretched[0].data(), static_cast<int>(pub_frames),
                                   host_sample_rate_, gen);
         } else {
-            std::vector<float> inter(static_cast<size_t>(out_frames) * 2);
-            for (long i = 0; i < out_frames; ++i) {
+            std::vector<float> inter(static_cast<size_t>(pub_frames) * 2);
+            for (long i = 0; i < pub_frames; ++i) {
                 inter[static_cast<size_t>(i) * 2] = stretched[0][static_cast<size_t>(i)];
                 inter[static_cast<size_t>(i) * 2 + 1] = stretched[1][static_cast<size_t>(i)];
             }
-            ok = store_.load_interleaved_stereo(inter.data(), static_cast<int>(out_frames),
+            ok = store_.load_interleaved_stereo(inter.data(), static_cast<int>(pub_frames),
                                                 host_sample_rate_, gen);
         }
         if (!ok) return;

@@ -146,6 +146,31 @@ TEST_CASE("loads loop, detects bpm/slices, publishes a tempo-matched buffer", "[
     REQUIRE(wait_for([&] { return f.proc->published_frames() == expected; }));
 }
 
+// Regression: a sample whose (stretched) length exceeds the per-slot store
+// capacity used to be REJECTED by load_*, so the publish was skipped and every
+// slice mapped past an empty buffer → tapping any slice was silent (the
+// "long samples don't play" bug). The store now holds a longer sample, and the
+// publish is clamped to the cap so anything still longer plays its head instead
+// of nothing.
+TEST_CASE("a sample longer than the old 60 s cap still publishes (not silent)",
+          "[tempo-sampler]") {
+    Fixture f;
+    constexpr long kOldCap = 48000L * 60L;        // the previous per-slot cap
+    const long n = 48000L * 61L;                  // 61 s — over the old cap, under the new
+    REQUIRE(n > kOldCap);
+    REQUIRE(n <= static_cast<long>(SamplerSampleStore::kMaxFrames));
+    auto buf = sine(220.0, 48000.0, n);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, n, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r); // host == loop ⇒ R = 1
+    // Publishes the full 61 s (was 0 before the fix), and never exceeds the cap.
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == n; },
+                     std::chrono::seconds(20)));
+    REQUIRE(f.proc->published_frames() <= static_cast<long>(SamplerSampleStore::kMaxFrames));
+}
+
 TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
     Fixture f;
     auto buf = sine(330.0, 48000.0, 24000);
@@ -1093,6 +1118,31 @@ void write_png(view::View& v, uint32_t w, uint32_t h, const char* path) {
                static_cast<std::streamsize>(png.size()));
 }
 }  // namespace
+
+// Regression: dragging an .m4a (or .aac/.alac/.caf) onto the editor used to be
+// rejected by a hardcoded extension allow-list even though the macOS CoreAudio
+// reader decodes them. The allow-list now derives from FormatRegistry, so the
+// drop gate matches the decoders. .wav is accepted on every platform; the
+// compressed containers are accepted where a reader for them is registered.
+TEST_CASE("WaveformDropView accepts registry-decodable drops (incl. m4a on macOS)",
+          "[tempo-sampler][drop]") {
+    WaveformDropView v;
+    auto accepts = [&](const char* path) {
+        view::DropData d;
+        d.type = view::DropData::Type::files;
+        d.file_paths = {path};
+        return v.accept_drag(d, {0.0f, 0.0f});
+    };
+    REQUIRE(accepts("/tmp/loop.wav"));            // built-in reader, all platforms
+    REQUIRE_FALSE(accepts("/tmp/notes.txt"));     // not an audio format
+    const bool m4a = accepts("/tmp/song.m4a");
+    const auto exts = audio::FormatRegistry::instance().supported_read_extensions();
+    const bool has_m4a = std::find(exts.begin(), exts.end(), ".m4a") != exts.end();
+    REQUIRE(m4a == has_m4a);                      // accepted iff a reader is registered
+#ifdef __APPLE__
+    REQUIRE(m4a);                                 // CoreAudio reader decodes m4a on macOS
+#endif
+}
 
 // Fix 2: with a non-"off" modulation latched, the teal highlight FULLY covers the
 // modulation key cell (no black inset) when rendered at the keyboard's panel dims

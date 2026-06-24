@@ -83,3 +83,33 @@ TEST_CASE("MusicalTyping octave shift releases the note actually played",
     REQUIRE(offs.size() == 1);
     REQUIRE(offs[0] == 72);
 }
+
+TEST_CASE("MusicalTyping octave-shift low bound is base-relative (reaches C-2)",
+          "[view][musical-typing][octave]") {
+    // The play-window low note must be draggable down to C-2 (MIDI 0) regardless
+    // of base note. A fixed −4 floor bottoms out at C-1 when base > C2 (e.g. a
+    // sampler root of C3) — the bug behind the overview highlight not reaching
+    // C-2. The floor is the most-negative shift that lands base+shift*12 on MIDI 0.
+    SECTION("base C2 (48) → floor −4") {
+        MusicalTypingController mt;
+        mt.set_base_note(48);
+        mt.set_octave_shift(-99);                       // clamp to the floor
+        REQUIRE(mt.octave_shift() == -4);               // 48 − 48 = MIDI 0 = C-2
+        REQUIRE(mt.base_note() + mt.octave_shift() * 12 == 0);
+    }
+    SECTION("base C3 (60) → floor −5 (regression: was hard-clamped to −4)") {
+        MusicalTypingController mt;
+        mt.set_base_note(60);
+        mt.set_octave_shift(-99);
+        REQUIRE(mt.octave_shift() == -5);               // 60 − 60 = MIDI 0 = C-2
+        REQUIRE(mt.base_note() + mt.octave_shift() * 12 == 0);
+        mt.set_octave_shift(-4);                        // a less-negative shift still holds
+        REQUIRE(mt.octave_shift() == -4);
+    }
+    SECTION("top bound stays +5") {
+        MusicalTypingController mt;
+        mt.set_base_note(60);
+        mt.set_octave_shift(99);
+        REQUIRE(mt.octave_shift() == 5);
+    }
+}
