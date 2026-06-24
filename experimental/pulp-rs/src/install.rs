@@ -1,16 +1,18 @@
-//! `pulp upgrade --install` — download + dual-binary self-replace.
+//! `pulp upgrade --install` — download + release-binary self-replace.
 //!
-//! In the dual-binary layout, the user-facing `pulp` is the Rust
-//! binary and `pulp-cpp` is the C++ delegate. The legacy C++ upgrade
+//! In the release layout, the user-facing `pulp` is the Rust binary,
+//! `pulp-cpp` is the C++ delegate, and `pulp-mcp` is the Claude Code
+//! plugin's MCP server. The legacy C++ upgrade
 //! path self-replaces the running binary with whatever is named `pulp`
 //! in the release tarball; delegating to it would clobber `pulp-cpp`
 //! and break the fallthrough chain.
 //!
 //! This module owns the install path on the Rust side. It downloads the
-//! release tarball, extracts both binaries, and atomically replaces the
-//! running `pulp` and the sibling `pulp-cpp`. Pre-swap single-binary
-//! tarballs are handled too (no-op on the cpp slot). The post-release
-//! smoke job (release-cli.yml) verifies both binaries land.
+//! release tarball, extracts its binaries, and atomically replaces the
+//! running `pulp` plus optional sibling payloads. Pre-swap single-binary
+//! tarballs are handled too (no-op on missing sibling slots). The
+//! post-release smoke job (release-cli.yml) verifies all release
+//! binaries land.
 //!
 //! # Surface
 //!
@@ -22,7 +24,7 @@
 //!   running binary path.
 //! - [`ExtractedArchive`] — what we found inside the archive.
 //! - [`replace_binary_atomic`] — single-binary swap with rollback.
-//! - [`install_extracted`] — apply both replacements.
+//! - [`install_extracted`] — apply release-binary replacements.
 //! - [`fetch_and_extract`] — heavy live download path; shells out to
 //!   `curl` + `tar` to avoid pulling in tar/flate2 deps.
 
@@ -36,11 +38,13 @@ use crate::error::{CliError, Result};
 /// `pulp::cli::pulp_upgrade_url_for` C++ helper character-for-character.
 #[must_use]
 pub fn upgrade_url_for(version: &str, platform: &str, arch: &str) -> (String, String) {
-    let ext = if platform == "windows" { "zip" } else { "tar.gz" };
+    let ext = if platform == "windows" {
+        "zip"
+    } else {
+        "tar.gz"
+    };
     let asset = format!("pulp-{platform}-{arch}.{ext}");
-    let url = format!(
-        "https://github.com/danielraffel/pulp/releases/download/v{version}/{asset}"
-    );
+    let url = format!("https://github.com/danielraffel/pulp/releases/download/v{version}/{asset}");
     (asset, url)
 }
 
@@ -89,6 +93,16 @@ pub fn cpp_basename() -> &'static str {
     }
 }
 
+/// pulp-mcp binary basename for the running OS.
+#[must_use]
+pub fn mcp_basename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "pulp-mcp.exe"
+    } else {
+        "pulp-mcp"
+    }
+}
+
 /// Resolve the running binary's filesystem path (i.e. the file we
 /// will overwrite). Wraps `std::env::current_exe` with a friendlier
 /// error.
@@ -109,6 +123,13 @@ pub fn sibling_cpp_path(self_path: &Path) -> Option<PathBuf> {
     self_path.parent().map(|p| p.join(cpp_basename()))
 }
 
+/// Sibling `pulp-mcp` path next to `self_path`. Returns `None` only if
+/// `self_path` has no parent.
+#[must_use]
+pub fn sibling_mcp_path(self_path: &Path) -> Option<PathBuf> {
+    self_path.parent().map(|p| p.join(mcp_basename()))
+}
+
 /// Top-level plan: where the binaries should land, what we're going to
 /// fetch. Pure data — no I/O.
 #[derive(Debug, Clone)]
@@ -122,6 +143,11 @@ pub struct InstallPlan {
     /// exist, [`install_extracted`] still drops the new pulp-cpp here
     /// so the post-swap layout converges on first upgrade.
     pub cpp_path: Option<PathBuf>,
+    /// Sibling `pulp-mcp` path. Present whenever `self_path` has a
+    /// parent. If the file at this path doesn't exist,
+    /// [`install_extracted`] still drops the new pulp-mcp here so
+    /// self-updated installs match fresh release installs.
+    pub mcp_path: Option<PathBuf>,
     pub is_zip: bool,
 }
 
@@ -136,12 +162,14 @@ impl InstallPlan {
         let (asset, url) = upgrade_url_for(version, current_platform(), current_arch());
         let self_path = current_executable_path()?;
         let cpp_path = sibling_cpp_path(&self_path);
+        let mcp_path = sibling_mcp_path(&self_path);
         Ok(Self {
             version: version.to_owned(),
             url,
             asset,
             self_path,
             cpp_path,
+            mcp_path,
             is_zip: cfg!(target_os = "windows"),
         })
     }
@@ -155,11 +183,14 @@ pub struct ExtractedArchive {
     /// Present only when the archive ships the dual-binary layout
     /// (post-swap releases). Pre-swap tarballs leave this `None`.
     pub new_cpp: Option<PathBuf>,
+    /// Present only when the archive ships the MCP server binary.
+    /// Older tarballs leave this `None`.
+    pub new_mcp: Option<PathBuf>,
 }
 
-/// Look in `root` for the new `pulp` and (optionally) `pulp-cpp`.
-/// `pulp` is required; `pulp-cpp` is best-effort so pre-swap tarballs
-/// still flow through this code path.
+/// Look in `root` for the new `pulp` and optional sibling binaries.
+/// `pulp` is required; `pulp-cpp` and `pulp-mcp` are best-effort so
+/// older tarballs still flow through this code path.
 ///
 /// # Errors
 ///
@@ -179,10 +210,17 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     } else {
         None
     };
+    let mcp_path = root.join(mcp_basename());
+    let new_mcp = if mcp_path.exists() {
+        Some(mcp_path)
+    } else {
+        None
+    };
     Ok(ExtractedArchive {
         root: root.to_owned(),
         new_pulp: pulp_path,
         new_cpp,
+        new_mcp,
     })
 }
 
@@ -301,8 +339,8 @@ pub fn check_build_artifact_guard(plan: &InstallPlan) -> Result<()> {
 }
 
 /// Apply the planned replacement: overwrite `plan.self_path` with the
-/// new pulp from the archive, and (when the archive ships pulp-cpp)
-/// overwrite or install the sibling `pulp-cpp`.
+/// new pulp from the archive, and overwrite or install optional sibling
+/// binaries when the archive ships them.
 ///
 /// Callers should invoke [`check_build_artifact_guard`] BEFORE the
 /// download step, but this function also re-checks defensively so a
@@ -324,6 +362,8 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
         pulp_replaced: true,
         cpp_replaced: false,
         cpp_created: false,
+        mcp_replaced: false,
+        mcp_created: false,
     };
     if let (Some(cpp_dst), Some(new_cpp)) = (plan.cpp_path.as_deref(), archive.new_cpp.as_deref()) {
         if cpp_dst.exists() {
@@ -339,11 +379,23 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
             report.cpp_created = true;
         }
     }
+    if let (Some(mcp_dst), Some(new_mcp)) = (plan.mcp_path.as_deref(), archive.new_mcp.as_deref()) {
+        if mcp_dst.exists() {
+            replace_binary_atomic(mcp_dst, new_mcp)?;
+            report.mcp_replaced = true;
+        } else {
+            // Fresh installs already extract pulp-mcp from the release
+            // archive. Self-updated installs need the same sibling payload
+            // so the Claude Code plugin's launcher can resolve the server.
+            install_new_binary(mcp_dst, new_mcp)?;
+            report.mcp_created = true;
+        }
+    }
     Ok(report)
 }
 
 /// Summary of which binaries were touched. Surfaced to the user so
-/// they can see the dual-binary install ran cleanly.
+/// they can see the release-binary install ran cleanly.
 #[derive(Debug, Clone, Copy)]
 pub struct InstallReport {
     /// `true` whenever the running `pulp` was replaced (always for a
@@ -355,6 +407,11 @@ pub struct InstallReport {
     /// freshly dropped from the archive (pre-swap → post-swap
     /// transition).
     pub cpp_created: bool,
+    /// Sibling `pulp-mcp` was overwritten in place.
+    pub mcp_replaced: bool,
+    /// Sibling `pulp-mcp` did not exist before this install and was
+    /// freshly dropped from the archive.
+    pub mcp_created: bool,
 }
 
 /// Heavy live path: download the tarball, extract it into `tmp_dir`,
@@ -483,9 +540,11 @@ mod tests {
         if cfg!(target_os = "windows") {
             assert_eq!(pulp_basename(), "pulp.exe");
             assert_eq!(cpp_basename(), "pulp-cpp.exe");
+            assert_eq!(mcp_basename(), "pulp-mcp.exe");
         } else {
             assert_eq!(pulp_basename(), "pulp");
             assert_eq!(cpp_basename(), "pulp-cpp");
+            assert_eq!(mcp_basename(), "pulp-mcp");
         }
     }
 
@@ -495,6 +554,14 @@ mod tests {
         let cpp = sibling_cpp_path(&me).unwrap();
         assert_eq!(cpp.parent().unwrap(), Path::new("/opt/pulp/bin"));
         assert_eq!(cpp.file_name().unwrap(), cpp_basename());
+    }
+
+    #[test]
+    fn sibling_mcp_path_is_under_self_parent() {
+        let me = PathBuf::from("/opt/pulp/bin/pulp");
+        let mcp = sibling_mcp_path(&me).unwrap();
+        assert_eq!(mcp.parent().unwrap(), Path::new("/opt/pulp/bin"));
+        assert_eq!(mcp.file_name().unwrap(), mcp_basename());
     }
 
     #[test]
@@ -512,15 +579,18 @@ mod tests {
         let arch = locate_binaries_in_archive(td.path()).unwrap();
         assert_eq!(arch.new_pulp, pulp);
         assert!(arch.new_cpp.is_none(), "pre-swap layout: no pulp-cpp");
+        assert!(arch.new_mcp.is_none(), "pre-MCP layout: no pulp-mcp");
     }
 
     #[test]
-    fn locate_binaries_finds_pulp_and_cpp() {
+    fn locate_binaries_finds_pulp_cpp_and_mcp() {
         let td = tempfile::tempdir().unwrap();
         fs::write(td.path().join(pulp_basename()), b"new-pulp").unwrap();
         fs::write(td.path().join(cpp_basename()), b"new-cpp").unwrap();
+        fs::write(td.path().join(mcp_basename()), b"new-mcp").unwrap();
         let arch = locate_binaries_in_archive(td.path()).unwrap();
         assert!(arch.new_cpp.is_some(), "post-swap layout: pulp-cpp present");
+        assert!(arch.new_mcp.is_some(), "MCP server binary present");
     }
 
     #[test]
@@ -567,19 +637,22 @@ mod tests {
     }
 
     #[test]
-    fn install_extracted_replaces_both_when_archive_has_both() {
+    fn install_extracted_replaces_siblings_when_archive_has_them() {
         let bin_dir = tempfile::tempdir().unwrap();
         let arch_dir = tempfile::tempdir().unwrap();
 
-        // Existing install: both binaries present.
+        // Existing install: all release binaries present.
         let pulp_dst = bin_dir.path().join(pulp_basename());
         let cpp_dst = bin_dir.path().join(cpp_basename());
+        let mcp_dst = bin_dir.path().join(mcp_basename());
         fs::write(&pulp_dst, b"old-pulp").unwrap();
         fs::write(&cpp_dst, b"old-cpp").unwrap();
+        fs::write(&mcp_dst, b"old-mcp").unwrap();
 
-        // Archive: dual-binary tarball.
+        // Archive: current release tarball.
         fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
         fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
+        fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
 
         let plan = InstallPlan {
             version: "0.50.0".into(),
@@ -587,6 +660,7 @@ mod tests {
             asset: "ignored".into(),
             self_path: pulp_dst.clone(),
             cpp_path: Some(cpp_dst.clone()),
+            mcp_path: Some(mcp_dst.clone()),
             is_zip: false,
         };
         let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
@@ -595,8 +669,11 @@ mod tests {
         assert!(report.pulp_replaced);
         assert!(report.cpp_replaced);
         assert!(!report.cpp_created);
+        assert!(report.mcp_replaced);
+        assert!(!report.mcp_created);
         assert_eq!(fs::read(&pulp_dst).unwrap(), b"new-pulp");
         assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
+        assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
     }
 
     #[test]
@@ -621,6 +698,7 @@ mod tests {
             asset: "ignored".into(),
             self_path: pulp_dst.clone(),
             cpp_path: Some(cpp_dst.clone()),
+            mcp_path: None,
             is_zip: false,
         };
         let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
@@ -628,9 +706,50 @@ mod tests {
 
         assert!(report.pulp_replaced);
         assert!(!report.cpp_replaced);
-        assert!(report.cpp_created, "first dual-binary upgrade must create pulp-cpp");
+        assert!(
+            report.cpp_created,
+            "first dual-binary upgrade must create pulp-cpp"
+        );
         assert!(cpp_dst.exists());
         assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
+    }
+
+    #[test]
+    fn install_extracted_creates_mcp_when_sibling_slot_empty() {
+        // Pre-MCP install: user has `pulp`, but no `pulp-mcp` yet.
+        // Install should drop pulp-mcp into the sibling slot so the
+        // Claude Code plugin's launcher can resolve the server.
+        let bin_dir = tempfile::tempdir().unwrap();
+        let arch_dir = tempfile::tempdir().unwrap();
+
+        let pulp_dst = bin_dir.path().join(pulp_basename());
+        let mcp_dst = bin_dir.path().join(mcp_basename());
+        fs::write(&pulp_dst, b"old-pulp").unwrap();
+        // mcp_dst intentionally absent.
+
+        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+        fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
+
+        let plan = InstallPlan {
+            version: "0.50.0".into(),
+            url: "ignored".into(),
+            asset: "ignored".into(),
+            self_path: pulp_dst.clone(),
+            cpp_path: None,
+            mcp_path: Some(mcp_dst.clone()),
+            is_zip: false,
+        };
+        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+        let report = install_extracted(&plan, &arch).unwrap();
+
+        assert!(report.pulp_replaced);
+        assert!(!report.mcp_replaced);
+        assert!(
+            report.mcp_created,
+            "first MCP-capable upgrade must create pulp-mcp"
+        );
+        assert!(mcp_dst.exists());
+        assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
     }
 
     #[test]
@@ -655,6 +774,7 @@ mod tests {
             asset: "ignored".into(),
             self_path: pulp_dst.clone(),
             cpp_path: Some(cpp_dst.clone()),
+            mcp_path: None,
             is_zip: false,
         };
         let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
@@ -663,7 +783,42 @@ mod tests {
         assert!(report.pulp_replaced);
         assert!(!report.cpp_replaced);
         assert!(!report.cpp_created);
-        assert!(!cpp_dst.exists(), "single-binary tarball must not invent pulp-cpp");
+        assert!(
+            !cpp_dst.exists(),
+            "single-binary tarball must not invent pulp-cpp"
+        );
+    }
+
+    #[test]
+    fn install_extracted_skips_mcp_when_archive_lacks_it() {
+        // Older tarball: no `pulp-mcp`. Install replaces pulp; leaves the
+        // (possibly absent) pulp-mcp slot alone.
+        let bin_dir = tempfile::tempdir().unwrap();
+        let arch_dir = tempfile::tempdir().unwrap();
+
+        let pulp_dst = bin_dir.path().join(pulp_basename());
+        let mcp_dst = bin_dir.path().join(mcp_basename());
+        fs::write(&pulp_dst, b"old-pulp").unwrap();
+
+        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+        // No pulp-mcp in archive.
+
+        let plan = InstallPlan {
+            version: "0.46.0".into(),
+            url: "ignored".into(),
+            asset: "ignored".into(),
+            self_path: pulp_dst.clone(),
+            cpp_path: None,
+            mcp_path: Some(mcp_dst.clone()),
+            is_zip: false,
+        };
+        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+        let report = install_extracted(&plan, &arch).unwrap();
+
+        assert!(report.pulp_replaced);
+        assert!(!report.mcp_replaced);
+        assert!(!report.mcp_created);
+        assert!(!mcp_dst.exists(), "older tarball must not invent pulp-mcp");
     }
 
     #[test]
@@ -676,6 +831,9 @@ mod tests {
         let sib = plan.cpp_path.expect("test binary must have a parent");
         assert_eq!(sib.parent(), plan.self_path.parent());
         assert_eq!(sib.file_name().unwrap(), cpp_basename());
+        let mcp = plan.mcp_path.expect("test binary must have a parent");
+        assert_eq!(mcp.parent(), plan.self_path.parent());
+        assert_eq!(mcp.file_name().unwrap(), mcp_basename());
     }
 
     #[test]
@@ -710,6 +868,7 @@ mod tests {
             asset: "ignored".into(),
             self_path: PathBuf::from("/some/proj/target/release/pulp"),
             cpp_path: None,
+            mcp_path: None,
             is_zip: false,
         };
         // Make sure the override env var isn't set from a parallel test.
@@ -723,7 +882,10 @@ mod tests {
 
     #[test]
     fn backup_path_appends_dot_bak() {
-        assert_eq!(backup_path(Path::new("/x/y/pulp")), PathBuf::from("/x/y/pulp.bak"));
+        assert_eq!(
+            backup_path(Path::new("/x/y/pulp")),
+            PathBuf::from("/x/y/pulp.bak")
+        );
         assert_eq!(
             backup_path(Path::new("C:\\bin\\pulp.exe")),
             PathBuf::from("C:\\bin\\pulp.exe.bak")
