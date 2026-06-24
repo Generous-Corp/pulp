@@ -1105,6 +1105,31 @@ TEST_CASE("MCP docs_search and create quote user arguments",
 #endif
 }
 
+TEST_CASE("MCP docs_check runs the project docs check script",
+          "[mcp][tools][docs][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project With Docs Check";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "tools");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    {
+        std::ofstream script(project / "tools" / "check-docs.sh");
+        script << "#!/bin/sh\n"
+               << "printf 'fake-docs-check [%s]\\n' \"$PWD\"\n";
+    }
+
+    ScopedCurrentPath cwd(project);
+    auto response = handle_request(tool_call("44", "pulp_docs_check"));
+    require_contains(response, R"JSON("id":44)JSON");
+    require_contains(response, "fake-docs-check");
+    REQUIRE(response.find("Error: not in a Pulp project") == std::string::npos);
+#endif
+}
+
 TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
           "[mcp][tools][packages][workflow]") {
 #if defined(_WIN32)

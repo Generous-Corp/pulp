@@ -134,7 +134,11 @@ registers into. Beyond the usual atomic chain, the two exhaustive
 (`element_value`/`set_element_value`) need the `custom` case, and the inspector's
 `frame_element_kind_name` switch in `inspect/src/inspector_window.cpp`.
 
-**Import report (P7).** `collect_import_report(ir.root)` (`design_import.hpp`)
+**Import report (P7).** Implementations of the import-report and
+placement-verification passes live in `core/view/src/design_ir_analysis.cpp`
+(extracted from `design_ir_json.cpp`, which is the IR JSON serialization
+*contract* — keep the analysis passes there, not in the serializer).
+`collect_import_report(ir.root)` (`design_import.hpp`)
 walks the IR's interactive elements and surfaces each control's resolution
 provenance — `{source_node_id, kind, resolution_rung, confidence_score,
 conflict_signals, verification_pass}` — plus summary counts (`conflicted` /
@@ -408,6 +412,78 @@ mind when touching this:
   lane's test in the SAME change. The faithful-vector
   overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
   whole-word convention for its own (InteractiveElementKind) vocabulary.
+
+### KEY-based recognition + the recognition-resolver merge module
+
+NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
+signal is the Figma component identity — a `component_set_key`. This is a
+SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
+
+- **The merge module is the single source of truth.** `core/view/.../recognition_resolver.{hpp,cpp}`
+  (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
+  into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
+  in precedence order (later wins on key collision):
+  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+     mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
+     against the JSON by a drift-guard test),
+  2. the user's `--recognition-manifest` (flat library-manifest shape),
+  3. installed-package `design_controls` fragments (custom controls) —
+     gathered by `discover_package_design_controls()` (walks up for the project's
+     `packages.lock.json` + `registry.json`, builds ONE `RecognitionSource` per
+     installed package that declares any `design_controls`, named by package id)
+     and added via `add_source(...)` ONCE, in the same resolver-build block, NOT
+     by threading a third lookup through the importer lanes. **Do not scatter the
+     merge.** Any new recognition source becomes one more `add_source` call.
+     A package fragment carries `factory_id` (no built-in `kind`), so a match
+     routes to the custom-control materialize path below. With no custom-control
+     package installed this contributes zero sources, so behavior is unchanged.
+- **`--recognition-manifest <path>`** lets a designer map their OWN component-set
+  keys / name prefixes to Pulp kinds. Shape (mirrors `library-manifest.json`):
+  `{ "widgets": { "<name>": { "kind"?, "component_set_key", "name_prefix"?, "factory_id"? } } }`.
+  `kind` defaults to the widget's map key. `factory_id` (no `kind`) is the
+  custom-control path: a match resolves to a registered native overlay instead
+  of a built-in widget (same shape installed-package `design_controls` use).
+  Harvest keys from the Figma MCP `search_design_system`.
+- **Which lane is wired (authoritative): the C++ CLI figma-plugin lane.** The
+  plugin envelope carries each instance's `figma.component_key` /
+  `main_component_name` EVEN when the in-Figma TS plugin did not recognize it
+  (a third-party component) — `parse_ir_node` stamps these into
+  `attributes.figmaComponentKey` / `figmaMainComponentName`. After parse, the
+  CLI (`pulp_import_design.cpp`, figma / figma-plugin sources only) builds the
+  resolver (built-in + optional user manifest) and calls
+  `apply_recognition_resolver(ir.root, ...)`, which stamps `audio_widget` on any
+  instance that matched but was not already recognized. This is the lane that
+  turns a pixel-faithful-but-0-controls third-party design (the live Ink &
+  Signal "NumberBox" case) into a wired one.
+- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) and the Python REST
+  lane (`figma_rest_export.py`) bake recognition at CAPTURE time** for the
+  built-in library only. They are NOT yet wired to a user manifest (the TS lane
+  runs in the Figma sandbox; feeding it a user manifest needs plumbing through
+  the plugin UI). **Follow-up:** accept the user manifest in those two lanes too.
+  Until then, the C++ CLI lane is the single source for user-manifest recognition.
+- **Never-silent-knob (P7) holds.** A component instance present in the design
+  but matched by NO source is NEVER guessed into a kind — `apply_recognition_resolver`
+  collects it into `UnmatchedComponent[]`, which the CLI surfaces as an
+  `unmapped-component` import diagnostic. Additive guarantee: no manifest + no
+  resolvable third-party key ⇒ behavior unchanged; an already-stamped
+  `audio_widget` is never overridden.
+- **Custom-control materialize half (the package lane's runtime side).** A
+  custom-factory match has no built-in `audio_widget` to stamp — instead the
+  resolver records the `recognitionFactoryId` node attribute. The CLI then runs
+  `materialize_recognized_custom_controls(ir.root)` (same module), which converts
+  every such node into a `kind=custom` `IRInteractiveElement` carrying that
+  `factory_id` + the node's geometry. The native materializer
+  (`make_faithful_svg_frame` → `to_frame_elements`) builds the overlay via the
+  factory the package registered with `register_design_control_factory`. An
+  unregistered factory renders inert (the baked SVG still shows) AND emits the
+  `native-materialize-custom-factory-unregistered` diagnostic — never a silent
+  knob. The conversion is idempotent and additive (a node with no
+  `recognitionFactoryId` is untouched).
+- **Merge ordering is deterministic and pinned.** Package sources are gathered
+  in lockfile order; the resolver merges later sources OVER earlier ones, so on
+  a `component_set_key` (or `name_prefix`) collision the LAST-added package wins.
+  Tests pin this so a re-order is a visible change, not a silent one.
+
 - **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →
   `pulpBindingModule="filter"`, `pulpBindingParam="cutoff_hz"`,
   `pulpParamKey="filter.cutoff_hz"`. No dot → empty module, whole string is the
