@@ -10,8 +10,12 @@ widget state, layout, and runtime diagnostics.
 ./build/pulp inspect
 ./build/pulp inspect --port 49152
 ./build/pulp inspect --command DOM.getDocument
-./build/pulp inspect --command Capture.screenshot --output shot.json
+./build/pulp inspect --command State.getParameters
 ```
+
+`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`
+currently return explicit unavailable errors until script-engine and
+host-capture wiring lands.
 
 The inspector exposes:
 - View hierarchy with bounds, flex properties, and styles

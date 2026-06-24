@@ -1146,7 +1146,7 @@ directory.
 pulp inspect
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
-pulp inspect --command Capture.screenshot --output shot.json
+pulp inspect --command State.getParameters
 ```
 
 Options:
@@ -1156,6 +1156,11 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+
+`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode` are
+reserved inspector protocol methods, but currently return explicit unavailable
+errors until script-engine and host-capture references are wired into the
+inspector domain.
 
 ### tweaks
 

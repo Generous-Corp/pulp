@@ -258,6 +258,22 @@ TEST_CASE("PresetManager escapes metadata so special characters stay valid JSON"
     REQUIRE(std::string(doc["name"].getString()) == preset_name);
 }
 
+#if defined(_WIN32)
+TEST_CASE("PresetManager sanitizes Windows preset identity path components",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-windows-path-components");
+    StateStore store;
+    setup_test_store(store);
+
+    PresetManager pm(store, "..", R"(C:\Temp\..\Plug|In?)");
+
+    REQUIRE(fs::path(pm.user_presets_dir()) ==
+            sandbox.root / "AppData" / "_" / "C__Temp_.._Plug_In_" / "Presets");
+    REQUIRE(pm.save("PathSafe"));
+    REQUIRE(fs::exists(fs::path(pm.user_presets_dir()) / "PathSafe.json"));
+}
+#endif
+
 TEST_CASE("PresetManager writes valid JSON even for non-finite param values",
           "[state][preset][reliability]") {
     // std::clamp does not filter NaN/inf, so a misbehaving setter or corrupt

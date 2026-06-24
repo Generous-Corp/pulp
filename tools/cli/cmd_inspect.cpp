@@ -162,8 +162,11 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "Examples:\n";
             std::cout << "  pulp inspect                              # Interactive REPL\n";
             std::cout << "  pulp inspect --command DOM.getDocument     # One-shot query\n";
-            std::cout << "  pulp inspect --command Capture.screenshot --output shot.png\n";
+            std::cout << "  pulp inspect --command State.getParameters # Parameter snapshot\n";
             std::cout << "  pulp inspect --host 192.168.1.42          # Remote debugging\n";
+            std::cout << "\n";
+            std::cout << "Note: Runtime.evaluate and Capture.screenshot currently report unavailable\n";
+            std::cout << "until script-engine and host-capture wiring lands.\n";
             return 0;
         }
         if (args[i] == "--host") {

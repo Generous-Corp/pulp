@@ -147,6 +147,10 @@ the tool takes arguments:
   as separate flags; a bare `{...}` token is ignored. Read-only tools that take
   no args sidestep this, so don't copy their dispatch shape for a tool that
   carries a payload.
+- **Do not wrap inspector error text as media.** Protocol-reserved methods that
+  are not wired yet (for example screenshot/evaluate surfaces waiting on
+  WindowHost or ScriptEngine references) should return ordinary text/error
+  content through MCP until the inspector method returns a real payload.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
