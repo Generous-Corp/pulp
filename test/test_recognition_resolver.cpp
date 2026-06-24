@@ -15,15 +15,26 @@
 
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/design_ir.hpp>
+#include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/design_import.hpp>
 #include <pulp/view/recognition_resolver.hpp>
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#define PULP_TEST_GETPID _getpid
+#else
+#include <unistd.h>
+#define PULP_TEST_GETPID ::getpid
+#endif
 
 using namespace pulp::view;
 namespace fs = std::filesystem;
@@ -328,4 +339,270 @@ TEST_CASE("the built-in recognition table matches library-manifest.json",
         REQUIRE(resolved.source_name == "builtin-library");
         REQUIRE(resolved.kind == audio_widget_kind_from_manifest_id(kind_id));
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P8 — installed-package custom controls: install → merge → resolve → materialize
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Write a project's packages.lock.json + registry.json into a fresh temp dir and
+// return the dir. `registry_packages_json` is the inner `"packages": {...}` body.
+fs::path write_project(const std::string& lock_packages_json,
+                       const std::string& registry_packages_json) {
+    static int counter = 0;
+    fs::path dir = fs::temp_directory_path() /
+                   ("pulp-p8-pkg-" + std::to_string(++counter) + "-" +
+                    std::to_string(PULP_TEST_GETPID()));
+    fs::create_directories(dir);
+    {
+        std::ofstream lock(dir / "packages.lock.json", std::ios::binary);
+        lock << R"({ "lockfile_version": 1, "packages": )"
+             << lock_packages_json << " }";
+    }
+    {
+        std::ofstream reg(dir / "registry.json", std::ios::binary);
+        reg << R"({ "registry_version": 1, "packages": )"
+            << registry_packages_json << " }";
+    }
+    return dir;
+}
+
+// Minimal locked-package body (the fields the gather path doesn't read are
+// elided — gather only needs the package id key).
+std::string locked(const std::string& id) {
+    return "{ \"" + id +
+           "\": { \"version\": \"1.0.0\", \"resolved\": \"https://x/y\", "
+           "\"integrity\": \"sha256-abc\", \"commit\": \"deadbeef\" } }";
+}
+
+} // namespace
+
+TEST_CASE("installed-package design_controls merge into the resolver and resolve",
+          "[view][import][recognition][issue-4677]") {
+    // The cross-boundary acceptance path: a schema-valid design_controls fragment
+    // on an INSTALLED package resolves end-to-end to the right factory_id — not a
+    // happy-path on each side in isolation.
+    const auto dir = write_project(
+        locked("acme-controls"),
+        R"({ "acme-controls": { "design_controls": [
+              { "factory_id": "acme.spinner", "component_set_key": "pkg_spinner_key" }
+        ] } })");
+
+    auto pkg = pulp::view::discover_package_design_controls(dir);
+    REQUIRE(pkg.warnings.empty());
+    REQUIRE(pkg.sources.size() == 1);
+    REQUIRE(pkg.sources[0].name == "acme-controls");
+
+    auto resolver = RecognitionResolver::with_builtin_library();
+    for (auto& s : pkg.sources) resolver.add_source(std::move(s));
+
+    auto ir = parse_figma_plugin_json(
+        third_party_envelope("pkg_spinner_key", "Acme / Spinner"));
+    const int wired = apply_recognition_resolver(ir.root, resolver, nullptr);
+    REQUIRE(wired == 1);
+
+    const auto* node = first_child(ir.root);
+    REQUIRE(node->audio_widget == AudioWidgetType::none);  // custom, not a knob
+    REQUIRE(node->attributes.at("recognitionFactoryId") == "acme.spinner");
+    REQUIRE(node->attributes.at("recognitionSource") == "acme-controls");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("no installed custom-control package leaves behavior unchanged",
+          "[view][import][recognition][issue-4677]") {
+    // Additive contract: a project with no packages.lock.json (or a lockfile with
+    // no design-control package) contributes zero sources.
+    const auto empty_dir = fs::temp_directory_path() /
+                           ("pulp-p8-empty-" + std::to_string(PULP_TEST_GETPID()));
+    fs::create_directories(empty_dir);
+    auto none = pulp::view::discover_package_design_controls(empty_dir);
+    REQUIRE(none.sources.empty());
+    REQUIRE(none.warnings.empty());
+    fs::remove_all(empty_dir);
+
+    // A package that declares NO design_controls also contributes nothing.
+    const auto dir = write_project(
+        locked("plain-dsp"),
+        R"({ "plain-dsp": { "category": "dsp" } })");
+    auto pkg = pulp::view::discover_package_design_controls(dir);
+    REQUIRE(pkg.sources.empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("duplicate component_set_key across entries: last-added source wins (pinned)",
+          "[view][import][recognition][issue-4677]") {
+    // Two packages declare the SAME component_set_key with DIFFERENT factory_ids.
+    // The resolver merges later sources OVER earlier ones, and gather emits one
+    // source per package in lockfile order — so the LAST package in lock order
+    // wins, deterministically. Pin that so a re-order is a visible change.
+    const auto dir = write_project(
+        // Lock order is alphabetical by id in the JSON object we write; choc
+        // preserves insertion order, so "first-pkg" then "second-pkg".
+        R"({ "first-pkg": { "version": "1.0.0", "resolved": "https://x", "integrity": "sha256-a", "commit": "aaaaaaa" },
+             "second-pkg": { "version": "1.0.0", "resolved": "https://x", "integrity": "sha256-b", "commit": "bbbbbbb" } })",
+        R"({ "first-pkg":  { "design_controls": [ { "factory_id": "first.control",  "component_set_key": "shared_key" } ] },
+             "second-pkg": { "design_controls": [ { "factory_id": "second.control", "component_set_key": "shared_key" } ] } })");
+
+    auto pkg = pulp::view::discover_package_design_controls(dir);
+    REQUIRE(pkg.sources.size() == 2);
+    REQUIRE(pkg.sources[0].name == "first-pkg");
+    REQUIRE(pkg.sources[1].name == "second-pkg");
+
+    RecognitionResolver resolver;  // no built-in; only the two packages
+    for (auto& s : pkg.sources) resolver.add_source(std::move(s));
+
+    const auto resolved = resolver.resolve("shared_key", /*name=*/"");
+    REQUIRE(resolved.matched);
+    // Last-added source (second-pkg) wins the key collision.
+    REQUIRE(resolved.factory_id == "second.control");
+    REQUIRE(resolved.source_name == "second-pkg");
+    REQUIRE(resolved.via == "key");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("name_prefix collision across merged packages: last-added source wins (pinned)",
+          "[view][import][recognition][issue-4677]") {
+    // Same identity via the name_prefix fallback rather than the key. The
+    // resolver walks sources in reverse, so the last-added package's prefix entry
+    // wins a collision — deterministic across the multi-package merge.
+    const auto dir = write_project(
+        R"({ "alpha-pkg": { "version": "1.0.0", "resolved": "https://x", "integrity": "sha256-a", "commit": "aaaaaaa" },
+             "beta-pkg":  { "version": "1.0.0", "resolved": "https://x", "integrity": "sha256-b", "commit": "bbbbbbb" } })",
+        R"({ "alpha-pkg": { "design_controls": [ { "factory_id": "alpha.widget", "name_prefix": "Shared / Widget" } ] },
+             "beta-pkg":  { "design_controls": [ { "factory_id": "beta.widget",  "name_prefix": "Shared / Widget" } ] } })");
+
+    auto pkg = pulp::view::discover_package_design_controls(dir);
+    REQUIRE(pkg.sources.size() == 2);
+
+    RecognitionResolver resolver;
+    for (auto& s : pkg.sources) resolver.add_source(std::move(s));
+
+    // No key match → prefix fallback. beta-pkg (last added) wins.
+    const auto resolved = resolver.resolve(/*component_key=*/"", "Shared / Widget XL");
+    REQUIRE(resolved.matched);
+    REQUIRE(resolved.via == "name_prefix");
+    REQUIRE(resolved.factory_id == "beta.widget");
+    REQUIRE(resolved.source_name == "beta-pkg");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("malformed registry/lockfile is non-fatal (warns, merges nothing)",
+          "[view][import][recognition][issue-4677]") {
+    // A broken registry must never break an import — gather returns no sources
+    // and a human-readable warning.
+    static int n = 0;
+    fs::path dir = fs::temp_directory_path() /
+                   ("pulp-p8-bad-" + std::to_string(PULP_TEST_GETPID()) + "-" +
+                    std::to_string(++n));
+    fs::create_directories(dir);
+    { std::ofstream l(dir / "packages.lock.json");
+      l << R"({ "lockfile_version": 1, "packages": )" << locked("acme") << " }"; }
+    { std::ofstream r(dir / "registry.json"); r << "{ this is not json"; }
+
+    auto pkg = pulp::view::discover_package_design_controls(dir);
+    REQUIRE(pkg.sources.empty());
+    REQUIRE_FALSE(pkg.warnings.empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("materialize: a resolved custom control becomes a kind=custom IR element",
+          "[view][import][recognition][issue-4677]") {
+    // After the resolver stamps recognitionFactoryId, the materialize half turns
+    // it into a kind=custom IRInteractiveElement carrying the factory_id and the
+    // node's geometry — what the native materializer consumes.
+    auto ir = parse_figma_plugin_json(
+        third_party_envelope("pkg_spinner_key", "Acme / Spinner"));
+    auto* node = const_cast<IRNode*>(first_child(ir.root));
+    REQUIRE(node != nullptr);
+    node->attributes["recognitionFactoryId"] = "acme.spinner";
+    node->source_node_id = "1273:33424";
+    node->style.left = 10.0f;
+    node->style.top = 20.0f;
+    node->style.width = 64.0f;
+    node->style.height = 64.0f;
+
+    const int n = pulp::view::materialize_recognized_custom_controls(ir.root);
+    REQUIRE(n == 1);
+    REQUIRE(node->interactive_elements.size() == 1);
+    const auto& el = node->interactive_elements.front();
+    REQUIRE(el.kind == InteractiveElementKind::custom);
+    REQUIRE(el.factory_id == "acme.spinner");
+    REQUIRE(el.w == Catch::Approx(64.0f));
+    REQUIRE(el.h == Catch::Approx(64.0f));
+    REQUIRE(el.source_node_id.has_value());
+    REQUIRE(*el.source_node_id == "1273:33424");
+
+    // Idempotent: a second pass does not double-stamp.
+    REQUIRE(pulp::view::materialize_recognized_custom_controls(ir.root) == 0);
+    REQUIRE(node->interactive_elements.size() == 1);
+}
+
+TEST_CASE("inert path: an unregistered custom factory renders inert + diagnoses",
+          "[view][import][recognition][issue-4677]") {
+    // The never-silent-knob contract: a kind=custom element whose factory_id is
+    // NOT registered must render inert (the baked SVG still shows) AND emit a
+    // diagnostic — never silently become a working knob. Exercise the REAL native
+    // materializer so the diagnostic comes from the shipping path.
+    clear_design_control_factories();
+
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement custom;
+    custom.kind = InteractiveElementKind::custom;
+    custom.factory_id = "unregistered.control";
+    custom.x = 10.0f; custom.y = 10.0f; custom.w = 40.0f; custom.h = 40.0f;
+    ir.root.interactive_elements.push_back(custom);
+
+    IRAssetRef asset;
+    asset.asset_id = "asset-svg";
+    asset.original_uri =
+        "data:image/svg+xml,"
+        "%3Csvg%20width%3D%22100%22%20height%3D%22100%22%20"
+        "xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E"
+        "%3Crect%20x%3D%2210%22%20y%3D%2210%22%20width%3D%2280%22%20height%3D%2280%22%2F%3E"
+        "%3C%2Fsvg%3E";
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+
+    const bool inert_diag = std::any_of(
+        diagnostics.begin(), diagnostics.end(), [](const ImportDiagnostic& d) {
+            return d.code == "native-materialize-custom-factory-unregistered";
+        });
+    REQUIRE(inert_diag);
+
+    // Now register the factory and confirm NO inert diagnostic fires.
+    bool built = false;
+    register_design_control_factory(
+        "unregistered.control",
+        [&](const DesignControlContext&) -> std::unique_ptr<View> {
+            built = true;
+            return std::make_unique<View>();
+        });
+    diagnostics.clear();
+    auto root2 = build_native_view_tree(ir, ir.asset_manifest,
+                                        {.diagnostics_out = &diagnostics});
+    REQUIRE(root2 != nullptr);
+    REQUIRE(built);
+    const bool inert_diag2 = std::any_of(
+        diagnostics.begin(), diagnostics.end(), [](const ImportDiagnostic& d) {
+            return d.code == "native-materialize-custom-factory-unregistered";
+        });
+    REQUIRE_FALSE(inert_diag2);
+
+    clear_design_control_factories();
 }
