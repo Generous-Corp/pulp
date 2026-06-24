@@ -60,7 +60,7 @@ TEST_CASE("CLI create targets skip empty standalone app targets",
           "[cli][create][issue-643]") {
     const auto targets = create_default_build_targets("", "app", "Standalone");
 
-    // PR #1271 P2 — an empty class_name (the slug
+    // PR #1271 — an empty class_name (the slug
     // sanitizer can collapse names made only of separators to "")
     // must NOT produce the malformed target `"-test"`. That string
     // looks like a CMake CLI option to `cmake --build --target ...`
@@ -73,7 +73,7 @@ TEST_CASE("CLI create targets skip empty standalone app targets",
 
 TEST_CASE("CLI create targets skip malformed targets when class_name is empty across formats",
           "[cli][create][issue-643]") {
-    // Same PR #1271 P2 case as above, generalised — none of the format
+    // Same PR #1271 case as above, generalised — none of the format
     // suffixes should produce a "_VST3" / "_CLAP" / "_Standalone"
     // string that starts with `_` either, for the same `cmake --build
     // --target` reason. Empty class_name → empty target list.
@@ -111,7 +111,7 @@ TEST_CASE("CLI create targets can omit the test target for template kit builds",
 
 TEST_CASE("CLI create selects build config at build/test time for multi-config generators",
           "[cli][create][issue-2133]") {
-    // PR #2133 P1: `pulp create` set only the configure-time
+    // PR #2133: `pulp create` set only the configure-time
     // CMAKE_BUILD_TYPE, so on Visual Studio / Xcode multi-config generators
     // `cmake --build` and `ctest` defaulted to Debug regardless of --debug.
     // The config name must flow into `cmake --build --config <cfg>` and

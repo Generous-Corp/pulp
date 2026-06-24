@@ -17,9 +17,9 @@ using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
 // ── pulp #1731 — Panel & View paint must honor effective_corner_radius ─────
-// Codex P1 #1: Panel had its own corner_radius_ field that paint() never
+// Panel had its own corner_radius_ field that paint() never
 // read (it called View::effective_corner_radius which only sees View's
-// slot). Codex P1 #2: View::paint_all used corner_radius_/corner_radii_[]
+// slot). View::paint_all used corner_radius_/corner_radii_[]
 // directly, silently ignoring corner_radius_pct_ / corner_radii_pct_[].
 
 TEST_CASE("pulp #1731 P1 — Panel default 8px corner radius actually paints",

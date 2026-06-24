@@ -693,7 +693,7 @@ TEST_CASE("discover: FetchContent scratch dirs do not register as stale-commit",
     CHECK_FALSE(fcc::any_unhealthy(entries));
 }
 
-// ── PR #753 P1: stale-ref entries must NOT block preflight ─────────────────
+// ── PR #753: stale-ref entries must NOT block preflight ────────────────────
 //
 // CMake's pulp_register_fetchcontent_source override path keys on the
 // CURRENT sanitized ref (`<dep>-<ref>`), so leftover `<dep>-<oldref>`
@@ -816,7 +816,7 @@ TEST_CASE("preflight: mixed stale + dangling reports only the dangling entry",
     CHECK(s.find("choc-aaaaa") == std::string::npos);
 }
 
-// ── PR #753 P2: --caches --json exit code reflects health ──────────────────
+// ── PR #753: --caches --json exit code reflects health ─────────────────────
 //
 // `render_report_json` itself always returns 0, but the cmd_doctor
 // caller is responsible for setting the exit code via any_unhealthy().

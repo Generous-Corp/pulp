@@ -375,7 +375,7 @@ TEST_CASE("broken validator with unknown ownership requires manual sudo path",
 
 TEST_CASE("apply_fixes preserves Broken status when fs::remove fails",
           "[doctor][validators][issue-743][codex-p1]") {
-    // PR #749 P1. If fs::remove fails (permission
+    // PR #749. If fs::remove fails (permission
     // flip mid-doctor, sticky bit, racing process) we MUST NOT report
     // success — the broken binary is still on disk and `pulp validate`
     // will keep aborting. The fix counts as still_missing, the report
@@ -422,7 +422,7 @@ TEST_CASE("apply_fixes preserves Broken status when fs::remove fails",
 
 TEST_CASE("discovery skips non-executable candidates and falls through to runnable paths",
           "[doctor][validators][issue-743][codex-p2]") {
-    // PR #749 P2. If a high-priority path exists
+    // PR #749. If a high-priority path exists
     // but is not executable (zero-byte placeholder, world-writable
     // text file someone left behind), discovery should skip it and
     // continue scanning the priority list rather than picking a
