@@ -409,7 +409,7 @@ mind when touching this:
   overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
   whole-word convention for its own (InteractiveElementKind) vocabulary.
 
-### KEY-based recognition + the recognition-resolver merge module (issue #4676)
+### KEY-based recognition + the recognition-resolver merge module
 
 NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
 signal is the Figma component identity — a `component_set_key`. This is a
@@ -423,7 +423,7 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
      mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
      against the JSON by a drift-guard test),
   2. the user's `--recognition-manifest` (flat library-manifest shape),
-  3. *(future, issue #4677)* installed-package `design_controls` fragments —
+  3. *(future)* installed-package `design_controls` fragments —
      these plug in by calling `resolver.add_source(...)` ONCE, here, NOT by
      threading a third lookup through the importer lanes. **Do not scatter the
      merge.** Any new recognition source becomes one more `add_source` call.

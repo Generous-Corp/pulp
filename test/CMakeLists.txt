@@ -4967,20 +4967,11 @@ catch_discover_tests(pulp-test-design-export
 
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
-    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp
+    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]"
     LABELS "parser-import")
-
-# Key-based recognition merge layer (issue #4676): the single module that merges
-# the built-in Pulp Figma Library + user recognition manifests into one resolved
-# component_set_key -> kind table.
-add_executable(pulp-test-recognition-resolver test_recognition_resolver.cpp)
-target_link_libraries(pulp-test-recognition-resolver PRIVATE pulp::view Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-recognition-resolver PRIVATE
-    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-recognition-resolver PROPERTIES LABELS "parser-import")
 
 # Reference-free import-fidelity self-checks (core/view/src/design_fidelity.cpp).
 add_executable(pulp-test-design-fidelity test_design_fidelity.cpp)
