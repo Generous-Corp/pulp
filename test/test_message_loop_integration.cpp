@@ -80,6 +80,30 @@ TEST_CASE("MessageLoopIntegration kind names cover every enum value",
     check(MainLoopKind::Custom,  "custom");
 }
 
+TEST_CASE("MessageLoopIntegration backend without a kind tag stays self-consistent",
+          "[events][message-loop-integration]") {
+    // Regression: register a backend with MainThreadDispatcher but skip
+    // the separate register_kind() step (the header documents kind tagging
+    // as a distinct call after register_backend()). The documented
+    // equivalence is `available() == (active_kind() != None)`; previously
+    // an untagged-but-present backend reported available()==true while
+    // active_kind()==None, breaking that invariant.
+    std::atomic<int> calls{0};
+    auto token = MainThreadDispatcher::register_backend(make_noop_backend(&calls));
+    REQUIRE(token != 0);
+
+    // No register_kind() call here on purpose.
+    REQUIRE(MessageLoopIntegration::available());
+    REQUIRE(MessageLoopIntegration::active_kind() != MainLoopKind::None);
+    REQUIRE(MessageLoopIntegration::active_name() != "none");
+
+    // The header-documented equivalence holds either way.
+    REQUIRE(MessageLoopIntegration::available() ==
+            (MessageLoopIntegration::active_kind() != MainLoopKind::None));
+
+    REQUIRE(MainThreadDispatcher::unregister_backend(token));
+}
+
 TEST_CASE("MessageLoopIntegration register_kind with token=0 is a no-op",
           "[events][message-loop-integration]") {
     MessageLoopIntegration::register_kind(0, MainLoopKind::Cocoa);

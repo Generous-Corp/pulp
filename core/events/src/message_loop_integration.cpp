@@ -39,6 +39,15 @@ MainLoopKind MessageLoopIntegration::active_kind() {
     }
     auto& r = KindRegistry::instance();
     std::lock_guard<std::mutex> lock(r.mu);
+    // A backend can be registered with MainThreadDispatcher without a
+    // matching register_kind() call — the header documents kind tagging
+    // as a separate step done after register_backend(). In that case the
+    // loop genuinely exists but its kind is unknown. Report Custom (a
+    // caller-registered loop) rather than None so the documented
+    // equivalence `available() == (active_kind() != None)` holds.
+    if (r.active == MainLoopKind::None) {
+        return MainLoopKind::Custom;
+    }
     return r.active;
 }
 
