@@ -429,8 +429,10 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   2. the user's `--recognition-manifest` (flat library-manifest shape),
   3. installed-package `design_controls` fragments (custom controls) —
      gathered by `discover_package_design_controls()` (walks up for the project's
-     `packages.lock.json` + `registry.json`, builds ONE `RecognitionSource` per
-     installed package that declares any `design_controls`, named by package id)
+     `packages.lock.json`, then reads the registry at `tools/packages/registry.json`
+     — the canonical CLI layout from `find_registry_path`, NOT a lockfile sibling;
+     a wrong path silently merges zero packages — builds ONE `RecognitionSource`
+     per installed package that declares any `design_controls`, named by package id)
      and added via `add_source(...)` ONCE, in the same resolver-build block, NOT
      by threading a third lookup through the importer lanes. **Do not scatter the
      merge.** Any new recognition source becomes one more `add_source` call.

@@ -250,10 +250,15 @@ int apply_recursive(IRNode& node,
                     node.attributes["recognitionVia"] = resolved.via;
                     ++wired;
                 }
-            } else if (unmatched_out && !component_key.empty()) {
+            } else if (unmatched_out) {
                 // Never-silent-knob (P7): a present-but-unmatched component is
-                // surfaced, never guessed. Deduplicate by key.
-                if (unmatched_seen.insert(component_key).second)
+                // surfaced, never guessed. Dedup by component_key when present,
+                // else by the identity name — a detached/local component carries
+                // only figmaMainComponentName, not a component_key, and must
+                // still be surfaced (not silently dropped).
+                const std::string& dedup_key =
+                    !component_key.empty() ? component_key : ident_name;
+                if (!dedup_key.empty() && unmatched_seen.insert(dedup_key).second)
                     unmatched_out->push_back({component_key, ident_name});
             }
         }
@@ -374,6 +379,10 @@ PackageDesignControlSources gather_package_design_controls(
     // Walk installed packages in lockfile order so the produced source order is
     // deterministic (the resolver merges later sources OVER earlier ones; a
     // stable order makes the dedup/collision behavior reproducible and pinnable).
+    // NOTE: "last package wins a shared key" relies on (a) choc::json preserving
+    // JSON object-member insertion order and (b) the CLI writing the lockfile in
+    // a stable order. Both hold today; if a future lockfile writer reorders,
+    // sort `locked`'s members by package id here for a layout-independent tiebreak.
     for (uint32_t i = 0; i < locked.size(); ++i) {
         const auto member = locked.getObjectMemberAt(i);
         const std::string pkg_id = member.name != nullptr ? member.name : "";
@@ -410,9 +419,12 @@ PackageDesignControlSources discover_package_design_controls(
     for (int i = 0; i < 32; ++i) {
         const auto lock = cur / "packages.lock.json";
         if (fs::exists(lock, ec) && !ec) {
-            // Look for a sibling registry.json; if absent, gather still runs and
+            // The registry lives at <root>/tools/packages/registry.json — the
+            // SAME path the CLI's find_registry_path resolves (package_commands_util.cpp),
+            // NOT a sibling of the lockfile. If absent, gather still runs and
             // reports the missing-registry warning for any locked package.
-            return gather_package_design_controls(lock, cur / "registry.json");
+            return gather_package_design_controls(
+                lock, cur / "tools" / "packages" / "registry.json");
         }
         if (!cur.has_parent_path() || cur.parent_path() == cur) break;
         cur = cur.parent_path();

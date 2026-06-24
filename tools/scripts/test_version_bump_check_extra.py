@@ -833,20 +833,42 @@ class AssessmentReportApplyTests(unittest.TestCase):
             self.assertEqual(json.loads((repo / "sdk.json").read_text())["version"], "1.1.0")
             run.assert_called_once()
 
-    def test_apply_bumps_ignores_none_and_patch_verdicts(self) -> None:
+    def test_apply_bumps_skips_none_but_writes_patch_verdicts(self) -> None:
+        # Post-Shipyard#358: only `none` means no release is owed.
+        # `patch` (the `fix:` classification) MUST be written — skipping
+        # it stranded every `fix:` PR at the `--require-bump-for-fix-feat`
+        # gate. A `none` verdict short-circuits before `already_bumped` is
+        # ever consulted; a `patch` verdict goes through the full
+        # already-bumped / version-at-base / write path.
         surface = vbc.Surface(
             "sdk",
             "SDK",
             [vbc.VersionFile("sdk.json", "json_field", "version")],
             ["src/**"],
         )
-        verdicts = [
-            vbc.Verdict(surface, "none", None, "1.0.0", "none"),
-            vbc.Verdict(surface, "patch", None, "1.0.0", "patch"),
-        ]
+
+        # A lone `none` verdict: nothing written, `already_bumped` untouched.
+        none_only = [vbc.Verdict(surface, "none", None, "1.0.0", "none")]
         with mock.patch.object(vbc, "already_bumped") as already_bumped:
-            self.assertEqual(vbc.apply_bumps(verdicts, "base", pathlib.Path("/tmp")), [])
+            self.assertEqual(
+                vbc.apply_bumps(none_only, "base", pathlib.Path("/tmp")), []
+            )
         already_bumped.assert_not_called()
+
+        # A `patch` verdict: the version file is rewritten 1.0.0 → 1.0.1.
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / "sdk.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+            patch_verdict = [vbc.Verdict(surface, "patch", None, "1.0.0", "patch")]
+            with mock.patch.object(vbc, "already_bumped", return_value=False), \
+                 mock.patch.object(vbc, "version_at_base", return_value="1.0.0"), \
+                 mock.patch.object(vbc.subprocess, "run") as run:
+                edited = vbc.apply_bumps(patch_verdict, "base", repo)
+            self.assertEqual(edited, ["sdk.json"])
+            self.assertEqual(
+                json.loads((repo / "sdk.json").read_text())["version"], "1.0.1"
+            )
+            run.assert_called_once()
 
     def test_fix_feat_skip_trailer_range_helper_requires_top_level_reason(self) -> None:
         with mock.patch.object(

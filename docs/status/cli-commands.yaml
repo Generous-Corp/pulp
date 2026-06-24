@@ -104,7 +104,7 @@ commands:
           - name: --key-pass
             required: false
       - name: notarize
-        summary: Submit signed bundles for Apple notarization (macOS)
+        summary: Submit packaged artifacts for Apple notarization (macOS); prefer release or --path with .pkg/.dmg/.zip
         args:
           - name: --path
             required: false
