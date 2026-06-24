@@ -787,6 +787,21 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
     };
 }
 
+int SignalGraph::prepared_max_block_size() const noexcept {
+    return live_ ? live_->max_block_size : 0;
+}
+
+std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->runtime.find(id);
+    if (it == live_->runtime.end()) return nullptr;
+    return it->second.gain.get();
+}
+
+std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
+    return live_;  // aliases the live CompiledGraph as an opaque keepalive
+}
+
 std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
     // Control/UI-thread read of the persistent per-node measurers. node_load_
     // is only mutated on the control thread (compile_), so this is race-free

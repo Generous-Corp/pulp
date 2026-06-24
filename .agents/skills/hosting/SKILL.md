@@ -214,6 +214,22 @@ predictable output, no MIDI.
   the manifest signature. Registry/package discovery metadata still needs its
   own signed canonical manifest; do not treat screenshots, validation reports,
   licenses, or provenance as covered by the node-pack loader signature.
+- **Routing a `SignalGraph` through the canonical executor
+  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** A prepared graph in
+  the eligible subset — nodes only `AudioInput`/`AudioOutput`/`Gain`, connections
+  only plain audio (feedforward or feedback; no MIDI/automation/audio-rate-mod/
+  sidechain) — can be translated by `build_signal_graph_executor_routing()` into a
+  `format::GraphRuntimeSnapshot` + pre-sized `GraphRuntimeBufferPool` and driven
+  via `GraphRuntimeExecutor::process_routed()`, producing output bit-identical to
+  `SignalGraph::process()`'s own walk. Gotchas: gate with
+  `signal_graph_executor_eligible()` first (Plugin/Custom/MIDI/PDC/sidechain/
+  automation stay on the legacy walk); the routing holds the live compiled
+  snapshot alive via `SignalGraph::live_snapshot_handle()` and the Gain bindings
+  read the live `live_gain_atomic()`, so **rebuild the routing after any
+  re-prepare** (the atomics belong to the snapshot it was built from). Eligibility
+  depends on the node-type restriction guaranteeing zero latency — only Plugin
+  nodes add latency, so the executor (which has no per-connection delay
+  compensation yet) stays correct for the subset.
 
 ## Common tripwires
 

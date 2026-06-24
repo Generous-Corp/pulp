@@ -38,17 +38,20 @@ pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
 # (lock-free primitives, automation queue, graph walk, Processor entry).
 pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
 
-# Phase 4 serial-parity baseline: the canonical GraphRuntimeExecutor gain must
-# match SignalGraph bit-for-bit (the regression baseline for converging the
-# host graph onto the executor seam).
+# The canonical GraphRuntimeExecutor gain output must match SignalGraph
+# bit-for-bit (regression baseline for the host-graph-on-executor seam).
 pulp_add_test_suite(pulp-test-graph-executor-parity
     LIBRARIES pulp::host pulp::format pulp::graph)
-# Phase 4a: off-RT scratch-slot buffer-assignment layout.
+# Off-RT scratch-slot buffer-assignment layout + reuse.
 pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
-# Phase 4b: executor routing path moves audio between nodes (two-gain chain
-# parity vs SignalGraph) and is allocation-free on the RT thread.
+# Executor routing path moves audio between nodes (chain/diamond/feedback/
+# multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
     SOURCES test_graph_executor_routing.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# A SignalGraph translated to the executor produces bit-identical output to its
+# own walk for the eligible node/connection subset.
+pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point

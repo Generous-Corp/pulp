@@ -1,14 +1,15 @@
-// Phase 4b/4c: prove the canonical GraphRuntimeExecutor's ROUTING path moves
+// Prove the canonical GraphRuntimeExecutor's ROUTING path moves
 // audio between nodes correctly. Unlike the single-node output-parity baseline
 // (test_graph_executor_parity.cpp), these build real topologies — a two-gain
 // chain (g2's input must be g1's output) and a diamond (fan-out + fan-in) —
 // where a routing bug (wrong slot, missed gather, wrong order) shows up as a
 // bit-level mismatch against pulp::host::SignalGraph driving the same graph.
-// Also asserts the routing path is allocation-free and rejects feedback graphs.
+// Covers feedforward, fan-out/fan-in, multi-output mixing, and one-block
+// feedback, and asserts the routing path is allocation-free.
 //
 // A small RoutedHarness owns the per-call buffers/buses/block so each case is
-// just "topology + bindings + assertion"; later phases (4d feedback variants,
-// 4e reuse parity) add cases without re-hand-rolling the plumbing.
+// just "topology + bindings + assertion"; new topologies add cases without
+// re-hand-rolling the plumbing.
 
 #include "harness/rt_allocation_probe.hpp"
 
@@ -253,7 +254,7 @@ constexpr double kSr = 48000.0;
 } // namespace
 
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a two-gain chain",
-          "[host][graph][executor][routing][phase4][parity]") {
+          "[host][graph][executor][routing][parity]") {
     GraphRuntimeExecutor exec;
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
@@ -301,7 +302,7 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a two-gain chain
 }
 
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-out + fan-in)",
-          "[host][graph][executor][routing][phase4][parity]") {
+          "[host][graph][executor][routing][parity]") {
     GraphRuntimeExecutor exec;
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
@@ -346,8 +347,53 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a diamond (fan-o
     }
 }
 
+TEST_CASE("GraphRuntimeExecutor routing sums multiple AudioOutput nodes into the bus",
+          "[host][graph][executor][routing][parity]") {
+    // in -> A -> out1 and in -> B -> out2; out1 and out2 are SEPARATE
+    // AudioOutput nodes both driving main-output channel 0. SignalGraph zeroes
+    // the output bus once and each output node accumulates, so bus = A + B.
+    // This is the case the AudioOutput accumulate (+=) + zero-bus-once change
+    // exists for; overwrite semantics would be last-writer-wins (= B only).
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},   // A
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},   // B
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},  // in -> A
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},  // in -> B
+        GraphRuntimeConnectionSpec{2, 0, 4, 0},  // A -> out1
+        GraphRuntimeConnectionSpec{3, 0, 5, 0},  // B -> out2
+    };
+    constexpr int kFrames = 64;
+    const float a = 0.5f, b = 0.25f;
+    GainState sa{a}, sb{b};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &sa, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &sb, true},
+        GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{5, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    auto pool = make_pool(snapshot, kFrames);
+    const auto x = test_signal(kFrames, 0.8f);
+    const std::vector<std::vector<float>> in{x};
+    RoutedHarness h(kSr, kFrames, in, 1);
+    GraphRuntimeExecutor exec;
+    REQUIRE(h.run(exec, snapshot, pool).ok());
+    for (int i = 0; i < kFrames; ++i) {
+        const float expected = x[static_cast<std::size_t>(i)] * a +
+                               x[static_cast<std::size_t>(i)] * b;
+        REQUIRE(h.outs[0][static_cast<std::size_t>(i)] == expected);
+    }
+}
+
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a split-lifetime fan-out",
-          "[host][graph][executor][routing][phase4][parity]") {
+          "[host][graph][executor][routing][parity]") {
     // A's output feeds B (early) and out (late); slot reuse must keep A's
     // scratch live across B. out:0 = A + B.
     const std::array nodes = {
@@ -391,7 +437,7 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a split-lifetime
 }
 
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a feedback loop",
-          "[host][graph][executor][routing][phase4][parity][feedback]") {
+          "[host][graph][executor][routing][parity][feedback]") {
     // in -> A(gain) -> out, with A -> A one-block feedback. The feedback is a
     // whole-block delay (not a per-sample IIR): block n's A input at sample i is
     // in[n][i] + A_out[n-1][i], so out[n][i] = g*(in[n][i] + A_out[n-1][i]).
@@ -442,7 +488,7 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a feedback loop"
 }
 
 TEST_CASE("GraphRuntimeExecutor routing process path does not allocate",
-          "[host][graph][executor][routing][phase4][rt-safety]") {
+          "[host][graph][executor][routing][rt-safety]") {
     constexpr int kFrames = 256;
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
@@ -480,7 +526,7 @@ TEST_CASE("GraphRuntimeExecutor routing process path does not allocate",
 }
 
 TEST_CASE("GraphRuntimeExecutor feedback routing path does not allocate",
-          "[host][graph][executor][routing][phase4][rt-safety][feedback]") {
+          "[host][graph][executor][routing][rt-safety][feedback]") {
     // Feedback adds the gather-from-prev-slot read and the end-of-block capture
     // copy; both must stay allocation-free on the RT thread.
     constexpr int kFrames = 128;

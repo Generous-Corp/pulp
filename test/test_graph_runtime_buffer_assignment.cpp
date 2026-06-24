@@ -1,11 +1,10 @@
-// Phase 4a/4e: unit coverage for the off-RT buffer-assignment pass that the
-// routing executor consumes. 4a established a per-port slot layout; 4e made it
-// reuse scratch across non-overlapping node lifetimes. These assert the
-// invariants the executor depends on (regions in range, a node's own input and
-// output regions never overlap, reuse never grows the slot count, one
-// persistent slot per feedback edge). End-to-end correctness of the reused
-// layout is proven by the SignalGraph bit-exact parity tests in
-// test_graph_executor_routing.cpp.
+// Unit coverage for the off-RT buffer-assignment pass that the routing executor
+// consumes: a per-port scratch-slot layout that reuses slots across
+// non-overlapping node lifetimes. These assert the invariants the executor
+// depends on (regions in range, a node's own input and output regions never
+// overlap, reuse never grows the slot count, one persistent slot per feedback
+// edge). End-to-end correctness of the reused layout is proven by the
+// SignalGraph bit-exact parity tests in test_graph_executor_routing.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -55,7 +54,7 @@ void check_invariants(const GraphRuntimePlan& plan,
 } // namespace
 
 TEST_CASE("Buffer assignment reuses scratch and never grows past total ports",
-          "[graph][buffer-assignment][phase4]") {
+          "[graph][buffer-assignment]") {
     // Linear: AudioInput(0->2) -> gain(2->2) -> AudioOutput(2->0).
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
@@ -78,7 +77,7 @@ TEST_CASE("Buffer assignment reuses scratch and never grows past total ports",
 }
 
 TEST_CASE("Buffer assignment reuse scales sub-linearly on a long chain",
-          "[graph][buffer-assignment][phase4]") {
+          "[graph][buffer-assignment]") {
     // A long unbranched stereo chain: input -> g1 -> g2 -> ... -> output.
     // Without reuse this is 2*(N) ports; with reuse only a few live regions
     // exist at once, so slot_count stays small and constant-ish.
@@ -109,7 +108,7 @@ TEST_CASE("Buffer assignment reuse scales sub-linearly on a long chain",
 }
 
 TEST_CASE("Buffer assignment appends one previous-block slot per feedback edge",
-          "[graph][buffer-assignment][phase4][feedback]") {
+          "[graph][buffer-assignment][feedback]") {
     const std::array nodes = {
         GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
         GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
@@ -141,7 +140,7 @@ TEST_CASE("Buffer assignment appends one previous-block slot per feedback edge",
 }
 
 TEST_CASE("Buffer assignment of an empty plan is valid and empty",
-          "[graph][buffer-assignment][phase4]") {
+          "[graph][buffer-assignment]") {
     auto plan = build_graph_runtime_plan(
         std::span<const GraphRuntimeNodeSpec>{},
         std::span<const GraphRuntimeConnectionSpec>{});

@@ -399,6 +399,24 @@ public:
     };
     std::vector<NodeLoadReport> node_loads() const;
 
+    // ── Canonical-executor migration ─────────────────────────────────────
+    // Hooks the SignalGraph→GraphRuntimeExecutor translation needs without
+    // exposing the private CompiledGraph. The translation lives in
+    // signal_graph_executor_routing.{hpp,cpp}; these are control-thread only.
+
+    // True once prepare() has published a live compiled snapshot.
+    bool is_prepared() const noexcept { return live_ != nullptr; }
+    // Max block size the live snapshot was prepared for (0 if not prepared).
+    int prepared_max_block_size() const noexcept;
+    // The live compiled snapshot's per-node gain atomic (Gain nodes only), or
+    // nullptr. The pointer stays valid only while the snapshot returned by
+    // live_snapshot_handle() is retained AND no re-prepare has occurred; a
+    // routing built from it must be rebuilt after the graph recompiles.
+    std::atomic<float>* live_gain_atomic(NodeId id) const noexcept;
+    // Opaque keepalive for the live compiled snapshot so a translated routing
+    // can pin the lifetime of the gain atomics it references.
+    std::shared_ptr<const void> live_snapshot_handle() const noexcept;
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,

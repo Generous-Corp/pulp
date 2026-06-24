@@ -1,16 +1,16 @@
-// Phase 4 serial-parity baseline: prove the canonical core/graph executor
+// Serial-parity baseline: prove the canonical core/graph executor
 // (pulp::format::GraphRuntimeExecutor) can drive a gain node to output that is
 // BIT-IDENTICAL to the host graph (pulp::host::SignalGraph) for the same input.
 //
 // This is the regression baseline for converging SignalGraph onto the executor
-// seam. It also pins a key architectural fact discovered while scoping Phase 4:
-// the executor does NOT route inter-node audio — it walks nodes in topological
-// order, drains the command queue, and hands every binding the SAME shared
-// ProcessBlock. Audio routing is the binding's responsibility (or a future
-// executor capability). So the parity here is "executor + a gain binding over
-// the shared block" vs "SignalGraph input->gain->output": both compute
-// out = in * g with the same float multiply, hence bit-identical. Future
-// Phase-4 sub-PRs build inter-node routing on top of this substrate.
+// seam, and it pins a key architectural fact: the executor's shared-block path
+// does NOT route inter-node audio — it walks nodes in topological order, drains
+// the command queue, and hands every binding the SAME shared ProcessBlock.
+// Audio routing is the binding's responsibility (or the routing process() path).
+// So the parity here is "executor + a gain binding over the shared block" vs
+// "SignalGraph input->gain->output": both compute out = in * g with the same
+// float multiply, hence bit-identical. Inter-node routing is exercised
+// separately in test_graph_executor_routing.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -174,9 +174,9 @@ std::vector<float> run_executor(float gain, double sr, int frames,
 // graph is one node and routes no inter-node audio. Topological ordering and
 // command drain are covered separately by the existing GraphRuntimeExecutor
 // tests ("visits snapshot nodes in plan order", "drains commands ..."). What
-// this adds is the SignalGraph<->executor output-parity baseline for Phase 4.
+// this adds is the SignalGraph<->executor output-parity baseline.
 TEST_CASE("GraphRuntimeExecutor gain binding output-parity vs SignalGraph in->gain->out",
-          "[host][graph][executor][phase4][parity]") {
+          "[host][graph][executor][parity]") {
     constexpr double kSr = 48000.0;
     for (int frames : {1, 64, 256, 1024}) {
         for (float gain : {1.0f, 0.5f, 0.25f, 2.0f, 0.0f}) {

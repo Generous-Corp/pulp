@@ -45,8 +45,8 @@ struct GraphRuntimeNodeProcessContext {
     // are populated and a binding MUST read/write them rather than the block's
     // buses. False on the shared-block process() path, where they are empty and
     // a binding works the buses directly. A binding should assert the mode it
-    // expects — once the SignalGraph walk migrates onto routing (Phase 4f) the
-    // shared-block path is slated to retire and this flag/dual-mode collapses.
+    // expects — the shared-block path is slated to retire once callers migrate
+    // onto routing, at which point this flag and the dual mode collapse.
     bool routed = false;
     // Per-node routed I/O (valid only when `routed`). A routing binding reads
     // `node_inputs` (already gathered from upstream output slots) and writes
@@ -157,8 +157,8 @@ struct GraphRuntimeExecutorResult {
 /// reuses it across realtime blocks. The executor never resizes it.
 ///
 /// Scope: this is the SHARED inter-node routing scratch for one serial walk.
-/// Phase 5 per-worker scratch is a separate concern and must not be overloaded
-/// onto this pool.
+/// Per-worker scratch for a parallel executor is a separate concern and must
+/// not be overloaded onto this shared pool.
 class GraphRuntimeBufferPool {
 public:
     // Off-RT: (re)allocate storage for `slot_count` mono slots of `max_frames`.

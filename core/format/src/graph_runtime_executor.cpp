@@ -44,14 +44,15 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
     return event;
 }
 
-// --- Routing helpers (Phase 4) -------------------------------------------
+// --- Routing helpers -----------------------------------------------------
 //
-// These are factored out of process_routed so the serial loop reads as
-// gather -> dispatch -> (binding | bus copy), so 4d (feedback gather) and
-// Phase 5 (parallelize run_routed_node across workers) have a localized seam
-// instead of a 100-line monolith to fork. gather/run are pure over the pool's
-// raw mono slots — the intended lift point if routing later moves to
-// core/graph (it has no ProcessBlock dependency except the bus copy).
+// Factored out of process_routed so the serial loop reads as
+// gather -> dispatch -> (binding | bus copy). This keeps the per-node body a
+// localized seam — a parallel executor can schedule run_routed_node across
+// workers, and the feedback gather stays a one-line change — instead of one
+// monolith. gather/run are pure over the pool's raw mono slots: the lift point
+// if routing later moves to core/graph (no ProcessBlock dependency except the
+// bus copy).
 
 // Zero each input slot (unconnected ports stay silent) then sum every inbound
 // audio connection into the dest input slot. Feedforward edges read the
@@ -60,11 +61,11 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 // captured source output), matching SignalGraph's one-block feedback_prev. Event
 // edges carry no audio and are skipped.
 //
-// Deferred: feedforward edges are summed with no plug-in delay compensation.
-// SignalGraph applies a per-connection PDC ring when a node reports latency
-// (signal_graph.cpp); the executor must grow the same before 4f migrates
-// latency-reporting graphs onto it. Current routing parity holds because the
-// tested nodes report zero latency.
+// Feedforward edges are summed with no plug-in delay compensation. SignalGraph
+// applies a per-connection PDC ring when a node reports latency
+// (signal_graph.cpp); the executor needs the same before it can route
+// latency-reporting graphs. Routing parity holds today because the routed
+// graphs report zero latency.
 void gather_node_inputs(const graph::GraphRuntimePlan& plan,
                         const graph::GraphRuntimeBufferAssignment& assignment,
                         GraphRuntimeBufferPool& pool,
@@ -114,8 +115,13 @@ void capture_feedback(const graph::GraphRuntimePlan& plan,
 }
 
 // AudioInput copies the main input bus into its output slots; AudioOutput
-// writes its gathered input slots to the main output bus. The only
+// ACCUMULATES its gathered input slots into the main output bus. The only
 // format/bus-aware step in routing.
+//
+// AudioOutput accumulates (+=), not overwrites, because the host graph it
+// mirrors (SignalGraph) zeroes the output bus once per block and lets every
+// AudioOutput node sum into it — so N output nodes mix rather than last-writer-
+// wins. process_routed zeroes the main output bus once before the walk to match.
 void copy_io_bus(graph::GraphRuntimeNodeKind kind,
                  GraphRuntimeBufferPool& pool,
                  const graph::GraphRuntimeNodePlan& node,
@@ -137,7 +143,8 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
             if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
             const float* src = pool.slot_data(slots.input_base + p);
             if (src == nullptr) continue;
-            std::copy_n(src, frames, out_bus->output.channel_ptr(p));
+            float* dst = out_bus->output.channel_ptr(p);
+            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
         }
     }
 }
@@ -178,9 +185,9 @@ bool GraphRuntimeSnapshot::reset(
 
     try {
         // The buffer assignment is a pure function of the plan, so it is built
-        // here off the audio thread alongside plan validation. Phase 5 per-worker
-        // scratch sizing depends on worker count, not the plan — it belongs to
-        // the executor/pool, NOT here.
+        // here off the audio thread alongside plan validation. Per-worker
+        // scratch sizing for a parallel executor depends on worker count, not
+        // the plan — it belongs to the executor/pool, NOT here.
         auto assignment = graph::build_graph_runtime_buffer_assignment(plan);
         if (!assignment.ok) {
             clear();
@@ -349,6 +356,15 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
 
+    // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
+    // output nodes mix (and any output channel no node drives stays silent),
+    // matching the host graph this executor mirrors.
+    if (out_bus != nullptr) {
+        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        }
+    }
+
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
 
@@ -385,7 +401,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             }
 
             // Marshal the node's mono slots into contiguous channel views. This
-            // is the per-node body Phase 5 will schedule onto worker threads.
+            // is the per-node body a parallel executor would schedule onto
+            // worker threads.
             std::array<const float*, kMaxRoutedPortsPerNode> in_ptrs{};
             std::array<float*, kMaxRoutedPortsPerNode> out_ptrs{};
             for (std::uint32_t p = 0; p < node.input_ports; ++p) {

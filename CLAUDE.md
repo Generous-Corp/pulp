@@ -249,6 +249,8 @@ This repo will be open-sourced. Every commit, every file, every directory name s
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
 Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
 
+**This applies to source code too — comments AND test names/tags, not just docs.** Do NOT write phase/PR/issue/wave/handoff breadcrumbs in `core/`, `test/`, or any shipped source. Specifically forbidden in code: `(Phase N)` / `Phase N will…` / `4f`-style sub-phase labels, `[phaseN]` Catch2 tags, "sub-PR"/"slice N of", and bare `#1234` issue/PR references. Write the comment as a present-tense statement of what the code does or a neutral capability note (e.g. "feedback needs a previous-block slot" — not "Phase 4d adds feedback"). A test tag should say what it covers (`[parity]`, `[rt-safety]`), never which session shipped it. The phase/PR narrative goes in the **commit message** and the **planning submodule**, where reviewers expect it. (`docs_noise_lint.py`'s diff-scoped scan enforces this for docs/skills today; source-comment enforcement is the author's responsibility until the lint's source scope lands.)
+
 ### Verify Against Code, Not Planning Docs
 
 When assessing what features exist or what claims are accurate, **always check the actual code on the current branch** — never trust planning documents, phase trackers, or status files as the source of truth. Planning docs describe intent; the code describes reality. If there is a conflict, the code wins. This applies to:
