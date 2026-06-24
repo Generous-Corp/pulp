@@ -110,6 +110,9 @@ std::vector<uint8_t> encode(const Message& msg) {
 
 // ── Decode helpers ───────────────────────────────────────────────────────────
 
+// Lenient string reader for the address and type-tag string: a bounded,
+// unterminated trailing string is tolerated (a packet with no type-tag section
+// is a valid zero-argument message).
 static std::string read_string(const uint8_t* data, size_t size, size_t& offset) {
     if (offset >= size) return {};
     auto* start = reinterpret_cast<const char*>(data + offset);
@@ -119,16 +122,30 @@ static std::string read_string(const uint8_t* data, size_t size, size_t& offset)
     return result;
 }
 
-static int32_t read_int32(const uint8_t* data, size_t size, size_t& offset) {
-    if (offset + 4 > size) return 0;
+// Strict typed-string argument reader: a missing null terminator within the
+// remaining bytes means the payload is truncated → fail closed.
+static std::string read_string_arg(const uint8_t* data, size_t size,
+                                   size_t& offset, bool& ok) {
+    if (offset >= size) { ok = false; return {}; }
+    auto* start = reinterpret_cast<const char*>(data + offset);
+    const size_t avail = size - offset;
+    auto len = strnlen(start, avail);
+    if (len == avail) { ok = false; return {}; }  // no terminator → truncated
+    std::string result(start, len);
+    offset += pad4(len + 1);
+    return result;
+}
+
+static int32_t read_int32(const uint8_t* data, size_t size, size_t& offset, bool& ok) {
+    if (offset + 4 > size) { ok = false; return 0; }
     uint32_t n;
     std::memcpy(&n, data + offset, 4);
     offset += 4;
     return static_cast<int32_t>(ntohl(n));
 }
 
-static float read_float32(const uint8_t* data, size_t size, size_t& offset) {
-    if (offset + 4 > size) return 0;
+static float read_float32(const uint8_t* data, size_t size, size_t& offset, bool& ok) {
+    if (offset + 4 > size) { ok = false; return 0; }
     uint32_t bits;
     std::memcpy(&bits, data + offset, 4);
     bits = ntohl(bits);
@@ -138,9 +155,12 @@ static float read_float32(const uint8_t* data, size_t size, size_t& offset) {
     return v;
 }
 
-static std::vector<uint8_t> read_blob(const uint8_t* data, size_t size, size_t& offset) {
-    auto blob_size = read_int32(data, size, offset);
-    if (blob_size < 0 || offset + blob_size > size) return {};
+static std::vector<uint8_t> read_blob(const uint8_t* data, size_t size,
+                                      size_t& offset, bool& ok) {
+    auto blob_size = read_int32(data, size, offset, ok);
+    if (!ok) return {};
+    if (blob_size < 0 ||
+        offset + static_cast<size_t>(blob_size) > size) { ok = false; return {}; }
     std::vector<uint8_t> result(data + offset, data + offset + blob_size);
     offset += pad4(blob_size);
     return result;
@@ -158,23 +178,32 @@ Message decode(const uint8_t* data, size_t size) {
     std::string tags = read_string(data, size, offset);
     if (tags.empty() || tags[0] != ',') return msg; // No args is valid
 
-    for (size_t i = 1; i < tags.size(); ++i) {
+    // Fail closed on a truncated/impossible typed argument: a malformed packet
+    // must decode to the empty-address sentinel (osc.hpp contract), which the
+    // receiver and bundle paths already reject as "malformed OSC message" —
+    // rather than fabricating 0/default arg values that would dispatch a real
+    // control change built from garbage. The address/type-tag reads stay lenient
+    // so a zero-argument or unterminated-address packet still decodes.
+    bool ok = true;
+    for (size_t i = 1; i < tags.size() && ok; ++i) {
         switch (tags[i]) {
-            case 'i': msg.args.emplace_back(read_int32(data, size, offset)); break;
-            case 'f': msg.args.emplace_back(read_float32(data, size, offset)); break;
-            case 's': msg.args.emplace_back(read_string(data, size, offset)); break;
-            case 'b': msg.args.emplace_back(read_blob(data, size, offset)); break;
+            case 'i': msg.args.emplace_back(read_int32(data, size, offset, ok)); break;
+            case 'f': msg.args.emplace_back(read_float32(data, size, offset, ok)); break;
+            case 's': msg.args.emplace_back(read_string_arg(data, size, offset, ok)); break;
+            case 'b': msg.args.emplace_back(read_blob(data, size, offset, ok)); break;
             case 'r': {
-                if (offset + 4 > size) break;
+                if (offset + 4 > size) { ok = false; break; }
                 ColourRgba c{data[offset], data[offset + 1],
                              data[offset + 2], data[offset + 3]};
                 offset += 4;
                 msg.args.emplace_back(c);
                 break;
             }
-            default: break;
+            default: break;  // unknown tag: skip, consume nothing
         }
     }
+
+    if (!ok) return {};  // malformed typed payload → empty-address sentinel
 
     return msg;
 }
