@@ -82,8 +82,8 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3301,
-      "note": "import-design CLI orchestration hotspot"
+      "max_loc": 3382,
+      "note": "import-design CLI orchestration hotspot; +81 for the recognition-resolver wiring (issue #4676 / extensible recognition)"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
@@ -97,8 +97,8 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2179,
-      "note": "DesignIR serialization contract hotspot; lowered after extracting the import-report + placement-verify analysis passes to design_ir_analysis.cpp"
+      "max_loc": 2200,
+      "note": "DesignIR serialization contract hotspot; net after extracting the analysis passes to design_ir_analysis.cpp (-) and parse_ir_node preserving component_key for the recognition resolver (+21)"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",

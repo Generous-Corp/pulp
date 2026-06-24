@@ -901,6 +901,27 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.style.mix_blend_mode =
             normalize_blend_mode(std::string(obj["figma"]["blend_mode"].toString()));
     }
+    // Preserve the Figma component identity the serializer packs into the
+    // `figma` block (serialize.ts: component_key / main_component_name). The
+    // built-in TS lane only stamps `audio_widget` for Pulp-Library keys, so a
+    // THIRD-PARTY design's instances reach the importer with this identity but
+    // NO audio_widget. The recognition resolver (recognition_resolver.hpp)
+    // re-resolves these against the merged manifest set after parse, so a user
+    // manifest can wire a designer's own component-set keys. Stored verbatim in
+    // attributes (free-form passthrough) — keyed on the canonical token, never
+    // a layer name. Additive: absent for non-figma-plugin sources.
+    if (obj.hasObjectMember("figma") && obj["figma"].isObject()) {
+        const auto fig = obj["figma"];
+        if (fig.hasObjectMember("component_key") && fig["component_key"].isString()) {
+            auto key = std::string(fig["component_key"].toString());
+            if (!key.empty()) node.attributes["figmaComponentKey"] = std::move(key);
+        }
+        if (fig.hasObjectMember("main_component_name") &&
+            fig["main_component_name"].isString()) {
+            auto name = std::string(fig["main_component_name"].toString());
+            if (!name.empty()) node.attributes["figmaMainComponentName"] = std::move(name);
+        }
+    }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);
     // Resize constraints. Figma carries them at node level as
