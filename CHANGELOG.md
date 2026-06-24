@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04670"></a>
+## [0.467.0] - 2026-06-24
+
+- feat(design-import): extensible recognition — user component-key→kind manifest + merge module ([#4705](https://github.com/danielraffel/pulp/pull/4705))
+- refactor(design-import): extract import-report + placement-verify passes out of design_ir_json.cpp ([#4691](https://github.com/danielraffel/pulp/pull/4691))
+
 <a id="v04663"></a>
 ## [0.466.3] - 2026-06-24
 
@@ -4962,6 +4968,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.467.0]: https://github.com/danielraffel/pulp/releases/tag/v0.467.0
 [0.466.3]: https://github.com/danielraffel/pulp/releases/tag/v0.466.3
 [0.466.2]: https://github.com/danielraffel/pulp/releases/tag/v0.466.2
 [0.466.1]: https://github.com/danielraffel/pulp/releases/tag/v0.466.1
