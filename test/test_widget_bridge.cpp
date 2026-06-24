@@ -1715,8 +1715,8 @@ TEST_CASE("WidgetBridge __gpuComputeDispatchImpl parses bufferDataBase64 payload
 }
 
 // Malformed base64 must not crash the bridge — runtime::base64_decode
-// returns nullopt and we treat that as "skip upload", matching the
-// pre-fix zero-fill behaviour for bad payloads. Same issue-491 surface.
+// returns nullopt and we treat that as "skip upload" for bad payloads
+// (zero-fill semantics preserved). Same issue-491 surface.
 TEST_CASE("WidgetBridge __gpuComputeDispatchImpl tolerates malformed bufferDataBase64",
           "[view][bridge][gpu][issue-491]") {
     ScriptEngine engine;

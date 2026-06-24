@@ -1,6 +1,6 @@
 // Verifies Processor::create_ara_document_controller() default + override
-// shape (workstream 06 slice 6.3, Pulp-side Processor hook). No ARA SDK
-// dependency — exercises the API surface that adapter companions rely on.
+// shape (Pulp-side Processor hook). No ARA SDK dependency — exercises the
+// API surface that adapter companions rely on.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
