@@ -253,8 +253,8 @@ struct UpgradeArgs {
 
 #[derive(clap::Args, Debug)]
 struct PrArgs {
-    /// Forwarded verbatim to `shipyard pr`. `--native` is consumed
-    /// here and errors out (fallback isn't ported).
+    /// Forwarded to `shipyard pr` after the Rust parser consumes
+    /// `--native` and the Pulp-side `--workflow` selector.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     tail: Vec<String>,
 }
