@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04635"></a>
+## [0.463.5] - 2026-06-23
+
+- fix(cli): honor rust pr workflow selection ([#4642](https://github.com/danielraffel/pulp/pull/4642))
+- docs(test): refresh platform regression comments ([#4641](https://github.com/danielraffel/pulp/pull/4641))
+- docs(test): refresh regression comment provenance ([#4640](https://github.com/danielraffel/pulp/pull/4640))
+
 <a id="v04634"></a>
 ## [0.463.4] - 2026-06-23
 
@@ -4893,6 +4900,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.463.5]: https://github.com/danielraffel/pulp/releases/tag/v0.463.5
 [0.463.4]: https://github.com/danielraffel/pulp/releases/tag/v0.463.4
 [0.463.3]: https://github.com/danielraffel/pulp/releases/tag/v0.463.3
 [0.463.2]: https://github.com/danielraffel/pulp/releases/tag/v0.463.2
