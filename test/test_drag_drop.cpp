@@ -552,8 +552,8 @@ TEST_CASE("begin_file_drag rejects a null native view and empty requests",
 
     FileDragRequest with_file;
     with_file.file_paths = {"/tmp/loop.wav"};
-    // Null native handle -> false on every platform (macOS guards on !view; the
-    // non-Apple stub always returns false).
+    // Null native handle -> false on every platform before any OS drag loop can
+    // start.
     REQUIRE_FALSE(begin_file_drag(nullptr, with_file));
 }
 
@@ -588,11 +588,16 @@ TEST_CASE("start_file_drag with an attached host but no native view returns fals
 
 TEST_CASE("start_file_drag hands off to the platform backend when a host has a "
           "native view", "[view][dnd][file-drag]") {
+#if defined(_WIN32)
+    SKIP("Windows OLE DoDragDrop is interactive; headless coverage stays on "
+         "null handles and host-owned outbound drag dispatch");
+#endif
+
     // A non-null sentinel handle drives start_file_drag all the way to
     // begin_file_drag. The macOS backend bails at [NSApp currentEvent] (nil in
-    // a headless test) BEFORE dereferencing the handle, and the non-Apple stub
-    // ignores it — so the full cross-platform handoff is exercised and the
-    // result is a safe `false` (no live mouse event / drag session to start).
+    // a headless test) BEFORE dereferencing the handle, and unsupported
+    // platforms use a no-op stub, so the full handoff is exercised without a
+    // live mouse event / drag session to start.
     StubPluginViewHost host(reinterpret_cast<NativeViewHandle>(0x1));
     View v;
     v.set_plugin_view_host(&host);
