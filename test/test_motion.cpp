@@ -1239,7 +1239,7 @@ TEST_CASE("assert_matches aligns events by stable IDs, not position",
     std::remove(path.c_str());
 }
 
-// ── Codex P1: NaN/Inf round-trip through fixture ─────────────────────
+// ── NaN/Inf round-trip through fixture ───────────────────────────────
 
 TEST_CASE("Fixture round-trips NaN and Inf component values",
           "[motion][fixture][codex-p1]") {

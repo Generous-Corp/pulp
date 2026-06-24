@@ -876,7 +876,7 @@ TEST_CASE("InspectorOverlay: follows_mouse re-selects the hovered view",
     REQUIRE(overlay.selected_view() == a_ptr);  // pinned despite follows_mouse
 }
 
-// Codex P1 follow-up on #2556: in follows_mouse mode a hover must NOT
+// #2556: in follows_mouse mode a hover must NOT
 // chase the pointer while a numeric field edit is in progress.
 // begin_field_edit() snapshots the edit target, but write_field_value()
 // / commit_field_edit() operate on the *current* selected_. If a
@@ -951,7 +951,7 @@ TEST_CASE("InspectorOverlay: follows_mouse hover does not move selection "
     REQUIRE(overlay.selected_view() == b_ptr);  // chasing resumes post-edit
 }
 
-// Codex P2 follow-up on #2328: Alt-hover state must clear when the
+// #2328: Alt-hover state must clear when the
 // cursor enters the inspector panel. Otherwise the live distance line
 // keeps drawing from selected_ to a view that's no longer under the
 // cursor.
@@ -1187,7 +1187,7 @@ TEST_CASE("InspectorOverlay: zoom factor is clamped to a sane range",
 
 TEST_CASE("InspectorOverlay: loupe clamps the sample window at canvas edges",
           "[inspect][overlay][phase3e]") {
-    // codex P2 #2464 — a loupe centered within kZoomGridCells/2 pixels
+    // #2464 — a loupe centered within kZoomGridCells/2 pixels
     // of a canvas edge used to push the cells×cells read rect
     // out of bounds, so read_pixels() rejected the WHOLE block and the
     // grid fell back to checkerboard exactly where edge inspection

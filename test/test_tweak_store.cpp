@@ -343,7 +343,7 @@ TEST_CASE("TweakStore: from_json preserves existing locked anchors",
 
 TEST_CASE("TweakStore: load_from_disk preserves a locked anchor absent from the file",
           "[inspect][tweak-store][lock][disk][regression]") {
-    // Codex P1 #2432: importing a file that omits a currently-locked
+    // #2432: importing a file that omits a currently-locked
     // anchor must NOT delete that anchor's tweaks or lock state — the
     // lock contract promises protection from re-import. This exercises
     // the real disk path (load_from_disk), not just from_json.
@@ -398,7 +398,7 @@ TEST_CASE("TweakStore: load_from_disk keeps in-memory tweaks for a locked anchor
 
 TEST_CASE("TweakStore: clear preserves multiple locked anchors and drops all unlocked",
           "[inspect][tweak-store][lock][regression]") {
-    // Codex P1 #2432: a global Inspector.clearTweaks routes through
+    // #2432: a global Inspector.clearTweaks routes through
     // clear(). Locked anchors (tweaks + bypass + lock) must survive;
     // every unlocked anchor must be erased.
     TweakStore s;
@@ -731,7 +731,7 @@ TEST_CASE("Inspector.listTweaks / clearTweaks / setBypass without store error",
         R"({"anchorId":"a","value":true})")).is_error);
 }
 
-// Codex P2 follow-up on #2300: listTweaks must include anchors that
+// Regression #2300: listTweaks must include anchors that
 // have ONLY a bypass (no tweak records). Otherwise setBypass on an
 // anchor with no entries — or one whose entries were later cleared
 // via clearTweaks — silently drops out of the protocol response and
