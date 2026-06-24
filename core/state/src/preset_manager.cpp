@@ -23,6 +23,23 @@ bool contains_string(const std::vector<std::string>& values, std::string_view ne
     return std::find(values.begin(), values.end(), needle) != values.end();
 }
 
+#ifdef _WIN32
+std::string sanitize_windows_path_component(std::string_view value) {
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char c : value) {
+        const bool invalid = c < 32 || c == '<' || c == '>' || c == ':' ||
+                             c == '"' || c == '/' || c == '\\' || c == '|' ||
+                             c == '?' || c == '*';
+        out.push_back(invalid ? '_' : static_cast<char>(c));
+    }
+    while (!out.empty() && (out.back() == ' ' || out.back() == '.')) {
+        out.pop_back();
+    }
+    return out.empty() ? "_" : out;
+}
+#endif
+
 } // namespace
 
 // ── Platform paths ───────────────────────────────────────────────────────
@@ -55,7 +72,8 @@ PresetManager::PresetManager(StateStore& store, const std::string& manufacturer,
     auto root = platform_presets_root();
     if (!root.empty()) {
 #ifdef _WIN32
-        user_dir_ = root / manufacturer / plugin_name / "Presets";
+        user_dir_ = root / sanitize_windows_path_component(manufacturer) /
+                    sanitize_windows_path_component(plugin_name) / "Presets";
 #else
         user_dir_ = root / manufacturer / plugin_name;
 #endif

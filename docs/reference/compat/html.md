@@ -188,7 +188,7 @@ Current divergent entry:
 `appendChild` / `removeChild` / `insertBefore` / `replaceChild`,
 `cloneNode`, `addEventListener` (click, mouseenter/leave,
 pointerenter/leave, pointerdown/move/up/cancel, gesture*, input,
-change, focus, blur), `dispatchEvent`, `setPointerCapture` /
+change, focus, blur, wheel, drop), `dispatchEvent`, `setPointerCapture` /
 `releasePointerCapture`, `getBoundingClientRect`, `offsetWidth` /
 `offsetHeight` / `clientWidth` / `clientHeight`, `nodeType` /
 `nodeName` (for React's reconciler hot path).
@@ -219,9 +219,11 @@ change, focus, blur), `dispatchEvent`, `setPointerCapture` /
    Range / Selection API is not modeled.
 6. **`html/svg`** — arch-explicit-non-goal. Layout-leaf shim only;
    use `<SvgPath>` from `@pulp/react` for rendered paths.
-7. **Drag and drop** — `dragstart` / `drag` / `dragend` not wired
-   through addEventListener; use `registerDrop` directly.
-8. **Wheel events** — `wheel` not wired through addEventListener; use
-   `registerWheel` directly.
-9. **Keyboard events** — `keydown` / `keyup` / `keypress` are forwarded
+7. **Source-side drag lifecycle** — drop-target registration is wired
+   through `addEventListener('drop', ...)` / `registerDrop`, but
+   JS-initiated drags, native drag-image rendering, and the full
+   `dragstart` / `drag` / `dragend` source lifecycle are not modeled.
+   Drop data is surfaced on the synthesized event as `_dropData`, not as
+   a full `dataTransfer` object.
+8. **Keyboard events** — `keydown` / `keyup` / `keypress` are forwarded
    globally via `__dispatch__` rather than bound per-element.
