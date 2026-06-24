@@ -176,9 +176,9 @@ static std::string handle_request_raw(const std::string& json) {
     if (id.empty()) id = "null";
 
     if (method == "initialize") {
-        // serverInfo.version tracks the SDK/CLI release (#2067).
-        // Held constant at "0.1.0" pre-fix; now wired to PROJECT_VERSION
-        // via tools/mcp/pulp_mcp_version.h.in so doctor/launcher can see
+        // serverInfo.version tracks the SDK/CLI release (#2067), wired
+        // to PROJECT_VERSION via tools/mcp/pulp_mcp_version.h.in so
+        // doctor/launcher can see
         // real drift between an old installed pulp-mcp and a newer plugin.
         std::string payload =
             std::string(R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"pulp-mcp","version":")JSON")
@@ -231,9 +231,9 @@ static std::string handle_request_raw(const std::string& json) {
                     return json_result(
                         id, compat_error_payload(name, min_sdk, project_sdk));
                 }
-                // If we couldn't resolve the project SDK at all we
-                // fall open — same as pre-#2070. The launcher has
-                // already started; gating on "no project root" would
+                // If we couldn't resolve the project SDK at all, fall
+                // open (#2070). The launcher has already started;
+                // gating on "no project root" would
                 // make pulp-mcp unusable from `/tmp` or similar.
             }
         }

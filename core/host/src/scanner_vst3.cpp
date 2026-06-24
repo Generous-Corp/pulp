@@ -9,9 +9,8 @@
 // safe (no dlopen, no bundleEntry, no ObjC class collisions).
 //
 // Bundles that don't ship a moduleinfo.json fall back to the previous
-// stem-based unique_id. Graph_serializer rehydration already
-// tolerates stem IDs (that was the pre-fix behaviour across the
-// board); this change only upgrades plugins that already declare
+// stem-based unique_id. Graph_serializer rehydration tolerates stem
+// IDs; moduleinfo.json only upgrades plugins that already declare
 // their identity.
 
 #include <pulp/runtime/log.hpp>
