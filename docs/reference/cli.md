@@ -838,7 +838,7 @@ pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
-pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
+pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
 pulp ship notarize --dry-run                       # print resolved argv, no submit
 pulp ship release --pkg --identity "..." --installer-identity "..."
@@ -851,7 +851,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 | Subcommand | What it does |
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
-| `notarize` | Submit signed bundles (or `--path` artifacts) to Apple notarytool (macOS) |
+| `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
 | `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
@@ -866,6 +866,8 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 `.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
 
 `package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary.
+
+For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
