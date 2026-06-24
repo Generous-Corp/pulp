@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6113,
-      "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 6109,
+      "note": "shared test registration hotspot; lowered after removing dead PulpGain_CLAP fixture-guard blocks (real wiring is the root CMakeLists block after add_subdirectory(examples))"
     },
     {
       "path": "test/test_design_import_codegen.cpp",

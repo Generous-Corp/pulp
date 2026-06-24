@@ -5794,11 +5794,10 @@ add_executable(pulp-test-host test_host.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
 # Point the integration test at the locally-built PulpGain.clap so the CLAP
 # loader runs against a known real plugin.
-if(TARGET PulpGain_CLAP)
-    target_compile_definitions(pulp-test-host PRIVATE
-        PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
-    add_dependencies(pulp-test-host PulpGain_CLAP)
-endif()
+# NOTE: the PulpGain_CLAP fixture wiring for pulp-test-host lives in the ROOT
+# CMakeLists.txt block after add_subdirectory(examples). test/ is registered
+# before examples/, so a `if(TARGET PulpGain_CLAP)` guard here never sees the
+# target on a clean configure and silently does nothing.
 # issue-669's older snapshot-publish stress case is intentionally kept in the
 # binary for manual replay, but not registered in the default per-PR CTest set:
 # it is a known flaky stress surface with a dedicated gated stress target below.
@@ -5854,11 +5853,8 @@ catch_discover_tests(pulp-test-real-plugin-runner-cache)
 add_executable(pulp-test-host-regression test_host_regression.cpp)
 target_link_libraries(pulp-test-host-regression
     PRIVATE pulp::host Catch2::Catch2WithMain)
-if(TARGET PulpGain_CLAP)
-    target_compile_definitions(pulp-test-host-regression PRIVATE
-        PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
-    add_dependencies(pulp-test-host-regression PulpGain_CLAP)
-endif()
+# PulpGain_CLAP fixture wiring for pulp-test-host-regression lives in the ROOT
+# CMakeLists.txt block after add_subdirectory(examples) (see note above).
 catch_discover_tests(pulp-test-host-regression)
 
 # Stress test for the SignalGraph hot-reload race (pulp#669). Runs the

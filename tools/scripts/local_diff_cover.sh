@@ -254,6 +254,26 @@ if echo "${changed_for_importer}" | grep -qE "${IMPORTER_COVERAGE_PATHS_REGEX}";
     importer_diff_touched=1
 fi
 
+# ── Hosted plugin-slot RT-safety coverage auto-inclusion ────────────────────
+# core/host/src/plugin_slot_*.cpp RT-safety (the prepare()-reserve / no-alloc
+# contract) is exercised by tests that LOAD a real plugin fixture
+# (PulpGain.clap / .vst3). This fast local build sets PULP_BUILD_EXAMPLES=OFF
+# for speed, so those fixtures aren't built and the tests skip — making a
+# plugin-slot diff read ~0% patch even though CI's full coverage build
+# (run_coverage.sh leaves PULP_BUILD_EXAMPLES at its default ON) measures them.
+# When a slot file changes, reconfigure build-cov with examples ON (GPU stays
+# OFF; the GPU-only examples self-skip on PULP_ENABLE_GPU. Design-import stays
+# ON — PULP_BUILD_TESTS=ON requires it — but in this targeted run we build only
+# the PulpGain fixtures + host test, never the design-import examples) so the
+# fixture coverage is attributed.
+HOSTED_SLOT_PATHS_REGEX='^core/host/src/plugin_slot_'
+HOSTED_SLOT_COVERAGE_TARGETS=(PulpGain_CLAP pulp-test-host)
+HOSTED_SLOT_COVERAGE_CTEST_REGEX='allocation-free after prepare'
+hosted_slot_diff_touched=0
+if echo "${changed_for_importer}" | grep -qE "${HOSTED_SLOT_PATHS_REGEX}"; then
+    hosted_slot_diff_touched=1
+fi
+
 if [ "$#" -gt 0 ]; then
     BUILD_TARGETS=("$@")
     # Targeted build that touches importer CLI source: ensure the importer
@@ -272,6 +292,19 @@ if [ "$#" -gt 0 ]; then
 else
     echo "=== Building all targets (slow) ==="
     cmake --build "${BUILD_DIR}" -j"${JOBS}"
+fi
+
+# Plugin-slot diff: the main build above ran with PULP_BUILD_EXAMPLES=OFF (no
+# plugin fixtures), so the slot no-alloc tests would skip and the slot lines
+# read uncovered. Reconfigure with examples ON and build ONLY the PulpGain
+# fixtures + host test (never the GPU/design-import examples, which the no-GPU
+# build can't link) so the fixture-gated tests run and their coverage counts.
+# Done as a post-pass so the main build stays examples-OFF/safe for both the
+# targeted and the no-args (pre-push) paths, and only fires for slot diffs.
+if [ "${hosted_slot_diff_touched}" -eq 1 ]; then
+    echo "[local_diff_cover] plugin-slot source changed — building PulpGain fixtures for hosted-slot coverage" >&2
+    cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" -DPULP_BUILD_EXAMPLES=ON >/dev/null
+    cmake --build "${BUILD_DIR}" -j"${JOBS}" --target "${HOSTED_SLOT_COVERAGE_TARGETS[@]}"
 fi
 
 # ── Run tests with profile output ───────────────────────────────────────────
@@ -306,6 +339,16 @@ if [ "${importer_diff_touched}" -eq 1 ] && [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-
     ctest --test-dir "${BUILD_DIR}" --output-on-failure \
         -R "${IMPORTER_COVERAGE_CTEST_REGEX}" \
         || echo "[local_diff_cover] WARN: importer ctest pass exited non-zero — continuing with partial report" >&2
+fi
+
+# Second ctest pass for the hosted-slot no-alloc cases, for the same reason as
+# the importer pass: when narrowed by PULP_DIFF_COVER_CTEST_REGEX their titles
+# would be filtered out, leaving the slot coverage maps present but unexecuted.
+if [ "${hosted_slot_diff_touched}" -eq 1 ] && [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+    echo "[local_diff_cover] running hosted-slot no-alloc ctest cases for coverage attribution" >&2
+    ctest --test-dir "${BUILD_DIR}" --output-on-failure \
+        -R "${HOSTED_SLOT_COVERAGE_CTEST_REGEX}" \
+        || echo "[local_diff_cover] WARN: hosted-slot ctest pass exited non-zero — continuing with partial report" >&2
 fi
 
 # ── Merge profiles ──────────────────────────────────────────────────────────
