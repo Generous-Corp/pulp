@@ -92,8 +92,8 @@ must track a delayed audio branch sample by sample.
 Two commands surface hosting in the CLI:
 
 ```
-pulp scan [--format clap|vst3|au|lv2]   # list discoverable plugins
-pulp host <path>                        # load and briefly run a plugin
+pulp scan [--format clap|vst3|au|auv3|lv2] [--no-load]  # list discoverable plugins
+pulp host <path>                                           # load and briefly run a plugin
 ```
 
 These exist to smoke-test the loaders outside a full DAW context.

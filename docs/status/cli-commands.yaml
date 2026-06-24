@@ -1639,7 +1639,10 @@ commands:
     args:
       - name: --format
         kind: option
-        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format
+        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
+      - name: --no-load
+        kind: flag
+        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host
@@ -1652,7 +1655,7 @@ commands:
         description: Path to the plug-in bundle (.clap / .vst3 / .component / .lv2)
       - name: --format
         kind: option
-        description: Format selector (clap default, vst3, au, auv3, lv2)
+        description: Format selector (clap default, vst3, au, auv3, lv2). Alias: -f
       - name: --id
         kind: option
         description: Unique id / URI to select a specific descriptor in the bundle (LV2 and multi-plugin CLAP)

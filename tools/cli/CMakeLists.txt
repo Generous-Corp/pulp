@@ -371,6 +371,18 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-host-missing-path-with-id PROPERTIES
         PASS_REGULAR_EXPRESSION "verified CLI host contract")
 
+    add_test(NAME cli-host-missing-path-rescan-hint
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPLUGIN_PATH=${CMAKE_BINARY_DIR}/test-tmp/missing-host-plugin-rescan-hint"
+            "-DFORMAT=clap"
+            "-DEXPECTED_EXIT=1"
+            "-DEXPECTED_REGEX=Re-scan with .*pulp scan"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+    set_tests_properties(cli-host-missing-path-rescan-hint PROPERTIES
+        PASS_REGULAR_EXPRESSION "verified CLI host contract")
+
     # Exercise the new `pulp coverage` dispatch (cmd_coverage.cpp).
     # `pulp coverage` with no args prints the usage banner and exits 0;
     # `pulp coverage bogus` prints the unknown-subcommand error and exits
