@@ -524,12 +524,12 @@ The `status` field uses the lowercased label set above
 
 **Status**: usable
 
-Manage the `~/.pulp/projects.json` registry. `pulp create` and
-`pulp new` register new projects automatically on successful
-scaffold; these commands exist so users can add projects created
-outside of `pulp create` (clones, manual checkouts) and prune stale
-entries. Registry entries are read by `pulp doctor --versions` to
-produce per-project skew reports.
+Manage the `~/.pulp/projects.json` registry. `pulp create` registers
+new projects automatically on successful scaffold; these commands
+exist so users can add projects created outside of `pulp create`
+(clones, manual checkouts) and remove stale entries. Registry entries
+are read by `pulp doctor --versions` to produce per-project skew
+reports.
 
 ```bash
 pulp projects list                       # show registered projects
