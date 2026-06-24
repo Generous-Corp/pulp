@@ -22,6 +22,7 @@ Or run a single cluster module directly:
     python3 tools/scripts/test_version_bump_heuristics.py
     python3 tools/scripts/test_version_bump_apply.py
     python3 tools/scripts/test_version_bump_fixfeat.py
+    python3 tools/scripts/test_version_bump_force_fixfeat.py
     python3 tools/scripts/test_skill_sync.py
 """
 
@@ -46,6 +47,9 @@ from test_version_bump_surfaces import VersionBumpSurfacesTests  # noqa: E402,F4
 from test_version_bump_heuristics import VersionBumpHeuristicsTests  # noqa: E402,F401
 from test_version_bump_apply import VersionBumpApplyTests  # noqa: E402,F401
 from test_version_bump_fixfeat import VersionBumpFixFeatTests  # noqa: E402,F401
+from test_version_bump_force_fixfeat import (  # noqa: E402,F401
+    VersionBumpForceFixFeatTests,
+)
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401
 
 
