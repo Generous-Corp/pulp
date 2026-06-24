@@ -341,7 +341,7 @@ ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup
 
 ## Web API Specs (Beyond CSS/DOM)
 
-These are the 10 additional Web API specifications that frontend developers use but aren't W3C CSS/DOM specs.
+These are the 12 additional Web API specifications that frontend developers use but aren't W3C CSS/DOM specs.
 
 ### 17. HTML Canvas 2D Context
 **Spec:** https://html.spec.whatwg.org/multipage/canvas.html
@@ -378,13 +378,16 @@ These are the 10 additional Web API specifications that frontend developers use 
 
 ### 19. Drag and Drop API
 **Spec:** https://html.spec.whatwg.org/multipage/dnd.html
-**Status:** ⚠️ Partial (C++ exists, JS bridge pending)
+**Status:** ✅ Mostly Complete
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| C++ DropTarget interface | ✅ | Platform-level drag target |
-| JS dragstart/drag/drop events | ❌ | Not yet bridged to JS |
-| dataTransfer object | ❌ | |
+| C++ DropTarget interface | ✅ | Platform-level file/text drops |
+| `registerDrop(id, callback)` | ✅ | JS receives type, data, x, y |
+| `addEventListener('drop', ...)` | ✅ | Routes through `registerDrop` and receives a synthesized drop event |
+| `on_drop` callback on View | ✅ | Fires with drop type and content |
+| `dragstart` / `drag` / `dragend` events | ❌ | Initiating drags from JS not supported |
+| `dataTransfer` object | ❌ | Drop data is exposed as `_dropData` / callback payloads |
 
 ### 20. Web Storage API
 **Spec:** https://html.spec.whatwg.org/multipage/webstorage.html
@@ -478,20 +481,6 @@ Pulp uses **Dawn** (Google's WebGPU implementation) as its GPU backend. The Dawn
 | `loadFont(path)` | ✅ | Bridge function, checks file exists |
 | `FontFace` constructor | ❌ | Use `loadFont()` + `style.fontFamily` |
 | `document.fonts.ready` | ❌ | Fonts load synchronously |
-
-### 29. Drag and Drop API
-**Spec:** https://html.spec.whatwg.org/multipage/dnd.html
-**Status:** ✅ Mostly Complete
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| C++ DropTarget interface | ✅ | Platform-level file/text drops |
-| `registerDrop(id, callback)` | ✅ | JS receives type, data, x, y |
-| `on_drop` callback on View | ✅ | Fires with drop type and content |
-| `dragstart` / `drag` / `dragend` events | ❌ | Initiating drags from JS not supported |
-| `dataTransfer` object | ❌ | Drop data passed as callback arguments |
-
----
 
 ## Deliberately Out of Scope
 
