@@ -433,6 +433,22 @@ FetchContent_MakeAvailable(yoga)
 set(PULP_HAS_YOGA TRUE)
 message(STATUS "Pulp: Yoga layout engine enabled")
 
+# Re-enable RTTI for yogacore. Yoga's project-defaults.cmake compiles with
+# -fno-rtti, which forces Clang to emit a LOCAL, hidden std::exception typeinfo
+# in every TU for exception landing pads (it can't reference the external RTTI
+# with -fno-rtti). When yogacore is co-linked with code that throws a
+# std-derived exception caught as std::exception — e.g. choc::json::ParseError
+# caught in core/host/src/graph_serializer.cpp once pulp-host links pulp-format
+# — that local typeinfo shadows libc++'s. On Apple, std::type_info is compared
+# by address, so the thrown object's base chain (resolved via libc++) and the
+# catch clause (bound to yoga's local copy) disagree and the catch silently
+# misses, escaping as an unexpected exception. Re-enabling RTTI makes yogacore
+# reference libc++'s std::exception typeinfo instead of defining a private one.
+# -frtti is appended after yoga's directory-level -fno-rtti, so it wins.
+if(TARGET yogacore AND NOT MSVC)
+    target_compile_options(yogacore PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-frtti>)
+endif()
+
 # Google Highway (Apache 2.0) — portable SIMD abstraction (SSE/NEON/AVX)
 # Pinned to the exact SHA of the 1.2.0 release (verified via
 # `git ls-remote https://github.com/google/highway.git refs/tags/1.2.0`).
