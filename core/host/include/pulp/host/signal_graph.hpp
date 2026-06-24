@@ -17,6 +17,7 @@
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/load_measurer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -25,6 +26,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -382,6 +384,21 @@ public:
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
+
+    // Per-node CPU-load telemetry, accumulated by process() and read from the
+    // control/UI thread. process() wraps each node's work in an
+    // AudioProcessLoadMeasurer begin()/end() (relaxed-atomic, RT-safe); these
+    // measurers persist across re-prepare() so a node's load history survives
+    // topology recompiles. Returns one entry per currently-present node that
+    // has been prepared (removed nodes' lingering measurers are filtered out),
+    // each a latest-value snapshot (may mix adjacent callbacks). Safe to poll
+    // while the audio thread runs.
+    struct NodeLoadReport {
+        NodeId node_id = 0;
+        audio::AudioProcessLoadSnapshot load;
+    };
+    std::vector<NodeLoadReport> node_loads() const;
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
@@ -471,6 +488,14 @@ private:
         // Plugin nodes, 0 otherwise).
         int64_t input_latency = 0;
         int64_t output_latency = 0;
+
+        // Per-node CPU-load telemetry. Points at a SignalGraph-owned
+        // AudioProcessLoadMeasurer that PERSISTS across CompiledGraph snapshots
+        // (keyed by NodeId in node_load_), so re-prepare() doesn't reset a
+        // node's accumulated load. process() wraps this node's work in
+        // begin()/end(); the measurer is relaxed-atomic (RT-safe). Null until
+        // resolved in compile_(); never owned by NodeRuntime.
+        pulp::audio::AudioProcessLoadMeasurer* load = nullptr;
 
         struct ParamBounds {
             uint32_t id = 0;
@@ -606,6 +631,20 @@ private:
     std::atomic<std::size_t> prepared_automation_buffer_bytes_{0};
     std::atomic<std::size_t> prepared_delay_buffer_bytes_{0};
     std::atomic<std::size_t> prepared_total_buffer_bytes_{0};
+
+    // Persistent per-node load measurers, keyed by NodeId. Control-thread
+    // owned; compile_() resolves each NodeRuntime::load to one of these (only
+    // ever ADDS entries while a snapshot may be live, never erases, so the
+    // audio thread's raw measurer pointers stay valid across snapshot swaps —
+    // the measurers are heap-stable behind unique_ptr regardless of map
+    // rehash). node_loads() reads their snapshots.
+    std::unordered_map<NodeId, std::unique_ptr<audio::AudioProcessLoadMeasurer>>
+        node_load_;
+    // Guards node_load_ MAP structure (insert in compile_ vs iterate in
+    // node_loads()) — those can run on different control threads (host
+    // prepare() vs UI poll). Control-side only; the audio thread never takes
+    // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
+    mutable std::mutex node_load_mu_;
 
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;

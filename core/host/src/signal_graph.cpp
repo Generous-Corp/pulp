@@ -787,6 +787,33 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
     };
 }
 
+std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
+    // Control/UI-thread read of the persistent per-node measurers. node_load_
+    // is only mutated on the control thread (compile_), so this is race-free
+    // against topology recompiles; the audio thread writes only the measurer
+    // objects' relaxed atomics, which snapshot() reads coherently.
+    // Filter to currently-present nodes so removed nodes' lingering measurers
+    // don't surface as phantom reports. The measurers are intentionally NOT
+    // erased from node_load_ (it is insert-only — see compile_): a
+    // retired-but-not-yet-drained snapshot may still hold raw
+    // NodeRuntime::load pointers into them, so erasing here would risk a
+    // use-after-free on the draining audio thread. Residual map growth is
+    // bounded by the number of distinct NodeIds the graph has ever held.
+    std::unordered_set<NodeId> live_ids;
+    live_ids.reserve(nodes_.size());
+    for (const auto& n : nodes_) live_ids.insert(n.id);
+
+    std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+    std::vector<NodeLoadReport> reports;
+    reports.reserve(node_load_.size());
+    for (const auto& [id, measurer] : node_load_) {
+        if (measurer && live_ids.count(id) != 0) {
+            reports.push_back(NodeLoadReport{id, measurer->snapshot()});
+        }
+    }
+    return reports;
+}
+
 SignalGraph::RuntimeBudgetReport
 SignalGraph::evaluate_optional_runtime_budget(
     runtime::RuntimeBudgetFrame& frame,
@@ -970,6 +997,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
 
     for (auto& n : nodes_) {
         NodeRuntime rt;
+        // Resolve (or lazily create) this node's persistent load measurer.
+        // node_load_ only grows here, so the raw measurer pointer handed to the
+        // audio thread via NodeRuntime::load stays valid across snapshot swaps.
+        // Locked against a concurrent node_loads() poll on the UI thread.
+        {
+            std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+            auto& load_slot = node_load_[n.id];
+            if (!load_slot) {
+                load_slot = std::make_unique<audio::AudioProcessLoadMeasurer>();
+            }
+            rt.load = load_slot.get();
+        }
         const int out_ch = std::max(0, n.num_output_ports);
         const int in_ch  = std::max(0, n.num_input_ports);
         rt.output_data.assign(static_cast<size_t>(out_ch) * max_block_size, 0.f);
@@ -1472,7 +1511,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
             }
         }
 
-        // 3. Produce output based on node type.
+        // 3. Produce output based on node type. Wrap the node's work in its
+        // persistent load measurer (relaxed-atomic begin()/end(); RT-safe) so
+        // per-node CPU load is attributable via node_loads().
+        if (rt.load) rt.load->begin(num_samples, static_cast<float>(cg->sample_rate));
         switch (shape.type) {
             case NodeType::AudioInput: {
                 const int chs = std::min(
@@ -1838,6 +1880,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 }
                 break;
         }
+        if (rt.load) rt.load->end();
     }
 
     // Capture each feedback source's current block for the *next* block.

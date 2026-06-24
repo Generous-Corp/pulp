@@ -352,6 +352,16 @@ validation polling. Polling `runtime_telemetry_snapshot()` is expected to stay
 allocation-free; it should aggregate already-published counters, not allocate
 or query the audio backend.
 
+For hosted graphs, `host::SignalGraph::node_loads()` exposes the same
+`AudioProcessLoadSnapshot` *per node*: `process()` wraps each node's work in a
+persistent per-node `AudioProcessLoadMeasurer` (relaxed-atomic begin()/end(),
+RT-safe), and `node_loads()` returns a latest-value snapshot per node from the
+control thread. The measurers persist across `prepare()` recompiles so a node's
+load history survives topology changes, and they are only ever added (never
+erased) while a snapshot is live, so the audio thread's raw measurer pointers
+stay valid across snapshot swaps. This is what lets a host attribute a CPU
+spike to a specific node instead of just the whole callback.
+
 Validation and UI surfaces should classify that snapshot with
 `audio::evaluate_audio_runtime_overload()` instead of inventing local
 thresholds. The shared policy reports nominal, watch, overloaded, and critical

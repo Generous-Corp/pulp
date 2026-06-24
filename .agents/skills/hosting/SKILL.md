@@ -143,6 +143,13 @@ predictable output, no MIDI.
   thread, don't recompute per block.
 - Removing a node invalidates its `NodeId`. Connections referencing a
   removed node are pruned automatically.
+- Per-node CPU load: `process()` wraps each node's work in a persistent
+  per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
+  `node_load_`), read via `node_loads()`. The measurers live on the
+  SignalGraph (not the snapshot) and `compile_()` only ever ADDS to the map —
+  never erase while a snapshot may be live, or the audio thread's raw
+  `NodeRuntime::load` pointer dangles. `begin()/end()` are relaxed-atomic and
+  RT-safe (proven under the no-alloc trap in test_signal_graph_rt_safety).
 - `.pulpgraph` schema changes must go through the graph serializer migration
   path. Bump the graph format version, add a deterministic migrator for older
   fixtures, and keep future-version loads fail-closed instead of silently
