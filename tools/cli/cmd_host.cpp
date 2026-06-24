@@ -1,7 +1,7 @@
 // pulp host / pulp scan — thin CLI wrappers around pulp::host.
 //
 // `pulp scan`  — walk the system plug-in paths and print what was found.
-// `pulp host`  — load a .clap (today) and run a short synthetic block
+// `pulp host`  — load a plugin bundle and run a short synthetic block
 //                through it. Smoke-tests the hosting pipeline without
 //                requiring a DAW.
 
@@ -241,10 +241,11 @@ int cmd_host(const std::vector<std::string>& args) {
     using namespace pulp::host;
 
     if (args.empty() || args[0] == "--help" || args[0] == "-h") {
-        std::printf("Usage: pulp host <path/to/plugin.clap> [--format clap]\n");
-        std::printf("       pulp host --id <clap-id>\n");
+        std::printf("Usage: pulp host <path/to/plugin> [--format clap|vst3|au|auv3|lv2] [--id <unique-id>]\n");
         std::printf("\nLoads the plug-in and runs a 256-sample synthetic block\n");
         std::printf("through it. Prints plug-in metadata and peak output level.\n");
+        std::printf("\n  --format <fmt>, -f <fmt>  Format: clap, vst3, au, auv3, lv2 (default: clap)\n");
+        std::printf("  --id <unique-id>          Select a descriptor URI / unique-id for LV2 or multi-plugin CLAP bundles\n");
         return args.empty() ? 1 : 0;
     }
 
