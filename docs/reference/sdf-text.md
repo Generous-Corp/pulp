@@ -109,6 +109,7 @@ emits the `128 == edge` field the SDF samplers expect.
 ## Related
 
 - `planning/next-features-plan.md` § Feature 4 — full phase plan
-- `examples/sdf-text-demo/` — SDF vs MSDF comparison
+- `examples/sdf-text-demo/` — runtime SDF text rendering and bloom demo
+- `examples/sdf-vs-msdf-demo/` — console SDF/MSDF atlas comparison
 - `examples/sdf-effects-demo/` — effects showcase across presets
 - `docs/reference/modules.md` — module index
