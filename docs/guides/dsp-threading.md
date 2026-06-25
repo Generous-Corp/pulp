@@ -296,6 +296,14 @@ re-prepare builds fresh ones on a fresh snapshot and never resizes a buffer an
 in-flight audio reader is using — the same RCU/retire discipline the legacy
 per-node scratch relies on.
 
+`SignalGraph::set_parallel_routing_enabled(true)` requests the levelized
+parallel executor for the same eligible subset. The parallel-safe snapshot uses
+reuse-free scratch slots, levels containing `AudioOutput` still run serially to
+preserve accumulation order, and `set_parallel_min_work_units()` can keep
+low-cost levels serial when their static work-weight x block size is below the
+fork/join break-even threshold. `routing_executor_stats()` is the diagnostic
+surface for tests and tools that need to prove which routed path ran.
+
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an
 active main output bus, allows output-only instrument blocks, publishes

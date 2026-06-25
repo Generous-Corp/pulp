@@ -181,7 +181,12 @@ predictable output, no MIDI.
   every executor zeroes the output bus + the MIDI ingress is idempotent (consumed
   mailbox sequences aren't committed until `run()` succeeds), so a failed parallel
   attempt re-renders the block on a lower tier with no doubled output or
-  double-consumed MIDI. GOTCHAS: (1) the parallel snapshot uses a REUSE-FREE
+  double-consumed MIDI. `SignalGraph::set_parallel_min_work_units(n)` forwards
+  to the executor's channel-sample break-even gate; default `0` preserves the
+  original "parallelize every eligible level" behavior, while a positive value
+  keeps low-cost levels serial to avoid fork/join overhead on small graphs. Use
+  `routing_executor_stats()` to verify the live path when testing the threshold.
+  GOTCHAS: (1) the parallel snapshot uses a REUSE-FREE
   buffer assignment (`parallel_safe=true`) — concurrent same-level nodes must not
   alias a recycled scratch slot; `process_parallel` refuses a non-parallel-safe
   snapshot. (2) Levels containing an AudioOutput node run SERIALLY in topo order
