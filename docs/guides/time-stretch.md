@@ -1,15 +1,14 @@
 # Time-Stretch & Pitch-Shift
 
 Pulp ships its own **MIT-licensed** time-stretch and pitch-shift engine in
-`core/signal`. There is no external dependency (no Rubber Band / GPL) — the engine,
-its character modes, the A/B measurement harness, and the tunable presets are all
-in-tree and reusable from any plugin.
+`core/signal` — no GPL dependency. The engine, its character modes, the A/B
+measurement harness, and the tunable presets are all in-tree and reusable from any
+plugin.
 
-> Honest status: the engine is **R3-competitive** — strong on tonal/melodic and, with
-> the material-adaptive window, sharp on percussion. It is not yet a blanket "beats
-> Rubber Band everywhere"; that's the tracked Track-A roadmap
-> (`planning/GOAL-offline-stretch-beat-r3.md`). Use the A/B harness below to judge for
-> your material.
+The `clean` character is a peak-locked phase vocoder (Laroche-Dolson phase
+propagation with identity phase locking) plus material-adaptive FFT windowing —
+natural on tonal/melodic material and sharp on percussion. Use the A/B harness below
+to dial it in for your own material.
 
 ## The two engines
 
@@ -83,7 +82,7 @@ eng.prepare(sample_rate, channels, sizing);
 | `formant_mode` | `preserve_original` | `follow_pitch` / `preserve_original` / `shift_independently` |
 | `formant_semitones` | `0` | Used with `shift_independently` |
 | `repitch_linked` | `false` | `true` = pure resample (vinyl), pitch tied to time |
-| `route_noise_stn` | `false` | Route noise/residual through the STN `NoiseMorpher` (experimental; off because it dulls transients — see the roadmap) |
+| `route_noise_stn` | `false` | Route noise/residual through the STN `NoiseMorpher` (experimental; off by default because it can dull transients) |
 | `relocate_transients` | `false` | Verbatim transient graft (reserved; no-op until seam-clean) |
 | `quality` | `2` | `0` draft preview … `2` best |
 
@@ -156,5 +155,4 @@ window ~19 (sharper, more present attacks).
 
 ## See also
 
-- `planning/GOAL-offline-stretch-beat-r3.md` — the quality goal + Track-A roadmap
 - [Packages: Signalsmith Stretch](packages/signalsmith-stretch.md) — the MIT alternative and when to reach for it
