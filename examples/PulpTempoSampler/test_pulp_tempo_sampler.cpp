@@ -128,6 +128,27 @@ void process_block(PulpTempoSamplerProcessor& p, double tempo_bpm, bool note_on,
     p.process(out, in, min, mout, ctx);
 }
 
+// Process one block driven by an explicit MIDI buffer (notes + CC + pitch wheel).
+void process_midi(PulpTempoSamplerProcessor& p, double tempo_bpm, midi::MidiBuffer& min,
+                  std::vector<float>& l, std::vector<float>& r) {
+    const int n = static_cast<int>(l.size());
+    float* op[2] = {l.data(), r.data()};
+    audio::BufferView<float> out(op, 2, static_cast<std::size_t>(n));
+    const float* ip[1] = {nullptr};
+    audio::BufferView<const float> in(ip, 0, static_cast<std::size_t>(n));
+    midi::MidiBuffer mout;
+    format::ProcessContext ctx{48000, n};
+    ctx.tempo_bpm = tempo_bpm;
+    ctx.is_playing = true;
+    p.process(out, in, min, mout, ctx);
+}
+
+double block_energy(const std::vector<float>& l) {
+    double e = 0.0;
+    for (float v : l) e += static_cast<double>(v) * v;
+    return e;
+}
+
 } // namespace
 
 TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
@@ -254,6 +275,83 @@ TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
         for (float v : l) REQUIRE(std::isfinite(v));
     }
     CHECK(energy > 1e-6); // produced audio
+}
+
+// #111: the keyboard's sustain / pitch-bend / modulation pads (and the matching
+// host CC64 / pitch-wheel / CC1) used to light up but never reach the voices.
+// They now drive the audio: sustain defers note-off, pitch-bend + mod-wheel
+// vibrato scale the playback rate.
+
+TEST_CASE("sustain pedal (CC64) holds a note through note-off",
+          "[tempo-sampler][issue-111]") {
+    Fixture f;
+    auto buf = sine(220.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.store.set_value(kTempoLoop, 1.0f);      // loop so the voice rings until released
+    f.store.set_value(kTempoRelease, 5.0f);   // fast release once it DOES release
+    f.store.set_value(kTempoSustain, 100.0f); // full sustain level
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // kick the render
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    const int note = 60;  // root
+    // Pedal DOWN, play the note, then release the KEY (note-off).
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 64, 127));
+      m.add(midi::MidiEvent::note_on(0, note, 100)); process_midi(*f.proc, 120.0, m, l, r); }
+    for (int b = 0; b < 4; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, note)); process_midi(*f.proc, 120.0, m, l, r); }
+
+    double held = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); held += block_energy(l); }
+    CHECK(held > 1e-3);  // still ringing despite the note-off — the pedal held it
+
+    // Pedal UP -> the held voice finally releases and decays away.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 64, 0)); process_midi(*f.proc, 120.0, m, l, r); }
+    for (int b = 0; b < 24; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); } // let the 5 ms release finish
+    double tail = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); tail += block_energy(l); }
+    CHECK(tail < held * 0.05);  // decayed after the pedal lifted
+}
+
+TEST_CASE("pitch-bend and mod-wheel reach the rendered audio",
+          "[tempo-sampler][issue-111]") {
+    // Render the same looped note three ways — no expression, full up-bend, full
+    // mod-wheel — and confirm each expression materially changes the output (both
+    // scale the playback rate, so the waveform diverges from the dry render).
+    auto render = [](int mode, std::vector<float>& acc) {
+        Fixture f;
+        auto buf = sine(220.0, 48000.0, 48000);
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        f.store.set_value(kTempoLoop, 1.0f);
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        { midi::MidiBuffer m;
+          if (mode == 1) m.add(midi::MidiEvent::pitch_bend(0, 16383));  // full up bend
+          if (mode == 2) m.add(midi::MidiEvent::cc(0, 1, 127));         // full mod wheel
+          m.add(midi::MidiEvent::note_on(0, 60, 100));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        acc.clear();
+        for (int b = 0; b < 16; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            acc.insert(acc.end(), l.begin(), l.end()); }
+    };
+    std::vector<float> dry, bent, modded;
+    render(0, dry); render(1, bent); render(2, modded);
+
+    double energy = 0.0, dbend = 0.0, dmod = 0.0;
+    for (std::size_t i = 0; i < dry.size(); ++i) {
+        energy += static_cast<double>(dry[i]) * dry[i];
+        const double a = dry[i] - bent[i];
+        const double b = dry[i] - modded[i];
+        dbend += a * a; dmod += b * b;
+    }
+    REQUIRE(energy > 1e-3);            // the dry render is audible
+    CHECK(dbend > energy * 0.10);      // +2 semitone bend clearly diverges
+    CHECK(dmod > energy * 0.01);       // vibrato (small but real) diverges too
 }
 
 // Each slice maps to its own chromatic note (idx = note - root). A note off the

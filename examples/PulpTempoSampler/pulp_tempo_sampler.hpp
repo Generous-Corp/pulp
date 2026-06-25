@@ -71,9 +71,11 @@ struct SamplerVoice {
     audio::PublishedSampleView sample;
     audio::LoopRegion region;   // stored so the UI playhead can map position->progress
     bool released = false;
+    bool sustained = false;     // note-off arrived but held by the sustain pedal
 
     void reset() {
         active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
+        sustained = false;
         adsr.reset(); renderer.reset();
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
@@ -746,6 +748,11 @@ public:
             kb_->set_input_capture(true);
             kb_->on_note_on  = [this](int note, float vel) { keyboard_play_on(note, vel); };
             kb_->on_note_off = [this](int note) { keyboard_play_off(note); };
+            // Pitch-bend / modulation / sustain pads now reach the voices (RT-safe
+            // atomic stores read by the audio thread), matching the host CC path.
+            kb_->on_pitch_bend = [this](float b) { pitch_bend_.store(b, std::memory_order_relaxed); };
+            kb_->on_modulation = [this](float m) { modulation_.store(m, std::memory_order_relaxed); };
+            kb_->on_sustain    = [this](bool on) { sustain_pedal_.store(on, std::memory_order_relaxed); };
             // ⌘K / ⌘W / Escape while the keyboard window is front HIDE it (the
             // toggle hides when visible). Without this the chords only reach the
             // MAIN editor window, so the keyboard could be shown but never hidden
@@ -1047,6 +1054,10 @@ public:
         root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
         root->typing.on_note_on = [this](int note, float vel) { keyboard_play_on(note, vel); };
         root->typing.on_note_off = [this](int note) { keyboard_play_off(note); };
+        // (The inline editor's `typing` is a note-only MusicalTypingController — it
+        // has no pitch-bend / modulation / sustain pads. Those live on the popout
+        // MusicalTypingKeyboard widget, wired in toggle_keyboard_window, and on the
+        // host CC / pitch-wheel path in process().)
         // Keep the keyboard-window's controller base note synced to ROOT while it
         // is open, so its 'a' key always plays slice 0 (note = root) like the
         // inline editor typing. toggle_keyboard_window() also sets it on open.
@@ -1237,6 +1248,14 @@ public:
         const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
         midi_in.sort();
 
+        // Sustain pedal: when the damper lifts, release every voice that a
+        // note-off left held (pedal-down deferred the release in release_note).
+        const bool pedal = sustain_pedal_.load(std::memory_order_relaxed);
+        if (sustain_prev_ && !pedal)
+            for (auto& voice : voices_)
+                if (voice.active && voice.sustained) { voice.release(); voice.sustained = false; }
+        sustain_prev_ = pedal;
+
         // Drain UI-injected notes (slice clicks / musical typing) at block start.
         while (auto n = ui_notes_.try_pop()) {
             if (n->on) {
@@ -1258,6 +1277,19 @@ public:
                              published, params);
             else if (event.message.isNoteOff())
                 release_note(event.message.getNoteNumber());
+            else if (event.message.isController()) {
+                // Mod wheel (CC1) -> vibrato depth; sustain (CC64) -> damper hold.
+                const int cc = event.message.getControllerNumber();
+                const float v = static_cast<float>(event.message.getControllerValue()) / 127.0f;
+                if (cc == 1) modulation_.store(v, std::memory_order_relaxed);
+                else if (cc == 64) sustain_pedal_.store(v >= 0.5f, std::memory_order_relaxed);
+            } else if (event.message.isPitchWheel()) {
+                // 14-bit pitch wheel: LSB | (MSB<<7), center 8192 -> -1..+1.
+                const std::uint8_t* d = event.message.data();
+                const int val = static_cast<int>(d[1]) | (static_cast<int>(d[2]) << 7);
+                pitch_bend_.store((static_cast<float>(val) - 8192.0f) / 8192.0f,
+                                  std::memory_order_relaxed);
+            }
             cursor = offset;
         }
         if (cursor < block_frames) render_active_voices(output, cursor, block_frames - cursor, params);
@@ -1596,6 +1628,24 @@ private:
         return region;
     }
 
+    // Playback-rate multiplier for one render chunk: pitch-bend (a static
+    // semitone offset over +/- kBendRangeSemis) plus mod-wheel vibrato (a
+    // kVibratoHz LFO whose phase advances by `chunk` frames, depth scaled by the
+    // mod amount). Audio-thread only; returns exactly 1.0 when nothing is
+    // engaged so the common no-expression path is allocation- and transcendental-
+    // free.
+    float apply_expression_rate(std::uint32_t chunk) noexcept {
+        constexpr double kTwoPi = 6.283185307179586;
+        const float bend = pitch_bend_.load(std::memory_order_relaxed);
+        const float mod = modulation_.load(std::memory_order_relaxed);
+        const double sr = host_sample_rate_ > 0.0f ? host_sample_rate_ : 48000.0;
+        mod_lfo_phase_ += kTwoPi * static_cast<double>(kVibratoHz) * chunk / sr;
+        if (mod_lfo_phase_ > kTwoPi) mod_lfo_phase_ -= kTwoPi;
+        const float vib = mod * kVibratoSemis * static_cast<float>(std::sin(mod_lfo_phase_));
+        const float semis = bend * kBendRangeSemis + vib;
+        return (semis == 0.0f) ? 1.0f : std::pow(2.0f, semis / 12.0f);
+    }
+
     void render_active_voices(audio::BufferView<float>& output, std::uint32_t start_frame,
                               std::uint32_t frames, const RenderParams& params) noexcept {
         if (frames == 0) return;
@@ -1604,9 +1654,14 @@ private:
         if (out_ch == 0) return;
         for (std::uint32_t ch = 0; ch < out_ch; ++ch) voice_scratch_ptrs_[ch] = voice_scratch_[ch].data();
 
+        // Pitch-bend + mod-wheel vibrato map to a playback-rate multiplier on the
+        // (tempo-matched, native-rate-1.0) buffer. Sampled per chunk: the LFO
+        // advances by the chunk length so a held note's vibrato is continuous
+        // across chunks/blocks. bend and mod are read once per chunk (relaxed).
         std::uint32_t rendered = 0;
         while (rendered < frames) {
             const auto chunk = std::min(frames - rendered, max_block_frames_);
+            const float rate = apply_expression_rate(chunk);
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(), out_ch, chunk);
             for (auto& voice : voices_) {
                 if (!voice.active) continue;
@@ -1615,6 +1670,7 @@ private:
                 audio::BufferView<const float> source(sptrs.data(), voice.sample.num_channels,
                                                       static_cast<std::size_t>(voice.sample.num_frames));
                 voice.adsr.set_params(params.adsr);
+                voice.renderer.set_playback_rate(rate);
                 const auto loop_result = voice.renderer.render(source, scratch, chunk);
                 bool finished = false;
                 for (std::uint32_t i = 0; i < chunk; ++i) {
@@ -1643,8 +1699,12 @@ private:
     }
 
     void release_note(int note) {
+        const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
-            if (voice.active && voice.note == note && !voice.released) voice.release();
+            if (voice.active && voice.note == note && !voice.released) {
+                if (hold) voice.sustained = true;  // damper down: defer until the pedal lifts
+                else voice.release();
+            }
     }
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
@@ -1668,6 +1728,20 @@ private:
     std::uint32_t max_block_frames_ = 512;
     std::uint32_t prepared_output_channels_ = 2;
     double last_host_bpm_ = 0.0;
+
+    // MIDI expression (UI keyboard buttons + host CC/pitch-wheel) -> audio thread.
+    // RT-safe: UI/host threads store, the audio thread loads (relaxed). Applied in
+    // render_active_voices as a per-voice playback-rate multiplier (bend + vibrato)
+    // and a deferred note-off (sustain). See on_pitch_bend / on_modulation /
+    // on_sustain wiring + apply_expression_rate().
+    std::atomic<float> pitch_bend_{0.0f};     // -1..+1, scaled by kBendRangeSemis
+    std::atomic<float> modulation_{0.0f};     // 0..1 vibrato depth
+    std::atomic<bool> sustain_pedal_{false};  // damper hold
+    static constexpr float kBendRangeSemis = 2.0f;   // +/- 2 semitones (Logic default)
+    static constexpr float kVibratoSemis = 0.4f;     // peak vibrato at full mod
+    static constexpr float kVibratoHz = 5.5f;        // vibrato LFO rate
+    bool sustain_prev_ = false;   // audio-thread-only: pedal falling-edge detect
+    double mod_lfo_phase_ = 0.0;  // audio-thread-only: vibrato LFO phase (radians)
 
     // Raw loop + analysis (guarded by raw_mutex_)
     mutable std::mutex raw_mutex_;
