@@ -3,13 +3,14 @@
 //!
 //! # Scope
 //!
-//! Rust matches the C++ surface at `tools/cli/cmd_version.cpp`:
+//! Rust owns the user-facing surface after the CLI cutover; the C++
+//! `pulp-cpp` command remains the rollback/delegate path:
 //!
-//! | Subcommand | Port status |
+//! | Subcommand | Surface status |
 //! |------------|-------------|
-//! | `show` (default) | Ported — human output + `--json`. |
-//! | `bump <major|minor|patch> [--plugin]` | Ported — CMakeLists.txt rewrite + CHANGELOG heading insert + footer hint. |
-//! | `check [--with-bump-check]` | Ported — SDK / AU plist / CHANGELOG / plugin.json / marketplace.json consistency; `--with-bump-check` delegates to `tools/scripts/version_bump_check.py --mode=report`. |
+//! | `show` (default) | Owned by Rust — human output + `--json`. |
+//! | `bump <major|minor|patch> [--plugin]` | Owned by Rust — CMakeLists.txt rewrite + CHANGELOG heading insert + footer hint. |
+//! | `check [--with-bump-check]` | Owned by Rust — SDK / AU plist / CHANGELOG / plugin.json / marketplace.json consistency; `--with-bump-check` delegates to `tools/scripts/version_bump_check.py --mode=report`. |
 //!
 //! # `check` semantics caveat
 //!
@@ -93,7 +94,7 @@ pub fn parse(tail: &[String]) -> Result<VersionCmd> {
         return Ok(VersionCmd::Show { json: false });
     }
     // `--json` anywhere in the tail promotes a no-subcommand call to
-    // `Show { json: true }`. C++ behaviour: `pulp version --json`.
+    // `Show { json: true }`. This is a Rust-owned user-facing lane.
     let mut positional: Vec<&str> = Vec::new();
     let mut json = false;
     let mut plugin_flag = false;

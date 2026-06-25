@@ -2,7 +2,7 @@
 //!
 //! # Why a separate module
 //!
-//! Both `pulp-rs version --json` and `pulp-rs upgrade --check-only`
+//! Both `pulp version --json` and `pulp upgrade --check-only`
 //! need to know the installed CLI version and — for `version` — the
 //! Claude-plugin version as well. Keeping the probe logic here (rather
 //! than duplicating it across the `cmd::*` orchestrators) means one
@@ -81,11 +81,11 @@ pub fn collect(cwd: &Path) -> VersionSnapshot {
     out
 }
 
-/// Emit the `pulp-rs version --json` shape.
+/// Emit the `pulp version --json` shape.
 ///
 /// Stable key order (`cli` before `plugin` before `plugin_min_cli`
 /// before `plugin_json_path`) is important for byte-level diffing
-/// against captured C++ output in parity tests.
+/// against captured fixture output in parity tests.
 #[must_use]
 pub fn emit_json(snap: &VersionSnapshot) -> String {
     let mut obj = serde_json::Map::new();

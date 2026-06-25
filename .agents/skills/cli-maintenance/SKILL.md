@@ -1083,6 +1083,18 @@ Gotchas:
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
 
+## `pulp version --json`
+
+The Rust user-facing `pulp` binary supports `pulp version --json` for a
+machine-readable version snapshot (`cli`, `plugin`, `plugin_min_cli`,
+`plugin_json_path`) using the same semver-compatible field shape as
+`pulp doctor --versions --json`. `pulp-cpp version` remains the
+rollback/delegate command and does not own this JSON lane. Keep
+`docs/reference/cli.md`, `docs/status/cli-commands.yaml`,
+`experimental/pulp-rs/src/cmd/version.rs`, `version_info.rs`, and
+`experimental/pulp-rs/tests/version_parity_test.rs` aligned when this
+surface changes.
+
 ## `pulp version check`
 
 Validates consistency across the version-bearing surfaces:
