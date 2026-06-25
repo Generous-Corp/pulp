@@ -56,7 +56,7 @@ Screenshots are captured via the headless screenshot tool:
 
 - **Type:** MIDI Effect (MIDI in → MIDI + audio out)
 - **Parameters:** Pattern, Tempo, Swing, Density, Velocity, Randomize
-- **UI:** Four knobs + two combos, auto-generated
+- **UI:** Six knobs, auto-generated
 - **Formats:** CLAP only
 
 ## PulpSampler — Audio File Sampler
