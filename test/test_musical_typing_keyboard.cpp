@@ -155,6 +155,25 @@ TEST_CASE("MusicalTypingKeyboard: piano window is base-independent (C-2..G8)",
     REQUIRE(hi2 - lo2 == 35);
 }
 
+// MusicalTypingKeyboard::set_base_note is the wrapper the sampler calls when the
+// ROOT note changes: unlike a bare controller().set_base_note(), it re-clamps the
+// octave shift to the NEW base's range (and refreshes the readout/overview), so a
+// shift that was valid for the old base can't push the play-window off C-2..G8.
+TEST_CASE("MusicalTypingKeyboard: set_base_note re-clamps the octave shift",
+          "[view][musical-typing]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_base_note(60);                          // C3 root
+    kb.controller().set_octave_shift(-99);         // pin to base-60's floor
+    const int floor60 = kb.controller().octave_shift();
+    REQUIRE(floor60 < 0);                           // base 60 can shift below 0 (reaches C-2)
+
+    kb.set_base_note(0);                            // re-base via the wrapper
+    // Base 0's floor is 0 (no negative shift), so the stale -ve shift must be
+    // re-clamped up. A bare controller().set_base_note would have left floor60.
+    REQUIRE(kb.controller().octave_shift() >= 0);
+    REQUIRE(kb.controller().octave_shift() != floor60);
+}
+
 TEST_CASE("MusicalTypingKeyboard: toggle swaps the frame AND the intrinsic size",
           "[view][musical-typing][toggle]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
