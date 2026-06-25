@@ -27,7 +27,6 @@ public:
     void layout_children() override {}
 };
 
-float gHeight = 0.0f;
 }  // namespace
 
 std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
@@ -141,7 +140,6 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
     y += 244.0f;
 
     root->set_bounds({0, 0, W, y});
-    gHeight = y;
     return root;
 }
 
