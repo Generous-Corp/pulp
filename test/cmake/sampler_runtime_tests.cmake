@@ -44,6 +44,8 @@ pulp_add_test_suite(pulp-test-graph-executor-parity
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Off-RT scratch-slot buffer-assignment layout + reuse.
 pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
+# Off-RT levelization (parallel-schedule levels) for static multicore.
+pulp_add_test_suite(pulp-test-graph-runtime-levelization LIBRARIES pulp::graph)
 # Executor routing path moves audio between nodes (chain/diamond/feedback/
 # multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
