@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Objective quality metrics for OfflineStretch renders.
 
-Plan: planning/Sampler-Offline-Stretch-Build-Plan.md §6 (quality metrics).
-
 Compares a rendered output WAV against its input at a known time ratio and
 reports the metrics that gate stretch quality:
 
@@ -13,12 +11,11 @@ reports the metrics that gate stretch quality:
                          to the onset's own energy (catches phase-vocoder
                          "breathing before the hit")
 
-FFT-based metrics (log-spectral distance, f0-in-cents) are stubbed: they need an
-FFT, which the standard library lacks. They activate automatically if numpy is
-importable, and otherwise report "skipped (no numpy)" so the harness still runs
-on a bare interpreter. The realtime-engine baseline (`--baseline`) records the
-current engine's numbers over the corpus; it is a pass-through at Phase 0 and
-gains real values once Phase 1 wires RealtimePitchTimeProcessor.
+FFT-based metrics (log-spectral distance, f0-in-cents) are optional: they need
+an FFT, which the standard library lacks. They activate automatically if numpy
+is importable, and otherwise report "skipped (no numpy)" so the harness still
+runs on a bare interpreter. Current renders go through the live OfflineStretch
+engine.
 
 Pure standard library by default; no hard dependency.
 """
@@ -178,7 +175,7 @@ def metrics(in_path, out_path, ratio):
     if _np is None:
         result["spectral_lsd"] = "skipped (no numpy)"
         result["pitch_cents"] = "skipped (no numpy)"
-    # TODO(phase1+): with numpy, add log-spectral distance on stationary
+    # TODO: with numpy, add log-spectral distance on stationary
     # segments and f0-tracking cents error on tonal material.
 
     return result

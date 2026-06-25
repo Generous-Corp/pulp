@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Capture the Phase-1 OfflineStretch quality baseline over the corpus.
+"""Capture the OfflineStretch quality baseline over the corpus.
 
-Plan: planning/Sampler-Offline-Stretch-Build-Plan.md §6 (capture the baseline =
-the realtime engine run offline). Each §4 offline-only refinement (transient
-relocation, multi-res STFT, ...) must beat THESE numbers to land.
+This captures the historical realtime-engine baseline. Offline-only refinements
+such as transient relocation or multi-res STFT should beat THESE numbers before
+becoming the default.
 
 Runs stretchcli over the synthetic corpus at a sweep of ratios, computes the
 metrics (metrics.py), and writes a JSON baseline + a readable table.
@@ -67,7 +67,7 @@ def main(argv):
             rows.append(row)
 
     baseline = {
-        "engine": "OfflineStretch tempo-only (Phase 1, RealtimePitchTimeProcessor)",
+        "engine": "OfflineStretch tempo-only baseline (RealtimePitchTimeProcessor)",
         "rubberband_comparison": "available" if have_rb else "deferred (rubberband not installed)",
         "ratios": RATIOS,
         "rows": rows,
@@ -76,7 +76,7 @@ def main(argv):
         json.dump(baseline, f, indent=2)
 
     # Readable table.
-    print(f"OfflineStretch Phase-1 baseline ({len(rows)} renders) -> {out_json}")
+    print(f"OfflineStretch baseline ({len(rows)} renders) -> {out_json}")
     print(f"  Rubber Band R3 lane: {baseline['rubberband_comparison']}")
     hdr = f"{'file':22} {'ratio':>5} {'len_ok':>6} {'onset_ms(mean/max)':>20} {'pre_echo_db':>11}"
     print(hdr)

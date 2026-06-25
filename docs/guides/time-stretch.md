@@ -131,23 +131,26 @@ transient_sensitivity = 1.5
 The offline-stretch example (`examples/offline-stretch/`) is the measurement bench:
 
 ```bash
-# Render with the material-adaptive window (what the sampler does)
-stretchcli in.wav out.wav --ratio 1.5 --auto-window --quality 2
+# Render with the material-adaptive window (the default; what the sampler does)
+stretchcli in.wav out.wav --ratio 1.5 --quality 2
 
 # Tempo-match by detected BPM, or just analyze
-stretchcli in.wav out.wav --bpm-to 120 --auto-window
+stretchcli in.wav out.wav --bpm-to 120
 stretchcli in.wav --analyze          # JSON: detected BPM + onsets
 
-# Pitch / formant / vinyl
+# Manual window, pitch / formant, and vinyl
+stretchcli in.wav out.wav --ratio 1.5 --fft 1024 --hop 128
 stretchcli in.wav out.wav --pitch 3 --formant preserve
 stretchcli in.wav out.wav --ratio 0.8 --repitch     # varispeed-style
 ```
 
-The Python harness (`examples/offline-stretch/tools/`) renders a corpus and scores
-it with **established** quality libraries (pyloudnorm for loudness match, librosa for
-onset strength / HPSS balance, essentia for inharmonicity) rather than hand-rolled
-probes — so an A/B is loudness-matched and reference-free. To fine-tune: render the
-same loop with two presets / windows, score both, and keep the winner.
+The Python A/B toolkit (`examples/offline-stretch/eval/`) renders candidate
+configs through `stretchcli` and scores brightness, attack punch, dominant low
+partial, low-frequency wobble, long-term spectral distance, and band balance
+with numpy + soundfile. The older corpus helpers under
+`examples/offline-stretch/tools/` remain for synthetic fixture generation and
+baseline capture. To fine-tune: render the same loop with two presets / windows,
+score both, listen, and keep the winner.
 
 Quick objective check used in development — **transient crest** (peak/RMS) at 2×
 stretch on a drum loop: the fixed default window scores ~11, the adaptive `1024/128`
