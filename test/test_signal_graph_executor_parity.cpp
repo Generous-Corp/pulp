@@ -1898,3 +1898,72 @@ TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
     REQUIRE(prepared_all);
     CHECK(blocks.load() > 0);
 }
+
+namespace {
+
+// in(2ch) -> 3 independent gain chains (chain A has one-block feedback, so the
+// graph is STATEFUL across blocks) -> all three sum into out(2ch). The three
+// chains share one parallel level (independent, fed from input); the output node
+// accumulates 3 incoming connections per channel, so its level runs serially in
+// topo order. Exercises parallel dispatch AND the multi-sink float-reduction
+// order whose determinism this golden locks. `parallel` opts into the pool path.
+void build_multisink_stateful(SignalGraph& g, bool parallel) {
+    const auto in = g.add_input_node(2, "In");
+    const auto out = g.add_output_node(2, "Out");
+    const auto a = g.add_gain_node("A");
+    const auto b = g.add_gain_node("B");
+    const auto c = g.add_gain_node("C");
+    for (int ch = 0; ch < 2; ++ch) {
+        REQUIRE(g.connect(in, ch, a, ch));
+        REQUIRE(g.connect(in, ch, b, ch));
+        REQUIRE(g.connect(in, ch, c, ch));
+        REQUIRE(g.connect(a, ch, out, ch));
+        REQUIRE(g.connect(b, ch, out, ch));
+        REQUIRE(g.connect(c, ch, out, ch));
+        REQUIRE(g.connect_feedback(a, ch, a, ch));  // chain A carries state
+    }
+    REQUIRE(g.set_node_gain(a, 0.31f));
+    REQUIRE(g.set_node_gain(b, 0.52f));
+    REQUIRE(g.set_node_gain(c, 0.17f));
+    g.set_parallel_routing_enabled(parallel);
+    REQUIRE(g.prepare(kSr, kFrames));
+    // Guard against a vacuous legacy-vs-legacy comparison: the topology must be
+    // eligible so the parallel session genuinely routes through the worker pool.
+    REQUIRE(signal_graph_executor_eligible(g));
+}
+
+// Render a fixed multi-block input sequence through a fresh graph, returning the
+// concatenated per-channel output (state carried block to block).
+std::vector<std::vector<float>> render_session(bool parallel, int blocks) {
+    SignalGraph g;
+    build_multisink_stateful(g, parallel);
+    std::vector<std::vector<float>> seq(2);
+    for (int blk = 0; blk < blocks; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk)),
+            ramp(kFrames, 0.4f + 0.03f * static_cast<float>(blk))};
+        const auto out = run_legacy(g, kFrames, input, 2);
+        for (int ch = 0; ch < 2; ++ch)
+            seq[ch].insert(seq[ch].end(), out[ch].begin(), out[ch].end());
+    }
+    return seq;
+}
+
+}  // namespace
+
+TEST_CASE("Golden: parallel multi-sink stateful graph renders identically run-to-run",
+          "[host][graph][executor][routing][parallel][golden][determinism]") {
+    // Two independent sessions (fresh graph each) over the SAME input sequence on
+    // the parallel path must produce bit-identical output: the worker-pool
+    // dispatch order must not perturb results, and the multi-sink accumulation
+    // order is fixed (AudioOutput levels run serially in topo order — never
+    // parallel-reduced). Locks the deterministic-reduction design decision.
+    constexpr int kBlocks = 8;
+    const auto run1 = render_session(/*parallel=*/true, kBlocks);
+    const auto run2 = render_session(/*parallel=*/true, kBlocks);
+    expect_equal(run1, run2);
+    // And the parallel render equals the deterministic legacy walk (cross-engine
+    // determinism over the full stateful session, not just one block).
+    const auto legacy = render_session(/*parallel=*/false, kBlocks);
+    expect_equal(run1, legacy);
+}
