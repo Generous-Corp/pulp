@@ -53,6 +53,8 @@
 
 namespace pulp::examples {
 
+inline constexpr const char* kPulpTempoSamplerVersion = "1.0.2";
+
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
 // extra cross-example include path.
@@ -573,7 +575,7 @@ public:
             .name = "PulpTempoSampler",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.tempo-sampler",
-            .version = "1.0.2",
+            .version = kPulpTempoSamplerVersion,
             .category = format::PluginCategory::Instrument,
             .input_buses = {},
             .output_buses = {{"Audio Out", 2}},

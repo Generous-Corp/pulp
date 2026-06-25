@@ -8,5 +8,6 @@ static const Steinberg::FUID PulpTempoSamplerUID(0x50554C50, 0x54454D50, 0x53414
 
 PULP_VST3_PLUGIN(PulpTempoSamplerUID, "PulpTempoSampler",
                  Steinberg::Vst::PlugType::kInstrumentSynth,
-                 "Pulp", "1.0.0", "https://github.com/danielraffel/pulp",
+                 "Pulp", pulp::examples::kPulpTempoSamplerVersion,
+                 "https://github.com/danielraffel/pulp",
                  pulp::examples::create_pulp_tempo_sampler)
