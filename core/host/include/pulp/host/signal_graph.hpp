@@ -461,6 +461,24 @@ public:
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
     }
+    // Break-even threshold for the parallel executor. A level runs across the
+    // worker pool only when its static work-weight x frame count reaches this
+    // many channel-samples; lower-cost levels stay serial to avoid fork/join
+    // overhead. Default 0 preserves the original "parallelize every eligible
+    // level" behavior. This is an RT-safe atomic setting and can be changed
+    // before or after prepare().
+    void set_parallel_min_work_units(std::uint64_t channel_samples) noexcept {
+        executor_.set_parallel_min_work_units(channel_samples);
+    }
+    std::uint64_t parallel_min_work_units() const noexcept {
+        return executor_.parallel_min_work_units();
+    }
+    // Diagnostic executor counters for verifying whether routed processing
+    // actually took the parallel/serial executor paths. This is telemetry, not a
+    // synchronization primitive; values may mix adjacent audio blocks.
+    format::GraphRuntimeExecutorStats routing_executor_stats() const noexcept {
+        return executor_.stats();
+    }
 
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,

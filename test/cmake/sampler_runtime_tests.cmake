@@ -60,6 +60,9 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Host-facing coverage for the parallel executor's break-even threshold wiring.
+pulp_add_test_suite(pulp-test-signal-graph-parallel-cost
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Differential routing parity: random audio-only DAGs driven through both
 # SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
 # fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
