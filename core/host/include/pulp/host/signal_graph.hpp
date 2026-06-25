@@ -14,6 +14,7 @@
 //   graph.prepare(48000, 512);
 //   graph.process(output_buffer, input_buffer, num_samples);
 
+#include <pulp/host/anticipation_lane.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
@@ -480,6 +481,49 @@ public:
         return executor_.stats();
     }
 
+    // Opt into ANTICIPATIVE RENDERING for eligible graphs (default OFF). When
+    // enabled + the canonical-executor routing is eligible + the graph has an
+    // anticipation-eligible latent interior (no live input / feedback / sidechain
+    // dependency — see analyze_anticipation_eligibility), compile_ carves that
+    // interior into an AnticipationLane that is pre-rendered AHEAD of the deadline
+    // off the audio thread; process() then consumes the pre-rendered boundary
+    // signals and runs the rest of the graph with the interior masked, absorbing
+    // the interior's CPU cost off the critical block. Output is bit-identical to
+    // the canonical (interior-live) render. Requires the canonical executor path
+    // (set_canonical_executor_routing_enabled). Enable BEFORE prepare().
+    //
+    // The interior's plugin state is advanced ONLY by the anticipation producer
+    // (pump_anticipation), never by process() — so the interior is always masked
+    // on the live path; an underrun yields silence for that block, never a live
+    // re-render (which would double-advance the producer-owned state).
+    //
+    // SAFETY NOTE: the static eligibility (analyze_anticipation_eligibility) does
+    // NOT detect a host-clock-sensitive interior plugin (one whose output depends
+    // on the transport playhead). It is safe today only because process() does not
+    // propagate transport into the routed render, so the ahead-render and a live
+    // render see identical (absent) transport. When transport plumbing lands, such
+    // an interior must be excluded (a per-node opt-out) before enabling this.
+    void set_anticipation_enabled(bool enabled) noexcept {
+        anticipation_enabled_.store(enabled, std::memory_order_relaxed);
+    }
+    bool anticipation_enabled() const noexcept {
+        return anticipation_enabled_.load(std::memory_order_relaxed);
+    }
+    // Producer pump (OFF the audio thread): render the live graph's anticipation
+    // interior ahead into its ring, up to `max_blocks` blocks. The host calls this
+    // from a single background/idle thread (it is the lane's sole producer; a
+    // concurrent/reentrant call is a guarded no-op). A no-op when anticipation is
+    // disabled or the live graph has no eligible interior. Returns the number of
+    // blocks rendered ahead this call.
+    //
+    // CONTRACT: the host MUST stop calling pump_anticipation and JOIN its producer
+    // thread before any prepare()/graph mutation. The pump renders the interior's
+    // plugin instances, which prepare() reinitializes and re-binds; running them
+    // concurrently is a data race (the snapshot reader-pin protects object lifetime,
+    // not plugin-state exclusivity). Same discipline as "no process() during
+    // prepare()". Re-prepare also resets the lead buffer — expect a brief transient.
+    int pump_anticipation(int max_blocks = 8);
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
@@ -745,6 +789,28 @@ private:
         graph::GraphRuntimeLevelization routing_levelization;
         std::vector<PluginBindingContext> routing_plugin_ctx_parallel;
         bool routing_parallel_valid = false;
+
+        // Anticipative rendering for this snapshot (built only when anticipation is
+        // enabled at compile time AND the routed plan has an eligible latent
+        // interior). The lane pre-renders the interior off the audio thread; the
+        // live path masks the interior in routing_snapshot's walk and feeds the
+        // lane's pre-rendered boundary signals into the interior boundary-source
+        // output slots of exec_pool. anticipation_skip_mask is indexed by
+        // routing_snapshot's dense node order; anticipation_prefill maps each lane
+        // output channel to the exec_pool slot carrying that boundary signal;
+        // anticipation_consume_scratch is the per-snapshot capture buffer consume()
+        // pops a block into before the prefill copy. The lane owns the interior
+        // plugin instances' state advancement — process() never runs them.
+        AnticipationLane anticipation_lane;
+        std::vector<std::uint8_t> anticipation_skip_mask;
+        struct AnticipationPrefill {
+            std::uint32_t out_channel = 0;  // lane output channel
+            std::uint32_t slot = 0;         // exec_pool mono slot to fill
+        };
+        std::vector<AnticipationPrefill> anticipation_prefill;
+        std::vector<std::vector<float>> anticipation_consume_scratch;
+        std::vector<float*> anticipation_consume_ptrs;
+        bool anticipation_valid = false;
     };
 
     std::vector<GraphNode> nodes_;
@@ -775,6 +841,11 @@ private:
     // parallel-safe snapshot + levelization + scratch pool ride the CompiledGraph
     // (see CompiledGraph::routing_*_parallel).
     std::atomic<bool> parallel_routing_enabled_{false};
+    std::atomic<bool> anticipation_enabled_{false};
+    // Guards the single-producer contract on pump_anticipation: a concurrent or
+    // reentrant call degrades to a no-op instead of corrupting the lane's
+    // unsynchronized executor/pool/scratch + interior plugin state.
+    std::atomic<bool> anticipation_pump_busy_{false};
     format::GraphRuntimeWorkerPool worker_pool_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access

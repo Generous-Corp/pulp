@@ -100,6 +100,12 @@ pulp_add_test_suite(pulp-test-anticipation-subgraph-render
 pulp_add_test_suite(pulp-test-anticipation-lane
     SOURCES test_anticipation_lane.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Acceptance: anticipation wired into SignalGraph::process — the pre-rendered
+# interior splice is bit-identical to the canonical interior-live render, and the
+# interior is advanced exactly once per block (by the producer pump), never twice.
+pulp_add_test_suite(pulp-test-signal-graph-anticipation
+    SOURCES test_signal_graph_anticipation.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

@@ -251,9 +251,24 @@ predictable output, no MIDI.
   ONLY by render_ahead — a live splice that uses a lane must not also process those
   nodes or their state double-advances; (2) render_ahead is SINGLE-producer (all
   calls, including priming, must be serialized — they share unsynchronized
-  executor/pool/scratch); only the ring mediates against the consumer. There is no
-  SignalGraph splice wiring this into the live path yet — that's the final Phase 6
-  slice.
+  executor/pool/scratch); only the ring mediates against the consumer.
+- **Anticipation splice (`set_anticipation_enabled`, default OFF; runs on the
+  canonical executor path).** When enabled + the routed snapshot is eligible + the
+  graph has an eligible latent interior, `compile_` builds an `AnticipationLane` +
+  a `skip_mask` over the routed plan (the interior nodes) + a prefill map (each
+  lane output channel → the interior boundary-source's `exec_pool` output slot).
+  The host drives `pump_anticipation()` from ONE background thread (the producer);
+  `process()` consumes a pre-rendered block, copies it into the prefill slots (or
+  zeros them on underrun / block-size mismatch), and runs `process_routed` with the
+  interior masked — bit-identical to the canonical interior-live render. GOTCHAS:
+  (1) the branch is TERMINAL once entered — on a routed failure it zeros the output
+  and returns rather than falling through to a path that would re-run (double-
+  advance) the producer-owned interior. (2) `pump_anticipation` pins the live
+  snapshot (RCU object-lifetime only) and is single-producer-guarded, but the host
+  MUST stop/join the pump before any `prepare()`/mutation — prepare reinitializes
+  the SAME plugin instances the pump renders (a data race otherwise; same rule as
+  "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
+  detected — safe only because no transport reaches the routed render today.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio

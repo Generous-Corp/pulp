@@ -9,6 +9,9 @@
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/anticipation_eligibility.hpp>
+#include <pulp/host/anticipation_partition.hpp>
+#include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
 #include <algorithm>
@@ -1273,8 +1276,108 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             }
             cg->routing_parallel_valid = ok;
         }
+
+        // Anticipative rendering: carve an eligible latent interior out of the
+        // graph into a lane pre-rendered ahead of the deadline, and prepare the
+        // live-path splice (a skip mask over the routed plan + a map from each lane
+        // output channel to the interior boundary-source output slot it fills).
+        // Requires the canonical routed snapshot (the splice runs on that path).
+        if (cg->routing_valid &&
+            anticipation_enabled_.load(std::memory_order_relaxed) &&
+            max_block_size > 0) {
+            const auto eligibility =
+                analyze_anticipation_eligibility(nodes_, connections_);
+            const auto partition =
+                build_anticipation_partition(nodes_, connections_, eligibility);
+            const auto subgraph =
+                build_anticipation_subgraph(nodes_, connections_, partition);
+            if (subgraph.renders_anything()) {
+                CompiledGraph& cgr = *cg;
+                constexpr int kLeadBlocks = 4;
+                const bool prepared = cg->anticipation_lane.prepare(
+                    subgraph,
+                    [&cgr](NodeId id) -> std::atomic<float>* {
+                        auto it = cgr.runtime.find(id);
+                        return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
+                    },
+                    [&cgr](NodeId id) -> PluginSlot* {
+                        auto it = cgr.plugins.find(id);
+                        return it == cgr.plugins.end() ? nullptr : it->second.get();
+                    },
+                    sample_rate, max_block_size, kLeadBlocks);
+                if (prepared) {
+                    // Map each interior node id -> its dense index in the ROUTED
+                    // plan, to build the skip mask and resolve boundary output slots.
+                    const auto& rplan = cg->routing_snapshot.plan();
+                    const auto& rassign = cg->routing_snapshot.buffer_assignment();
+                    auto routed_index = [&rplan](NodeId id) -> std::uint32_t {
+                        for (std::uint32_t i = 0; i < rplan.nodes.size(); ++i) {
+                            if (rplan.nodes[i].id == id) return i;
+                        }
+                        return 0xFFFFFFFFu;
+                    };
+                    cg->anticipation_skip_mask.assign(rplan.nodes.size(), 0);
+                    bool map_ok = true;
+                    for (const auto idx : partition.interior_nodes) {
+                        const std::uint32_t ri = routed_index(nodes_[idx].id);
+                        if (ri == 0xFFFFFFFFu) { map_ok = false; break; }
+                        cg->anticipation_skip_mask[ri] = 1;
+                    }
+                    cg->anticipation_prefill.clear();
+                    for (std::uint32_t ch = 0; map_ok && ch < subgraph.outputs.size();
+                         ++ch) {
+                        const auto& out = subgraph.outputs[ch];
+                        const std::uint32_t ri = routed_index(out.source_node);
+                        if (ri == 0xFFFFFFFFu) { map_ok = false; break; }
+                        const std::uint32_t slot =
+                            rassign.nodes[ri].output_base + out.source_port;
+                        cg->anticipation_prefill.push_back({ch, slot});
+                    }
+                    if (map_ok) {
+                        cg->anticipation_consume_scratch.assign(
+                            subgraph.outputs.size(),
+                            std::vector<float>(static_cast<std::size_t>(max_block_size),
+                                               0.0f));
+                        cg->anticipation_consume_ptrs.clear();
+                        for (auto& c : cg->anticipation_consume_scratch) {
+                            cg->anticipation_consume_ptrs.push_back(c.data());
+                        }
+                        cg->anticipation_valid = true;
+                    }
+                }
+            }
+        }
     }
     return cg;
+}
+
+int SignalGraph::pump_anticipation(int max_blocks) {
+    if (!anticipation_enabled_.load(std::memory_order_relaxed)) return 0;
+    // Single-producer guard: a concurrent or reentrant pump degrades to a no-op
+    // rather than corrupting the lane's unsynchronized executor/pool/scratch.
+    if (anticipation_pump_busy_.exchange(true, std::memory_order_acquire)) return 0;
+    // Pin the live snapshot like a process() reader (the same RCU handshake
+    // prune_retired_snapshots_ waits on) so the CompiledGraph object can't be freed
+    // while we render its lane. render_ahead is bounded (<= max_blocks), so this
+    // never holds the reader count long enough to stall a re-prepare materially.
+    //
+    // CONTRACT (host-enforced, not provable here): the host MUST stop calling
+    // pump_anticipation AND join its producer thread before any prepare()/graph
+    // mutation. The reader-pin only keeps the CompiledGraph object alive — it does
+    // NOT make the shared PluginSlot instances exclusive, and prepare() reinitializes
+    // those same instances (n.plugin->prepare) and builds a new lane over them. A
+    // pump concurrent with prepare() would be a data race on the plugin state. This
+    // mirrors the existing "no process() concurrent with prepare()" contract.
+    active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
+    int rendered = 0;
+    if (auto* cg = live_raw_.load(std::memory_order_seq_cst)) {
+        if (cg->anticipation_valid && max_blocks > 0) {
+            rendered = cg->anticipation_lane.render_ahead(max_blocks);
+        }
+    }
+    active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
+    anticipation_pump_busy_.store(false, std::memory_order_release);
+    return rendered;
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
@@ -1658,6 +1761,59 @@ void SignalGraph::process(audio::BufferView<float>& output,
             // (a node failed, or it does not fit) can fall through to the serial
             // executor and then the legacy walk re-rendering the same block with
             // no double-consumed MIDI and no doubled output.
+            // Anticipative rendering (tried first): the lane has pre-rendered the
+            // interior off the audio thread. Consume one block, fill the interior
+            // boundary-source output slots with it (or zero them on an underrun /
+            // block-size mismatch — NEVER re-run the interior, whose plugin state
+            // the producer owns), then run the routed walk with the interior masked
+            // so only the exterior runs live. Uses the serial routed snapshot.
+            if (anticipation_enabled_.load(std::memory_order_relaxed) &&
+                cg->anticipation_valid &&
+                cg->anticipation_lane.output_channels() ==
+                    cg->anticipation_prefill.size() &&
+                cg->exec_pool.fits(cg->routing_snapshot, frames32)) {
+                const bool size_ok =
+                    frames32 == static_cast<std::uint32_t>(
+                                    cg->anticipation_lane.block_frames());
+                bool hit = false;
+                if (size_ok) {
+                    pulp::audio::BufferView<float> cap(
+                        cg->anticipation_consume_ptrs.data(),
+                        cg->anticipation_consume_ptrs.size(), frames32);
+                    hit = cg->anticipation_lane.consume(cap);
+                }
+                for (const auto& pf : cg->anticipation_prefill) {
+                    float* dst = cg->exec_pool.slot_data(pf.slot);
+                    if (dst == nullptr) continue;
+                    if (hit) {
+                        std::copy_n(cg->anticipation_consume_ptrs[pf.out_channel],
+                                    num_samples, dst);
+                    } else {
+                        std::fill_n(dst, num_samples, 0.0f);
+                    }
+                }
+                // Once entered, this branch is TERMINAL: consume() has already
+                // advanced the ring (the producer owns the interior's plugin
+                // state), so we must NOT fall through to a path that re-runs the
+                // interior live — that would double-advance it. A routed failure
+                // (a rare exterior node error) yields a silent block here, not a
+                // fallback re-render.
+                const bool ok = dispatch_routed([&] {
+                    return executor_.process_routed(
+                        block, cg->routing_snapshot, cg->exec_pool,
+                        has_midi ? &cg->routing_midi : nullptr,
+                        has_automation ? &cg->routing_automation : nullptr, {}, {}, {},
+                        {}, cg->anticipation_skip_mask);
+                });
+                if (!ok) {
+                    for (std::size_t c = 0; c < output.num_channels(); ++c) {
+                        std::memset(output.channel_ptr(c), 0,
+                                    sizeof(float) * static_cast<std::size_t>(num_samples));
+                    }
+                }
+                return;
+            }
+
             if (parallel_routing_enabled_.load(std::memory_order_relaxed) &&
                 cg->routing_parallel_valid && worker_pool_.running() &&
                 cg->exec_pool_parallel.fits(cg->routing_snapshot_parallel, frames32)) {
