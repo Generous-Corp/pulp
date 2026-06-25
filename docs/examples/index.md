@@ -1,6 +1,9 @@
 # Examples
 
-Pulp ships with eight plugin examples plus standalone apps (GPU demo, UI preview, web demos) that validate different capabilities of the framework. Each example is self-contained under `examples/` and builds as part of the standard CMake build.
+This page is the curated gallery for the documented core examples. The broader
+`examples/` tree also contains subsystem demos and platform-specific proof
+projects such as Bendr, PulpTempoSampler, MPE, WebView, Three.js, SDF, Stream,
+Plugin Host, Audio Inspector, and iOS AUv3 examples.
 
 ## Gallery
 
@@ -36,7 +39,8 @@ These examples explore features that are not yet stable across all platforms.
 
 ## Building Examples
 
-All examples build as part of the standard CMake build:
+The CMake-backed gallery examples build as part of the standard CMake build
+when their platform and option gates are satisfied:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
