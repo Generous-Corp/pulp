@@ -126,10 +126,14 @@ bool node_eligible(const GraphNode& node) noexcept {
 }
 
 bool connection_eligible(const Connection& c) noexcept {
-    // Plain audio only; feedback is fine (the executor handles one-block
-    // feedback). MIDI / automation / audio-rate-mod / sidechain keep the
-    // legacy walk.
-    return !c.midi && !c.automation && !c.audio_rate_modulation && !c.sidechain;
+    // Audio edges only. Feedback is fine (the executor handles one-block
+    // feedback). Sidechain is fine: SignalGraph routes a sidechain edge as a
+    // plain audio edge into a higher input port of the destination plugin (the
+    // plugin's input_ports count already includes its sidechain ports, and the
+    // single concatenated input bus carries them), and it participates in PDC
+    // exactly like any audio edge — all of which the routed gather reproduces.
+    // MIDI / automation / audio-rate-mod still keep the legacy walk.
+    return !c.midi && !c.automation && !c.audio_rate_modulation;
 }
 
 } // namespace
