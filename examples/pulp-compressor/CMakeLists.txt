@@ -9,7 +9,7 @@ if(PULP_BUILD_TESTS)
     catch_discover_tests(pulp-compressor-test)
 endif()
 
-# Plugin (all formats except standalone — no standalone sidechain routing)
+# Plugin (VST3, AU v2, CLAP; no standalone sidechain routing)
 pulp_add_plugin(PulpCompressor
     FORMATS         VST3 AU CLAP
     PLUGIN_NAME     "PulpCompressor"

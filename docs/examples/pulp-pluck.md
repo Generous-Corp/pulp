@@ -3,7 +3,7 @@
 Karplus-Strong plucked string synthesizer.
 
 ## Formats
-VST3, AU, CLAP
+VST3, AU v2, CLAP
 
 ## Features
 - Physical modeling synthesis via Karplus-Strong algorithm

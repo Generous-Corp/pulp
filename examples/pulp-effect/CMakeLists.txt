@@ -9,7 +9,7 @@ if(PULP_BUILD_TESTS)
     catch_discover_tests(pulp-effect-test)
 endif()
 
-# Plugin (all formats)
+# Plugin (VST3, AU v2, CLAP)
 pulp_add_plugin(PulpEffect
     FORMATS         VST3 AU CLAP
     PLUGIN_NAME     "PulpEffect"
