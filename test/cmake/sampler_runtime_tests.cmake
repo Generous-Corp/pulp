@@ -87,6 +87,19 @@ pulp_add_test_suite(pulp-test-anticipation-partition
 pulp_add_test_suite(pulp-test-anticipation-subgraph
     SOURCES test_anticipation_subgraph.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Render-path proof: the extracted sub-graph, driven through the real executor,
+# reproduces the full graph's boundary signals with each captured port on its own
+# output channel (the guard the structural extraction tests cannot give).
+pulp_add_test_suite(pulp-test-anticipation-subgraph-render
+    SOURCES test_anticipation_subgraph_render.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# Render-ahead lane: pre-render the eligible sub-graph into a ring off the audio
+# thread and consume pre-rendered blocks on it — consumed output matches a
+# synchronous render, underruns cleanly, allocates nothing on consume, and the
+# producer/consumer pair is race-free.
+pulp_add_test_suite(pulp-test-anticipation-lane
+    SOURCES test_anticipation_lane.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

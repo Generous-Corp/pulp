@@ -22,6 +22,7 @@ target_sources(pulp-host PRIVATE
     src/anticipation_eligibility.cpp
     src/anticipation_partition.cpp
     src/anticipation_subgraph.cpp
+    src/anticipation_lane.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::runtime pulp::state)
