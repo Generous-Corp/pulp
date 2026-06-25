@@ -39,13 +39,13 @@ bool gain_binding(fmt::ProcessBlock&,
 
 // Plugin binding: invoke the node's PluginSlot exactly as SignalGraph's Plugin
 // node does — a single Main input/output bus built over the node's gathered
-// inputs and assigned outputs, with empty MIDI-in and an empty parameter-event
-// queue (the eligible subset has no MIDI / automation / sidechain edges), and a
-// scratch MIDI-out that is cleared and discarded. The node's output slots are
-// pinned persistent (see build_executor_snapshot), so a plugin that does not
-// fully overwrite its output carries the same stale tail across blocks that
-// SignalGraph's persistent per-node buffer does. The ProcessBuffers and bus
-// views are stack-built each call (string_view names, no allocation), matching
+// inputs and assigned outputs, with MIDI and parameter-event buffers supplied by
+// the routed executor when the graph carries those edges (or the binding's
+// fallback scratch for audio-only graphs). The node's output slots are pinned
+// persistent (see build_executor_snapshot), so a plugin that does not fully
+// overwrite its output carries the same stale tail across blocks that
+// SignalGraph's persistent per-node buffer does. The ProcessBuffers and bus views
+// are stack-built each call (string_view names, no allocation), matching
 // SignalGraph; both paths reach the slot through PluginSlot::process's default
 // main-in/main-out projection, so the audio output is bit-identical.
 bool plugin_binding(fmt::ProcessBlock&,
@@ -95,9 +95,10 @@ bool plugin_binding(fmt::ProcessBlock&,
     // Use the executor's per-node MIDI buffers when the routed call supplies
     // them (a MIDI graph): node_midi_in carries the events gathered from this
     // plugin's inbound MIDI edges, and node_midi_out is the buffer downstream
-    // nodes gather from. Fall back to the empty shared scratch for audio-only
-    // graphs (no MIDI routing). Clear the output fully before the plugin fills
-    // it, matching SignalGraph's per-node clear.
+    // nodes gather from. Fall back to the binding scratch for audio-only graphs
+    // (shared on serial snapshots, per-plugin on parallel snapshots). Clear the
+    // output fully before the plugin fills it, matching SignalGraph's per-node
+    // clear.
     midi::MidiBuffer& midi_in =
         ctx.node_midi_in != nullptr ? *ctx.node_midi_in : pctx->scratch->midi_in;
     midi::MidiBuffer& midi_out =
@@ -106,7 +107,7 @@ bool plugin_binding(fmt::ProcessBlock&,
     midi_out.clear_sysex();
     if (auto* ump = midi_out.ump()) ump->clear();
     // Use the executor's per-node parameter-automation events when supplied (an
-    // automation graph); the empty shared scratch queue otherwise.
+    // automation graph); the binding fallback queue otherwise.
     state::ParameterEventQueue& param_events =
         ctx.node_param_events != nullptr ? *ctx.node_param_events
                                          : pctx->scratch->param_events;
@@ -318,8 +319,10 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
 
     // Bindings in plan.nodes order (build_graph_runtime_plan preserves spec
     // order). AudioInput/AudioOutput are executor-handled (null binding); Gain
-    // binds its live atomic; Plugin binds a context referencing its live slot
-    // and the shared scratch.
+    // binds its live atomic; Plugin binds a context referencing its live slot and
+    // fallback scratch. Serial snapshots reuse the shared scratch; parallel
+    // snapshots need per-plugin fallback scratch because same-level Plugin nodes
+    // may run concurrently and PluginSlot::process mutates MIDI output.
     std::vector<fmt::GraphRuntimeNodeBinding> bindings;
     bindings.reserve(plan.plan.nodes.size());
     for (const auto& pnode : plan.plan.nodes) {
@@ -341,7 +344,19 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             // Eligibility required a live slot; a missing one here means the
             // resolver and the topology disagree — fail closed to the walk.
             if (slot == nullptr) return false;
-            plugin_ctx.push_back(PluginBindingContext{slot, &scratch});
+            PluginBindingContext ctx;
+            ctx.slot = slot;
+            if (parallel_safe) {
+                try {
+                    ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();
+                } catch (...) {
+                    return false;
+                }
+                ctx.scratch = ctx.owned_scratch.get();
+            } else {
+                ctx.scratch = &scratch;
+            }
+            plugin_ctx.push_back(std::move(ctx));
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, plugin_binding, &plugin_ctx.back(), /*required=*/true});
         } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null

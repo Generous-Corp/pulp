@@ -213,8 +213,8 @@ predictable output, no MIDI.
   anticipate" — host-clock-sensitive plugins (output depends on the transport
   playhead) are NOT statically detectable from node metadata and are intentionally
   not covered; a renderer consuming this must layer a host-time check or a per-node
-  opt-out on top. There is no anticipative renderer yet — this is the analysis the
-  Phase 6 renderer will gate on.
+  opt-out on top. The `SignalGraph` anticipative splice now gates on this
+  analysis when `set_anticipation_enabled(true)` is prepared.
 - **Anticipation partition (`anticipation_partition.{hpp,cpp}`).**
   `build_anticipation_partition(nodes, connections, eligibility)` carves the
   renderable eligible INTERIOR (eligible nodes minus the live AudioOutput/MidiOutput
