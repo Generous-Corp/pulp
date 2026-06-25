@@ -116,6 +116,12 @@ bool StandaloneApp::start() {
     config_.supports_audio_input = config_.supports_audio_input && processor_has_audio_input;
     if (!config_.supports_audio_input) {
         config_.input_channels = 0;
+        // An instrument has no input bus to inject the test tone into, so the
+        // audio-settings test signal must go straight to the OUTPUT — otherwise it
+        // feeds a non-existent input and the user sees the meter LED but hears
+        // nothing. (Effects keep the default input-injection so the tone is
+        // processed by the effect.)
+        config_.route_test_signal_to_output = true;
     }
     constrain_audio_config(config_);
 

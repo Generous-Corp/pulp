@@ -125,6 +125,13 @@ void CoreAudioDevice::query_callback_workgroup() {
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
     config_ = config;
+    // No explicit device requested AND output-only => use the system DefaultOutput
+    // unit, which AUTO-FOLLOWS the system default device (and sample-rate-converts).
+    // This is what makes switching to AirPods / headphones mid-session keep playing.
+    // A pinned device, or any input-capable config, uses HALOutput instead
+    // (DefaultOutput has no input bus).
+    const bool follow_default =
+        (device_id_ == kAudioObjectUnknown) && config_.input_channels == 0;
     if (device_id_ == kAudioObjectUnknown) {
         device_id_ = CoreAudioSystem::get_default_device(false);
         if (device_id_ == kAudioObjectUnknown) {
@@ -133,10 +140,12 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         }
     }
 
-    // Create output audio unit (AUHAL)
+    // Create output audio unit (HALOutput, or DefaultOutput when following the
+    // system default so a device switch is handled by the unit itself).
     AudioComponentDescription desc{};
     desc.componentType = kAudioUnitType_Output;
-    desc.componentSubType = kAudioUnitSubType_HALOutput;
+    desc.componentSubType =
+        follow_default ? kAudioUnitSubType_DefaultOutput : kAudioUnitSubType_HALOutput;
     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 
     auto component = AudioComponentFindNext(nullptr, &desc);
@@ -157,7 +166,10 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     // interface-routed outputs). In that case fall back to DefaultOutput before
     // treating startup as fatal. Input-capable configs stay on AUHAL because
     // DefaultOutput has no input bus.
-    status = AudioUnitSetProperty(audio_unit_,
+    // DefaultOutput follows the system default automatically — only HALOutput needs
+    // (and accepts) an explicit CurrentDevice binding. Skipping the bind here is what
+    // lets a follow_default unit move to a newly-selected output device live.
+    status = follow_default ? noErr : AudioUnitSetProperty(audio_unit_,
         kAudioOutputUnitProperty_CurrentDevice,
         kAudioUnitScope_Global, 0,
         &device_id_, sizeof(device_id_));

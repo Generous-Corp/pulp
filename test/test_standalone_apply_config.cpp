@@ -72,3 +72,44 @@ TEST_CASE("StandaloneApp::apply_config preserves the processor instance",
 
     app.stop();
 }
+
+// M1 feedback: an instrument's audio-settings test tone showed the meter LED but
+// was silent — route_test_signal_to_output defaulted false, so the tone was
+// injected as INPUT (which an instrument ignores) instead of going to the output.
+// start() now flips it on for input-less processors.
+namespace {
+// A true instrument: no audio input bus (output-only), like PulpTempoSampler.
+// (The default PluginDescriptor has a stereo input bus, i.e. an effect.)
+class InstrumentProc : public ApplyConfigProc {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "InstrumentProc";
+        d.manufacturer = "Pulp";
+        d.input_buses = {};                       // instrument: no audio input
+        d.output_buses = {{"Audio Out", 2, false}};
+        return d;
+    }
+};
+std::unique_ptr<Processor> make_instrument_proc() { return std::make_unique<InstrumentProc>(); }
+}  // namespace
+
+TEST_CASE("StandaloneApp routes the test tone to output for an instrument",
+          "[format][standalone][issue-audio-test-tone]") {
+    StandaloneApp app(&make_instrument_proc);  // output-only instrument
+    StandaloneConfig cfg;
+    cfg.headless = true;
+    cfg.output_channels = 2;
+    cfg.buffer_size = 256;
+    REQUIRE(cfg.route_test_signal_to_output == false);  // the default for effects
+    app.set_config(cfg);
+
+    if (!app.start()) {
+        SUCCEED("no audio device available — instrument routing check skipped");
+        return;
+    }
+    // Instrument => no input bus to inject the tone into => it must route to output.
+    CHECK(app.config().route_test_signal_to_output == true);
+    CHECK(app.config().input_channels == 0);
+    app.stop();
+}
