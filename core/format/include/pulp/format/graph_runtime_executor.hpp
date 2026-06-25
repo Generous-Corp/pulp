@@ -345,19 +345,22 @@ public:
     // routed, since the gather would otherwise silently drop the overflow.
     static constexpr std::uint32_t kMaxParamsPerNode = 64;
 
-    // Off-RT: allocate `node_count` event queues and `connection_count` slew
-    // states (zero-initialized, un-primed). Returns false on allocation failure.
-    bool reset(std::uint32_t node_count, std::uint32_t connection_count);
+    // Off-RT: allocate per-node event queues + per-connection slew state, and —
+    // for each node — a max_frames accumulation buffer per distinct DENSE
+    // (audio-rate) automation parameter it receives (precomputed from the plan in
+    // first-seen connection order). Returns false on allocation failure.
+    bool reset(const graph::GraphRuntimePlan& plan, std::uint32_t max_frames);
     void clear() noexcept;
 
     std::uint32_t node_count() const noexcept { return node_count_; }
     std::uint32_t connection_count() const noexcept { return connection_count_; }
+    std::uint32_t max_frames() const noexcept { return max_frames_; }
 
     state::ParameterEventQueue* events(std::uint32_t node_index) noexcept {
         return node_index < node_count_ ? events_[node_index].get() : nullptr;
     }
-    // Persisted per-connection slew state (RT-mutable). last() is the previous
-    // block's post-slew value; primed() guards the first-block snap.
+    // Persisted per-connection slew state (RT-mutable, sparse). last() is the
+    // previous block's post-slew value; primed() guards the first-block snap.
     float& slew_last(std::uint32_t conn_index) noexcept { return slew_last_[conn_index]; }
     bool slew_primed(std::uint32_t conn_index) const noexcept {
         return slew_primed_[conn_index] != 0;
@@ -366,18 +369,42 @@ public:
         slew_primed_[conn_index] = v ? 1 : 0;
     }
 
-    bool fits(std::uint32_t node_count, std::uint32_t connection_count) const noexcept {
-        return node_count_ >= node_count && connection_count_ >= connection_count;
+    // Per-node DENSE (audio-rate) parameter accumulation buffers. A node receives
+    // `dense_param_count(n)` distinct audio-rate parameters; dense_param_id(n,i)
+    // is the i-th and dense_buffer(n,i) its max_frames accumulation region.
+    std::uint32_t dense_param_count(std::uint32_t node_index) const noexcept {
+        return node_index < node_count_ ? node_dense_count_[node_index] : 0;
+    }
+    std::uint32_t dense_param_id(std::uint32_t node_index, std::uint32_t i) const noexcept {
+        return dense_params_[node_dense_first_[node_index] + i].param_id;
+    }
+    float* dense_buffer(std::uint32_t node_index, std::uint32_t i) noexcept {
+        return dense_storage_.data() + dense_params_[node_dense_first_[node_index] + i].offset;
+    }
+
+    bool fits(std::uint32_t node_count, std::uint32_t connection_count,
+              std::uint32_t frames) const noexcept {
+        return node_count_ >= node_count && connection_count_ >= connection_count &&
+               frames <= max_frames_;
     }
 
 private:
+    struct DenseParam {
+        std::uint32_t param_id = 0;
+        std::uint32_t offset = 0;  // into dense_storage_ (floats)
+    };
     // ParameterEventQueue is large and non-copyable; hold it via unique_ptr so a
     // reallocating vector never needs to move/copy it.
     std::vector<std::unique_ptr<state::ParameterEventQueue>> events_;  // per node
     std::vector<float> slew_last_;                    // per connection
     std::vector<std::uint8_t> slew_primed_;           // per connection
+    std::vector<DenseParam> dense_params_;            // flattened per-node
+    std::vector<std::uint32_t> node_dense_first_;     // per node: index into dense_params_
+    std::vector<std::uint32_t> node_dense_count_;     // per node
+    std::vector<float> dense_storage_;                // total dense params × max_frames
     std::uint32_t node_count_ = 0;
     std::uint32_t connection_count_ = 0;
+    std::uint32_t max_frames_ = 0;
 };
 
 class GraphRuntimeExecutor {
