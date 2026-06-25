@@ -86,12 +86,12 @@ Features:
 **Path**: `examples/PulpSampler/`
 **Type**: Instrument
 **Formats**: CLAP
-**Purpose**: An audio-file sampler with MIDI triggering, ADSR envelope, and
-pitch control. Validates sample loading, multi-voice playback, and sampler
-state round-trips.
+**Purpose**: A sample-buffer sampler with MIDI triggering, ADSR envelope, and
+pitch control. Validates off-thread mono/stereo sample publication,
+multi-voice playback, and parameter state round-trips.
 
 Features:
-- Audio file sample loading
+- Off-thread mono/stereo sample-buffer loading
 - MIDI note triggering with velocity
 - ADSR envelope and pitch control
 - Multi-voice polyphony

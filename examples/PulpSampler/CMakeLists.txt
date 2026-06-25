@@ -1,4 +1,4 @@
-# PulpSampler — audio file sampler with MIDI triggering and ADSR
+# PulpSampler — sample-buffer sampler with MIDI triggering and ADSR
 # CLAP only for now (like PulpSynth/PulpDrums)
 
 if(PULP_HAS_CLAP)

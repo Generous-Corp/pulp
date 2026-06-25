@@ -53,7 +53,7 @@ add_subdirectory(PulpSynth)
 # MPE demo: MPE-aware sine synth validating the per-note expression path
 add_subdirectory(mpe-synth)
 
-# PulpSampler: audio file sampler with MIDI + ADSR
+# PulpSampler: sample-buffer sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)
 
 # OfflineStretch dev harness: stretchcli (file in -> render -> file out, --analyze)

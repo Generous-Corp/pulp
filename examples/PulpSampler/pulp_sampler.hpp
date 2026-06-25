@@ -1,8 +1,8 @@
 #pragma once
 
-/// PulpSampler — audio file sampler with MIDI triggering and ADSR envelope.
-/// Demonstrates: sample-slot publication, primitive loop rendering, ADSR,
-/// pitch shifting, waveform editor integration, PresetManager.
+/// PulpSampler — sample-buffer sampler with MIDI triggering and ADSR envelope.
+/// Demonstrates: controller-thread sample-slot publication, primitive loop
+/// rendering, ADSR, pitch shifting, and processor parameter serialization.
 
 #include "sampler_components.hpp"
 
