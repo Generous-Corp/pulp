@@ -10,6 +10,7 @@
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
 #include <atomic>
+#include <thread>
 #include <cstdint>
 #include <numeric>
 #include <vector>
@@ -145,4 +146,62 @@ TEST_CASE("WorkerPool stop is idempotent",
     pool.stop();
     pool.stop();  // second stop is a no-op, not a crash
     CHECK_FALSE(pool.running());
+}
+
+TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-free",
+          "[format][graph][worker-pool][threads][rt-safety]") {
+    // The SignalGraph parallel path starts the pool off the control thread (during
+    // prepare) but drives run() from the audio thread. Exercise that exact split:
+    // start here, then run() repeatedly from a separate thread while this thread
+    // re-validates the pool. Surfaces a first-batch publish race under TSan.
+    GraphRuntimeWorkerPool pool;
+    REQUIRE(pool.start(8));
+    constexpr std::uint32_t kTasks = 500;
+    SquareCtx ctx;
+    ctx.out.assign(kTasks, 0);
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint64_t> batches{0};
+    std::thread driver([&] {
+        while (!stop.load(std::memory_order_relaxed)) {
+            ctx.runs.store(0, std::memory_order_relaxed);
+            pool.run(kTasks, square_task, &ctx);
+            batches.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    for (int i = 0; i < 100; ++i) {
+        (void)pool.running();
+        (void)pool.worker_count();
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_relaxed);
+    driver.join();
+    CHECK(batches.load() > 0);
+    for (std::uint32_t i = 0; i < kTasks; ++i) CHECK(ctx.out[i] == i * i);
+}
+
+TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race-free",
+          "[format][graph][worker-pool][threads][rt-safety]") {
+    // process_parallel fires several run() calls in quick succession (one per
+    // level) within a single audio block; mimic that exactly: start on this
+    // thread, then a driver fires 3 tiny back-to-back batches per "block", many
+    // times. width(8) < workers(16) leaves participant 0 + even workers with
+    // empty ranges, matching the wide-level partition.
+    GraphRuntimeWorkerPool pool;
+    REQUIRE(pool.start(16));
+    SquareCtx ctx;
+    ctx.out.assign(8, 0);
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint64_t> blocks{0};
+    std::thread driver([&] {
+        while (!stop.load(std::memory_order_relaxed)) {
+            pool.run(8, square_task, &ctx);
+            pool.run(8, square_task, &ctx);
+            pool.run(8, square_task, &ctx);
+            blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    for (int i = 0; i < 200; ++i) std::this_thread::yield();
+    stop.store(true, std::memory_order_relaxed);
+    driver.join();
+    CHECK(blocks.load() > 0);
 }

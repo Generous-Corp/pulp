@@ -446,6 +446,22 @@ public:
         return canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     }
 
+    // Opt into the LEVELIZED PARALLEL executor for eligible graphs (default OFF,
+    // independent of the serial executor opt-in). Enable BEFORE prepare(): the
+    // parallel-safe routing snapshot + levelization are built at compile time and
+    // the worker pool is started there, so flipping this on after prepare() has
+    // no effect until the next prepare(). When enabled + eligible + the pool is
+    // running + the parallel pool fits the block, process() routes through
+    // GraphRuntimeExecutor::process_parallel; otherwise it falls back to the
+    // serial executor (if its opt-in is set) and then the legacy walk. Output is
+    // bit-identical across all three paths.
+    void set_parallel_routing_enabled(bool enabled) noexcept {
+        parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
+    }
+    bool parallel_routing_enabled() const noexcept {
+        return parallel_routing_enabled_.load(std::memory_order_relaxed);
+    }
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
@@ -697,6 +713,20 @@ private:
         // sparse automation, owned per-snapshot like exec_pool. Empty (node_count
         // 0) for graphs with no sparse automation.
         format::GraphRuntimeAutomationScratch routing_automation;
+
+        // Levelized PARALLEL routing for this snapshot (built only when parallel
+        // routing is enabled at compile time). Same plan as routing_snapshot but
+        // with a reuse-free buffer assignment (parallel_safe) so concurrent
+        // same-level nodes never alias a slot, plus its own (larger) scratch pool
+        // and the static level schedule. The MIDI/automation scratch and the
+        // MidiInput/Output node lists above are SHARED (identical plan; only ONE
+        // path runs per block). routing_plugin_ctx_parallel holds the parallel
+        // snapshot's Plugin bindings' stable user_data.
+        format::GraphRuntimeSnapshot routing_snapshot_parallel;
+        format::GraphRuntimeBufferPool exec_pool_parallel;
+        graph::GraphRuntimeLevelization routing_levelization;
+        std::vector<PluginBindingContext> routing_plugin_ctx_parallel;
+        bool routing_parallel_valid = false;
     };
 
     std::vector<GraphNode> nodes_;
@@ -721,6 +751,13 @@ private:
     // so it rides the existing RCU lifetime and is never resized under a reader.
     std::atomic<bool> canonical_executor_routing_enabled_{false};
     format::GraphRuntimeExecutor executor_;
+    // Levelized parallel routing opt-in + its persistent worker pool. The pool is
+    // a long-lived SignalGraph member (NOT per-RCU-snapshot): started off-RT in
+    // compile_() when parallel routing is enabled, joined in the destructor. The
+    // parallel-safe snapshot + levelization + scratch pool ride the CompiledGraph
+    // (see CompiledGraph::routing_*_parallel).
+    std::atomic<bool> parallel_routing_enabled_{false};
+    format::GraphRuntimeWorkerPool worker_pool_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};

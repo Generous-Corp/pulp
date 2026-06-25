@@ -82,8 +82,15 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
            "GraphRuntimeWorkerPool::run() is not re-entrant and must not run concurrently");
 
     // Publish the batch, then release it to the parked workers via the epoch.
-    // completed_ is monotonic: this batch is done when it reaches base + count.
-    const std::uint64_t target = completed_base_ + task_count;
+    // completed_ counts PARTICIPANTS finished (not tasks): every participant —
+    // including one handed an empty range — bumps it by 1 after it has read the
+    // published batch (task_count_/fn_/context_) in run_range. Waiting for all
+    // worker_count_ participants therefore guarantees no straggler is still
+    // reading those members when the next batch overwrites them. (Counting tasks
+    // instead lets an empty-range worker's +0 go un-awaited, so it could still be
+    // reading task_count_ as the next run() writes it — a data race.) completed_
+    // is monotonic across batches; this one is done at base + worker_count_.
+    const std::uint64_t target = completed_base_ + worker_count_;
     fn_ = fn;
     context_ = context;
     task_count_ = task_count;
@@ -92,7 +99,7 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     // The caller is participant 0.
     run_range(0);
 
-    // Spin until every participant has added its range (all task writes are then
+    // Spin until every participant has registered done (all task writes are then
     // visible via the completed_ acquire/release barrier).
     // `< target` (not `!=`): completed_ reaches target exactly, but a `<` guard
     // can never deadlock the spin if the count ever overshoots.
@@ -118,7 +125,10 @@ void GraphRuntimeWorkerPool::run_range(std::uint32_t worker_index) noexcept {
     for (std::uint32_t i = r.begin; i < r.end; ++i) {
         fn_(context_, i);
     }
-    completed_.fetch_add(r.end - r.begin, std::memory_order_acq_rel);
+    // +1 per participant (see run()): the barrier counts participants finished,
+    // so even an empty range must register that this worker is done reading the
+    // published batch and writing its tasks.
+    completed_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {

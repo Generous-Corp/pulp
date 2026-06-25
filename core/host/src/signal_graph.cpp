@@ -1212,6 +1212,67 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                     plan, static_cast<std::uint32_t>(max_block_size));
             }
         }
+
+        // Levelized parallel routing: when enabled (at this prepare), build a
+        // PARALLEL-SAFE (reuse-free) snapshot of the same eligible graph + its
+        // levelization + a dedicated scratch pool, and ensure the persistent
+        // worker pool is running. The MIDI/automation scratch and MidiInput/Output
+        // node lists are SHARED with the serial path (identical plan). On any
+        // failure the parallel path stays invalid and process() falls back.
+        cg->routing_parallel_valid = false;
+        if (cg->routing_valid && parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+            max_block_size > 0) {
+            CompiledGraph& cgr = *cg;
+            bool ok = build_executor_snapshot(
+                nodes_, connections_,
+                [&cgr](NodeId id) -> std::atomic<float>* {
+                    auto it = cgr.runtime.find(id);
+                    return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
+                },
+                [&cgr](NodeId id) -> PluginSlot* {
+                    auto it = cgr.plugins.find(id);
+                    return it == cgr.plugins.end() ? nullptr : it->second.get();
+                },
+                cg->routing_plugin_ctx_parallel, cg->routing_plugin_scratch,
+                cg->routing_snapshot_parallel, /*parallel_safe=*/true);
+            if (ok) {
+                cg->routing_levelization = graph::build_graph_runtime_levelization(
+                    cg->routing_snapshot_parallel.plan());
+                ok = cg->routing_levelization.ok &&
+                     cg->exec_pool_parallel.reset(
+                         cg->routing_snapshot_parallel.buffer_slot_count(),
+                         static_cast<std::uint32_t>(max_block_size),
+                         cg->routing_snapshot_parallel.buffer_assignment()
+                             .connection_delay_samples);
+            }
+            if (ok) {
+                // Start the persistent worker pool off the audio thread, ONCE.
+                // Hardware concurrency capped to a sane bound; participant 0 is
+                // the audio thread, so the pool spawns worker_count - 1 threads.
+                //
+                // INVARIANT (load-bearing for audio-thread safety): the pool size
+                // is fixed for the SignalGraph's lifetime and the pool is never
+                // stopped/resized on a re-prepare. start()/stop() join worker
+                // threads and reset epoch_/completed_/worker_count_; running them
+                // concurrently with an in-flight process_parallel -> run() on the
+                // audio thread would be a use-after-free. The only legal stop is
+                // ~GraphRuntimeWorkerPool during ~SignalGraph, after the audio
+                // thread has (by contract) stopped calling process(). So: start
+                // only when not yet started (worker_count() == 0 — also retries a
+                // previously failed start, safe because routing_parallel_valid was
+                // false so process() never entered the parallel branch). A re-
+                // prepare just re-checks running(); it must not restart the pool.
+                if (worker_pool_.worker_count() == 0) {
+                    const unsigned hw = std::thread::hardware_concurrency();
+                    const std::uint32_t workers =
+                        std::clamp<std::uint32_t>(hw == 0 ? 2 : hw, 2, 16);
+                    ok = worker_pool_.start(workers);
+                } else {
+                    ok = worker_pool_.running();
+                }
+            }
+            cg->routing_parallel_valid = ok;
+        }
     }
     return cg;
 }
@@ -1512,62 +1573,59 @@ void SignalGraph::process(audio::BufferView<float>& output,
         return;
     }
 
-    // Canonical-executor path (opt-in): for an eligible snapshot, route the
-    // block through GraphRuntimeExecutor instead of the legacy walk. The
-    // executor zeroes the output bus and accumulates AudioOutput itself, so this
-    // returns before the legacy zero+walk below. The dispatch stays inside the
-    // ProcessReadGuard, so `cg` (and its routing snapshot + gain atomics) is
-    // pinned for the whole routed call.
-    if (canonical_executor_routing_enabled_.load(std::memory_order_relaxed) &&
-        cg->routing_valid &&
-        cg->exec_pool.fits(cg->routing_snapshot, static_cast<std::uint32_t>(num_samples))) {
+    // Routed dispatch (opt-in): try the levelized PARALLEL executor first (if
+    // enabled), then the SERIAL executor, then fall through to the legacy walk.
+    // Both routed paths run GraphRuntimeExecutor (which zeroes the output bus and
+    // accumulates AudioOutput itself, so a successful routed call returns before
+    // the legacy zero+walk below) and SHARE the MIDI mailbox bridge (the MIDI
+    // scratch + MidiInput/Output node lists are shared — identical plan). The
+    // dispatch stays inside the ProcessReadGuard, so `cg` (snapshots, pools, gain
+    // atomics) is pinned for the whole call. Output is bit-identical across paths.
+    {
+        const auto frames32 = static_cast<std::uint32_t>(num_samples);
+        const bool has_midi = cg->routing_midi.node_count() > 0;
+        const bool has_automation = cg->routing_automation.node_count() > 0;
+
         pulp::format::BusBufferSet buses;
-        if (buses.add_input("main", input, pulp::format::BusRole::Main) &&
-            buses.add_output("main", output, pulp::format::BusRole::Main)) {
+        const bool buses_ok =
+            buses.add_input("main", input, pulp::format::BusRole::Main) &&
+            buses.add_output("main", output, pulp::format::BusRole::Main);
+        if (buses_ok) {
             pulp::format::ProcessBlock block;
             block.sample_rate = cg->sample_rate;
-            block.frame_count = static_cast<std::uint32_t>(num_samples);
+            block.frame_count = frames32;
             block.buses = &buses;
 
-            const bool has_midi = cg->routing_midi.node_count() > 0;
-            // Bridge MIDI ingress: copy each MidiInput node's freshly-injected
-            // mailbox snapshot into its routed MIDI-output buffer (the same
-            // unseen-sequence dedup the legacy walk applies), so the executor's
-            // MIDI gather sees it. The executor never touches a node's MIDI
-            // output, so this pre-fill survives the walk. The consumed sequence
-            // is captured in `pending_seq` and committed to
-            // midi_input_sequence_seen only after the dispatch succeeds — a
-            // fallback to the legacy walk must re-consume the same block.
-            if (has_midi) {
-                for (auto& mi : cg->routing_midi_inputs) {
-                    mi.pending_seq = 0;
-                    midi::MidiBuffer* out_buf = cg->routing_midi.out(mi.plan_index);
-                    if (out_buf == nullptr) continue;
-                    clear_midi_block(*out_buf);
-                    cg->routing_midi.set_out_incomplete(mi.plan_index, false);
-                    auto rt_it = cg->runtime.find(mi.id);
-                    if (rt_it == cg->runtime.end() || !rt_it->second.midi_input_mailbox) {
-                        continue;
-                    }
-                    const auto& injected = rt_it->second.midi_input_mailbox->published.read();
-                    if (injected.sequence != 0 &&
-                        injected.sequence != rt_it->second.midi_input_sequence_seen) {
-                        cg->routing_midi.set_out_incomplete(
-                            mi.plan_index, !injected.copy_to_midi(*out_buf));
-                        mi.pending_seq = injected.sequence;
+            // Run one routed path with the shared MIDI mailbox bridge around it.
+            // `run` returns the executor result; this returns true iff routing
+            // succeeded (took the path). On failure the consumed MIDI sequences
+            // are NOT committed, so a fallback path re-consumes the same block.
+            auto dispatch_routed = [&](auto&& run) -> bool {
+                if (!block.validate()) return false;
+                if (has_midi) {
+                    for (auto& mi : cg->routing_midi_inputs) {
+                        mi.pending_seq = 0;
+                        midi::MidiBuffer* out_buf = cg->routing_midi.out(mi.plan_index);
+                        if (out_buf == nullptr) continue;
+                        clear_midi_block(*out_buf);
+                        cg->routing_midi.set_out_incomplete(mi.plan_index, false);
+                        auto rt_it = cg->runtime.find(mi.id);
+                        if (rt_it == cg->runtime.end() ||
+                            !rt_it->second.midi_input_mailbox) {
+                            continue;
+                        }
+                        const auto& injected =
+                            rt_it->second.midi_input_mailbox->published.read();
+                        if (injected.sequence != 0 &&
+                            injected.sequence != rt_it->second.midi_input_sequence_seen) {
+                            cg->routing_midi.set_out_incomplete(
+                                mi.plan_index, !injected.copy_to_midi(*out_buf));
+                            mi.pending_seq = injected.sequence;
+                        }
                     }
                 }
-            }
-
-            const bool has_automation = cg->routing_automation.node_count() > 0;
-            if (block.validate() &&
-                executor_.process_routed(
-                    block, cg->routing_snapshot, cg->exec_pool,
-                    has_midi ? &cg->routing_midi : nullptr,
-                    has_automation ? &cg->routing_automation : nullptr).ok()) {
+                if (!run().ok()) return false;
                 if (has_midi) {
-                    // Commit the consumed mailbox sequences now that routing
-                    // succeeded.
                     for (const auto& mi : cg->routing_midi_inputs) {
                         if (mi.pending_seq == 0) continue;
                         auto rt_it = cg->runtime.find(mi.id);
@@ -1575,9 +1633,6 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             rt_it->second.midi_input_sequence_seen = mi.pending_seq;
                         }
                     }
-                    // Bridge MIDI egress: publish each MidiOutput node's gathered
-                    // routed MIDI-input buffer to its mailbox for extract_midi(),
-                    // carrying the same incompleteness the legacy walk reports.
                     for (const auto& mo : cg->routing_midi_outputs) {
                         midi::MidiBuffer* in_buf = cg->routing_midi.in(mo.plan_index);
                         auto rt_it = cg->runtime.find(mo.id);
@@ -1590,10 +1645,47 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         rt_it->second.midi_output_mailbox->write(cg->midi_publish_scratch);
                     }
                 }
-                return;
+                return true;
+            };
+
+            // worker_pool_.running() is a plain flag read here; it is safe without
+            // a drain handshake only because running_ is flipped false exactly
+            // once, by ~GraphRuntimeWorkerPool, when no audio-thread reader exists
+            // (see the compile_ start invariant). Each dispatch is idempotent: it
+            // re-clears the MIDI ingress buffers and does not commit consumed
+            // sequences until run() succeeds, and every executor zeroes the output
+            // bus before accumulating — so a parallel attempt that returns false
+            // (a node failed, or it does not fit) can fall through to the serial
+            // executor and then the legacy walk re-rendering the same block with
+            // no double-consumed MIDI and no doubled output.
+            if (parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+                cg->routing_parallel_valid && worker_pool_.running() &&
+                cg->exec_pool_parallel.fits(cg->routing_snapshot_parallel, frames32)) {
+                if (dispatch_routed([&] {
+                        return executor_.process_parallel(
+                            block, cg->routing_snapshot_parallel,
+                            cg->routing_levelization, cg->exec_pool_parallel,
+                            worker_pool_, has_midi ? &cg->routing_midi : nullptr,
+                            has_automation ? &cg->routing_automation : nullptr);
+                    })) {
+                    return;
+                }
+            }
+
+            if (canonical_executor_routing_enabled_.load(std::memory_order_relaxed) &&
+                cg->routing_valid &&
+                cg->exec_pool.fits(cg->routing_snapshot, frames32)) {
+                if (dispatch_routed([&] {
+                        return executor_.process_routed(
+                            block, cg->routing_snapshot, cg->exec_pool,
+                            has_midi ? &cg->routing_midi : nullptr,
+                            has_automation ? &cg->routing_automation : nullptr);
+                    })) {
+                    return;
+                }
             }
         }
-        // Any setup failure falls through to the legacy walk (safe).
+        // Any setup failure / disabled path falls through to the legacy walk.
     }
 
     // Clear the final destination; AudioOutput nodes accumulate into it.

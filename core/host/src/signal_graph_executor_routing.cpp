@@ -209,7 +209,8 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              const std::function<PluginSlot*(NodeId)>& plugin_for,
                              std::vector<PluginBindingContext>& plugin_ctx,
                              PluginRoutingScratch& scratch,
-                             fmt::GraphRuntimeSnapshot& out) {
+                             fmt::GraphRuntimeSnapshot& out,
+                             bool parallel_safe) {
     out.clear();
     plugin_ctx.clear();
     if (!signal_graph_topology_executor_eligible(nodes, connections)) return false;
@@ -353,7 +354,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
         }
     }
 
-    return out.reset(std::move(plan.plan), bindings);
+    return out.reset(std::move(plan.plan), bindings, parallel_safe);
 }
 
 bool build_signal_graph_executor_routing(const SignalGraph& graph,
