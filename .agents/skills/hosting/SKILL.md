@@ -272,7 +272,15 @@ predictable output, no MIDI.
   "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
   detected — safe only because no transport reaches the routed render today.
   (A masked node must not be an `AudioOutput` or a feedback endpoint; the
-  partition guarantees this and `process_routed` debug-asserts it.)
+  partition guarantees this and `process_routed` debug-asserts it.) (4) The lane
+  uses a FIXED block size (the prepared max). A block of a different size — or a
+  ring underrun — silences the interior for that block (the interior is never
+  re-rendered live, so bit-identical-to-canonical holds only for fixed-size,
+  kept-up blocks); and an interior param/gain edit takes effect at render-ahead
+  time, a lead earlier than a live render. The anticipation branch is
+  STRUCTURALLY terminal once `anticipation_valid` — it never falls through to the
+  parallel/legacy paths (which would run the producer-owned interior live), even
+  if the pool can't fit the block (then: silence).
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
