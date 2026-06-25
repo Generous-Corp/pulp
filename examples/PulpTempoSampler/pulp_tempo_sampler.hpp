@@ -25,6 +25,7 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/signal/resampler.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -561,6 +562,7 @@ public:
             const float* src = channels[std::min(c, raw_channels_ - 1)];
             std::copy(src, src + frames, raw_[c].begin());
         }
+        resample_raw_to_host_locked();
         analyze_locked();
         raw_generation_.fetch_add(1, std::memory_order_acq_rel);
         request_render(pending_host_bpm_.load(std::memory_order_relaxed));
@@ -1288,6 +1290,68 @@ private:
             }
         }
         ui_play_slice_.store(-1, std::memory_order_release);  // nothing playing
+    }
+
+    // Resample the just-loaded raw audio from its native rate to the host
+    // sample rate so analysis, stretching, and playback all share one
+    // coordinate system. Without this, a sub-host-rate file (e.g. a 44.1k
+    // sample loaded into a 48k host) plays back ~host/native faster — audibly
+    // higher pitched — because both the OfflineStretch engine and the
+    // PublishedSampleStore are pinned to host_sample_rate_ while the raw data
+    // sits at its file rate. Runs under raw_mutex_, off the audio thread.
+    // Linear-phase: the leading group delay is trimmed so the downbeat stays
+    // put, and the output is length-locked to round(N * out/in).
+    void resample_raw_to_host_locked() {
+        const double in_sr = raw_sr_;
+        const double out_sr = static_cast<double>(host_sample_rate_);
+        if (in_sr <= 0.0 || out_sr <= 0.0) return;
+        if (std::abs(in_sr - out_sr) < 1.0) return;        // already at host rate
+        if (raw_frames_ <= 0 || raw_channels_ < 1) return;
+
+        const std::size_t in_n = static_cast<std::size_t>(raw_frames_);
+        const std::size_t ch = static_cast<std::size_t>(std::min(raw_channels_, 2));
+        signal::Resampler rs;
+        rs.prepare(in_sr, out_sr, ch, in_n);
+
+        const std::size_t tpp = rs.taps_per_phase();
+        const std::size_t gd_in = (tpp > 0) ? (tpp - 1) / 2 : 0;   // input-rate group delay
+        const std::size_t gd_out = static_cast<std::size_t>(
+            std::llround(static_cast<double>(gd_in) * out_sr / in_sr));
+        const long want = std::lround(static_cast<double>(raw_frames_) * out_sr / in_sr);
+        if (want <= 0) return;
+
+        const std::size_t cap = rs.max_output_for(in_n + gd_in) + 8u;
+        std::array<std::vector<float>, 2> out;
+        std::array<float*, 2> outp{};
+        for (int c = 0; c < 2; ++c) { out[c].assign(cap, 0.0f); outp[c] = out[c].data(); }
+
+        // Pass 1: real input.
+        std::array<const float*, 2> inp{raw_[0].data(), raw_[1].data()};
+        const auto r1 = rs.process_block_detailed(inp.data(), in_n, outp.data(), cap);
+        std::size_t produced = r1.output_frames;
+
+        // Pass 2: flush zeros to drain the filter's delayed tail.
+        std::array<std::vector<float>, 2> zeros;
+        std::array<const float*, 2> zp{};
+        for (int c = 0; c < 2; ++c) { zeros[c].assign(gd_in, 0.0f); zp[c] = zeros[c].data(); }
+        std::array<float*, 2> outp2{out[0].data() + produced, out[1].data() + produced};
+        if (gd_in > 0 && produced < cap) {
+            const auto r2 = rs.process_block_detailed(zp.data(), gd_in, outp2.data(), cap - produced);
+            produced += r2.output_frames;
+        }
+
+        // Drop the linear-phase latency, then length-lock to `want` frames
+        // (zero-pad if the flush came up short).
+        const std::size_t start = std::min<std::size_t>(gd_out, produced);
+        const std::size_t avail = produced - start;
+        for (int c = 0; c < 2; ++c) {
+            std::vector<float> trimmed(static_cast<std::size_t>(want), 0.0f);
+            const std::size_t n = std::min<std::size_t>(static_cast<std::size_t>(want), avail);
+            std::copy(out[c].begin() + start, out[c].begin() + start + n, trimmed.begin());
+            raw_[c].swap(trimmed);
+        }
+        raw_frames_ = want;
+        raw_sr_ = out_sr;
     }
 
     // ── Analysis (under raw_mutex_) ──

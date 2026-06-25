@@ -204,6 +204,39 @@ TEST_CASE("a sample longer than the old 60 s cap still publishes (not silent)",
     REQUIRE(f.proc->published_frames() <= static_cast<long>(SamplerSampleStore::kMaxFrames));
 }
 
+// Regression (#112): a sub-host-rate sample (e.g. 44.1k loaded into a 48k host)
+// used to be tagged + played at the host rate WITHOUT resampling, so it played
+// back 48000/44100 = 1.088x faster — audibly ~+0.9 semitone higher. load_loop
+// now resamples to the host rate on load, so the stored sample sits at the host
+// rate with its pitch (cycle count) preserved.
+TEST_CASE("a sub-host-rate sample is resampled to the host rate on load (pitch-locked)",
+          "[tempo-sampler][issue-112]") {
+    Fixture f; // host = 48000
+    // 200 Hz tone, exactly 1 s at 44.1k: 200 cycles -> ~400 zero crossings,
+    // independent of the rate it ends up stored at.
+    auto buf = sine(200.0, 44100.0, 44100);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 44100, 44100.0));
+
+    std::vector<float> mono;
+    float sr = 0.0f;
+    std::vector<long> slices;
+    REQUIRE(f.proc->snapshot_for_view(mono, sr, slices));
+
+    // Stored at the host rate, length-locked to round(N * host/native) = 48000.
+    REQUIRE(sr == 48000.0f);
+    REQUIRE(std::llabs(static_cast<long>(mono.size()) - 48000L) <= 1);
+
+    // Pitch preserved: still ~200 cycles (~400 sign changes) — NOT scaled up to
+    // 200 * 48000/44100 = ~218 Hz (which would read ~436 crossings). Count sign
+    // changes, skipping a few edge samples for the trimmed filter ramp.
+    int crossings = 0;
+    for (std::size_t i = 6; i + 6 < mono.size(); ++i)
+        if ((mono[i - 1] <= 0.0f) != (mono[i] <= 0.0f)) ++crossings;
+    REQUIRE(crossings >= 392);
+    REQUIRE(crossings <= 408);
+}
+
 TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
     Fixture f;
     auto buf = sine(330.0, 48000.0, 24000);
