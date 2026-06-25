@@ -338,6 +338,7 @@ TEST_CASE("docs command reports missing manifest and script paths",
     {
         ScopedOutput output;
         REQUIRE(cmd_docs({"build-api"}) == 1);
+        REQUIRE(output.err.str().find("build-api-docs.sh") != std::string::npos);
     }
 }
 
@@ -363,6 +364,32 @@ TEST_CASE("docs command runs project docs check script",
                "#!/bin/sh\n"
                "exit 7\n");
     REQUIRE(cmd_docs({"check"}) == 7);
+    REQUIRE_FALSE(fs::exists(marker));
+#endif
+}
+
+TEST_CASE("docs command runs project API docs build script",
+          "[cli][docs][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir tmp;
+    auto root = make_project(tmp);
+    auto marker = root / "api-docs-build-ran.txt";
+    write_file(root / "tools" / "build-api-docs.sh",
+               "#!/bin/sh\n"
+               "printf 'cli-docs-build-api-ran\\n' > \"" + marker.string() + "\"\n");
+
+    ScopedCurrentPath cwd{root / "docs" / "guides"};
+    REQUIRE(cmd_docs({"build-api"}) == 0);
+    REQUIRE(fs::exists(marker));
+    REQUIRE(read_file_contents(marker).find("cli-docs-build-api-ran") != std::string::npos);
+
+    fs::remove(marker);
+    write_file(root / "tools" / "build-api-docs.sh",
+               "#!/bin/sh\n"
+               "exit 9\n");
+    REQUIRE(cmd_docs({"build-api"}) == 9);
     REQUIRE_FALSE(fs::exists(marker));
 #endif
 }
