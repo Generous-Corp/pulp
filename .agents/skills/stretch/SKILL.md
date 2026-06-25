@@ -31,7 +31,7 @@ cmake --build build --target stretchcli -j
 |------|------|---------|-------|
 | `clean` (default) | peak-lock phase vocoder + **material-adaptive FFT**; time ≠ pitch | tonal / melodic / sustained (bass, vocals, pads, mixes) | **good, shipping** |
 | `varispeed` | pitch+time **LINKED** (sinc resample) + speed-scaled tape head EQ + end-fade | tape slow/speed character; sidesteps the drum weakness | **good, shipping** |
-| `phase_vocoder` | clean + verbatim transient relocation (punch) | percussion punch | **scaffold → renders clean** (relocation seams unsolved) |
+| `phase_vocoder` | reserved; renders as clean (the `clean` engine + `--relocate` is the punch path) | percussion punch | **scaffold → renders clean**; use `--relocate` for punch |
 | `granular` | grain/stutter texture | texture | **scaffold → renders clean** |
 
 `varispeed` ≠ time-stretch: it changes pitch AND tempo together (like tape/vinyl
@@ -44,11 +44,12 @@ resample, no EQ) vs `--character clean` (time-stretch).
 
 - **Bass**: excellent — pitch-exact (adaptive 8192 FFT resolves close low partials).
 - **Tonal (vocals/pads/mixes)**: very good — matches/beats Rubber Band R3 to the ear.
-- **Drums/percussion (clean mode)**: usable but **R3 still wins**. A phase vocoder
-  smears percussion decay — a paradigm limit, identical in our Python prototype and
-  the C++ engine (proven by code + spectrum). For drums, prefer `varispeed`, or
-  accept ~R3-adjacent. Beating R3 on drums needs a real percussion path (beat-slice
-  / transient-separated) — future work, NOT done.
+- **Drums/percussion (clean mode)**: a phase vocoder smears percussion ATTACKS
+  (keeps only ~70-75% of each transient peak) — the "compressed/less dynamic"
+  artifact. **Verbatim transient relocation** (below) now restores the attack peaks
+  to ~97%+ of source; enable it for percussion. The PV still smears the decay TAIL
+  (a paradigm limit), so for the most tape-like character `varispeed` is still an
+  option; full R3-beating drums would need a true transient-separated path.
 
 ## Engine internals worth knowing (validated, do not regress)
 
@@ -63,7 +64,24 @@ resample, no EQ) vs `--character clean` (time-stretch).
 - **Mandatory end-fade on varispeed** (tape doesn't hard-cut; a bare resample of a
   ringing tail ticks).
 - `--transient-sens X` raises the Röbel reset sensitivity (sharper attacks); off by
-  default — a fine-tune knob.
+  default — a fine-tune knob. (Measured to REGRESS at 2× on its own — a graft is
+  better; see relocation below.)
+- **Verbatim transient relocation** (`StretchTransientMode::verbatim_relocate`, or
+  `--relocate`): grafts each ORIGINAL attack back onto the PV output, PEAK-ALIGNED,
+  restoring the punch the PV smears (transient peak ~73% → ~97%+ of source across
+  0.25–4×; tonal/sine = perfect no-op; identity at ratio 1). On the tempo-only
+  spectral path. **The three gotchas that make-or-break it** (each cost a debugging
+  cycle): (1) the output transient is **NOT at `oi*ratio`** — `tempo_stretch` leaves
+  a ratio-dependent group-delay offset (~205 samples at 2×), so search `|out|` for
+  the real peak near the nominal position, don't graft at `oi*ratio`; (2) the
+  energy-window onset detector returns the window START, which **LEADS** the true
+  peak, so the input-peak search must go **FORWARD** from the onset (a back-search
+  grafts silence → makes it WORSE); (3) the output-peak search width **scales with
+  the stretched onset spacing** so it can't lock onto a neighbour at high
+  compression. Offline-only (allocates; runs on the render worker, never the audio
+  thread). Enabled by default in the PulpTempoSampler render path. Crest factor is
+  the WRONG success metric (restoring all peaks moves peak AND RMS together) — use
+  per-transient peak-vs-source + attack slope.
 
 ## Fine-tune + share a preset (`StretchPreset`)
 
