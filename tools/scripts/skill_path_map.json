@@ -93,6 +93,8 @@
         "tools/scripts/hotspot_size_guard.json",
         "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
+        "tools/scripts/single_backend_guard.py",
+        "tools/scripts/processing_model_terms_lint.py",
         "tools/launchd/**",
         ".githooks/**"
       ]

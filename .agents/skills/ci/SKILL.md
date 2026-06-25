@@ -150,6 +150,19 @@ lanes, and verify a runner is actually busy before blaming capacity.
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
   deliberate material-effect literal `// token-lint:allow`; after intentionally
   lowering a file's count, re-freeze with `--update-baseline`.
+- **SignalGraph single-backend governance (`single_backend_guard.py` +
+  `processing_model_terms_lint.py`).** Whole-tree structural guards (not
+  diff-scoped) that keep the DSP runtime convergence from regrowing a second
+  surface: exactly one type (`GraphRuntimeExecutor`) may define
+  `process_routed` / `process_parallel`; `pulp create` offers no graph-plugin
+  authoring scaffold; the public generated-DSP ABI entry symbols stay the
+  sanctioned pair (`pulp_native_core_entry_v1`, `pulp_node_v1_entry`); and the
+  differential parity test stays registered as a built target. They run in
+  `gates.sh`, the pre-push hook, and the `Versioning & Skill-Sync` workflow
+  (hard-fail). To sanction a genuinely-new routing engine, authoring template,
+  or generated-DSP ABI, widen the allowlist in `single_backend_guard.py` in the
+  same PR — that diff is the architecture-review record. Both guards carry a
+  `--selftest` run in the workflow's fixture-test step.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

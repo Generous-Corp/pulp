@@ -148,6 +148,19 @@ jobs:
         run: |
           python3 tools/scripts/check_cli_mcp_parity.py --mode=report --no-color
 
+      - name: SignalGraph single-backend governance (issue-keyed I1/I10/I11/I12)
+        # Authoritative gate for the SignalGraph / linear-authoring structural
+        # invariants. Whole-tree (not diff-scoped) — the way these drift is a new
+        # routing engine, authoring surface, or generated-DSP ABI landing
+        # anywhere, not an edit to a watched file. Enforces: one routing backend
+        # (GraphRuntimeExecutor), no graph-plugin authoring scaffold, the
+        # generated-DSP ABI entry symbols stay the sanctioned pair, and the
+        # differential parity safety-net stays wired into the build. The
+        # reserved-terminology lint runs alongside it. Hard-fail, no bypass.
+        run: |
+          python3 tools/scripts/processing_model_terms_lint.py
+          python3 tools/scripts/single_backend_guard.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
@@ -157,3 +170,5 @@ jobs:
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
+          python3 tools/scripts/single_backend_guard.py --selftest
+          python3 tools/scripts/processing_model_terms_lint.py --selftest

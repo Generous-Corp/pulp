@@ -65,6 +65,8 @@ DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 IMPORT_PROV="$ROOT/tools/scripts/check_import_provenance.py"
 CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
+TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
+SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -175,7 +177,25 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
     fi
 fi
 
-# ── 8. import-provenance (opt-in) ──────────────────────────────────────────
+# ── 8. SignalGraph single-backend governance ──────────────────────────────
+# Global structural invariants (not diff-scoped): one routing backend
+# (GraphRuntimeExecutor), no second authoring surface, no unsanctioned
+# generated-DSP ABI entrypoint, and the differential parity safety-net stays
+# wired into the build. Plus the reserved-terminology lint. Sub-second; these
+# protect the convergence work from silently regrowing a second runtime.
+if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
+    echo "" >&2
+    echo "▸ SignalGraph governance (single-backend + reserved terminology)" >&2
+    if ! "$PYTHON" "$TERMS_LINT" >/dev/null; then
+        echo "  terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2
+        fail=1
+    fi
+    if ! "$PYTHON" "$SINGLE_BACKEND_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 9. import-provenance (opt-in) ──────────────────────────────────────────
 # Audits that any emitted/migrated project carries a well-formed clean-room
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands

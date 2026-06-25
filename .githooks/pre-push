@@ -103,6 +103,8 @@ SCC="$ROOT/tools/import-validation/check-source-contracts.py"
 SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
+TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
+SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     # Repo predates the gates; no-op so the hook doesn't block legitimate
@@ -245,6 +247,29 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
         echo "[pre-push] codecov-config: drift detected — codecov.yml is stale. Run \`python3 tools/scripts/test_codecov_config.py\` and \`python3 tools/scripts/test_codecov_components.py\` for details." >&2
         fail=1
     fi
+fi
+
+# SignalGraph single-backend governance — global structural invariants that
+# protect the convergence work from silently regrowing a second runtime: one
+# routing backend (GraphRuntimeExecutor), no second authoring surface, no
+# unsanctioned generated-DSP ABI entrypoint, and the differential parity
+# safety-net stays wired into the build. Plus the reserved-terminology lint.
+# Whole-tree (not diff-scoped), sub-second.
+if [ -f "$TERMS_LINT" ]; then
+    "$PYTHON" "$TERMS_LINT" >/dev/null
+    case $? in
+        0) ;;
+        1) echo "[pre-push] terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2; fail=1 ;;
+        *) echo "[pre-push] processing_model_terms_lint: internal error" >&2 ;;
+    esac
+fi
+if [ -f "$SINGLE_BACKEND_GUARD" ]; then
+    "$PYTHON" "$SINGLE_BACKEND_GUARD"
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] single_backend_guard: internal error" >&2 ;;
+    esac
 fi
 
 # Local diff-coverage check — mirror the CI `Diff coverage required` gate
