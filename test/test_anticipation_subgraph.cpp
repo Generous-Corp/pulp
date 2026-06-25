@@ -75,7 +75,7 @@ int count_sinks(const AnticipationSubgraph& g) {
 
 }  // namespace
 
-TEST_CASE("Subgraph: a stereo generator chain copies the interior and synthesizes sinks",
+TEST_CASE("Subgraph: a stereo generator chain copies the interior and synthesizes one multi-input sink",
           "[host][anticipation][subgraph]") {
     // gen(0/2) -> gain(2/2) -> out(2/0), stereo. Interior = {gen, gain}; out is a
     // live sink. Two boundary ports (gain:0, gain:1) -> one two-input sink.
