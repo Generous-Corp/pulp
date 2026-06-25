@@ -255,7 +255,12 @@ predictable output, no MIDI.
   calls, including priming, must be serialized — they share unsynchronized
   executor/pool/scratch); only the ring mediates against the consumer. There is no
   SignalGraph splice wiring this into the live path yet — that's the final Phase 6
-  slice.
+  slice. Use `GraphRuntimeExecutor::process_routed(..., skip_mask)` for that
+  splice: pre-fill the skipped interior nodes' output slots from the consumed lane
+  block, then mask those nodes so their plugin state is not advanced again. A
+  masked node must not be an `AudioOutput` or a feedback endpoint; the
+  anticipation partition satisfies this by excluding live sinks and feedback
+  endpoints, and debug builds assert the contract.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
