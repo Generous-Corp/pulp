@@ -115,7 +115,7 @@ prove:
 Reference commands:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target pulp-faust-gain-test pulp-faust-filter-test pulp-faust-tremolo-test -j8
 ctest --test-dir build --output-on-failure -R Faust
 ```
