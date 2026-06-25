@@ -506,7 +506,21 @@ public:
         std::span<const graph::GraphTimedCommand> commands = {},
         std::span<GraphRuntimeCommandDecision> command_results = {},
         GraphRuntimeCommandHandler command_handler = {},
-        GraphRuntimeEventSink event_sink = {}) noexcept;
+        GraphRuntimeEventSink event_sink = {},
+        std::span<const std::uint8_t> skip_mask = {}) noexcept;
+
+    // `skip_mask` (optional, indexed by dense node index; empty = run everything):
+    // a non-zero entry means "do not run this node — its output slots are already
+    // filled by the caller". Used by anticipative rendering, where a pre-rendered
+    // sub-graph's boundary outputs are written into the skipped interior nodes'
+    // output slots before the call so the rest of the graph reads them instead of
+    // re-running the interior (which advances plugin state that the anticipation
+    // producer already owns). A masked node must NOT be a feedback endpoint (source
+    // or destination — the post-walk feedback capture would read its prefilled slot
+    // and feed stale history) nor an AudioOutput (skipping it drops its accumulate
+    // into the shared output bus, which no pool prefill can restore). The
+    // anticipation interior satisfies both — 6a excludes feedback endpoints and the
+    // interior never contains a live sink. Debug builds assert the contract.
 
     // Levelized PARALLEL routing path: same per-node work as process_routed, but
     // each topological level's independent nodes are dispatched across `workers`

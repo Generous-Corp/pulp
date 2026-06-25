@@ -829,3 +829,65 @@ TEST_CASE("Parallel routing cost gate: a sub-threshold level runs serially",
                 lo.outs[0][static_cast<std::size_t>(i)]);
     }
 }
+
+TEST_CASE("process_routed skips a node and reads its pre-filled output slot",
+          "[format][graph][executor][routing][skip]") {
+    // in -> A -> B -> out. Skipping A and pre-filling A's output slot with exactly
+    // what A would have produced (x * gainA) must yield the same output as running
+    // A — the mechanism anticipative rendering uses to splice a pre-rendered
+    // interior into the live graph without re-running (and re-advancing) it.
+    constexpr int kFrames = 64;
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+        GraphRuntimeConnectionSpec{3, 0, 4, 0},
+    };
+    GainState gA{2.0f}, gB{3.0f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &gA, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &gB, true},
+        GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    const auto x = test_signal(kFrames, 0.5f);
+
+    GraphRuntimeExecutor exec;
+    auto pool_full = make_pool(snapshot, kFrames);
+    RoutedHarness full(kSr, kFrames, {x}, 1);
+    REQUIRE(full.run(exec, snapshot, pool_full).ok());
+
+    // A's plan index + output slot.
+    const auto& plan = snapshot.plan();
+    std::uint32_t a_idx = 0;
+    for (std::uint32_t i = 0; i < plan.nodes.size(); ++i)
+        if (plan.nodes[i].id == 2) a_idx = i;
+    const std::uint32_t a_slot = snapshot.buffer_assignment().nodes[a_idx].output_base;
+
+    // Skip A; pre-fill its output slot with x * gainA.
+    auto pool_skip = make_pool(snapshot, kFrames);
+    float* slot = pool_skip.slot_data(a_slot);
+    REQUIRE(slot != nullptr);
+    for (int i = 0; i < kFrames; ++i) slot[i] = x[static_cast<std::size_t>(i)] * 2.0f;
+
+    std::vector<std::uint8_t> skip(plan.nodes.size(), 0);
+    skip[a_idx] = 1;
+    RoutedHarness skipped(kSr, kFrames, {x}, 1);
+    REQUIRE(exec.process_routed(skipped.block, snapshot, pool_skip, nullptr, nullptr,
+                                {}, {}, {}, {}, skip)
+                .ok());
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(skipped.outs[0][static_cast<std::size_t>(i)] ==
+                full.outs[0][static_cast<std::size_t>(i)]);
+    }
+    // Guard against a vacuous all-zero match: the signal is actually non-trivial.
+    CHECK(full.outs[0][1] != 0.0f);
+}

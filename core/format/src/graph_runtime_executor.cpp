@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <span>
 #include <utility>
 
@@ -854,7 +855,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
-    GraphRuntimeEventSink event_sink) noexcept {
+    GraphRuntimeEventSink event_sink,
+    std::span<const std::uint8_t> skip_mask) noexcept {
     if (!block.validate()) return fail_invalid_block();
     if (!snapshot.valid()) return fail_invalid_snapshot();
 
@@ -905,9 +907,44 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         }
     }
 
+#ifndef NDEBUG
+    // Contract for a skip_mask (caller-enforced; assert it so a future caller
+    // can't regress into silent-wrong audio): a masked node must be neither an
+    // AudioOutput (skipping it drops its += into the shared output bus, which no
+    // pool pre-fill can restore) nor a feedback endpoint (its pre-filled slot would
+    // feed stale history into capture_feedback / the next block). The anticipation
+    // interior satisfies this — live sinks are never interior and 6a excludes
+    // feedback endpoints.
+    if (!skip_mask.empty()) {
+        for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+            if (i < skip_mask.size() && skip_mask[i] != 0) {
+                assert(plan.nodes[i].kind != graph::GraphRuntimeNodeKind::AudioOutput &&
+                       "process_routed: a skipped node must not be an AudioOutput");
+            }
+        }
+        for (const auto& c : plan.connections) {
+            if (!c.feedback) continue;
+            const bool src_skipped =
+                c.source_index < skip_mask.size() && skip_mask[c.source_index] != 0;
+            const bool dst_skipped =
+                c.dest_index < skip_mask.size() && skip_mask[c.dest_index] != 0;
+            assert(!src_skipped && !dst_skipped &&
+                   "process_routed: a skipped node must not be a feedback endpoint");
+        }
+    }
+#endif
+
     const auto command_decisions = command_results.first(commands.size());
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
+
+        // Skipped nodes are not run: the caller has pre-filled their output slots
+        // (anticipative rendering pre-renders the interior off-thread). They are
+        // not counted as processed and their plugin state is left untouched.
+        if (!skip_mask.empty() && node_index < skip_mask.size() &&
+            skip_mask[node_index] != 0) {
+            continue;
+        }
 
         const auto error = run_routed_node(node_index, plan, bindings, assignment,
                                            pool, midi, automation, block, in_bus,
