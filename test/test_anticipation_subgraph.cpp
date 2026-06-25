@@ -1,9 +1,9 @@
 // Coverage for the anticipation sub-graph extraction: the renderable interior
-// carved from a partition, with one synthesized AudioOutput sink per distinct
-// boundary output port. These tests assert the interior nodes and internal edges
-// are copied, each distinct boundary port gets exactly one sink fed from it,
-// synthesized ids never collide with existing ones, and a graph with no eligible
-// interior renders nothing.
+// carved from a partition, with one synthesized AudioOutput sink whose input
+// ports carry the distinct boundary outputs. These tests assert the interior
+// nodes and internal edges are copied, each distinct boundary port gets its own
+// sink input/channel, synthesized ids never collide with existing ones, and a
+// graph with no eligible interior renders nothing.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -78,7 +78,7 @@ int count_sinks(const AnticipationSubgraph& g) {
 TEST_CASE("Subgraph: a stereo generator chain copies the interior and synthesizes sinks",
           "[host][anticipation][subgraph]") {
     // gen(0/2) -> gain(2/2) -> out(2/0), stereo. Interior = {gen, gain}; out is a
-    // live sink. Two boundary ports (gain:0, gain:1) -> two synthesized sinks.
+    // live sink. Two boundary ports (gain:0, gain:1) -> one two-input sink.
     std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),
                                  mk(2, NodeType::Gain, 2, 2),
                                  mk(3, NodeType::AudioOutput, 2, 0)};

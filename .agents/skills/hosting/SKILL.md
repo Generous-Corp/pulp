@@ -229,11 +229,13 @@ predictable output, no MIDI.
   `build_anticipation_subgraph(nodes, connections, partition)` turns a partition
   into a standalone renderable graph: it copies the interior nodes verbatim (plugin
   slots/gain/ports preserved) and the internal edges, and synthesizes ONE
-  one-input `AudioOutput` sink per DISTINCT boundary output port (fresh ids above
-  every existing node id, so no collision), fed from that port — so the sub-graph
-  renders through the ordinary `build_executor_snapshot` + `process_routed` and its
-  output bus carries exactly the boundary signals. `outputs[]` maps each sink back
-  to the `(source_node, source_port)` it captures. GOTCHA: the interior plugin
+  `AudioOutput` sink whose input ports correspond to the DISTINCT boundary output
+  ports (fresh id above every existing node id, so no collision), fed so boundary
+  output `i` lands on sink input/output-bus channel `i` — so the sub-graph renders
+  through the ordinary `build_executor_snapshot` + `process_routed` and its output
+  bus carries exactly the boundary signals without summing them together.
+  `outputs[]` maps each output-bus channel back to the `(source_node, source_port)`
+  it captures. GOTCHA: the interior plugin
   GraphNodes are copied by value, so the SAME plugin instances render here — which
   means a live splice (a later slice) must NOT also process those instances, or
   their state double-advances. This slice does extraction only; it neither renders
