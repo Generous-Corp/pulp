@@ -87,6 +87,12 @@ pulp_add_test_suite(pulp-test-anticipation-partition
 pulp_add_test_suite(pulp-test-anticipation-subgraph
     SOURCES test_anticipation_subgraph.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Render-path proof: the extracted sub-graph, driven through the real executor,
+# reproduces the full graph's boundary signals with each captured port on its own
+# output channel (the guard the structural extraction tests cannot give).
+pulp_add_test_suite(pulp-test-anticipation-subgraph-render
+    SOURCES test_anticipation_subgraph_render.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
