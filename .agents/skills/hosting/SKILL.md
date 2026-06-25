@@ -385,6 +385,32 @@ predictable output, no MIDI.
   `GraphRuntimeExecutor` is a `SignalGraph` member (prepare never mutates it; the
   single audio thread is its only writer).
 
+## Offline graph rendering (`OfflineSignalGraphHost`)
+
+`core/host/offline_signal_graph_host.{hpp,cpp}` renders a prepared `SignalGraph`
+offline by stepping a fixed block size across a frame range through the **public**
+`SignalGraph::process()` — no live audio device, deterministic, allocation-free per
+block (staging + output buffers are sized in `prepare()`). It is a control-thread
+host, not a routing path: it adds no walk of its own and never touches graph
+internals, so it stays clear of the in-flight routing/anticipation churn.
+
+Gotchas:
+- **Block-size silence clamp.** `SignalGraph::process()` zero-fills any block larger
+  than the prepared `max_block_size` (`prepared_max_block_size()`). `prepare()` refuses
+  if the configured `block_frames` exceeds the graph's prepared max — otherwise an
+  offline "one big block" render would silently drop to silence. To render one big
+  block, re-`prepare()` the graph at that block size first.
+- **What "offline equals online" actually means here.** A `SignalGraph` carries no
+  `ProcessMode`/transport into its nodes, so an offline render is NOT distinguishable
+  from an online one by render mode — the only variable is the block partitioning. For
+  deterministic nodes, output is therefore block-size invariant: same input at any
+  block size → bit-exact for pure gain/sum, within ~1e-6 across re-partitioning. A node
+  whose output legitimately depends on block size (the exempt path) is declared
+  EXEMPT as harness-side metadata today (no per-node `ProcessMode` opt-out exists yet);
+  the equivalence harness flags and excludes it rather than failing.
+- Keep the executor/parallel/anticipation opt-ins OFF for partition-invariance
+  fixtures — anticipation in particular is intentionally not block-size invariant.
+
 ## Common tripwires
 
 - Building `pulp-host` without adding a new `.cpp` to `target_sources` —
