@@ -157,3 +157,10 @@ pulp_add_test_suite(pulp-test-processor-block-adapter
 pulp_add_test_suite(pulp-test-processor-node-adapter
     SOURCES test_processor_node_adapter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# A generated/native DSP core (C-ABI native_core) reaches a graph through the
+# SAME ProcessorNode path as any Processor — no separate generated-DSP runtime.
+# Standalone (HeadlessHost) and in-graph (ProcessorNode) output must be bit-exact.
+pulp_add_test_suite(pulp-test-generated-dsp-graph-parity
+    SOURCES test_generated_dsp_graph_parity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

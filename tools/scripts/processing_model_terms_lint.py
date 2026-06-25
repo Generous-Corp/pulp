@@ -39,6 +39,11 @@ FORBIDDEN = [
         re.compile(r"\bSignalGraph\s+backend\b", re.IGNORECASE),
         'the inter-node backend is GraphRuntimeExecutor, not a "SignalGraph backend"',
     ),
+    (
+        re.compile(r"\bgenerated[\s\-]dsp\s+runtime\b", re.IGNORECASE),
+        'generated DSP reaches the graph as a Processor (NativeCoreProcessor + '
+        'ProcessorNode); there is no separate "generated-DSP runtime"',
+    ),
 ]
 
 SCAN_DIRS = ("docs", "core")
@@ -88,6 +93,10 @@ def selftest() -> int:
         ("write a Processor; host it in a SignalGraph", 0),
         ("the GraphRuntimeExecutor is the routing backend", 0),
         ("a SignalGraph hosts plugin nodes", 0),
+        ("ship the generated-DSP runtime as its own engine", 1),
+        ("the generated DSP runtime owns its own scheduler", 1),
+        ("generated-dsp runtime  # terms-lint: allow", 0),
+        ("a generated DSP core runs as a Processor node", 0),
     ]
     failures = 0
     for text, expected in cases:
