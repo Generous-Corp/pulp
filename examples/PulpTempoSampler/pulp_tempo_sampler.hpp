@@ -318,7 +318,7 @@ private:
         c.fill_text("Drop a sample, or click to browse", b.x + b.width / 2, cy + 42);
         c.set_fill_color(canvas::Color::rgba8(0x64, 0x6D, 0x7A));
         c.set_font("", 11.0f);
-        c.fill_text("WAV  AIFF  FLAC  MP3  OGG", b.x + b.width / 2, cy + 62);
+        c.fill_text("WAV  AIFF  FLAC  MP3  OGG  M4A", b.x + b.width / 2, cy + 62);
         c.set_text_align(canvas::TextAlign::left);
     }
     void paint_drag_overlay(canvas::Canvas& c, const view::Rect& b) {
