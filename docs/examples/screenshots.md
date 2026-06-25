@@ -22,28 +22,28 @@ Screenshots are captured via the headless screenshot tool:
 - **Type:** Effect (stereo in → stereo out)
 - **Parameters:** Input Gain (dB), Output Gain (dB), Bypass
 - **UI:** Two knobs + one toggle, auto-generated via AutoUi
-- **Formats:** VST3, AU, CLAP, Standalone
+- **Formats:** VST3, AU v2/AUv3, CLAP, Standalone, optional AAX
 
 ## PulpTone — Polyphonic Synth
 
 - **Type:** Instrument (MIDI in → stereo out)
 - **Parameters:** Waveform, Frequency, Attack, Release
 - **UI:** Three knobs + one combo, auto-generated via AutoUi
-- **Formats:** VST3, AU, CLAP, Standalone
+- **Formats:** VST3, AU v2, CLAP, Standalone
 
 ## PulpEffect — Biquad Filter
 
 - **Type:** Effect (stereo in → stereo out)
 - **Parameters:** Frequency (Hz), Resonance, Gain (dB), Filter Type, Bypass
 - **UI:** Three knobs + one combo + one toggle, auto-generated
-- **Formats:** VST3, AU, CLAP
+- **Formats:** VST3, AU v2, CLAP
 
 ## PulpCompressor — Sidechain Compressor
 
 - **Type:** Effect with sidechain (stereo + sidechain in → stereo out)
 - **Parameters:** Threshold (dB), Ratio, Attack (ms), Release (ms), Makeup (dB), Bypass
 - **UI:** Five knobs + one toggle, auto-generated
-- **Formats:** VST3, AU, CLAP
+- **Formats:** VST3, AU v2, CLAP
 
 ## PulpSynth — Macro Oscillator Synth
 
