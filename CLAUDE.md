@@ -175,6 +175,30 @@ Format adapters translate:
   CLAP: PulpClapPlugin (clap_plugin_t) ↔ Processor
 ```
 
+### Choosing a Processing Model (Processor vs SignalGraph)
+
+Pulp has one DSP **authoring** model and one **composition** engine. Default to
+the authoring model; reach for the graph only when routing is dynamic at run time.
+
+- **Default to `Processor`** for any plugin, effect, instrument, MIDI effect, or
+  agent-generated DSP. One plugin = one `Processor`; compose internal multi-stage
+  DSP from `pulp::signal::*` helpers inside `process()`.
+- **Reach for `SignalGraph` only when the routing itself is runtime-dynamic:**
+  hosting external plugins, a user-editable rack/mixer/node-editor, or a topology
+  loaded/saved as `.pulpgraph`. A graph node *wraps* a built unit — it is not a way
+  to author DSP.
+- **"Fixed topology" can still be complex.** Polyphony (synths/samplers),
+  multi-bus inputs, sidechain, internal parallel/serial chains, mid/side,
+  oversampling, and convolution are **all `Processor` concerns** — not reasons to
+  reach for `SignalGraph`. Never express a one-in/one-out (or any fixed) chain as a
+  graph without a stated runtime-routing reason.
+- **Heuristic:** fixed at build time → `Processor`; edited/loaded at run time →
+  `SignalGraph`.
+- A `CustomNodeType` is a graph utility node, **not** a plugin authoring surface.
+
+Full guidance and reserved terminology: `docs/reference/processing-models.md`.
+Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
+
 ### Thread Model
 
 - **Audio thread**: reads params via `std::atomic<float>` (relaxed), processes buffers, pushes meter data via `TripleBuffer`

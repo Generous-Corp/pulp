@@ -1806,9 +1806,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
                     {
                         .info = {
-                            .name = "Graph Plugin In",
+                            .name = "Plugin Node In",
                             .index = 0,
                             .direction = format::BusDirection::Input,
+                            // bus label for a plugin node's main I/O inside a SignalGraph
                             .role = format::BusRole::Main,
                             .declared_channels =
                                 static_cast<int>(in_c.num_channels()),
@@ -1821,7 +1822,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
                     {
                         .info = {
-                            .name = "Graph Plugin Out",
+                            .name = "Plugin Node Out",
                             .index = 0,
                             .direction = format::BusDirection::Output,
                             .role = format::BusRole::Main,

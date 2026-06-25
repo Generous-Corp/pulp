@@ -383,6 +383,11 @@ docs:
     kind: reference
     summary: Opt-in native-language (Rust-first) audio components behind a language-neutral C ABI, with iOS static-only limits
 
+  - slug: processing-models
+    path: reference/processing-models.md
+    kind: reference
+    summary: When to author a Processor vs. compose with SignalGraph, plus reserved terminology
+
   # Policies
   - slug: code-style
     path: policies/code-style.md
