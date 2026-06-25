@@ -11,6 +11,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/process_block.hpp>
+#include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 
@@ -248,4 +249,30 @@ TEST_CASE("Executor eligibility rejects unprepared and non-eligible graphs",
     REQUIRE(midi.connect_midi(min, mout));
     REQUIRE(midi.prepare(kSr, kFrames));
     CHECK_FALSE(signal_graph_executor_eligible(midi));
+}
+
+TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible graphs",
+          "[host][graph][executor][routing]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(1, "In");
+    auto prev = in;
+
+    // This stays within SignalGraph's default GraphLimits but exceeds
+    // GraphRuntimePlan's default max_nodes, so the capability predicate remains
+    // true while the actual route construction must fail cleanly.
+    const auto gain_count = pulp::graph::GraphRuntimeLimits{}.max_nodes;
+    for (std::uint32_t i = 0; i < gain_count; ++i) {
+        const auto gain = g.add_gain_node("G");
+        REQUIRE(g.connect(prev, 0, gain, 0));
+        prev = gain;
+    }
+
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(prev, 0, out, 0));
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    CHECK(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    CHECK_FALSE(build_signal_graph_executor_routing(g, routing));
+    CHECK_FALSE(routing.valid);
 }
