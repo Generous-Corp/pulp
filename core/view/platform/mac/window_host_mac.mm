@@ -1955,6 +1955,8 @@ public:
     }
 
     ~MacGpuWindowHost() override {
+        if (key_monitor_) { [NSEvent removeMonitor:key_monitor_]; key_monitor_ = nil; }
+        app_key_handler_ = nullptr;
         if (render_dispatch_alive_)
             render_dispatch_alive_->store(false, std::memory_order_release);
         stop_display_link();
@@ -2173,6 +2175,28 @@ public:
         delegate_.onClose = ^{ if (close_callback_) close_callback_(); };
     }
 
+    // App-level key monitor: route keyDown/keyUp to `handler` before the responder
+    // chain, regardless of which window is key (so a popout keyboard keeps getting
+    // keystrokes after the user clicks a control in another window). Returning true
+    // from the handler CONSUMES the event (return nil), so it doesn't ALSO reach the
+    // focused window's keyDown — no double-trigger.
+    void set_app_key_monitor(std::function<bool(const KeyEvent&)> handler) override {
+        if (key_monitor_) { [NSEvent removeMonitor:key_monitor_]; key_monitor_ = nil; }
+        app_key_handler_ = std::move(handler);
+        if (!app_key_handler_) return;
+        key_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
+                            (NSEventMaskKeyDown | NSEventMaskKeyUp)
+                        handler:^NSEvent*(NSEvent* event) {
+            if (!app_key_handler_) return event;
+            pulp::view::KeyEvent ke;
+            ke.key = key_code_from_ns(event.keyCode);
+            ke.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+            ke.is_down = (event.type == NSEventTypeKeyDown);
+            ke.is_repeat = (event.type == NSEventTypeKeyDown) ? event.isARepeat : NO;
+            return app_key_handler_(ke) ? nil : event;
+        }];
+    }
+
     void set_resize_callback(ResizeCallback cb) override {
         resize_callback_ = std::move(cb);
     }
@@ -2378,6 +2402,8 @@ private:
     PulpMetalView* metal_view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
     std::function<void()> close_callback_;
+    id key_monitor_ = nil;                                       // NSEvent app key monitor
+    std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;

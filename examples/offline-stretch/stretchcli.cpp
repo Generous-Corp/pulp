@@ -137,8 +137,7 @@ pulp::signal::OfflineFormantMode parse_formant(const char* s, bool* ok) {
 }
 
 int render(const std::string& in, const std::string& out,
-           pulp::signal::OfflineStretchOptions opts, std::optional<double> bpm_to,
-           bool auto_window = false) {
+           pulp::signal::OfflineStretchOptions opts, std::optional<double> bpm_to,           bool auto_window = false, float transient = 0.0f) {
     auto data = FormatRegistry::instance().read(in);
     if (!data || data->empty()) {
         std::fprintf(stderr, "error: cannot read '%s'\n", in.c_str());
@@ -184,6 +183,8 @@ int render(const std::string& in, const std::string& out,
                      win.fft_size, win.analysis_hop);
     }
 
+    if (transient > 0.0f) { sizing.transient_sensitivity = transient; opts.transient_sensitivity = transient; }
+
     pulp::signal::OfflineStretch eng;
     eng.prepare(static_cast<double>(data->sample_rate), static_cast<int>(nch), sizing);
 
@@ -223,6 +224,7 @@ int main(int argc, char** argv) {
     bool want_analyze = false;
     std::optional<double> bpm_to;
     bool auto_window = false;
+    float transient = 0.0f;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -242,6 +244,7 @@ int main(int argc, char** argv) {
         else if (a == "--max-pitch") opts.max_pitch_semitones = std::atof(next("--max-pitch"));
         else if (a == "--bpm-to") bpm_to = std::atof(next("--bpm-to"));
         else if (a == "--auto-window") auto_window = true;
+        else if (a == "--transient") transient = static_cast<float>(std::atof(next("--transient")));
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown flag %s\n", a.c_str()); usage(); return 2; }
         else pos.push_back(a);
@@ -252,5 +255,5 @@ int main(int argc, char** argv) {
         return analyze(pos[0]);
     }
     if (pos.size() != 2) { usage(); return 2; }
-    return render(pos[0], pos[1], opts, bpm_to, auto_window);
+    return render(pos[0], pos[1], opts, bpm_to, auto_window, transient);
 }

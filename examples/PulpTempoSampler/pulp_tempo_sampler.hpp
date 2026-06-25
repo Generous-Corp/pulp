@@ -715,6 +715,7 @@ public:
             //     keyboard is closed" bug).
             //  2) Belt-and-suspenders: release any note still in the UI-held set and
             //     clear the lit display so nothing lingers lit on the next open.
+            kb_window_->set_app_key_monitor({});   // stop routing app keys to the keyboard
             if (kb_) kb_->set_input_capture(false);
             for (int n : held_notes_ui_) ui_note_off(n);
             held_notes_ui_.clear();
@@ -790,6 +791,19 @@ public:
             kb_->set_input_capture(true);   // re-arm self-capture (dropped on the last hide)
         }
         kb_window_->show();
+        // Route ALL app keystrokes to the keyboard while it is open. macOS delivers
+        // keys only to the KEY window, so once the user clicks a control in the MAIN
+        // editor window (e.g. the tempo fader) the keyboard window stops receiving
+        // QWERTY and typing goes dead until it is re-focused. This app-level monitor
+        // forwards every keystroke to the keyboard regardless of which window is key,
+        // consuming only the keys it handles (notes / 1–8 / tab / ⌘K-⌘W-Esc) so other
+        // keys still reach the focused window. The keyboard is now the single QWERTY
+        // source whenever it is open.
+        kb_window_->set_app_key_monitor([this](const view::KeyEvent& e) -> bool {
+            if (!kb_ || !kb_window_ || !kb_window_->is_visible()) return false;
+            if (kb_->on_global_key && kb_->on_global_key(e)) return true;  // ⌘K / ⌘W / Esc
+            return kb_->on_key_event(e);                                   // notes + 1–8 / tab
+        });
     }
 
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
