@@ -487,3 +487,274 @@ TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible 
     CHECK_FALSE(build_signal_graph_executor_routing(g, routing));
     CHECK_FALSE(routing.valid);
 }
+
+namespace {
+
+using pulp::host::PluginInfo;
+using pulp::host::PluginFormat;
+using pulp::host::PluginSlot;
+
+PluginInfo test_plugin_info(int in_ch, int out_ch) {
+    PluginInfo info{};
+    info.name = "DeterministicTest";
+    info.format = PluginFormat::CLAP;
+    info.num_inputs = in_ch;
+    info.num_outputs = out_ch;
+    info.category = "Fx";
+    return info;
+}
+
+// Deterministic, stateless test plugin for routing parity.
+//   kFull            : out[c] = in[c] * scale for every channel (full write).
+//   kPartialCh1Gated : out[0] = in[0] * scale always; out[1] is written only on
+//                      blocks whose first input sample is > 0, and otherwise left
+//                      untouched — so its buffer carries a non-trivial stale tail
+//                      across blocks. Stateless (the decision depends only on the
+//                      current block), so the same instance can drive both walks.
+class DeterministicPlugin final : public PluginSlot {
+public:
+    enum class Mode { kFull, kPartialCh1Gated };
+    DeterministicPlugin(Mode mode, float scale, int in_ch, int out_ch, int latency = 0)
+        : mode_(mode), scale_(scale), latency_(latency),
+          info_(test_plugin_info(in_ch, out_ch)) {}
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&,
+                 int n) override {
+        const std::size_t chs = out.num_channels();
+        const bool gate_open = in.num_samples() > 0 && in.num_channels() > 0 &&
+                               in.channel_ptr(0)[0] > 0.0f;
+        for (std::size_t c = 0; c < chs; ++c) {
+            if (mode_ == Mode::kPartialCh1Gated && c == 1 && !gate_open) {
+                continue;  // leave channel 1 untouched -> stale tail persists
+            }
+            float* o = out.channel_ptr(c);
+            const float* i = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+            for (int s = 0; s < n; ++s) {
+                o[static_cast<std::size_t>(s)] =
+                    i ? i[static_cast<std::size_t>(s)] * scale_ : 0.0f;
+            }
+        }
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return latency_; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    Mode mode_;
+    float scale_;
+    int latency_;
+    PluginInfo info_;
+};
+
+} // namespace
+
+TEST_CASE("Translated routing matches SignalGraph: input -> plugin -> output",
+          "[host][graph][executor][routing][parity][plugin]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2),
+        2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    REQUIRE(g.connect(in, 0, p, 0));
+    REQUIRE(g.connect(in, 1, p, 1));
+    REQUIRE(g.connect(p, 0, out, 0));
+    REQUIRE(g.connect(p, 1, out, 1));
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.8f), ramp(kFrames, 0.6f)};
+    expect_equal(run_legacy(g, kFrames, input, 2),
+                 run_routed(exec, routing, kFrames, input, 2));
+}
+
+TEST_CASE("Translated routing matches SignalGraph: plugin chain",
+          "[host][graph][executor][routing][parity][plugin]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p1 = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 0.5f, 2, 2),
+        2, 2, "P1");
+    const auto p2 = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 0.75f, 2, 2),
+        2, 2, "P2");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p1, c));
+        REQUIRE(g.connect(p1, c, p2, c));
+        REQUIRE(g.connect(p2, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.9f), ramp(kFrames, 0.4f)};
+    expect_equal(run_legacy(g, kFrames, input, 2),
+                 run_routed(exec, routing, kFrames, input, 2));
+}
+
+TEST_CASE("Translated routing matches SignalGraph: plugin + gain fan-in mix",
+          "[host][graph][executor][routing][parity][plugin]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 0.5f, 2, 2),
+        2, 2, "P");
+    const auto gain = g.add_gain_node("G");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(in, c, gain, c));
+        REQUIRE(g.connect(p, c, out, c));     // plugin -> output
+        REQUIRE(g.connect(gain, c, out, c));  // gain   -> output (fan-in sum)
+    }
+    REQUIRE(g.set_node_gain(gain, 0.25f));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.7f), ramp(kFrames, 0.5f)};
+    expect_equal(run_legacy(g, kFrames, input, 2),
+                 run_routed(exec, routing, kFrames, input, 2));
+}
+
+TEST_CASE("Translated routing matches SignalGraph: non-full-writing plugin persists its tail across blocks",
+          "[host][graph][executor][routing][parity][plugin][persistent]") {
+    // The plugin leaves channel 1 untouched on blocks whose first input sample
+    // is <= 0. SignalGraph keeps channel 1's previous value in its persistent
+    // per-node buffer; the executor must do the same via the pinned persistent
+    // output slot. Drive several blocks whose ch0 sign alternates, so ch1 is
+    // written on some blocks and stale on others, and require block-for-block
+    // equality across the whole sequence.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kPartialCh1Gated, 0.5f, 2, 2),
+        2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+
+    // Block 0 opens the gate (ch0[0] > 0) so ch1 gets a real value; block 1
+    // closes it (ch0[0] < 0) so ch1 must stay stale; alternate for 6 blocks.
+    for (int blk = 0; blk < 6; ++blk) {
+        const float sign = (blk % 2 == 0) ? 1.0f : -1.0f;
+        std::vector<float> ch0 = ramp(kFrames, 0.8f);
+        std::vector<float> ch1 = ramp(kFrames, 0.6f);
+        ch0[0] = sign * 0.5f;  // drive the gate deterministically
+        const std::vector<std::vector<float>> input{ch0, ch1};
+        const auto legacy = run_legacy(g, kFrames, input, 2);
+        const auto routed = run_routed(exec, routing, kFrames, input, 2);
+        INFO("block " << blk);
+        expect_equal(legacy, routed);
+    }
+}
+
+TEST_CASE("Executor eligibility rejects a Plugin node with no live slot",
+          "[host][graph][executor][routing][eligibility][plugin]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    // An unresolved plugin node carries metadata but no slot.
+    const auto p = g.add_unresolved_plugin_node(test_plugin_info(2, 2), 2, 2, "Missing");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE_FALSE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE_FALSE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE_FALSE(routing.valid);
+}
+
+TEST_CASE("SignalGraph::process plugin executor path does not allocate on the audio thread",
+          "[host][graph][executor][routing][rt-safety][plugin]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 0.5f, 2, 2),
+        2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    const auto l = ramp(kFrames, 0.8f), r = ramp(kFrames, 0.6f);
+    std::vector<float> li = l, ri = r;
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> ic{li.data(), ri.data()};
+    std::array<float*, 2> oc{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+
+    g.process(ov, iv, kFrames);  // warm-up outside the probe
+    {
+        pulp::test::RtAllocationProbe probe;
+        g.process(ov, iv, kFrames);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("Executor eligibility rejects a latency-reporting plugin",
+          "[host][graph][executor][routing][eligibility][plugin]") {
+    // The executor's gather has no per-connection PDC delay; the legacy walk
+    // delay-compensates a latency-reporting plugin, so such a graph must stay on
+    // the legacy walk (ineligible) rather than route and diverge silently.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2, /*latency=*/64),
+        2, 2, "LatencyP");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE_FALSE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE_FALSE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE_FALSE(routing.valid);
+}
