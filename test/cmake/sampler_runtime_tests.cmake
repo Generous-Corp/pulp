@@ -66,6 +66,12 @@ pulp_add_test_suite(pulp-test-signal-graph-executor-parity
 pulp_add_test_suite(pulp-test-graph-routing-differential-parity
     SOURCES test_graph_routing_differential_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Anticipative-rendering safety contract: the static eligibility analysis must
+# exclude every live-input / feedback / sidechain-dependent node and propagate
+# those exclusions downstream, so no unsafe subgraph is ever rendered ahead.
+pulp_add_test_suite(pulp-test-anticipation-eligibility
+    SOURCES test_anticipation_eligibility.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

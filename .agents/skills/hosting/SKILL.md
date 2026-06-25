@@ -195,6 +195,21 @@ predictable output, no MIDI.
   count runtime-variable without a drain handshake. The pool's completion barrier
   counts PARTICIPANTS finished (not tasks): an empty-range participant must still
   register done, or it can race the next batch's published state.
+- **Anticipative-rendering eligibility (`anticipation_eligibility.{hpp,cpp}`).**
+  `analyze_anticipation_eligibility(nodes, connections)` is the static SAFETY
+  contract for rendering a latent subgraph ahead of the audio deadline: it
+  classifies each node `None` (passed) or a hard-exclusion reason — seeds live
+  AudioInput/MidiInput nodes, both endpoints of every feedback edge, and any node
+  with a sidechain inbound edge, then propagates each exclusion forward along
+  feedforward (non-feedback) edges to a fixpoint so anything downstream of an
+  excluded node is excluded too. It's deliberately conservative: a false exclusion
+  only forfeits a speed-up, but a false inclusion would render an unsafe node
+  ahead. GOTCHA: `passes_static_exclusions(i)` is NOT a blanket "safe to
+  anticipate" — host-clock-sensitive plugins (output depends on the transport
+  playhead) are NOT statically detectable from node metadata and are intentionally
+  not covered; a renderer consuming this must layer a host-time check or a per-node
+  opt-out on top. There is no anticipative renderer yet — this is the analysis the
+  Phase 6 renderer will gate on.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
