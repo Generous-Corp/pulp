@@ -67,6 +67,24 @@ When writing docs or code comments, avoid the bare word "graph" for authoring
 work — qualify it as `SignalGraph`. A plugin is always a `Processor`; there is no
 such thing as a graph-authored plugin.
 
+## How this is enforced
+
+Two CI guards keep the model from blurring back into two surfaces. Both run in
+`gates.sh`, the pre-push hook, and the `Versioning & Skill-Sync` workflow.
+
+- `tools/scripts/processing_model_terms_lint.py` flags the reserved-terminology
+  anti-phrases (e.g. "graph plugin") in docs and source. <!-- terms-lint: allow -->
+
+- `tools/scripts/single_backend_guard.py` asserts the structural invariants:
+  exactly one routing backend (`GraphRuntimeExecutor`) defines the routed-graph
+  execution entry points; `pulp create` offers no scaffold that treats a
+  `SignalGraph` as an authoring surface; the public generated-DSP ABI entry
+  symbols stay the sanctioned pair
+  (the `native_core.h` Processor-level FFI and the `pulp_node_v1` custom-node
+  ABI); and the routed-vs-`SignalGraph` differential parity test stays wired
+  into the build. Sanctioning a genuinely-new engine, scaffold, or ABI is a
+  deliberate allowlist edit in that guard.
+
 ## See also
 
 - [Signal Graph Reference](signal-graph.md) — the `SignalGraph` node and edge model.
