@@ -1207,9 +1207,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             for (const auto& conn : plan.connections) {
                 if (conn.is_automation) { plan_has_automation = true; break; }
             }
-            if (cg->routing_valid && plan_has_automation) {
+            if (cg->routing_valid && plan_has_automation && max_block_size > 0) {
                 cg->routing_valid = cg->routing_automation.reset(
-                    plan.node_count(), plan.connection_count());
+                    plan, static_cast<std::uint32_t>(max_block_size));
             }
         }
     }

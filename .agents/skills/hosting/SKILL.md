@@ -142,8 +142,8 @@ predictable output, no MIDI.
   carry a LIVE slot) / MidiInput / MidiOutput, connections audio (feedforward,
   one-block feedback, or sidechain — a sidechain edge routes as plain audio into
   a higher input port of the destination plugin), MIDI (connect_midi event
-  edges), or SPARSE parameter automation (connect_automation; dense audio-rate
-  modulation still keeps the legacy walk) — can be driven
+  edges), or parameter automation — sparse (connect_automation, two control
+  points) and dense (connect_audio_rate_modulation, per-sample) — can be driven
   through the canonical `GraphRuntimeExecutor` instead of the legacy walk via
   `set_canonical_executor_routing_enabled(true)`. Output is bit-identical to the
   legacy walk (`signal_graph_executor_routing.{hpp,cpp}` translates the graph;
@@ -160,13 +160,16 @@ predictable output, no MIDI.
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
   identically. MIDI edges route through per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
-  mailboxes (inject_midi / extract_midi) around the routed call. Sparse parameter
+  mailboxes (inject_midi / extract_midi) around the routed call. Parameter
   automation routes through a `GraphRuntimeAutomationScratch` (per-node parameter
-  event queue + per-connection slew state): the executor samples each source at
-  the block edges, maps/slews/mixes per the connection's resolved bounds, and
-  builds the plugin's parameter events — bit-identical to the walk. A node
-  automating more than `kMaxParamsPerNode` (64) distinct parameters is kept on
-  the legacy walk. Dense audio-rate modulation still stays on the legacy walk.
+  event queue + per-connection slew state + per-node dense buffers): sparse edges
+  sample the source at the block edges, map/slew/mix per the connection's
+  resolved bounds, and emit two control points; dense audio-rate edges map every
+  sample (through the same per-connection PDC delay ring as audio), mix into a
+  per-node buffer, and emit one event per sample — both bit-identical to the walk
+  and built into the same per-node event queue. A node exceeding
+  `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
+  walk.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio

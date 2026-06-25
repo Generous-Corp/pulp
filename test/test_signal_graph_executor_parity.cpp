@@ -699,12 +699,20 @@ public:
                  const pulp::host::ParameterEventQueue& params,
                  int n) override {
         const int last = n - 1;
+        // Param 1 (sparse / control-rate): linear gain ramp v0 -> vN.
         float v0 = 1.0f;
         float vN = 1.0f;
+        // Param 2 (dense / audio-rate): per-sample gain, default 1 where unset.
+        std::array<float, 4096> g2;
+        for (int s = 0; s < n && s < 4096; ++s) g2[static_cast<std::size_t>(s)] = 1.0f;
         for (const auto& ev : params) {
-            if (ev.param_id != 1) continue;
-            if (ev.sample_offset == 0) v0 = ev.value;
-            if (ev.sample_offset == last) vN = ev.value;
+            if (ev.param_id == 1) {
+                if (ev.sample_offset == 0) v0 = ev.value;
+                if (ev.sample_offset == last) vN = ev.value;
+            } else if (ev.param_id == 2 && ev.sample_offset >= 0 &&
+                       ev.sample_offset < n && ev.sample_offset < 4096) {
+                g2[static_cast<std::size_t>(ev.sample_offset)] = ev.value;
+            }
         }
         const std::size_t chs = out.num_channels();
         for (std::size_t c = 0; c < chs; ++c) {
@@ -712,7 +720,7 @@ public:
             const float* i = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
             for (int s = 0; s < n; ++s) {
                 const float t = last > 0 ? static_cast<float>(s) / static_cast<float>(last) : 0.0f;
-                const float gain = v0 + (vN - v0) * t;
+                const float gain = (v0 + (vN - v0) * t) * g2[static_cast<std::size_t>(s)];
                 o[static_cast<std::size_t>(s)] =
                     (i ? i[static_cast<std::size_t>(s)] : 0.0f) * gain;
             }
@@ -781,6 +789,8 @@ public:
             p.min_value = 0.0f;
             p.max_value = 1.0f;
             p.flags.automatable = true;
+            p.flags.modulatable = true;
+            p.rate = pulp::state::ParamRate::AudioRate;  // also dense-modulatable
             ps.push_back(p);
         }
         return ps;
@@ -1530,22 +1540,75 @@ TEST_CASE("SignalGraph::process automation matches legacy: two-source Add mix",
     }
 }
 
-TEST_CASE("SignalGraph::process opt-in falls back to legacy for dense audio-rate automation",
-          "[host][graph][executor][routing][automation]") {
-    // Dense audio-rate modulation is not yet routed; an eligible-looking graph
-    // with an audio-rate edge must stay ineligible and fall back to the walk.
-    SignalGraph g;
-    const auto in = g.add_input_node(2, "In");
-    const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
-    const auto out = g.add_output_node(2, "Out");
-    for (int c = 0; c < 2; ++c) {
-        REQUIRE(g.connect(in, c, p, c));
-        REQUIRE(g.connect(p, c, out, c));
+TEST_CASE("SignalGraph::process automation matches legacy: dense audio-rate modulation",
+          "[host][graph][executor][routing][parity][automation]") {
+    // in:0 drives the plugin's audio-rate parameter (id 2) per sample; the plugin
+    // applies it sample-by-sample. The routed dense gather must build the same
+    // per-sample parameter events the legacy walk does.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_audio_rate_modulation(in, 0, p, 2, 0.0f, 2.0f, 0.0f,
+                                                pulp::host::AutomationMix::Replace));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk)),
+            ramp(kFrames, 0.4f + 0.03f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
     }
-    REQUIRE(g.connect_audio_rate_modulation(in, 0, p, 2, 0.0f, 2.0f, 0.0f,
-                                            pulp::host::AutomationMix::Replace));
-    REQUIRE(g.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(g));
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: dense audio-rate with PDC delay",
+          "[host][graph][executor][routing][parity][automation][pdc]") {
+    // The dense modulation source runs through a latency-64 plugin, so the
+    // audio-rate edge into the mixing plugin is PDC-delayed by 64. Drive several
+    // blocks (the delay ring carries state) and require block-for-block parity.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto latP = g.add_plugin_node(
+            std::make_unique<DeterministicPlugin>(
+                DeterministicPlugin::Mode::kFull, 1.0f, 2, 2, /*latency=*/64),
+            2, 2, "LatP");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, latP, c));
+            REQUIRE(g.connect(latP, c, p, c));  // main audio (latency 64)
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        // Dense modulation from the plain (0-latency) input -> p's audio-rate
+        // param; p.input_latency=64, so this edge is delay-compensated by 64.
+        REQUIRE(g.connect_audio_rate_modulation(in, 0, p, 2, 0.0f, 2.0f, 0.0f,
+                                                pulp::host::AutomationMix::Replace));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 8; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.02f * static_cast<float>(blk)),
+            ramp(kFrames, 0.5f + 0.02f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
 }
 
 TEST_CASE("SignalGraph::process automation executor path does not allocate on the audio thread",
@@ -1560,6 +1623,9 @@ TEST_CASE("SignalGraph::process automation executor path does not allocate on th
     }
     REQUIRE(g.connect_automation(in, 0, p, 1, 0.0f, 2.0f, /*smoothing_ms=*/5.0f,
                                  pulp::host::AutomationMix::Replace));
+    // Also a dense audio-rate edge so the probe covers the per-sample gather.
+    REQUIRE(g.connect_audio_rate_modulation(in, 1, p, 2, 0.0f, 2.0f, 0.0f,
+                                            pulp::host::AutomationMix::Replace));
     g.set_canonical_executor_routing_enabled(true);
     REQUIRE(g.prepare(kSr, kFrames));
     REQUIRE(signal_graph_executor_eligible(g));
@@ -1648,6 +1714,67 @@ TEST_CASE("SignalGraph::process automation matches legacy: source also drives au
         const std::vector<std::vector<float>> input{
             ramp(kFrames, 0.6f + 0.04f * static_cast<float>(blk)),
             ramp(kFrames, 0.5f + 0.03f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process opt-in falls back to legacy past the per-node dense automation cap",
+          "[host][graph][executor][routing][automation]") {
+    // The dense gather's per-param accumulators are also a fixed on-stack array;
+    // a node receiving more distinct audio-rate params than the cap must stay on
+    // the legacy walk.
+    constexpr int kOverCap =
+        static_cast<int>(pulp::format::GraphRuntimeAutomationScratch::kMaxParamsPerNode) + 1;
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(std::make_unique<ManyParamPlugin>(kOverCap, 2), 2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    for (int i = 0; i < kOverCap; ++i) {
+        REQUIRE(g.connect_audio_rate_modulation(in, 0, p, static_cast<uint32_t>(i + 1),
+                                                0.0f, 1.0f, 0.0f,
+                                                pulp::host::AutomationMix::Add));
+    }
+    // Prepare with a tiny block so the per-sample events (kOverCap * block) fit
+    // the parameter-event-queue capacity (1024) — otherwise prepare rejects the
+    // graph before eligibility is queried. With a prepared graph, the per-node
+    // dense param cap is the gate that keeps it on the legacy walk.
+    REQUIRE(g.prepare(kSr, /*max_block=*/8));
+    CHECK_FALSE(signal_graph_executor_eligible(g));
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: dense Replace + Add on one param",
+          "[host][graph][executor][routing][parity][automation]") {
+    // Two dense edges into the same audio-rate parameter — one Replace, one Add —
+    // so the per-sample accumulate order + bounds clamp must match the walk.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_audio_rate_modulation(in, 0, p, 2, 0.0f, 1.2f, 0.0f,
+                                                pulp::host::AutomationMix::Replace));
+        REQUIRE(g.connect_audio_rate_modulation(in, 1, p, 2, 0.0f, 1.2f, 0.0f,
+                                                pulp::host::AutomationMix::Add));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.03f * static_cast<float>(blk)),
+            ramp(kFrames, 0.6f - 0.02f * static_cast<float>(blk))};
         INFO("block " << blk);
         expect_equal(run_legacy(legacy, kFrames, input, 2),
                      run_legacy(routed, kFrames, input, 2));

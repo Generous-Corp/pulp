@@ -308,6 +308,75 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         if (!queue->push({accum[pi].param_id, 0, v0, 0})) break;
         if (last > 0 && !queue->push({accum[pi].param_id, last, vN, 0})) break;
     }
+
+    // Dense (audio-rate) modulation: per-sample map (with the same per-connection
+    // PDC delay ring as audio) accumulated per parameter, emitting one event per
+    // sample. Pushed after the sparse control points into the SAME queue (a final
+    // stable sort orders them by sample offset), matching the host walk's
+    // audio-rate path.
+    const std::uint32_t dense_count = automation.dense_param_count(node_index);
+    std::array<bool, kMaxAutomatedParamsPerNode> dense_replace{};
+    std::array<bool, kMaxAutomatedParamsPerNode> dense_add{};
+    std::array<float, kMaxAutomatedParamsPerNode> dense_lo{};
+    std::array<float, kMaxAutomatedParamsPerNode> dense_hi{};
+    for (std::uint32_t i = 0; i < dense_count; ++i) {
+        std::fill_n(automation.dense_buffer(node_index, i), frames, 0.0f);
+    }
+    for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+        const auto conn_index =
+            plan.inbound_connection_indices[node.first_inbound_connection + c];
+        const auto& conn = plan.connections[conn_index];
+        if (!conn.is_automation || !conn.automation.audio_rate) continue;
+        std::uint32_t pi = 0;
+        for (; pi < dense_count; ++pi) {
+            if (automation.dense_param_id(node_index, pi) == conn.automation.param_id) break;
+        }
+        if (pi == dense_count) continue;
+        const auto& src_slots = assignment.nodes[conn.source_index];
+        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        if (src == nullptr) continue;
+        const auto& a = conn.automation;
+        dense_lo[pi] = a.bounds_lo;
+        dense_hi[pi] = a.bounds_hi;
+        float* dst = automation.dense_buffer(node_index, pi);
+        const auto ring = pool.delay_ring(conn_index);
+        if (ring.data == nullptr || ring.delay == 0) {
+            for (std::uint32_t f = 0; f < frames; ++f) {
+                const float v = a.range_lo +
+                    std::clamp(src[f], 0.0f, 1.0f) * (a.range_hi - a.range_lo);
+                if (a.mix_add) { dst[f] += v; dense_add[pi] = true; }
+                else { dst[f] = v; dense_replace[pi] = true; }
+            }
+        } else {
+            const int ring_size = static_cast<int>(ring.size);
+            const int delay = static_cast<int>(ring.delay);
+            int wp = *ring.write_pos;
+            int rp = wp - delay;
+            if (rp < 0) rp += ring_size;
+            for (std::uint32_t f = 0; f < frames; ++f) {
+                ring.data[wp] = src[f];
+                const float v = a.range_lo +
+                    std::clamp(ring.data[rp], 0.0f, 1.0f) * (a.range_hi - a.range_lo);
+                if (a.mix_add) { dst[f] += v; dense_add[pi] = true; }
+                else { dst[f] = v; dense_replace[pi] = true; }
+                if (++wp == ring_size) wp = 0;
+                if (++rp == ring_size) rp = 0;
+            }
+            *ring.write_pos = wp;
+        }
+    }
+    for (std::uint32_t i = 0; i < dense_count; ++i) {
+        if (!dense_replace[i] && !dense_add[i]) continue;
+        const std::uint32_t pid = automation.dense_param_id(node_index, i);
+        const float* vals = automation.dense_buffer(node_index, i);
+        const float lo = std::min(dense_lo[i], dense_hi[i]);
+        const float hi = std::max(dense_lo[i], dense_hi[i]);
+        for (std::uint32_t f = 0; f < frames; ++f) {
+            float v = vals[f];
+            if (dense_add[i]) v = std::clamp(v, lo, hi);
+            if (!queue->push({pid, static_cast<std::int32_t>(f), v, 0})) break;
+        }
+    }
     queue->sort();
 }
 
@@ -407,9 +476,11 @@ void GraphRuntimeMidiScratch::clear() noexcept {
     node_count_ = 0;
 }
 
-bool GraphRuntimeAutomationScratch::reset(std::uint32_t node_count,
-                                          std::uint32_t connection_count) {
+bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
+                                          std::uint32_t max_frames) {
     clear();
+    const std::uint32_t node_count = plan.node_count();
+    const std::uint32_t connection_count = plan.connection_count();
     try {
         events_.reserve(node_count);
         for (std::uint32_t i = 0; i < node_count; ++i) {
@@ -417,12 +488,44 @@ bool GraphRuntimeAutomationScratch::reset(std::uint32_t node_count,
         }
         slew_last_.assign(connection_count, 0.0f);
         slew_primed_.assign(connection_count, 0);
+
+        // Per-node dense (audio-rate) parameter layout: each node's distinct
+        // audio-rate param ids in first-seen inbound-connection order, each given
+        // a max_frames accumulation region (matching the host walk's per-node
+        // audio_rate_param_data).
+        node_dense_first_.assign(node_count, 0);
+        node_dense_count_.assign(node_count, 0);
+        std::uint32_t total_dense = 0;
+        for (std::uint32_t n = 0; n < node_count; ++n) {
+            const auto& node = plan.nodes[n];
+            node_dense_first_[n] = static_cast<std::uint32_t>(dense_params_.size());
+            for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+                const auto ci =
+                    plan.inbound_connection_indices[node.first_inbound_connection + c];
+                const auto& conn = plan.connections[ci];
+                if (!conn.is_automation || !conn.automation.audio_rate) continue;
+                bool seen = false;
+                for (std::uint32_t k = 0; k < node_dense_count_[n]; ++k) {
+                    if (dense_params_[node_dense_first_[n] + k].param_id ==
+                        conn.automation.param_id) {
+                        seen = true;
+                        break;
+                    }
+                }
+                if (seen) continue;
+                dense_params_.push_back({conn.automation.param_id, total_dense * max_frames});
+                ++node_dense_count_[n];
+                ++total_dense;
+            }
+        }
+        dense_storage_.assign(static_cast<std::size_t>(total_dense) * max_frames, 0.0f);
     } catch (...) {
         clear();
         return false;
     }
     node_count_ = node_count;
     connection_count_ = connection_count;
+    max_frames_ = max_frames;
     return true;
 }
 
@@ -430,8 +533,13 @@ void GraphRuntimeAutomationScratch::clear() noexcept {
     events_.clear();
     slew_last_.clear();
     slew_primed_.clear();
+    dense_params_.clear();
+    node_dense_first_.clear();
+    node_dense_count_.clear();
+    dense_storage_.clear();
     node_count_ = 0;
     connection_count_ = 0;
+    max_frames_ = 0;
 }
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
@@ -669,7 +777,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     // An automation scratch, when supplied, must cover every node + connection so
     // the gather can index any node's queue and any connection's slew state.
     if (automation != nullptr &&
-        !automation->fits(plan.node_count(), plan.connection_count())) {
+        !automation->fits(plan.node_count(), plan.connection_count(), frames)) {
         GraphRuntimeExecutorResult fail;
         fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
         return fail;
