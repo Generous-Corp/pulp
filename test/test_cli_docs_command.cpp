@@ -331,6 +331,38 @@ TEST_CASE("docs command reports missing manifest and script paths",
 
     {
         ScopedOutput output;
+        REQUIRE(cmd_docs({"check"}) == 1);
+        REQUIRE(output.err.str().find("check script not found") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
         REQUIRE(cmd_docs({"build-api"}) == 1);
     }
+}
+
+TEST_CASE("docs command runs project docs check script",
+          "[cli][docs][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir tmp;
+    auto root = make_project(tmp);
+    auto marker = root / "docs-check-ran.txt";
+    write_file(root / "tools" / "check-docs.sh",
+               "#!/bin/sh\n"
+               "printf 'cli-docs-check-ran\\n' > \"" + marker.string() + "\"\n");
+
+    ScopedCurrentPath cwd{root / "docs" / "guides"};
+    REQUIRE(cmd_docs({"check"}) == 0);
+    REQUIRE(fs::exists(marker));
+    REQUIRE(read_file_contents(marker).find("cli-docs-check-ran") != std::string::npos);
+
+    fs::remove(marker);
+    write_file(root / "tools" / "check-docs.sh",
+               "#!/bin/sh\n"
+               "exit 7\n");
+    REQUIRE(cmd_docs({"check"}) == 7);
+    REQUIRE_FALSE(fs::exists(marker));
+#endif
 }
