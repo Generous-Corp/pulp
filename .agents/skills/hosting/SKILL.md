@@ -399,6 +399,34 @@ Gotchas:
 - Keep the executor/parallel/anticipation opt-ins OFF for partition-invariance
   fixtures — anticipation in particular is intentionally not block-size invariant.
 
+## Baking a graph to a `Processor` (`BakedGraphProcessor`)
+
+`core/host/baked_graph_processor.{hpp,cpp}` — `bake(const SignalGraph&)` freezes a
+prepared, fully-lowerable graph into one `pulp::format::Processor` that runs a frozen
+`GraphRuntimeSnapshot` through the SAME `GraphRuntimeExecutor::process_routed()` the
+live graph uses, so baked output is bit-identical to the live graph for the lowerable
+subset. The artifact is a *serialized fused plan* (data), not generated code — it
+reuses the one backend, so the baked Processor only CALLS `process_routed`, never
+defines a routing entry point.
+
+Gotchas:
+- **Lowerable subset is narrow by design.** Today: `AudioInput`/`AudioOutput`/`Gain`
+  only. `bake()` REFUSES loudly (null processor + a `LowerRejectReason`) for an
+  unprepared or executor-ineligible graph, a hosted `Plugin` node (opaque external
+  state — not self-contained), or a `Custom` node (lowering is a follow-up). The
+  node-kind refusals are checked BEFORE the eligibility predicate so a Plugin/Custom
+  graph reports its specific reason instead of a generic `NotExecutorEligible`.
+- **The baked Processor owns its Gain values.** `bake()` copies each Gain's value into
+  the Processor; `prepare()` seeds one heap-stable `atomic<float>` per Gain (a
+  `unique_ptr` vector, never a value vector) and resolves the routed Gain bindings to
+  those owned atomics — so the baked Processor is independent of the source graph's
+  live snapshot lifetime. A second `prepare()` clears the old snapshot/pool/atomics
+  before rebuilding, so binding pointers never dangle.
+- **Sizing mirrors live routing.** `prepare()` builds the snapshot via the same
+  `build_executor_snapshot()` the live routing uses and sizes the pool from
+  `buffer_slot_count()` × `max_buffer_size` plus the per-connection PDC rings, so
+  `process()` is allocation-free.
+
 ## Common tripwires
 
 - Building `pulp-host` without adding a new `.cpp` to `target_sources` —
