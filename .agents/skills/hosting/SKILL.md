@@ -359,21 +359,19 @@ predictable output, no MIDI.
   own signed canonical manifest; do not treat screenshots, validation reports,
   licenses, or provenance as covered by the node-pack loader signature.
 - **Routing a `SignalGraph` through the canonical executor
-  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** The current eligible
-  subset is the one described above under "Canonical-executor routing": AudioInput
-  / AudioOutput / Gain / live Plugin / MidiInput / MidiOutput nodes, with audio
-  (feedforward, feedback, sidechain), MIDI, sparse automation, and dense
-  audio-rate modulation edges. The builder fails closed for unsupported Custom
-  nodes, placeholder Plugin nodes, and per-node automation counts above the fixed
-  scratch caps. `build_signal_graph_executor_routing()` translates an eligible
-  prepared graph into a `format::GraphRuntimeSnapshot` + pre-sized
+  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** The eligible subset is
+  described above under "Canonical-executor routing" and enforced by
+  `signal_graph_topology_executor_eligible()` /
+  `signal_graph_executor_eligible()`. The builder fails closed for unsupported
+  Custom nodes, placeholder Plugin nodes, and per-node automation counts above
+  the fixed scratch caps. `build_signal_graph_executor_routing()` translates an
+  eligible prepared graph into a `format::GraphRuntimeSnapshot` + pre-sized
   `GraphRuntimeBufferPool`; the live `process()` path embeds that snapshot and
   its scratch pool per `CompiledGraph`, so a re-prepare rebuilds fresh routing
   state without resizing buffers an in-flight audio reader holds. The routing
-  keeps the live compiled snapshot alive, reads live gain atomics, and invokes the
-  snapshot's live PluginSlots, so **rebuild routing after any re-prepare** and
-  keep this section aligned with `signal_graph_topology_executor_eligible()` and
-  `test_signal_graph_executor_parity`.
+  keeps the live compiled snapshot alive, reads live gain atomics, and invokes
+  the snapshot's live PluginSlots, so **rebuild routing after any re-prepare**
+  and keep this section aligned with `test_signal_graph_executor_parity`.
 
 ## Common tripwires
 
