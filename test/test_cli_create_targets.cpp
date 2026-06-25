@@ -1,11 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "tools/cli/create_build_commands.hpp"
 #include "tools/cli/create_targets.hpp"
 
+#include <filesystem>
+#include <string>
 #include <vector>
 
+using pulp::cli::create_standalone_configure_command;
+using pulp::cli::create_standalone_ctest_command;
 using pulp::cli::create_build_config;
 using pulp::cli::create_default_build_targets;
+
+namespace fs = std::filesystem;
 
 TEST_CASE("CLI create targets use format suffixes for plugin projects", "[cli][create]") {
     const auto targets =
@@ -123,4 +130,23 @@ TEST_CASE("CLI create selects build config at build/test time for multi-config g
     // multi-config selectors the generators require.
     CHECK((" --config " + create_build_config(false)) == " --config Release");
     CHECK((" -C " + create_build_config(true)) == " -C Debug");
+}
+
+TEST_CASE("CLI create standalone commands quote paths with spaces",
+          "[cli][create][shellout][coverage]") {
+    const fs::path source_dir = fs::path("Generated Projects") / "My Plugin";
+    const fs::path build_dir = source_dir / "build dir";
+    const fs::path sdk_dir = fs::path("SDK Cache") / "Pulp SDK";
+
+    const auto configure =
+        create_standalone_configure_command(source_dir, build_dir, false, sdk_dir);
+    CHECK(configure.find("-S \"" + source_dir.string() + "\"") != std::string::npos);
+    CHECK(configure.find("-B \"" + build_dir.string() + "\"") != std::string::npos);
+    CHECK(configure.find("-DCMAKE_BUILD_TYPE=\"Release\"") != std::string::npos);
+    CHECK(configure.find("-DCMAKE_PREFIX_PATH=\"" + sdk_dir.string() + "\"")
+          != std::string::npos);
+
+    const auto ctest = create_standalone_ctest_command(build_dir, true);
+    CHECK(ctest.find("--test-dir \"" + build_dir.string() + "\"") != std::string::npos);
+    CHECK(ctest.find("-C \"Debug\"") != std::string::npos);
 }
