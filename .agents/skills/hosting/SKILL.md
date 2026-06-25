@@ -170,6 +170,31 @@ predictable output, no MIDI.
   and built into the same per-node event queue. A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
+- **Parallel-executor routing (opt-in, default OFF, independent of the serial
+  opt-in).** `set_parallel_routing_enabled(true)` drives the SAME eligible subset
+  through `GraphRuntimeExecutor::process_parallel` — a levelized fork-join over a
+  persistent `GraphRuntimeWorkerPool` (the audio thread is participant 0). Output
+  is bit-identical to the serial executor and the legacy walk; the per-node body
+  (`run_routed_node`) is shared. Dispatch order in `process()`: parallel (if
+  enabled + valid + pool running + fits) → serial executor (if its toggle on) →
+  legacy walk. The two routed branches share one `dispatch_routed` bridge, and
+  every executor zeroes the output bus + the MIDI ingress is idempotent (consumed
+  mailbox sequences aren't committed until `run()` succeeds), so a failed parallel
+  attempt re-renders the block on a lower tier with no doubled output or
+  double-consumed MIDI. GOTCHAS: (1) the parallel snapshot uses a REUSE-FREE
+  buffer assignment (`parallel_safe=true`) — concurrent same-level nodes must not
+  alias a recycled scratch slot; `process_parallel` refuses a non-parallel-safe
+  snapshot. (2) Levels containing an AudioOutput node run SERIALLY in topo order
+  (AudioOutput `+=` accumulates into the shared output bus; float add is
+  non-associative, so order is load-bearing for ≥3 sinks). (3) WORKER-POOL
+  LIFECYCLE is load-bearing: the pool is started ONCE (size = clamped hardware
+  concurrency, guarded by `worker_count() == 0`) and NEVER stopped/resized on a
+  re-prepare — `start()`/`stop()` join threads + reset the epoch/completion
+  counters, a UAF if run against an in-flight audio `run()`. The only legal stop
+  is `~GraphRuntimeWorkerPool` at SignalGraph destruction. Don't make the thread
+  count runtime-variable without a drain handshake. The pool's completion barrier
+  counts PARTICIPANTS finished (not tasks): an empty-range participant must still
+  register done, or it can race the next batch's published state.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
