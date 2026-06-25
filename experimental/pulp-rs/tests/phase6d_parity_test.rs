@@ -113,6 +113,8 @@ fn create_help_lists_all_options() {
         "--in-tree",
         "--no-build",
         "--no-interactive",
+        "--pin",
+        "--debug",
     ] {
         assert!(
             stdout.contains(flag),

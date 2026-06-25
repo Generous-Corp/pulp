@@ -422,6 +422,9 @@ commands:
       - name: --type
         kind: option
         description: "Plugin type: effect, instrument, app, bare (default: effect)"
+      - name: --mpe
+        kind: flag
+        description: Opt into MPE support for instrument projects.
       - name: --manufacturer
         kind: option
         description: "Manufacturer name (default: Pulp)"
@@ -431,6 +434,9 @@ commands:
       - name: --output
         kind: option
         description: Output directory override (otherwise uses PULP_PROJECTS_DIR, ~/.pulp/config.toml, repo sibling, or ./<name>)
+      - name: --targets
+        kind: option
+        description: "Comma-separated extra targets to scaffold (alias: --target; e.g., android)."
       - name: --in-tree
         kind: flag
         description: "Add the project under examples/ using the local Pulp checkout (alias: --example)"
@@ -440,6 +446,12 @@ commands:
       - name: --no-interactive
         kind: flag
         description: "Non-interactive mode for CI/scripting (alias: --ci)"
+      - name: --pin
+        kind: flag
+        description: Write the current SDK version into `pulp.toml` instead of the default floating `sdk_version = "latest"` marker.
+      - name: --debug
+        kind: flag
+        description: Configure the generated project with `CMAKE_BUILD_TYPE=Debug` instead of the default Release build.
     docs: reference/cli.md#create
 
   - name: cache

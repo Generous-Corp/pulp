@@ -8,7 +8,8 @@
 //! |-------------------------------------------------|-------------|
 //! | Flag parse (`--type`, `--mpe`, `--template`,    | Ported      |
 //! |   `--manufacturer`, `--output`, `--targets`,    |             |
-//! |   `--in-tree`, `--no-build`, `--ci`)            |             |
+//! |   `--in-tree`, `--no-build`, `--ci`, `--pin`,   |             |
+//! |   `--debug`)                                    |             |
 //! | Name derivation (class / lower / namespace /    | Ported      |
 //! |   plugin-code / mfr-code / bundle id)           |             |
 //! | Output directory resolution (`--output` / in-   | Ported      |
@@ -23,6 +24,7 @@
 //! | Doctor pre-flight                               | **Skipped** |
 //! | `ensure_sdk()` / network fetch                  | **Skipped** |
 //! | Post-scaffold build / ctest                     | **Skipped** |
+//! | `--pin` / `--debug` effects                     | **Skipped** |
 //! | AAX/AU SDK availability warnings                | **Skipped** |
 //! | Android template tree copy                      | Ported      |
 //! | `~/.pulp/projects.json` registry add            | **Skipped** |
@@ -76,6 +78,12 @@ pub struct CreateArgs {
     /// `--no-interactive` / `--ci`. Required for the Rust-native
     /// scaffold path; otherwise the command delegates to `pulp-cpp`.
     pub ci_mode: bool,
+    /// `--pin`. Parsed so the native `--ci` path can report that the full
+    /// create path owns SDK pinning semantics.
+    pub pin_sdk: bool,
+    /// `--debug`. Parsed so the native `--ci` path can report that it has no
+    /// configure/build step where Debug could take effect.
+    pub debug_build: bool,
     /// `--help` / `-h`.
     pub wants_help: bool,
 }
@@ -93,6 +101,8 @@ impl Default for CreateArgs {
             in_tree: false,
             no_build: false,
             ci_mode: false,
+            pin_sdk: false,
+            debug_build: false,
             wants_help: false,
         }
     }
@@ -134,6 +144,8 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             "--in-tree" | "--example" => out.in_tree = true,
             "--no-build" => out.no_build = true,
             "--no-interactive" | "--ci" => out.ci_mode = true,
+            "--pin" => out.pin_sdk = true,
+            "--debug" => out.debug_build = true,
             _ if !a.starts_with('-') && out.name.is_empty() => {
                 out.name = a.clone();
             }
@@ -198,7 +210,9 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
         \x20 --in-tree, --example                 Add the project to examples/\n\
         \x20 --no-build                           Skip build after scaffolding\n\
-        \x20 --no-interactive, --ci               Non-interactive mode\n",
+        \x20 --no-interactive, --ci               Non-interactive mode\n\
+        \x20 --pin                                Pin SDK version in pulp.toml (full create path; ignored with --ci)\n\
+        \x20 --debug                              Configure Debug instead of Release (full create path; ignored with --ci)\n",
     )
     .map_err(io)
 }
@@ -818,6 +832,20 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
     };
 
     let out_dir = resolve_out_dir(args, project_root.as_deref(), cwd)?;
+    if args.pin_sdk || args.debug_build {
+        let ignored = if args.pin_sdk && args.debug_build {
+            "--pin/--debug"
+        } else if args.pin_sdk {
+            "--pin"
+        } else {
+            "--debug"
+        };
+        writeln!(
+            out,
+            "Note: {ignored} only takes effect in the full create path; ignored by the native --ci scaffold path."
+        )
+        .map_err(io)?;
+    }
     scaffold(
         args,
         &out_dir,
@@ -841,6 +869,22 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_minimal_effect_templates(root: &Path, processor_body: &str) {
+        let templates = root.join("tools").join("templates").join("effect");
+        fs::create_dir_all(&templates).unwrap();
+        fs::write(templates.join("processor.hpp.template"), processor_body).unwrap();
+        fs::write(
+            templates.join("CMakeLists.txt.template"),
+            "project({{CLASS_NAME}})\n",
+        )
+        .unwrap();
+        fs::write(
+            templates.join("test.cpp.template"),
+            "t={{LOWER_NAME}}\n",
+        )
+        .unwrap();
+    }
 
     #[test]
     fn class_name_camel_cases() {
@@ -920,14 +964,9 @@ mod tests {
     fn scaffold_writes_expected_files() {
         let td = tempfile::tempdir().unwrap();
         let root = td.path().join("repo");
-        let templates = root.join("tools").join("templates").join("effect");
-        fs::create_dir_all(&templates).unwrap();
         // Minimal templates — just enough to drive the writer.
         let proc_body = "CLASS={{CLASS_NAME}}\nUID={{VST3_UID}}\n#include <pulp/format/processor.hpp>\n        .accepts_midi = true,\n";
-        fs::write(templates.join("processor.hpp.template"), proc_body).unwrap();
-        let cmake_body = "project({{CLASS_NAME}})\n";
-        fs::write(templates.join("CMakeLists.txt.template"), cmake_body).unwrap();
-        fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
+        write_minimal_effect_templates(&root, proc_body);
 
         let args = CreateArgs {
             name: "My Gain".to_owned(),
@@ -940,6 +979,8 @@ mod tests {
             in_tree: true,
             no_build: true,
             ci_mode: true,
+            pin_sdk: false,
+            debug_build: false,
             wants_help: false,
         };
 
@@ -1197,6 +1238,9 @@ mod tests {
             let p = parse_args(&["x".to_owned(), (*tok).to_owned()]);
             assert!(p.ci_mode, "{tok} did not set ci_mode");
         }
+        let p = parse_args(&["x".to_owned(), "--pin".to_owned(), "--debug".to_owned()]);
+        assert!(p.pin_sdk);
+        assert!(p.debug_build);
     }
 
     #[test]
@@ -1257,11 +1301,52 @@ mod tests {
         print_help(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         for opt in [
-            "--type", "--mpe", "--template", "--manufacturer", "--output",
-            "--targets", "--in-tree", "--no-build", "--ci",
+            "--type",
+            "--mpe",
+            "--template",
+            "--manufacturer",
+            "--output",
+            "--targets",
+            "--in-tree",
+            "--no-build",
+            "--ci",
+            "--pin",
+            "--debug",
         ] {
             assert!(s.contains(opt), "missing option in help: {opt}");
         }
+    }
+
+    #[test]
+    fn run_native_ci_warns_when_full_path_flags_are_ignored() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("repo");
+        fs::create_dir_all(root.join("core")).unwrap();
+        fs::write(root.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        write_minimal_effect_templates(
+            &root,
+            "#include <pulp/format/processor.hpp>\n        .accepts_midi = true,\n",
+        );
+
+        let mut buf = Vec::new();
+        let rc = run(
+            &root,
+            &CreateArgs {
+                name: "Warn Me".to_owned(),
+                output: Some(td.path().join("warn-me")),
+                ci_mode: true,
+                no_build: true,
+                pin_sdk: true,
+                debug_build: true,
+                ..CreateArgs::default()
+            },
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(rc, 0);
+        let stdout = String::from_utf8(buf).unwrap();
+        assert!(stdout.contains("--pin/--debug only takes effect in the full create path"));
+        assert!(stdout.contains("ignored by the native --ci scaffold path"));
     }
 
     #[test]

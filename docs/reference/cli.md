@@ -19,12 +19,16 @@ Default behavior is product-first:
 ```bash
 pulp create "My Gain"                              # effect plugin (default)
 pulp create "My Synth" --type instrument           # instrument plugin
+pulp create "MPE Synth" --type instrument --mpe    # instrument with MPE support
 pulp create "My App" --type app                    # standalone audio application
 pulp create "My Project" --type bare               # minimal skeleton
 pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
 pulp create "My FX" --output ~/projects/my-fx      # custom output directory
+pulp create "Android App" --type app --targets android --no-build # scaffold Android files
 pulp create "Debug Knob" --in-tree                 # add an example under examples/
 pulp create "Kit Gain" --template ./my-template-kit # scaffold from a local template kit
+pulp create "Pinned FX" --pin                      # write an exact SDK version
+pulp create "Debug FX" --debug                     # configure Debug instead of Release
 pulp create "My FX" --no-build                     # scaffold only, skip build
 pulp create "My FX" --no-interactive               # CI/scripting mode (no prompts)
 ```
@@ -48,19 +52,21 @@ projects_dir = "~/Code/PulpProjects"
 
 Set `PULP_HOME` to move the default `~/.pulp/` home used for SDK/cache/config storage.
 
-This flow is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation.
+The full create path is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation.
+
+When the Rust front end runs its native `--ci` scaffolder instead of delegating to `pulp-cpp`, it creates files and prints the follow-up `pulp build` command, but it does not run doctor checks, SDK fetch/cache setup, project registration, configure, build, or ctest. Use the delegated C++ create path for the one-shot scaffold/build/test proof.
 
 Mode truth:
 - **SDK mode** means you are in an external project building against a pinned installed Pulp SDK artifact.
 - **Source-tree mode** means you are inside the Pulp checkout building the repo or its examples against live source.
 - `pulp create` defaults to SDK mode unless you explicitly ask for an in-tree example with `--in-tree`.
 
-What it does:
+What the full create path does:
 1. Runs `pulp doctor` checks (fails fast if environment is broken)
 2. In standalone product mode: if run from inside a Pulp checkout, prepares pinned dependencies from that checkout and caches a local SDK install; otherwise downloads and caches the SDK release
 3. Scaffolds source files from built-in templates or an explicitly named local template kit (processor, format entries, test, CMakeLists.txt)
 4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
-5. In standalone product mode: generates `pulp.toml` with pinned SDK version and local SDK hints when created from a checkout
+5. In standalone product mode: generates `pulp.toml` with `sdk_version = "latest"` by default, an exact SDK version when `--pin` is passed, and local SDK hints when created from a checkout
 6. Configures, builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
 

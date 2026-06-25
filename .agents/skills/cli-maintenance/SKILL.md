@@ -740,6 +740,13 @@ at create time. Both code paths print a discoverable post-create
 message about `pulp project pin` so users learn the opt-in command
 without hunting.
 
+The Rust-native `pulp create --ci` path is a scaffold-only fallback: it
+parses the full create flag inventory for help/parity, but full-path flags
+such as `--pin` and `--debug` only take effect through the delegated C++
+create path. Keep those flags modeled in `CreateArgs` so the native `--ci`
+path can warn when it ignores them instead of silently treating them like
+typos.
+
 ## `pulp pr` — shim over `shipyard pr`
 
 By default `pulp pr` delegates to `shipyard pr` (on PATH), forwarding argv.
