@@ -285,14 +285,16 @@ feedback. Per-connection PDC delay lines, sidechain/MIDI/automation edge
 routing, slot reuse, and the `SignalGraph` walk migration belong to later
 graph-runtime slices.
 
-`host::SignalGraph` can route its live `process()` callback through this
-executor for eligible graphs (only AudioInput/AudioOutput/Gain nodes, plain
-audio connections) via `set_use_executor(true)` — default OFF, with the legacy
-walk as the fallback for ineligible graphs and the parity oracle. The routing
-snapshot and its scratch pool are built in `compile_()` and embedded
-per-snapshot in the published `CompiledGraph`, so a re-prepare builds fresh ones
-on a fresh snapshot and never resizes a buffer an in-flight audio reader is
-using — the same RCU/retire discipline the legacy per-node scratch relies on.
+`host::SignalGraph` can request routing its live `process()` callback through
+this executor for eligible graphs (only AudioInput/AudioOutput/Gain nodes, plain
+audio connections including one-block feedback) via
+`set_canonical_executor_routing_enabled(true)` —
+default OFF, with the legacy walk as the fallback for ineligible graphs and the
+parity oracle. The routing snapshot and its scratch pool are built in
+`compile_()` and embedded per-snapshot in the published `CompiledGraph`, so a
+re-prepare builds fresh ones on a fresh snapshot and never resizes a buffer an
+in-flight audio reader is using — the same RCU/retire discipline the legacy
+per-node scratch relies on.
 
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an

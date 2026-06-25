@@ -233,8 +233,8 @@ TEST_CASE("Translated routing honors set_node_gain after prepare",
 
 namespace {
 
-// Build in -> A(gain) -> out + A->A feedback. `use_executor` selects the path.
-void build_feedback_graph(SignalGraph& g, float gain, bool use_executor) {
+// Build in -> A(gain) -> out + A->A feedback. `route_executor` selects the path.
+void build_feedback_graph(SignalGraph& g, float gain, bool route_executor) {
     const auto in = g.add_input_node(1, "In");
     const auto a = g.add_gain_node("A");
     const auto out = g.add_output_node(1, "Out");
@@ -242,7 +242,7 @@ void build_feedback_graph(SignalGraph& g, float gain, bool use_executor) {
     REQUIRE(g.connect(a, 0, out, 0));
     REQUIRE(g.connect_feedback(a, 0, a, 0));
     REQUIRE(g.set_node_gain(a, gain));
-    g.set_use_executor(use_executor);
+    g.set_canonical_executor_routing_enabled(route_executor);
     REQUIRE(g.prepare(kSr, kFrames));
 }
 
@@ -255,8 +255,8 @@ TEST_CASE("SignalGraph::process opt-in executor path matches the legacy walk",
     // match block-for-block (proves the live opt-in dispatch + cross-block
     // feedback state agree with the legacy path).
     SignalGraph legacy, routed;
-    build_feedback_graph(legacy, 0.5f, /*use_executor=*/false);
-    build_feedback_graph(routed, 0.5f, /*use_executor=*/true);
+    build_feedback_graph(legacy, 0.5f, /*route_executor=*/false);
+    build_feedback_graph(routed, 0.5f, /*route_executor=*/true);
     REQUIRE(signal_graph_executor_eligible(routed));
 
     for (int blk = 0; blk < 6; ++blk) {
@@ -286,7 +286,7 @@ TEST_CASE("SignalGraph::process opt-in falls back to legacy for ineligible graph
     REQUIRE(g.connect(in, 0, a, 0));
     REQUIRE(g.connect(a, 0, out, 0));
     REQUIRE(g.set_node_gain(a, 0.5f));
-    g.set_use_executor(true);
+    g.set_canonical_executor_routing_enabled(true);
     REQUIRE(g.prepare(kSr, kFrames));
     CHECK_FALSE(signal_graph_executor_eligible(g));  // MIDI node disqualifies
 
@@ -304,7 +304,7 @@ TEST_CASE("SignalGraph::process opt-in falls back to legacy for ineligible graph
 TEST_CASE("SignalGraph::process executor path does not allocate on the audio thread",
           "[host][graph][executor][routing][rt-safety]") {
     SignalGraph g;
-    build_feedback_graph(g, 0.5f, /*use_executor=*/true);
+    build_feedback_graph(g, 0.5f, /*route_executor=*/true);
     REQUIRE(signal_graph_executor_eligible(g));
 
     const auto x = ramp(kFrames, 0.8f);
@@ -324,8 +324,8 @@ TEST_CASE("SignalGraph::process executor path does not allocate on the audio thr
 
 namespace {
 
-// Build in -> g1 -> g2 -> out (stereo, feedforward); `use_executor` selects path.
-void build_stereo_chain(SignalGraph& g, float a, float b, bool use_executor) {
+// Build in -> g1 -> g2 -> out (stereo, feedforward); `route_executor` selects path.
+void build_stereo_chain(SignalGraph& g, float a, float b, bool route_executor) {
     const auto in = g.add_input_node(2, "In");
     const auto g1 = g.add_gain_node("G1");
     const auto g2 = g.add_gain_node("G2");
@@ -338,7 +338,7 @@ void build_stereo_chain(SignalGraph& g, float a, float b, bool use_executor) {
     REQUIRE(g.connect(g2, 1, out, 1));
     REQUIRE(g.set_node_gain(g1, a));
     REQUIRE(g.set_node_gain(g2, b));
-    g.set_use_executor(use_executor);
+    g.set_canonical_executor_routing_enabled(route_executor);
     REQUIRE(g.prepare(kSr, kFrames));
 }
 
@@ -351,13 +351,13 @@ TEST_CASE("SignalGraph::process opt-in dispatch matches legacy: stereo chain + m
     // require bit-identical output. Covers the executor branch's own bus wiring.
     SECTION("stereo chain") {
         SignalGraph off, on;
-        build_stereo_chain(off, 0.5f, 0.75f, /*use_executor=*/false);
-        build_stereo_chain(on, 0.5f, 0.75f, /*use_executor=*/true);
+        build_stereo_chain(off, 0.5f, 0.75f, /*route_executor=*/false);
+        build_stereo_chain(on, 0.5f, 0.75f, /*route_executor=*/true);
         const std::vector<std::vector<float>> in{ramp(kFrames, 0.8f), ramp(kFrames, 0.6f)};
         expect_equal(run_legacy(off, kFrames, in, 2), run_legacy(on, kFrames, in, 2));
     }
     SECTION("two AudioOutput nodes mix") {
-        auto build = [](SignalGraph& g, bool use_executor) {
+        auto build = [](SignalGraph& g, bool route_executor) {
             const auto in = g.add_input_node(1, "In");
             const auto a = g.add_gain_node("A");
             const auto b = g.add_gain_node("B");
@@ -369,7 +369,7 @@ TEST_CASE("SignalGraph::process opt-in dispatch matches legacy: stereo chain + m
             REQUIRE(g.connect(b, 0, o2, 0));
             REQUIRE(g.set_node_gain(a, 0.5f));
             REQUIRE(g.set_node_gain(b, 0.25f));
-            g.set_use_executor(use_executor);
+            g.set_canonical_executor_routing_enabled(route_executor);
             REQUIRE(g.prepare(kSr, kFrames));
         };
         SignalGraph off, on;
@@ -383,14 +383,14 @@ TEST_CASE("SignalGraph::process opt-in dispatch matches legacy: stereo chain + m
 TEST_CASE("SignalGraph::process feedforward executor toggle is seamless mid-stream",
           "[host][graph][executor][routing][parity]") {
     // For a feedforward graph (no per-path feedback state), toggling
-    // set_use_executor between blocks must stay bit-identical to the steady
-    // legacy path block-for-block.
+    // Toggling the canonical executor between blocks must stay bit-identical to
+    // the steady legacy path block-for-block.
     SignalGraph toggled, legacy;
-    build_stereo_chain(toggled, 0.5f, 0.75f, /*use_executor=*/false);
-    build_stereo_chain(legacy, 0.5f, 0.75f, /*use_executor=*/false);
+    build_stereo_chain(toggled, 0.5f, 0.75f, /*route_executor=*/false);
+    build_stereo_chain(legacy, 0.5f, 0.75f, /*route_executor=*/false);
     for (int blk = 0; blk < 6; ++blk) {
         CAPTURE(blk);
-        toggled.set_use_executor(blk % 2 == 0);  // flip every block
+        toggled.set_canonical_executor_routing_enabled(blk % 2 == 0);  // flip every block
         const std::vector<std::vector<float>> in{
             ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk)), ramp(kFrames, 0.5f)};
         expect_equal(run_legacy(toggled, kFrames, in, 2),
@@ -400,15 +400,16 @@ TEST_CASE("SignalGraph::process feedforward executor toggle is seamless mid-stre
 
 TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
           "[host][graph][executor][routing][rt-safety][threads]") {
-    // The routed scratch pool is owned per-snapshot (retired via RCU), so a
-    // control-thread re-prepare that builds a fresh snapshot must never resize a
-    // buffer the audio thread is rendering into. Hammer process() on one thread
-    // while another re-prepares; this races/UAFs if the pool were shared, and is
-    // the regression guard for that fix (surfaces cleanly under TSan).
+    // The routed scratch pool is owned per-snapshot and retired through the
+    // same reader-count/raw-pointer handshake as the rest of CompiledGraph.
+    // Hammer process() on one thread while another re-prepares; this catches a
+    // shared-pool resize race or a retired-snapshot UAF (surfaces cleanly under
+    // TSan).
     SignalGraph g;
-    build_feedback_graph(g, 0.5f, /*use_executor=*/true);
+    build_feedback_graph(g, 0.5f, /*route_executor=*/true);
 
     std::atomic<bool> stop{false};
+    std::atomic<bool> started{false};
     std::atomic<std::uint64_t> blocks{0};
     std::thread audio([&] {
         std::vector<float> xi(kFrames, 0.3f), yo(kFrames, 0.0f);
@@ -416,16 +417,24 @@ TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
         std::array<float*, 1> oc{yo.data()};
         pulp::audio::BufferView<const float> iv(ic.data(), 1, kFrames);
         pulp::audio::BufferView<float> ov(oc.data(), 1, kFrames);
+        started.store(true, std::memory_order_release);
         while (!stop.load(std::memory_order_relaxed)) {
             g.process(ov, iv, kFrames);  // may render or hit the silent gap
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
+    while (!started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
-        REQUIRE(g.prepare(kSr, kFrames));  // builds + publishes fresh snapshots
+        if (!g.prepare(kSr, kFrames)) {  // builds + publishes fresh snapshots
+            prepared_all = false;
+        }
     }
     stop.store(true, std::memory_order_relaxed);
     audio.join();
+    REQUIRE(prepared_all);
     CHECK(blocks.load() > 0);  // the audio thread actually ran
 }
 

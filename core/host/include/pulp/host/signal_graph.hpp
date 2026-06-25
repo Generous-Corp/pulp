@@ -431,11 +431,14 @@ public:
     // mid-stream switch resets feedback history to whatever the destination path
     // last wrote — a one-block transient, not a crash or a permanent divergence.
     // Pick a path before starting a feedback graph and keep it for the stream.
-    void set_use_executor(bool enabled) noexcept {
-        use_executor_.store(enabled, std::memory_order_relaxed);
+    void set_canonical_executor_routing_enabled(bool enabled) noexcept {
+        canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
     }
-    bool uses_executor() const noexcept {
-        return use_executor_.load(std::memory_order_relaxed);
+    // Returns the requested opt-in flag, not a promise that the current block
+    // is taking the executor path. Actual dispatch also requires an eligible
+    // prepared snapshot and a scratch pool sized for the block.
+    bool canonical_executor_routing_enabled() const noexcept {
+        return canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     }
 
     RuntimeBudgetReport evaluate_optional_runtime_budget(
@@ -651,9 +654,7 @@ private:
         // Gain, plain audio connections). Empty/invalid otherwise. Its Gain
         // bindings reference this snapshot's own `runtime[id].gain` atomics, so
         // it carries no keepalive — it lives and dies exactly with this
-        // CompiledGraph, published atomically with it via live_raw_. The mutable
-        // scratch pool that drives it is audio-thread-owned on SignalGraph, NOT
-        // here, so a retired snapshot never shares mutable render state.
+        // CompiledGraph, published atomically with it via live_raw_.
         format::GraphRuntimeSnapshot routing_snapshot;
         bool routing_valid = false;
         // Per-snapshot scratch pool driving the routed path, sized in compile_()
@@ -685,7 +686,7 @@ private:
     // thread is its only writer (relaxed stat counters). The mutable scratch
     // pool is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool)
     // so it rides the existing RCU lifetime and is never resized under a reader.
-    std::atomic<bool> use_executor_{false};
+    std::atomic<bool> canonical_executor_routing_enabled_{false};
     format::GraphRuntimeExecutor executor_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access

@@ -45,8 +45,10 @@ bool signal_graph_executor_eligible(const SignalGraph& graph);
 // resolving each Gain node's live atomic via `gain_for`. Shared by the live-graph
 // translation and by SignalGraph::compile_ (which embeds the snapshot in the
 // compiled graph, resolving atomics from its own runtime). Returns false (and
-// leaves `out` empty) if the topology is not eligible or a Gain atomic is
-// missing. Does NOT size a pool or set a keepalive — the caller owns those.
+// leaves `out` empty) if the topology is not eligible, a Gain atomic is
+// missing, or the canonical graph-runtime plan/snapshot cannot be built under
+// its own limits. Does NOT size a pool or set a keepalive — the caller owns
+// those.
 bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::span<const Connection> connections,
                              const std::function<std::atomic<float>*(NodeId)>& gain_for,
