@@ -86,12 +86,20 @@ public:
     /// compute the MIDI note a typing key maps to for non-keyboard input (clicks).
     int octave_shift() const { return octave_shift_; }
 
-    /// Set the octave shift directly. Clamped to −4..+5: the asymmetric top end
-    /// lets the typing play-window's top reach G8 (MIDI 127) on the overview strip
-    /// (base C3 + 5 octaves = C8, and the 18-key window clamps its top to G8),
-    /// matching Logic's reach. Lets an on-screen octave −/+ control drive the same
-    /// state the z/x keys do.
-    void set_octave_shift(int s) { octave_shift_ = std::clamp(s, -4, 5); }
+    /// Set the octave shift directly. BOTH bounds are BASE-RELATIVE so the
+    /// play-window reaches the true range edges (C-2 … G8) regardless of base note.
+    /// Low bound = the most-negative shift that lands base+shift*12 on MIDI 0 (base
+    /// C2 → −4, C3 → −5). High bound = at least +5 (the 18-key typing play-window's
+    /// top reaches G8 from a normal base), AND enough to bring the window low up to
+    /// the piano's G8 saturation point (MIDI 92) for LOW roots — a fixed +5 left a
+    /// root ≤ C0 short of G8 because the overview strip's base-relative top exceeded
+    /// what this clamp honored. Lets an on-screen octave −/+ control, the z/x keys,
+    /// and the overview-strip drag all agree.
+    void set_octave_shift(int s) {
+        const int lo = -((base_note_ + 11) / 12);              // reach C-2 (base > C2)
+        const int hi = std::max(5, (92 - base_note_ + 11) / 12);  // reach G8 (low roots)
+        octave_shift_ = std::clamp(s, lo, hi);
+    }
 
     /// Release every held note (focus loss / capture disabled). Safe to call any
     /// time; a no-op when nothing is held.

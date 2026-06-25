@@ -19,21 +19,25 @@
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone_settings.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/signal/resampler.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/musical_typing.hpp>
+#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/waveform_editor.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <array>
@@ -67,9 +71,11 @@ struct SamplerVoice {
     audio::PublishedSampleView sample;
     audio::LoopRegion region;   // stored so the UI playhead can map position->progress
     bool released = false;
+    bool sustained = false;     // note-off arrived but held by the sustain pedal
 
     void reset() {
         active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
+        sustained = false;
         adsr.reset(); renderer.reset();
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
@@ -90,7 +96,13 @@ class SamplerSampleStore : public audio::PublishedSampleStore {
 public:
     static constexpr std::uint32_t kSlotCount = 2;
     static constexpr std::uint32_t kMaxChannels = 2;
-    static constexpr std::uint64_t kMaxFrames = 48000ull * 60ull;
+    // Per-slot frame capacity. A sample whose STRETCHED length exceeds this can't
+    // be published, so its slices map past the buffer and trigger silence — the
+    // longer-sample-won't-play bug. 60 s was too small for full-length sources;
+    // 4 min covers typical loops/songs. render_to_tempo additionally clamps the
+    // publish to this cap so anything longer degrades gracefully (the head plays)
+    // instead of silent-failing. (~184 MB preallocated across 2 stereo slots.)
+    static constexpr std::uint64_t kMaxFrames = 48000ull * 240ull;
     bool prepare() {
         return audio::PublishedSampleStore::prepare(
             audio::PublishedSampleStoreConfig{kSlotCount, kMaxChannels, kMaxFrames});
@@ -206,12 +218,15 @@ public:
 
 private:
     static bool is_audio_ext(const std::string& path) {
-        static const char* kExts[] = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg"};
+        // Accept exactly what the FormatRegistry can DECODE on this platform —
+        // including .m4a / .aac / .alac / .caf via the macOS CoreAudio reader.
+        // Sourcing the allow-list from the registry keeps drag-drop, the Open
+        // dialog, and the decoders from drifting apart (the m4a-won't-open bug:
+        // the decoder supported it but a hardcoded list here rejected the drop).
         std::string lower = path;
         std::transform(lower.begin(), lower.end(), lower.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        for (const char* e : kExts) {
-            const std::string es = e;
+        for (const auto& es : audio::FormatRegistry::instance().supported_read_extensions()) {
             if (lower.size() >= es.size() &&
                 lower.compare(lower.size() - es.size(), es.size(), es) == 0)
                 return true;
@@ -308,7 +323,7 @@ private:
         c.fill_text("Drop a sample, or click to browse", b.x + b.width / 2, cy + 42);
         c.set_fill_color(canvas::Color::rgba8(0x64, 0x6D, 0x7A));
         c.set_font("", 11.0f);
-        c.fill_text("WAV  AIFF  FLAC  MP3  OGG", b.x + b.width / 2, cy + 62);
+        c.fill_text("WAV  AIFF  FLAC  MP3  OGG  M4A", b.x + b.width / 2, cy + 62);
         c.set_text_align(canvas::TextAlign::left);
     }
     void paint_drag_overlay(canvas::Canvas& c, const view::Rect& b) {
@@ -351,133 +366,14 @@ public:
     }
 };
 
-// Compact interactive musical-typing keyboard, Ink & Signal styled. Its 16 keys
-// ARE the QWERTY musical-typing map (slice idx = note - root): white keys
-// A S D F G H J K L, black keys W E T Y U O P, ~1.25 octave C..D#. Click a key
-// to audition that slice; the key under the playhead lights up, so typing, MIDI
-// and clicks all show. Toggled by ⌘K. This is the interactive companion to
-// MusicalTypingController; the faithful Figma SVG component stays the design
-// reference until it is re-exported with per-key interactive elements.
-class InteractiveKeyboard : public view::View {
+// Invisible zero-chrome view that runs a callback once per frame (continuous
+// repaint). Used to poll the processor's loop generation so the footer TEMPO
+// box can default to the freshly-detected loop BPM (R≈1) when a new loop loads.
+class FrameTick : public view::View {
 public:
-    std::function<void(int slice, bool on)> on_play_slice;  // click -> audition
-    std::function<int()> active_slice;                      // playhead slice or -1
-    std::function<std::string()> root_label;                // e.g. "C3"
-
-    InteractiveKeyboard() { set_continuous_repaint(true); }
-
-    void on_mouse_event(const view::MouseEvent& e) override {
-        if (e.is_wheel) return;
-        const bool ph = e.hasExplicitPhase();
-        const bool down = ph ? e.isPress() : e.is_down;
-        const bool up   = ph ? e.isRelease() : !e.is_down;
-        if (down && e.button == view::MouseButton::left) {
-            const int s = key_at(e.position.x, e.position.y);
-            if (s >= 0) { pressed_ = s; if (on_play_slice) on_play_slice(s, true); }
-        } else if (up && pressed_ >= 0) {
-            if (on_play_slice) on_play_slice(pressed_, false);
-            pressed_ = -1;
-        }
-    }
-
-    void paint(canvas::Canvas& c) override {
-        using canvas::Color;
-        auto b = local_bounds();
-        const Color panel  = Color::rgba8(0x1E, 0x25, 0x30);
-        const Color border = Color::rgba8(0x39, 0x41, 0x4A);
-        const Color wkey   = Color::rgba8(0xE9, 0xED, 0xF2);
-        const Color bkey   = Color::rgba8(0x2A, 0x32, 0x3D);
-        const Color teal   = Color::rgba8(0x16, 0xDA, 0xC2);
-        const Color ink    = Color::rgba8(0x16, 0x1A, 0x21);  // dark text (on light/active)
-        const Color wtxt   = Color::rgba8(0xD6, 0xDC, 0xE4);  // light text (on black keys)
-        const Color muted  = Color::rgba8(0x93, 0x9C, 0xA9);
-
-        c.set_fill_color(panel);
-        c.fill_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-        c.set_stroke_color(border); c.set_line_width(1.f);
-        c.stroke_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-
-        c.set_fill_color(muted);
-        c.set_font("JetBrains Mono", 11.f);
-        c.set_text_align(canvas::TextAlign::left);
-        c.fill_text("MUSICAL TYPING", b.x + 16.f, b.y + 24.f);
-        if (root_label) {
-            c.set_text_align(canvas::TextAlign::right);
-            c.fill_text("ROOT " + root_label(), b.x + b.width - 16.f, b.y + 24.f);
-        }
-
-        const int act = active_slice ? active_slice() : -1;
-        auto hot = [&](int i){ return i == pressed_ || i == act; };
-
-        // White keys, then black keys on top.
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (is_black(i)) continue;
-            KRect r = white_rect(i);
-            c.set_fill_color(hot(i) ? teal : wkey);
-            c.fill_rounded_rect(r.x + 1.f, r.y, r.w - 2.f, r.h, 4.f);
-            c.set_fill_color(ink);
-            c.set_font("JetBrains Mono", 13.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 12.f);
-        }
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (!is_black(i)) continue;
-            KRect r = black_rect(i);
-            c.set_fill_color(hot(i) ? teal : bkey);
-            c.fill_rounded_rect(r.x, r.y, r.w, r.h, 3.f);
-            c.set_fill_color(hot(i) ? ink : wtxt);
-            c.set_font("JetBrains Mono", 11.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 8.f);
-        }
-        c.set_text_align(canvas::TextAlign::left);
-    }
-
-private:
-    struct KRect { float x, y, w, h; };
-    static constexpr int kNumKeys = 16;
-
-    static const char* letter(int i) {
-        static const char* const L[16] =
-            {"A","W","S","E","D","F","T","G","Y","H","U","J","K","O","L","P"};
-        return (i >= 0 && i < 16) ? L[i] : "";
-    }
-    static bool is_black(int i) {
-        switch (i) {
-            case 1: case 3: case 6: case 8: case 10: case 13: case 15: return true;
-            default: return false;
-        }
-    }
-    static int white_count() { return 9; }
-    int white_index(int sliceidx) const {
-        int wi = 0; for (int i = 0; i < sliceidx; ++i) if (!is_black(i)) ++wi; return wi;
-    }
-    KRect keyarea() const {
-        auto b = local_bounds();
-        const float padx = 16.f, top = 40.f, bot = 16.f;
-        return {b.x + padx, b.y + top, b.width - 2 * padx, b.height - top - bot};
-    }
-    KRect white_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        return {g.x + static_cast<float>(white_index(sliceidx)) * ww, g.y, ww, g.h};
-    }
-    KRect black_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        const int wi = white_index(sliceidx - 1);  // sliceidx-1 is the preceding white
-        const float bw = ww * 0.6f, bh = g.h * 0.6f;
-        return {g.x + static_cast<float>(wi + 1) * ww - bw * 0.5f, g.y, bw, bh};
-    }
-    static bool inside(const KRect& r, float x, float y) {
-        return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-    }
-    int key_at(float x, float y) const {
-        for (int i = 0; i < kNumKeys; ++i)
-            if (is_black(i)) { KRect r = black_rect(i); if (inside(r, x, y)) return i; }
-        for (int i = 0; i < kNumKeys; ++i)
-            if (!is_black(i)) { KRect r = white_rect(i); if (inside(r, x, y)) return i; }
-        return -1;
-    }
-    int pressed_ = -1;
+    std::function<void()> on_tick;
+    FrameTick() { set_continuous_repaint(true); }
+    void paint(canvas::Canvas&) override { if (on_tick) on_tick(); }
 };
 
 // Editor root that owns the widget<->parameter bindings and store listeners.
@@ -494,10 +390,39 @@ public:
     // current_root_note to the ROOT param.
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
-    // The on-screen interactive musical-typing keyboard. Hidden by default;
-    // ⌘K (Ctrl+K on Win/Linux) toggles it. Click keys to audition slices; the
-    // playhead key lights up so typing / MIDI / clicks all show.
-    InteractiveKeyboard* keyboard = nullptr;
+    // True while the SDK MusicalTypingKeyboard's own window is on-screen. The
+    // editor's typing only plays slices (and lights the keyboard) while that
+    // window is visible — when the keyboard is hidden, QWERTY triggers nothing.
+    // This gates the MAIN-window typing path; when the keyboard's OWN window is
+    // focused it self-captures keys instead (set_input_capture(true)), so the two
+    // paths cover the two focus cases without overlapping. create_view() wires
+    // this to `kb_window_ && kb_window_->is_visible()`; tests inject a bool.
+    std::function<bool()> keyboard_window_visible;
+    // Toggle the SDK MusicalTypingKeyboard's own secondary GPU window (Cmd-K /
+    // Ctrl+K, and the toolbar "Keyboard" button). The keyboard is NOT inline —
+    // the processor owns the window + primitive; create_view() wires this to
+    // PulpTempoSamplerProcessor::toggle_keyboard_window().
+    std::function<void()> on_toggle_keyboard;
+    // Toolbar "Settings" button that opens the standalone Audio/MIDI panel. It is
+    // only meaningful in the standalone (the SDK settings chrome owns the panel);
+    // in a DAW the host owns device routing, so it is hidden. Visibility is
+    // resolved once the view is attached (see update_standalone_chrome_affordances).
+    view::TextButton* settings_button = nullptr;
+    // Footer TEMPO box (target-tempo override) + its loop-generation watermark.
+    // The FrameTick poller defaults the fader/readout to the detected loop BPM
+    // whenever a new loop is analyzed (generation bump), so R≈1 on load.
+    view::Fader* tempo_fader = nullptr;
+    std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
+
+    // Reveal the "Settings" button only when hosted in the standalone settings
+    // chrome (a TabPanel ancestor carrying the Audio/MIDI Settings tab). Called
+    // from Processor::on_view_opened — by then the editor is parented into the
+    // chrome, so format::standalone_settings_available() can detect it. Cheap and
+    // allocation-free, so it is safe outside the paint no-alloc scope.
+    void update_standalone_chrome_affordances() {
+        if (settings_button)
+            settings_button->set_visible(format::standalone_settings_available(this));
+    }
 
     SamplerEditorRoot() {
         set_focusable(true);
@@ -517,19 +442,15 @@ public:
     // Release any held typing notes (e.g. on focus loss) so nothing sticks.
     void release_all_typing() { typing.all_notes_off(); }
 
-    // Show/hide the on-screen keyboard. Returns the new visibility.
-    bool toggle_keyboard() {
-        if (!keyboard) return false;
-        const bool show = !keyboard->visible();
-        keyboard->set_visible(show);
-        return show;
-    }
+    // Toggle the MusicalTypingKeyboard window (same target as the toolbar button).
+    void toggle_keyboard() { if (on_toggle_keyboard) on_toggle_keyboard(); }
 
 private:
     bool on_musical_key(const view::KeyEvent& e) {
-        // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the on-screen keyboard. Checked
-        // before the modifier-chord rejection below so the command-combo reaches
-        // here (the macOS host routes Cmd chords via performKeyEquivalent:).
+        // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the MusicalTypingKeyboard
+        // window. Checked before the modifier-chord rejection below so the
+        // command-combo reaches here (the macOS host routes Cmd chords via
+        // performKeyEquivalent:).
         const uint16_t toggle_mod = view::kModCmd | view::kModCtrl;
         if (e.key == view::KeyCode::k && (e.modifiers & toggle_mod) && e.is_down && !e.is_repeat) {
             toggle_keyboard();
@@ -538,6 +459,13 @@ private:
         // Don't turn typing into a name field into notes — if a text-input widget
         // owns focus, let it have the keys.
         if (auto* fv = view::View::focused_input_; fv && fv->accepts_text_input())
+            return false;
+        // Musical typing only PLAYS while the keyboard window is on-screen. A
+        // key-DOWN with the keyboard hidden does not trigger a slice (returns
+        // false so the host keeps the key). A key-UP always passes through so a
+        // note that was held when the keyboard was hidden still gets released —
+        // no stuck note. ⌘K above is unaffected: it toggles regardless.
+        if (e.is_down && (!keyboard_window_visible || !keyboard_window_visible()))
             return false;
         if (current_root_note) typing.set_base_note(current_root_note());
         return typing.handle_key(e);  // false for unmapped / modifier chords -> host keeps them
@@ -636,6 +564,7 @@ public:
             const float* src = channels[std::min(c, raw_channels_ - 1)];
             std::copy(src, src + frames, raw_[c].begin());
         }
+        resample_raw_to_host_locked();
         analyze_locked();
         raw_generation_.fetch_add(1, std::memory_order_acq_rel);
         request_render(pending_host_bpm_.load(std::memory_order_relaxed));
@@ -729,7 +658,204 @@ public:
         pos_out = ui_play_pos_.load(std::memory_order_relaxed);
     }
 
+    // ── Musical-typing keyboard window (SDK primitive) ──────────────────────
+    // The keyboard's note sink: a MusicalTypingKeyboard emits ABSOLUTE MIDI
+    // notes (base = ROOT + octave + semitone). They go to the SAME lock-free
+    // UI→audio queue host MIDI / slice clicks use; region_for_note maps each to
+    // slice idx = note - root.
+    void sampler_note_on(int note, float velocity) { ui_note_on(note, velocity); }
+    void sampler_note_off(int note) { ui_note_off(note); }
+
+    // ── Single QWERTY/click source for the on-screen keyboard (UI thread) ────
+    // Both the editor's MusicalTypingController (computer-keyboard typing, gated
+    // on the keyboard window being visible) AND clicks on the keyboard's keys
+    // route here. Each call plays/stops the slice via the lock-free UI→audio
+    // queue AND maintains a set of currently-held MIDI notes that is pushed to
+    // the keyboard (set_active_notes) so the matching keys light/unlight live.
+    // When the MAIN editor window is focused this held set is the source of truth
+    // for the keyboard's lit keys; when the keyboard's OWN window is focused it
+    // self-captures keys (set_input_capture(true)) and routes them here too. Host MIDI
+    // arrives on the audio thread and is not reflected here (no UI-thread hook).
+    void keyboard_play_on(int note, float velocity) {
+        ui_note_on(note, velocity);
+        if (std::find(held_notes_ui_.begin(), held_notes_ui_.end(), note) ==
+            held_notes_ui_.end())
+            held_notes_ui_.push_back(note);
+        push_keyboard_lights();
+    }
+    void keyboard_play_off(int note) {
+        ui_note_off(note);
+        held_notes_ui_.erase(
+            std::remove(held_notes_ui_.begin(), held_notes_ui_.end(), note),
+            held_notes_ui_.end());
+        push_keyboard_lights();
+    }
+    /// Push the current held-note set to the on-screen keyboard so it lights the
+    /// matching keys (absolute MIDI). No-op until the keyboard window exists.
+    void push_keyboard_lights() {
+        if (kb_) kb_->set_active_notes(held_notes_ui_);
+    }
+    /// Test-only: the held-note set currently lit on the on-screen keyboard.
+    const std::vector<int>& held_notes_for_test() const { return held_notes_ui_; }
+    /// Test-only: inject the SDK keyboard so the held-note → set_active_notes wiring
+    /// can be exercised headlessly (the live path creates it in toggle_keyboard_window).
+    void set_keyboard_for_test(std::unique_ptr<view::MusicalTypingKeyboard> kb) {
+        kb_ = std::move(kb);
+    }
+
+    /// Toggle the MusicalTypingKeyboard's OWN secondary GPU window. Called from
+    /// ⌘K and the toolbar "Keyboard" button (UI thread). Lazily creates the
+    /// window + primitive on first open; subsequent calls show/hide it. The
+    /// keyboard is the faithful Figma-SVG DesignFrameView, so the window MUST be
+    /// GPU (use_gpu = true) — a CPU host renders it blank (mirrors mtk-demo).
+    void toggle_keyboard_window() {
+        if (kb_window_ && kb_window_->is_visible()) {
+            // Hiding. Two things must happen so NO MIDI lingers after the keyboard
+            // is dismissed:
+            //  1) Drop the keyboard's self-capture — set_input_capture(false) fires
+            //     on_note_off for every key the keyboard was holding (a key still
+            //     physically down when the window hides never gets its own key-up,
+            //     since a hidden window receives no keys), routing each through
+            //     keyboard_play_off → ui_note_off. Without this the held note's
+            //     voice sustained forever (the "QWERTY keeps sending MIDI after the
+            //     keyboard is closed" bug).
+            //  2) Belt-and-suspenders: release any note still in the UI-held set and
+            //     clear the lit display so nothing lingers lit on the next open.
+            kb_window_->set_app_key_monitor({});   // stop routing app keys to the keyboard
+            if (kb_) kb_->set_input_capture(false);
+            for (int n : held_notes_ui_) ui_note_off(n);
+            held_notes_ui_.clear();
+            push_keyboard_lights();
+            kb_window_->hide();
+            return;
+        }
+        if (!kb_window_) {
+            kb_ = std::make_unique<view::MusicalTypingKeyboard>();
+            // The keyboard self-captures QWERTY (set_input_capture(true), the SDK
+            // default + focusable). This matters because the keyboard lives in its
+            // OWN secondary window: macOS routes typed keys to whichever window is
+            // key, so when this window is focused, ONLY its root sees the keys —
+            // the main editor's on_global_key does not fire (it's per-window). With
+            // capture OFF the root was also non-focusable, so a focused keyboard
+            // window dropped EVERY key (letters, numbers 1–8, tab) — dead typing.
+            // Capture ON routes letters → on_note_on → keyboard_play_on (plays the
+            // slice + lights via the held-note set) and numbers 1–8 / tab through
+            // the SDK's control_press (pitch-bend / modulation / sustain buttons),
+            // matching the click path. No double-trigger: only one window is key at
+            // a time, so the editor's typing source (which plays + lights via
+            // set_active_notes while the MAIN window is focused) and this keyboard
+            // never both fire for the same keystroke.
+            kb_->set_input_capture(true);
+            kb_->on_note_on  = [this](int note, float vel) { keyboard_play_on(note, vel); };
+            kb_->on_note_off = [this](int note) { keyboard_play_off(note); };
+            // Pitch-bend / modulation / sustain pads now reach the voices (RT-safe
+            // atomic stores read by the audio thread), matching the host CC path.
+            kb_->on_pitch_bend = [this](float b) { pitch_bend_.store(b, std::memory_order_relaxed); };
+            kb_->on_modulation = [this](float m) { modulation_.store(m, std::memory_order_relaxed); };
+            kb_->on_sustain    = [this](bool on) { sustain_pedal_.store(on, std::memory_order_relaxed); };
+            // ⌘K / ⌘W / Escape while the keyboard window is front HIDE it (the
+            // toggle hides when visible). Without this the chords only reach the
+            // MAIN editor window, so the keyboard could be shown but never hidden
+            // once it became key. on_global_key is the keyboard ROOT's hook: the
+            // mac host fires it for Escape (keyDown) and Cmd-chords
+            // (performKeyEquivalent). performKeyEquivalent runs BEFORE keyDown, so
+            // ⌘K / ⌘W are intercepted here and never reach on_key_event as a note.
+            kb_->on_global_key = [this](const view::KeyEvent& e) -> bool {
+                if (!e.is_down || e.is_repeat) return false;
+                const uint16_t cmd = view::kModCmd | view::kModCtrl;
+                const bool chord = (e.modifiers & cmd) != 0;
+                const bool hide = (chord && e.key == view::KeyCode::k) ||   // ⌘K
+                                  (chord && e.key == view::KeyCode::w) ||   // ⌘W
+                                  (e.key == view::KeyCode::escape);          // Esc
+                if (hide) { toggle_keyboard_window(); return true; }
+                return false;
+            };
+            // 'a' plays slice 0 (note = ROOT). A live listener (create_view) keeps
+            // this synced if ROOT changes while the window is open.
+            kb_->set_base_note(static_cast<int>(state().get_value(kRootNote)));
+
+            const float w = kb_->panel_width(), h = kb_->panel_height();
+            view::WindowOptions opts;
+            opts.title = "Musical Typing";
+            opts.use_gpu = true;            // faithful SVG needs the Skia Graphite host
+            opts.secondary_window = true;   // closing it never quits the standalone app
+            opts.width = w;  opts.height = h;
+            opts.min_width = w; opts.min_height = 176.0f;  // piano frame is shorter
+            opts.resizable = true;
+            kb_window_ = view::WindowHost::create(*kb_, opts);
+            if (!kb_window_) { kb_.reset(); return; }  // platform without a window host
+            // Aspect-locked design viewport (mirror mtk-demo); resize the window to
+            // fit the active frame on a piano⇄typing toggle.
+            kb_window_->set_design_viewport(w, h);
+            kb_window_->set_fixed_aspect_ratio(w / h);
+            view::WindowHost* host = kb_window_.get();
+            kb_->on_intrinsic_size_changed = [host](float nw, float nh) {
+                host->set_fixed_aspect_ratio(nw / nh);
+                host->set_design_viewport(nw, nh);
+                host->request_content_size(nw, nh);
+            };
+            // A title-bar close hides the window without going through
+            // toggle_keyboard_window's hide branch, so drop the app key monitor here
+            // too (otherwise it lingers, harmlessly gated by is_visible(), until the
+            // next toggle).
+            kb_window_->set_close_callback([this] {
+                if (kb_window_) kb_window_->set_app_key_monitor({});
+            });
+        }
+        // Re-sync ROOT each open (it may have changed while the window was hidden).
+        if (kb_) {
+            kb_->set_base_note(static_cast<int>(state().get_value(kRootNote)));
+            kb_->set_input_capture(true);   // re-arm self-capture (dropped on the last hide)
+        }
+        kb_window_->show();
+        // Route app keystrokes to the keyboard while it is open. macOS delivers keys
+        // only to the KEY window, so once the user clicks a control in the MAIN editor
+        // window (e.g. the tempo fader) the keyboard window stops receiving QWERTY and
+        // typing goes dead until it is re-focused. This app-level monitor forwards
+        // PLAYABLE keys (notes / 1–8 / tab) to the keyboard regardless of which window
+        // is key, consuming ONLY those so everything else still reaches the focused
+        // window. Deliberately NOT consumed here (left to the normal window/menu path):
+        //   • a focused text input owns the keys (settings chrome, rename field);
+        //   • ⌘/Ctrl chords (⌘K/⌘W toggle via the focused window's on_global_key, menu
+        //     key-equivalents) and Escape (dismiss a dialog) — consuming these app-wide
+        //     would e.g. close the keyboard when Esc was meant for a popover.
+        kb_window_->set_app_key_monitor([this](const view::KeyEvent& e) -> bool {
+            if (!kb_ || !kb_window_ || !kb_window_->is_visible()) return false;
+            if (auto* fv = view::View::focused_input_; fv && fv->accepts_text_input())
+                return false;
+            const uint16_t chord = view::kModCmd | view::kModCtrl;
+            if ((e.modifiers & chord) || e.key == view::KeyCode::escape) return false;
+            return kb_->on_key_event(e);   // notes + 1–8 / tab (consumes only what it plays)
+        });
+    }
+
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
+
+    // ── Target-tempo override (UI-driven) ──────────────────────────────────
+    // The standalone has no host transport to set a tempo, so a UI control (the
+    // footer TEMPO box) drives the target tempo the loop is stretched TO. 0 means
+    // "follow the host" (the default — preserves in-DAW host-sync for the headless
+    // path / plugin formats that never engage it). Any value in [20,400] pins the
+    // render denominator R = loop_bpm / target, so dragging it re-stretches the
+    // loop live and the slice regions refit. Off-audio-thread (UI) entry point.
+    static constexpr double kTargetBpmMin = 20.0;
+    static constexpr double kTargetBpmMax = 400.0;
+    void set_target_bpm(double bpm) {
+        const double clamped = std::clamp(bpm, kTargetBpmMin, kTargetBpmMax);
+        tempo_override_.store(clamped, std::memory_order_relaxed);
+        request_render(clamped);  // re-stretch to the new target now
+    }
+    /// The tempo the loop is currently stretched TO: the override when engaged,
+    /// else the last host/standalone tempo seen by the worker (default 120).
+    double effective_bpm() const {
+        const double o = tempo_override_.load(std::memory_order_relaxed);
+        return o > 0.0 ? o : pending_host_bpm_.load(std::memory_order_relaxed);
+    }
+    /// True once a UI target tempo is engaged (vs. following the host).
+    bool tempo_override_active() const {
+        return tempo_override_.load(std::memory_order_relaxed) > 0.0;
+    }
+
     std::size_t num_slices() const {
         std::lock_guard<std::mutex> lock(raw_mutex_);
         return slices_orig_.empty() ? 0 : slices_orig_.size() - 1;
@@ -849,6 +975,40 @@ public:
             root->add_child(std::move(btn));
         }
 
+        // Toolbar affordances next to "Open…": a "Settings" button that opens the
+        // standalone Audio/MIDI device panel, and a "Keyboard" button that toggles
+        // the on-screen musical-typing keyboard (same target as ⌘K). Both sit to
+        // the left of "Open…" within the clear strip past the title.
+        SamplerEditorRoot* root_ptr = root.get();
+        {
+            // Hidden until update_standalone_chrome_affordances() confirms we are
+            // hosted in the standalone settings chrome (no Audio/MIDI tab in a DAW).
+            auto btn = std::make_unique<TextButton>("Settings");
+            place(*btn, 476, 14, 82, 28);
+            btn->set_visible(false);
+            btn->on_click = [root_ptr] { format::open_standalone_settings(root_ptr); };
+            root->settings_button = btn.get();
+            root->add_child(std::move(btn));
+        }
+        {
+            auto btn = std::make_unique<TextButton>("Keyboard");
+            place(*btn, 566, 14, 82, 28);
+            // The button AND ⌘K hit the SAME path: SamplerEditorRoot::on_toggle_keyboard,
+            // which the processor points at toggle_keyboard_window() below.
+            btn->on_click = [root_ptr] { root_ptr->toggle_keyboard(); };
+            root->add_child(std::move(btn));
+        }
+        // Both the "Keyboard" button and ⌘K (on_musical_key) route here: open/close
+        // the MusicalTypingKeyboard's own secondary GPU window.
+        root->on_toggle_keyboard = [this] { toggle_keyboard_window(); };
+        // Gate the editor's musical typing on the keyboard window being shown:
+        // the editor is the single QWERTY source, so QWERTY only plays slices (and
+        // lights the on-screen keys) while the keyboard is on-screen. Hidden
+        // keyboard -> typing is silent and nothing lights.
+        root->keyboard_window_visible = [this] {
+            return kb_window_ && kb_window_->is_visible();
+        };
+
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
         // when loaded. Click a slice (or musical-type) to audition it; drop or
@@ -860,9 +1020,17 @@ public:
         // always-visible Open button (so you can load/replace even with a sample
         // already loaded, where a waveform tap auditions a slice instead).
         auto do_browse = [this] {
+            // Filter from the registry's decodable extensions (incl. m4a/aac/alac/
+            // caf on macOS) — strip the leading dot for the dialog's "ext;ext" form.
+            std::string pattern;
+            for (const auto& e : audio::FormatRegistry::instance().supported_read_extensions()) {
+                std::string s = (!e.empty() && e.front() == '.') ? e.substr(1) : e;
+                if (s.empty()) continue;
+                if (!pattern.empty()) pattern += ';';
+                pattern += s;
+            }
             auto picked = platform::FileDialog::open_file(
-                "Load a sample",
-                {{"Audio Files", "wav;aif;aiff;flac;mp3;ogg"}}, "");
+                "Load a sample", {{"Audio Files", pattern}}, "");
             if (picked && !picked->empty()) request_load_path(*picked);
         };
         wf->on_browse = do_browse;
@@ -876,11 +1044,28 @@ public:
         root->add_child(std::move(wf));
 
         // Musical typing: the SDK MusicalTypingController turns the QWERTY row
-        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … Notes go
-        // to the same lock-free UI->audio queue as host MIDI and slice clicks.
+        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … This is the
+        // SINGLE computer-keyboard source (the on-screen keyboard is display-only).
+        // Notes flow through keyboard_play_on/off, which both plays the slice (same
+        // lock-free UI->audio queue as host MIDI / slice clicks) AND lights the
+        // matching keys on the on-screen keyboard via set_active_notes. on_musical_key
+        // gates this on the keyboard window being visible, so typing is silent and
+        // lights nothing when the keyboard is hidden.
         root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
-        root->typing.on_note_on = [this](int note, float vel) { ui_note_on(note, vel); };
-        root->typing.on_note_off = [this](int note) { ui_note_off(note); };
+        root->typing.on_note_on = [this](int note, float vel) { keyboard_play_on(note, vel); };
+        root->typing.on_note_off = [this](int note) { keyboard_play_off(note); };
+        // (The inline editor's `typing` is a note-only MusicalTypingController — it
+        // has no pitch-bend / modulation / sustain pads. Those live on the popout
+        // MusicalTypingKeyboard widget, wired in toggle_keyboard_window, and on the
+        // host CC / pitch-wheel path in process().)
+        // Keep the keyboard-window's controller base note synced to ROOT while it
+        // is open, so its 'a' key always plays slice 0 (note = root) like the
+        // inline editor typing. toggle_keyboard_window() also sets it on open.
+        root->listeners.push_back(state().add_listener(
+            [this](state::ParamID id, float v) {
+                if (id == kRootNote && kb_) kb_->set_base_note(static_cast<int>(v));
+            },
+            state::ListenerThread::Main));
 
         // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
@@ -888,7 +1073,7 @@ public:
         // Root = octave (C-2..C8). Octave granularity keeps the dropdown short
         // enough to fit + flip above when needed (a 121-note chromatic list was
         // taller than the window and got clipped). idx -> MIDI note idx*12.
-        label(20, 320, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        label(20, 320, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
@@ -908,17 +1093,17 @@ public:
                     if (id == kRootNote) comboPtr->set_selected_silent(static_cast<int>(v) / 12);
                 },
                 state::ListenerThread::Main));
-            place(*combo, 64, 316, 96, 26);
+            place(*combo, 54, 316, 64, 26);
             root->add_child(std::move(combo));
         }
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(176, 320, 44, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        label(124, 320, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 220, 322, 150, 16);
+            place(*fader, 162, 322, 86, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -928,13 +1113,73 @@ public:
                 state::ListenerThread::Main));
         }
 
+        // Target-tempo (TEMPO) box: the standalone has no host transport, so this
+        // fader drives the BPM the loop is stretched TO. 20..400 BPM maps to the
+        // fader's 0..1; dragging calls set_target_bpm() -> the worker re-renders,
+        // so the slice regions refit live. A live numeric readout sits to its
+        // right. The FrameTick below defaults both to the detected loop BPM (R≈1)
+        // whenever a new loop is analyzed. Mirrors the SENS fader + SLICES readout.
+        constexpr double kBpmMin = PulpTempoSamplerProcessor::kTargetBpmMin;  // 20
+        constexpr double kBpmMax = PulpTempoSamplerProcessor::kTargetBpmMax;  // 400
+        auto bpm_to_norm = [](double b) {
+            return static_cast<float>(std::clamp((b - kBpmMin) / (kBpmMax - kBpmMin), 0.0, 1.0));
+        };
+        auto norm_to_bpm = [](float v) {
+            return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
+        };
+        label(256, 320, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        {
+            auto fader = std::make_unique<Fader>();
+            fader->set_orientation(Fader::Orientation::horizontal);
+            place(*fader, 306, 322, 86, 16);
+            fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
+                                                              : effective_bpm()));
+            fader->on_change = [this, norm_to_bpm](float v) {
+                set_target_bpm(norm_to_bpm(v));
+            };
+            root->tempo_fader = fader.get();
+            root->add_child(std::move(fader));
+        }
+        // Live BPM readout for the TEMPO fader (shows the engaged target tempo).
+        {
+            auto live = std::make_unique<LiveText>();
+            live->font_family = mono;
+            live->color = teal;
+            live->text = [this] {
+                return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
+            };
+            place(*live, 398, 320, 64, 18);
+            root->add_child(std::move(live));
+        }
+
         // Live slice count (updates after a drop or a sensitivity change).
         {
             auto live = std::make_unique<LiveText>();
             live->font_family = mono;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 390, 320, 140, 18);
+            place(*live, 468, 320, 84, 18);
             root->add_child(std::move(live));
+        }
+
+        // Per-frame poller: when a new loop is analyzed (generation bump), default
+        // the TEMPO fader + override to the detected loop BPM so it plays at its
+        // natural tempo (R≈1) until the user drags. Lives in the UI (not the
+        // processor) so the headless / plugin paths keep following the host tempo.
+        {
+            auto tick = std::make_unique<FrameTick>();
+            SamplerEditorRoot* rp = root.get();
+            tick->on_tick = [this, rp, bpm_to_norm] {
+                const std::uint64_t g = raw_generation();
+                if (g == rp->tempo_seen_gen_) return;
+                rp->tempo_seen_gen_ = g;
+                const double b = detected_bpm();
+                if (b > 0.0) {
+                    set_target_bpm(b);
+                    if (rp->tempo_fader) rp->tempo_fader->set_value(bpm_to_norm(b));
+                }
+            };
+            place(*tick, 0, 0, 0, 0);
+            root->add_child(std::move(tick));
         }
 
         // LOOP toggle: enable/disable Forward looping for triggered slices
@@ -951,28 +1196,27 @@ public:
             loopBtn->set_off_background_color(raised);
             loopBtn->set_off_text_color(muted);
             loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 556, 316, 84, 26);
+            place(*loopBtn, 560, 316, 84, 26);
             root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
             root->add_child(std::move(loopBtn));
         }
 
-        // On-screen interactive musical-typing keyboard. Hidden until ⌘K/Ctrl+K.
-        // Added LAST so it paints on top as a floating panel. Click a key to
-        // audition its slice (same path as a waveform-slice tap); the playhead
-        // key lights up so typing, MIDI and clicks all read on it.
-        {
-            auto kbd = std::make_unique<InteractiveKeyboard>();
-            place(*kbd, 60, 86, 640, 196);
-            kbd->set_visible(false);
-            kbd->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
-            kbd->active_slice = [this] { int s = -1; float p = 0.0f; playhead(s, p); return s; };
-            kbd->root_label = [this] { return note_name(static_cast<int>(state().get_value(kRootNote))); };
-            root->keyboard = kbd.get();
-            root->add_child(std::move(kbd));
-        }
+        // The musical-typing keyboard is NOT inline anymore: the SDK primitive
+        // pulp::view::MusicalTypingKeyboard is hosted in its OWN secondary GPU
+        // window (⌘K / the "Keyboard" button → toggle_keyboard_window()), so it
+        // never overlaps the waveform editor.
 
         root->layout_children();
         return root;
+    }
+
+    // Once the editor is attached to the window (and, in the standalone, parented
+    // into the settings chrome), resolve chrome-dependent affordances — i.e.
+    // reveal the "Settings" button only when the Audio/MIDI panel is actually
+    // reachable. In a DAW there is no such chrome, so the button stays hidden.
+    void on_view_opened(view::View& view) override {
+        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view))
+            root->update_standalone_chrome_affordances();
     }
 
     // ── Audio thread ───────────────────────────────────────────────────────
@@ -984,9 +1228,15 @@ public:
                  const format::ProcessContext& ctx) override {
         clear_output(output);
 
-        // Track host tempo; on change, ask the worker to re-render (RT-safe:
-        // just atomic stores + flag, no allocation/locks on the audio thread).
-        const double bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
+        // Track the effective tempo; on change, ask the worker to re-render
+        // (RT-safe: just atomic loads/stores + a flag, no allocation/locks on the
+        // audio thread). When the UI engages a target-tempo OVERRIDE (the footer
+        // TEMPO box / set_target_bpm), it wins over the host tempo — and we render
+        // to it, NOT the host value, so this per-block read can never clobber the
+        // user's pending_host_bpm_ back to the host's tempo.
+        const double host_bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
+        const double override_bpm = tempo_override_.load(std::memory_order_relaxed);
+        const double bpm = override_bpm > 0.0 ? override_bpm : host_bpm;
         if (ctx.tempo_changed || bpm != last_host_bpm_) {
             last_host_bpm_ = bpm;
             request_render(bpm);
@@ -997,6 +1247,14 @@ public:
         const auto params = current_params();
         const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
         midi_in.sort();
+
+        // Sustain pedal: when the damper lifts, release every voice that a
+        // note-off left held (pedal-down deferred the release in release_note).
+        const bool pedal = sustain_pedal_.load(std::memory_order_relaxed);
+        if (sustain_prev_ && !pedal)
+            for (auto& voice : voices_)
+                if (voice.active && voice.sustained) { voice.release(); voice.sustained = false; }
+        sustain_prev_ = pedal;
 
         // Drain UI-injected notes (slice clicks / musical typing) at block start.
         while (auto n = ui_notes_.try_pop()) {
@@ -1019,6 +1277,19 @@ public:
                              published, params);
             else if (event.message.isNoteOff())
                 release_note(event.message.getNoteNumber());
+            else if (event.message.isController()) {
+                // Mod wheel (CC1) -> vibrato depth; sustain (CC64) -> damper hold.
+                const int cc = event.message.getControllerNumber();
+                const float v = static_cast<float>(event.message.getControllerValue()) / 127.0f;
+                if (cc == 1) modulation_.store(v, std::memory_order_relaxed);
+                else if (cc == 64) sustain_pedal_.store(v >= 0.5f, std::memory_order_relaxed);
+            } else if (event.message.isPitchWheel()) {
+                // 14-bit pitch wheel: LSB | (MSB<<7), center 8192 -> -1..+1.
+                const std::uint8_t* d = event.message.data();
+                const int val = static_cast<int>(d[1]) | (static_cast<int>(d[2]) << 7);
+                pitch_bend_.store((static_cast<float>(val) - 8192.0f) / 8192.0f,
+                                  std::memory_order_relaxed);
+            }
             cursor = offset;
         }
         if (cursor < block_frames) render_active_voices(output, cursor, block_frames - cursor, params);
@@ -1051,6 +1322,68 @@ private:
             }
         }
         ui_play_slice_.store(-1, std::memory_order_release);  // nothing playing
+    }
+
+    // Resample the just-loaded raw audio from its native rate to the host
+    // sample rate so analysis, stretching, and playback all share one
+    // coordinate system. Without this, a sub-host-rate file (e.g. a 44.1k
+    // sample loaded into a 48k host) plays back ~host/native faster — audibly
+    // higher pitched — because both the OfflineStretch engine and the
+    // PublishedSampleStore are pinned to host_sample_rate_ while the raw data
+    // sits at its file rate. Runs under raw_mutex_, off the audio thread.
+    // Linear-phase: the leading group delay is trimmed so the downbeat stays
+    // put, and the output is length-locked to round(N * out/in).
+    void resample_raw_to_host_locked() {
+        const double in_sr = raw_sr_;
+        const double out_sr = static_cast<double>(host_sample_rate_);
+        if (in_sr <= 0.0 || out_sr <= 0.0) return;
+        if (std::abs(in_sr - out_sr) < 1.0) return;        // already at host rate
+        if (raw_frames_ <= 0 || raw_channels_ < 1) return;
+
+        const std::size_t in_n = static_cast<std::size_t>(raw_frames_);
+        const std::size_t ch = static_cast<std::size_t>(std::min(raw_channels_, 2));
+        signal::Resampler rs;
+        rs.prepare(in_sr, out_sr, ch, in_n);
+
+        const std::size_t tpp = rs.taps_per_phase();
+        const std::size_t gd_in = (tpp > 0) ? (tpp - 1) / 2 : 0;   // input-rate group delay
+        const std::size_t gd_out = static_cast<std::size_t>(
+            std::llround(static_cast<double>(gd_in) * out_sr / in_sr));
+        const long want = std::lround(static_cast<double>(raw_frames_) * out_sr / in_sr);
+        if (want <= 0) return;
+
+        const std::size_t cap = rs.max_output_for(in_n + gd_in) + 8u;
+        std::array<std::vector<float>, 2> out;
+        std::array<float*, 2> outp{};
+        for (int c = 0; c < 2; ++c) { out[c].assign(cap, 0.0f); outp[c] = out[c].data(); }
+
+        // Pass 1: real input.
+        std::array<const float*, 2> inp{raw_[0].data(), raw_[1].data()};
+        const auto r1 = rs.process_block_detailed(inp.data(), in_n, outp.data(), cap);
+        std::size_t produced = r1.output_frames;
+
+        // Pass 2: flush zeros to drain the filter's delayed tail.
+        std::array<std::vector<float>, 2> zeros;
+        std::array<const float*, 2> zp{};
+        for (int c = 0; c < 2; ++c) { zeros[c].assign(gd_in, 0.0f); zp[c] = zeros[c].data(); }
+        std::array<float*, 2> outp2{out[0].data() + produced, out[1].data() + produced};
+        if (gd_in > 0 && produced < cap) {
+            const auto r2 = rs.process_block_detailed(zp.data(), gd_in, outp2.data(), cap - produced);
+            produced += r2.output_frames;
+        }
+
+        // Drop the linear-phase latency, then length-lock to `want` frames
+        // (zero-pad if the flush came up short).
+        const std::size_t start = std::min<std::size_t>(gd_out, produced);
+        const std::size_t avail = produced - start;
+        for (int c = 0; c < 2; ++c) {
+            std::vector<float> trimmed(static_cast<std::size_t>(want), 0.0f);
+            const std::size_t n = std::min<std::size_t>(static_cast<std::size_t>(want), avail);
+            std::copy(out[c].begin() + start, out[c].begin() + start + n, trimmed.begin());
+            raw_[c].swap(trimmed);
+        }
+        raw_frames_ = want;
+        raw_sr_ = out_sr;
     }
 
     // ── Analysis (under raw_mutex_) ──
@@ -1130,6 +1463,13 @@ private:
 
         const long out_frames = signal::offline_stretch_output_frames(frames, R);
         if (out_frames <= 0) return;
+        // The published store has a fixed per-slot capacity; a stretched length
+        // beyond it would be REJECTED by load_*, skipping the publish and leaving
+        // every slice silent (the longer-sample bug). Clamp the published length
+        // so an oversize sample plays its head instead of nothing — slices past
+        // pub_frames map past the buffer and region_for_note already silences them.
+        const long pub_frames =
+            std::min<long>(out_frames, static_cast<long>(SamplerSampleStore::kMaxFrames));
 
         // Refresh the slice boundaries into the stretched buffer FIRST, before the
         // audio re-publish below. A sensitivity-only re-slice keeps the same
@@ -1144,7 +1484,7 @@ private:
             std::vector<long> scaled;
             scaled.reserve(slices.size());
             for (long s : slices)
-                scaled.push_back(std::min<long>(out_frames, static_cast<long>(std::llround(s * R))));
+                scaled.push_back(std::min<long>(pub_frames, static_cast<long>(std::llround(s * R))));
             std::lock_guard<std::mutex> lock(slice_mutex_);
             slices_stretched_ = std::move(scaled);
         }
@@ -1155,8 +1495,22 @@ private:
         std::vector<float*> outp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) { inp[c] = raw_copy[static_cast<size_t>(c)].data(); outp[c] = stretched[static_cast<size_t>(c)].data(); }
 
+        // Material-adaptive FFT window — analyze the loop and size the STFT to its
+        // character instead of the fixed 4096/512 default: a percussive break gets
+        // 1024/128 (sharp, bright attacks — the "drum_pl" reference render), a
+        // bass-heavy loop gets 8192/512 (resolves low partials, no wobble). This is
+        // the adaptive-FFT the engine implements but the sampler had never wired, so
+        // every loop was rendered at one window — smeary on drums. Pass the window
+        // (and the engine's prepared range) to the worker-local engine's prepare().
+        const auto win = signal::OfflineStretch::recommend_window(
+            inp.data(), frames, ch, static_cast<double>(host_sample_rate_));
+        o.fft_size = win.fft_size;
+        o.analysis_hop = win.analysis_hop;
+        o.max_time_ratio = engine_.max_time_ratio();
+        o.max_pitch_semitones = engine_.max_pitch_semitones();
+
         signal::OfflineStretch local;          // worker-local engine instance
-        local.prepare(static_cast<double>(host_sample_rate_), ch);
+        local.prepare(static_cast<double>(host_sample_rate_), ch, o);
         std::string err;
         if (!local.process(inp.data(), frames, outp.data(), out_frames, o, &err)) return;
 
@@ -1165,15 +1519,15 @@ private:
         const auto gen = audio_ack_generation_.load(std::memory_order_acquire);
         bool ok = false;
         if (ch == 1) {
-            ok = store_.load_mono(stretched[0].data(), static_cast<int>(out_frames),
+            ok = store_.load_mono(stretched[0].data(), static_cast<int>(pub_frames),
                                   host_sample_rate_, gen);
         } else {
-            std::vector<float> inter(static_cast<size_t>(out_frames) * 2);
-            for (long i = 0; i < out_frames; ++i) {
+            std::vector<float> inter(static_cast<size_t>(pub_frames) * 2);
+            for (long i = 0; i < pub_frames; ++i) {
                 inter[static_cast<size_t>(i) * 2] = stretched[0][static_cast<size_t>(i)];
                 inter[static_cast<size_t>(i) * 2 + 1] = stretched[1][static_cast<size_t>(i)];
             }
-            ok = store_.load_interleaved_stereo(inter.data(), static_cast<int>(out_frames),
+            ok = store_.load_interleaved_stereo(inter.data(), static_cast<int>(pub_frames),
                                                 host_sample_rate_, gen);
         }
         if (!ok) return;
@@ -1274,6 +1628,24 @@ private:
         return region;
     }
 
+    // Playback-rate multiplier for one render chunk: pitch-bend (a static
+    // semitone offset over +/- kBendRangeSemis) plus mod-wheel vibrato (a
+    // kVibratoHz LFO whose phase advances by `chunk` frames, depth scaled by the
+    // mod amount). Audio-thread only; returns exactly 1.0 when nothing is
+    // engaged so the common no-expression path is allocation- and transcendental-
+    // free.
+    float apply_expression_rate(std::uint32_t chunk) noexcept {
+        constexpr double kTwoPi = 6.283185307179586;
+        const float bend = pitch_bend_.load(std::memory_order_relaxed);
+        const float mod = modulation_.load(std::memory_order_relaxed);
+        const double sr = host_sample_rate_ > 0.0f ? host_sample_rate_ : 48000.0;
+        mod_lfo_phase_ += kTwoPi * static_cast<double>(kVibratoHz) * chunk / sr;
+        if (mod_lfo_phase_ > kTwoPi) mod_lfo_phase_ -= kTwoPi;
+        const float vib = mod * kVibratoSemis * static_cast<float>(std::sin(mod_lfo_phase_));
+        const float semis = bend * kBendRangeSemis + vib;
+        return (semis == 0.0f) ? 1.0f : std::pow(2.0f, semis / 12.0f);
+    }
+
     void render_active_voices(audio::BufferView<float>& output, std::uint32_t start_frame,
                               std::uint32_t frames, const RenderParams& params) noexcept {
         if (frames == 0) return;
@@ -1282,9 +1654,14 @@ private:
         if (out_ch == 0) return;
         for (std::uint32_t ch = 0; ch < out_ch; ++ch) voice_scratch_ptrs_[ch] = voice_scratch_[ch].data();
 
+        // Pitch-bend + mod-wheel vibrato map to a playback-rate multiplier on the
+        // (tempo-matched, native-rate-1.0) buffer. Sampled per chunk: the LFO
+        // advances by the chunk length so a held note's vibrato is continuous
+        // across chunks/blocks. bend and mod are read once per chunk (relaxed).
         std::uint32_t rendered = 0;
         while (rendered < frames) {
             const auto chunk = std::min(frames - rendered, max_block_frames_);
+            const float rate = apply_expression_rate(chunk);
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(), out_ch, chunk);
             for (auto& voice : voices_) {
                 if (!voice.active) continue;
@@ -1293,6 +1670,7 @@ private:
                 audio::BufferView<const float> source(sptrs.data(), voice.sample.num_channels,
                                                       static_cast<std::size_t>(voice.sample.num_frames));
                 voice.adsr.set_params(params.adsr);
+                voice.renderer.set_playback_rate(rate);
                 const auto loop_result = voice.renderer.render(source, scratch, chunk);
                 bool finished = false;
                 for (std::uint32_t i = 0; i < chunk; ++i) {
@@ -1321,8 +1699,12 @@ private:
     }
 
     void release_note(int note) {
+        const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
-            if (voice.active && voice.note == note && !voice.released) voice.release();
+            if (voice.active && voice.note == note && !voice.released) {
+                if (hold) voice.sustained = true;  // damper down: defer until the pedal lifts
+                else voice.release();
+            }
     }
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
@@ -1347,6 +1729,20 @@ private:
     std::uint32_t prepared_output_channels_ = 2;
     double last_host_bpm_ = 0.0;
 
+    // MIDI expression (UI keyboard buttons + host CC/pitch-wheel) -> audio thread.
+    // RT-safe: UI/host threads store, the audio thread loads (relaxed). Applied in
+    // render_active_voices as a per-voice playback-rate multiplier (bend + vibrato)
+    // and a deferred note-off (sustain). See on_pitch_bend / on_modulation /
+    // on_sustain wiring + apply_expression_rate().
+    std::atomic<float> pitch_bend_{0.0f};     // -1..+1, scaled by kBendRangeSemis
+    std::atomic<float> modulation_{0.0f};     // 0..1 vibrato depth
+    std::atomic<bool> sustain_pedal_{false};  // damper hold
+    static constexpr float kBendRangeSemis = 2.0f;   // +/- 2 semitones (Logic default)
+    static constexpr float kVibratoSemis = 0.4f;     // peak vibrato at full mod
+    static constexpr float kVibratoHz = 5.5f;        // vibrato LFO rate
+    bool sustain_prev_ = false;   // audio-thread-only: pedal falling-edge detect
+    double mod_lfo_phase_ = 0.0;  // audio-thread-only: vibrato LFO phase (radians)
+
     // Raw loop + analysis (guarded by raw_mutex_)
     mutable std::mutex raw_mutex_;
     std::vector<float> raw_[2];
@@ -1367,6 +1763,8 @@ private:
     std::atomic<bool> drop_flag_{false};
     std::atomic<std::uint64_t> raw_generation_{0};
     std::atomic<double> pending_host_bpm_{120.0};
+    // UI target-tempo override: 0 = follow host, else the BPM to stretch TO.
+    std::atomic<double> tempo_override_{0.0};
     std::mutex drop_mutex_;
     std::string pending_drop_path_;
 
@@ -1380,6 +1778,17 @@ private:
     std::atomic<int> ui_play_slice_{-1};
     std::atomic<float> ui_play_pos_{0.0f};  // 0..1 through the slice
     int last_note_ = -1;  // audio-thread only: most recent note_on
+
+    // Musical-typing keyboard window (SDK primitive), lazily created on first ⌘K /
+    // "Keyboard" toggle. UI-thread only. kb_ is declared BEFORE kb_window_ so the
+    // window (which holds a View& to kb_) destructs first.
+    std::unique_ptr<view::MusicalTypingKeyboard> kb_;
+    std::unique_ptr<view::WindowHost> kb_window_;
+    // Currently-held MIDI notes lit on the on-screen keyboard (UI thread only).
+    // Fed by the editor's QWERTY typing and by clicks on the keyboard's keys;
+    // pushed to the keyboard via set_active_notes on every change. Empty → no lit
+    // keys (e.g. while the keyboard is hidden, since typing is gated off then).
+    std::vector<int> held_notes_ui_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {

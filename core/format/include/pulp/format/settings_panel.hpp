@@ -66,6 +66,14 @@ public:
     /// Call periodically (~30 Hz) from idle/timer to refresh meters and hotplug.
     void poll();
 
+    /// Natural (uncompressed) height the panel needs so its Audio tab — the
+    /// tallest tab, shown first — lays out every device combo, meter, and label
+    /// at full size. The standalone host grows the window to this when the
+    /// Settings tab is active (and shrinks back to the editor's size otherwise),
+    /// so the device dropdowns never get squished into the editor's height.
+    /// Tracks the Audio-tab row layout in settings_panel.cpp.
+    [[nodiscard]] static int preferred_height();
+
 private:
     void build_audio_tab();
     void build_midi_tab();

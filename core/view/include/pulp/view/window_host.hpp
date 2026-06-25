@@ -226,6 +226,17 @@ public:
     virtual void set_idle_callback(std::function<void()> cb) { (void)cb; }
     virtual void set_resize_callback(ResizeCallback cb);
 
+    // Install an APP-LEVEL key monitor: keyDown/keyUp events anywhere in the app
+    // are forwarded to `handler` before the focused window's responder chain sees
+    // them; return true to CONSUME (the event then doesn't reach any window). Use
+    // it to route keyboard input to a popout window (e.g. a Musical Typing
+    // keyboard) regardless of WHICH window is currently key — so typing keeps
+    // working after the user clicks a control in another window. Pass `{}` to
+    // remove. No-op on platforms without an app-global key hook.
+    virtual void set_app_key_monitor(std::function<bool(const KeyEvent&)> handler) {
+        (void)handler;
+    }
+
     // Set a callback for when the window is closed
     virtual void set_close_callback(std::function<void()> cb) = 0;
 

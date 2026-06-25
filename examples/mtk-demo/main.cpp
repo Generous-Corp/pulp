@@ -36,17 +36,20 @@ std::string note_name(int midi) {
 int main(int argc, char** argv) {
     const char* screenshot = nullptr;
     int octave = 0;   // --octave N pre-shifts the octave (for render proofs)
+    int base = -1;    // --base N overrides the controller base note (e.g. a sampler root)
     bool piano = false;
     bool demo = false;   // --demo drives the whole control surface, then renders
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!std::strcmp(argv[i], "--octave") && i + 1 < argc) octave = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--base") && i + 1 < argc) base = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--piano")) piano = true;
         else if (!std::strcmp(argv[i], "--demo")) demo = true;
     }
 
     auto kb = std::make_unique<MusicalTypingKeyboard>();
     kb->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
+    if (base >= 0) kb->set_base_note(base);   // mirror a sampler root (e.g. C3=60)
     if (piano) kb->set_mode(MusicalTypingKeyboard::Mode::piano);
     kb->on_note_on  = [](int n, float v) { std::printf("note on  %-3d %-3s  vel %.2f\n", n, note_name(n).c_str(), v); };
     kb->on_note_off = [](int n)          { std::printf("note off %-3d %-3s\n", n, note_name(n).c_str()); };

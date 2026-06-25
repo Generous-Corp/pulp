@@ -559,6 +559,31 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     }
     detail::configure_standalone_design_viewport(*window, size_hints, chrome);
 
+    // Grow the window when the Settings tab is active so the Audio/MIDI panel —
+    // which needs far more height than a fixed-size editor — lays its device
+    // dropdowns and meters out at full size instead of being squished into the
+    // editor's height; shrink back to the editor's own size on the editor tab.
+    // Drives the SAME design-viewport + content-size path the keyboard resize
+    // uses (set_design_viewport / set_fixed_aspect_ratio / request_content_size),
+    // so paint scale and the OS aspect lock track each tab. Editor stays pinned
+    // at its declared size (no letterbox); Settings reflows to fill its taller
+    // window. Framework-level so every standalone settings chrome benefits.
+    if (auto* tab_panel = chrome.tab_panel()) {
+        view::WindowHost* host = window.get();
+        const float editor_w = static_cast<float>(size_hints.preferred_width);
+        const float editor_h = static_cast<float>(size_hints.preferred_height);
+        const float settings_h =
+            std::max(editor_h, static_cast<float>(SettingsPanel::preferred_height()));
+        tab_panel->on_tab_change = [host, tab_panel, editor_w, editor_h, settings_h](int index) {
+            const bool settings = index == tab_panel->find_tab("Settings");
+            const float w = editor_w;
+            const float h = settings ? settings_h : editor_h;
+            host->set_fixed_aspect_ratio(w / h);
+            host->set_design_viewport(w, h);
+            host->request_content_size(w, h);
+        };
+    }
+
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
 

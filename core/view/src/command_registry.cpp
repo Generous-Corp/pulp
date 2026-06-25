@@ -178,8 +178,19 @@ bool CommandRegistry::dispatch_key_event(const KeyEvent& event) {
 }
 
 void route_global_keys(View& root, CommandRegistry& registry) {
-    root.on_global_key = [&registry](const KeyEvent& event) -> bool {
-        return registry.dispatch_key_event(event);
+    // COMPOSE with any handler already installed on the root rather than
+    // clobbering it. The standalone shell wires the Audio Inspector's command
+    // registry onto the window root here, but that root may already own an
+    // editor-supplied `on_global_key` (e.g. a sampler's ⌘K musical-keyboard
+    // toggle / typing handler). A bare assignment silently dropped that handler,
+    // so editor shortcuts went dead the moment the inspector path ran. The
+    // registry gets first crack (so a registered command consumes the chord);
+    // anything it doesn't claim falls through to the prior handler.
+    auto prior = std::move(root.on_global_key);
+    root.on_global_key = [&registry, prior = std::move(prior)](
+                             const KeyEvent& event) -> bool {
+        if (registry.dispatch_key_event(event)) return true;
+        return prior ? prior(event) : false;
     };
 }
 

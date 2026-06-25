@@ -73,7 +73,36 @@ void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter
     meter->request_repaint();
 }
 
+// ── Natural panel height ────────────────────────────────────────────────────
+// Sum of the Audio tab's row layout (the tallest tab, shown first) so the host
+// can size the window tall enough that nothing compresses. Keep in lockstep with
+// build_audio_tab(): the same preferred heights, the 8px inter-row gap, and the
+// 12px padding on all four sides.
+constexpr int kRowGap = 8;       // audio_tab flex().gap
+constexpr int kTabPadding = 12;  // audio_tab flex().padding (per side)
+constexpr int kSectionLabel = 20;
+constexpr int kInfoLabel = 16;
+constexpr int kCombo = 28;
+constexpr int kMeter = 48;
+constexpr int kToggleRow = 28;  // test-signal header row
+
+// 15 rows in build_audio_tab(): 6 section labels, 5 combos (output/input/rate/
+// buffer device + the test-signal frequency combo), 1 info label (latency),
+// 2 meters, and the test-signal header row.
+constexpr int kAudioRowCount = 15;
+constexpr int kAudioTabContent =
+    6 * kSectionLabel + 5 * kCombo + 1 * kInfoLabel + 2 * kMeter + kToggleRow;
+constexpr int kAudioTabNatural =
+    kAudioTabContent + (kAudioRowCount - 1) * kRowGap + 2 * kTabPadding;  // 14 gaps
+
+constexpr int kHeaderHeight = 52;     // panel header (Done bar)
+constexpr int kInnerTabBarHeight = 32;  // SettingsPanel's inner Audio/MIDI tab bar
+
 }  // namespace
+
+int SettingsPanel::preferred_height() {
+    return kHeaderHeight + kInnerTabBarHeight + kAudioTabNatural;
+}
 
 // ── Helper: create a styled label ──────────────────────────────────────────
 

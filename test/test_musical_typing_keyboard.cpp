@@ -124,6 +124,56 @@ TEST_CASE("MusicalTypingKeyboard: piano frame has the chromatic span C2..B4",
         REQUIRE(std::count(piano.begin(), piano.end(), n) == 1);
 }
 
+// Regression: the piano playable window must stay a contiguous 36-key window over
+// C-2..G8 regardless of the controller base note. midi_for_element used to offset
+// by (note - base_note), so a sampler root of C3 (60) shifted the whole window
+// down 12 semitones — the top reached only ~D#7 instead of G8, and the lowest
+// visible key was C-1 not C-2. It must map by the frame-intrinsic low note (48).
+TEST_CASE("MusicalTypingKeyboard: piano window is base-independent (C-2..G8)",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.controller().set_base_note(60);   // C3 root, like the tempo sampler
+    kb.set_mode(Mode::piano);
+    auto window = [&] {
+        int lo = 999, hi = -1;
+        for (int i = 0; i < kb.element_count(); ++i)
+            if (kb.element_kind(i) == K::momentary && kb.element_note(i) >= 0) {
+                const int m = kb.midi_for_element(i);
+                lo = std::min(lo, m); hi = std::max(hi, m);
+            }
+        return std::pair<int, int>{lo, hi};
+    };
+    // Far LEFT: window bottoms on C-2 (MIDI 0); still 36 contiguous keys.
+    kb.controller().set_octave_shift(-99);
+    auto [lo1, hi1] = window();
+    REQUIRE(lo1 == 0);                 // C-2
+    REQUIRE(hi1 - lo1 == 35);          // 36-key contiguous window
+    // Far RIGHT: window tops out on G8 (MIDI 127).
+    kb.controller().set_octave_shift(99);
+    auto [lo2, hi2] = window();
+    REQUIRE(hi2 == 127);               // G8
+    REQUIRE(hi2 - lo2 == 35);
+}
+
+// MusicalTypingKeyboard::set_base_note is the wrapper the sampler calls when the
+// ROOT note changes: unlike a bare controller().set_base_note(), it re-clamps the
+// octave shift to the NEW base's range (and refreshes the readout/overview), so a
+// shift that was valid for the old base can't push the play-window off C-2..G8.
+TEST_CASE("MusicalTypingKeyboard: set_base_note re-clamps the octave shift",
+          "[view][musical-typing]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_base_note(60);                          // C3 root
+    kb.controller().set_octave_shift(-99);         // pin to base-60's floor
+    const int floor60 = kb.controller().octave_shift();
+    REQUIRE(floor60 < 0);                           // base 60 can shift below 0 (reaches C-2)
+
+    kb.set_base_note(0);                            // re-base via the wrapper
+    // Base 0's floor is 0 (no negative shift), so the stale -ve shift must be
+    // re-clamped up. A bare controller().set_base_note would have left floor60.
+    REQUIRE(kb.controller().octave_shift() >= 0);
+    REQUIRE(kb.controller().octave_shift() != floor60);
+}
+
 TEST_CASE("MusicalTypingKeyboard: toggle swaps the frame AND the intrinsic size",
           "[view][musical-typing][toggle]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
@@ -236,6 +286,57 @@ TEST_CASE("MusicalTypingKeyboard: computer keyboard plays + lights typing keys",
     // Cmd-chords are NOT consumed (host keeps its shortcuts).
     KeyEvent cmdA{}; cmdA.key = KeyCode::a; cmdA.is_down = true; cmdA.modifiers = kModCmd;
     REQUIRE_FALSE(kb.on_key_event(cmdA));
+}
+
+// Regression: input_capture gates whether the keyboard plays its OWN typed keys.
+// The tempo sampler's popout keyboard window had it set to false (display-only),
+// so when that window was focused EVERY typed key was dropped (the dead-keyboard
+// bug). With it true the keyboard self-captures: letters play notes and numbers
+// 1–8 route to pitch-bend / modulation controls.
+TEST_CASE("MusicalTypingKeyboard: input_capture gates self-play of typed keys",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    std::vector<float> bends;
+    kb.on_note_on    = [&](int n, float) { ons.push_back(n); };
+    kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
+
+    auto press = [](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = true; return e; };
+
+    // Display-only: on_key_event is a no-op and plays nothing.
+    kb.set_input_capture(false);
+    REQUIRE_FALSE(kb.on_key_event(press(KeyCode::a)));
+    REQUIRE_FALSE(kb.on_key_event(press(KeyCode::num2)));
+    REQUIRE(ons.empty());
+    REQUIRE(bends.empty());
+
+    // Self-capture: a letter plays its note; number 2 drives pitch-bend up.
+    kb.set_input_capture(true);
+    REQUIRE(kb.on_key_event(press(KeyCode::a)));
+    REQUIRE(ons == std::vector<int>{48});          // 'a' = C2
+    REQUIRE(kb.on_key_event(press(KeyCode::num2)));
+    REQUIRE_FALSE(bends.empty());                  // pitch-bend control fired
+}
+
+// Regression: dropping self-capture must RELEASE any note still held, firing
+// on_note_off. The tempo sampler calls set_input_capture(false) when the keyboard
+// window is dismissed; without the release a key held at close time never got its
+// key-up (a hidden window receives no keys) and its voice sustained forever — the
+// "QWERTY keeps sending MIDI after the keyboard is closed" bug.
+TEST_CASE("MusicalTypingKeyboard: dropping capture releases held notes (close path)",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons, offs;
+    kb.on_note_on  = [&](int n, float) { ons.push_back(n); };
+    kb.on_note_off = [&](int n) { offs.push_back(n); };
+
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;
+    REQUIRE(kb.on_key_event(a));                    // 'a' held, no key-up sent
+    REQUIRE(ons == std::vector<int>{48});
+    REQUIRE(offs.empty());
+
+    kb.set_input_capture(false);                    // dismiss → must release the held note
+    REQUIRE(offs == std::vector<int>{48});
 }
 
 TEST_CASE("MusicalTypingKeyboard: z/x shift the typed octave",
@@ -607,6 +708,21 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     kb.on_mouse_drag({700.0f, 33.0f});
     REQUIRE(kb.controller().octave_shift() == 5);
     kb.on_mouse_up({700.0f, 33.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: strip drag reaches C-2 even when base > C2",
+          "[view][musical-typing][overview]") {
+    // A sampler sets the keyboard base to the sample root (often C3). The strip's
+    // far-left drag must still bottom the play-window low note on C-2 (MIDI 0); a
+    // fixed −4 floor would stop at C-1 (the overview-highlight-can't-reach-C-2 bug).
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.controller().set_base_note(60);              // C3 root, like the tempo sampler
+    refit(kb);
+    kb.on_mouse_down({400.0f, 30.0f});              // grab the strip
+    kb.on_mouse_drag({120.0f, 33.0f});              // drag hard left
+    REQUIRE(kb.controller().octave_shift() == -5);  // 60 − 60 = MIDI 0 = C-2
+    REQUIRE(kb.controller().base_note() + kb.controller().octave_shift() * 12 == 0);
+    kb.on_mouse_up({120.0f, 33.0f});
 }
 
 TEST_CASE("MusicalTypingKeyboard: the overview highlight is coupled to z/x + the arrows",
