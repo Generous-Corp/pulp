@@ -227,6 +227,14 @@ if [ -x "$ROOT/tools/docs_generate.py" ]; then
     fi
 fi
 
+# ── Processing-model terminology ─────────────────────────────────────────────
+if [ -f "$ROOT/tools/scripts/processing_model_terms_lint.py" ]; then
+    echo "Checking Processor vs SignalGraph terminology..."
+    if ! python3 "$ROOT/tools/scripts/processing_model_terms_lint.py"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── Widget catalog sync (every View primitive documented) ─────────────────────
 if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
     echo "Checking widget catalog (docs/reference/widgets.md) is in sync..."
