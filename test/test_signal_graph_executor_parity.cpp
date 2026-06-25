@@ -678,6 +678,130 @@ pulp::midi::MidiBuffer make_injected_midi(int seed) {
     return buf;
 }
 
+// Plugin with one automatable parameter (id 1, bounds [0,2]) that applies it as
+// a per-sample gain ramp from the block's first control point to its last:
+// out[c][i] = in[c][i] * lerp(v0, vN, i/last). Reading the parameter events makes
+// any automation gather divergence (mapping, slew, mix, clamp, ordering) show up
+// as an audio-output difference.
+class AutomatedGainPlugin final : public PluginSlot {
+public:
+    explicit AutomatedGainPlugin(int channels)
+        : info_(test_plugin_info(channels, channels)) {}
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue& params,
+                 int n) override {
+        const int last = n - 1;
+        float v0 = 1.0f;
+        float vN = 1.0f;
+        for (const auto& ev : params) {
+            if (ev.param_id != 1) continue;
+            if (ev.sample_offset == 0) v0 = ev.value;
+            if (ev.sample_offset == last) vN = ev.value;
+        }
+        const std::size_t chs = out.num_channels();
+        for (std::size_t c = 0; c < chs; ++c) {
+            float* o = out.channel_ptr(c);
+            const float* i = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+            for (int s = 0; s < n; ++s) {
+                const float t = last > 0 ? static_cast<float>(s) / static_cast<float>(last) : 0.0f;
+                const float gain = v0 + (vN - v0) * t;
+                o[static_cast<std::size_t>(s)] =
+                    (i ? i[static_cast<std::size_t>(s)] : 0.0f) * gain;
+            }
+        }
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override {
+        pulp::host::HostParamInfo p;
+        p.id = 1;
+        p.name = "Gain";
+        p.min_value = 0.0f;
+        p.max_value = 2.0f;
+        p.default_value = 1.0f;
+        p.flags.automatable = true;
+        // A second, audio-rate-capable parameter for dense-modulation coverage.
+        pulp::host::HostParamInfo p2;
+        p2.id = 2;
+        p2.name = "AudioRateGain";
+        p2.min_value = 0.0f;
+        p2.max_value = 2.0f;
+        p2.default_value = 1.0f;
+        p2.flags.automatable = true;
+        p2.flags.modulatable = true;
+        p2.rate = pulp::state::ParamRate::AudioRate;
+        return {p, p2};
+    }
+    float get_parameter(uint32_t) const override { return 1.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    PluginInfo info_;
+};
+
+// Plugin exposing `num_params` automatable parameters (ids 1..num_params), for
+// the per-node automated-parameter cap. Audio passes through unchanged.
+class ManyParamPlugin final : public PluginSlot {
+public:
+    ManyParamPlugin(int num_params, int channels)
+        : num_params_(num_params), info_(test_plugin_info(channels, channels)) {}
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n) override {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c) {
+            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+        }
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override {
+        std::vector<pulp::host::HostParamInfo> ps;
+        for (int i = 0; i < num_params_; ++i) {
+            pulp::host::HostParamInfo p;
+            p.id = static_cast<uint32_t>(i + 1);
+            p.min_value = 0.0f;
+            p.max_value = 1.0f;
+            p.flags.automatable = true;
+            ps.push_back(p);
+        }
+        return ps;
+    }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    int num_params_;
+    PluginInfo info_;
+};
+
 } // namespace
 
 TEST_CASE("Translated routing matches SignalGraph: input -> plugin -> output",
@@ -1305,4 +1429,227 @@ TEST_CASE("SignalGraph::process MIDI executor path does not allocate on the audi
     pulp::midi::MidiBuffer drained;
     drained.reserve(64, 8, 256);
     static_cast<void>(g.extract_midi(mo, drained));
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: single sparse edge",
+          "[host][graph][executor][routing][parity][automation]") {
+    // in:0 drives the plugin's gain parameter (range [0,2]); the plugin applies
+    // it to the audio. The routed automation gather must build the same two
+    // control points the legacy walk does, so the audio output matches.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_automation(in, 0, p, 1, 0.0f, 2.0f, 0.0f,
+                                     pulp::host::AutomationMix::Replace));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk)),
+            ramp(kFrames, 0.4f + 0.03f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: per-source slew across blocks",
+          "[host][graph][executor][routing][parity][automation]") {
+    // A non-zero smoothing time engages the per-source slew, whose state persists
+    // across blocks. Drive several blocks with changing source values and require
+    // block-for-block parity so the slew state is exercised.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_automation(in, 0, p, 1, 0.0f, 2.0f, /*smoothing_ms=*/5.0f,
+                                     pulp::host::AutomationMix::Replace));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 8; ++blk) {
+        // Alternate the source level hard so the slew must ramp, not snap.
+        const float lvl = (blk % 2 == 0) ? 0.1f : 0.9f;
+        std::vector<float> a(static_cast<std::size_t>(kFrames), lvl);
+        std::vector<float> b = ramp(kFrames, 0.5f);
+        const std::vector<std::vector<float>> input{a, b};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: two-source Add mix",
+          "[host][graph][executor][routing][parity][automation]") {
+    // Two automation sources (in:0, in:1) sum into the same parameter with Add
+    // mix; the accumulate order + bounds clamp must match the legacy walk.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_automation(in, 0, p, 1, 0.0f, 1.5f, 0.0f,
+                                     pulp::host::AutomationMix::Add));
+        REQUIRE(g.connect_automation(in, 1, p, 1, 0.0f, 1.5f, 0.0f,
+                                     pulp::host::AutomationMix::Add));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.04f * static_cast<float>(blk)),
+            ramp(kFrames, 0.8f - 0.05f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process opt-in falls back to legacy for dense audio-rate automation",
+          "[host][graph][executor][routing][automation]") {
+    // Dense audio-rate modulation is not yet routed; an eligible-looking graph
+    // with an audio-rate edge must stay ineligible and fall back to the walk.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.connect_audio_rate_modulation(in, 0, p, 2, 0.0f, 2.0f, 0.0f,
+                                            pulp::host::AutomationMix::Replace));
+    REQUIRE(g.prepare(kSr, kFrames));
+    CHECK_FALSE(signal_graph_executor_eligible(g));
+}
+
+TEST_CASE("SignalGraph::process automation executor path does not allocate on the audio thread",
+          "[host][graph][executor][routing][rt-safety][automation]") {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.connect_automation(in, 0, p, 1, 0.0f, 2.0f, /*smoothing_ms=*/5.0f,
+                                 pulp::host::AutomationMix::Replace));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    const auto l = ramp(kFrames, 0.8f), r = ramp(kFrames, 0.6f);
+    std::vector<float> li = l, ri = r;
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> ic{li.data(), ri.data()};
+    std::array<float*, 2> oc{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+
+    g.process(ov, iv, kFrames);  // warm-up outside the probe
+    {
+        pulp::test::RtAllocationProbe probe;
+        g.process(ov, iv, kFrames);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("SignalGraph::process opt-in falls back to legacy past the per-node automation cap",
+          "[host][graph][executor][routing][automation]") {
+    // A node automating more distinct parameters than the gather's on-stack
+    // accumulator holds must stay ineligible (kept on the legacy walk) rather
+    // than route and silently drop the overflow.
+    constexpr int kOverCap =
+        static_cast<int>(pulp::format::GraphRuntimeAutomationScratch::kMaxParamsPerNode) + 1;
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(std::make_unique<ManyParamPlugin>(kOverCap, 2), 2, 2, "P");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    for (int i = 0; i < kOverCap; ++i) {
+        REQUIRE(g.connect_automation(in, 0, p, static_cast<uint32_t>(i + 1), 0.0f, 1.0f, 0.0f,
+                                     pulp::host::AutomationMix::Add));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    CHECK_FALSE(signal_graph_executor_eligible(g));
+
+    // Exactly at the cap is still eligible.
+    SignalGraph at_cap;
+    const auto in2 = at_cap.add_input_node(2, "In");
+    const auto p2 = at_cap.add_plugin_node(
+        std::make_unique<ManyParamPlugin>(kOverCap - 1, 2), 2, 2, "P");
+    const auto out2 = at_cap.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(at_cap.connect(in2, c, p2, c));
+        REQUIRE(at_cap.connect(p2, c, out2, c));
+    }
+    for (int i = 0; i < kOverCap - 1; ++i) {
+        REQUIRE(at_cap.connect_automation(in2, 0, p2, static_cast<uint32_t>(i + 1), 0.0f, 1.0f,
+                                          0.0f, pulp::host::AutomationMix::Add));
+    }
+    REQUIRE(at_cap.prepare(kSr, kFrames));
+    CHECK(signal_graph_executor_eligible(at_cap));
+}
+
+TEST_CASE("SignalGraph::process automation matches legacy: source also drives audio",
+          "[host][graph][executor][routing][parity][automation]") {
+    // A plugin's audio output both feeds a downstream plugin's audio input AND
+    // drives its gain parameter. The source's output slot must stay live for the
+    // automation gather to read it, and the routed output must match the walk.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto a = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "A");
+        const auto b = g.add_plugin_node(std::make_unique<AutomatedGainPlugin>(2), 2, 2, "B");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, a, c));
+            REQUIRE(g.connect(a, c, b, c));   // A's audio -> B's audio
+            REQUIRE(g.connect(b, c, out, c));
+        }
+        REQUIRE(g.connect_automation(a, 0, b, 1, 0.0f, 2.0f, 0.0f,  // A:0 -> B's gain param
+                                     pulp::host::AutomationMix::Replace));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph legacy, routed;
+    build(legacy, false);
+    build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.04f * static_cast<float>(blk)),
+            ramp(kFrames, 0.5f + 0.03f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+    }
 }

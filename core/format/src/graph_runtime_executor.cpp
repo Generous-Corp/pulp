@@ -192,6 +192,125 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
     midi.set_in_incomplete(node_index, incomplete);
 }
 
+// Upper bound on distinct automated parameters per node for the on-stack
+// accumulator. The caller (eligibility check) rejects any graph that exceeds
+// this on a node and keeps it on the legacy walk, so the `continue` below is
+// a defense-in-depth backstop, never hit for an eligible graph.
+constexpr std::uint32_t kMaxAutomatedParamsPerNode =
+    GraphRuntimeAutomationScratch::kMaxParamsPerNode;
+
+// Build this node's parameter-automation events from its inbound SPARSE
+// automation connections (audio-rate edges are handled elsewhere). Each edge
+// samples its source's audio output at sample 0 and N-1, maps into the
+// parameter range, applies per-source linear slew (state persisted in the
+// scratch), accumulates per parameter by mix mode, then emits two control points
+// per touched parameter — replicating the host walk's sparse-automation math.
+void gather_node_automation(const graph::GraphRuntimePlan& plan,
+                            const graph::GraphRuntimeBufferAssignment& assignment,
+                            GraphRuntimeBufferPool& pool,
+                            GraphRuntimeAutomationScratch& automation,
+                            const graph::GraphRuntimeNodePlan& node,
+                            std::uint32_t node_index,
+                            std::uint32_t frames,
+                            double sample_rate) noexcept {
+    state::ParameterEventQueue* queue = automation.events(node_index);
+    if (queue == nullptr) return;
+    queue->clear();
+    const int last = static_cast<int>(frames) - 1;
+
+    struct Accum {
+        std::uint32_t param_id;
+        float v0;
+        float vN;
+        float lo;
+        float hi;
+        bool has_add;
+    };
+    std::array<Accum, kMaxAutomatedParamsPerNode> accum{};
+    std::uint32_t param_count = 0;
+
+    for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+        const auto conn_index =
+            plan.inbound_connection_indices[node.first_inbound_connection + c];
+        const auto& conn = plan.connections[conn_index];
+        if (!conn.is_automation || conn.automation.audio_rate) continue;
+        const auto& src_slots = assignment.nodes[conn.source_index];
+        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        if (src == nullptr) continue;
+        const auto& a = conn.automation;
+        const float s0 = std::clamp(src[0], 0.0f, 1.0f);
+        const float sN = std::clamp(src[last < 0 ? 0 : last], 0.0f, 1.0f);
+        float m0 = a.range_lo + s0 * (a.range_hi - a.range_lo);
+        float mN = a.range_lo + sN * (a.range_hi - a.range_lo);
+
+        if (a.smoothing_ms > 0.0f && sample_rate > 0.0) {
+            const float range = std::abs(a.range_hi - a.range_lo);
+            const double slew_samples =
+                static_cast<double>(a.smoothing_ms) * 0.001 * sample_rate;
+            const float max_step =
+                slew_samples > 0.0 ? (range / static_cast<float>(slew_samples)) : range;
+            if (!automation.slew_primed(conn_index)) {
+                automation.slew_last(conn_index) = m0;
+                automation.set_slew_primed(conn_index, true);
+            }
+            auto ramp_to = [max_step](float from, float target) {
+                const float delta = target - from;
+                if (delta > max_step) return from + max_step;
+                if (delta < -max_step) return from - max_step;
+                return target;
+            };
+            const float new_v0 = ramp_to(automation.slew_last(conn_index), m0);
+            float new_vN = new_v0;
+            if (last > 0) {
+                const float max_block_step = max_step * static_cast<float>(last);
+                const float delta = mN - new_v0;
+                if (delta > max_block_step) {
+                    new_vN = new_v0 + max_block_step;
+                } else if (delta < -max_block_step) {
+                    new_vN = new_v0 - max_block_step;
+                } else {
+                    new_vN = mN;
+                }
+            }
+            automation.slew_last(conn_index) = new_vN;
+            m0 = new_v0;
+            mN = new_vN;
+        }
+
+        std::uint32_t pi = 0;
+        for (; pi < param_count; ++pi) {
+            if (accum[pi].param_id == a.param_id) break;
+        }
+        if (pi == param_count) {
+            if (param_count >= kMaxAutomatedParamsPerNode) continue;
+            accum[pi] = Accum{a.param_id, 0.0f, 0.0f, a.bounds_lo, a.bounds_hi, false};
+            ++param_count;
+        }
+        if (a.mix_add) {
+            accum[pi].v0 += m0;
+            accum[pi].vN += mN;
+            accum[pi].has_add = true;
+        } else {
+            accum[pi].v0 = m0;
+            accum[pi].vN = mN;
+        }
+    }
+
+    for (std::uint32_t pi = 0; pi < param_count; ++pi) {
+        float v0 = accum[pi].v0;
+        float vN = accum[pi].vN;
+        if (accum[pi].has_add) {
+            const float lo = std::min(accum[pi].lo, accum[pi].hi);
+            const float hi = std::max(accum[pi].lo, accum[pi].hi);
+            v0 = std::clamp(v0, lo, hi);
+            vN = std::clamp(vN, lo, hi);
+        }
+        if (!queue->push({accum[pi].param_id, 0, v0, 0})) break;
+        if (last > 0 && !queue->push({accum[pi].param_id, last, vN, 0})) break;
+    }
+    queue->sort();
+}
+
 // After all nodes run, capture each feedback edge's current source output into
 // its previous-block slot for the next block (the source's output slot is final
 // once the block's walk completes). One-block delay, matching SignalGraph.
@@ -286,6 +405,33 @@ bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count) {
 void GraphRuntimeMidiScratch::clear() noexcept {
     slots_.clear();
     node_count_ = 0;
+}
+
+bool GraphRuntimeAutomationScratch::reset(std::uint32_t node_count,
+                                          std::uint32_t connection_count) {
+    clear();
+    try {
+        events_.reserve(node_count);
+        for (std::uint32_t i = 0; i < node_count; ++i) {
+            events_.push_back(std::make_unique<state::ParameterEventQueue>());
+        }
+        slew_last_.assign(connection_count, 0.0f);
+        slew_primed_.assign(connection_count, 0);
+    } catch (...) {
+        clear();
+        return false;
+    }
+    node_count_ = node_count;
+    connection_count_ = connection_count;
+    return true;
+}
+
+void GraphRuntimeAutomationScratch::clear() noexcept {
+    events_.clear();
+    slew_last_.clear();
+    slew_primed_.clear();
+    node_count_ = 0;
+    connection_count_ = 0;
 }
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
@@ -502,6 +648,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     const GraphRuntimeSnapshot& snapshot,
     GraphRuntimeBufferPool& pool,
     GraphRuntimeMidiScratch* midi,
+    GraphRuntimeAutomationScratch* automation,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
@@ -515,6 +662,14 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     const auto frames = block.frame_count;
 
     if (!pool.fits(snapshot, frames)) {
+        GraphRuntimeExecutorResult fail;
+        fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
+        return fail;
+    }
+    // An automation scratch, when supplied, must cover every node + connection so
+    // the gather can index any node's queue and any connection's slew state.
+    if (automation != nullptr &&
+        !automation->fits(plan.node_count(), plan.connection_count())) {
         GraphRuntimeExecutorResult fail;
         fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
         return fail;
@@ -566,6 +721,10 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         if (midi != nullptr) {
             gather_node_midi(plan, *midi, node, node_index);
         }
+        if (automation != nullptr) {
+            gather_node_automation(plan, assignment, pool, *automation, node,
+                                   node_index, frames, block.sample_rate);
+        }
 
         if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
             node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
@@ -611,6 +770,9 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             if (midi != nullptr) {
                 context.node_midi_in = midi->in(node_index);
                 context.node_midi_out = midi->out(node_index);
+            }
+            if (automation != nullptr) {
+                context.node_param_events = automation->events(node_index);
             }
             if (!binding.process(block, context, binding.user_data)) {
                 result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
