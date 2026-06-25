@@ -6,46 +6,62 @@
 
 ## Summary
 
-A standalone application for testing the view/widget system and GPU rendering pipeline without building a full plugin. It creates a window with knobs, a toggle, a fader, and a label, all built from JavaScript via the `WidgetBridge` scripting layer.
+A standalone application for testing the view/widget system, imported UI scripts,
+the inspector overlay, and the GPU rendering pipeline without building a full
+plugin. With no script it opens a small built-in widget demo; with `--script` it
+loads an imported JavaScript/JSX bundle through the `WidgetBridge` scripting
+layer.
 
 ## What It Demonstrates
 
-- The full rendering pipeline: JS script -> WidgetBridge -> View tree -> layout -> paint -> CoreGraphics -> screen
-- `ScriptEngine` (QuickJS) integration for building UIs from JavaScript
+- The live rendering pipeline: script or built-in demo -> View tree -> layout -> paint -> GPU window
+- `ScriptEngine` (QuickJS) integration for loading imported JavaScript UI bundles
 - `WidgetBridge` binding JavaScript widget creation functions to the View hierarchy
 - `StateStore` parameter setup outside of a plugin context
 - `WindowHost` for native window creation and event loop
+- In-canvas inspector overlay plus floating inspector window wiring
+- Headless capture and diagnostics through `--screenshot`, `--view-tree-out`, `--label-audit`, and `--font-probe`
+- Optional zero-copy benchmark mode when Pulp is configured with `PULP_BENCHMARK=ON`
 - Dark theme application via `Theme::dark()`
 - Flexbox layout configuration (`FlexDirection::column`, padding, gap)
-- Widget types: `createLabel`, `createKnob`, `createToggle`, `createFader`
-- Setting widget values from JavaScript via `setValue()`
+- Built-in widget types: labels, knobs, toggles, faders, and scroll views
 
 ## Supported Formats
 
-This is not a plugin. It builds only as a native standalone target (`.app` on macOS, executable elsewhere).
+This is not a plugin. It builds as the native standalone `pulp-ui-preview`
+target when the desktop UI/GPU dependencies are available.
 
 ## Supported Platforms
 
 | Platform | Supported |
 |----------|-----------|
-| macOS | Yes |
-| Windows | No (guarded by `if(APPLE)` in CMakeLists.txt) |
-| Linux | No (guarded by `if(APPLE)` in CMakeLists.txt) |
+| macOS | Yes, desktop only with GPU and Skia enabled |
+| iOS | No |
+| Windows | No (target is Apple-desktop gated in CMake) |
+| Linux | No (target is Apple-desktop gated in CMake) |
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `main.cpp` | Application entry point: creates StateStore, View tree, ScriptEngine, WidgetBridge, and WindowHost |
-| `CMakeLists.txt` | Build configuration; links `pulp::view` and `pulp::state` |
+| `main.cpp` | Application entry point: creates state, preview root, scripting bridge, inspector wiring, headless diagnostics, and WindowHost |
+| `design_viewport_probe.hpp` | Header-only imported-design viewport resolver used by the live preview path |
+| `CMakeLists.txt` | Build configuration; gates the target to Apple desktop with GPU, Skia, and `pulp::inspect` available |
+| `test/test_ui_preview_viewport.cpp` | Headless tests for the imported-design viewport probe |
+| `test/test_bench_integration.cpp` | Optional benchmark-mode integration test when `PULP_BENCHMARK` and `pulp-ui-preview` are built |
 
 ## Known Limitations
 
-- macOS only. The CMakeLists.txt wraps the entire target in an `if(APPLE)` guard.
-- Links `pulp::view` and `pulp::state` but does not link any audio or format libraries. This is intentional -- it validates the UI stack in isolation.
-- No test file. Validation is visual (launch the app and inspect the window).
-- The rendering backend depends on CoreGraphics. The Dawn/Skia GPU path is not exercised by this example in its current form.
+- macOS desktop only. The CMakeLists.txt requires Apple desktop, GPU enabled,
+  Skia available, and `pulp::inspect` present.
+- It intentionally does not link audio or plugin-format libraries; it validates
+  the UI stack in isolation.
+- End-to-end live-window behavior is still primarily validated by launching the
+  app or by desktop automation, but the imported-design viewport resolver and
+  benchmark JSON contract have automated coverage.
+- The executable is a developer validation host, not a stable application API.
 
 ## Related Examples
 
 - [PulpGain](example-pulp-gain.html) -- the parameters used in this preview (Gain, Mix, Bypass) mirror PulpGain's parameter set
+- [Showcase](example-showcase.html) -- JavaScript UI bundle that can be loaded through `pulp-ui-preview --script`
