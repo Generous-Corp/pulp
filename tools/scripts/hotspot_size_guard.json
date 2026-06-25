@@ -127,7 +127,7 @@
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1291,
+      "max_loc": 1236,
       "note": "CLI common cleanup candidate"
     },
     {

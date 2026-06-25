@@ -369,7 +369,7 @@ catch_discover_tests(pulp-test-cli-design-binding
     PROPERTIES LABELS "parser-import")
 
 # CLI create target selection tests
-add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp
+add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp ${CMAKE_SOURCE_DIR}/tools/cli/create_build_commands.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/create_targets.cpp
 )
 target_include_directories(pulp-test-cli-create-targets PRIVATE ${CMAKE_SOURCE_DIR})
@@ -557,7 +557,7 @@ catch_discover_tests(pulp-test-cli-tweaks-shellout)
 # on Windows by writing doubled backslashes into clone URLs.
 add_executable(pulp-test-cli-shell-quote
     test_cli_shell_quote.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -583,7 +583,7 @@ catch_discover_tests(pulp-test-cli-shell-quote)
 add_executable(pulp-test-cli-docs-command
     test_cli_docs_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -920,7 +920,7 @@ configure_file(
     @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp

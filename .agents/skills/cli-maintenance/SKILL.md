@@ -1725,6 +1725,12 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- Standalone `pulp create` configure/test shell commands live in
+  `tools/cli/create_build_commands.{hpp,cpp}` so path quoting is tested without
+  running a full scaffold build. Keep every path-bearing command argument
+  quoted via the shared `tools/cli/shell_quote.{hpp,cpp}` helper, including
+  `-S`, `-B`, `-DCMAKE_PREFIX_PATH=`, and `ctest --test-dir`; users can pass
+  `--output` paths with spaces.
 - **`pulp sdk available` + newer-SDK banner cache contract.** `pulp sdk available` shells out to curl for the GitHub `/releases?per_page=30` endpoint and parses `tag_name` entries — no JSON dep. `maybe_print_newer_sdk_banner(installed)` caches the latest release at `~/.pulp/cache/latest_release.txt` (line 1 = version, line 2 = Unix timestamp) with a 24h TTL and a 2s curl timeout. The cache is best-effort — if curl fails the banner just doesn't print this run. Wired into `pulp sdk status` only; `pulp build` and `pulp create` deliberately stay quiet on the hot path. To invalidate the cache: `rm ~/.pulp/cache/latest_release.txt`.
 - **`tools/cli/cli_doctor_helpers.cpp` owns doctor check bodies** (2026-05, R2-4). The 971-line doctor block moved out of `cli_common.cpp` into its own TU. Public API (`DoctorCheck` struct + `run_doctor_*` functions) stays in `cli_common.hpp`; no new public header was added (Codex risk callout: don't replace one catch-all surface with another). When adding a new doctor check, edit `cli_doctor_helpers.cpp` only.
 - **`pulp doctor list` + `--only <name>`** (2026-05, R2-8). `pulp doctor list` enumerates available checks; `pulp doctor --only <substring>` case-insensitive filter runs a subset. Works across modes (`pulp doctor android list`, `pulp doctor --only emulator`). Filter logic lives in `cmd_doctor.cpp`, not in the helpers TU — the `DoctorCheck` vector returned by `run_doctor_checks` already IS the registry. No new struct or registration step needed when adding a check.

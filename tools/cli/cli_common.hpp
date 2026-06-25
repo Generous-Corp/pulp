@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "shell_quote.hpp"
+
 #include <pulp/runtime/system.hpp>
 
 namespace fs = std::filesystem;
@@ -59,8 +61,6 @@ int decode_system_status(int status);
 int run(const std::string& cmd);
 int run_with_spinner(const std::string& cmd, const std::string& label);
 std::string exec_output(const std::string& cmd);
-std::string shell_quote(const std::string& s);
-std::string shell_quote(const fs::path& p);
 fs::path platform_executable(fs::path p);
 
 // ── String Utilities ────────────────────────────────────────────────────────
