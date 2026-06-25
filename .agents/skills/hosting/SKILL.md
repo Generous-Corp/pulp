@@ -271,6 +271,8 @@ predictable output, no MIDI.
   the SAME plugin instances the pump renders (a data race otherwise; same rule as
   "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
   detected — safe only because no transport reaches the routed render today.
+  (A masked node must not be an `AudioOutput` or a feedback endpoint; the
+  partition guarantees this and `process_routed` debug-asserts it.)
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
