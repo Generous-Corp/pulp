@@ -1,22 +1,21 @@
 // plugin-host-demo
 //
-// Minimal Pulp host: scans for CLAP plugins, loads one via PluginSlot::load,
-// runs a block of synthetic audio through it, and prints a summary of what
-// happened (plugin name, I/O, parameters, peak output).
+// Minimal Pulp host: scans the standard plugin locations, loads one plugin via
+// PluginSlot::load, runs a block of synthetic audio through it, and prints a
+// summary of what happened (plugin name, I/O, parameters, peak output).
 //
 // Usage:
 //   pulp-plugin-host-demo                      # auto-pick first scanned CLAP
 //   pulp-plugin-host-demo --list               # list scanned plugins and exit
-//   pulp-plugin-host-demo --path <file.clap>   # load a specific bundle
-//   pulp-plugin-host-demo --id <clap-id>       # pick a specific descriptor
-//                                              # inside a multi-plugin bundle
+//   pulp-plugin-host-demo --path <bundle>      # pick a scanned bundle path
+//   pulp-plugin-host-demo --id <plugin-id>     # pick a scanned descriptor by id
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
 //                                              # (issue #494 demo)
 //
 // This is a validation harness for loading real plugins through Pulp's host
-// abstraction. It is not a DAW: there is no audio device I/O, no UI, and no
-// graph editor. The point is to prove a real third-party plugin loads and
-// processes audio through the same host boundary used by richer surfaces.
+// abstraction. It is not a DAW: there is no audio device I/O, no native window,
+// and no graph editor. The point is to prove a real third-party plugin loads
+// and processes audio through the same host boundary used by richer surfaces.
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -354,7 +353,7 @@ int main(int argc, char** argv) {
             filter_id = argv[++i];
         } else if (a == "--help" || a == "-h") {
             std::printf("Usage: %s [--list] [--manage] "
-                        "[--path <bundle>] [--id <clap-id>]\n", argv[0]);
+                        "[--path <bundle>] [--id <plugin-id>]\n", argv[0]);
             return 0;
         } else {
             std::fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -375,13 +374,16 @@ int main(int argc, char** argv) {
         chosen = pick_plugin(plugins, filter_path, filter_id);
         if (chosen.path.empty() && !filter_path.empty()) {
             // User passed an explicit path that the scanner may not have found
-            // (outside default dirs). Try it directly.
+            // (outside default dirs). The demo's direct path fallback is
+            // CLAP-only; other formats should come from scanned descriptors.
             chosen.path   = filter_path;
             chosen.format = PluginFormat::CLAP;
             chosen.name   = filter_path.substr(filter_path.find_last_of('/') + 1);
         }
     } else {
-        // Prefer CLAP since that's the only format the loader implements today.
+        // Prefer CLAP for the default demo because it is the most portable
+        // validated fixture path. Explicit --path/--id filters can still select
+        // other scanned formats when their host loaders are compiled in.
         for (const auto& p : plugins) {
             if (p.format == PluginFormat::CLAP) { chosen = p; break; }
         }
