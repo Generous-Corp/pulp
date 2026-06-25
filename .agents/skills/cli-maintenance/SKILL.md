@@ -179,6 +179,12 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   tests proving malformed argv is rejected before platform guards or side
   effects, especially for commands like `pulp ship release` where macOS-only
   execution follows cross-platform flag parsing.
+- Shell-out wrappers that build a command string must quote resolved repo/config
+  paths and every forwarded user argument before interpolation. For passthrough
+  commands such as `pulp docs build-site`, add a fake-tool PATH test that records
+  argv from a nested cwd and includes spaces in forwarded paths, so config
+  discovery and argument preservation do not depend on the real external tool
+  being installed.
 - Platform-specific flags are still parsed cross-platform but only *act*
   inside a platform `#if`. E.g. `pulp ship package --format appimage --binary
   <exe> [--icon <png>]` parses everywhere, yet only the `#if defined(__linux__)`
