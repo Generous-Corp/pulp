@@ -61,6 +61,7 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
     try {
         assignment.nodes.resize(node_count);
         assignment.feedback_prev_slot.assign(plan.connections.size(), kGraphRuntimeNoSlot);
+        assignment.connection_delay_samples.assign(plan.connections.size(), 0);
     } catch (...) {
         assignment = {};
         assignment.ok = false;
@@ -153,6 +154,42 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             }
         }
         assignment.slot_count = cursor;
+    } catch (...) {
+        assignment = {};
+        assignment.ok = false;
+        return assignment;
+    }
+
+    // Plug-in delay compensation. Propagate each node's added latency through the
+    // topology in processing order (every source resolves before its consumers),
+    // then derive each feedforward connection's required delay so fan-in paths of
+    // differing latency time-align — matching the host graph's per-connection
+    // delay lines. Feedback and event connections carry no delay.
+    try {
+        std::vector<std::uint32_t> input_latency(node_count, 0);
+        std::vector<std::uint32_t> output_latency(node_count, 0);
+        for (const auto node_index : plan.processing_order_indices) {
+            const auto& node = plan.nodes[node_index];
+            std::uint32_t max_upstream = 0;
+            for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+                const auto ci = plan.inbound_connection_indices[
+                    node.first_inbound_connection + c];
+                const auto& conn = plan.connections[ci];
+                if (conn.feedback || conn.event) continue;
+                max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
+            }
+            input_latency[node_index] = max_upstream;
+            output_latency[node_index] = max_upstream + node.latency_samples;
+        }
+        for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+            const auto& conn = plan.connections[i];
+            if (conn.feedback || conn.event) continue;
+            const std::uint32_t dst_in = input_latency[conn.dest_index];
+            const std::uint32_t src_out = output_latency[conn.source_index];
+            const std::uint32_t want = dst_in > src_out ? dst_in - src_out : 0;
+            assignment.connection_delay_samples[i] = want;
+            if (want > 0) assignment.has_delay = true;
+        }
     } catch (...) {
         assignment = {};
         assignment.ok = false;

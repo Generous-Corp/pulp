@@ -1173,7 +1173,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         if (cg->routing_valid && max_block_size > 0) {
             cg->routing_valid = cg->exec_pool.reset(
                 cg->routing_snapshot.buffer_slot_count(),
-                static_cast<std::uint32_t>(max_block_size));
+                static_cast<std::uint32_t>(max_block_size),
+                cg->routing_snapshot.buffer_assignment().connection_delay_samples);
         }
     }
     return cg;

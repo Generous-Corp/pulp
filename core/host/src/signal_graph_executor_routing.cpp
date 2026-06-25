@@ -115,12 +115,11 @@ bool node_eligible(const GraphNode& node) noexcept {
         case NodeType::Plugin:
             // A Plugin node only routes bit-exactly when its slot is live (the
             // binding invokes it; a missing/placeholder slot would take
-            // SignalGraph's pass-through-or-zero branch instead) AND reports zero
-            // latency: the executor's gather has no per-connection PDC delay yet,
-            // so a latency-reporting plugin — which the legacy walk delay-
-            // compensates — would diverge. Such graphs stay on the legacy walk
-            // until executor PDC lands.
-            return node.plugin != nullptr && node.plugin->latency_samples() == 0;
+            // SignalGraph's pass-through-or-zero branch instead). A reported
+            // latency is fine: the executor's gather applies the same
+            // per-connection delay compensation as the legacy walk, derived from
+            // the node's latency_samples carried into the plan.
+            return node.plugin != nullptr;
         default:
             return false;
     }
@@ -184,6 +183,17 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             static_cast<std::uint32_t>(std::max(0, node.num_output_ports)),
         };
         spec.persistent_output = node.type == NodeType::Plugin;
+        // Carry the node's reported latency so the buffer assignment can derive
+        // per-connection delay compensation. Resolve it from the SAME slot the
+        // legacy walk's latency pass uses (plugin_for == the compiled snapshot's
+        // plugins) so the propagated delays match exactly.
+        if (node.type == NodeType::Plugin) {
+            PluginSlot* slot = plugin_for ? plugin_for(node.id) : nullptr;
+            if (slot != nullptr) {
+                spec.latency_samples =
+                    static_cast<std::uint32_t>(std::max(0, slot->latency_samples()));
+            }
+        }
         node_specs.push_back(spec);
     }
 
@@ -260,7 +270,8 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
     const int max_block = graph.prepared_max_block_size();
     if (max_block <= 0) return false;
     if (!out.pool.reset(out.snapshot.buffer_slot_count(),
-                        static_cast<std::uint32_t>(max_block))) {
+                        static_cast<std::uint32_t>(max_block),
+                        out.snapshot.buffer_assignment().connection_delay_samples)) {
         return false;
     }
 

@@ -65,7 +65,8 @@ struct SignalGraphExecutorRouting {
 //   - nodes only AudioInput / AudioOutput / Gain (fixed 2-in/2-out, always
 //     fully writes) / Plugin (every Plugin node must carry a live slot; its
 //     output region is pinned persistent so a plugin that does not fully write
-//     matches SignalGraph's persistent per-node buffer);
+//     matches SignalGraph's persistent per-node buffer; a reported latency is
+//     fine — its delay compensation is replicated on the routed path);
 //   - connections only plain audio (feedforward or feedback; no MIDI,
 //     automation, audio-rate-modulation, or sidechain).
 // No prepared check.

@@ -53,6 +53,20 @@ struct GraphRuntimeBufferAssignment {
     std::vector<std::uint32_t> feedback_prev_slot;
     // True if the plan has any feedback connection.
     bool has_feedback = false;
+    // Indexed by connection index (matches GraphRuntimePlan::connections). For a
+    // feedforward audio connection, the number of samples its source output must
+    // be delayed so it time-aligns with the destination's most-latent input —
+    // plug-in delay compensation. Derived by propagating per-node
+    // latency_samples through the topology (input_latency = max upstream
+    // output_latency; output_latency = input_latency + this node's
+    // latency_samples) and taking dst.input_latency - src.output_latency. 0 for
+    // connections that need no delay and for every feedback/event connection.
+    // The backing delay ring (sized delay + max_frames, with a persisted write
+    // position) lives in the GraphRuntimeBufferPool, which knows max_frames; the
+    // assignment carries only the per-connection sample counts.
+    std::vector<std::uint32_t> connection_delay_samples;
+    // True if any connection needs a non-zero delay.
+    bool has_delay = false;
     bool ok = false;
 };
 

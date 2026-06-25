@@ -122,6 +122,7 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 spec.event_input_ports,
                 spec.event_output_ports,
                 spec.persistent_output,
+                spec.latency_samples,
                 0,
                 0,
                 0,

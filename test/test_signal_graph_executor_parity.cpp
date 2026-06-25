@@ -736,11 +736,12 @@ TEST_CASE("SignalGraph::process plugin executor path does not allocate on the au
     }
 }
 
-TEST_CASE("Executor eligibility rejects a latency-reporting plugin",
-          "[host][graph][executor][routing][eligibility][plugin]") {
-    // The executor's gather has no per-connection PDC delay; the legacy walk
-    // delay-compensates a latency-reporting plugin, so such a graph must stay on
-    // the legacy walk (ineligible) rather than route and diverge silently.
+TEST_CASE("Translated routing matches SignalGraph: latency-reporting plugin in a chain",
+          "[host][graph][executor][routing][parity][plugin][pdc]") {
+    // A latency-reporting plugin is now eligible: the routed gather applies the
+    // same per-connection delay compensation as the legacy walk. In a pure chain
+    // every path is equally latent, so no connection is delayed — but the graph
+    // must still be eligible and route bit-exactly across blocks.
     SignalGraph g;
     const auto in = g.add_input_node(2, "In");
     const auto p = g.add_plugin_node(
@@ -753,8 +754,148 @@ TEST_CASE("Executor eligibility rejects a latency-reporting plugin",
         REQUIRE(g.connect(p, c, out, c));
     }
     REQUIRE(g.prepare(kSr, kFrames));
-    REQUIRE_FALSE(signal_graph_executor_eligible(g));
+    REQUIRE(signal_graph_executor_eligible(g));
     SignalGraphExecutorRouting routing;
-    REQUIRE_FALSE(build_signal_graph_executor_routing(g, routing));
-    REQUIRE_FALSE(routing.valid);
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.8f + 0.01f * static_cast<float>(blk)),
+            ramp(kFrames, 0.6f - 0.01f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
+    }
+}
+
+namespace {
+
+// A diamond where one arm carries a latency-reporting plugin and the other a
+// plain gain. The plain arm must be delay-compensated to time-align with the
+// plugin arm at the output fan-in, exercising the per-connection delay ring.
+// Driven over several blocks (the ring carries state across blocks) and required
+// to match SignalGraph's own walk block-for-block. Parameterized on the reported
+// latency so both sub-block and supra-block delays are covered.
+void run_latency_diamond_parity(int latency) {
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2, latency),
+        2, 2, "LatencyP");
+    const auto gain = g.add_gain_node("G");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));      // latent arm
+        REQUIRE(g.connect(in, c, gain, c));   // plain arm (must be delayed)
+        REQUIRE(g.connect(p, c, out, c));
+        REQUIRE(g.connect(gain, c, out, c));  // fan-in sum at the output
+    }
+    REQUIRE(g.set_node_gain(gain, 0.75f));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    for (int blk = 0; blk < 8; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.03f * static_cast<float>(blk)),
+            ramp(kFrames, 0.5f + 0.02f * static_cast<float>(blk))};
+        INFO("latency " << latency << " block " << blk);
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Translated routing matches SignalGraph: latency diamond, sub-block delay",
+          "[host][graph][executor][routing][parity][plugin][pdc]") {
+    run_latency_diamond_parity(/*latency=*/64);  // < kFrames (128)
+}
+
+TEST_CASE("Translated routing matches SignalGraph: latency diamond, supra-block delay",
+          "[host][graph][executor][routing][parity][plugin][pdc]") {
+    run_latency_diamond_parity(/*latency=*/200);  // > kFrames (128): ring wraps
+}
+
+TEST_CASE("Translated routing matches SignalGraph: latency diamond, mixed block sizes",
+          "[host][graph][executor][routing][parity][plugin][pdc]") {
+    // The ring is sized delay + max_frames precisely so a runtime block shorter
+    // than the prepared maximum still wraps correctly. Prepare at kFrames but
+    // drive blocks of varying length (including sub-max), requiring block-for-
+    // block equality so the shorter-block ring advance is exercised.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2, /*latency=*/96),
+        2, 2, "LatencyP");
+    const auto gain = g.add_gain_node("G");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(in, c, gain, c));
+        REQUIRE(g.connect(p, c, out, c));
+        REQUIRE(g.connect(gain, c, out, c));
+    }
+    REQUIRE(g.set_node_gain(gain, 0.75f));
+    REQUIRE(g.prepare(kSr, kFrames));  // max_block = kFrames (128)
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::array<int, 6> block_sizes{64, 128, 32, 100, 64, 17};
+    for (std::size_t b = 0; b < block_sizes.size(); ++b) {
+        const int frames = block_sizes[b];
+        const std::vector<std::vector<float>> input{
+            ramp(frames, 0.7f + 0.05f * static_cast<float>(b)),
+            ramp(frames, 0.5f + 0.04f * static_cast<float>(b))};
+        INFO("block " << b << " frames " << frames);
+        expect_equal(run_legacy(g, frames, input, 2),
+                     run_routed(exec, routing, frames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process PDC executor path does not allocate on the audio thread",
+          "[host][graph][executor][routing][rt-safety][plugin][pdc]") {
+    // The per-connection delay ring is sized at prepare(); the gather only does
+    // bounded index arithmetic and copies over it. Exercise the delayed-edge
+    // branch (a latency diamond) under the allocation probe.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2, /*latency=*/200),
+        2, 2, "LatencyP");
+    const auto gain = g.add_gain_node("G");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));
+        REQUIRE(g.connect(in, c, gain, c));
+        REQUIRE(g.connect(p, c, out, c));
+        REQUIRE(g.connect(gain, c, out, c));
+    }
+    REQUIRE(g.set_node_gain(gain, 0.75f));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    const auto l = ramp(kFrames, 0.8f), r = ramp(kFrames, 0.6f);
+    std::vector<float> li = l, ri = r;
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> ic{li.data(), ri.data()};
+    std::array<float*, 2> oc{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+
+    g.process(ov, iv, kFrames);  // warm-up outside the probe
+    {
+        pulp::test::RtAllocationProbe probe;
+        g.process(ov, iv, kFrames);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
 }

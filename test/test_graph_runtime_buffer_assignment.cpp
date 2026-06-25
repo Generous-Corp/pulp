@@ -256,3 +256,60 @@ TEST_CASE("Persistent-output and feedback pinning coexist without slot collision
         }
     }
 }
+
+TEST_CASE("Buffer assignment propagates latency into per-connection delays",
+          "[graph][buffer-assignment][pdc]") {
+    // Diamond: AudioInput -> {plugin(latency 64), gain} -> AudioOutput. The gain
+    // arm is less latent than the plugin arm, so its edges to the output must be
+    // delayed by 64 to time-align the fan-in; every other edge needs no delay.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 2, 2, 0, 0, true, 64},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 2, 2},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 2, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},  // in -> plugin
+        GraphRuntimeConnectionSpec{1, 1, 2, 1},
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},  // in -> gain
+        GraphRuntimeConnectionSpec{1, 1, 3, 1},
+        GraphRuntimeConnectionSpec{2, 0, 4, 0},  // plugin -> out
+        GraphRuntimeConnectionSpec{2, 1, 4, 1},
+        GraphRuntimeConnectionSpec{3, 0, 4, 0},  // gain -> out (delayed)
+        GraphRuntimeConnectionSpec{3, 1, 4, 1},
+    };
+    const auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto a = build_graph_runtime_buffer_assignment(plan.plan);
+    check_invariants(plan.plan, a);
+
+    REQUIRE(a.has_delay);
+    REQUIRE(a.connection_delay_samples.size() == plan.plan.connections.size());
+    // Dense indices: gain == node index 2, output == node index 3.
+    for (std::size_t i = 0; i < plan.plan.connections.size(); ++i) {
+        const auto& c = plan.plan.connections[i];
+        const bool gain_to_out = c.source_index == 2 && c.dest_index == 3;
+        CHECK(a.connection_delay_samples[i] == (gain_to_out ? 64u : 0u));
+    }
+}
+
+TEST_CASE("Buffer assignment reports no delay when no node adds latency",
+          "[graph][buffer-assignment][pdc]") {
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 2, 2},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 2, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{1, 1, 2, 1},
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+        GraphRuntimeConnectionSpec{2, 1, 3, 1},
+    };
+    const auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto a = build_graph_runtime_buffer_assignment(plan.plan);
+    check_invariants(plan.plan, a);
+    CHECK_FALSE(a.has_delay);
+    for (const auto d : a.connection_delay_samples) CHECK(d == 0u);
+}

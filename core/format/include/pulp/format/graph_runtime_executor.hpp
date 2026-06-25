@@ -165,6 +165,15 @@ public:
     // Zero-fills, so the first block (and any feedback edge) reads silence.
     // Returns false on allocation failure or zero max_frames with slots.
     bool reset(std::uint32_t slot_count, std::uint32_t max_frames);
+
+    // Off-RT: as above, plus per-connection plug-in-delay-compensation rings.
+    // `connection_delay_samples` is the snapshot assignment's per-connection
+    // delay (0 = no ring). Each delayed connection gets a contiguous ring of
+    // (delay + max_frames) floats and a persisted write position, zero-filled so
+    // the leading delay reads silence. The 2-arg reset is equivalent to passing
+    // an all-zero / empty span. Returns false on allocation failure.
+    bool reset(std::uint32_t slot_count, std::uint32_t max_frames,
+               std::span<const std::uint32_t> connection_delay_samples);
     void clear() noexcept;
 
     std::uint32_t slot_count() const noexcept { return slot_count_; }
@@ -180,15 +189,63 @@ public:
         return storage_.data() + static_cast<std::size_t>(index) * max_frames_;
     }
 
-    // True when the pool can back `snapshot`'s routing for a block of `frames`.
+    // A per-connection plug-in-delay-compensation ring: a contiguous float
+    // buffer of `size` (= delay + max_frames) with a persisted write position the
+    // executor advances by the block's frame count. `data == nullptr` when the
+    // connection needs no delay.
+    struct DelayRing {
+        float* data = nullptr;
+        std::uint32_t size = 0;
+        std::uint32_t delay = 0;
+        int* write_pos = nullptr;
+    };
+
+    // RT-safe: the delay ring for connection `index`, or an empty ring (data ==
+    // nullptr) when the connection has no delay or the pool carries no rings.
+    DelayRing delay_ring(std::uint32_t index) noexcept {
+        if (index >= ring_.size()) return {};
+        RingSlot& r = ring_[index];
+        if (r.size == 0) return {};
+        return DelayRing{ring_storage_.data() + r.offset, r.size, r.delay, &r.write_pos};
+    }
+
+    // True when the pool can back `snapshot`'s routing for a block of `frames`:
+    // enough mono slots, a large-enough max_frames, and — if the snapshot needs
+    // PDC — a delay-ring layout matching its connection count (so a pool sized
+    // without rings falls back to the legacy walk rather than routing without
+    // delay compensation and diverging). This validates ring COUNT, not each
+    // ring's size; the invariant that the rings were sized from THIS snapshot's
+    // per-connection delays is held by construction — reset() the pool from the
+    // same buffer_assignment that built the snapshot (both travel as one
+    // CompiledGraph). Pairing a pool with a same-connection-count-but-different-
+    // delays snapshot is not a supported call sequence.
     bool fits(const GraphRuntimeSnapshot& snapshot, std::uint32_t frames) const noexcept {
-        return slot_count_ >= snapshot.buffer_slot_count() && frames <= max_frames_;
+        if (slot_count_ < snapshot.buffer_slot_count() || frames > max_frames_) {
+            return false;
+        }
+        const auto& assignment = snapshot.buffer_assignment();
+        if (assignment.has_delay &&
+            ring_.size() != snapshot.plan().connections.size()) {
+            return false;
+        }
+        return true;
     }
 
 private:
+    // Per-connection delay-ring layout (parallel to the plan's connections; empty
+    // when the pool was reset without delays). size == 0 means no ring.
+    struct RingSlot {
+        std::uint32_t offset = 0;  // into ring_storage_
+        std::uint32_t size = 0;    // delay + max_frames; 0 = no ring
+        std::uint32_t delay = 0;
+        int write_pos = 0;         // persisted RT state, advanced per block
+    };
+
     std::vector<float> storage_;
     std::uint32_t slot_count_ = 0;
     std::uint32_t max_frames_ = 0;
+    std::vector<float> ring_storage_;
+    std::vector<RingSlot> ring_;
 };
 
 class GraphRuntimeExecutor {

@@ -150,7 +150,12 @@ predictable output, no MIDI.
   stale tail across blocks that SignalGraph's per-node buffer does — the reason a
   Plugin node needs a live slot to be eligible (a null-slot placeholder would
   take the legacy pass-through-or-zero branch, which the executor does not
-  reproduce). MIDI / automation / sidechain graphs stay on the legacy walk.
+  reproduce). A latency-reporting plugin IS eligible: the routed gather applies
+  the same per-connection plug-in delay compensation as the legacy walk
+  (per-node latency is propagated through the topology in the buffer assignment,
+  and each feedforward connection that needs it gets a delay ring sized in the
+  `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
+  identically. MIDI / automation / sidechain graphs stay on the legacy walk.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio

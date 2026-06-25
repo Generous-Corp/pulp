@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <utility>
 
 namespace pulp::format {
@@ -61,11 +62,11 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 // captured source output), matching SignalGraph's one-block feedback_prev. Event
 // edges carry no audio and are skipped.
 //
-// Feedforward edges are summed with no plug-in delay compensation. SignalGraph
-// applies a per-connection PDC ring when a node reports latency
-// (signal_graph.cpp); the executor needs the same before it can route
-// latency-reporting graphs. Routing parity holds today because the routed
-// graphs report zero latency.
+// A feedforward edge whose source is less latent than the destination's
+// most-latent input is delayed through a per-connection ring (sized by the
+// snapshot's buffer assignment, stored in the pool) so fan-in paths time-align,
+// matching the host graph's per-connection delay lines. Edges with zero delay
+// take the plain sum path.
 void gather_node_inputs(const graph::GraphRuntimePlan& plan,
                         const graph::GraphRuntimeBufferAssignment& assignment,
                         GraphRuntimeBufferPool& pool,
@@ -82,16 +83,36 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
         if (conn.event) continue;
-        const float* src = nullptr;
-        if (conn.feedback) {
-            src = pool.slot_data(assignment.feedback_prev_slot[conn_index]);
-        } else {
-            const auto& src_slots = assignment.nodes[conn.source_index];
-            src = pool.slot_data(src_slots.output_base + conn.source_port);
-        }
         float* dst = pool.slot_data(slots.input_base + conn.dest_port);
-        if (src == nullptr || dst == nullptr) continue;
-        for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+        if (dst == nullptr) continue;
+        if (conn.feedback) {
+            const float* src = pool.slot_data(assignment.feedback_prev_slot[conn_index]);
+            if (src == nullptr) continue;
+            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+            continue;
+        }
+        const auto& src_slots = assignment.nodes[conn.source_index];
+        const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
+        if (src == nullptr) continue;
+        const auto ring = pool.delay_ring(conn_index);
+        if (ring.data == nullptr || ring.delay == 0) {
+            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+        } else {
+            // Per-connection delay line: write the current sample at the write
+            // head, read the sample `delay` positions behind it, accumulate.
+            const int ring_size = static_cast<int>(ring.size);
+            const int delay = static_cast<int>(ring.delay);
+            int wp = *ring.write_pos;
+            int rp = wp - delay;
+            if (rp < 0) rp += ring_size;
+            for (std::uint32_t f = 0; f < frames; ++f) {
+                ring.data[wp] = src[f];
+                dst[f] += ring.data[rp];
+                if (++wp == ring_size) wp = 0;
+                if (++rp == ring_size) rp = 0;
+            }
+            *ring.write_pos = wp;
+        }
     }
 }
 
@@ -152,9 +173,44 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
 } // namespace
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
+    return reset(slot_count, max_frames, {});
+}
+
+bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames,
+                                   std::span<const std::uint32_t> connection_delay_samples) {
     if (slot_count > 0 && max_frames == 0) return false;
     try {
         storage_.assign(static_cast<std::size_t>(slot_count) * max_frames, 0.0f);
+
+        // Lay out one contiguous ring per delayed connection in ring_storage_.
+        // A delay of D needs D + max_frames floats (the legacy per-connection
+        // delay line), zero-filled so the leading D samples read silence.
+        std::vector<RingSlot> rings;
+        std::size_t total_ring_floats = 0;
+        if (!connection_delay_samples.empty()) {
+            rings.assign(connection_delay_samples.size(), RingSlot{});
+            for (std::size_t i = 0; i < connection_delay_samples.size(); ++i) {
+                const std::uint32_t delay = connection_delay_samples[i];
+                if (delay == 0) continue;
+                const std::uint32_t size = delay + max_frames;
+                // Fail closed rather than truncate the 32-bit ring offset: a
+                // truncated offset would index out of ring_storage_ on the RT
+                // gather. Off-RT, so the bound check is free.
+                if (total_ring_floats > 0xFFFFFFFFull - size) {
+                    clear();
+                    return false;
+                }
+                rings[i].offset = static_cast<std::uint32_t>(total_ring_floats);
+                rings[i].size = size;
+                rings[i].delay = delay;
+                rings[i].write_pos = 0;
+                total_ring_floats += size;
+            }
+        }
+        std::vector<float> ring_storage(total_ring_floats, 0.0f);
+
+        ring_ = std::move(rings);
+        ring_storage_ = std::move(ring_storage);
     } catch (...) {
         clear();
         return false;
@@ -168,6 +224,8 @@ void GraphRuntimeBufferPool::clear() noexcept {
     storage_.clear();
     slot_count_ = 0;
     max_frames_ = 0;
+    ring_storage_.clear();
+    ring_.clear();
 }
 
 bool GraphRuntimeSnapshot::reset(

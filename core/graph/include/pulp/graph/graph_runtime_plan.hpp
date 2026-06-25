@@ -41,6 +41,12 @@ struct GraphRuntimeNodeSpec {
     // slot reuse would otherwise hand it a different node's stale data.
     // Meaningful only for nodes with output_ports > 0; a no-op otherwise.
     bool persistent_output = false;
+    // Latency this node ADDS to its own signal path, in samples (e.g. a hosted
+    // plugin's reported processing latency). The buffer assignment propagates it
+    // through the topology to derive per-connection delay compensation so that
+    // fan-in paths of differing latency time-align. Zero for nodes that add no
+    // latency (audio I/O, gain).
+    std::uint32_t latency_samples = 0;
 };
 
 struct GraphRuntimeConnectionSpec {
@@ -61,6 +67,8 @@ struct GraphRuntimeNodePlan {
     std::uint32_t event_output_ports = 0;
     // Carried from GraphRuntimeNodeSpec::persistent_output; see that field.
     bool persistent_output = false;
+    // Carried from GraphRuntimeNodeSpec::latency_samples; see that field.
+    std::uint32_t latency_samples = 0;
     std::uint32_t first_inbound_connection = 0;
     std::uint32_t inbound_connection_count = 0;
     std::uint32_t first_outbound_connection = 0;
