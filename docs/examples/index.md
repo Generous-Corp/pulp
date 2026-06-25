@@ -21,7 +21,7 @@ These examples exist to test and validate specific subsystems of the framework.
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU, CLAP, Standalone |
+| [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU v2, CLAP, Standalone |
 | [PulpEffect](example-pulp-effect.html) | Biquad filter with frequency, resonance, type, and mix | VST3, AU, CLAP |
 | [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU, CLAP |
 | [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |
