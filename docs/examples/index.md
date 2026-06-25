@@ -13,7 +13,7 @@ These examples are polished and demonstrate best practices for building Pulp plu
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpGain](example-pulp-gain.html) | Stereo gain effect with input/output gain and bypass | VST3, AU, CLAP, Standalone |
+| [PulpGain](example-pulp-gain.html) | Stereo gain effect with input/output gain and bypass | VST3, AU v2/AUv3, CLAP, Standalone, optional AAX |
 
 ### Validation
 

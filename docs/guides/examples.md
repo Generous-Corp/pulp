@@ -11,12 +11,12 @@ All examples live under `examples/`.
 
 **Path**: `examples/pulp-gain/`
 **Type**: Effect
-**Formats**: VST3, AU v2, CLAP, Standalone
+**Formats**: VST3, AU v2, AUv3, CLAP, Standalone, optional AAX
 **Purpose**: The simplest possible plugin. A gain knob. Validates that the build system works, format entry points are correct, and audio passes through.
 
 Features:
 - Single gain parameter (dB)
-- All four output formats
+- Default VST3, CLAP, and Standalone targets; AU v2/AUv3 on Apple; optional AAX on macOS/Windows
 - Golden-file audio test
 - Includes `Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`
 
