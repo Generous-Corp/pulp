@@ -16,6 +16,7 @@
 
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
@@ -414,8 +415,12 @@ public:
     // live_snapshot_handle() is retained AND no re-prepare has occurred; a
     // routing built from it must be rebuilt after the graph recompiles.
     std::atomic<float>* live_gain_atomic(NodeId id) const noexcept;
+    // The live compiled snapshot's PluginSlot for a Plugin node, or nullptr.
+    // Same lifetime contract as live_gain_atomic: valid only while
+    // live_snapshot_handle() is retained and no re-prepare has occurred.
+    PluginSlot* live_plugin_slot(NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
-    // can pin the lifetime of the gain atomics it references.
+    // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
 
     // Opt in to driving the audio callback through the canonical
@@ -664,6 +669,14 @@ private:
         // in-flight audio-thread reader is using on a retired snapshot. Feedback
         // previous-block state lives here and resets with the snapshot.
         format::GraphRuntimeBufferPool exec_pool;
+        // Plugin-binding storage for the routed path, owned per-snapshot like
+        // exec_pool. routing_plugin_ctx is reserved in compile_() to the plugin
+        // count so the snapshot's Plugin bindings can point their user_data at
+        // stable elements; routing_plugin_scratch is the shared MIDI/param
+        // scratch every Plugin binding hands to PluginSlot::process. The slots
+        // themselves live in `plugins` above (same cg lifetime).
+        std::vector<PluginBindingContext> routing_plugin_ctx;
+        PluginRoutingScratch routing_plugin_scratch;
     };
 
     std::vector<GraphNode> nodes_;

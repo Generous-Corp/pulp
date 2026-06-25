@@ -799,6 +799,13 @@ std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
     return it->second.gain.get();
 }
 
+PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->plugins.find(id);
+    if (it == live_->plugins.end()) return nullptr;
+    return it->second.get();
+}
+
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_;  // aliases the live CompiledGraph as an opaque keepalive
 }
@@ -1155,6 +1162,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 auto it = cgr.runtime.find(id);
                 return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
             },
+            [&cgr](NodeId id) -> PluginSlot* {
+                auto it = cgr.plugins.find(id);
+                return it == cgr.plugins.end() ? nullptr : it->second.get();
+            },
+            cg->routing_plugin_ctx, cg->routing_plugin_scratch,
             cg->routing_snapshot);
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).

@@ -137,6 +137,20 @@ predictable output, no MIDI.
   empty audio views for MIDI-only slots. Override the `ProcessBuffers` overload
   when a hosted format or fixture needs direct bus metadata for sidechains,
   auxes, surround, or multi-output products.
+- **Canonical-executor routing (opt-in, default OFF).** An eligible graph —
+  nodes only AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
+  carry a LIVE slot), connections only plain audio (feedforward or one-block
+  feedback; no MIDI / automation / audio-rate-mod / sidechain) — can be driven
+  through the canonical `GraphRuntimeExecutor` instead of the legacy walk via
+  `set_canonical_executor_routing_enabled(true)`. Output is bit-identical to the
+  legacy walk (`signal_graph_executor_routing.{hpp,cpp}` translates the graph;
+  `test_signal_graph_executor_parity` is the guard). Plugin output slots are
+  pinned *persistent* in the buffer assignment (the `persistent_output` spec
+  flag), so a plugin that does not fully overwrite its output carries the same
+  stale tail across blocks that SignalGraph's per-node buffer does — the reason a
+  Plugin node needs a live slot to be eligible (a null-slot placeholder would
+  take the legacy pass-through-or-zero branch, which the executor does not
+  reproduce). MIDI / automation / sidechain graphs stay on the legacy walk.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
