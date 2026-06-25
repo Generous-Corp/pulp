@@ -33,8 +33,27 @@ struct GraphRuntimeLevelization {
     // level_count + 1 entries; level_nodes has one entry per node.
     std::vector<std::uint32_t> level_offsets;
     std::vector<std::uint32_t> level_nodes;
+    // Per level (level_count entries): a static, deterministic work-weight =
+    // sum of graph_runtime_node_cost_weight() over the level's nodes. A coarse
+    // shape score (per-channel work proxy), NOT a CPU-cycle estimate; multiplied
+    // by the runtime frame count it gives a "channel-samples" figure a parallel
+    // executor compares against a fork/join break-even threshold to decide
+    // whether dispatching the level across workers is worth the overhead.
+    std::vector<std::uint64_t> level_work_weight;
     bool ok = false;
 };
+
+// Static per-node work weight feeding level_work_weight: the per-channel work a
+// node does, approximated as max(input_ports, output_ports) for audio-processing
+// kinds (Processor / Utility / Custom) and 0 for pure I/O (AudioInput /
+// AudioOutput / MidiInput / MidiOutput), which neither justify a worker hop nor
+// (for AudioOutput) ever run in parallel. Deterministic and allocation-free.
+// NOTE: Gain and hosted-plugin nodes both map to Processor, so this cannot tell a
+// cheap gain from an expensive plugin — per-node DSP-cost discrimination needs
+// the runtime measured-load feed (masterwork §6.4), a later refinement.
+std::uint64_t graph_runtime_node_cost_weight(GraphRuntimeNodeKind kind,
+                                             std::uint32_t input_ports,
+                                             std::uint32_t output_ports) noexcept;
 
 // Compute the levelization for `plan`. Returns ok=false only on allocation
 // failure or a malformed plan (processing order not covering every node); an

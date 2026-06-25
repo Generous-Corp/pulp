@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <span>
 #include <utility>
 
@@ -441,6 +442,95 @@ constexpr std::size_t kRoutedMidiEventCapacity = 1024;
 constexpr std::size_t kRoutedMidiSysexCapacity = 128;
 constexpr std::size_t kRoutedMidiSysexPayloadCapacity = 4096;
 
+// Run ONE node of the routing walk: gather its audio / MIDI / automation inputs,
+// then either copy the I/O bus (AudioInput/AudioOutput) or invoke its binding.
+// Returns the error code (None on success). This is the per-node seam shared by
+// the serial walk and the parallel (levelized) walk, so both produce identical
+// output by construction. It touches only this node's own scratch (disjoint
+// output slots, per-node MIDI/automation buffers, per-connection inbound rings),
+// so distinct nodes may run concurrently — EXCEPT AudioOutput, which accumulates
+// into the shared output bus and must be run serially by the caller.
+GraphRuntimeExecutorErrorCode run_routed_node(
+    std::uint32_t node_index,
+    const graph::GraphRuntimePlan& plan,
+    std::span<const GraphRuntimeNodeBinding> bindings,
+    const graph::GraphRuntimeBufferAssignment& assignment,
+    GraphRuntimeBufferPool& pool,
+    GraphRuntimeMidiScratch* midi,
+    GraphRuntimeAutomationScratch* automation,
+    ProcessBlock& block,
+    const BusBuffer* in_bus,
+    BusBuffer* out_bus,
+    std::span<const GraphRuntimeCommandDecision> command_results,
+    std::uint32_t frames) noexcept {
+    const auto& node = plan.nodes[node_index];
+    const auto& slots = assignment.nodes[node_index];
+
+    if (node.input_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode ||
+        node.output_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode) {
+        return GraphRuntimeExecutorErrorCode::NodePortLimitExceeded;
+    }
+
+    gather_node_inputs(plan, assignment, pool, node, slots, frames);
+    if (midi != nullptr) {
+        gather_node_midi(plan, *midi, node, node_index);
+    }
+    if (automation != nullptr) {
+        gather_node_automation(plan, assignment, pool, *automation, node, node_index,
+                               frames, block.sample_rate);
+    }
+
+    if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
+        node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
+        copy_io_bus(node.kind, pool, node, slots, in_bus, out_bus, frames);
+        return GraphRuntimeExecutorErrorCode::None;
+    }
+
+    const auto& binding = bindings[node_index];
+    if (!binding.process) {
+        return binding.required ? GraphRuntimeExecutorErrorCode::MissingRequiredProcessor
+                                : GraphRuntimeExecutorErrorCode::None;
+    }
+
+    // Marshal the node's mono slots into contiguous channel views.
+    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> in_ptrs{};
+    std::array<float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> out_ptrs{};
+    for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+        in_ptrs[p] = pool.slot_data(slots.input_base + p);
+    }
+    for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+        out_ptrs[p] = pool.slot_data(slots.output_base + p);
+    }
+
+    GraphRuntimeNodeProcessContext context;
+    context.plan = &plan;
+    context.node = &node;
+    context.node_index = node_index;
+    context.command_results = command_results;
+    context.routed = true;
+    context.node_inputs = audio::BufferView<const float>(
+        in_ptrs.data(), node.input_ports, frames);
+    context.node_outputs = audio::BufferView<float>(
+        out_ptrs.data(), node.output_ports, frames);
+    if (midi != nullptr) {
+        context.node_midi_in = midi->in(node_index);
+        context.node_midi_out = midi->out(node_index);
+    }
+    if (automation != nullptr) {
+        context.node_param_events = automation->events(node_index);
+    }
+    if (!binding.process(block, context, binding.user_data)) {
+        return GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
+    }
+    if (midi != nullptr && context.node_midi_out != nullptr) {
+        midi->set_out_incomplete(
+            node_index,
+            midi->in_incomplete(node_index) ||
+                routed_midi_has_drops(*context.node_midi_out));
+    }
+    return GraphRuntimeExecutorErrorCode::None;
+}
+
 } // namespace
 
 bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count) {
@@ -600,7 +690,8 @@ void GraphRuntimeBufferPool::clear() noexcept {
 
 bool GraphRuntimeSnapshot::reset(
     graph::GraphRuntimePlan plan,
-    std::span<const GraphRuntimeNodeBinding> bindings) {
+    std::span<const GraphRuntimeNodeBinding> bindings,
+    bool parallel_safe) {
     clear();
     if (bindings.size() != plan.nodes.size()) return false;
     if (plan.processing_order_indices.size() != plan.nodes.size()) return false;
@@ -613,10 +704,12 @@ bool GraphRuntimeSnapshot::reset(
 
     try {
         // The buffer assignment is a pure function of the plan, so it is built
-        // here off the audio thread alongside plan validation. Per-worker
-        // scratch sizing for a parallel executor depends on worker count, not
-        // the plan — it belongs to the executor/pool, NOT here.
-        auto assignment = graph::build_graph_runtime_buffer_assignment(plan);
+        // here off the audio thread alongside plan validation. parallel_safe
+        // disables slot reuse so concurrent same-level nodes never alias a
+        // recycled slot. Per-worker scratch sizing for a parallel executor
+        // depends on worker count, not the plan — it belongs to the pool.
+        auto assignment =
+            graph::build_graph_runtime_buffer_assignment(plan, /*allow_reuse=*/!parallel_safe);
         if (!assignment.ok) {
             clear();
             return false;
@@ -624,6 +717,7 @@ bool GraphRuntimeSnapshot::reset(
         plan_ = std::move(plan);
         bindings_.assign(bindings.begin(), bindings.end());
         assignment_ = std::move(assignment);
+        parallel_safe_ = parallel_safe;
     } catch (...) {
         clear();
         return false;
@@ -635,6 +729,7 @@ void GraphRuntimeSnapshot::clear() noexcept {
     plan_.clear();
     bindings_.clear();
     assignment_ = {};
+    parallel_safe_ = false;
 }
 
 bool GraphRuntimeSnapshot::valid() const noexcept {
@@ -760,7 +855,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
-    GraphRuntimeEventSink event_sink) noexcept {
+    GraphRuntimeEventSink event_sink,
+    std::span<const std::uint8_t> skip_mask) noexcept {
     if (!block.validate()) return fail_invalid_block();
     if (!snapshot.valid()) return fail_invalid_snapshot();
 
@@ -811,96 +907,229 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         }
     }
 
+#ifndef NDEBUG
+    // Contract for a skip_mask (caller-enforced; assert it so a future caller
+    // can't regress into silent-wrong audio): a masked node must be neither an
+    // AudioOutput (skipping it drops its += into the shared output bus, which no
+    // pool pre-fill can restore) nor a feedback endpoint (its pre-filled slot would
+    // feed stale history into capture_feedback / the next block). The anticipation
+    // interior satisfies this — live sinks are never interior and 6a excludes
+    // feedback endpoints.
+    if (!skip_mask.empty()) {
+        for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+            if (i < skip_mask.size() && skip_mask[i] != 0) {
+                assert(plan.nodes[i].kind != graph::GraphRuntimeNodeKind::AudioOutput &&
+                       "process_routed: a skipped node must not be an AudioOutput");
+            }
+        }
+        for (const auto& c : plan.connections) {
+            if (!c.feedback) continue;
+            const bool src_skipped =
+                c.source_index < skip_mask.size() && skip_mask[c.source_index] != 0;
+            const bool dst_skipped =
+                c.dest_index < skip_mask.size() && skip_mask[c.dest_index] != 0;
+            assert(!src_skipped && !dst_skipped &&
+                   "process_routed: a skipped node must not be a feedback endpoint");
+        }
+    }
+#endif
+
+    const auto command_decisions = command_results.first(commands.size());
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
 
-        const auto& node = plan.nodes[node_index];
-        const auto& slots = assignment.nodes[node_index];
+        // Skipped nodes are not run: the caller has pre-filled their output slots
+        // (anticipative rendering pre-renders the interior off-thread). They are
+        // not counted as processed and their plugin state is left untouched.
+        if (!skip_mask.empty() && node_index < skip_mask.size() &&
+            skip_mask[node_index] != 0) {
+            continue;
+        }
 
-        if (node.input_ports > kMaxRoutedPortsPerNode ||
-            node.output_ports > kMaxRoutedPortsPerNode) {
-            result.error = GraphRuntimeExecutorErrorCode::NodePortLimitExceeded;
+        const auto error = run_routed_node(node_index, plan, bindings, assignment,
+                                           pool, midi, automation, block, in_bus,
+                                           out_bus, command_decisions, frames);
+        if (error != GraphRuntimeExecutorErrorCode::None) {
+            result.error = error;
             result.failed_node_index = node_index;
             node_failures_.fetch_add(1, std::memory_order_relaxed);
             return result;
         }
-
-        gather_node_inputs(plan, assignment, pool, node, slots, frames);
-        if (midi != nullptr) {
-            gather_node_midi(plan, *midi, node, node_index);
-        }
-        if (automation != nullptr) {
-            gather_node_automation(plan, assignment, pool, *automation, node,
-                                   node_index, frames, block.sample_rate);
-        }
-
-        if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
-            node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
-            copy_io_bus(node.kind, pool, node, slots, in_bus, out_bus, frames);
-        } else {
-            const auto& binding = bindings[node_index];
-            if (!binding.process) {
-                if (binding.required) {
-                    result.error =
-                        GraphRuntimeExecutorErrorCode::MissingRequiredProcessor;
-                    result.failed_node_index = node_index;
-                    node_failures_.fetch_add(1, std::memory_order_relaxed);
-                    return result;
-                }
-                // optional no-op; its output slots stay silent
-                ++result.nodes_processed;
-                nodes_processed_.fetch_add(1, std::memory_order_relaxed);
-                continue;
-            }
-
-            // Marshal the node's mono slots into contiguous channel views. This
-            // is the per-node body a parallel executor would schedule onto
-            // worker threads.
-            std::array<const float*, kMaxRoutedPortsPerNode> in_ptrs{};
-            std::array<float*, kMaxRoutedPortsPerNode> out_ptrs{};
-            for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-                in_ptrs[p] = pool.slot_data(slots.input_base + p);
-            }
-            for (std::uint32_t p = 0; p < node.output_ports; ++p) {
-                out_ptrs[p] = pool.slot_data(slots.output_base + p);
-            }
-
-            GraphRuntimeNodeProcessContext context;
-            context.plan = &plan;
-            context.node = &node;
-            context.node_index = node_index;
-            context.command_results = command_results.first(commands.size());
-            context.routed = true;
-            context.node_inputs = audio::BufferView<const float>(
-                in_ptrs.data(), node.input_ports, frames);
-            context.node_outputs = audio::BufferView<float>(
-                out_ptrs.data(), node.output_ports, frames);
-            if (midi != nullptr) {
-                context.node_midi_in = midi->in(node_index);
-                context.node_midi_out = midi->out(node_index);
-            }
-            if (automation != nullptr) {
-                context.node_param_events = automation->events(node_index);
-            }
-            if (!binding.process(block, context, binding.user_data)) {
-                result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
-                result.failed_node_index = node_index;
-                node_failures_.fetch_add(1, std::memory_order_relaxed);
-                return result;
-            }
-            // A MIDI-emitting binding's output is incomplete if its gathered
-            // input was, or if the binding itself dropped output events —
-            // matching the host walk's per-node midi_out_incomplete.
-            if (midi != nullptr && context.node_midi_out != nullptr) {
-                midi->set_out_incomplete(
-                    node_index,
-                    midi->in_incomplete(node_index) ||
-                        routed_midi_has_drops(*context.node_midi_out));
-            }
-        }
-
         ++result.nodes_processed;
         nodes_processed_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    capture_feedback(plan, assignment, pool, frames);
+
+    blocks_processed_.fetch_add(1, std::memory_order_relaxed);
+    return result;
+}
+
+namespace {
+
+// Worker-pool task context for one level's parallel nodes. Holds the shared
+// (read-mostly) walk state plus this level's node-index slice and an error sink.
+struct ParallelLevelTask {
+    const graph::GraphRuntimePlan* plan;
+    std::span<const GraphRuntimeNodeBinding> bindings;
+    const graph::GraphRuntimeBufferAssignment* assignment;
+    GraphRuntimeBufferPool* pool;
+    GraphRuntimeMidiScratch* midi;
+    GraphRuntimeAutomationScratch* automation;
+    ProcessBlock* block;
+    const BusBuffer* in_bus;
+    BusBuffer* out_bus;
+    std::span<const GraphRuntimeCommandDecision> command_results;
+    std::uint32_t frames;
+    const std::uint32_t* level_nodes;          // this level's node indices
+    std::atomic<std::uint32_t>* error_code;    // 0 = None, else (code + 1)
+    std::atomic<std::uint32_t>* failed_node;
+};
+
+void run_level_node(void* ctx, std::uint32_t i) noexcept {
+    auto* t = static_cast<ParallelLevelTask*>(ctx);
+    const std::uint32_t node_index = t->level_nodes[i];
+    const auto e = run_routed_node(node_index, *t->plan, t->bindings, *t->assignment,
+                                   *t->pool, t->midi, t->automation, *t->block,
+                                   t->in_bus, t->out_bus, t->command_results,
+                                   t->frames);
+    if (e != GraphRuntimeExecutorErrorCode::None) {
+        std::uint32_t expected = 0;
+        if (t->error_code->compare_exchange_strong(
+                expected, static_cast<std::uint32_t>(e) + 1,
+                std::memory_order_relaxed)) {
+            t->failed_node->store(node_index, std::memory_order_relaxed);
+        }
+    }
+}
+
+} // namespace
+
+GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
+    ProcessBlock& block,
+    const GraphRuntimeSnapshot& snapshot,
+    const graph::GraphRuntimeLevelization& levels,
+    GraphRuntimeBufferPool& pool,
+    GraphRuntimeWorkerPool& workers,
+    GraphRuntimeMidiScratch* midi,
+    GraphRuntimeAutomationScratch* automation,
+    std::span<const graph::GraphTimedCommand> commands,
+    std::span<GraphRuntimeCommandDecision> command_results,
+    GraphRuntimeCommandHandler command_handler,
+    GraphRuntimeEventSink event_sink) noexcept {
+    if (!block.validate()) return fail_invalid_block();
+    if (!snapshot.valid()) return fail_invalid_snapshot();
+
+    const auto& plan = snapshot.plan();
+    const auto bindings = snapshot.bindings();
+    const auto& assignment = snapshot.buffer_assignment();
+    const auto frames = block.frame_count;
+
+    // The levelization must describe THIS plan (a stale one would mis-schedule),
+    // and the snapshot must use the reuse-free layout — a serial (reused) layout
+    // would let concurrent same-level nodes alias a recycled slot and race.
+    if (!levels.ok || levels.node_level.size() != plan.nodes.size() ||
+        !snapshot.parallel_safe()) {
+        return fail_invalid_snapshot();
+    }
+    if (!pool.fits(snapshot, frames) ||
+        (automation != nullptr &&
+         !automation->fits(plan.node_count(), plan.connection_count(), frames)) ||
+        (midi != nullptr && !midi->fits(plan.node_count()))) {
+        GraphRuntimeExecutorResult fail;
+        fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
+        return fail;
+    }
+
+    GraphRuntimeExecutorResult result;
+    if (!drain_commands(block, plan, commands, command_results, command_handler,
+                        event_sink, result)) {
+        return fail_command_scratch_too_small();
+    }
+
+    const BusBuffer* in_bus =
+        block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
+    BusBuffer* out_bus =
+        block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+    if (out_bus != nullptr) {
+        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        }
+    }
+
+    const auto command_decisions = command_results.first(commands.size());
+    std::atomic<std::uint32_t> error_code{0};
+    std::atomic<std::uint32_t> failed_node{0};
+
+    auto report_failure = [&](GraphRuntimeExecutorErrorCode e,
+                              std::uint32_t node) -> GraphRuntimeExecutorResult {
+        result.error = e;
+        result.failed_node_index = node;
+        node_failures_.fetch_add(1, std::memory_order_relaxed);
+        return result;
+    };
+
+    for (std::uint32_t level = 0; level < levels.level_count; ++level) {
+        const std::uint32_t base = levels.level_offsets[level];
+        const std::uint32_t width = levels.level_offsets[level + 1] - base;
+        if (width == 0) continue;
+
+        // A level runs serially when it can't safely parallelize: a single node
+        // (no benefit), no worker threads, or it contains an AudioOutput node
+        // (which accumulates into the shared output bus — see the header).
+        bool serial = width == 1 || workers.worker_count() <= 1;
+        for (std::uint32_t k = 0; !serial && k < width; ++k) {
+            if (plan.nodes[levels.level_nodes[base + k]].kind ==
+                graph::GraphRuntimeNodeKind::AudioOutput) {
+                serial = true;
+            }
+        }
+        // Cost gate: skip the fork/join when the level's static work-weight x this
+        // block's frame count is below the break-even threshold. level_work_weight
+        // is precomputed off-RT (per the levelization); the audio-thread check is a
+        // single multiply-compare. A zero threshold parallelizes every eligible
+        // level. (Empty level_work_weight — a plan with no precomputed weights —
+        // leaves `serial` as-is rather than reading out of bounds.)
+        if (!serial && level < levels.level_work_weight.size()) {
+            const std::uint64_t work =
+                levels.level_work_weight[level] * static_cast<std::uint64_t>(frames);
+            if (work < parallel_min_work_units_.load(std::memory_order_relaxed)) {
+                serial = true;
+            }
+        }
+        if (serial) {
+            serial_levels_run_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            parallel_levels_dispatched_.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        if (serial) {
+            for (std::uint32_t k = 0; k < width; ++k) {
+                const std::uint32_t node_index = levels.level_nodes[base + k];
+                const auto e = run_routed_node(node_index, plan, bindings, assignment,
+                                               pool, midi, automation, block, in_bus,
+                                               out_bus, command_decisions, frames);
+                if (e != GraphRuntimeExecutorErrorCode::None) {
+                    return report_failure(e, node_index);
+                }
+            }
+        } else {
+            ParallelLevelTask task{
+                &plan, bindings, &assignment, &pool, midi, automation, &block,
+                in_bus, out_bus, command_decisions, frames,
+                levels.level_nodes.data() + base, &error_code, &failed_node,
+            };
+            workers.run(width, run_level_node, &task);
+            if (const std::uint32_t code = error_code.load(std::memory_order_relaxed);
+                code != 0) {
+                return report_failure(
+                    static_cast<GraphRuntimeExecutorErrorCode>(code - 1),
+                    failed_node.load(std::memory_order_relaxed));
+            }
+        }
+
+        result.nodes_processed += width;
+        nodes_processed_.fetch_add(width, std::memory_order_relaxed);
     }
 
     capture_feedback(plan, assignment, pool, frames);
@@ -921,6 +1150,8 @@ GraphRuntimeExecutorStats GraphRuntimeExecutor::stats() const noexcept {
         invalid_snapshots_.load(std::memory_order_relaxed),
         command_scratch_failures_.load(std::memory_order_relaxed),
         node_failures_.load(std::memory_order_relaxed),
+        parallel_levels_dispatched_.load(std::memory_order_relaxed),
+        serial_levels_run_.load(std::memory_order_relaxed),
     };
 }
 
@@ -935,6 +1166,8 @@ void GraphRuntimeExecutor::reset_stats() noexcept {
     invalid_snapshots_.store(0, std::memory_order_relaxed);
     command_scratch_failures_.store(0, std::memory_order_relaxed);
     node_failures_.store(0, std::memory_order_relaxed);
+    parallel_levels_dispatched_.store(0, std::memory_order_relaxed);
+    serial_levels_run_.store(0, std::memory_order_relaxed);
 }
 
 GraphRuntimeExecutorResult GraphRuntimeExecutor::fail_invalid_block() noexcept {

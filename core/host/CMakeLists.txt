@@ -19,6 +19,10 @@ target_sources(pulp-host PRIVATE
     src/isolated_scanner.cpp
     src/node_pack.cpp
     src/signal_graph_executor_routing.cpp
+    src/anticipation_eligibility.cpp
+    src/anticipation_partition.cpp
+    src/anticipation_subgraph.cpp
+    src/anticipation_lane.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::runtime pulp::state)

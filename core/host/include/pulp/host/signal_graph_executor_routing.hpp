@@ -87,13 +87,17 @@ bool signal_graph_executor_eligible(const SignalGraph& graph);
 // leaves `out` empty) if the topology is not eligible, a Gain atomic or Plugin
 // slot is missing, or the canonical plan/snapshot cannot be built under its
 // limits. Does NOT size a pool or set a keepalive — the caller owns those.
+// `parallel_safe` builds the snapshot's buffer assignment without slot reuse so
+// it can drive GraphRuntimeExecutor::process_parallel (concurrent same-level
+// nodes never alias a recycled slot); default false = the compact serial layout.
 bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::span<const Connection> connections,
                              const std::function<std::atomic<float>*(NodeId)>& gain_for,
                              const std::function<PluginSlot*(NodeId)>& plugin_for,
                              std::vector<PluginBindingContext>& plugin_ctx,
                              PluginRoutingScratch& scratch,
-                             format::GraphRuntimeSnapshot& out);
+                             format::GraphRuntimeSnapshot& out,
+                             bool parallel_safe = false);
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

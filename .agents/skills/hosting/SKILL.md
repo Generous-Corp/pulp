@@ -170,6 +170,92 @@ predictable output, no MIDI.
   and built into the same per-node event queue. A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
+- **Parallel-executor routing (opt-in, default OFF, independent of the serial
+  opt-in).** `set_parallel_routing_enabled(true)` drives the SAME eligible subset
+  through `GraphRuntimeExecutor::process_parallel` — a levelized fork-join over a
+  persistent `GraphRuntimeWorkerPool` (the audio thread is participant 0). Output
+  is bit-identical to the serial executor and the legacy walk; the per-node body
+  (`run_routed_node`) is shared. Dispatch order in `process()`: parallel (if
+  enabled + valid + pool running + fits) → serial executor (if its toggle on) →
+  legacy walk. The two routed branches share one `dispatch_routed` bridge, and
+  every executor zeroes the output bus + the MIDI ingress is idempotent (consumed
+  mailbox sequences aren't committed until `run()` succeeds), so a failed parallel
+  attempt re-renders the block on a lower tier with no doubled output or
+  double-consumed MIDI. `SignalGraph::set_parallel_min_work_units(n)` forwards
+  to the executor's channel-sample break-even gate; default `0` preserves the
+  original "parallelize every eligible level" behavior, while a positive value
+  keeps low-cost levels serial to avoid fork/join overhead on small graphs. Use
+  `routing_executor_stats()` to verify the live path when testing the threshold.
+  GOTCHAS: (1) the parallel snapshot uses a REUSE-FREE
+  buffer assignment (`parallel_safe=true`) — concurrent same-level nodes must not
+  alias a recycled scratch slot; `process_parallel` refuses a non-parallel-safe
+  snapshot. (2) Levels containing an AudioOutput node run SERIALLY in topo order
+  (AudioOutput `+=` accumulates into the shared output bus; float add is
+  non-associative, so order is load-bearing for ≥3 sinks). (3) WORKER-POOL
+  LIFECYCLE is load-bearing: the pool is started ONCE (size = clamped hardware
+  concurrency, guarded by `worker_count() == 0`) and NEVER stopped/resized on a
+  re-prepare — `start()`/`stop()` join threads + reset the epoch/completion
+  counters, a UAF if run against an in-flight audio `run()`. The only legal stop
+  is `~GraphRuntimeWorkerPool` at SignalGraph destruction. Don't make the thread
+  count runtime-variable without a drain handshake. The pool's completion barrier
+  counts PARTICIPANTS finished (not tasks): an empty-range participant must still
+  register done, or it can race the next batch's published state.
+- **Anticipative-rendering eligibility (`anticipation_eligibility.{hpp,cpp}`).**
+  `analyze_anticipation_eligibility(nodes, connections)` is the static SAFETY
+  contract for rendering a latent subgraph ahead of the audio deadline: it
+  classifies each node `None` (passed) or a hard-exclusion reason — seeds live
+  AudioInput/MidiInput nodes, both endpoints of every feedback edge, and any node
+  with a sidechain inbound edge, then propagates each exclusion forward along
+  feedforward (non-feedback) edges to a fixpoint so anything downstream of an
+  excluded node is excluded too. It's deliberately conservative: a false exclusion
+  only forfeits a speed-up, but a false inclusion would render an unsafe node
+  ahead. GOTCHA: `passes_static_exclusions(i)` is NOT a blanket "safe to
+  anticipate" — host-clock-sensitive plugins (output depends on the transport
+  playhead) are NOT statically detectable from node metadata and are intentionally
+  not covered; a renderer consuming this must layer a host-time check or a per-node
+  opt-out on top. There is no anticipative renderer yet — this is the analysis the
+  Phase 6 renderer will gate on.
+- **Anticipation partition (`anticipation_partition.{hpp,cpp}`).**
+  `build_anticipation_partition(nodes, connections, eligibility)` carves the
+  renderable eligible INTERIOR (eligible nodes minus the live AudioOutput/MidiOutput
+  sinks, which are consumed at the real deadline and must never be written ahead)
+  and the BOUNDARY edges (interior-source -> outside-the-interior), which are the
+  splice points the renderer pre-computes and the live graph reads. `cost_weight`
+  (the same coarse max(in,out) proxy the parallel cost gate uses) +
+  `worth_anticipating()` gate out trivial/no-boundary partitions. Still pure static
+  analysis — no rendering, no RT path. Builds on the 6a eligibility result and is
+  rejected (ok=false) if that result isn't ok or doesn't match the node span.
+- **Anticipation sub-graph (`anticipation_subgraph.{hpp,cpp}`).**
+  `build_anticipation_subgraph(nodes, connections, partition)` turns a partition
+  into a standalone renderable graph: it copies the interior nodes verbatim (plugin
+  slots/gain/ports preserved) and the internal edges, and synthesizes ONE
+  `AudioOutput` sink whose input ports correspond to the DISTINCT boundary output
+  ports (fresh id above every existing node id, so no collision), fed so boundary
+  output `i` lands on sink input/output-bus channel `i` — so the sub-graph renders
+  through the ordinary `build_executor_snapshot` + `process_routed` and its output
+  bus carries exactly the boundary signals without summing them together.
+  `outputs[]` maps each output-bus channel back to the `(source_node, source_port)`
+  it captures. GOTCHA: the interior plugin
+  GraphNodes are copied by value, so the SAME plugin instances render here — which
+  means a live splice (a later slice) must NOT also process those instances, or
+  their state double-advances. This slice does extraction only; it neither renders
+  nor changes any RT path.
+- **Anticipation lane (`anticipation_lane.{hpp,cpp}`).** `AnticipationLane` renders
+  an eligible sub-graph AHEAD of the deadline into a `PlanarAudioRingBuffer`:
+  `prepare()` (off-RT, quiescent) builds the executor snapshot + sizes the ring for
+  a FIXED block size; `render_ahead()` (single background producer) advances the
+  interior's plugin state and pushes whole blocks; `consume()` (audio thread,
+  RT-safe, no-alloc) pops a pre-rendered block or reports underrun so the caller
+  falls back to a synchronous render. The block size is PINNED at prepare (before
+  any thread exists) so producer/consumer stay in lockstep and there's no
+  cross-thread block-size field — the consumed sequence is bit-identical to a
+  block-by-block synchronous render. GOTCHAS: (1) the interior plugins are advanced
+  ONLY by render_ahead — a live splice that uses a lane must not also process those
+  nodes or their state double-advances; (2) render_ahead is SINGLE-producer (all
+  calls, including priming, must be serialized — they share unsynchronized
+  executor/pool/scratch); only the ring mediates against the consumer. There is no
+  SignalGraph splice wiring this into the live path yet — that's the final Phase 6
+  slice.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio

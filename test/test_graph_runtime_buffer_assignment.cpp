@@ -313,3 +313,44 @@ TEST_CASE("Buffer assignment reports no delay when no node adds latency",
     CHECK_FALSE(a.has_delay);
     for (const auto d : a.connection_delay_samples) CHECK(d == 0u);
 }
+
+TEST_CASE("Buffer assignment with reuse disabled gives every node disjoint regions",
+          "[graph][buffer-assignment][parallel]") {
+    // The parallel layout (allow_reuse=false) must never share a scratch slot
+    // between two nodes — concurrent same-level nodes would otherwise alias it.
+    // Diamond: in -> {g1, g2} -> out (g1/g2 are an independent parallel pair).
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 2, 2},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 2, 2},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 2, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, GraphRuntimeConnectionSpec{1, 1, 2, 1},
+        GraphRuntimeConnectionSpec{1, 0, 3, 0}, GraphRuntimeConnectionSpec{1, 1, 3, 1},
+        GraphRuntimeConnectionSpec{2, 0, 4, 0}, GraphRuntimeConnectionSpec{2, 1, 4, 1},
+        GraphRuntimeConnectionSpec{3, 0, 4, 0}, GraphRuntimeConnectionSpec{3, 1, 4, 1},
+    };
+    const auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto a = build_graph_runtime_buffer_assignment(plan.plan, /*allow_reuse=*/false);
+    check_invariants(plan.plan, a);
+
+    // Mark every slot each node's input/output region occupies; no slot may be
+    // claimed by two distinct regions (across all nodes).
+    std::vector<int> used(a.slot_count, 0);
+    for (std::size_t i = 0; i < plan.plan.nodes.size(); ++i) {
+        const auto& node = plan.plan.nodes[i];
+        const auto& s = a.nodes[i];
+        for (std::uint32_t p = 0; p < node.input_ports; ++p) ++used[s.input_base + p];
+        for (std::uint32_t p = 0; p < node.output_ports; ++p) ++used[s.output_base + p];
+    }
+    for (const auto u : used) CHECK(u <= 1);  // no slot shared by two regions
+
+    // Reuse-free slot_count is exactly the sum of every node's port regions.
+    CHECK(a.slot_count == total_ports(nodes));
+
+    // The compact (reuse) layout for the same graph uses strictly fewer slots.
+    const auto reuse = build_graph_runtime_buffer_assignment(plan.plan, /*allow_reuse=*/true);
+    CHECK(reuse.slot_count < a.slot_count);
+}

@@ -1780,3 +1780,190 @@ TEST_CASE("SignalGraph::process automation matches legacy: dense Replace + Add o
                      run_legacy(routed, kFrames, input, 2));
     }
 }
+
+namespace {
+
+// in(2ch) -> N parallel gains -> out(2ch). A wide level so the parallel executor
+// actually dispatches across workers. `parallel` opts into the parallel path.
+void build_wide_signal_graph(SignalGraph& g, int n, bool parallel) {
+    const auto in = g.add_input_node(2, "In");
+    const auto out = g.add_output_node(2, "Out");
+    for (int i = 0; i < n; ++i) {
+        const auto gn = g.add_gain_node("G");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, gn, c));
+            REQUIRE(g.connect(gn, c, out, c));
+        }
+        REQUIRE(g.set_node_gain(gn, 0.02f + 0.003f * static_cast<float>(i)));
+    }
+    g.set_parallel_routing_enabled(parallel);
+    REQUIRE(g.prepare(kSr, kFrames));
+}
+
+}  // namespace
+
+TEST_CASE("SignalGraph::process parallel path matches legacy: wide graph",
+          "[host][graph][executor][routing][parity][parallel]") {
+    SignalGraph legacy, par;
+    build_wide_signal_graph(legacy, 16, /*parallel=*/false);
+    build_wide_signal_graph(par, 16, /*parallel=*/true);
+    REQUIRE(signal_graph_executor_eligible(par));
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.04f * static_cast<float>(blk)),
+            ramp(kFrames, 0.5f - 0.02f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(par, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("SignalGraph::process parallel path matches legacy: feedback across blocks",
+          "[host][graph][executor][routing][parity][parallel]") {
+    // The parallel executor captures feedback after the level walk (serial), so a
+    // feedback graph must match the legacy walk block-for-block on the parallel path.
+    SignalGraph legacy, par;
+    build_feedback_graph(legacy, 0.5f, /*route_executor=*/false);
+    par.set_parallel_routing_enabled(true);
+    {
+        const auto in = par.add_input_node(1, "In");
+        const auto a = par.add_gain_node("A");
+        const auto out = par.add_output_node(1, "Out");
+        REQUIRE(par.connect(in, 0, a, 0));
+        REQUIRE(par.connect(a, 0, out, 0));
+        REQUIRE(par.connect_feedback(a, 0, a, 0));
+        REQUIRE(par.set_node_gain(a, 0.5f));
+        REQUIRE(par.prepare(kSr, kFrames));
+    }
+    REQUIRE(signal_graph_executor_eligible(par));
+    for (int blk = 0; blk < 6; ++blk) {
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        expect_equal(run_legacy(legacy, kFrames, {x}, 1),
+                     run_legacy(par, kFrames, {x}, 1));
+    }
+}
+
+TEST_CASE("SignalGraph::process parallel path does not allocate on the audio thread",
+          "[host][graph][executor][routing][rt-safety][parallel]") {
+    SignalGraph g;
+    build_wide_signal_graph(g, 16, /*parallel=*/true);
+    REQUIRE(signal_graph_executor_eligible(g));
+    const auto l = ramp(kFrames, 0.8f), r = ramp(kFrames, 0.6f);
+    std::vector<float> li = l, ri = r, lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> ic{li.data(), ri.data()};
+    std::array<float*, 2> oc{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+    g.process(ov, iv, kFrames);  // warm up the workers outside the probe
+    {
+        pulp::test::RtAllocationProbe probe;
+        g.process(ov, iv, kFrames);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
+          "[host][graph][executor][routing][rt-safety][threads][parallel]") {
+    // Hammer process() (parallel path, multi-threaded) on the audio thread while
+    // another thread re-prepares. The worker pool is a long-lived member (not
+    // restarted on same-worker-count re-prepares), and each routed snapshot/pool
+    // rides the RCU lifetime — surfaces a pool-lifecycle or retired-snapshot race
+    // under TSan.
+    SignalGraph g;
+    build_wide_signal_graph(g, 8, /*parallel=*/true);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> started{false};
+    std::atomic<std::uint64_t> blocks{0};
+    std::thread audio([&] {
+        std::vector<float> li(kFrames, 0.3f), ri(kFrames, 0.2f);
+        std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 2> ic{li.data(), ri.data()};
+        std::array<float*, 2> oc{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+        pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+        started.store(true, std::memory_order_release);
+        while (!stop.load(std::memory_order_relaxed)) {
+            g.process(ov, iv, kFrames);
+            blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    while (!started.load(std::memory_order_acquire)) std::this_thread::yield();
+    bool prepared_all = true;
+    for (int i = 0; i < 200; ++i) {
+        if (!g.prepare(kSr, kFrames)) prepared_all = false;
+    }
+    stop.store(true, std::memory_order_relaxed);
+    audio.join();
+    REQUIRE(prepared_all);
+    CHECK(blocks.load() > 0);
+}
+
+namespace {
+
+// in(2ch) -> 3 independent gain chains (chain A has one-block feedback, so the
+// graph is STATEFUL across blocks) -> all three sum into out(2ch). The three
+// chains share one parallel level (independent, fed from input); the output node
+// accumulates 3 incoming connections per channel, so its level runs serially in
+// topo order. Exercises parallel dispatch AND the multi-sink float-reduction
+// order whose determinism this golden locks. `parallel` opts into the pool path.
+void build_multisink_stateful(SignalGraph& g, bool parallel) {
+    const auto in = g.add_input_node(2, "In");
+    const auto out = g.add_output_node(2, "Out");
+    const auto a = g.add_gain_node("A");
+    const auto b = g.add_gain_node("B");
+    const auto c = g.add_gain_node("C");
+    for (int ch = 0; ch < 2; ++ch) {
+        REQUIRE(g.connect(in, ch, a, ch));
+        REQUIRE(g.connect(in, ch, b, ch));
+        REQUIRE(g.connect(in, ch, c, ch));
+        REQUIRE(g.connect(a, ch, out, ch));
+        REQUIRE(g.connect(b, ch, out, ch));
+        REQUIRE(g.connect(c, ch, out, ch));
+        REQUIRE(g.connect_feedback(a, ch, a, ch));  // chain A carries state
+    }
+    REQUIRE(g.set_node_gain(a, 0.31f));
+    REQUIRE(g.set_node_gain(b, 0.52f));
+    REQUIRE(g.set_node_gain(c, 0.17f));
+    g.set_parallel_routing_enabled(parallel);
+    REQUIRE(g.prepare(kSr, kFrames));
+    // Guard against a vacuous legacy-vs-legacy comparison: the topology must be
+    // eligible so the parallel session genuinely routes through the worker pool.
+    REQUIRE(signal_graph_executor_eligible(g));
+}
+
+// Render a fixed multi-block input sequence through a fresh graph, returning the
+// concatenated per-channel output (state carried block to block).
+std::vector<std::vector<float>> render_session(bool parallel, int blocks) {
+    SignalGraph g;
+    build_multisink_stateful(g, parallel);
+    std::vector<std::vector<float>> seq(2);
+    for (int blk = 0; blk < blocks; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk)),
+            ramp(kFrames, 0.4f + 0.03f * static_cast<float>(blk))};
+        const auto out = run_legacy(g, kFrames, input, 2);
+        for (int ch = 0; ch < 2; ++ch)
+            seq[ch].insert(seq[ch].end(), out[ch].begin(), out[ch].end());
+    }
+    return seq;
+}
+
+}  // namespace
+
+TEST_CASE("Golden: parallel multi-sink stateful graph renders identically run-to-run",
+          "[host][graph][executor][routing][parallel][golden][determinism]") {
+    // Two independent sessions (fresh graph each) over the SAME input sequence on
+    // the parallel path must produce bit-identical output: the worker-pool
+    // dispatch order must not perturb results, and the multi-sink accumulation
+    // order is fixed (AudioOutput levels run serially in topo order — never
+    // parallel-reduced). Locks the deterministic-reduction design decision.
+    constexpr int kBlocks = 8;
+    const auto run1 = render_session(/*parallel=*/true, kBlocks);
+    const auto run2 = render_session(/*parallel=*/true, kBlocks);
+    expect_equal(run1, run2);
+    // And the parallel render equals the deterministic legacy walk (cross-engine
+    // determinism over the full stateful session, not just one block).
+    const auto legacy = render_session(/*parallel=*/false, kBlocks);
+    expect_equal(run1, legacy);
+}

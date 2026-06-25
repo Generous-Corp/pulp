@@ -46,6 +46,10 @@ pulp_add_test_suite(pulp-test-graph-executor-parity
 pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
 # Off-RT levelization (parallel-schedule levels) for static multicore.
 pulp_add_test_suite(pulp-test-graph-runtime-levelization LIBRARIES pulp::graph)
+# Persistent fork-join worker pool for the levelized parallel executor.
+pulp_add_test_suite(pulp-test-graph-runtime-worker-pool
+    SOURCES test_graph_runtime_worker_pool.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
 # Executor routing path moves audio between nodes (chain/diamond/feedback/
 # multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
@@ -56,12 +60,46 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Host-facing coverage for the parallel executor's break-even threshold wiring.
+pulp_add_test_suite(pulp-test-signal-graph-parallel-cost
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Differential routing parity: random audio-only DAGs driven through both
 # SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
 # fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
 pulp_add_test_suite(pulp-test-graph-routing-differential-parity
     SOURCES test_graph_routing_differential_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Anticipative-rendering safety contract: the static eligibility analysis must
+# exclude every live-input / feedback / sidechain-dependent node and propagate
+# those exclusions downstream, so no unsafe subgraph is ever rendered ahead.
+pulp_add_test_suite(pulp-test-anticipation-eligibility
+    SOURCES test_anticipation_eligibility.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# The eligible interior + boundary edges carved out for anticipative rendering:
+# live sinks stay out of the interior, every interior->outside edge is a splice
+# point, and a live-only graph yields nothing worth anticipating.
+pulp_add_test_suite(pulp-test-anticipation-partition
+    SOURCES test_anticipation_partition.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# The renderable sub-graph carved from a partition: interior nodes + internal
+# edges + one synthesized AudioOutput sink whose input ports carry the distinct
+# boundary outputs, with a fresh non-colliding id.
+pulp_add_test_suite(pulp-test-anticipation-subgraph
+    SOURCES test_anticipation_subgraph.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# Render-path proof: the extracted sub-graph, driven through the real executor,
+# reproduces the full graph's boundary signals with each captured port on its own
+# output channel (the guard the structural extraction tests cannot give).
+pulp_add_test_suite(pulp-test-anticipation-subgraph-render
+    SOURCES test_anticipation_subgraph_render.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# Render-ahead lane: pre-render the eligible sub-graph into a ring off the audio
+# thread and consume pre-rendered blocks on it — consumed output matches a
+# synchronous render, underruns cleanly, allocates nothing on consume, and the
+# producer/consumer pair is race-free.
+pulp_add_test_suite(pulp-test-anticipation-lane
+    SOURCES test_anticipation_lane.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

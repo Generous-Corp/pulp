@@ -3,8 +3,10 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_buffer_assignment.hpp>
+#include <pulp/graph/graph_runtime_levelization.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
+#include <pulp/format/graph_runtime_worker_pool.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -106,9 +108,18 @@ struct GraphRuntimeNodeBinding {
 /// still reference it; use a publish/lifetime policy above this primitive.
 class GraphRuntimeSnapshot {
 public:
+    // `parallel_safe` builds the buffer assignment without slot reuse so the
+    // snapshot can drive process_parallel (concurrent nodes never alias a
+    // recycled slot). Default false = the compact serial layout for
+    // process_routed. Both layouts produce identical output; parallel just costs
+    // more slots.
     bool reset(graph::GraphRuntimePlan plan,
-               std::span<const GraphRuntimeNodeBinding> bindings);
+               std::span<const GraphRuntimeNodeBinding> bindings,
+               bool parallel_safe = false);
     void clear() noexcept;
+
+    // True if this snapshot's assignment is reuse-free (safe for process_parallel).
+    bool parallel_safe() const noexcept { return parallel_safe_; }
 
     bool valid() const noexcept;
     const graph::GraphRuntimePlan& plan() const noexcept { return plan_; }
@@ -129,6 +140,7 @@ private:
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
     graph::GraphRuntimeBufferAssignment assignment_;
+    bool parallel_safe_ = false;
 };
 
 struct GraphRuntimeEventSink {
@@ -151,6 +163,11 @@ struct GraphRuntimeExecutorStats {
     std::uint64_t invalid_snapshots = 0;
     std::uint64_t command_scratch_failures = 0;
     std::uint64_t node_failures = 0;
+    // process_parallel() level routing: how many levels were dispatched across
+    // the worker pool vs run serially on the audio thread (single-node levels,
+    // AudioOutput-accumulation levels, or levels below the cost threshold).
+    std::uint64_t parallel_levels_dispatched = 0;
+    std::uint64_t serial_levels_run = 0;
 };
 
 struct GraphRuntimeExecutorResult {
@@ -489,10 +506,63 @@ public:
         std::span<const graph::GraphTimedCommand> commands = {},
         std::span<GraphRuntimeCommandDecision> command_results = {},
         GraphRuntimeCommandHandler command_handler = {},
+        GraphRuntimeEventSink event_sink = {},
+        std::span<const std::uint8_t> skip_mask = {}) noexcept;
+
+    // `skip_mask` (optional, indexed by dense node index; empty = run everything):
+    // a non-zero entry means "do not run this node — its output slots are already
+    // filled by the caller". Used by anticipative rendering, where a pre-rendered
+    // sub-graph's boundary outputs are written into the skipped interior nodes'
+    // output slots before the call so the rest of the graph reads them instead of
+    // re-running the interior (which advances plugin state that the anticipation
+    // producer already owns). A masked node must NOT be a feedback endpoint (source
+    // or destination — the post-walk feedback capture would read its prefilled slot
+    // and feed stale history) nor an AudioOutput (skipping it drops its accumulate
+    // into the shared output bus, which no pool prefill can restore). The
+    // anticipation interior satisfies both — 6a excludes feedback endpoints and the
+    // interior never contains a live sink. Debug builds assert the contract.
+
+    // Levelized PARALLEL routing path: same per-node work as process_routed, but
+    // each topological level's independent nodes are dispatched across `workers`
+    // (the audio thread is participant 0), barriered between levels. Output is
+    // bit-identical to process_routed: each node owns disjoint scratch, its
+    // fan-in sum is single-threaded, and the level barrier orders producers
+    // before consumers. A level that contains an AudioOutput node (which
+    // accumulates into the shared output bus) or has a single node runs serially.
+    // `levels` must be the levelization of `snapshot`'s plan and `workers` must be
+    // started; pool/midi/automation must fit() the snapshot as for process_routed.
+    GraphRuntimeExecutorResult process_parallel(
+        ProcessBlock& block,
+        const GraphRuntimeSnapshot& snapshot,
+        const graph::GraphRuntimeLevelization& levels,
+        GraphRuntimeBufferPool& pool,
+        GraphRuntimeWorkerPool& workers,
+        GraphRuntimeMidiScratch* midi = nullptr,
+        GraphRuntimeAutomationScratch* automation = nullptr,
+        std::span<const graph::GraphTimedCommand> commands = {},
+        std::span<GraphRuntimeCommandDecision> command_results = {},
+        GraphRuntimeCommandHandler command_handler = {},
         GraphRuntimeEventSink event_sink = {}) noexcept;
 
     GraphRuntimeExecutorStats stats() const noexcept;
     void reset_stats() noexcept;
+
+    // Cost threshold (off-RT setter): process_parallel dispatches a level across
+    // the worker pool only when its static work-weight x frame_count reaches this
+    // many "channel-samples"; below it the level runs serially to avoid losing the
+    // fork/join overhead on trivial work (the break-even guard — fork/join can
+    // lose at 32-64 frames). DEFAULT 0 = parallelize every eligible (width>1,
+    // no-AudioOutput) level; worker-pool dispatch is the executor's job and the
+    // real safety gate is the caller's opt-in (SignalGraph parallel routing is
+    // default-OFF). Set a positive break-even (e.g. 4096 ~= 16 stereo nodes x 128
+    // frames) to keep trivial levels serial once parallel routing is enabled on
+    // small graphs.
+    void set_parallel_min_work_units(std::uint64_t channel_samples) noexcept {
+        parallel_min_work_units_.store(channel_samples, std::memory_order_relaxed);
+    }
+    std::uint64_t parallel_min_work_units() const noexcept {
+        return parallel_min_work_units_.load(std::memory_order_relaxed);
+    }
 
 private:
     GraphRuntimeExecutorResult fail_invalid_block() noexcept;
@@ -520,6 +590,10 @@ private:
     std::atomic<std::uint64_t> invalid_snapshots_{0};
     std::atomic<std::uint64_t> command_scratch_failures_{0};
     std::atomic<std::uint64_t> node_failures_{0};
+    std::atomic<std::uint64_t> parallel_levels_dispatched_{0};
+    std::atomic<std::uint64_t> serial_levels_run_{0};
+    // 0 = no cost gate (parallelize every eligible level); see the setter.
+    std::atomic<std::uint64_t> parallel_min_work_units_{0};
 };
 
 } // namespace pulp::format

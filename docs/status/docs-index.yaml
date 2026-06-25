@@ -287,7 +287,7 @@ docs:
   - slug: example-pulp-sampler
     path: examples/pulp-sampler.md
     kind: guide
-    summary: PulpSampler - audio file sampler with MIDI, ADSR, and pitch control
+    summary: PulpSampler - sample-buffer sampler with MIDI, ADSR, and pitch control
   - slug: example-pulp-pluck
     path: examples/pulp-pluck.md
     kind: guide

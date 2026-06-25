@@ -8,6 +8,63 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04910"></a>
+## [0.491.0] - 2026-06-25
+
+- feat(format): optional skip-mask in process_routed for pre-filled nodes ([#4836](https://github.com/danielraffel/pulp/pull/4836))
+
+<a id="v04900"></a>
+## [0.490.0] - 2026-06-25
+
+- feat(host): anticipation lane — render an eligible sub-graph ahead of the deadline ([#4833](https://github.com/danielraffel/pulp/pull/4833))
+- test(host): render-path proof for the anticipation sub-graph ([#4827](https://github.com/danielraffel/pulp/pull/4827))
+
+<a id="v04890"></a>
+## [0.489.0] - 2026-06-25
+
+- feat(host): anticipation sub-graph extraction (renderable interior + sink) ([#4824](https://github.com/danielraffel/pulp/pull/4824))
+
+<a id="v04880"></a>
+## [0.488.0] - 2026-06-25
+
+- fix(host): expose SignalGraph parallel cost gate ([#4822](https://github.com/danielraffel/pulp/pull/4822))
+
+<a id="v04870"></a>
+## [0.487.0] - 2026-06-25
+
+- feat(host): anticipation partition (eligible interior + boundary edges) ([#4821](https://github.com/danielraffel/pulp/pull/4821))
+
+<a id="v04860"></a>
+## [0.486.0] - 2026-06-25
+
+- feat(host): static anticipative-rendering eligibility analysis ([#4820](https://github.com/danielraffel/pulp/pull/4820))
+
+<a id="v04850"></a>
+## [0.485.0] - 2026-06-25
+
+- feat(graph): coarse static cost threshold for the parallel graph executor ([#4818](https://github.com/danielraffel/pulp/pull/4818))
+- docs: align FAUST guide build type ([#4816](https://github.com/danielraffel/pulp/pull/4816))
+- test(host): run-to-run determinism golden for the parallel graph executor ([#4815](https://github.com/danielraffel/pulp/pull/4815))
+- refactor(view): remove widget gallery dead height state ([#4813](https://github.com/danielraffel/pulp/pull/4813))
+
+<a id="v04840"></a>
+## [0.484.0] - 2026-06-25
+
+- feat(host): opt-in levelized parallel graph execution in SignalGraph::process ([#4812](https://github.com/danielraffel/pulp/pull/4812))
+
+<a id="v04830"></a>
+## [0.483.0] - 2026-06-25
+
+- feat(format): levelized parallel graph execution (process_parallel) ([#4806](https://github.com/danielraffel/pulp/pull/4806))
+- docs(examples): align PulpSampler parameter name ([#4804](https://github.com/danielraffel/pulp/pull/4804))
+- docs(examples): align PulpSampler sample scope ([#4802](https://github.com/danielraffel/pulp/pull/4802))
+
+<a id="v04820"></a>
+## [0.482.0] - 2026-06-25
+
+- feat(format): persistent fork-join worker pool for the levelized parallel executor ([#4801](https://github.com/danielraffel/pulp/pull/4801))
+- docs(examples): correct PulpSynth screenshot controls ([#4799](https://github.com/danielraffel/pulp/pull/4799))
+
 <a id="v04810"></a>
 ## [0.481.0] - 2026-06-25
 
@@ -5090,6 +5147,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.491.0]: https://github.com/danielraffel/pulp/releases/tag/v0.491.0
+[0.490.0]: https://github.com/danielraffel/pulp/releases/tag/v0.490.0
+[0.489.0]: https://github.com/danielraffel/pulp/releases/tag/v0.489.0
+[0.488.0]: https://github.com/danielraffel/pulp/releases/tag/v0.488.0
+[0.487.0]: https://github.com/danielraffel/pulp/releases/tag/v0.487.0
+[0.486.0]: https://github.com/danielraffel/pulp/releases/tag/v0.486.0
+[0.485.0]: https://github.com/danielraffel/pulp/releases/tag/v0.485.0
+[0.484.0]: https://github.com/danielraffel/pulp/releases/tag/v0.484.0
+[0.483.0]: https://github.com/danielraffel/pulp/releases/tag/v0.483.0
+[0.482.0]: https://github.com/danielraffel/pulp/releases/tag/v0.482.0
 [0.481.0]: https://github.com/danielraffel/pulp/releases/tag/v0.481.0
 [0.480.0]: https://github.com/danielraffel/pulp/releases/tag/v0.480.0
 [0.479.0]: https://github.com/danielraffel/pulp/releases/tag/v0.479.0

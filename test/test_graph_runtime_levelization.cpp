@@ -182,3 +182,46 @@ TEST_CASE("Levelization: an empty plan is a valid zero-level schedule",
     REQUIRE(lv.level_offsets.size() == 1);
     CHECK(lv.level_offsets[0] == 0);
 }
+
+TEST_CASE("Levelization: per-node cost weight reflects audio-processing channels",
+          "[graph][levelization][cost]") {
+    using pulp::graph::graph_runtime_node_cost_weight;
+    // Audio-processing kinds weigh max(in,out) channels; pure I/O weighs 0.
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::Processor, 2, 2) == 2);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::Processor, 1, 4) == 4);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::Utility, 3, 1) == 3);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::Custom, 2, 2) == 2);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::AudioInput, 0, 2) == 0);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::AudioOutput, 2, 0) == 0);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::MidiInput, 0, 1) == 0);
+    CHECK(graph_runtime_node_cost_weight(GraphRuntimeNodeKind::MidiOutput, 1, 0) == 0);
+}
+
+TEST_CASE("Levelization: per-level work weight sums its nodes' cost weights",
+          "[graph][levelization][cost]") {
+    // in(0/2) -> 3 stereo processors -> out(2/0). Levels: {in}=0, {p1,p2,p3}=2*3,
+    // {out}=0. Only the processor level carries weight.
+    const std::array nodes = {
+        node(1, 0, 2, GraphRuntimeNodeKind::AudioInput),
+        node(2, 2, 2),
+        node(3, 2, 2),
+        node(4, 2, 2),
+        node(5, 2, 0, GraphRuntimeNodeKind::AudioOutput),
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, GraphRuntimeConnectionSpec{1, 0, 3, 0},
+        GraphRuntimeConnectionSpec{1, 0, 4, 0}, GraphRuntimeConnectionSpec{2, 0, 5, 0},
+        GraphRuntimeConnectionSpec{3, 0, 5, 0}, GraphRuntimeConnectionSpec{4, 0, 5, 0},
+    };
+    const auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto lv = build_graph_runtime_levelization(plan.plan);
+    REQUIRE(lv.ok);
+    REQUIRE(lv.level_work_weight.size() == lv.level_count);
+    const std::uint32_t in_lvl = lv.node_level[index_of(plan.plan, 1)];
+    const std::uint32_t proc_lvl = lv.node_level[index_of(plan.plan, 2)];
+    const std::uint32_t out_lvl = lv.node_level[index_of(plan.plan, 5)];
+    CHECK(lv.level_work_weight[in_lvl] == 0);
+    CHECK(lv.level_work_weight[proc_lvl] == 6);  // 3 nodes * max(2,2)
+    CHECK(lv.level_work_weight[out_lvl] == 0);
+}

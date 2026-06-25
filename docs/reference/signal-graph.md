@@ -158,6 +158,23 @@ Unsupported behavior is explicit: this helper does not skip graph audio nodes,
 change routing, or virtualize plugins. It only lets host-side optional work
 choose a degraded path before that work starts.
 
+## Executor Routing
+
+`SignalGraph::set_canonical_executor_routing_enabled(true)` requests the
+serial `GraphRuntimeExecutor` path for eligible prepared graphs.
+`SignalGraph::set_parallel_routing_enabled(true)` requests the levelized
+parallel executor path for the same eligible subset and falls back to serial
+executor routing or the legacy walk when the parallel snapshot cannot run.
+
+Parallel routing defaults to dispatching every eligible multi-node level.
+Hosts can call `set_parallel_min_work_units(channel_samples)` to keep levels
+below that static work-weight x block-size threshold serial, avoiding worker
+fork/join overhead on small graphs. `routing_executor_stats()` exposes
+diagnostic counters such as parallel levels dispatched and serial levels run so
+tests and tools can verify the route actually taken. These flags and counters
+are telemetry/control knobs for the prepared execution path; they do not change
+graph topology or the generated/import validation budgets above.
+
 ## Latency & PDC
 
 Every `PluginSlot` reports `latency_samples()`. During `prepare()` the

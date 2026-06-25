@@ -62,10 +62,11 @@ inline std::vector<float> test_signal(int n, float seed) {
 inline bool make_snapshot(pulp::format::GraphRuntimeSnapshot& snapshot,
                           std::span<const pulp::graph::GraphRuntimeNodeSpec> nodes,
                           std::span<const pulp::graph::GraphRuntimeConnectionSpec> conns,
-                          std::span<const pulp::format::GraphRuntimeNodeBinding> bindings) {
+                          std::span<const pulp::format::GraphRuntimeNodeBinding> bindings,
+                          bool parallel_safe = false) {
     auto plan = pulp::graph::build_graph_runtime_plan(nodes, conns);
     if (!plan.ok()) return false;
-    return snapshot.reset(std::move(plan.plan), bindings);
+    return snapshot.reset(std::move(plan.plan), bindings, parallel_safe);
 }
 
 inline pulp::format::GraphRuntimeBufferPool make_pool(

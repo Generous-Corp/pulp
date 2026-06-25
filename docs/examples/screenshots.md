@@ -48,8 +48,8 @@ Screenshots are captured via the headless screenshot tool:
 ## PulpSynth — Macro Oscillator Synth
 
 - **Type:** Instrument (MIDI in → stereo out)
-- **Parameters:** 10 parameters (oscillator shape, filter, envelope, effects)
-- **UI:** Eight knobs + two toggles, auto-generated
+- **Parameters:** 10 parameters (oscillator, filter, envelope, output)
+- **UI:** 10 knobs, auto-generated
 - **Formats:** CLAP only
 
 ## PulpDrums — Generative Drum Sequencer
@@ -59,11 +59,11 @@ Screenshots are captured via the headless screenshot tool:
 - **UI:** Six knobs, auto-generated
 - **Formats:** CLAP only
 
-## PulpSampler — Audio File Sampler
+## PulpSampler — Sample-Buffer Sampler
 
 - **Type:** Instrument (MIDI in → stereo out)
-- **Parameters:** Volume, Attack, Decay, Sustain, Release, Pitch, Loop
-- **UI:** Five knobs + two toggles, auto-generated
+- **Parameters:** Gain, Attack, Decay, Sustain, Release, Pitch, Loop
+- **UI:** Gain, ADSR, Pitch controls, and Loop toggle, auto-generated
 - **Formats:** CLAP only
 
 ## GPU Demo — Modulation Matrix
