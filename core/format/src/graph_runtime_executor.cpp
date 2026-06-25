@@ -82,7 +82,8 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (conn.event) continue;
+        // Event (MIDI) and automation edges carry no audio into an input port.
+        if (conn.event || conn.is_automation) continue;
         float* dst = pool.slot_data(slots.input_base + conn.dest_port);
         if (dst == nullptr) continue;
         if (conn.feedback) {

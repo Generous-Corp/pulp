@@ -170,15 +170,21 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                                 ? "graph event connection source port is out of range"
                                 : "graph connection source port is out of range");
             }
-            const auto& dest = result.plan.nodes[dest_index];
-            const auto dest_ports = spec.event ? dest.event_input_ports
-                                               : dest.input_ports;
-            if (spec.dest_port >= dest_ports) {
-                return fail(GraphRuntimePlanErrorCode::DestinationPortOutOfRange, i,
-                            spec.dest_node,
-                            spec.event
-                                ? "graph event connection destination port is out of range"
-                                : "graph connection destination port is out of range");
+            // An automation connection targets a destination PARAMETER, not an
+            // audio/event input port (its dest_port is a conventional 0), so the
+            // input-port range check does not apply. Its source IS an audio
+            // output port, so the source check above still holds.
+            if (!spec.is_automation) {
+                const auto& dest = result.plan.nodes[dest_index];
+                const auto dest_ports = spec.event ? dest.event_input_ports
+                                                   : dest.input_ports;
+                if (spec.dest_port >= dest_ports) {
+                    return fail(GraphRuntimePlanErrorCode::DestinationPortOutOfRange, i,
+                                spec.dest_node,
+                                spec.event
+                                    ? "graph event connection destination port is out of range"
+                                    : "graph connection destination port is out of range");
+                }
             }
 
             result.plan.connections.push_back({
@@ -188,6 +194,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 spec.dest_port,
                 spec.feedback,
                 spec.event,
+                spec.is_automation,
+                spec.automation,
             });
             ++outbound_counts[source_index];
             ++inbound_counts[dest_index];

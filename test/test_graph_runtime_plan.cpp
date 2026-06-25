@@ -282,3 +282,75 @@ TEST_CASE("GraphRuntimePlan accepts empty graphs as valid no-op plans",
     REQUIRE(result.plan.connection_count() == 0);
     REQUIRE(result.plan.processing_order_indices.empty());
 }
+
+TEST_CASE("GraphRuntimePlan carries parameter-automation metadata",
+          "[graph][graph-runtime][plan][automation]") {
+    using namespace pulp::graph;
+    // in(0->2) -> plugin(2->2); plus an automation edge in:0 -> plugin param 42.
+    const std::array nodes = {
+        node(1, 0, 2, GraphRuntimeNodeKind::AudioInput),
+        node(2, 2, 2),
+    };
+    GraphRuntimeConnectionSpec audio = connect(1, 0, 2, 0);
+    GraphRuntimeConnectionSpec autom{};
+    autom.source_node = 1;
+    autom.source_port = 1;
+    autom.dest_node = 2;
+    autom.dest_port = 0;  // conventional; a parameter target, not an audio port
+    autom.is_automation = true;
+    autom.automation = GraphRuntimeAutomationSpec{
+        /*param_id=*/42, /*range_lo=*/-1.0f, /*range_hi=*/1.0f,
+        /*smoothing_ms=*/25.0f, /*mix_add=*/true, /*audio_rate=*/false,
+        /*bounds_lo=*/-2.0f, /*bounds_hi=*/2.0f};
+    const std::array conns = {audio, autom};
+
+    const auto result = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(result.ok());
+    REQUIRE(result.plan.connections.size() == 2);
+
+    // The audio edge is unchanged; the automation edge carries its full spec.
+    const auto& a = result.plan.connections[1];
+    CHECK(a.is_automation);
+    CHECK_FALSE(a.event);
+    CHECK_FALSE(a.feedback);
+    CHECK(a.automation.param_id == 42u);
+    CHECK(a.automation.range_lo == -1.0f);
+    CHECK(a.automation.range_hi == 1.0f);
+    CHECK(a.automation.smoothing_ms == 25.0f);
+    CHECK(a.automation.mix_add);
+    CHECK_FALSE(a.automation.audio_rate);
+    CHECK(a.automation.bounds_lo == -2.0f);
+    CHECK(a.automation.bounds_hi == 2.0f);
+
+    // Automation still orders the graph: source (in) before dest (plugin).
+    REQUIRE(result.plan.processing_order_indices.size() == 2);
+    CHECK(result.plan.processing_order_indices[0] == 0);
+    CHECK(result.plan.processing_order_indices[1] == 1);
+}
+
+TEST_CASE("GraphRuntimePlan skips the input-port check for automation edges",
+          "[graph][graph-runtime][plan][automation]") {
+    using namespace pulp::graph;
+    // The destination plugin has ZERO audio input ports; an automation edge to
+    // its parameter must still be accepted (dest_port targets a parameter, not
+    // an audio input), whereas a plain audio edge to it would be rejected.
+    const std::array nodes = {
+        node(1, 0, 2, GraphRuntimeNodeKind::AudioInput),
+        node(2, 0, 2),  // 0 audio inputs
+    };
+    GraphRuntimeConnectionSpec autom{};
+    autom.source_node = 1;
+    autom.source_port = 0;
+    autom.dest_node = 2;
+    autom.dest_port = 0;
+    autom.is_automation = true;
+    autom.automation.param_id = 7;
+    const std::array ok_conns = {autom};
+    CHECK(build_graph_runtime_plan(nodes, ok_conns).ok());
+
+    // A plain audio edge to the same (absent) input port 0 is rejected.
+    const std::array bad_conns = {connect(1, 0, 2, 0)};
+    const auto bad = build_graph_runtime_plan(nodes, bad_conns);
+    CHECK_FALSE(bad.ok());
+    CHECK(bad.error.code == GraphRuntimePlanErrorCode::DestinationPortOutOfRange);
+}
