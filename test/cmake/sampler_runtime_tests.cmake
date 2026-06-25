@@ -151,3 +151,9 @@ pulp_add_test_suite(pulp-test-graph-runtime-executor
 # ProcessBlock to legacy Processor::process() adapter for migration compatibility.
 pulp_add_test_suite(pulp-test-processor-block-adapter
     LIBRARIES pulp::format)
+
+# I2 parity: the same Processor produces identical output standalone (HeadlessHost)
+# and as an in-graph ProcessorNode driven through the routed GraphRuntimeExecutor.
+pulp_add_test_suite(pulp-test-processor-node-adapter
+    SOURCES test_processor_node_adapter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

@@ -17,6 +17,7 @@ target_sources(pulp-format PRIVATE
     src/graph_runtime_executor.cpp
     src/plugin_state_io.cpp
     src/processor_block_adapter.cpp
+    src/processor_node_adapter.cpp
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp
