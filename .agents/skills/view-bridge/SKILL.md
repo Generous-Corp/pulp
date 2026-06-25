@@ -211,8 +211,9 @@ Roles are opaque — the bridge only uses them for introspection.
 Parameter bindings propagate automatically because every attached view
 polls the same `StateStore`; there is no explicit broadcast step.
 
-Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
-`ViewRole::Remote` secondary view.
+Remote views attach through `ViewBridge::attach_remote_channel(channel, label)`
+as `ViewRole::Remote` secondaries. The bridge does not own URL parsing or socket
+creation; callers connect a `MessageChannel` first and hand it to the bridge.
 
 ## Trackpad / Scroll-Wheel Zoom Event Path
 
@@ -453,7 +454,7 @@ fresh lib instead of segfaulting at first paint.
 7 cases, 67 assertions. Run with
 `ctest --test-dir build -R ViewBridge --output-on-failure`.
 
-## Remote views (Phase 4)
+## Remote views
 
 `ViewBridge::attach_remote_channel(channel, label)` registers a
 `RemoteViewSession` driving a `MessageChannel` (WebSocket or in-process
@@ -466,15 +467,16 @@ protocol in `docs/reference/remote-view-protocol.md`:
 - `view.input` (notification)
 - `view.close` (either side)
 
-Tests: `test/test_remote_view.cpp` — 4 Catch2 cases / 23 assertions via
-MemoryMessageChannel loopback.
+Tests: `test/test_remote_view.cpp` covers handshake, metadata escaping,
+parameter sync, input forwarding, close handling, null-channel rejection, and
+stale-session detach behavior via MemoryMessageChannel loopback.
 
 ### Attaching from an MCP server
 
 An MCP server that runs alongside a Pulp plugin host can open a
 `RemoteViewSession` to drive the plugin's view from Claude Code:
 
-1. MCP server declares a tool (e.g. `view_attach`, `view_param_set`,
+1. MCP server can declare a tool (e.g. `view_attach`, `view_param_set`,
    `view_param_get`) backed by `pulp::runtime::WebSocketChannel::connect(...)`.
 2. Tool handler calls `bridge->attach_remote_channel(std::move(ws), "mcp")`
    where `bridge` is the host's ViewBridge (same process) — or opens
@@ -927,16 +929,16 @@ bridge code path.
 - `core/format/src/view_bridge.cpp` — implementation
 - `core/format/include/pulp/format/processor.hpp` — `create_view`,
   `view_size`, `on_view_*`
-- `core/format/include/pulp/format/remote_view_session.hpp` — Phase 4
+- `core/format/include/pulp/format/remote_view_session.hpp` — remote session API
 - `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference
-- `docs/reference/remote-view-protocol.md` — Phase 4 wire format
+- `docs/reference/remote-view-protocol.md` — remote-view wire format
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
 - `test/test_remote_view.cpp` — loopback tests for the remote protocol
 - `test/test_editor_bridge.cpp` — EditorBridge unit tests
-- `planning/next-features-plan.md` § Feature 1 — phase tracking
+- `planning/next-features-plan.md` § Feature 1 — historical planning context
 
 ## Plugin-contributed settings sections
 

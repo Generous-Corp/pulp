@@ -1,9 +1,10 @@
-# Remote View Protocol (Feature 1, Phase 4)
+# Remote View Protocol
 
-Wire format for attaching a remote view to a `pulp::format::ViewBridge`.
-A remote view is a secondary view (role `ViewRole::Remote`) whose paint
-and input live on another process or machine; `attach_remote_view(url)`
-opens a WebSocket to that endpoint and exchanges the messages below.
+Wire format for a remote view attached to a `pulp::format::ViewBridge`.
+A remote view is registered through
+`ViewBridge::attach_remote_channel(channel, label)`: callers supply a
+connected `pulp::runtime::MessageChannel`, usually a `WebSocketChannel`
+connected to another process or machine.
 
 **Status:** **MVP** — parameter sync + input events + basic metadata are
 live. Paint-op streaming (canvas-command mirroring) is staged for a
@@ -15,8 +16,9 @@ is the coherent parameter-and-input bus that wires into it.
 - **Carrier:** RFC 6455 WebSocket. Text frames carry JSON; binary
   frames are reserved for future paint-op streams.
 - **Connection:** client side is the Pulp host opening a connection to
-  the remote-view server (`attach_remote_view("ws://…")`). Server side
-  is the remote renderer (web page, Electron app, native client).
+  the remote-view server with `WebSocketChannel::connect(...)`, then
+  passing the channel to `ViewBridge::attach_remote_channel(...)`.
+  Server side is the remote renderer (web page, Electron app, native client).
 - **Framing:** JSON-RPC 2.0 (`jsonrpc: "2.0"`) using the in-tree
   `pulp::runtime::JsonRpcPeer` on top of `WebSocketChannel`.
 - **Thread model:** all protocol dispatch runs on the UI / host thread
@@ -53,7 +55,7 @@ is the coherent parameter-and-input bus that wires into it.
 ```
 client (ViewBridge host)                server (remote renderer)
 ──────────────────────────                ────────────────────────
-attach_remote_view("ws://…")
+attach_remote_channel(WebSocketChannel::connect(...))
   │
   │  WebSocket upgrade  ──────────────►  accept
   │  ◄─────────────────────────────────  101 Switching Protocols
@@ -74,7 +76,9 @@ attach_remote_view("ws://…")
 
 ## Failure modes
 
-- **Connection refused / handshake failure** → `attach_remote_view` returns
+- **Connection refused** → `WebSocketChannel::connect(...)` returns `nullptr`
+  before the bridge is attached.
+- **Protocol handshake failure** → `attach_remote_channel(...)` returns
   `nullptr` and sets `bridge->last_error()`.
 - **Mid-session disconnect** → `on_closed` fires on the WebSocket;
   the bridge detaches the remote view automatically and dispatches
@@ -100,13 +104,15 @@ attach_remote_view("ws://…")
 
 ## MCP integration
 
-`tools/mcp/pulp_mcp.cpp` exposes the protocol as MCP tools so Claude
-Code can attach to a running plugin and inspect / drive its editor:
+`tools/mcp/pulp_mcp.cpp` is the repo-level MCP server today. It does not yet
+expose per-plugin remote-view tools, but a host-side MCP wrapper can use this
+protocol to attach to a running plugin and inspect / drive its editor:
 
-- `view_attach` — wraps `attach_remote_view`
-- `view_param_set` / `view_param_get` — drives `view.param_*`
+- `view_attach` — connects a `WebSocketChannel` and calls `attach_remote_channel`
+- `view_param_set` / `view_param_get` — drives `RemoteViewSession::set_parameter`
+  / `get_parameter`
 - `view_list` — enumerates attached secondary views
-- `view_input` — sends synthetic input
+- `view_input` — calls `RemoteViewSession::send_input`
 - `view_close` — detaches
 
 See `.agents/skills/view-bridge/SKILL.md` for the full MCP command
