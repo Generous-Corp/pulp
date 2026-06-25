@@ -149,7 +149,15 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
                                          const fs::path& working_dir) {
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(working_dir);
-    options.timeout_ms = 10000;
+    // Generous budget, not a latency assertion. `pulp create` runs in ~1-2 s,
+    // but the local-template-kit path shells `pulp` → `pulp-cpp` (two cold
+    // binary loads + dylib resolution + file I/O) for byte-for-byte parity.
+    // On a freshly-cloned ephemeral CI VM with a cold page cache that double
+    // cold-start intermittently blew past a 10 s budget — the create itself
+    // succeeded, but `ChildProcess::run` killed it and `timed_out` tripped
+    // (only the delegating kit cases, never the single-process reject cases).
+    // 60 s tolerates the cold-VM start while still catching a genuine hang.
+    options.timeout_ms = 60000;
 
     ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
     auto binary = pulp_binary();
