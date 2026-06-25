@@ -1082,6 +1082,42 @@ mod tests {
     }
 
     #[test]
+    fn run_build_api_delegates_to_script_and_propagates_exit_code() {
+        let td = plant_project();
+        let tools = td.path().join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        let script = tools.join("build-api-docs.sh");
+        fs::write(&script, "#!/bin/sh\n").unwrap();
+
+        let rec = RecordingSpawner::with_codes(vec![9]);
+        let mut buf = Vec::new();
+        let sub = Sub::BuildApi(vec!["--dry-run".to_owned()]);
+        let rc = run(td.path(), &sub, &rec, &mut buf).unwrap();
+
+        assert_eq!(rc, 9);
+        let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "bash");
+        assert_eq!(
+            calls[0].args,
+            vec![
+                script.to_string_lossy().into_owned(),
+                "--dry-run".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_build_api_requires_script_to_exist() {
+        let td = plant_project();
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let err = run(td.path(), &Sub::BuildApi(vec![]), &rec, &mut buf).unwrap_err();
+        assert!(err.to_string().contains("build script not found"));
+        assert!(err.to_string().contains("build-api-docs.sh"));
+    }
+
+    #[test]
     fn run_check_requires_script_to_exist() {
         let td = plant_project();
         let rec = RecordingSpawner::ok();
