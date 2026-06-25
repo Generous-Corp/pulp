@@ -783,7 +783,13 @@ public:
                 host->set_design_viewport(nw, nh);
                 host->request_content_size(nw, nh);
             };
-            kb_window_->set_close_callback([] {});
+            // A title-bar close hides the window without going through
+            // toggle_keyboard_window's hide branch, so drop the app key monitor here
+            // too (otherwise it lingers, harmlessly gated by is_visible(), until the
+            // next toggle).
+            kb_window_->set_close_callback([this] {
+                if (kb_window_) kb_window_->set_app_key_monitor({});
+            });
         }
         // Re-sync ROOT each open (it may have changed while the window was hidden).
         if (kb_) {
@@ -791,18 +797,24 @@ public:
             kb_->set_input_capture(true);   // re-arm self-capture (dropped on the last hide)
         }
         kb_window_->show();
-        // Route ALL app keystrokes to the keyboard while it is open. macOS delivers
-        // keys only to the KEY window, so once the user clicks a control in the MAIN
-        // editor window (e.g. the tempo fader) the keyboard window stops receiving
-        // QWERTY and typing goes dead until it is re-focused. This app-level monitor
-        // forwards every keystroke to the keyboard regardless of which window is key,
-        // consuming only the keys it handles (notes / 1–8 / tab / ⌘K-⌘W-Esc) so other
-        // keys still reach the focused window. The keyboard is now the single QWERTY
-        // source whenever it is open.
+        // Route app keystrokes to the keyboard while it is open. macOS delivers keys
+        // only to the KEY window, so once the user clicks a control in the MAIN editor
+        // window (e.g. the tempo fader) the keyboard window stops receiving QWERTY and
+        // typing goes dead until it is re-focused. This app-level monitor forwards
+        // PLAYABLE keys (notes / 1–8 / tab) to the keyboard regardless of which window
+        // is key, consuming ONLY those so everything else still reaches the focused
+        // window. Deliberately NOT consumed here (left to the normal window/menu path):
+        //   • a focused text input owns the keys (settings chrome, rename field);
+        //   • ⌘/Ctrl chords (⌘K/⌘W toggle via the focused window's on_global_key, menu
+        //     key-equivalents) and Escape (dismiss a dialog) — consuming these app-wide
+        //     would e.g. close the keyboard when Esc was meant for a popover.
         kb_window_->set_app_key_monitor([this](const view::KeyEvent& e) -> bool {
             if (!kb_ || !kb_window_ || !kb_window_->is_visible()) return false;
-            if (kb_->on_global_key && kb_->on_global_key(e)) return true;  // ⌘K / ⌘W / Esc
-            return kb_->on_key_event(e);                                   // notes + 1–8 / tab
+            if (auto* fv = view::View::focused_input_; fv && fv->accepts_text_input())
+                return false;
+            const uint16_t chord = view::kModCmd | view::kModCtrl;
+            if ((e.modifiers & chord) || e.key == view::KeyCode::escape) return false;
+            return kb_->on_key_event(e);   // notes + 1–8 / tab (consumes only what it plays)
         });
     }
 
