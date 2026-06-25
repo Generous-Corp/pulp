@@ -43,9 +43,10 @@ struct AnticipationSubgraph {
 };
 
 // Build the renderable sub-graph for a partition: copy the interior nodes, copy
-// the connections internal to the interior, and for each DISTINCT boundary output
-// port (source_node, source_port) synthesize a one-input AudioOutput sink fed from
-// that port (fresh ids above every existing node id, so they never collide).
+// the connections internal to the interior, and synthesize one AudioOutput sink
+// with one input port per DISTINCT boundary output port (source_node,
+// source_port). The fresh sink id is above every existing node id, so it cannot
+// collide with the source graph.
 // Deterministic; allocation-bounded. Returns ok=false if `partition` is not ok or
 // references a node absent from `nodes` (it should not, having been built from the
 // same graph). The interior carries no feedback edges (6a excludes feedback

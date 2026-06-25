@@ -82,8 +82,8 @@ pulp_add_test_suite(pulp-test-anticipation-partition
     SOURCES test_anticipation_partition.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # The renderable sub-graph carved from a partition: interior nodes + internal
-# edges + one synthesized AudioOutput sink per distinct boundary output port, with
-# fresh non-colliding ids.
+# edges + one synthesized AudioOutput sink whose input ports carry the distinct
+# boundary outputs, with a fresh non-colliding id.
 pulp_add_test_suite(pulp-test-anticipation-subgraph
     SOURCES test_anticipation_subgraph.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
