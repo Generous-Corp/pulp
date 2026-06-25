@@ -72,6 +72,12 @@ pulp_add_test_suite(pulp-test-graph-routing-differential-parity
 pulp_add_test_suite(pulp-test-anticipation-eligibility
     SOURCES test_anticipation_eligibility.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# The eligible interior + boundary edges carved out for anticipative rendering:
+# live sinks stay out of the interior, every interior->outside edge is a splice
+# point, and a live-only graph yields nothing worth anticipating.
+pulp_add_test_suite(pulp-test-anticipation-partition
+    SOURCES test_anticipation_partition.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

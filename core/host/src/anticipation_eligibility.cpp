@@ -11,11 +11,17 @@ AnticipationEligibility analyze_anticipation_eligibility(
     AnticipationEligibility result;
     result.node_exclusion.assign(nodes.size(), AnticipationExclusion::None);
 
-    // NodeId -> dense index into `nodes`.
+    // NodeId -> dense index into `nodes`. Duplicate ids would collapse a later
+    // node onto an earlier one's classification when edges resolve their
+    // endpoints, so a stale/aliased id could escape an exclusion — reject as
+    // malformed (a safety classifier must be correct by construction, not by an
+    // unstated unique-id assumption on a raw span).
     std::unordered_map<NodeId, std::size_t> index_of;
     index_of.reserve(nodes.size());
     for (std::size_t i = 0; i < nodes.size(); ++i) {
-        index_of.emplace(nodes[i].id, i);
+        if (!index_of.emplace(nodes[i].id, i).second) {
+            return result;  // ok = false
+        }
     }
 
     auto find = [&](NodeId id, std::size_t& out) -> bool {

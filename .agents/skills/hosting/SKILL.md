@@ -210,6 +210,16 @@ predictable output, no MIDI.
   not covered; a renderer consuming this must layer a host-time check or a per-node
   opt-out on top. There is no anticipative renderer yet — this is the analysis the
   Phase 6 renderer will gate on.
+- **Anticipation partition (`anticipation_partition.{hpp,cpp}`).**
+  `build_anticipation_partition(nodes, connections, eligibility)` carves the
+  renderable eligible INTERIOR (eligible nodes minus the live AudioOutput/MidiOutput
+  sinks, which are consumed at the real deadline and must never be written ahead)
+  and the BOUNDARY edges (interior-source -> outside-the-interior), which are the
+  splice points the renderer pre-computes and the live graph reads. `cost_weight`
+  (the same coarse max(in,out) proxy the parallel cost gate uses) +
+  `worth_anticipating()` gate out trivial/no-boundary partitions. Still pure static
+  analysis — no rendering, no RT path. Builds on the 6a eligibility result and is
+  rejected (ok=false) if that result isn't ok or doesn't match the node span.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
