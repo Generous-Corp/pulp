@@ -13,6 +13,8 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>
 
+#include "plugin_slot_au_internal.hpp"
+
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudioTypes/CoreAudioTypes.h>
@@ -117,6 +119,9 @@ public:
         }
 
         num_channels_ = channels;
+        // Size the output AudioBufferList scratch once, here, so process()'s
+        // per-block refill never allocates on the audio thread (A2).
+        au_internal::reserve_audio_buffer_list(abl_storage_, num_channels_);
         prepared_ = true;
         cache_parameters();
         return true;
@@ -186,19 +191,14 @@ public:
 
         const int channels = std::min(static_cast<int>(output.num_channels()),
                                       num_channels_);
-        // Build an AudioBufferList pointing at the caller's output buffers.
-        // Each channel is its own AudioBuffer since we declared
-        // non-interleaved.
-        std::vector<std::uint8_t> abl_storage(
-            sizeof(AudioBufferList) + sizeof(AudioBuffer) * (channels - 1));
-        auto* abl = reinterpret_cast<AudioBufferList*>(abl_storage.data());
-        abl->mNumberBuffers = static_cast<UInt32>(channels);
-        for (int c = 0; c < channels; ++c) {
-            abl->mBuffers[c].mNumberChannels = 1;
-            abl->mBuffers[c].mDataByteSize =
-                static_cast<UInt32>(num_samples) * sizeof(float);
-            abl->mBuffers[c].mData = output.channel_ptr(c);
-        }
+        // Point an AudioBufferList at the caller's output buffers (one
+        // AudioBuffer per channel — non-interleaved). Reuses abl_storage_,
+        // sized for num_channels_ in prepare(), so this refill allocates
+        // nothing on the audio thread (A2). channels <= num_channels_, so the
+        // pre-sized buffer always fits.
+        AudioBufferList* abl = au_internal::fill_output_audio_buffer_list(
+            abl_storage_, output, channels,
+            static_cast<UInt32>(num_samples) * sizeof(float));
 
         AudioUnitRenderActionFlags flags = 0;
         AudioTimeStamp ts{};
@@ -439,6 +439,9 @@ private:
     int    max_block_size_ = 0;
     int    num_channels_   = 2;
     bool   prepared_       = false;
+    // Reusable AudioBufferList scratch for process(); sized once in prepare()
+    // so the per-block render setup never allocates on the audio thread (A2).
+    std::vector<std::uint8_t> abl_storage_;
     int64_t sample_time_   = 0;
     std::atomic<bool> bypassed_{false};
 };

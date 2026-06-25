@@ -5792,15 +5792,15 @@ pulp_add_test_suite(pulp-test-mpe-synth-voice
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
-# Point the integration test at the locally-built PulpGain.clap so the CLAP
-# loader runs against a known real plugin.
-# NOTE: the PulpGain_CLAP fixture wiring for pulp-test-host lives in the ROOT
-# CMakeLists.txt block after add_subdirectory(examples). test/ is registered
-# before examples/, so a `if(TARGET PulpGain_CLAP)` guard here never sees the
-# target on a clean configure and silently does nothing.
-# issue-669's older snapshot-publish stress case is intentionally kept in the
-# binary for manual replay, but not registered in the default per-PR CTest set:
-# it is a known flaky stress surface with a dedicated gated stress target below.
+# On Apple, the AU host-slot tests (test_plugin_slot_au.mm) ride along — they
+# reuse pulp::host + rt_allocation_probe here and must stay off non-Apple (.mm/MSVC).
+if(APPLE)
+  target_sources(pulp-test-host PRIVATE test_plugin_slot_au.mm)
+endif()
+# PulpGain_CLAP fixture wiring lives in the ROOT CMakeLists.txt after
+# add_subdirectory(examples) (test/ registered first, so a TARGET guard here
+# never sees it). issue-669 stress stays in the binary for manual replay, out
+# of the default CTest set (flaky; gated target below).
 catch_discover_tests(pulp-test-host TEST_SPEC "~[flaky]")
 
 # SignalGraph tests carved out of test_host.cpp to keep the parent

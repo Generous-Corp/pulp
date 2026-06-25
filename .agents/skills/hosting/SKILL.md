@@ -459,6 +459,18 @@ Gotchas:
   or an un-capacity-limited `MidiBuffer` is outside the contract. No-alloc
   coverage lives in `test_host.cpp` ("ClapSlot::process is allocation-free
   after prepare() reserves"), gated on `PULP_TEST_CLAP_PATH`.
+- The AU slot (`plugin_slot_au.mm`) has the same rule for its output
+  `AudioBufferList`: `AuSlot::process` builds an ABL pointing at the caller's
+  channels every block. Size the backing `abl_storage_` once in `prepare()`
+  (`num_channels_`) via `au_internal::reserve_audio_buffer_list` and only
+  *refill* it per block (`fill_output_audio_buffer_list`) — never allocate a
+  fresh `std::vector` in `process()`. The ABL build lives in
+  `plugin_slot_au_internal.hpp` so its no-alloc invariant is unit-tested
+  (pointer-stable across thousands of refills) without a live AU;
+  `test_plugin_slot_au.mm` additionally drives a real system Apple effect AU
+  through `process()` (skips honestly when none is registered — headless CI
+  may surface no AUs). Do NOT assert `allocs==0` over `AudioUnitRender` itself
+  (Apple allocates internally); assert the reuse invariant on our buffer.
 - The VST3 slot has the same channel-vector issue *plus* extra per-block
   allocation inside the Steinberg helper containers it builds each block
   (`Vst::ParameterChanges` / `EventList` from `public.sdk/.../hosting`), so
