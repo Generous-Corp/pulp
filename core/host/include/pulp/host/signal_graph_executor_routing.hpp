@@ -67,8 +67,9 @@ struct SignalGraphExecutorRouting {
 //     output region is pinned persistent so a plugin that does not fully write
 //     matches SignalGraph's persistent per-node buffer; a reported latency is
 //     fine — its delay compensation is replicated on the routed path);
-//   - connections only plain audio (feedforward or feedback; no MIDI,
-//     automation, audio-rate-modulation, or sidechain).
+//   - connections only audio (feedforward, feedback, or sidechain — a sidechain
+//     edge routes as plain audio into a higher input port of the destination
+//     plugin; no MIDI, automation, or audio-rate-modulation).
 // No prepared check.
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections);

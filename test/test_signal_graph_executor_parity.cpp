@@ -513,7 +513,7 @@ PluginInfo test_plugin_info(int in_ch, int out_ch) {
 //                      current block), so the same instance can drive both walks.
 class DeterministicPlugin final : public PluginSlot {
 public:
-    enum class Mode { kFull, kPartialCh1Gated };
+    enum class Mode { kFull, kPartialCh1Gated, kSidechainMix };
     DeterministicPlugin(Mode mode, float scale, int in_ch, int out_ch, int latency = 0)
         : mode_(mode), scale_(scale), latency_(latency),
           info_(test_plugin_info(in_ch, out_ch)) {}
@@ -529,6 +529,24 @@ public:
                  const pulp::host::ParameterEventQueue&,
                  int n) override {
         const std::size_t chs = out.num_channels();
+        if (mode_ == Mode::kSidechainMix) {
+            // out[c] = main[c] * scale + sidechain[c], where the sidechain
+            // channels are the input channels just past the main channels (a
+            // plugin exposing `chs` main + `chs` sidechain inputs). Reading the
+            // sidechain channels makes a sidechain-routing or PDC-delay bug
+            // surface as an output divergence.
+            for (std::size_t c = 0; c < chs; ++c) {
+                float* o = out.channel_ptr(c);
+                const float* m = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+                const std::size_t sc = c + chs;
+                const float* s = sc < in.num_channels() ? in.channel_ptr(sc) : nullptr;
+                for (int k = 0; k < n; ++k) {
+                    const auto i = static_cast<std::size_t>(k);
+                    o[i] = (m ? m[i] * scale_ : 0.0f) + (s ? s[i] : 0.0f);
+                }
+            }
+            return;
+        }
         const bool gate_open = in.num_samples() > 0 && in.num_channels() > 0 &&
                                in.channel_ptr(0)[0] > 0.0f;
         for (std::size_t c = 0; c < chs; ++c) {
@@ -897,5 +915,86 @@ TEST_CASE("SignalGraph::process PDC executor path does not allocate on the audio
         pulp::test::RtAllocationProbe probe;
         g.process(ov, iv, kFrames);
         REQUIRE_FALSE(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("Translated routing matches SignalGraph: sidechain edges",
+          "[host][graph][executor][routing][parity][plugin][sidechain]") {
+    // A plugin with 2 main + 2 sidechain input ports reads its sidechain
+    // channels (out = main*scale + sidechain). The sidechain source is a
+    // separately-scaled copy of the input so main != sidechain. The routed
+    // gather must fill the plugin's higher input ports from the sidechain edges
+    // exactly as SignalGraph does.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto sc = g.add_gain_node("SCGain");
+    const auto p = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kSidechainMix, 0.5f, /*in_ch=*/4, /*out_ch=*/2),
+        4, 2, "MixP");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, p, c));                       // main inputs
+        REQUIRE(g.connect(in, c, sc, c));                      // feed the sc source
+        REQUIRE(g.connect_sidechain(sc, c, p, c + 2));         // sidechain inputs
+        REQUIRE(g.connect(p, c, out, c));
+    }
+    REQUIRE(g.set_node_gain(sc, 0.75f));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    for (int blk = 0; blk < 4; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.8f + 0.02f * static_cast<float>(blk)),
+            ramp(kFrames, 0.6f - 0.02f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
+    }
+}
+
+TEST_CASE("Translated routing matches SignalGraph: sidechain edge with PDC delay",
+          "[host][graph][executor][routing][parity][plugin][sidechain][pdc]") {
+    // The main path runs through a latency-reporting plugin, so the plugin
+    // mixing in the sidechain sees its main inputs at latency 64 and its
+    // sidechain inputs (a plain gain path) at latency 0 — the sidechain edges
+    // must be PDC-delayed by 64 to time-align. Exercises PDC on sidechain edges;
+    // requires block-for-block parity (the delay ring carries state).
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto latP = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kFull, 0.5f, 2, 2, /*latency=*/64),
+        2, 2, "LatP");
+    const auto sc = g.add_gain_node("SCGain");
+    const auto mixP = g.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(
+            DeterministicPlugin::Mode::kSidechainMix, 1.0f, /*in_ch=*/4, /*out_ch=*/2),
+        4, 2, "MixP");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, latP, c));
+        REQUIRE(g.connect(latP, c, mixP, c));                  // main (latency 64)
+        REQUIRE(g.connect(in, c, sc, c));
+        REQUIRE(g.connect_sidechain(sc, c, mixP, c + 2));      // sidechain (latency 0)
+        REQUIRE(g.connect(mixP, c, out, c));
+    }
+    REQUIRE(g.set_node_gain(sc, 0.75f));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    for (int blk = 0; blk < 8; ++blk) {
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.7f + 0.03f * static_cast<float>(blk)),
+            ramp(kFrames, 0.5f + 0.02f * static_cast<float>(blk))};
+        INFO("block " << blk);
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
     }
 }

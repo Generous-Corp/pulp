@@ -139,8 +139,9 @@ predictable output, no MIDI.
   auxes, surround, or multi-output products.
 - **Canonical-executor routing (opt-in, default OFF).** An eligible graph —
   nodes only AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
-  carry a LIVE slot), connections only plain audio (feedforward or one-block
-  feedback; no MIDI / automation / audio-rate-mod / sidechain) — can be driven
+  carry a LIVE slot), connections only audio (feedforward, one-block feedback,
+  or sidechain — a sidechain edge routes as plain audio into a higher input port
+  of the destination plugin; no MIDI / automation / audio-rate-mod) — can be driven
   through the canonical `GraphRuntimeExecutor` instead of the legacy walk via
   `set_canonical_executor_routing_enabled(true)`. Output is bit-identical to the
   legacy walk (`signal_graph_executor_routing.{hpp,cpp}` translates the graph;
