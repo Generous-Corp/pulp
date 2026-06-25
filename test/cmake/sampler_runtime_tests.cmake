@@ -78,6 +78,12 @@ pulp_add_test_suite(pulp-test-anticipation-eligibility
 pulp_add_test_suite(pulp-test-anticipation-partition
     SOURCES test_anticipation_partition.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# The renderable sub-graph carved from a partition: interior nodes + internal
+# edges + one synthesized AudioOutput sink per distinct boundary output port, with
+# fresh non-colliding ids.
+pulp_add_test_suite(pulp-test-anticipation-subgraph
+    SOURCES test_anticipation_subgraph.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.

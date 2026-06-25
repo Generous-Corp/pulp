@@ -220,6 +220,19 @@ predictable output, no MIDI.
   `worth_anticipating()` gate out trivial/no-boundary partitions. Still pure static
   analysis — no rendering, no RT path. Builds on the 6a eligibility result and is
   rejected (ok=false) if that result isn't ok or doesn't match the node span.
+- **Anticipation sub-graph (`anticipation_subgraph.{hpp,cpp}`).**
+  `build_anticipation_subgraph(nodes, connections, partition)` turns a partition
+  into a standalone renderable graph: it copies the interior nodes verbatim (plugin
+  slots/gain/ports preserved) and the internal edges, and synthesizes ONE
+  one-input `AudioOutput` sink per DISTINCT boundary output port (fresh ids above
+  every existing node id, so no collision), fed from that port — so the sub-graph
+  renders through the ordinary `build_executor_snapshot` + `process_routed` and its
+  output bus carries exactly the boundary signals. `outputs[]` maps each sink back
+  to the `(source_node, source_port)` it captures. GOTCHA: the interior plugin
+  GraphNodes are copied by value, so the SAME plugin instances render here — which
+  means a live splice (a later slice) must NOT also process those instances, or
+  their state double-advances. This slice does extraction only; it neither renders
+  nor changes any RT path.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
