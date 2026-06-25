@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04760"></a>
+## [0.476.0] - 2026-06-25
+
+- feat(host): route sidechain edges on the canonical executor path ([#4778](https://github.com/danielraffel/pulp/pull/4778))
+
 <a id="v04750"></a>
 ## [0.475.0] - 2026-06-25
 
@@ -5055,6 +5060,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.476.0]: https://github.com/danielraffel/pulp/releases/tag/v0.476.0
 [0.475.0]: https://github.com/danielraffel/pulp/releases/tag/v0.475.0
 [0.474.0]: https://github.com/danielraffel/pulp/releases/tag/v0.474.0
 [0.473.0]: https://github.com/danielraffel/pulp/releases/tag/v0.473.0
