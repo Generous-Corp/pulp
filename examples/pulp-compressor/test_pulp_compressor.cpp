@@ -2,7 +2,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_compressor.hpp"
 #include <pulp/format/headless.hpp>
+#include <pulp/format/processor_block_adapter.hpp>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 
 using namespace pulp;
@@ -26,6 +29,18 @@ static void process_headless(format::HeadlessHost& host,
     auto ov = out.view();
     host.process(ov, iv);
 }
+
+struct ConstAudioView {
+    explicit ConstAudioView(const audio::Buffer<float>& buffer) {
+        REQUIRE(buffer.num_channels() <= ptrs.size());
+        for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch)
+            ptrs[ch] = buffer.channel(ch).data();
+        view = {ptrs.data(), buffer.num_channels(), buffer.num_samples()};
+    }
+
+    std::array<const float*, 16> ptrs{};
+    audio::BufferView<const float> view;
+};
 
 TEST_CASE("PulpCompressor descriptor has sidechain bus", "[compressor]") {
     auto proc = create_pulp_compressor();
@@ -98,6 +113,64 @@ TEST_CASE("PulpCompressor state round-trip", "[compressor]") {
     REQUIRE_THAT(h2.state().get_value(kThreshold), WithinAbs(-30.0, 0.1));
     REQUIRE_THAT(h2.state().get_value(kRatio), WithinAbs(8.0, 0.1));
     REQUIRE_THAT(h2.state().get_value(kMakeupGain), WithinAbs(6.0, 0.1));
+}
+
+TEST_CASE("PulpCompressor sidechain input drives gain reduction",
+          "[compressor][sidechain]") {
+    constexpr std::size_t kFrames = 4096;
+
+    // HeadlessHost has no sidechain bus entry point; drive the canonical
+    // multi-bus processor adapter directly.
+    auto processor = create_pulp_compressor();
+    state::StateStore store;
+    processor->set_state_store(&store);
+    processor->define_parameters(store);
+    processor->prepare({
+        .sample_rate = 48000.0,
+        .max_buffer_size = static_cast<int>(kFrames),
+        .input_channels = 2,
+        .output_channels = 2,
+    });
+
+    store.set_value(kThreshold, -20.0f);
+    store.set_value(kRatio, 20.0f);
+    store.set_value(kAttack, 0.1f);
+    store.set_value(kRelease, 50.0f);
+    store.set_value(kMakeupGain, 0.0f);
+
+    audio::Buffer<float> main_in(2, kFrames);
+    audio::Buffer<float> sidechain(2, kFrames);
+    audio::Buffer<float> output(2, kFrames);
+
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        main_in.channel(0)[i] = 0.01f;
+        main_in.channel(1)[i] = 0.01f;
+        sidechain.channel(0)[i] = 1.0f;
+        sidechain.channel(1)[i] = 1.0f;
+    }
+
+    ConstAudioView main_view(main_in);
+    ConstAudioView sidechain_view(sidechain);
+
+    format::BusBufferSet buses;
+    REQUIRE(buses.add_input("main", main_view.view));
+    REQUIRE(buses.add_input("sidechain", sidechain_view.view, format::BusRole::Sidechain));
+    REQUIRE(buses.add_output("main", output.view()));
+
+    format::ProcessBlock block;
+    block.sample_rate = 48000.0;
+    block.frame_count = static_cast<std::uint32_t>(kFrames);
+    block.render_speed = 1.0;
+    block.buses = &buses;
+
+    format::ProcessorBlockAdapterScratch scratch;
+    REQUIRE(format::process_processor_block(*processor, block, scratch));
+
+    float settled_peak = 0.0f;
+    for (std::size_t i = 1024; i < kFrames; ++i)
+        settled_peak = std::max(settled_peak, std::abs(output.channel(0)[i]));
+
+    REQUIRE(settled_peak < 0.005f);
 }
 
 // ── Deeper golden cases (#356 golden breadth) ─────────────────────────
