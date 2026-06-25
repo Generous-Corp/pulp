@@ -72,7 +72,15 @@ struct GraphRuntimeBufferAssignment {
 
 // Compute the slot layout for `plan`. Returns ok=false (and slot_count=0) only
 // on allocation failure; an empty plan yields ok=true with slot_count=0.
+//
+// `allow_reuse` (default true) is the serial layout: a scratch region is recycled
+// by strictly-later nodes once its last reader has run, minimizing slot_count.
+// Pass false for the PARALLEL executor: reuse keys on serial topological order,
+// but same-level nodes run concurrently, so a recycled slot would alias and race
+// two live values. With allow_reuse=false every node gets fresh, never-recycled
+// input/output regions (larger slot_count, but no inter-node aliasing); feedback-
+// prev and delay-ring slots are unaffected (already never recycled).
 GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
-    const GraphRuntimePlan& plan);
+    const GraphRuntimePlan& plan, bool allow_reuse = true);
 
 } // namespace pulp::graph

@@ -485,3 +485,281 @@ TEST_CASE("GraphRuntimeExecutor feedback routing path does not allocate",
         REQUIRE_FALSE(probe.saw_allocation());
     }
 }
+
+// ── Levelized parallel execution (process_parallel) ─────────────────────────
+// process_parallel must produce output bit-identical to the serial process_routed
+// path (each node owns disjoint scratch; the level barrier orders producers
+// before consumers). A wide fan-out graph puts many independent gains on one
+// level so the parallel dispatch actually runs.
+
+namespace {
+
+// in(1ch) -> N parallel gains -> out(1ch) (fan-in sum). The N gains share level 1.
+void build_wide_fanout(std::vector<GraphRuntimeNodeSpec>& nodes,
+                       std::vector<GraphRuntimeConnectionSpec>& conns,
+                       std::vector<GainState>& gains,
+                       std::vector<GraphRuntimeNodeBinding>& bindings, int n) {
+    nodes.push_back({1, GraphRuntimeNodeKind::AudioInput, 0, 1});
+    const pulp::graph::NodeId out_id = static_cast<pulp::graph::NodeId>(n + 2);
+    gains.assign(static_cast<std::size_t>(n), GainState{});
+    for (int i = 0; i < n; ++i) {
+        const auto id = static_cast<pulp::graph::NodeId>(i + 2);
+        nodes.push_back({id, GraphRuntimeNodeKind::Processor, 1, 1});
+        gains[static_cast<std::size_t>(i)].gain = 0.1f + 0.01f * static_cast<float>(i);
+        conns.push_back({1, 0, id, 0});       // in -> gain
+        conns.push_back({id, 0, out_id, 0});  // gain -> out (fan-in)
+    }
+    nodes.push_back({out_id, GraphRuntimeNodeKind::AudioOutput, 1, 0});
+    bindings.push_back({1, nullptr, nullptr, false});
+    for (int i = 0; i < n; ++i) {
+        bindings.push_back({static_cast<pulp::graph::NodeId>(i + 2), routing_gain,
+                            &gains[static_cast<std::size_t>(i)], true});
+    }
+    bindings.push_back({out_id, nullptr, nullptr, false});
+}
+
+} // namespace
+
+TEST_CASE("Parallel routing matches the serial routed path: wide fan-out",
+          "[format][graph][executor][routing][parallel]") {
+    constexpr int kFrames = 64;
+    std::vector<GraphRuntimeNodeSpec> nodes;
+    std::vector<GraphRuntimeConnectionSpec> conns;
+    std::vector<GainState> gains;
+    std::vector<GraphRuntimeNodeBinding> bindings;
+    build_wide_fanout(nodes, conns, gains, bindings, /*n=*/16);
+
+    // Serial uses the compact (reuse) layout; parallel uses the reuse-free
+    // layout. Comparing their outputs also proves both layouts compute identically.
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    GraphRuntimeSnapshot psnapshot;
+    REQUIRE(make_snapshot(psnapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(psnapshot.plan());
+    REQUIRE(levels.ok);
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.8f)};
+    GraphRuntimeExecutor exec;
+
+    auto pool_serial = make_pool(snapshot, kFrames);
+    RoutedHarness serial(kSr, kFrames, in, 1);
+    REQUIRE(serial.run(exec, snapshot, pool_serial).ok());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+    auto pool_parallel = make_pool(psnapshot, kFrames);
+    RoutedHarness par(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(par.block, psnapshot, levels, pool_parallel, workers).ok());
+    workers.stop();
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(serial.outs[0][static_cast<std::size_t>(i)] ==
+                par.outs[0][static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Parallel routing matches the serial routed path: multi-output mixing",
+          "[format][graph][executor][routing][parallel]") {
+    constexpr int kFrames = 64;
+    // Two AudioOutput nodes accumulate into the same bus — they must run serially
+    // in the parallel path (their level is forced serial). Output must still match.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, GraphRuntimeConnectionSpec{1, 0, 3, 0},
+        GraphRuntimeConnectionSpec{2, 0, 4, 0}, GraphRuntimeConnectionSpec{3, 0, 5, 0},
+    };
+    GainState g2{0.5f}, g3{0.25f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &g2, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &g3, true},
+        GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{5, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    GraphRuntimeSnapshot psnapshot;
+    REQUIRE(make_snapshot(psnapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(psnapshot.plan());
+    REQUIRE(levels.ok);
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.6f)};
+    GraphRuntimeExecutor exec;
+    auto pool_serial = make_pool(snapshot, kFrames);
+    RoutedHarness serial(kSr, kFrames, in, 1);
+    REQUIRE(serial.run(exec, snapshot, pool_serial).ok());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+    auto pool_parallel = make_pool(psnapshot, kFrames);
+    RoutedHarness par(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(par.block, psnapshot, levels, pool_parallel, workers).ok());
+    workers.stop();
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(serial.outs[0][static_cast<std::size_t>(i)] ==
+                par.outs[0][static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Parallel routing is allocation-free on the audio thread",
+          "[format][graph][executor][routing][parallel][rt-safety]") {
+    constexpr int kFrames = 64;
+    std::vector<GraphRuntimeNodeSpec> nodes;
+    std::vector<GraphRuntimeConnectionSpec> conns;
+    std::vector<GainState> gains;
+    std::vector<GraphRuntimeNodeBinding> bindings;
+    build_wide_fanout(nodes, conns, gains, bindings, /*n=*/16);
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(snapshot.plan());
+    auto pool = make_pool(snapshot, kFrames);
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.8f)};
+    GraphRuntimeExecutor exec;
+    {
+        RoutedHarness warm(kSr, kFrames, in, 1);
+        REQUIRE(exec.process_parallel(warm.block, snapshot, levels, pool, workers).ok());
+    }
+    {
+        RoutedHarness h(kSr, kFrames, in, 1);
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(exec.process_parallel(h.block, snapshot, levels, pool, workers).ok());
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    workers.stop();
+}
+
+TEST_CASE("Parallel routing matches serial: 3 sinks accumulate in topo order",
+          "[format][graph][executor][routing][parallel]") {
+    // Three AudioOutput nodes sum into the same output channel at one level. The
+    // serial-fallback for that level must accumulate in the SAME order the serial
+    // walk does (processing order), or non-associative float += diverges. The
+    // gains feeding the sinks are wired highest-id-first so processing order is
+    // NOT ascending node-index — exercising the ordering guarantee.
+    constexpr int kFrames = 64;
+    // ids: in=1; gains 2,3,4; sinks 5,6,7. Wire in->gain edges in REVERSE so the
+    // sink fed by the highest-id gain is processed first.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{6, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{7, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 4, 0},  // in -> g4 (readied first)
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{4, 0, 7, 0},  // g4 -> sink7
+        GraphRuntimeConnectionSpec{3, 0, 6, 0},
+        GraphRuntimeConnectionSpec{2, 0, 5, 0},
+    };
+    // Order-sensitive gains: a large term and two small ones so (a+b)+c float-
+    // differs from a different order.
+    GainState g2{1.0f}, g3{1.0e7f}, g4{1.0f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &g2, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &g3, true},
+        GraphRuntimeNodeBinding{4, routing_gain, &g4, true},
+        GraphRuntimeNodeBinding{5, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{6, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{7, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    GraphRuntimeSnapshot psnapshot;
+    REQUIRE(make_snapshot(psnapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(psnapshot.plan());
+    REQUIRE(levels.ok);
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.9f)};
+    GraphRuntimeExecutor exec;
+    auto pool_serial = make_pool(snapshot, kFrames);
+    RoutedHarness serial(kSr, kFrames, in, 1);
+    REQUIRE(serial.run(exec, snapshot, pool_serial).ok());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+    auto pool_parallel = make_pool(psnapshot, kFrames);
+    RoutedHarness par(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(par.block, psnapshot, levels, pool_parallel, workers).ok());
+    workers.stop();
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(serial.outs[0][static_cast<std::size_t>(i)] ==
+                par.outs[0][static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Parallel routing matches serial: deep and wide (two parallel levels)",
+          "[format][graph][executor][routing][parallel]") {
+    // in -> A[0..3] -> B[0..3] -> out. A is level 1 (parallel), B is level 2
+    // (parallel), out level 3. Exercises two consecutive parallel levels and the
+    // cross-level barrier (level-1 writes visible to level-2 workers).
+    constexpr int kFrames = 64;
+    constexpr int kW = 4;
+    std::vector<GraphRuntimeNodeSpec> nodes;
+    std::vector<GraphRuntimeConnectionSpec> conns;
+    nodes.push_back({1, GraphRuntimeNodeKind::AudioInput, 0, 1});
+    const auto out_id = static_cast<pulp::graph::NodeId>(2 + 2 * kW);
+    for (int i = 0; i < kW; ++i) {
+        const auto a = static_cast<pulp::graph::NodeId>(2 + i);
+        const auto b = static_cast<pulp::graph::NodeId>(2 + kW + i);
+        nodes.push_back({a, GraphRuntimeNodeKind::Processor, 1, 1});
+        nodes.push_back({b, GraphRuntimeNodeKind::Processor, 1, 1});
+        conns.push_back({1, 0, a, 0});       // in -> A[i]
+        conns.push_back({a, 0, b, 0});       // A[i] -> B[i]
+        conns.push_back({b, 0, out_id, 0});  // B[i] -> out (fan-in)
+    }
+    nodes.push_back({out_id, GraphRuntimeNodeKind::AudioOutput, 1, 0});
+
+    std::vector<GainState> gains(static_cast<std::size_t>(2 * kW));
+    std::vector<GraphRuntimeNodeBinding> bindings;
+    bindings.push_back({1, nullptr, nullptr, false});
+    for (int i = 0; i < kW; ++i) {
+        gains[static_cast<std::size_t>(2 * i)].gain = 0.3f + 0.01f * static_cast<float>(i);
+        gains[static_cast<std::size_t>(2 * i + 1)].gain = 0.5f - 0.02f * static_cast<float>(i);
+        bindings.push_back({static_cast<pulp::graph::NodeId>(2 + i), routing_gain,
+                            &gains[static_cast<std::size_t>(2 * i)], true});
+        bindings.push_back({static_cast<pulp::graph::NodeId>(2 + kW + i), routing_gain,
+                            &gains[static_cast<std::size_t>(2 * i + 1)], true});
+    }
+    bindings.push_back({out_id, nullptr, nullptr, false});
+
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    GraphRuntimeSnapshot psnapshot;
+    REQUIRE(make_snapshot(psnapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(psnapshot.plan());
+    REQUIRE(levels.ok);
+    REQUIRE(levels.level_count == 4);  // in / A / B / out
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.7f)};
+    GraphRuntimeExecutor exec;
+    auto pool_serial = make_pool(snapshot, kFrames);
+    RoutedHarness serial(kSr, kFrames, in, 1);
+    REQUIRE(serial.run(exec, snapshot, pool_serial).ok());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+    auto pool_parallel = make_pool(psnapshot, kFrames);
+    RoutedHarness par(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(par.block, psnapshot, levels, pool_parallel, workers).ok());
+    workers.stop();
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(serial.outs[0][static_cast<std::size_t>(i)] ==
+                par.outs[0][static_cast<std::size_t>(i)]);
+    }
+}

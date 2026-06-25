@@ -3,8 +3,10 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_buffer_assignment.hpp>
+#include <pulp/graph/graph_runtime_levelization.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
+#include <pulp/format/graph_runtime_worker_pool.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -106,9 +108,18 @@ struct GraphRuntimeNodeBinding {
 /// still reference it; use a publish/lifetime policy above this primitive.
 class GraphRuntimeSnapshot {
 public:
+    // `parallel_safe` builds the buffer assignment without slot reuse so the
+    // snapshot can drive process_parallel (concurrent nodes never alias a
+    // recycled slot). Default false = the compact serial layout for
+    // process_routed. Both layouts produce identical output; parallel just costs
+    // more slots.
     bool reset(graph::GraphRuntimePlan plan,
-               std::span<const GraphRuntimeNodeBinding> bindings);
+               std::span<const GraphRuntimeNodeBinding> bindings,
+               bool parallel_safe = false);
     void clear() noexcept;
+
+    // True if this snapshot's assignment is reuse-free (safe for process_parallel).
+    bool parallel_safe() const noexcept { return parallel_safe_; }
 
     bool valid() const noexcept;
     const graph::GraphRuntimePlan& plan() const noexcept { return plan_; }
@@ -129,6 +140,7 @@ private:
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
     graph::GraphRuntimeBufferAssignment assignment_;
+    bool parallel_safe_ = false;
 };
 
 struct GraphRuntimeEventSink {
@@ -484,6 +496,28 @@ public:
         ProcessBlock& block,
         const GraphRuntimeSnapshot& snapshot,
         GraphRuntimeBufferPool& pool,
+        GraphRuntimeMidiScratch* midi = nullptr,
+        GraphRuntimeAutomationScratch* automation = nullptr,
+        std::span<const graph::GraphTimedCommand> commands = {},
+        std::span<GraphRuntimeCommandDecision> command_results = {},
+        GraphRuntimeCommandHandler command_handler = {},
+        GraphRuntimeEventSink event_sink = {}) noexcept;
+
+    // Levelized PARALLEL routing path: same per-node work as process_routed, but
+    // each topological level's independent nodes are dispatched across `workers`
+    // (the audio thread is participant 0), barriered between levels. Output is
+    // bit-identical to process_routed: each node owns disjoint scratch, its
+    // fan-in sum is single-threaded, and the level barrier orders producers
+    // before consumers. A level that contains an AudioOutput node (which
+    // accumulates into the shared output bus) or has a single node runs serially.
+    // `levels` must be the levelization of `snapshot`'s plan and `workers` must be
+    // started; pool/midi/automation must fit() the snapshot as for process_routed.
+    GraphRuntimeExecutorResult process_parallel(
+        ProcessBlock& block,
+        const GraphRuntimeSnapshot& snapshot,
+        const graph::GraphRuntimeLevelization& levels,
+        GraphRuntimeBufferPool& pool,
+        GraphRuntimeWorkerPool& workers,
         GraphRuntimeMidiScratch* midi = nullptr,
         GraphRuntimeAutomationScratch* automation = nullptr,
         std::span<const graph::GraphTimedCommand> commands = {},

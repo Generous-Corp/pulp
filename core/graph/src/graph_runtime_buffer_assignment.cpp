@@ -55,7 +55,7 @@ private:
 } // namespace
 
 GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
-    const GraphRuntimePlan& plan) {
+    const GraphRuntimePlan& plan, bool allow_reuse) {
     GraphRuntimeBufferAssignment assignment;
     const std::size_t node_count = plan.nodes.size();
     try {
@@ -123,28 +123,32 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             const auto& node = plan.nodes[node_index];
             auto& slots = assignment.nodes[node_index];
 
-            slots.input_base = alloc.alloc(node.input_ports);
+            // With reuse disabled (parallel layout), every region is fresh and
+            // never recycled — concurrent nodes can't alias a recycled slot.
+            slots.input_base = allow_reuse ? alloc.alloc(node.input_ports)
+                                           : alloc.alloc_fresh(node.input_ports);
             // A persistent-output node's output region must be dedicated: fresh
             // slots that no other node ever writes (see alloc_fresh). Pairs with
             // last_use == pinned below, which also keeps it from being recycled
             // by a later node.
-            slots.output_base = node.persistent_output
+            slots.output_base = (node.persistent_output || !allow_reuse)
                                     ? alloc.alloc_fresh(node.output_ports)
                                     : alloc.alloc(node.output_ports);
 
-            // Input region dies after this node runs.
-            if (node.input_ports > 0) {
-                frees_at[t].push_back({slots.input_base, node.input_ports});
-            }
-            // Output region dies after its last consumer (or never, if pinned).
-            if (node.output_ports > 0) {
-                const std::uint32_t death = last_use[node_index];
-                if (death < node_count) {
-                    frees_at[death].push_back({slots.output_base, node.output_ports});
+            if (allow_reuse) {
+                // Input region dies after this node runs.
+                if (node.input_ports > 0) {
+                    frees_at[t].push_back({slots.input_base, node.input_ports});
                 }
+                // Output region dies after its last consumer (or never, if pinned).
+                if (node.output_ports > 0) {
+                    const std::uint32_t death = last_use[node_index];
+                    if (death < node_count) {
+                        frees_at[death].push_back({slots.output_base, node.output_ports});
+                    }
+                }
+                for (const auto& f : frees_at[t]) alloc.free(f.base, f.size);
             }
-
-            for (const auto& f : frees_at[t]) alloc.free(f.base, f.size);
         }
 
         std::uint32_t cursor = alloc.high_water();

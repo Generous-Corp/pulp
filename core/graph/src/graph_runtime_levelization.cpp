@@ -48,11 +48,16 @@ GraphRuntimeLevelization build_graph_runtime_levelization(const GraphRuntimePlan
         for (std::uint32_t l = 0; l < result.level_count; ++l) {
             result.level_offsets[l + 1] += result.level_offsets[l];
         }
-        // Place nodes in ascending node-index order within each level (stable,
-        // deterministic) using a per-level write cursor seeded from the offsets.
+        // Place nodes within each level in PROCESSING (topological) order, not
+        // node-index order, by walking processing_order_indices. Same-level nodes
+        // are independent so a parallel executor may run them in any order, but a
+        // serial fallback for a level (e.g. one containing an AudioOutput node
+        // that accumulates into the shared bus) then iterates this slice in the
+        // exact order the serial walk would — preserving bit-identical, non-
+        // associative float accumulation.
         std::vector<std::uint32_t> cursor(result.level_offsets.begin(),
                                           result.level_offsets.end());
-        for (std::uint32_t n = 0; n < node_count; ++n) {
+        for (const auto n : plan.processing_order_indices) {
             const std::uint32_t level = result.node_level[n];
             result.level_nodes[cursor[level]++] = n;
         }
