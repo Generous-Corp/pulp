@@ -2,8 +2,8 @@
 #
 # stretchcli drives pulp::signal::OfflineStretch from the command line
 # (file in -> render -> file out, plus --analyze). It is the development +
-# corpus-rendering tool for the engine; see
-# planning/Sampler-Offline-Stretch-Build-Plan.md.
+# corpus-rendering tool for the engine; see INTEGRATION.md and
+# docs/guides/time-stretch.md.
 
 add_executable(stretchcli stretchcli.cpp)
 target_link_libraries(stretchcli PRIVATE pulp::audio pulp::signal)

@@ -1,7 +1,7 @@
-# OfflineStretch — ratio derivation & component routing (Phase 2.1)
+# OfflineStretch — Ratio Derivation & Component Routing
 
-The design contract the reviews asked for before coding the pitch/time/formant
-paths (plan §4.2). Reflects what `core/signal/offline_stretch.hpp` actually does.
+Design contract for the pitch/time/formant paths. Reflects what
+`core/signal/offline_stretch.hpp` actually does.
 
 ## Symbols
 
@@ -30,8 +30,8 @@ Goal: duration `R`, pitch `×P`, in one phase-vocoder pass.
 
 One PV pass + one interpolation — not two cascaded PV passes. The tempo engine is
 sized at `prepare()` for `max_time_ratio · 2^(max_pitch/12)` so `R·P` stays in
-bounds. A true engine-internal single-pass for **preserved** formants (avoiding
-the cascade's second PV pass) is the plan §4 escape-hatch / v2 work.
+bounds. A true engine-internal single-pass for **preserved** formants would
+avoid the cascade's second PV pass and remains a future optimization.
 
 ## Component routing matrix (STN)
 
@@ -41,7 +41,7 @@ the cascade's second PV pass) is the plan §4 escape-hatch / v2 work.
 | Component | Pitch | Time | Formant | Transient | Recombine |
 |---|---|---|---|---|---|
 | Tonal (sines) | PV phase-propagation | yes | envelope (SpectralEnvelopeShifter) | no | phase-locked |
-| Transient | reset (Röbel) | reposition | no | phase reset (P3: verbatim) | sharp |
+| Transient | reset (Röbel) | reposition | no | phase reset; verbatim relocation is gated | sharp |
 | Noise / residual | morph | morph (NoiseMorpher) | optional | no | morph, no phase prop |
 
 The tonal/transient/noise split + recombination lives inside the engine
@@ -49,7 +49,7 @@ The tonal/transient/noise split + recombination lives inside the engine
 `MultichannelPhaseCoordinator`); OfflineStretch selects it via config and is
 verified deterministic on noise input.
 
-## Verified (Phase 2)
+## Verified Behavior
 
 - Pitch ±12 st doubles/halves a sine; duration unchanged.
 - Independent follow (R=1.5,+12 st) → 1 kHz at exact length; cascade
