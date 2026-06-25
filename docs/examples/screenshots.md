@@ -62,7 +62,7 @@ Screenshots are captured via the headless screenshot tool:
 ## PulpSampler — Sample-Buffer Sampler
 
 - **Type:** Instrument (MIDI in → stereo out)
-- **Parameters:** Volume, Attack, Decay, Sustain, Release, Pitch, Loop
+- **Parameters:** Gain, Attack, Decay, Sustain, Release, Pitch, Loop
 - **UI:** Gain, ADSR, Pitch controls, and Loop toggle, auto-generated
 - **Formats:** CLAP only
 
