@@ -277,19 +277,19 @@ TEST_CASE("SignalGraph::process opt-in executor path matches the legacy walk",
 
 TEST_CASE("SignalGraph::process opt-in falls back to legacy for ineligible graphs",
           "[host][graph][executor][routing]") {
-    // A stray MIDI node makes the graph ineligible; with the opt-in ON, process()
-    // must fall back to the legacy walk and still produce in*gain.
+    // A stray Custom node makes the graph ineligible; with the opt-in ON,
+    // process() must fall back to the legacy walk and still produce in*gain.
     SignalGraph g;
     const auto in = g.add_input_node(1, "In");
     const auto a = g.add_gain_node("A");
     const auto out = g.add_output_node(1, "Out");
-    (void)g.add_midi_input_node("MIDI In");  // ineligible node type present
+    (void)g.add_unresolved_custom_node("test.custom", 1, 1, 1, "Custom");  // ineligible type
     REQUIRE(g.connect(in, 0, a, 0));
     REQUIRE(g.connect(a, 0, out, 0));
     REQUIRE(g.set_node_gain(a, 0.5f));
     g.set_canonical_executor_routing_enabled(true);
     REQUIRE(g.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(g));  // MIDI node disqualifies
+    CHECK_FALSE(signal_graph_executor_eligible(g));  // Custom node disqualifies
 
     const auto x = ramp(kFrames, 0.8f);
     std::vector<float> xi = x, yo(kFrames, 0.0f);
@@ -453,13 +453,15 @@ TEST_CASE("Executor eligibility rejects unprepared and non-eligible graphs",
     CHECK_FALSE(build_signal_graph_executor_routing(unprepared, routing));
     CHECK_FALSE(routing.valid);
 
-    // A MIDI node is outside the eligible subset even when prepared.
-    SignalGraph midi;
-    const auto min = midi.add_midi_input_node("MIDI In");
-    const auto mout = midi.add_midi_output_node("MIDI Out");
-    REQUIRE(midi.connect_midi(min, mout));
-    REQUIRE(midi.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(midi));
+    // A Custom node is outside the eligible subset even when prepared.
+    SignalGraph custom;
+    const auto cin = custom.add_input_node(1, "In");
+    const auto cnode = custom.add_unresolved_custom_node("test.custom", 1, 1, 1, "Custom");
+    const auto cout = custom.add_output_node(1, "Out");
+    REQUIRE(custom.connect(cin, 0, cnode, 0));
+    REQUIRE(custom.connect(cnode, 0, cout, 0));
+    REQUIRE(custom.prepare(kSr, kFrames));
+    CHECK_FALSE(signal_graph_executor_eligible(custom));
 }
 
 TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible graphs",
@@ -580,6 +582,101 @@ private:
     int latency_;
     PluginInfo info_;
 };
+
+// Deterministic MIDI plugin: passes audio through (full write) and emits a copy
+// of each inbound note transposed by `transpose_` semitones (other messages pass
+// through). The transpose makes the plugin's MIDI output distinct from its input
+// so a bug that routed the wrong buffer would surface.
+class MidiTransposePlugin final : public PluginSlot {
+public:
+    MidiTransposePlugin(int transpose, int in_ch, int out_ch)
+        : transpose_(transpose), info_(test_plugin_info(in_ch, out_ch)) {}
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::host::ParameterEventQueue&,
+                 int n) override {
+        const std::size_t chs = out.num_channels();
+        for (std::size_t c = 0; c < chs; ++c) {
+            float* o = out.channel_ptr(c);
+            const float* i = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+            for (int s = 0; s < n; ++s) {
+                o[static_cast<std::size_t>(s)] = i ? i[static_cast<std::size_t>(s)] : 0.0f;
+            }
+        }
+        for (const auto& ev : midi_in) {
+            const auto ch = static_cast<uint8_t>(ev.data()[0] & 0x0F);
+            const auto note = static_cast<uint8_t>((ev.data()[1] + transpose_) & 0x7F);
+            if (ev.is_note_on()) {
+                midi_out.add(pulp::midi::MidiEvent::note_on(ch, note, ev.data()[2]));
+            } else if (ev.is_note_off()) {
+                midi_out.add(pulp::midi::MidiEvent::note_off(ch, note, ev.data()[2]));
+            } else {
+                midi_out.add(ev);
+            }
+        }
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    int transpose_;
+    PluginInfo info_;
+};
+
+// A comparable snapshot of a MIDI buffer's events (3 status/data bytes + size +
+// offset), in buffer order, for bit-exact comparison between the two walks.
+struct MidiEvtKey {
+    std::array<uint8_t, 3> bytes{};
+    std::uint32_t size = 0;
+    int32_t offset = 0;
+    bool operator==(const MidiEvtKey& o) const {
+        return bytes == o.bytes && size == o.size && offset == o.offset;
+    }
+};
+
+std::vector<MidiEvtKey> collect_midi(const pulp::midi::MidiBuffer& buf) {
+    std::vector<MidiEvtKey> out;
+    for (const auto& ev : buf) {
+        MidiEvtKey k;
+        k.size = ev.size();
+        for (std::uint32_t i = 0; i < ev.size() && i < 3; ++i) k.bytes[i] = ev.data()[i];
+        k.offset = ev.sample_offset;
+        out.push_back(k);
+    }
+    return out;
+}
+
+void expect_midi_equal(const std::vector<MidiEvtKey>& a,
+                       const std::vector<MidiEvtKey>& b) {
+    REQUIRE(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i) REQUIRE(a[i] == b[i]);
+}
+
+pulp::midi::MidiBuffer make_injected_midi(int seed) {
+    pulp::midi::MidiBuffer buf;
+    buf.reserve(64, 8, 256);
+    buf.add(pulp::midi::MidiEvent::note_on(0, static_cast<uint8_t>(60 + seed), 100));
+    buf.add(pulp::midi::MidiEvent::cc(0, 7, static_cast<uint8_t>(64 + seed)));
+    buf.add(pulp::midi::MidiEvent::note_off(0, static_cast<uint8_t>(60 + seed), 0));
+    return buf;
+}
 
 } // namespace
 
@@ -997,4 +1094,215 @@ TEST_CASE("Translated routing matches SignalGraph: sidechain edge with PDC delay
         expect_equal(run_legacy(g, kFrames, input, 2),
                      run_routed(exec, routing, kFrames, input, 2));
     }
+}
+
+namespace {
+
+// Drive one block with a 1-channel silent audio bus (graphs whose only purpose
+// is MIDI routing still need a valid block; the audio bus is unused).
+void process_silent_block(SignalGraph& g) {
+    std::vector<float> in(static_cast<std::size_t>(kFrames), 0.0f);
+    std::vector<float> out(static_cast<std::size_t>(kFrames), 0.0f);
+    std::array<const float*, 1> ic{in.data()};
+    std::array<float*, 1> oc{out.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 1, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 1, kFrames);
+    g.process(ov, iv, kFrames);
+}
+
+std::vector<MidiEvtKey> extract_collected(const SignalGraph& g, pulp::host::NodeId out_node) {
+    pulp::midi::MidiBuffer buf;
+    buf.reserve(64, 8, 256);
+    REQUIRE(const_cast<SignalGraph&>(g).extract_midi(out_node, buf));
+    return collect_midi(buf);
+}
+
+} // namespace
+
+TEST_CASE("SignalGraph::process MIDI routing matches legacy: MidiInput -> MidiOutput",
+          "[host][graph][executor][routing][parity][midi]") {
+    // Pure MIDI edge routing: injected events flow MidiInput -> MidiOutput with
+    // no plugin. The routed path's MIDI gather must deliver the same events to
+    // the output mailbox that the legacy walk does.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(g.connect_midi(mi, mo));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return std::pair<pulp::host::NodeId, pulp::host::NodeId>{mi, mo};
+    };
+    SignalGraph legacy, routed;
+    const auto [lmi, lmo] = build(legacy, false);
+    const auto [rmi, rmo] = build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+
+    for (int blk = 0; blk < 4; ++blk) {
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(legacy.inject_midi(lmi, inj));
+        REQUIRE(routed.inject_midi(rmi, inj));
+        process_silent_block(legacy);
+        process_silent_block(routed);
+        INFO("block " << blk);
+        expect_midi_equal(extract_collected(legacy, lmo), extract_collected(routed, rmo));
+    }
+}
+
+TEST_CASE("SignalGraph::process MIDI routing matches legacy: overflow reports incomplete",
+          "[host][graph][executor][routing][parity][midi]") {
+    // Injecting more events than the per-node MIDI capacity (1024) overflows the
+    // mailbox snapshot; both walks must deliver the same truncated events AND
+    // report the same incomplete status through extract_midi()'s return value.
+    auto build = [](SignalGraph& g, bool route) {
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(g.connect_midi(mi, mo));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return std::pair<pulp::host::NodeId, pulp::host::NodeId>{mi, mo};
+    };
+    SignalGraph legacy, routed;
+    const auto [lmi, lmo] = build(legacy, false);
+    const auto [rmi, rmo] = build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+
+    pulp::midi::MidiBuffer flood;
+    flood.reserve(4096, 8, 256);
+    for (int i = 0; i < 2000; ++i) {
+        flood.add(pulp::midi::MidiEvent::note_on(0, static_cast<uint8_t>(i & 0x7F), 100));
+    }
+    // inject_midi returns false when the flood overflows the mailbox, but still
+    // publishes the truncated + incomplete snapshot; both paths see the same.
+    CHECK(legacy.inject_midi(lmi, flood) == routed.inject_midi(rmi, flood));
+    process_silent_block(legacy);
+    process_silent_block(routed);
+
+    pulp::midi::MidiBuffer legacy_out, routed_out;
+    legacy_out.reserve(4096, 8, 256);
+    routed_out.reserve(4096, 8, 256);
+    const bool legacy_complete = legacy.extract_midi(lmo, legacy_out);
+    const bool routed_complete = routed.extract_midi(rmo, routed_out);
+    CHECK(legacy_complete == routed_complete);   // both incomplete under overflow
+    expect_midi_equal(collect_midi(legacy_out), collect_midi(routed_out));
+}
+
+TEST_CASE("SignalGraph::process MIDI routing matches legacy: MidiInput -> plugin -> MidiOutput",
+          "[host][graph][executor][routing][parity][midi][plugin]") {
+    // Audio and MIDI through one plugin: audio in -> plugin -> out, and
+    // MIDI in -> plugin (transpose +7) -> MIDI out. Both the audio output and
+    // the transposed MIDI at the sink must match the legacy walk block-for-block.
+    struct Ids { pulp::host::NodeId mi, mo; };
+    auto build = [](SignalGraph& g, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(
+            std::make_unique<MidiTransposePlugin>(7, 2, 2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.connect_midi(mi, p));
+        REQUIRE(g.connect_midi(p, mo));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mi, mo};
+    };
+    SignalGraph legacy, routed;
+    const auto lids = build(legacy, false);
+    const auto rids = build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+
+    for (int blk = 0; blk < 4; ++blk) {
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(legacy.inject_midi(lids.mi, inj));
+        REQUIRE(routed.inject_midi(rids.mi, inj));
+
+        const auto x = ramp(kFrames, 0.7f + 0.05f * static_cast<float>(blk));
+        const auto y = ramp(kFrames, 0.5f - 0.03f * static_cast<float>(blk));
+        const std::vector<std::vector<float>> input{x, y};
+        INFO("block " << blk);
+        // run_legacy drives g.process(); the routed graph dispatches through the
+        // executor (routing enabled), the other through the legacy walk.
+        expect_equal(run_legacy(legacy, kFrames, input, 2),
+                     run_legacy(routed, kFrames, input, 2));
+        expect_midi_equal(extract_collected(legacy, lids.mo),
+                          extract_collected(routed, rids.mo));
+    }
+}
+
+TEST_CASE("SignalGraph::process MIDI routing matches legacy: plugin -> plugin MIDI chain",
+          "[host][graph][executor][routing][parity][midi][plugin]") {
+    // MIDI flows through two plugins in series (transpose +5 then +3); the
+    // executor's MIDI gather must carry each plugin's MIDI output into the next.
+    struct Ids { pulp::host::NodeId mi, mo; };
+    auto build = [](SignalGraph& g, bool route) {
+        const auto p1 = g.add_plugin_node(
+            std::make_unique<MidiTransposePlugin>(5, 0, 0), 0, 0, "P1");
+        const auto p2 = g.add_plugin_node(
+            std::make_unique<MidiTransposePlugin>(3, 0, 0), 0, 0, "P2");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(g.connect_midi(mi, p1));
+        REQUIRE(g.connect_midi(p1, p2));
+        REQUIRE(g.connect_midi(p2, mo));
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mi, mo};
+    };
+    SignalGraph legacy, routed;
+    const auto lids = build(legacy, false);
+    const auto rids = build(routed, true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+
+    for (int blk = 0; blk < 4; ++blk) {
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(legacy.inject_midi(lids.mi, inj));
+        REQUIRE(routed.inject_midi(rids.mi, inj));
+        process_silent_block(legacy);
+        process_silent_block(routed);
+        INFO("block " << blk);
+        expect_midi_equal(extract_collected(legacy, lids.mo),
+                          extract_collected(routed, rids.mo));
+    }
+}
+
+TEST_CASE("SignalGraph::process MIDI executor path does not allocate on the audio thread",
+          "[host][graph][executor][routing][rt-safety][midi]") {
+    SignalGraph g;
+    const auto p = g.add_plugin_node(
+        std::make_unique<MidiTransposePlugin>(7, 0, 0), 0, 0, "P");
+    const auto mi = g.add_midi_input_node("MIDI In");
+    const auto mo = g.add_midi_output_node("MIDI Out");
+    REQUIRE(g.connect_midi(mi, p));
+    REQUIRE(g.connect_midi(p, mo));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    // Pre-allocate the audio bus OUTSIDE the probe (the graph is MIDI-only; the
+    // 1-channel bus is unused but process() needs a valid block).
+    std::vector<float> in(static_cast<std::size_t>(kFrames), 0.0f);
+    std::vector<float> out(static_cast<std::size_t>(kFrames), 0.0f);
+    std::array<const float*, 1> ic{in.data()};
+    std::array<float*, 1> oc{out.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 1, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 1, kFrames);
+
+    // Warm up the routed event path (mailbox read, gather, plugin emit, publish)
+    // outside the probe, then inject immediately before the probed block so it
+    // actually carries events (process() clears the MIDI input each block).
+    REQUIRE(g.inject_midi(mi, make_injected_midi(1)));
+    g.process(ov, iv, kFrames);
+    REQUIRE(g.inject_midi(mi, make_injected_midi(2)));
+    {
+        pulp::test::RtAllocationProbe probe;
+        g.process(ov, iv, kFrames);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    pulp::midi::MidiBuffer drained;
+    drained.reserve(64, 8, 256);
+    static_cast<void>(g.extract_midi(mo, drained));
 }

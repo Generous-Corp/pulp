@@ -5,11 +5,14 @@
 #include <pulp/graph/graph_runtime_buffer_assignment.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
+#include <pulp/midi/buffer.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -53,6 +56,14 @@ struct GraphRuntimeNodeProcessContext {
     // `node_outputs` (its assigned scratch slots). Channels are mono slots.
     audio::BufferView<const float> node_inputs;
     audio::BufferView<float> node_outputs;
+    // Per-node MIDI (non-null only on the routing path when the call supplies a
+    // GraphRuntimeMidiScratch). `node_midi_in` holds the events gathered from
+    // this node's inbound event connections (the executor fills it before the
+    // binding runs); a binding that emits MIDI writes `node_midi_out` (clearing
+    // it first). Null when the graph carries no MIDI — a binding then falls back
+    // to its own scratch.
+    midi::MidiBuffer* node_midi_in = nullptr;
+    midi::MidiBuffer* node_midi_out = nullptr;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -248,6 +259,70 @@ private:
     std::vector<RingSlot> ring_;
 };
 
+/// Pre-allocated per-node MIDI buffers backing the routing path's event edges.
+///
+/// One `in`/`out` MidiBuffer pair per plan node (indexed by dense node index),
+/// each with an attached UmpBuffer and reserved to a fixed realtime capacity so
+/// add()/sysex append never allocate on the audio thread. The executor clears a
+/// node's `in` and gathers its inbound event connections into it before the
+/// node runs; a MIDI-emitting binding writes the node's `out`. A node's `out`
+/// also serves as the source other nodes gather from, so it persists for the
+/// block. The caller (host) bridges MidiInput/MidiOutput system nodes to its own
+/// mailboxes around process_routed by writing/reading these buffers directly.
+///
+/// Slots are heap-stable (each pair is a unique_ptr) because a MidiBuffer holds
+/// a pointer to its attached UmpBuffer; a reallocating vector would dangle it.
+class GraphRuntimeMidiScratch {
+public:
+    // Off-RT: (re)allocate `node_count` in/out buffer pairs, each reserved to the
+    // fixed realtime capacities. Returns false on allocation failure.
+    bool reset(std::uint32_t node_count);
+    void clear() noexcept;
+
+    std::uint32_t node_count() const noexcept { return node_count_; }
+
+    // RT-safe: this node's gathered MIDI input / produced MIDI output buffer, or
+    // nullptr if the node index is out of range.
+    midi::MidiBuffer* in(std::uint32_t node_index) noexcept {
+        return node_index < node_count_ ? &slots_[node_index]->in_buffer : nullptr;
+    }
+    midi::MidiBuffer* out(std::uint32_t node_index) noexcept {
+        return node_index < node_count_ ? &slots_[node_index]->out_buffer : nullptr;
+    }
+
+    // Per-node incompleteness flags (a buffer dropped events, or carried an
+    // upstream drop). Tracked so the host egress can report the same incomplete
+    // state through extract_midi() that the legacy walk does.
+    bool in_incomplete(std::uint32_t node_index) const noexcept {
+        return node_index < node_count_ && slots_[node_index]->in_incomplete;
+    }
+    void set_in_incomplete(std::uint32_t node_index, bool v) noexcept {
+        if (node_index < node_count_) slots_[node_index]->in_incomplete = v;
+    }
+    bool out_incomplete(std::uint32_t node_index) const noexcept {
+        return node_index < node_count_ && slots_[node_index]->out_incomplete;
+    }
+    void set_out_incomplete(std::uint32_t node_index, bool v) noexcept {
+        if (node_index < node_count_) slots_[node_index]->out_incomplete = v;
+    }
+
+    bool fits(std::uint32_t node_count) const noexcept {
+        return node_count_ >= node_count;
+    }
+
+private:
+    struct Slot {
+        midi::MidiBuffer in_buffer;
+        midi::UmpBuffer in_ump;
+        midi::MidiBuffer out_buffer;
+        midi::UmpBuffer out_ump;
+        bool in_incomplete = false;
+        bool out_incomplete = false;
+    };
+    std::vector<std::unique_ptr<Slot>> slots_;
+    std::uint32_t node_count_ = 0;
+};
+
 class GraphRuntimeExecutor {
 public:
     static constexpr std::size_t kMaxInlineCommandCapacity = 256;
@@ -315,10 +390,17 @@ public:
     // output is captured into that slot for the next block (matching
     // host::SignalGraph's feedback_prev). The pool's zero-init gives the first
     // block silent feedback.
+    // When `midi` is non-null it must fit() the snapshot's node count: the
+    // executor clears each node's MIDI input, gathers its inbound event
+    // connections into it, and exposes the per-node in/out buffers to bindings
+    // via the process context. MidiInput/MidiOutput system nodes carry no audio
+    // and no binding; the caller pre-fills a MidiInput node's `out` and drains a
+    // MidiOutput node's `in` around this call. Pass null for audio-only graphs.
     GraphRuntimeExecutorResult process_routed(
         ProcessBlock& block,
         const GraphRuntimeSnapshot& snapshot,
         GraphRuntimeBufferPool& pool,
+        GraphRuntimeMidiScratch* midi = nullptr,
         std::span<const graph::GraphTimedCommand> commands = {},
         std::span<GraphRuntimeCommandDecision> command_results = {},
         GraphRuntimeCommandHandler command_handler = {},
