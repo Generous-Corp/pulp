@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04930"></a>
+## [0.493.0] - 2026-06-25
+
+- fix(host): isolate parallel plugin routing scratch ([#4850](https://github.com/danielraffel/pulp/pull/4850))
+- feat(tempo-sampler): Musical Typing keyboard + adaptive-FFT stretch + m4a (M1-feedback) ([#4774](https://github.com/danielraffel/pulp/pull/4774))
+
 <a id="v04920"></a>
 ## [0.492.0] - 2026-06-25
 
@@ -5154,6 +5160,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.493.0]: https://github.com/danielraffel/pulp/releases/tag/v0.493.0
 [0.492.0]: https://github.com/danielraffel/pulp/releases/tag/v0.492.0
 [0.491.0]: https://github.com/danielraffel/pulp/releases/tag/v0.491.0
 [0.490.0]: https://github.com/danielraffel/pulp/releases/tag/v0.490.0
