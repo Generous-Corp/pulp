@@ -238,6 +238,22 @@ predictable output, no MIDI.
   means a live splice (a later slice) must NOT also process those instances, or
   their state double-advances. This slice does extraction only; it neither renders
   nor changes any RT path.
+- **Anticipation lane (`anticipation_lane.{hpp,cpp}`).** `AnticipationLane` renders
+  an eligible sub-graph AHEAD of the deadline into a `PlanarAudioRingBuffer`:
+  `prepare()` (off-RT, quiescent) builds the executor snapshot + sizes the ring for
+  a FIXED block size; `render_ahead()` (single background producer) advances the
+  interior's plugin state and pushes whole blocks; `consume()` (audio thread,
+  RT-safe, no-alloc) pops a pre-rendered block or reports underrun so the caller
+  falls back to a synchronous render. The block size is PINNED at prepare (before
+  any thread exists) so producer/consumer stay in lockstep and there's no
+  cross-thread block-size field — the consumed sequence is bit-identical to a
+  block-by-block synchronous render. GOTCHAS: (1) the interior plugins are advanced
+  ONLY by render_ahead — a live splice that uses a lane must not also process those
+  nodes or their state double-advances; (2) render_ahead is SINGLE-producer (all
+  calls, including priming, must be serialized — they share unsynchronized
+  executor/pool/scratch); only the ring mediates against the consumer. There is no
+  SignalGraph splice wiring this into the live path yet — that's the final Phase 6
+  slice.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
