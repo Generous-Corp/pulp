@@ -163,6 +163,11 @@ struct GraphRuntimeExecutorStats {
     std::uint64_t invalid_snapshots = 0;
     std::uint64_t command_scratch_failures = 0;
     std::uint64_t node_failures = 0;
+    // process_parallel() level routing: how many levels were dispatched across
+    // the worker pool vs run serially on the audio thread (single-node levels,
+    // AudioOutput-accumulation levels, or levels below the cost threshold).
+    std::uint64_t parallel_levels_dispatched = 0;
+    std::uint64_t serial_levels_run = 0;
 };
 
 struct GraphRuntimeExecutorResult {
@@ -528,6 +533,23 @@ public:
     GraphRuntimeExecutorStats stats() const noexcept;
     void reset_stats() noexcept;
 
+    // Cost threshold (off-RT setter): process_parallel dispatches a level across
+    // the worker pool only when its static work-weight x frame_count reaches this
+    // many "channel-samples"; below it the level runs serially to avoid losing the
+    // fork/join overhead on trivial work (the break-even guard — fork/join can
+    // lose at 32-64 frames). DEFAULT 0 = parallelize every eligible (width>1,
+    // no-AudioOutput) level; worker-pool dispatch is the executor's job and the
+    // real safety gate is the caller's opt-in (SignalGraph parallel routing is
+    // default-OFF). Set a positive break-even (e.g. 4096 ~= 16 stereo nodes x 128
+    // frames) to keep trivial levels serial once parallel routing is enabled on
+    // small graphs.
+    void set_parallel_min_work_units(std::uint64_t channel_samples) noexcept {
+        parallel_min_work_units_.store(channel_samples, std::memory_order_relaxed);
+    }
+    std::uint64_t parallel_min_work_units() const noexcept {
+        return parallel_min_work_units_.load(std::memory_order_relaxed);
+    }
+
 private:
     GraphRuntimeExecutorResult fail_invalid_block() noexcept;
     GraphRuntimeExecutorResult fail_invalid_snapshot() noexcept;
@@ -554,6 +576,10 @@ private:
     std::atomic<std::uint64_t> invalid_snapshots_{0};
     std::atomic<std::uint64_t> command_scratch_failures_{0};
     std::atomic<std::uint64_t> node_failures_{0};
+    std::atomic<std::uint64_t> parallel_levels_dispatched_{0};
+    std::atomic<std::uint64_t> serial_levels_run_{0};
+    // 0 = no cost gate (parallelize every eligible level); see the setter.
+    std::atomic<std::uint64_t> parallel_min_work_units_{0};
 };
 
 } // namespace pulp::format

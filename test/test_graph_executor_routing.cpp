@@ -763,3 +763,69 @@ TEST_CASE("Parallel routing matches serial: deep and wide (two parallel levels)"
                 par.outs[0][static_cast<std::size_t>(i)]);
     }
 }
+
+TEST_CASE("Parallel routing cost gate: a sub-threshold level runs serially",
+          "[format][graph][executor][routing][parallel][cost]") {
+    // in(1) -> 4 mono gains -> out(1). The 4-gain level is the only parallel-
+    // eligible level (width>1, no AudioOutput); its static weight is 4*max(1,1)=4,
+    // so at 64 frames it carries 256 channel-samples of work. The cost gate routes
+    // it serially when the threshold exceeds that, and dispatches it when the
+    // threshold is 0 — without ever changing the output.
+    constexpr int kFrames = 64;
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{6, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, GraphRuntimeConnectionSpec{1, 0, 3, 0},
+        GraphRuntimeConnectionSpec{1, 0, 4, 0}, GraphRuntimeConnectionSpec{1, 0, 5, 0},
+        GraphRuntimeConnectionSpec{2, 0, 6, 0}, GraphRuntimeConnectionSpec{3, 0, 6, 0},
+        GraphRuntimeConnectionSpec{4, 0, 6, 0}, GraphRuntimeConnectionSpec{5, 0, 6, 0},
+    };
+    GainState g2{0.1f}, g3{0.2f}, g4{0.3f}, g5{0.4f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &g2, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &g3, true},
+        GraphRuntimeNodeBinding{4, routing_gain, &g4, true},
+        GraphRuntimeNodeBinding{5, routing_gain, &g5, true},
+        GraphRuntimeNodeBinding{6, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot psnapshot;
+    REQUIRE(make_snapshot(psnapshot, nodes, conns, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(psnapshot.plan());
+    REQUIRE(levels.ok);
+
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.8f)};
+    GraphRuntimeExecutor exec;
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(4));
+
+    // Threshold above the level's 256 channel-samples: it stays serial.
+    exec.set_parallel_min_work_units(1000);
+    exec.reset_stats();
+    auto pool_hi = make_pool(psnapshot, kFrames);
+    RoutedHarness hi(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(hi.block, psnapshot, levels, pool_hi, workers).ok());
+    CHECK(exec.stats().parallel_levels_dispatched == 0);
+    CHECK(exec.stats().serial_levels_run >= 1);
+
+    // Threshold 0: the gain level dispatches across the worker pool.
+    exec.set_parallel_min_work_units(0);
+    exec.reset_stats();
+    auto pool_lo = make_pool(psnapshot, kFrames);
+    RoutedHarness lo(kSr, kFrames, in, 1);
+    REQUIRE(exec.process_parallel(lo.block, psnapshot, levels, pool_lo, workers).ok());
+    CHECK(exec.stats().parallel_levels_dispatched >= 1);
+    workers.stop();
+
+    // The gate only chooses the path; output is identical either way.
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(hi.outs[0][static_cast<std::size_t>(i)] ==
+                lo.outs[0][static_cast<std::size_t>(i)]);
+    }
+}

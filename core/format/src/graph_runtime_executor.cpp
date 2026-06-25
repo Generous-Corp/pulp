@@ -1047,6 +1047,24 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
                 serial = true;
             }
         }
+        // Cost gate: skip the fork/join when the level's static work-weight x this
+        // block's frame count is below the break-even threshold. level_work_weight
+        // is precomputed off-RT (per the levelization); the audio-thread check is a
+        // single multiply-compare. A zero threshold parallelizes every eligible
+        // level. (Empty level_work_weight — a plan with no precomputed weights —
+        // leaves `serial` as-is rather than reading out of bounds.)
+        if (!serial && level < levels.level_work_weight.size()) {
+            const std::uint64_t work =
+                levels.level_work_weight[level] * static_cast<std::uint64_t>(frames);
+            if (work < parallel_min_work_units_.load(std::memory_order_relaxed)) {
+                serial = true;
+            }
+        }
+        if (serial) {
+            serial_levels_run_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            parallel_levels_dispatched_.fetch_add(1, std::memory_order_relaxed);
+        }
 
         if (serial) {
             for (std::uint32_t k = 0; k < width; ++k) {
@@ -1095,6 +1113,8 @@ GraphRuntimeExecutorStats GraphRuntimeExecutor::stats() const noexcept {
         invalid_snapshots_.load(std::memory_order_relaxed),
         command_scratch_failures_.load(std::memory_order_relaxed),
         node_failures_.load(std::memory_order_relaxed),
+        parallel_levels_dispatched_.load(std::memory_order_relaxed),
+        serial_levels_run_.load(std::memory_order_relaxed),
     };
 }
 
@@ -1109,6 +1129,8 @@ void GraphRuntimeExecutor::reset_stats() noexcept {
     invalid_snapshots_.store(0, std::memory_order_relaxed);
     command_scratch_failures_.store(0, std::memory_order_relaxed);
     node_failures_.store(0, std::memory_order_relaxed);
+    parallel_levels_dispatched_.store(0, std::memory_order_relaxed);
+    serial_levels_run_.store(0, std::memory_order_relaxed);
 }
 
 GraphRuntimeExecutorResult GraphRuntimeExecutor::fail_invalid_block() noexcept {

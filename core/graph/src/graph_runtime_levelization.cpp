@@ -5,6 +5,28 @@
 
 namespace pulp::graph {
 
+std::uint64_t graph_runtime_node_cost_weight(GraphRuntimeNodeKind kind,
+                                             std::uint32_t input_ports,
+                                             std::uint32_t output_ports) noexcept {
+    // Exhaustive over GraphRuntimeNodeKind on purpose (no default): -Wswitch flags
+    // a newly added kind here. A new AUDIO-PROCESSING kind MUST join the first
+    // group, or it scores 0 and never tips a level over the parallel threshold (a
+    // silent missed-parallelism, not a correctness bug). The trailing return is
+    // the unreachable fallthrough for unknown values.
+    switch (kind) {
+        case GraphRuntimeNodeKind::Processor:
+        case GraphRuntimeNodeKind::Utility:
+        case GraphRuntimeNodeKind::Custom:
+            return std::max(input_ports, output_ports);
+        case GraphRuntimeNodeKind::AudioInput:
+        case GraphRuntimeNodeKind::AudioOutput:
+        case GraphRuntimeNodeKind::MidiInput:
+        case GraphRuntimeNodeKind::MidiOutput:
+            return 0;
+    }
+    return 0;
+}
+
 GraphRuntimeLevelization build_graph_runtime_levelization(const GraphRuntimePlan& plan) {
     GraphRuntimeLevelization result;
     const std::size_t node_count = plan.nodes.size();
@@ -60,6 +82,17 @@ GraphRuntimeLevelization build_graph_runtime_levelization(const GraphRuntimePlan
         for (const auto n : plan.processing_order_indices) {
             const std::uint32_t level = result.node_level[n];
             result.level_nodes[cursor[level]++] = n;
+        }
+
+        // Per-level static work-weight: sum each level's node cost weights. Used
+        // off the audio thread to precompute a parallel-vs-serial break-even
+        // figure (weight x frames) the executor checks per block.
+        result.level_work_weight.assign(result.level_count, 0);
+        for (std::size_t n = 0; n < node_count; ++n) {
+            const auto& node = plan.nodes[n];
+            result.level_work_weight[result.node_level[n]] +=
+                graph_runtime_node_cost_weight(node.kind, node.input_ports,
+                                               node.output_ports);
         }
     } catch (...) {
         result = {};
