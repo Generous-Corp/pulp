@@ -739,12 +739,14 @@ jobs:
           fi
 
       - name: Configure
-        # On pull_request events, skip example plugin builds
+        # On pull_request events, skip the examples tree
         # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /
         # AraPitchTracker × VST3/AU/CLAP format variants — the heavy
-        # build targets). Tests still build + run; just not the
-        # example-plugin product bundles. Trades ~10-20 min per PR
-        # for a deferred validation that examples still compile.
+        # build targets). Core tests still build + run; example-local
+        # tests registered from examples/*/CMakeLists.txt are deferred
+        # with the plugin product bundles. Trades ~10-20 min per PR for
+        # the nightly / workflow_dispatch validation that examples still
+        # compile.
         # On workflow_dispatch, Shipyard PR validation keeps examples
         # enabled but disables GPU-only targets: the self-hosted macOS
         # runner does not carry the pinned Skia archive, and GPU release
