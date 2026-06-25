@@ -5,8 +5,8 @@
 /// `pulp::runtime::MessageChannel` (usually a `WebSocketChannel`).
 ///
 /// See `docs/reference/remote-view-protocol.md` for the wire format.
-/// ViewBridge::attach_remote_view() owns the session and registers the
-/// remote view as a secondary view with role `ViewRole::Remote`.
+/// ViewBridge::attach_remote_channel() owns the session and registers
+/// the remote view as a secondary view with role `ViewRole::Remote`.
 
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/json_rpc.hpp>

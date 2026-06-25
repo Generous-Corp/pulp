@@ -1,9 +1,10 @@
 # ViewBridge
 
 ViewBridge is the editor-lifecycle layer that sits between your `Processor`
-and every plugin format (VST3, AU, CLAP, standalone, AAX). It owns the
-constructed view tree, dispatches open / close / resize callbacks, and lets
-one processor serve multiple simultaneous views (editor + inspector + remote).
+and each host adapter that exposes a Pulp editor surface (VST3, AU v2/v3,
+CLAP, and standalone today). It owns the constructed view tree, dispatches
+open / close / resize callbacks, and lets one processor serve multiple
+simultaneous views (editor + inspector + remote).
 
 ## Why it exists
 
@@ -67,6 +68,9 @@ public:
   // Secondary views (inspector, remote preview, …)
   view::View* attach_secondary_view(std::unique_ptr<view::View>, ViewRole);
   bool        detach_secondary_view(view::View*);
+  RemoteViewSession* attach_remote_channel(std::unique_ptr<runtime::MessageChannel>,
+                                           std::string label = {});
+  bool        detach_remote(RemoteViewSession*);
   size_t      view_count() const;
   view::View* view_at(size_t);
   ViewRole    role_at(size_t) const;
@@ -224,6 +228,9 @@ bridge.attach_secondary_view(std::move(inspector), ViewRole::Inspector);
 Each adapter constructs one `ViewBridge` per editor window and forwards
 host lifecycle events to `open()` / `close()` / `resize()`.
 
+The optional AAX adapter is audio/control-only today; it does not expose a
+custom `EffectGUI` / ViewBridge editor surface yet.
+
 ## Example
 
 See `examples/view-bridge-demo/` for a runnable demo that:
@@ -232,8 +239,14 @@ See `examples/view-bridge-demo/` for a runnable demo that:
 2. Attaches a secondary inspector view via `attach_secondary_view()`.
 3. Exercises lifecycle callbacks and a resize.
 
-## Phase 4: remote views (deferred)
+## Remote views
 
-WebSocket-driven `attach_remote_view(url)` is planned but not yet
-implemented. The local multi-view machinery in `ViewBridge` is the
-foundation for that work.
+`ViewBridge::attach_remote_channel(channel, label)` is implemented. It takes
+ownership of an already-connected `runtime::MessageChannel` (usually a
+`WebSocketChannel`) and registers a `RemoteViewSession` as a `ViewRole::Remote`
+secondary.
+
+There is no public `attach_remote_view(url)` convenience helper. Callers that
+need WebSocket transport should connect the channel first, then pass it to
+`attach_remote_channel(...)`. Paint-op streaming remains a follow-up; today's
+remote session covers metadata, parameter sync, input forwarding, and close.
