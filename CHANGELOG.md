@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04840"></a>
+## [0.484.0] - 2026-06-25
+
+- feat(host): opt-in levelized parallel graph execution in SignalGraph::process ([#4812](https://github.com/danielraffel/pulp/pull/4812))
+
 <a id="v04830"></a>
 ## [0.483.0] - 2026-06-25
 
@@ -5103,6 +5108,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.484.0]: https://github.com/danielraffel/pulp/releases/tag/v0.484.0
 [0.483.0]: https://github.com/danielraffel/pulp/releases/tag/v0.483.0
 [0.482.0]: https://github.com/danielraffel/pulp/releases/tag/v0.482.0
 [0.481.0]: https://github.com/danielraffel/pulp/releases/tag/v0.481.0
