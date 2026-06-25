@@ -197,12 +197,12 @@ docs:
   - slug: examples
     path: guides/examples.md
     kind: guide
-    summary: Walkthroughs of all example plugins
+    summary: Curated walkthroughs of core example plugins, standalone demos, and source-only DSP lanes
 
   - slug: examples-index
     path: examples/index.md
     kind: guide
-    summary: Gallery index of all example projects by category
+    summary: Curated gallery index of documented example pages by category
 
   - slug: example-pulp-gain
     path: examples/pulp-gain.md

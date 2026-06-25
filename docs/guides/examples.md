@@ -1,6 +1,9 @@
 # Examples
 
-Pulp ships with eight example plugins plus standalone apps (GPU demo, UI preview, web demos). Each example validates a specific capability of the framework.
+Pulp's curated example guide covers the core plugin gallery, selected standalone
+apps, and source-only DSP lanes. The broader `examples/` tree also contains
+subsystem demos and platform-specific proof projects; use each example's local
+README or subsystem guide for those specialized workflows.
 
 All examples live under `examples/`.
 
@@ -114,6 +117,13 @@ Features:
 **Type**: Standalone application (not a plugin)
 **Purpose**: A standalone app for testing the view/widget system and GPU rendering pipeline without building a full plugin.
 
+## Additional CMake-Backed Examples
+
+`examples/CMakeLists.txt` includes more shipped targets than the curated plugin
+gallery above. Current examples include Bendr, PulpTempoSampler, PulpMpeSynth,
+ViewBridge, Audio Inspector, Plugin Host, Stream, SDF, WebView, Three.js, and iOS
+AUv3 demos. Some are gated by platform, optional dependencies, or feature flags.
+
 ## FAUST Examples
 
 These examples validate the current supported FAUST lane: offline codegen,
@@ -184,8 +194,9 @@ the bounded subset.
 
 ## Building Examples
 
-CMake-backed examples are built as part of the main build. Source-only Cmajor
-and JSFX examples use the lane-specific validators below.
+CMake-backed examples in the root example graph build as part of the main build
+when their platform and option gates are satisfied. Source-only Cmajor and JSFX
+examples use the lane-specific validators below.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

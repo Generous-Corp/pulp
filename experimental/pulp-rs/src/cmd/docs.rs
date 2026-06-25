@@ -1070,15 +1070,25 @@ mod tests {
     fn run_build_site_delegates_to_mkdocs() {
         let td = plant_project();
         fs::write(td.path().join("mkdocs.yml"), "site_name: Test\n").unwrap();
-        let rec = RecordingSpawner::ok();
+        let rec = RecordingSpawner::with_codes(vec![7]);
         let mut buf = Vec::new();
         let sub = Sub::BuildSite(vec!["--strict".to_owned()]);
         let rc = run(td.path(), &sub, &rec, &mut buf).unwrap();
-        assert_eq!(rc, 0);
+        assert_eq!(rc, 7);
         let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].program, "mkdocs");
-        assert!(calls[0].args.contains(&"build".to_owned()));
-        assert!(calls[0].args.contains(&"--strict".to_owned()));
+        assert_eq!(
+            calls[0].args,
+            vec![
+                "build".to_owned(),
+                "-f".to_owned(),
+                td.path().join("mkdocs.yml").to_string_lossy().into_owned(),
+                "--strict".to_owned(),
+            ]
+        );
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("pip install -r requirements-docs.txt"));
     }
 
     #[test]
