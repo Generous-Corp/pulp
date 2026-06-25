@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04730"></a>
+## [0.473.0] - 2026-06-25
+
+- feat(graph): persistent-output node slots in the routing buffer assignment ([#4753](https://github.com/danielraffel/pulp/pull/4753))
+- docs(sdf): correct example links ([#4754](https://github.com/danielraffel/pulp/pull/4754))
+- docs(examples): clarify curated gallery scope ([#4752](https://github.com/danielraffel/pulp/pull/4752))
+
 <a id="v04722"></a>
 ## [0.472.2] - 2026-06-24
 
@@ -5028,6 +5035,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.473.0]: https://github.com/danielraffel/pulp/releases/tag/v0.473.0
 [0.472.2]: https://github.com/danielraffel/pulp/releases/tag/v0.472.2
 [0.472.1]: https://github.com/danielraffel/pulp/releases/tag/v0.472.1
 [0.472.0]: https://github.com/danielraffel/pulp/releases/tag/v0.472.0
