@@ -15,7 +15,7 @@ A generative drum sequencer that outputs MIDI note events. The first Pulp exampl
 - 16-step drum pattern sequencing with four tracks (kick, snare, hi-hat, clap)
 - GM drum map note numbers (channel 10)
 - Four built-in patterns: basic 4/4, breakbeat, sparse, and dense
-- Swing timing (offset applied to even steps)
+- Swing timing (offset applied to odd-numbered 16th-note steps)
 - Density-based pattern modulation (probabilistic step skipping and addition)
 - Velocity randomization
 - Audio pass-through while generating MIDI (acts as a MIDI insert effect)
