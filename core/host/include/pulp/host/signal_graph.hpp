@@ -488,9 +488,16 @@ public:
     // interior into an AnticipationLane that is pre-rendered AHEAD of the deadline
     // off the audio thread; process() then consumes the pre-rendered boundary
     // signals and runs the rest of the graph with the interior masked, absorbing
-    // the interior's CPU cost off the critical block. Output is bit-identical to
-    // the canonical (interior-live) render. Requires the canonical executor path
-    // (set_canonical_executor_routing_enabled). Enable BEFORE prepare().
+    // the interior's CPU cost off the critical block. Requires the canonical
+    // executor path (set_canonical_executor_routing_enabled). Enable BEFORE prepare().
+    //
+    // Output is bit-identical to the canonical (interior-live) render WHEN the host
+    // pumps enough and uses a fixed block size equal to the prepared max block. Two
+    // intrinsic exceptions: (1) a block whose size differs from the prepared max, or
+    // a ring underrun, silences the interior for that block (it is never re-rendered
+    // live — see the producer-ownership note below); (2) a parameter/gain change on
+    // an interior node takes effect at render-ahead time, i.e. up to a lead's-worth
+    // of blocks earlier than in a live render.
     //
     // The interior's plugin state is advanced ONLY by the anticipation producer
     // (pump_anticipation), never by process() — so the interior is always masked
