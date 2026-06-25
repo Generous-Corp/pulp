@@ -150,3 +150,109 @@ TEST_CASE("Buffer assignment of an empty plan is valid and empty",
     CHECK(a.slot_count == 0);
     CHECK(a.nodes.empty());
 }
+
+TEST_CASE("Buffer assignment pins a persistent-output node's region (never recycled)",
+          "[graph][buffer-assignment][persistent]") {
+    // A mono chain recycles aggressively (only ~3 slots stay live at once for
+    // any length). Marking one middle node persistent forces its single output
+    // slot to be dedicated — never recycled by a strictly-later node — so its
+    // contents survive across blocks. That dedicated slot costs exactly one more
+    // slot than the fully-reused layout, an allocator-independent, observable
+    // effect of the flag.
+    constexpr int kStages = 5;            // input -> p1..p5 -> output
+    constexpr std::size_t kPersistIdx = 3;  // a middle processor (dense index 3)
+    auto build = [](bool persistent) {
+        std::vector<GraphRuntimeNodeSpec> nodes;
+        nodes.push_back({1, GraphRuntimeNodeKind::AudioInput, 0, 1});
+        for (int i = 0; i < kStages; ++i) {
+            nodes.push_back({static_cast<pulp::graph::NodeId>(2 + i),
+                             GraphRuntimeNodeKind::Processor, 1, 1});
+        }
+        nodes.push_back({static_cast<pulp::graph::NodeId>(2 + kStages),
+                         GraphRuntimeNodeKind::AudioOutput, 1, 0});
+        nodes[kPersistIdx].persistent_output = persistent;
+        std::vector<GraphRuntimeConnectionSpec> conns;
+        for (pulp::graph::NodeId s = 1; s <= static_cast<pulp::graph::NodeId>(kStages + 1); ++s) {
+            conns.push_back({s, 0, static_cast<pulp::graph::NodeId>(s + 1), 0});
+        }
+        auto plan = build_graph_runtime_plan(nodes, conns);
+        REQUIRE(plan.ok());
+        return std::pair{plan.plan, build_graph_runtime_buffer_assignment(plan.plan)};
+    };
+
+    const auto [plan_p, a_p] = build(true);
+    const auto [plan_n, a_n] = build(false);
+    check_invariants(plan_p, a_p);
+    check_invariants(plan_n, a_n);
+
+    // The persistent node's single output slot is disjoint from every OTHER
+    // node's input and output region (dedicated => survives across blocks).
+    const auto& pin = a_p.nodes[kPersistIdx];
+    REQUIRE(plan_p.nodes[kPersistIdx].output_ports == 1);
+    const std::uint32_t lo = pin.output_base;
+    const std::uint32_t hi = pin.output_base + 1;
+    for (std::size_t i = 0; i < plan_p.nodes.size(); ++i) {
+        if (i == kPersistIdx) continue;
+        const auto& n = plan_p.nodes[i];
+        const auto& s = a_p.nodes[i];
+        if (n.input_ports > 0) {
+            CHECK((s.input_base + n.input_ports <= lo || hi <= s.input_base));
+        }
+        if (n.output_ports > 0) {
+            CHECK((s.output_base + n.output_ports <= lo || hi <= s.output_base));
+        }
+    }
+
+    // The flag is load-bearing: forgoing that one node's reuse costs exactly one
+    // extra slot over the fully-recycled layout.
+    CHECK(a_p.slot_count == a_n.slot_count + 1);
+}
+
+TEST_CASE("Persistent-output and feedback pinning coexist without slot collision",
+          "[graph][buffer-assignment][persistent][feedback]") {
+    // input(0->1) -> A(1->1, persistent, 2 out) -> B(1->1) -> output(1->0), plus
+    // a feedback edge B->A. A is both a feedback DEST and a persistent source; B
+    // is a feedback SOURCE (pinned). The persistent region (fresh, never recycled)
+    // must stay disjoint from every other node region AND from the feedback
+    // previous-block slot, which is appended above the high-water mark.
+    std::array<GraphRuntimeNodeSpec, 4> nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 2},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 2, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    nodes[1].persistent_output = true;  // node A
+    std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},  // input -> A
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},  // A.0 -> B
+        GraphRuntimeConnectionSpec{2, 1, 3, 1},  // A.1 -> B
+        GraphRuntimeConnectionSpec{3, 0, 4, 0},  // B -> output
+        GraphRuntimeConnectionSpec{3, 0, 2, 0},  // B -> A (feedback edge)
+    };
+    conns[4].feedback = true;
+    auto plan = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(plan.ok());
+    const auto a = build_graph_runtime_buffer_assignment(plan.plan);
+    check_invariants(plan.plan, a);
+    REQUIRE(a.has_feedback);
+
+    // A's dedicated 2-slot output region disjoint from every other node region.
+    const auto& A = a.nodes[1];
+    REQUIRE(plan.plan.nodes[1].output_ports == 2);
+    const std::uint32_t lo = A.output_base, hi = A.output_base + 2;
+    for (std::size_t i = 0; i < plan.plan.nodes.size(); ++i) {
+        if (i == 1) continue;
+        const auto& n = plan.plan.nodes[i];
+        const auto& s = a.nodes[i];
+        if (n.input_ports > 0) CHECK((s.input_base + n.input_ports <= lo || hi <= s.input_base));
+        if (n.output_ports > 0) CHECK((s.output_base + n.output_ports <= lo || hi <= s.output_base));
+    }
+    // The feedback previous-block slot must not land inside A's persistent region.
+    for (std::size_t i = 0; i < plan.plan.connections.size(); ++i) {
+        const std::uint32_t fp = a.feedback_prev_slot[i];
+        if (fp != pulp::graph::kGraphRuntimeNoSlot) {
+            CHECK((fp < lo || fp >= hi));
+            CHECK(fp < a.slot_count);
+        }
+    }
+}

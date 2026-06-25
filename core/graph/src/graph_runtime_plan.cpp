@@ -121,6 +121,7 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 spec.output_ports,
                 spec.event_input_ports,
                 spec.event_output_ports,
+                spec.persistent_output,
                 0,
                 0,
                 0,

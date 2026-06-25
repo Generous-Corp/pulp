@@ -27,6 +27,17 @@ public:
         high_water_ += size;
         return base;
     }
+    // Allocate fresh slots above the high-water mark, never reusing a freed
+    // region. Used for a persistent output region, which must be a slot no other
+    // node ever writes — reusing an earlier node's freed slot would let that
+    // node overwrite the persistent contents every block, clobbering the tail
+    // before the next block reads it.
+    std::uint32_t alloc_fresh(std::uint32_t size) {
+        if (size == 0) return high_water_;
+        const std::uint32_t base = high_water_;
+        high_water_ += size;
+        return base;
+    }
     void free(std::uint32_t base, std::uint32_t size) {
         if (size == 0 || size >= free_by_size_.size()) return;
         free_by_size_[size].push_back(base);
@@ -78,9 +89,15 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
 
         // last_use[n] = topo position after which node n's OUTPUT region is dead.
         // Default to the node's own position (no consumer -> dead immediately).
-        std::vector<std::uint32_t> last_use(node_count);
-        for (std::size_t n = 0; n < node_count; ++n) last_use[n] = pos[n];
+        // A persistent-output node is pinned: its region is never freed, so it
+        // never aliases another node and its contents survive across blocks
+        // (the backing pool persists), matching a per-node persistent output
+        // buffer for nodes that may not fully overwrite their outputs.
         const std::uint32_t pinned = static_cast<std::uint32_t>(node_count);  // never freed in-block
+        std::vector<std::uint32_t> last_use(node_count);
+        for (std::size_t n = 0; n < node_count; ++n) {
+            last_use[n] = plan.nodes[n].persistent_output ? pinned : pos[n];
+        }
         // Connection plans store dense node indices in source_index/dest_index.
         for (const auto& conn : plan.connections) {
             if (conn.event) continue;
@@ -103,7 +120,13 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             auto& slots = assignment.nodes[node_index];
 
             slots.input_base = alloc.alloc(node.input_ports);
-            slots.output_base = alloc.alloc(node.output_ports);
+            // A persistent-output node's output region must be dedicated: fresh
+            // slots that no other node ever writes (see alloc_fresh). Pairs with
+            // last_use == pinned below, which also keeps it from being recycled
+            // by a later node.
+            slots.output_base = node.persistent_output
+                                    ? alloc.alloc_fresh(node.output_ports)
+                                    : alloc.alloc(node.output_ports);
 
             // Input region dies after this node runs.
             if (node.input_ports > 0) {
