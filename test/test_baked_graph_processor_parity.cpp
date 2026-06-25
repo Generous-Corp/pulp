@@ -214,6 +214,47 @@ TEST_CASE("Baked graph matches the live graph bit-exactly across blocks",
     CHECK(peak > 0.1f);
 }
 
+TEST_CASE("Baked graph matches the live graph's legacy WALK bit-exactly",
+          "[host][graph][bake][parity]") {
+    // The baked Processor's documented contract is "matches the live graph's walk."
+    // The default routing path today IS the legacy walk, so leave the live graph in
+    // its default (executor routing OFF) and compare the WALK output to the baked
+    // Processor (which runs process_routed). Bit-exact here proves baked == walk
+    // directly, not merely baked == executor.
+    SignalGraph g;
+    const auto in = g.add_input_node(1, "In");
+    const auto g1 = g.add_gain_node("G1");
+    const auto g2 = g.add_gain_node("G2");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, g1, 0));
+    REQUIRE(g.connect(in, 0, g2, 0));
+    REQUIRE(g.connect_feedback(g1, 0, g1, 0));  // feedback exercised across blocks
+    REQUIRE(g.connect(g1, 0, out, 0));
+    REQUIRE(g.connect(g2, 0, out, 0));
+    REQUIRE(g.set_node_gain(g1, 0.3838383f));
+    REQUIRE(g.set_node_gain(g2, 0.6262626f));
+    // NB: do NOT enable canonical executor routing — the live graph runs the walk.
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE_FALSE(g.canonical_executor_routing_enabled());  // really the walk
+
+    auto r = bake(g);
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    r.processor->prepare(make_prepare_ctx(1));
+
+    float peak = 0.0f;
+    for (int blk = 0; blk < 6; ++blk) {
+        INFO("block " << blk);
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.5f + 0.06f * static_cast<float>(blk))};
+        const auto walk = run_graph(g, kFrames, input, 1);   // legacy walk output
+        const auto baked = run_baked(*r.processor, kFrames, input, 1);
+        expect_equal(walk, baked);
+        for (float s : baked[0]) peak = std::max(peak, std::fabs(s));
+    }
+    CHECK(peak > 0.1f);  // non-vacuity: real signal on both paths
+}
+
 TEST_CASE("Baked processor process() is allocation-free on the audio thread",
           "[host][graph][bake][rt-safety]") {
     SignalGraph g;

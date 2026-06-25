@@ -15,6 +15,11 @@
 // Plugin node (opaque external state, not self-contained) or a Custom node.
 // Custom-node lowering and on-disk plan serialization are deliberate follow-ups;
 // this slice keeps the captured plan as in-memory owned data.
+//
+// bake() captures the graph's TOPOLOGY and Gain VALUES, not hot runtime state: the
+// baked Processor builds fresh feedback/delay/scratch state in prepare() and starts
+// it from zero. If the source graph has already processed blocks (non-zero feedback
+// history), that history is not cloned — the baked Processor begins a fresh stream.
 
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/processor.hpp>

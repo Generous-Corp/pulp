@@ -162,7 +162,12 @@ lanes, and verify a runner is actually busy before blaming capacity.
   (hard-fail). To sanction a genuinely-new routing engine, authoring template,
   or generated-DSP ABI, widen the allowlist in `single_backend_guard.py` in the
   same PR — that diff is the architecture-review record. Both guards carry a
-  `--selftest` run in the workflow's fixture-test step.
+  `--selftest` run in the workflow's fixture-test step. Hardening notes (from the
+  series adversarial review): a non-sanctioned `Rival::process_routed` is flagged
+  even when defined *inside* `graph_runtime_executor.{hpp,cpp}` (no TU-filename
+  escape), and the parity-registration check requires the test source to appear on
+  a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
+  a bare mention in a dead variable no longer counts.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

@@ -426,6 +426,12 @@ Gotchas:
   `build_executor_snapshot()` the live routing uses and sizes the pool from
   `buffer_slot_count()` × `max_buffer_size` plus the per-connection PDC rings, so
   `process()` is allocation-free.
+- **bake() captures topology + gain values, not hot runtime state.** The baked
+  Processor builds fresh feedback/delay/scratch in `prepare()` and starts from zero;
+  a source graph that has already processed blocks does not transfer its feedback
+  history. The parity proof covers both directions — baked output is bit-exact to the
+  live graph's legacy WALK and to its routed executor (the test asserts the walk case
+  explicitly, since the routing default is OFF until executor telemetry parity lands).
 
 ## Common tripwires
 
