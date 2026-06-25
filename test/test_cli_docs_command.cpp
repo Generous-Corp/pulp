@@ -60,6 +60,34 @@ struct ScopedOutput {
     }
 };
 
+#if !defined(_WIN32)
+struct ScopedEnv {
+    std::string name;
+    bool had_value = false;
+    std::string old_value;
+
+    ScopedEnv(const char* n, const std::string& value) : name(n) {
+        if (const char* value = std::getenv(n)) {
+            had_value = true;
+            old_value = value;
+        }
+        set(value);
+    }
+
+    ~ScopedEnv() {
+        if (had_value) {
+            (void)::setenv(name.c_str(), old_value.c_str(), 1);
+        } else {
+            (void)::unsetenv(name.c_str());
+        }
+    }
+
+    void set(const std::string& value) {
+        REQUIRE(::setenv(name.c_str(), value.c_str(), 1) == 0);
+    }
+};
+#endif
+
 void write_file(const fs::path& path, const std::string& body) {
     fs::create_directories(path.parent_path());
     std::ofstream f(path);
@@ -365,6 +393,55 @@ TEST_CASE("docs command runs project docs check script",
                "exit 7\n");
     REQUIRE(cmd_docs({"check"}) == 7);
     REQUIRE_FALSE(fs::exists(marker));
+#endif
+}
+
+TEST_CASE("docs command runs project docs site build through mkdocs",
+          "[cli][docs][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake mkdocs assertions are only used on non-Windows");
+#else
+    TempDir tmp;
+    auto root = make_project(tmp);
+    write_file(root / "mkdocs.yml", "site_name: Test\n");
+
+    auto fake_bin = tmp.path / "bin";
+    auto fake_mkdocs = fake_bin / "mkdocs";
+    auto args_log = tmp.path / "mkdocs-args.txt";
+    write_file(fake_mkdocs,
+               "#!/bin/sh\n"
+               "for arg in \"$@\"; do\n"
+               "  printf '%s\\n' \"$arg\"\n"
+               "done > \"$PULP_FAKE_MKDOCS_ARGS\"\n"
+               "exit \"${PULP_FAKE_MKDOCS_EXIT:-0}\"\n");
+    fs::permissions(fake_mkdocs,
+                    fs::perms::owner_exec | fs::perms::owner_read |
+                        fs::perms::owner_write,
+                    fs::perm_options::add);
+
+    const char* old_path = std::getenv("PATH");
+    ScopedEnv path_env("PATH", fake_bin.string() + ":" + (old_path ? old_path : ""));
+    ScopedEnv args_env("PULP_FAKE_MKDOCS_ARGS", args_log.string());
+    ScopedEnv exit_env("PULP_FAKE_MKDOCS_EXIT", "0");
+
+    auto site_dir = root / "build" / "site dir with spaces";
+    ScopedCurrentPath cwd{root / "docs" / "guides"};
+    REQUIRE(cmd_docs({"build-site", "--site-dir", site_dir.string(), "--strict"}) == 0);
+
+    auto args = read_file_contents(args_log);
+    const auto root_config = fs::weakly_canonical(root / "mkdocs.yml");
+    const auto expected_args =
+        "build\n"
+        "-f\n" + root_config.string() + "\n"
+        "--site-dir\n" + site_dir.string() + "\n"
+        "--strict\n";
+    REQUIRE(args == expected_args);
+
+    exit_env.set("11");
+    ScopedOutput output;
+    REQUIRE(cmd_docs({"build-site"}) == 11);
+    REQUIRE(output.err.str().find("pip install -r requirements-docs.txt")
+            != std::string::npos);
 #endif
 }
 

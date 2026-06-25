@@ -614,9 +614,9 @@ int cmd_docs(const std::vector<std::string>& args) {
         // this way because it resolved paths from the script location
         // (#591).
         auto mkdocs_yml = root / "mkdocs.yml";
-        std::string cmd = "mkdocs build -f \"" + mkdocs_yml.string() + "\"";
+        std::string cmd = "mkdocs build -f " + shell_quote(mkdocs_yml);
         for (size_t i = 1; i < args.size(); ++i) {
-            cmd += " " + args[i];
+            cmd += " " + shell_quote(args[i]);
         }
         int rc = run(cmd);
         if (rc != 0) {
