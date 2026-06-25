@@ -750,9 +750,10 @@ private:
         // Plugin-binding storage for the routed path, owned per-snapshot like
         // exec_pool. routing_plugin_ctx is reserved in compile_() to the plugin
         // count so the snapshot's Plugin bindings can point their user_data at
-        // stable elements; routing_plugin_scratch is the shared MIDI/param
-        // scratch every Plugin binding hands to PluginSlot::process. The slots
-        // themselves live in `plugins` above (same cg lifetime).
+        // stable elements; routing_plugin_scratch is the serial snapshot's shared
+        // MIDI/param fallback scratch when no per-node executor scratch is
+        // supplied. The slots themselves live in `plugins` above (same cg
+        // lifetime).
         std::vector<PluginBindingContext> routing_plugin_ctx;
         PluginRoutingScratch routing_plugin_scratch;
         // Per-node MIDI buffers for the routed path's event edges, owned
@@ -783,7 +784,9 @@ private:
         // and the static level schedule. The MIDI/automation scratch and the
         // MidiInput/Output node lists above are SHARED (identical plan; only ONE
         // path runs per block). routing_plugin_ctx_parallel holds the parallel
-        // snapshot's Plugin bindings' stable user_data.
+        // snapshot's Plugin bindings' stable user_data; each binding owns its
+        // fallback scratch so same-level Plugin nodes do not share mutable MIDI
+        // output state.
         format::GraphRuntimeSnapshot routing_snapshot_parallel;
         format::GraphRuntimeBufferPool exec_pool_parallel;
         graph::GraphRuntimeLevelization routing_levelization;

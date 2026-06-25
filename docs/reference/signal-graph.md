@@ -175,6 +175,20 @@ tests and tools can verify the route actually taken. These flags and counters
 are telemetry/control knobs for the prepared execution path; they do not change
 graph topology or the generated/import validation budgets above.
 
+`SignalGraph::set_anticipation_enabled(true)` opts a prepared graph into
+anticipative rendering on the canonical executor path. When the graph has an
+eligible latent interior, `prepare()` builds an `AnticipationLane` and a routed
+skip mask. A host-side producer calls `pump_anticipation(max_blocks)` from one
+background thread to render that interior ahead of the audio deadline; the audio
+thread's `process()` consumes a pre-rendered boundary block, pre-fills the routed
+executor slots, and runs the rest of the graph with the interior masked so its
+plugin state advances only on the producer. Anticipation is default-off and must
+be enabled before `prepare()`. If the lane underruns or the block size no longer
+matches, the splice writes silence for that pre-rendered boundary rather than
+falling back to a live interior render, which would double-advance plugin state.
+Hosts must stop and join the producer thread before any graph mutation or
+`prepare()` call.
+
 ## Latency & PDC
 
 Every `PluginSlot` reports `latency_samples()`. During `prepare()` the

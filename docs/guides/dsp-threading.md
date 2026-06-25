@@ -267,7 +267,7 @@ drains graph queues without heap allocation, emits bounded command
 accepted/rejected events, and visits nodes in plan order.
 
 `GraphRuntimeExecutor::process_routed()` adds inter-node audio routing on top of
-that walk for feedforward graphs. The snapshot computes a
+that walk for routed graphs. The snapshot computes a
 `graph::GraphRuntimeBufferAssignment` off the audio thread (one mono scratch
 slot per node input/output port); the caller pre-allocates a
 `GraphRuntimeBufferPool` of that many slots and reuses it across blocks. Per
@@ -281,20 +281,22 @@ delay: the assignment appends one persistent previous-block slot per feedback
 edge, gather adds that slot (last block's captured source output), and after the
 walk the source's output is captured into it — mirroring SignalGraph's
 `feedback_prev`, with the pool's zero-init giving the first block silent
-feedback. Per-connection PDC delay lines, sidechain/MIDI/automation edge
-routing, slot reuse, and the `SignalGraph` walk migration belong to later
-graph-runtime slices.
+feedback. Per-connection PDC delay lines, sidechain inputs, MIDI edges, sparse
+automation, dense audio-rate modulation, slot reuse, and the `SignalGraph`
+process migration are part of the current routed path; the executor fails closed
+when a graph exceeds the fixed per-node automation scratch capacity.
 
 `host::SignalGraph` can request routing its live `process()` callback through
-this executor for eligible graphs (only AudioInput/AudioOutput/Gain nodes, plain
-audio connections including one-block feedback) via
-`set_canonical_executor_routing_enabled(true)` —
-default OFF, with the legacy walk as the fallback for ineligible graphs and the
-parity oracle. The routing snapshot and its scratch pool are built in
-`compile_()` and embedded per-snapshot in the published `CompiledGraph`, so a
-re-prepare builds fresh ones on a fresh snapshot and never resizes a buffer an
-in-flight audio reader is using — the same RCU/retire discipline the legacy
-per-node scratch relies on.
+this executor for eligible graphs via
+`set_canonical_executor_routing_enabled(true)` — default OFF, with the legacy
+walk as the fallback for ineligible graphs and the parity oracle. Eligible nodes
+are AudioInput, AudioOutput, Gain, live Plugin, MidiInput, and MidiOutput nodes;
+eligible edges are feedforward/feedback/sidechain audio, MIDI, sparse
+automation, and dense audio-rate modulation. The routing snapshot and its
+scratch pool are built in `compile_()` and embedded per-snapshot in the
+published `CompiledGraph`, so a re-prepare builds fresh ones on a fresh snapshot
+and never resizes a buffer an in-flight audio reader is using — the same
+RCU/retire discipline the legacy per-node scratch relies on.
 
 `SignalGraph::set_parallel_routing_enabled(true)` requests the levelized
 parallel executor for the same eligible subset. The parallel-safe snapshot uses
@@ -303,6 +305,16 @@ preserve accumulation order, and `set_parallel_min_work_units()` can keep
 low-cost levels serial when their static work-weight x block size is below the
 fork/join break-even threshold. `routing_executor_stats()` is the diagnostic
 surface for tests and tools that need to prove which routed path ran.
+
+`SignalGraph::set_anticipation_enabled(true)` adds an opt-in anticipative splice
+on top of the canonical routed path. When `prepare()` finds an eligible latent
+interior, the graph builds an `AnticipationLane`; a single background producer
+calls `pump_anticipation()` to pre-render that interior ahead of the deadline,
+and `process()` consumes one pre-rendered boundary block, pre-fills the routed
+executor slots, and masks the interior so its plugin state is not advanced twice.
+Hosts must stop and join the producer before `prepare()` or graph mutation, and
+underruns produce silence for the spliced boundary instead of falling back to a
+live interior render.
 
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an

@@ -10,7 +10,7 @@ freed memory. This reference exists to pin the contract down.
 |----------------|----------------------------------------------------|---------|
 | **UI thread** | Builds the graph, loads plugins, edits connections, drives automation | Your app's main/event thread |
 | **Audio thread** | `SignalGraph::process()`, plugin `process()` callbacks | Driver-owned (CoreAudio, WASAPI, …) |
-| **Worker thread** | `PluginSlot::load()` I/O, network, preset scans, deferred UI commits | Whatever pool the caller provides |
+| **Worker thread** | `PluginSlot::load()` I/O, network, preset scans, deferred UI commits, single-producer `SignalGraph::pump_anticipation()` | Whatever pool the caller provides |
 
 ## `SignalGraph`
 
@@ -54,6 +54,16 @@ The TSan-oriented graph tests pin the combined contract: one thread may run
 `inject_midi()`, and `extract_midi()` against the prepared snapshot. See
 `pulp-test-host-signal-graph` filter
 `"[host][graph][threading][race][tsan][midi]"`.
+
+### Worker-thread producer APIs
+
+- `pump_anticipation(max_blocks)` — renders an eligible anticipative interior
+  into the live snapshot's lane. It is guarded against concurrent or reentrant
+  producer calls, but the host must still treat it as a single-producer API.
+  Stop calling it and join the producer thread before any `prepare()` or graph
+  mutation; the snapshot reader pin keeps the compiled graph alive, but it does
+  not make the shared plugin instances safe to re-prepare while the producer is
+  rendering them.
 
 ### UI-thread read-only accessors
 

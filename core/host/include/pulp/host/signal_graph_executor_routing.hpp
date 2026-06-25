@@ -18,13 +18,12 @@ class SignalGraph;
 struct GraphNode;
 struct Connection;
 
-// Shared scratch a routed Plugin-node binding hands to PluginSlot::process. For
-// the eligible subset (no MIDI / automation / sidechain edges) `midi_in` and
-// `param_events` are always empty; `midi_out` is cleared each call and discarded
-// (the subset has no MIDI output edges). Nodes run serially on the audio thread,
-// so a single instance per snapshot is reused across all Plugin nodes. Owned by
-// whoever owns the routing (CompiledGraph / SignalGraphExecutorRouting); a
-// PluginBindingContext references it as the binding's user_data.
+// Fallback scratch a routed Plugin-node binding hands to PluginSlot::process
+// when the routed call does not need per-node MIDI or automation buffers.
+// MIDI/automation graphs use the executor-owned per-node scratch exposed through
+// GraphRuntimeNodeProcessContext. Serial snapshots may share one fallback
+// scratch; parallel snapshots bind each Plugin node to owned fallback scratch
+// because PluginSlot::process receives a mutable MIDI output buffer.
 struct PluginRoutingScratch {
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
@@ -33,10 +32,14 @@ struct PluginRoutingScratch {
 
 // Per-Plugin-node binding context (the binding's user_data). Stored in a
 // caller-owned vector reserved to the plugin-node count so its elements keep
-// stable addresses for the snapshot's lifetime.
+// stable addresses for the snapshot's lifetime. `scratch` points either at the
+// serial snapshot's shared fallback scratch or at `owned_scratch` for a parallel
+// snapshot. Keep owned scratch heap-indirected so `scratch` survives moving this
+// context into `plugin_ctx`.
 struct PluginBindingContext {
     PluginSlot* slot = nullptr;
     PluginRoutingScratch* scratch = nullptr;
+    std::unique_ptr<PluginRoutingScratch> owned_scratch;
 };
 
 // A SignalGraph translated into the canonical GraphRuntimeExecutor's routing
@@ -63,13 +66,16 @@ struct SignalGraphExecutorRouting {
 // True iff `nodes`/`connections` are in the subset the executor reproduces
 // bit-exactly:
 //   - nodes only AudioInput / AudioOutput / Gain (fixed 2-in/2-out, always
-//     fully writes) / Plugin (every Plugin node must carry a live slot; its
-//     output region is pinned persistent so a plugin that does not fully write
-//     matches SignalGraph's persistent per-node buffer; a reported latency is
-//     fine — its delay compensation is replicated on the routed path);
-//   - connections only audio (feedforward, feedback, or sidechain — a sidechain
+//     fully writes) / live Plugin / MidiInput / MidiOutput. Every Plugin node
+//     must carry a live slot; its output region is pinned persistent so a plugin
+//     that does not fully write matches SignalGraph's persistent per-node buffer;
+//     a reported latency is fine because its delay compensation is replicated on
+//     the routed path;
+//   - connections may be audio (feedforward, feedback, or sidechain — a sidechain
 //     edge routes as plain audio into a higher input port of the destination
-//     plugin; no MIDI, automation, or audio-rate-modulation).
+//     plugin), MIDI event edges, sparse automation, or dense audio-rate
+//     modulation. Sparse and dense automation each fail closed when one node
+//     exceeds GraphRuntimeAutomationScratch::kMaxParamsPerNode distinct params.
 // No prepared check.
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections);

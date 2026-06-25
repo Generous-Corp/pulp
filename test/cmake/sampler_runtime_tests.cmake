@@ -60,6 +60,11 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Parallel SignalGraph plugin bindings must not share fallback MIDI/parameter
+# scratch when the routed executor runs same-level Plugin nodes concurrently.
+pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch
+    SOURCES test_signal_graph_parallel_plugin_scratch.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Host-facing coverage for the parallel executor's break-even threshold wiring.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-cost
     LIBRARIES pulp::host pulp::format pulp::graph)
