@@ -1200,6 +1200,17 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             if (plan_has_midi) {
                 cg->routing_valid = cg->routing_midi.reset(plan.node_count());
             }
+            // Per-snapshot sparse-automation scratch, built only when the routed
+            // plan carries automation connections (audio-only / MIDI graphs
+            // allocate none).
+            bool plan_has_automation = false;
+            for (const auto& conn : plan.connections) {
+                if (conn.is_automation) { plan_has_automation = true; break; }
+            }
+            if (cg->routing_valid && plan_has_automation && max_block_size > 0) {
+                cg->routing_valid = cg->routing_automation.reset(
+                    plan, static_cast<std::uint32_t>(max_block_size));
+            }
         }
     }
     return cg;
@@ -1548,10 +1559,12 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 }
             }
 
+            const bool has_automation = cg->routing_automation.node_count() > 0;
             if (block.validate() &&
                 executor_.process_routed(
                     block, cg->routing_snapshot, cg->exec_pool,
-                    has_midi ? &cg->routing_midi : nullptr).ok()) {
+                    has_midi ? &cg->routing_midi : nullptr,
+                    has_automation ? &cg->routing_automation : nullptr).ok()) {
                 if (has_midi) {
                     // Commit the consumed mailbox sequences now that routing
                     // succeeded.

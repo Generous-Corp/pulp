@@ -5,6 +5,7 @@
 // Demonstrates the MIDI-effect path with scheduled note output.
 
 #include <pulp/format/processor.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -47,12 +48,37 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({kTempo, "Tempo", "BPM", {60, 240, 120, 1}});
-        store.add_parameter({kSwing, "Swing", "", {0, 1, 0, 0.01f}});
-        store.add_parameter({kDensity, "Density", "", {0, 1, 0.5f, 0.01f}});
-        store.add_parameter({kVelocity, "Velocity", "", {1, 127, 100, 1}});
-        store.add_parameter({kPattern, "Pattern", "", {0, 3, 0, 1}});
-        store.add_parameter({kRandomize, "Randomize", "", {0, 1, 0, 0.01f}});
+        store.add_parameter({
+            .id = kTempo,
+            .name = "Tempo",
+            .unit = "BPM",
+            .range = state::ParamRange::linear(60.0f, 240.0f, 120.0f, 1.0f),
+        });
+        store.add_parameter({
+            .id = kSwing,
+            .name = "Swing",
+            .range = state::ParamRange::linear(0.0f, 1.0f, 0.0f, 0.01f),
+        });
+        store.add_parameter({
+            .id = kDensity,
+            .name = "Density",
+            .range = state::ParamRange::linear(0.0f, 1.0f, 0.5f, 0.01f),
+        });
+        store.add_parameter({
+            .id = kVelocity,
+            .name = "Velocity",
+            .range = state::ParamRange::linear(1.0f, 127.0f, 100.0f, 1.0f),
+        });
+        store.add_parameter({
+            .id = kPattern,
+            .name = "Pattern",
+            .range = state::ParamRange::linear(0.0f, 3.0f, 0.0f, 1.0f),
+        });
+        store.add_parameter({
+            .id = kRandomize,
+            .name = "Randomize",
+            .range = state::ParamRange::linear(0.0f, 1.0f, 0.0f, 0.01f),
+        });
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -87,7 +113,7 @@ public:
         // Samples per 16th note
         double samples_per_step = (sample_rate_ * 60.0) / (tempo * 4.0);
 
-        // Apply swing to even steps
+        // Apply swing to odd-numbered 16th-note steps.
         double swing_offset = 0;
         if (step_position_ % 2 == 1) {
             swing_offset = samples_per_step * swing * 0.5;

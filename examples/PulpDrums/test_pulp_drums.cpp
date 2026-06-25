@@ -57,6 +57,35 @@ TEST_CASE("PulpDrums passes audio through", "[examples][drums]") {
     REQUIRE(out_r[100] < -0.49f);
 }
 
+TEST_CASE("PulpDrums passes incoming MIDI through", "[examples][drums]") {
+    HeadlessHost host(create_pulp_drums);
+    host.prepare(48000, 512, 2, 2);
+    // Suppress generated notes so the only MIDI output is the passed-through event.
+    host.state().set_value(kDensity, 0.0f);
+    host.state().set_value(kRandomize, 0.0f);
+
+    std::vector<float> in_l(512, 0), in_r(512, 0);
+    std::vector<float> out_l(512, 0), out_r(512, 0);
+    const float* in_ptrs[] = {in_l.data(), in_r.data()};
+    float* out_ptrs[] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> input(in_ptrs, 2, 512);
+    pulp::audio::BufferView<float> output(out_ptrs, 2, 512);
+
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    auto note = pulp::midi::MidiEvent::note_on(1, 64, 90);
+    note.sample_offset = 17;
+    midi_in.add(note);
+
+    host.process(output, input, midi_in, midi_out);
+
+    REQUIRE(midi_out.size() == 1);
+    REQUIRE(midi_out[0].is_note_on());
+    REQUIRE(midi_out[0].channel() == 1);
+    REQUIRE(midi_out[0].note() == 64);
+    REQUIRE(midi_out[0].velocity() == 90);
+    REQUIRE(midi_out[0].sample_offset == 17);
+}
+
 TEST_CASE("PulpDrums descriptor", "[examples][drums]") {
     HeadlessHost host(create_pulp_drums);
     auto& desc = host.descriptor();

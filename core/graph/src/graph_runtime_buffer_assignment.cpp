@@ -178,10 +178,16 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
                 const auto ci = plan.inbound_connection_indices[
                     node.first_inbound_connection + c];
                 const auto& conn = plan.connections[ci];
-                // Feedback, event (MIDI), and sparse-automation edges do not
-                // carry latency-aligned audio into an input port, so they don't
-                // contribute to a node's input latency (matching the host walk).
-                if (conn.feedback || conn.event || conn.is_automation) continue;
+                // Feedback, event (MIDI), and SPARSE-automation edges carry no
+                // latency-aligned audio, so they don't contribute to a node's
+                // input latency. DENSE audio-rate modulation edges DO participate
+                // in latency + per-connection delay (their source is sampled per
+                // block-position and time-aligned like audio) — matching the host
+                // walk, which only skips feedback/midi/sparse-automation.
+                if (conn.feedback || conn.event ||
+                    (conn.is_automation && !conn.automation.audio_rate)) {
+                    continue;
+                }
                 max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
             }
             input_latency[node_index] = max_upstream;
@@ -189,7 +195,10 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];
-            if (conn.feedback || conn.event || conn.is_automation) continue;
+            if (conn.feedback || conn.event ||
+                (conn.is_automation && !conn.automation.audio_rate)) {
+                continue;
+            }
             const std::uint32_t dst_in = input_latency[conn.dest_index];
             const std::uint32_t src_out = output_latency[conn.source_index];
             const std::uint32_t want = dst_in > src_out ? dst_in - src_out : 0;
