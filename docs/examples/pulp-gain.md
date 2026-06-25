@@ -15,10 +15,10 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 - Reading parameter values from `StateStore` on the audio thread via `state().get_value()`
 - Stereo audio pass-through and gain processing
 - Bypass parameter handling
-- Building the default plugin format targets plus optional AAX from a single processor
-- Format-specific entry point files (`vst3_entry.cpp`, `au_v2_entry.cpp`, `clap_entry.cpp`, `aax_entry.cpp`, `main.cpp`)
+- Building the default VST3, CLAP, and Standalone targets, Apple AU v2/AUv3 targets, and optional AAX from a single processor
+- Format-specific entry point files (`vst3_entry.cpp`, `au_v2_entry.cpp`, `au_v3_entry.cpp`, `clap_entry.cpp`, `aax_entry.cpp`, `main.cpp`)
 - Bundle metadata files (`Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`)
-- Format validation tests (auval, pluginval, CLAP dlopen, optional AAX validator)
+- Format validation coverage: CLAP dlopen, AU v2 `auval`, VST3 `pluginval`, and optional AAX validation through `pulp validate`
 
 ## Try in Browser
 
@@ -33,6 +33,7 @@ locally for now.
 |--------|-----------|
 | VST3 | Yes |
 | AU v2 | Yes |
+| AU v3 | Yes on Apple |
 | CLAP | Yes |
 | AAX | Optional on macOS/Windows |
 | Standalone | Yes |
@@ -54,6 +55,7 @@ locally for now.
 | `pulp_gain.hpp` | Processor implementation: descriptor, parameters, audio processing |
 | `vst3_entry.cpp` | VST3 format entry point |
 | `au_v2_entry.cpp` | Audio Unit v2 entry point |
+| `au_v3_entry.cpp` | Audio Unit v3 entry point |
 | `au_register.cpp` | AU component registration |
 | `clap_entry.cpp` | CLAP format entry point |
 | `aax_entry.cpp` | AAX format entry point |
