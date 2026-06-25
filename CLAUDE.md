@@ -830,6 +830,22 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+**Reclaiming coverage build dirs.** `local_diff_cover.sh` (and shipyard's
+local validation, which runs it) creates a per-worktree `build-cov/` and never
+cleans it. Across many worktrees these accumulate into hundreds of GB and fill
+the disk — which then fails the next coverage build with "No space left on
+device" (looks like a code failure; it is not). Reclaim them with:
+
+```bash
+tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
+tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
+```
+
+It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+a source tree or the primary `build/`), scans sibling worktrees by default
+(override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
+process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
+
 ### Pre-Push Gates Check
 
 `tools/scripts/gates.sh` is the on-demand runner for the cheap
