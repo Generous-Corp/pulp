@@ -649,3 +649,69 @@ TEST_CASE("StretchPreset parsing is tolerant", "[offline-stretch][preset]") {
     StretchPreset bad;
     CHECK_FALSE(pulp::signal::preset_from_text("character = bogus\n", bad, &err));
 }
+
+// #110: verbatim transient relocation grafts the original attack back onto the
+// phase-vocoder output, restoring the peak the PV smears (the "compressed" sound),
+// while leaving tonal material (no detected onsets) bit-identical.
+TEST_CASE("verbatim transient relocation restores attack peaks; tonal is a no-op",
+          "[offline-stretch][issue-110]") {
+    const long sr = 48000, n = sr; // 1 s
+    auto peak = [](const std::vector<float>& v) {
+        float m = 0.0f; for (float x : v) m = std::max(m, std::abs(x)); return m;
+    };
+
+    // Percussive: 6 sharp exponentially-decaying clicks.
+    std::vector<float> perc(static_cast<size_t>(n), 0.0f);
+    for (int k = 0; k < 6; ++k) {
+        const long t0 = static_cast<long>(k) * (n / 6);
+        for (long j = 0; j < 2000 && t0 + j < n; ++j) {
+            const float env = std::exp(-static_cast<float>(j) / 480.0f);
+            perc[static_cast<size_t>(t0 + j)] =
+                env * std::sin(2.0f * 3.14159265f * 150.0f * static_cast<float>(j) / static_cast<float>(sr));
+        }
+    }
+
+    OfflineStretch s; s.prepare(static_cast<double>(sr), 1);
+    const double R = 2.0;
+    const long out_n = offline_stretch_output_frames(n, R);
+    const float* ip[1] = {perc.data()};
+    std::string err;
+
+    OfflineStretchOptions base; base.time_ratio = R; base.quality = 2;
+    std::vector<float> clean(static_cast<size_t>(out_n));
+    float* cp[1] = {clean.data()};
+    REQUIRE(s.process(ip, n, cp, out_n, base, &err));
+
+    OfflineStretchOptions ro = base;
+    ro.transient_mode = pulp::signal::StretchTransientMode::verbatim_relocate;
+    std::vector<float> relo(static_cast<size_t>(out_n));
+    float* rp[1] = {relo.data()};
+    REQUIRE(s.process(ip, n, rp, out_n, ro, &err));
+
+    // The plain PV smears the attacks; relocation restores them materially higher,
+    // approaching the original peak.
+    CHECK(peak(relo) > peak(clean) * 1.15f);
+    CHECK(peak(relo) >= peak(perc) * 0.9f);
+
+    // Tonal material: no onsets detected -> relocation is a perfect no-op.
+    std::vector<float> sine(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        sine[static_cast<size_t>(i)] =
+            0.6f * std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / static_cast<float>(sr));
+    const float* sip[1] = {sine.data()};
+    std::vector<float> sclean(static_cast<size_t>(out_n)), srelo(static_cast<size_t>(out_n));
+    float* scp[1] = {sclean.data()}; float* srp[1] = {srelo.data()};
+    REQUIRE(s.process(sip, n, scp, out_n, base, &err));
+    REQUIRE(s.process(sip, n, srp, out_n, ro, &err));
+    float maxd = 0.0f;
+    for (long i = 0; i < out_n; ++i) maxd = std::max(maxd, std::abs(sclean[static_cast<size_t>(i)] - srelo[static_cast<size_t>(i)]));
+    CHECK(maxd < 1e-6f);
+
+    // Identity (R=1) must ignore relocation entirely.
+    std::vector<float> id(static_cast<size_t>(n));
+    OfflineStretchOptions io = ro; io.time_ratio = 1.0;
+    float* idp[1] = {id.data()};
+    REQUIRE(s.process(ip, n, idp, n, io, &err));
+    float idd = 0.0f; for (long i = 0; i < n; ++i) idd = std::max(idd, std::abs(id[static_cast<size_t>(i)] - perc[static_cast<size_t>(i)]));
+    CHECK(idd < 1e-6f);
+}

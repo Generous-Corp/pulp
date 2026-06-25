@@ -267,6 +267,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-stn") opts.route_noise_stn = false;               // (default) bypass STN noise morph
         else if (a == "--stn") opts.route_noise_stn = true;                   // opt into STN noise morph
         else if (a == "--transient-sens") opts.transient_sensitivity = std::atof(next("--transient-sens"));
+        else if (a == "--relocate") opts.transient_mode = pulp::signal::StretchTransientMode::verbatim_relocate;
         else if (a == "--character") {
             bool ok = false; opts.character = parse_character(next("--character"), &ok);
             if (!ok) { std::fprintf(stderr, "error: --character must be clean|varispeed|phase_vocoder|granular\n"); return 2; }

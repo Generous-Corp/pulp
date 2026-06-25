@@ -1460,6 +1460,11 @@ private:
                                         : signal::OfflineFormantMode::shift_independently;
         }
         o.quality = static_cast<int>(state().get_value(kTempoQuality) + 0.5f);
+        // Graft verbatim transients back onto the stretched output so drum/loop
+        // attacks keep their punch instead of the phase-vocoder "compressed" smear.
+        // No-op on tonal material (no onsets detected) and on the pitch/linked
+        // paths; active on the tempo-only spectral render the sampler uses most.
+        o.transient_mode = signal::StretchTransientMode::verbatim_relocate;
 
         const long out_frames = signal::offline_stretch_output_frames(frames, R);
         if (out_frames <= 0) return;

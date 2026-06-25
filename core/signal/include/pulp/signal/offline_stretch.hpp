@@ -19,9 +19,10 @@
 /// ─────────────────────────────────────────────────────────────────────────
 /// Current status: tempo stretch, pitch shift, varispeed, formant modes,
 /// repitch-linked resampling, independent time+pitch, draft OLA preview, and STN
-/// routing are implemented over the realtime spectral primitives. The identity
-/// route remains exact at `time_ratio == 1` and `pitch_semitones == 0`; offline
-/// refinements such as seam-clean transient relocation remain gated.
+/// routing are implemented over the realtime spectral primitives, as is opt-in
+/// verbatim transient relocation (StretchTransientMode::verbatim_relocate) on the
+/// tempo-only path. The identity route remains exact at `time_ratio == 1` and
+/// `pitch_semitones == 0`.
 /// ─────────────────────────────────────────────────────────────────────────
 
 #include <pulp/signal/interpolator.hpp>
@@ -46,8 +47,10 @@ namespace pulp::signal {
 enum class OfflineFormantMode { follow_pitch, preserve_original, shift_independently };
 
 /// Transient strategy. `phase_reset` uses the (causal) TransientPhasePolicy
-/// Röbel reset; `verbatim_relocate` is the offline-only copy-through path,
-/// gated on seam-quality and blind-A/B acceptance criteria.
+/// Röbel reset; `verbatim_relocate` (offline-only) grafts each ORIGINAL attack
+/// back onto the phase-vocoder output, peak-aligned, to restore the punch the PV
+/// smears. Active on the tempo-only spectral path; a no-op on tonal material (no
+/// onsets) and at ratio==1.
 enum class StretchTransientMode { phase_reset, verbatim_relocate };
 
 /// Character mode — the musically-distinct "engine per job" selector. Each has a
@@ -66,8 +69,9 @@ struct OfflineStretchOptions {
     /// Character mode (see StretchCharacter). Default `clean`. `varispeed` ignores
     /// pitch_semitones (pitch is linked to time_ratio); the others honor it.
     StretchCharacter character = StretchCharacter::clean;
-    /// Cross-engine: graft verbatim transients onto the stretched output for punch.
-    /// Current limitation: seam-clean relocation is not enabled yet, so this is a no-op.
+    /// Graft verbatim transients onto the stretched output for punch (restores the
+    /// attack peak the phase vocoder smears). Active on the tempo-only spectral
+    /// path (pitch==0, quality>=1); equivalent to transient_mode==verbatim_relocate.
     bool relocate_transients = false;
     double time_ratio = 1.0;        ///< output duration / input duration
     double pitch_semitones = 0.0;   ///< fractional allowed
@@ -323,7 +327,12 @@ public:
                 ola_tempo(in, in_frames, out, out_frames, opts.time_ratio);
                 return true;
             }
-            return tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio);
+            if (!tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio)) return false;
+            // Graft verbatim transients onto the PV output to restore attack punch.
+            if ((opts.transient_mode == StretchTransientMode::verbatim_relocate ||
+                 opts.relocate_transients) && opts.time_ratio != 1.0)
+                relocate_transients(in, in_frames, out, out_frames, opts.time_ratio);
+            return true;
         }
 
         // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
@@ -618,6 +627,103 @@ private:
         return true;
     }
 
+    // Self-contained spectral-flux onset detector over the channel-summed signal.
+    // Signal-layer safe (core/signal must NOT depend on core/audio's OnsetDetector).
+    // Returns input sample indices of detected transient attacks, ascending.
+    std::vector<long> detect_onsets(const float* const* in, long n) const {
+        std::vector<long> onsets;
+        if (n < kOnsetWin) return onsets;
+        const long hop = kOnsetHop;
+        auto win_energy = [&](long s) {
+            double e = 0.0;
+            const long end = std::min<long>(s + kOnsetWin, n);
+            for (long i = s; i < end; ++i)
+                for (int c = 0; c < channels_; ++c) { const float v = in[c][i]; e += static_cast<double>(v) * v; }
+            return e;
+        };
+        std::vector<double> flux;
+        flux.reserve(static_cast<size_t>(n / hop + 1));
+        double prev = win_energy(0);
+        for (long s = hop; s + kOnsetWin <= n; s += hop) {
+            const double e = win_energy(s);
+            flux.push_back(std::max(0.0, e - prev));   // half-wave-rectified energy rise
+            prev = e;
+        }
+        if (flux.empty()) return onsets;
+        double mean = 0.0; for (double f : flux) mean += f; mean /= static_cast<double>(flux.size());
+        const double thresh = mean * kOnsetThreshMult;
+        long last = -kOnsetMinGap;
+        for (size_t i = 0; i < flux.size(); ++i) {
+            const bool peak = (i == 0 || flux[i] >= flux[i - 1]) &&
+                              (i + 1 >= flux.size() || flux[i] >= flux[i + 1]);
+            const long sample = static_cast<long>(i + 1) * hop;   // s started at hop
+            if (flux[i] > thresh && peak && sample - last > kOnsetMinGap) {
+                onsets.push_back(sample);
+                last = sample;
+            }
+        }
+        return onsets;
+    }
+
+    // Channel-summed |x| at a single sample (transient-peak locator helper).
+    double abs_sum(const float* const* x, long i, long n) const {
+        if (i < 0 || i >= n) return 0.0;
+        double a = 0.0;
+        for (int c = 0; c < channels_; ++c) a += std::abs(static_cast<double>(x[c][i]));
+        return a;
+    }
+
+    // Verbatim transient relocation (StretchTransientMode::verbatim_relocate):
+    // graft each ORIGINAL transient attack back onto the phase-vocoder output to
+    // restore the sharp peak the PV smears (the "compressed / less dynamic"
+    // artifact). The output transient does NOT sit at oi*ratio — tempo_stretch's
+    // lead/anchor trim leaves a ratio-dependent group-delay offset — so we locate
+    // the PV's actual smeared peak by searching |out| in a window around the
+    // nominal position, then PEAK-ALIGN the original attack onto it. Equal-power
+    // edge crossfades keep the seam click-free; only the short attack is replaced,
+    // so the stretched sustain (and exact out_frames length) is intact.
+    void relocate_transients(const float* const* in, long in_frames,
+                             float* const* out, long out_frames, double ratio) const {
+        if (in_frames <= 0 || out_frames <= 0) return;
+        const long W = kReloAttack;        // grafted half-window each side of the peak
+        const long xf = std::min<long>(kReloXfade, W);
+        // Search +/- a fraction of the STRETCHED onset spacing for the output
+        // transient peak: wide enough to cover the PV's ratio-dependent latency
+        // offset, but never so wide it locks onto a neighbouring transient (which
+        // would happen with a fixed window at high compression, ratio << 1).
+        const long search = std::clamp<long>(
+            std::llround(static_cast<double>(kOnsetMinGap) * ratio * 0.4), 128L, kReloSearch);
+        for (long oi : detect_onsets(in, in_frames)) {
+            // Input attack peak near the onset. The energy-window detector returns
+            // the window START, which LEADS the peak by ~kOnsetWin, so search
+            // FORWARD from oi (plus a small look-back for jitter).
+            long ip = oi; double ipk = -1.0;
+            for (long j = std::max(0L, oi - kReloBack); j < std::min(in_frames, oi + kOnsetWin + W); ++j) {
+                const double a = abs_sum(in, j, in_frames);
+                if (a > ipk) { ipk = a; ip = j; }
+            }
+            if (ipk <= 0.0) continue;
+            // Output transient peak: search |out| around the nominal stretched pos.
+            const long op0 = std::llround(static_cast<double>(oi) * ratio);
+            long op = op0; double opk = -1.0;
+            for (long p = std::max(0L, op0 - search); p <= std::min(out_frames - 1, op0 + search); ++p) {
+                const double a = abs_sum(out, p, out_frames);
+                if (a > opk) { opk = a; op = p; }
+            }
+            // Graft the original attack, peak-aligned (in[ip] -> out[op]), with a
+            // linear crossfade ramping back to the PV output at both edges.
+            for (long k = -W; k <= W; ++k) {
+                const long si = ip + k, di = op + k;
+                if (si < 0 || si >= in_frames || di < 0 || di >= out_frames) continue;
+                const long ak = std::llabs(k);
+                float w = 1.0f;                                  // weight for the ORIGINAL
+                if (ak > W - xf) w = static_cast<float>(W - ak) / static_cast<float>(xf);
+                for (int c = 0; c < channels_; ++c)
+                    out[c][di] = w * in[c][si] + (1.0f - w) * out[c][di];
+            }
+        }
+    }
+
     // Duration-preserving pitch shift via the realtime_pitch engine. Pitch and
     // formant targets are set BEFORE reset() so the control smoothers latch
     // immediately (no 30 ms pitch ramp at the start). process() is equal-length
@@ -684,6 +790,16 @@ private:
     }
 
     static constexpr int kBlock = 4096;
+    // Verbatim transient relocation tuning (sample counts target ~44.1-48 kHz;
+    // attack/crossfade are short enough to be SR-robust without rescaling).
+    static constexpr long kOnsetWin = 512;           // energy window
+    static constexpr long kOnsetHop = 128;           // onset analysis hop
+    static constexpr double kOnsetThreshMult = 4.0;  // flux > mean*this = onset
+    static constexpr long kOnsetMinGap = 1920;       // >= ~40 ms between onsets
+    static constexpr long kReloAttack = 256;         // ~5 ms grafted half-window
+    static constexpr long kReloXfade = 64;           // ~1.3 ms linear edge crossfade
+    static constexpr long kReloBack = 768;           // input-peak search look-back (onset lags the peak)
+    static constexpr long kReloSearch = 1536;        // +/- ~32 ms output-peak search
     RealtimePitchTimeProcessor engine_;
     RealtimePitchTimeProcessor pitch_engine_;
     double latency_anchor_ = 0.0;
