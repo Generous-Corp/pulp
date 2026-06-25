@@ -33,6 +33,14 @@ struct GraphRuntimeNodeSpec {
     std::uint32_t output_ports = 0;
     std::uint32_t event_input_ports = 0;
     std::uint32_t event_output_ports = 0;
+    // When true, the buffer assignment gives this node's output region dedicated
+    // scratch slots that are never recycled by another node, so their contents
+    // persist across blocks. Required for parity with a per-node persistent
+    // output buffer when the node may NOT fully overwrite its outputs each block
+    // (e.g. a hosted plugin that leaves a channel or trailing samples untouched);
+    // slot reuse would otherwise hand it a different node's stale data.
+    // Meaningful only for nodes with output_ports > 0; a no-op otherwise.
+    bool persistent_output = false;
 };
 
 struct GraphRuntimeConnectionSpec {
@@ -51,6 +59,8 @@ struct GraphRuntimeNodePlan {
     std::uint32_t output_ports = 0;
     std::uint32_t event_input_ports = 0;
     std::uint32_t event_output_ports = 0;
+    // Carried from GraphRuntimeNodeSpec::persistent_output; see that field.
+    bool persistent_output = false;
     std::uint32_t first_inbound_connection = 0;
     std::uint32_t inbound_connection_count = 0;
     std::uint32_t first_outbound_connection = 0;
