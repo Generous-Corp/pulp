@@ -15,6 +15,7 @@ target_sources(pulp-format PRIVATE
     src/offline_sample_bounce.cpp
     src/offline_sample_slot_bounce.cpp
     src/graph_runtime_executor.cpp
+    src/graph_runtime_worker_pool.cpp
     src/plugin_state_io.cpp
     src/processor_block_adapter.cpp
     src/processor_node_adapter.cpp

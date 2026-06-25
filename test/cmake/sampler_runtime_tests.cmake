@@ -46,6 +46,10 @@ pulp_add_test_suite(pulp-test-graph-executor-parity
 pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
 # Off-RT levelization (parallel-schedule levels) for static multicore.
 pulp_add_test_suite(pulp-test-graph-runtime-levelization LIBRARIES pulp::graph)
+# Persistent fork-join worker pool for the levelized parallel executor.
+pulp_add_test_suite(pulp-test-graph-runtime-worker-pool
+    SOURCES test_graph_runtime_worker_pool.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
 # Executor routing path moves audio between nodes (chain/diamond/feedback/
 # multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
