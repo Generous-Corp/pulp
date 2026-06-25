@@ -1770,41 +1770,46 @@ void SignalGraph::process(audio::BufferView<float>& output,
             if (anticipation_enabled_.load(std::memory_order_relaxed) &&
                 cg->anticipation_valid &&
                 cg->anticipation_lane.output_channels() ==
-                    cg->anticipation_prefill.size() &&
-                cg->exec_pool.fits(cg->routing_snapshot, frames32)) {
-                const bool size_ok =
-                    frames32 == static_cast<std::uint32_t>(
-                                    cg->anticipation_lane.block_frames());
-                bool hit = false;
-                if (size_ok) {
-                    pulp::audio::BufferView<float> cap(
-                        cg->anticipation_consume_ptrs.data(),
-                        cg->anticipation_consume_ptrs.size(), frames32);
-                    hit = cg->anticipation_lane.consume(cap);
-                }
-                for (const auto& pf : cg->anticipation_prefill) {
-                    float* dst = cg->exec_pool.slot_data(pf.slot);
-                    if (dst == nullptr) continue;
-                    if (hit) {
-                        std::copy_n(cg->anticipation_consume_ptrs[pf.out_channel],
-                                    num_samples, dst);
-                    } else {
-                        std::fill_n(dst, num_samples, 0.0f);
+                    cg->anticipation_prefill.size()) {
+                // STRUCTURALLY TERMINAL once anticipation is valid: the interior's
+                // plugin state is advanced solely by the producer (pump_anticipation),
+                // so the live path must NEVER run the interior — not via a fallback,
+                // and not even when the pool can't fit the block. The fits() check is
+                // INSIDE the branch (not an entry gate) precisely so a future change
+                // that made it false could not let control fall through to the
+                // parallel/legacy paths below, which would run the masked interior
+                // live and double-advance producer-owned state. Worst case here is a
+                // silent block, never a double-render.
+                bool ok = false;
+                if (cg->exec_pool.fits(cg->routing_snapshot, frames32)) {
+                    const bool size_ok =
+                        frames32 == static_cast<std::uint32_t>(
+                                        cg->anticipation_lane.block_frames());
+                    bool hit = false;
+                    if (size_ok) {
+                        pulp::audio::BufferView<float> cap(
+                            cg->anticipation_consume_ptrs.data(),
+                            cg->anticipation_consume_ptrs.size(), frames32);
+                        hit = cg->anticipation_lane.consume(cap);
                     }
+                    for (const auto& pf : cg->anticipation_prefill) {
+                        float* dst = cg->exec_pool.slot_data(pf.slot);
+                        if (dst == nullptr) continue;
+                        if (hit) {
+                            std::copy_n(cg->anticipation_consume_ptrs[pf.out_channel],
+                                        num_samples, dst);
+                        } else {
+                            std::fill_n(dst, num_samples, 0.0f);
+                        }
+                    }
+                    ok = dispatch_routed([&] {
+                        return executor_.process_routed(
+                            block, cg->routing_snapshot, cg->exec_pool,
+                            has_midi ? &cg->routing_midi : nullptr,
+                            has_automation ? &cg->routing_automation : nullptr, {}, {},
+                            {}, {}, cg->anticipation_skip_mask);
+                    });
                 }
-                // Once entered, this branch is TERMINAL: consume() has already
-                // advanced the ring (the producer owns the interior's plugin
-                // state), so we must NOT fall through to a path that re-runs the
-                // interior live — that would double-advance it. A routed failure
-                // (a rare exterior node error) yields a silent block here, not a
-                // fallback re-render.
-                const bool ok = dispatch_routed([&] {
-                    return executor_.process_routed(
-                        block, cg->routing_snapshot, cg->exec_pool,
-                        has_midi ? &cg->routing_midi : nullptr,
-                        has_automation ? &cg->routing_automation : nullptr, {}, {}, {},
-                        {}, cg->anticipation_skip_mask);
-                });
                 if (!ok) {
                     for (std::size_t c = 0; c < output.num_channels(); ++c) {
                         std::memset(output.channel_ptr(c), 0,
@@ -1814,6 +1819,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 return;
             }
 
+            // Reached only when anticipation is NOT valid (the branch above is
+            // terminal whenever it is) — REQUIRED for safety: the parallel and
+            // legacy paths run every node, including any interior the producer
+            // owns, so they must never execute while anticipation is active.
             if (parallel_routing_enabled_.load(std::memory_order_relaxed) &&
                 cg->routing_parallel_valid && worker_pool_.running() &&
                 cg->exec_pool_parallel.fits(cg->routing_snapshot_parallel, frames32)) {

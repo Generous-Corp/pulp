@@ -550,6 +550,14 @@ fn real_main() -> Result<(), ExitCode> {
             cmd::pkg::run_list(json, &mut out).map_err(|e| map_err(&e))
         }
         Command::Search(args) => {
+            if args.tail.iter().any(|a| a == "--refresh") {
+                let mut argv = vec!["search".to_owned()];
+                argv.extend(args.tail);
+                return map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                    &argv,
+                    "pulp search --refresh is implemented by the C++ delegate. Build/install pulp-cpp to refresh the remote registry cache.",
+                ));
+            }
             let parsed = cmd::pkg::parse_search_args(&args.tail).map_err(|e| {
                 eprintln!("{e}");
                 ExitCode::from(2)
@@ -690,8 +698,7 @@ fn real_main() -> Result<(), ExitCode> {
                 }
             })?;
             let talker = cmd::motion::SystemInspector;
-            cmd::motion::dispatch(&sub, &flags, &talker, &mut out)
-                .map_err(|e| map_err(&e))
+            cmd::motion::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
         }
     }
 }

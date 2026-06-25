@@ -38,7 +38,7 @@ PluginInfo gen_info() {
 // test can prove how many times the interior was actually rendered.
 class CountingGen final : public PluginSlot {
 public:
-    CountingGen() : info_(gen_info()) {}
+    explicit CountingGen(int latency = 0) : info_(gen_info()), latency_(latency) {}
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
     bool prepare(double, int) override { return true; }
@@ -62,7 +62,7 @@ public:
     bool is_bypassed() const override { return false; }
     std::vector<uint8_t> save_state() const override { return {}; }
     bool restore_state(const std::vector<uint8_t>&) override { return true; }
-    int latency_samples() const override { return 0; }
+    int latency_samples() const override { return latency_; }
     int tail_samples() const override { return 0; }
     bool has_editor() const override { return false; }
     void* create_editor_view() override { return nullptr; }
@@ -72,6 +72,7 @@ public:
 
 private:
     PluginInfo info_;
+    int latency_ = 0;
     int block_ = 0;
 };
 
@@ -194,4 +195,140 @@ TEST_CASE("SignalGraph anticipation off leaves the canonical render unchanged",
     CHECK(gen->calls.load() == 1);  // interior ran live
     CHECK(blk[0][0] == (10.0f + 0.0f) * 0.5f);
     CHECK(blk[1][0] == (20.0f + 0.0f) * 0.5f);
+}
+
+namespace {
+
+// Drive `g` for `blocks` blocks, pumping the producer first when `anticipated`.
+// Returns each channel's concatenated output.
+std::vector<std::vector<float>> run_session(SignalGraph& g, int blocks,
+                                            bool anticipated, int out_channels) {
+    std::vector<std::vector<float>> seq(static_cast<std::size_t>(out_channels));
+    for (int b = 0; b < blocks; ++b) {
+        if (anticipated) g.pump_anticipation(8);
+        std::vector<std::vector<float>> oc(static_cast<std::size_t>(out_channels),
+                                           std::vector<float>(kFrames, 0.0f));
+        std::vector<float> zi(kFrames, 0.0f);
+        std::vector<float*> op;
+        std::vector<const float*> ip(2, zi.data());
+        for (auto& c : oc) op.push_back(c.data());
+        pulp::audio::BufferView<const float> iv(ip.data(), 2, kFrames);
+        pulp::audio::BufferView<float> ov(op.data(), op.size(), kFrames);
+        g.process(ov, iv, kFrames);
+        for (int c = 0; c < out_channels; ++c)
+            seq[static_cast<std::size_t>(c)].insert(
+                seq[static_cast<std::size_t>(c)].end(), oc[static_cast<std::size_t>(c)].begin(),
+                oc[static_cast<std::size_t>(c)].end());
+    }
+    return seq;
+}
+
+// Build `wire` into both a canonical graph and an anticipated graph, render
+// `blocks`, and assert bit-identical output. `wire` returns nothing; it adds nodes
+// + connections + gains to the passed graph (fresh plugin instances each call).
+template <typename Wire>
+void expect_anticipation_bit_exact(Wire&& wire, int blocks, int out_channels) {
+    SignalGraph oracle;
+    wire(oracle);
+    oracle.set_canonical_executor_routing_enabled(true);
+    REQUIRE(oracle.prepare(kSr, kFrames));
+    const auto expected = run_session(oracle, blocks, /*anticipated=*/false, out_channels);
+
+    SignalGraph antic;
+    wire(antic);
+    antic.set_canonical_executor_routing_enabled(true);
+    antic.set_anticipation_enabled(true);
+    REQUIRE(antic.prepare(kSr, kFrames));
+    const auto got = run_session(antic, blocks, /*anticipated=*/true, out_channels);
+
+    for (int c = 0; c < out_channels; ++c) {
+        const auto cc = static_cast<std::size_t>(c);
+        REQUIRE(got[cc].size() == expected[cc].size());
+        for (std::size_t i = 0; i < got[cc].size(); ++i)
+            REQUIRE(got[cc][i] == expected[cc][i]);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("SignalGraph anticipation: interior internal fan-in stays bit-exact",
+          "[host][anticipation][signal-graph]") {
+    // gen1, gen2 -> gain(2-in summing) -> out. Interior = {gen1, gen2, gain}.
+    expect_anticipation_bit_exact(
+        [](SignalGraph& g) {
+            const auto a = g.add_plugin_node(std::make_unique<CountingGen>(), 0, 2, "G1");
+            const auto b = g.add_plugin_node(std::make_unique<CountingGen>(), 0, 2, "G2");
+            const auto mix = g.add_gain_node("Mix");
+            const auto out = g.add_output_node(2, "Out");
+            for (int c = 0; c < 2; ++c) {
+                REQUIRE(g.connect(a, c, mix, c));
+                REQUIRE(g.connect(b, c, mix, c));
+                REQUIRE(g.connect(mix, c, out, c));
+            }
+            REQUIRE(g.set_node_gain(mix, 0.25f));
+        },
+        10, 2);
+}
+
+TEST_CASE("SignalGraph anticipation: one interior port feeding two sinks stays bit-exact",
+          "[host][anticipation][signal-graph]") {
+    // gen -> gain, gain feeds out1 AND out2 (same source ports, two consumers).
+    expect_anticipation_bit_exact(
+        [](SignalGraph& g) {
+            const auto gen = g.add_plugin_node(std::make_unique<CountingGen>(), 0, 2, "Gen");
+            const auto gain = g.add_gain_node("G");
+            const auto out1 = g.add_output_node(2, "Out1");
+            const auto out2 = g.add_output_node(2, "Out2");
+            for (int c = 0; c < 2; ++c) {
+                REQUIRE(g.connect(gen, c, gain, c));
+                REQUIRE(g.connect(gain, c, out1, c));
+                REQUIRE(g.connect(gain, c, out2, c));
+            }
+            REQUIRE(g.set_node_gain(gain, 0.5f));
+        },
+        10, 2);  // both AudioOutputs sum into the one main output bus
+}
+
+TEST_CASE("SignalGraph anticipation: a latency-reporting interior plugin stays bit-exact",
+          "[host][anticipation][signal-graph]") {
+    // gen(latency 16) -> gain -> out. Exercises per-connection PDC across the
+    // anticipation boundary: the lane must not double-apply the interior latency
+    // that the live splice's delay compensation also accounts for.
+    expect_anticipation_bit_exact(
+        [](SignalGraph& g) {
+            const auto gen =
+                g.add_plugin_node(std::make_unique<CountingGen>(/*latency=*/16), 0, 2, "Gen");
+            const auto gain = g.add_gain_node("G");
+            const auto out = g.add_output_node(2, "Out");
+            for (int c = 0; c < 2; ++c) {
+                REQUIRE(g.connect(gen, c, gain, c));
+                REQUIRE(g.connect(gain, c, out, c));
+            }
+            REQUIRE(g.set_node_gain(gain, 0.5f));
+        },
+        16, 2);
+}
+
+TEST_CASE("SignalGraph anticipation: a short block silences the interior safely",
+          "[host][anticipation][signal-graph]") {
+    // A block smaller than the prepared max can't be served by the fixed-block
+    // lane; the interior is silenced (never re-run live), not garbage/crash.
+    SignalGraph g;
+    build(g);
+    g.set_canonical_executor_routing_enabled(true);
+    g.set_anticipation_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    g.pump_anticipation(8);
+    const int kShort = kFrames / 2;
+    std::vector<float> l(kFrames, 9.0f), r(kFrames, 9.0f);  // pre-fill non-zero
+    std::array<float*, 2> oc{l.data(), r.data()};
+    std::vector<float> zi(kFrames, 0.0f);
+    std::array<const float*, 2> ic{zi.data(), zi.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kShort);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kShort);
+    g.process(ov, iv, kShort);
+    for (int i = 0; i < kShort; ++i) {
+        CHECK(l[static_cast<std::size_t>(i)] == 0.0f);  // interior silenced, not garbage
+        CHECK(r[static_cast<std::size_t>(i)] == 0.0f);
+    }
 }

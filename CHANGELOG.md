@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04940"></a>
+## [0.494.0] - 2026-06-25
+
+- feat(host): add offline SignalGraph render host with online/offline parity ([#4861](https://github.com/danielraffel/pulp/pull/4861))
+- docs(host): align SignalGraph routing contract comments ([#4856](https://github.com/danielraffel/pulp/pull/4856))
+- refactor(host): harden the anticipation splice + prove determinism for harder graphs ([#4855](https://github.com/danielraffel/pulp/pull/4855))
+
+<a id="v04931"></a>
+## [0.493.1] - 2026-06-25
+
+- ci: enforce SignalGraph single-backend governance in gates + CI ([#4848](https://github.com/danielraffel/pulp/pull/4848))
+
 <a id="v04930"></a>
 ## [0.493.0] - 2026-06-25
 
@@ -5160,6 +5172,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.494.0]: https://github.com/danielraffel/pulp/releases/tag/v0.494.0
+[0.493.1]: https://github.com/danielraffel/pulp/releases/tag/v0.493.1
 [0.493.0]: https://github.com/danielraffel/pulp/releases/tag/v0.493.0
 [0.492.0]: https://github.com/danielraffel/pulp/releases/tag/v0.492.0
 [0.491.0]: https://github.com/danielraffel/pulp/releases/tag/v0.491.0

@@ -272,7 +272,15 @@ predictable output, no MIDI.
   "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
   detected — safe only because no transport reaches the routed render today.
   (A masked node must not be an `AudioOutput` or a feedback endpoint; the
-  partition guarantees this and `process_routed` debug-asserts it.)
+  partition guarantees this and `process_routed` debug-asserts it.) (4) The lane
+  uses a FIXED block size (the prepared max). A block of a different size — or a
+  ring underrun — silences the interior for that block (the interior is never
+  re-rendered live, so bit-identical-to-canonical holds only for fixed-size,
+  kept-up blocks); and an interior param/gain edit takes effect at render-ahead
+  time, a lead earlier than a live render. The anticipation branch is
+  STRUCTURALLY terminal once `anticipation_valid` — it never falls through to the
+  parallel/legacy paths (which would run the producer-owned interior live), even
+  if the pool can't fit the block (then: silence).
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
@@ -351,31 +359,45 @@ predictable output, no MIDI.
   own signed canonical manifest; do not treat screenshots, validation reports,
   licenses, or provenance as covered by the node-pack loader signature.
 - **Routing a `SignalGraph` through the canonical executor
-  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** A prepared graph in
-  the eligible subset — nodes only `AudioInput`/`AudioOutput`/`Gain`, connections
-  only plain audio (feedforward or feedback; no MIDI/automation/audio-rate-mod/
-  sidechain) — can be translated by `build_signal_graph_executor_routing()` into a
-  `format::GraphRuntimeSnapshot` + pre-sized `GraphRuntimeBufferPool` and driven
-  via `GraphRuntimeExecutor::process_routed()`, producing output bit-identical to
-  `SignalGraph::process()`'s own walk. Gotchas: gate with
-  `signal_graph_executor_eligible()` first (Plugin/Custom/MIDI/PDC/sidechain/
-  automation stay on the legacy walk); the routing holds the live compiled
-  snapshot alive via `SignalGraph::live_snapshot_handle()` and the Gain bindings
-  read the live `live_gain_atomic()`, so **rebuild the routing after any
-  re-prepare** (the atomics belong to the snapshot it was built from). Eligibility
-  depends on the node-type restriction guaranteeing zero latency — only Plugin
-  nodes add latency, so the executor (which has no per-connection delay
-  compensation yet) stays correct for the subset.
-  `SignalGraph::set_canonical_executor_routing_enabled(true)` requests that the
-  live `process()` callback use this path for eligible graphs (default OFF →
-  legacy walk; ineligible graphs always fall back). The routing snapshot AND its
-  scratch pool are built in
-  `compile_()` and embedded per-snapshot in the published `CompiledGraph` (NOT a
-  shared `SignalGraph` member), so a re-prepare builds them on a fresh snapshot
-  and never resizes a buffer an in-flight audio reader holds — the same
-  RCU/retire discipline the legacy per-node scratch relies on. The long-lived
-  `GraphRuntimeExecutor` is a `SignalGraph` member (prepare never mutates it; the
-  single audio thread is its only writer).
+  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** The eligible subset is
+  described above under "Canonical-executor routing" and enforced by
+  `signal_graph_topology_executor_eligible()` /
+  `signal_graph_executor_eligible()`. The builder fails closed for unsupported
+  Custom nodes, placeholder Plugin nodes, and per-node automation counts above
+  the fixed scratch caps. `build_signal_graph_executor_routing()` translates an
+  eligible prepared graph into a `format::GraphRuntimeSnapshot` + pre-sized
+  `GraphRuntimeBufferPool`; the live `process()` path embeds that snapshot and
+  its scratch pool per `CompiledGraph`, so a re-prepare rebuilds fresh routing
+  state without resizing buffers an in-flight audio reader holds. The routing
+  keeps the live compiled snapshot alive, reads live gain atomics, and invokes
+  the snapshot's live PluginSlots, so **rebuild routing after any re-prepare**
+  and keep this section aligned with `test_signal_graph_executor_parity`.
+
+## Offline graph rendering (`OfflineSignalGraphHost`)
+
+`core/host/offline_signal_graph_host.{hpp,cpp}` renders a prepared `SignalGraph`
+offline by stepping a fixed block size across a frame range through the **public**
+`SignalGraph::process()` — no live audio device, deterministic, allocation-free per
+block (staging + output buffers are sized in `prepare()`). It is a control-thread
+host, not a routing path: it adds no walk of its own and never touches graph
+internals, so it stays clear of the in-flight routing/anticipation churn.
+
+Gotchas:
+- **Block-size silence clamp.** `SignalGraph::process()` zero-fills any block larger
+  than the prepared `max_block_size` (`prepared_max_block_size()`). `prepare()` refuses
+  if the configured `block_frames` exceeds the graph's prepared max — otherwise an
+  offline "one big block" render would silently drop to silence. To render one big
+  block, re-`prepare()` the graph at that block size first.
+- **What "offline equals online" actually means here.** A `SignalGraph` carries no
+  `ProcessMode`/transport into its nodes, so an offline render is NOT distinguishable
+  from an online one by render mode — the only variable is the block partitioning. For
+  deterministic nodes, output is therefore block-size invariant: same input at any
+  block size → bit-exact for pure gain/sum, within ~1e-6 across re-partitioning. A node
+  whose output legitimately depends on block size (the exempt path) is declared
+  EXEMPT as harness-side metadata today (no per-node `ProcessMode` opt-out exists yet);
+  the equivalence harness flags and excludes it rather than failing.
+- Keep the executor/parallel/anticipation opt-ins OFF for partition-invariance
+  fixtures — anticipation in particular is intentionally not block-size invariant.
 
 ## Common tripwires
 

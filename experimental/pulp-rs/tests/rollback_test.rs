@@ -199,6 +199,48 @@ fn kit_and_content_help_flags_fall_through_to_pulp_cpp() {
     }
 }
 
+#[test]
+fn search_refresh_falls_through_to_pulp_cpp() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let stub_path = td.path().join(stub_binary_name());
+    fs::write(&stub_path, stub_script_body()).expect("write stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub_path, perms).unwrap();
+    }
+
+    let cur_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut search_paths: Vec<PathBuf> = std::env::split_paths(&cur_path).collect();
+    search_paths.insert(0, td.path().to_path_buf());
+    let joined = std::env::join_paths(search_paths).expect("paths");
+
+    let output = Command::cargo_bin(BIN_NAME)
+        .expect("binary")
+        .arg("search")
+        .arg("fft")
+        .arg("--refresh")
+        .env("PATH", joined)
+        .env_remove("PULP_USE_CPP")
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .output()
+        .expect("run");
+
+    let code = output.status.code().expect("exit code");
+    assert_eq!(
+        code, 42,
+        "expected stub exit 42 for search --refresh, got {code}"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert!(
+        stdout.contains("search") && stdout.contains("fft") && stdout.contains("--refresh"),
+        "stub should echo delegated search --refresh argv; got: {stdout:?}"
+    );
+}
+
 #[cfg(unix)]
 fn stub_binary_name() -> &'static str {
     "pulp-cpp"

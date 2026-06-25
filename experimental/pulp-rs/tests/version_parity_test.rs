@@ -1,7 +1,7 @@
-// version_parity_test.rs — `pulp-rs version --json` against captured
-// expected.json. The C++ `pulp version` has no `--json` flag today, so
-// the expected.json files here are the Rust prototype's own pinned
-// shape. That's still a parity contract: any accidental change to the
+// version_parity_test.rs — `pulp version --json` against captured
+// expected.json. The C++ rollback command has no `--json` flag today, so
+// the expected.json files here pin the Rust user-facing shape. That's
+// still a parity contract: any accidental change to the
 // writer will break the test and force a review.
 //
 // We additionally assert that the per-field SCHEMA matches `doctor

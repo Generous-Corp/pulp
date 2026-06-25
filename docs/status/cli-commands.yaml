@@ -534,6 +534,10 @@ commands:
   - name: version
     status: usable
     summary: Show, bump, or check version consistency across Pulp framework, plugin, changelog, and generated metadata surfaces.
+    args:
+      - name: --json
+        kind: flag
+        description: Emit the machine-readable version snapshot for the default `pulp version` view, including CLI, plugin, plugin_min_cli, and plugin_json_path fields.
     subcommands:
       - name: bump
         summary: Increment the framework version, or plugin version when --plugin is set

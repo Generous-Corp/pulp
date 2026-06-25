@@ -1723,12 +1723,15 @@ Show, bump, or check version consistency across the framework, plugin, changelog
 
 ```bash
 pulp version                  # Show current SDK and project versions
+pulp version --json           # Emit a machine-readable version snapshot
 pulp version bump patch       # Increment patch version
 pulp version bump minor       # Increment minor version
 pulp version bump major --plugin  # Bump plugin version (pulp_add_plugin VERSION)
 pulp version check            # Verify version consistency
 pulp version check --with-bump-check  # Also run the PR version-bump gate report
 ```
+
+The Rust user-facing CLI also supports `--json` on the default `version` view. The JSON object reports the running CLI version, Claude plugin version, plugin minimum CLI version, and discovered plugin manifest path using the same semver-compatible field shape as `pulp doctor --versions --json`.
 
 The `bump` subcommand updates `CMakeLists.txt project(VERSION)` and adds a CHANGELOG.md entry. The SDK version constant is derived from CMake via `configure_file`, so a rebuild picks up the change automatically. Use `--plugin` to bump the `pulp_add_plugin(... VERSION ...)` line instead.
 
