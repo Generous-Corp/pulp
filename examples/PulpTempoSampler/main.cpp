@@ -36,7 +36,7 @@ std::string g_loop_path;
 
 int main(int argc, char** argv) {
     using namespace pulp;
-    runtime::log_info("PulpTempoSampler Standalone v1.0.0");
+    runtime::log_info("PulpTempoSampler Standalone v{}", examples::kPulpTempoSamplerVersion);
 
     std::string loop_path;
     std::string screenshot_path;

@@ -1,5 +1,6 @@
 # PulpTempoSampler — tempo-matching sampler built on the offline OfflineStretch
-# engine. All formats (AU / VST3 / CLAP / Standalone) via pulp_add_plugin.
+# engine. Formats are CLAP, Standalone, VST3, and AU on Apple via
+# pulp_add_plugin.
 
 set(PULP_TEMPO_FORMATS CLAP Standalone VST3)
 if(APPLE)
@@ -39,5 +40,7 @@ if(PULP_BUILD_TESTS)
         target_link_libraries(pulp-tempo-sampler-test PRIVATE pulp::view)
     endif()
     target_include_directories(pulp-tempo-sampler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(pulp-tempo-sampler-test
+        PRIVATE PULP_TEMPO_SAMPLER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     catch_discover_tests(pulp-tempo-sampler-test)
 endif()
