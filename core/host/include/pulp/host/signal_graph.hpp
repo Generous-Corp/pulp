@@ -677,6 +677,22 @@ private:
         // themselves live in `plugins` above (same cg lifetime).
         std::vector<PluginBindingContext> routing_plugin_ctx;
         PluginRoutingScratch routing_plugin_scratch;
+        // Per-node MIDI buffers for the routed path's event edges, owned
+        // per-snapshot like exec_pool. Empty (node_count 0) for graphs with no
+        // MIDI. The routed dispatch bridges the SignalGraph MIDI mailboxes to
+        // these buffers around process_routed: a MidiInput node's mailbox is read
+        // into its scratch output before the walk, and a MidiOutput node's
+        // gathered scratch input is published to its mailbox after. `routing_midi_io`
+        // lists those system nodes by (dense plan index, NodeId) so the bridge
+        // avoids a per-block NodeId lookup.
+        format::GraphRuntimeMidiScratch routing_midi;
+        // `pending_seq` is audio-thread scratch: the mailbox sequence a MidiInput
+        // would consume this block, captured during the ingress pre-fill and
+        // committed to midi_input_sequence_seen only after the routed dispatch
+        // succeeds (so a fallback to the legacy walk re-consumes the same block).
+        struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
+        std::vector<RoutedMidiNode> routing_midi_inputs;
+        std::vector<RoutedMidiNode> routing_midi_outputs;
     };
 
     std::vector<GraphNode> nodes_;

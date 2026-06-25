@@ -1176,6 +1176,31 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 static_cast<std::uint32_t>(max_block_size),
                 cg->routing_snapshot.buffer_assignment().connection_delay_samples);
         }
+        // Per-snapshot MIDI scratch + the MidiInput/MidiOutput node index lists
+        // the routed dispatch bridges to the mailboxes. Built only when the
+        // routed plan carries MIDI nodes, so audio-only graphs allocate none.
+        cg->routing_midi_inputs.clear();
+        cg->routing_midi_outputs.clear();
+        if (cg->routing_valid) {
+            const auto& plan = cg->routing_snapshot.plan();
+            bool plan_has_midi = false;
+            for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+                const auto kind = plan.nodes[i].kind;
+                if (kind == graph::GraphRuntimeNodeKind::MidiInput) {
+                    cg->routing_midi_inputs.push_back({i, plan.nodes[i].id});
+                    plan_has_midi = true;
+                } else if (kind == graph::GraphRuntimeNodeKind::MidiOutput) {
+                    cg->routing_midi_outputs.push_back({i, plan.nodes[i].id});
+                    plan_has_midi = true;
+                } else if (plan.nodes[i].event_input_ports > 0 ||
+                           plan.nodes[i].event_output_ports > 0) {
+                    plan_has_midi = true;  // a plugin carrying MIDI edges
+                }
+            }
+            if (plan_has_midi) {
+                cg->routing_valid = cg->routing_midi.reset(plan.node_count());
+            }
+        }
     }
     return cg;
 }
@@ -1492,8 +1517,66 @@ void SignalGraph::process(audio::BufferView<float>& output,
             block.sample_rate = cg->sample_rate;
             block.frame_count = static_cast<std::uint32_t>(num_samples);
             block.buses = &buses;
+
+            const bool has_midi = cg->routing_midi.node_count() > 0;
+            // Bridge MIDI ingress: copy each MidiInput node's freshly-injected
+            // mailbox snapshot into its routed MIDI-output buffer (the same
+            // unseen-sequence dedup the legacy walk applies), so the executor's
+            // MIDI gather sees it. The executor never touches a node's MIDI
+            // output, so this pre-fill survives the walk. The consumed sequence
+            // is captured in `pending_seq` and committed to
+            // midi_input_sequence_seen only after the dispatch succeeds — a
+            // fallback to the legacy walk must re-consume the same block.
+            if (has_midi) {
+                for (auto& mi : cg->routing_midi_inputs) {
+                    mi.pending_seq = 0;
+                    midi::MidiBuffer* out_buf = cg->routing_midi.out(mi.plan_index);
+                    if (out_buf == nullptr) continue;
+                    clear_midi_block(*out_buf);
+                    cg->routing_midi.set_out_incomplete(mi.plan_index, false);
+                    auto rt_it = cg->runtime.find(mi.id);
+                    if (rt_it == cg->runtime.end() || !rt_it->second.midi_input_mailbox) {
+                        continue;
+                    }
+                    const auto& injected = rt_it->second.midi_input_mailbox->published.read();
+                    if (injected.sequence != 0 &&
+                        injected.sequence != rt_it->second.midi_input_sequence_seen) {
+                        cg->routing_midi.set_out_incomplete(
+                            mi.plan_index, !injected.copy_to_midi(*out_buf));
+                        mi.pending_seq = injected.sequence;
+                    }
+                }
+            }
+
             if (block.validate() &&
-                executor_.process_routed(block, cg->routing_snapshot, cg->exec_pool).ok()) {
+                executor_.process_routed(
+                    block, cg->routing_snapshot, cg->exec_pool,
+                    has_midi ? &cg->routing_midi : nullptr).ok()) {
+                if (has_midi) {
+                    // Commit the consumed mailbox sequences now that routing
+                    // succeeded.
+                    for (const auto& mi : cg->routing_midi_inputs) {
+                        if (mi.pending_seq == 0) continue;
+                        auto rt_it = cg->runtime.find(mi.id);
+                        if (rt_it != cg->runtime.end()) {
+                            rt_it->second.midi_input_sequence_seen = mi.pending_seq;
+                        }
+                    }
+                    // Bridge MIDI egress: publish each MidiOutput node's gathered
+                    // routed MIDI-input buffer to its mailbox for extract_midi(),
+                    // carrying the same incompleteness the legacy walk reports.
+                    for (const auto& mo : cg->routing_midi_outputs) {
+                        midi::MidiBuffer* in_buf = cg->routing_midi.in(mo.plan_index);
+                        auto rt_it = cg->runtime.find(mo.id);
+                        if (in_buf == nullptr || rt_it == cg->runtime.end() ||
+                            !rt_it->second.midi_output_mailbox) {
+                            continue;
+                        }
+                        cg->midi_publish_scratch.set_from_midi(
+                            *in_buf, 0, cg->routing_midi.in_incomplete(mo.plan_index));
+                        rt_it->second.midi_output_mailbox->write(cg->midi_publish_scratch);
+                    }
+                }
                 return;
             }
         }

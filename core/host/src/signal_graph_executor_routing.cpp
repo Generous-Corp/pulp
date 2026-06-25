@@ -92,9 +92,21 @@ bool plugin_binding(fmt::ProcessBlock&,
         fmt::ProcessBusBufferSet<float>{std::span(output_buses)},
     };
 
-    pctx->scratch->midi_out.clear();
-    pctx->slot->process(buffers, pctx->scratch->midi_in, pctx->scratch->midi_out,
-                        pctx->scratch->param_events, num_samples);
+    // Use the executor's per-node MIDI buffers when the routed call supplies
+    // them (a MIDI graph): node_midi_in carries the events gathered from this
+    // plugin's inbound MIDI edges, and node_midi_out is the buffer downstream
+    // nodes gather from. Fall back to the empty shared scratch for audio-only
+    // graphs (no MIDI routing). Clear the output fully before the plugin fills
+    // it, matching SignalGraph's per-node clear.
+    midi::MidiBuffer& midi_in =
+        ctx.node_midi_in != nullptr ? *ctx.node_midi_in : pctx->scratch->midi_in;
+    midi::MidiBuffer& midi_out =
+        ctx.node_midi_out != nullptr ? *ctx.node_midi_out : pctx->scratch->midi_out;
+    midi_out.clear();
+    midi_out.clear_sysex();
+    if (auto* ump = midi_out.ump()) ump->clear();
+    pctx->slot->process(buffers, midi_in, midi_out, pctx->scratch->param_events,
+                        num_samples);
     return true;
 }
 
@@ -102,6 +114,8 @@ gr::GraphRuntimeNodeKind map_kind(NodeType type) noexcept {
     switch (type) {
         case NodeType::AudioInput: return gr::GraphRuntimeNodeKind::AudioInput;
         case NodeType::AudioOutput: return gr::GraphRuntimeNodeKind::AudioOutput;
+        case NodeType::MidiInput: return gr::GraphRuntimeNodeKind::MidiInput;
+        case NodeType::MidiOutput: return gr::GraphRuntimeNodeKind::MidiOutput;
         default: return gr::GraphRuntimeNodeKind::Processor;  // Gain / Plugin
     }
 }
@@ -111,6 +125,11 @@ bool node_eligible(const GraphNode& node) noexcept {
         case NodeType::AudioInput:
         case NodeType::AudioOutput:
         case NodeType::Gain:
+        // MidiInput / MidiOutput carry no audio and run as no-op nodes on the
+        // routed path; the host bridges their mailboxes around process_routed,
+        // and the executor's MIDI gather routes events between them and plugins.
+        case NodeType::MidiInput:
+        case NodeType::MidiOutput:
             return true;
         case NodeType::Plugin:
             // A Plugin node only routes bit-exactly when its slot is live (the
@@ -126,14 +145,15 @@ bool node_eligible(const GraphNode& node) noexcept {
 }
 
 bool connection_eligible(const Connection& c) noexcept {
-    // Audio edges only. Feedback is fine (the executor handles one-block
+    // Audio and MIDI edges. Feedback is fine (the executor handles one-block
     // feedback). Sidechain is fine: SignalGraph routes a sidechain edge as a
     // plain audio edge into a higher input port of the destination plugin (the
     // plugin's input_ports count already includes its sidechain ports, and the
     // single concatenated input bus carries them), and it participates in PDC
-    // exactly like any audio edge — all of which the routed gather reproduces.
-    // MIDI / automation / audio-rate-mod still keep the legacy walk.
-    return !c.midi && !c.automation && !c.audio_rate_modulation;
+    // exactly like any audio edge. MIDI edges are carried as event connections
+    // and routed by the executor's MIDI gather. Automation / audio-rate-mod
+    // still keep the legacy walk.
+    return !c.automation && !c.audio_rate_modulation;
 }
 
 } // namespace
@@ -173,6 +193,23 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     }
     plugin_ctx.reserve(plugin_count);
 
+    // Whether this graph carries any MIDI. Only then do nodes declare event
+    // ports (one in + one out, port 0 — connect_midi routes the whole per-node
+    // MIDI stream on port 0), so an audio-only graph's plan is byte-identical to
+    // before MIDI support and never inflates the total-port budget.
+    bool has_midi = false;
+    for (const auto& node : nodes) {
+        if (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput) {
+            has_midi = true;
+            break;
+        }
+    }
+    if (!has_midi) {
+        for (const auto& c : connections) {
+            if (c.midi) { has_midi = true; break; }
+        }
+    }
+
     // Node specs in nodes() order; the plan resolves connections by NodeId, so
     // bindings just need to match plan.nodes order (== spec order). Plugin output
     // regions are pinned persistent so a non-full-writing plugin keeps its stale
@@ -186,6 +223,10 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             static_cast<std::uint32_t>(std::max(0, node.num_input_ports)),
             static_cast<std::uint32_t>(std::max(0, node.num_output_ports)),
         };
+        if (has_midi) {
+            spec.event_input_ports = 1;
+            spec.event_output_ports = 1;
+        }
         spec.persistent_output = node.type == NodeType::Plugin;
         // Carry the node's reported latency so the buffer assignment can derive
         // per-connection delay compensation. Resolve it from the SAME slot the
@@ -203,13 +244,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
 
     // Connection specs in connections() order, so a dest port's inbound edges
     // are summed in the SAME order SignalGraph accumulates them (float add is
-    // non-associative). Feedback flag carried through.
+    // non-associative). Feedback flag carried through; a MIDI edge becomes an
+    // event connection the executor routes via its MIDI gather.
     std::vector<gr::GraphRuntimeConnectionSpec> conn_specs;
     conn_specs.reserve(connections.size());
     for (const auto& c : connections) {
         conn_specs.push_back(gr::GraphRuntimeConnectionSpec{
             c.source_node, c.source_port, c.dest_node, c.dest_port,
-            c.feedback, /*event=*/false,
+            c.feedback, /*event=*/c.midi,
         });
     }
 
@@ -244,7 +286,11 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             plugin_ctx.push_back(PluginBindingContext{slot, &scratch});
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, plugin_binding, &plugin_ctx.back(), /*required=*/true});
-        } else {  // AudioInput / AudioOutput — executor kind dispatch
+        } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null
+            // binding: AudioInput/AudioOutput are executor kind dispatch, and
+            // MidiInput/MidiOutput run as no-op nodes (the executor's MIDI gather
+            // fills a MidiOutput's input; the host pre-fills a MidiInput's output
+            // and drains a MidiOutput's input around process_routed).
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, nullptr, nullptr, /*required=*/false});
         }

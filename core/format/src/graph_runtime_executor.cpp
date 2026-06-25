@@ -116,6 +116,81 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
     }
 }
 
+// Clear a MIDI buffer's events, sysex, and attached UMP — the full reset the
+// host walk applies before gathering a node's inbound MIDI.
+void clear_routed_midi(midi::MidiBuffer& block) noexcept {
+    block.clear();
+    block.clear_sysex();
+    if (auto* ump = block.ump()) ump->clear();
+}
+
+// True if a buffer dropped any event / sysex / UMP message (capacity limit hit),
+// matching the host walk's drop check.
+bool routed_midi_has_drops(const midi::MidiBuffer& block) noexcept {
+    if (block.dropped_event_count() > 0 || block.dropped_sysex_count() > 0) return true;
+    const auto* ump = block.ump();
+    return ump != nullptr && ump->dropped_event_count() > 0;
+}
+
+// Append every event / sysex / UMP message from `src` to `dst`, the same
+// whole-buffer copy the host walk uses to gather an inbound MIDI edge. Returns
+// false if `src` already carried a drop or an add() dropped here (the
+// incompleteness the host propagates downstream). RT-safe when both buffers are
+// reserved (add() respects the realtime capacity limit).
+bool copy_routed_midi(const midi::MidiBuffer& src, midi::MidiBuffer& dst) noexcept {
+    bool copied_all = !routed_midi_has_drops(src);
+    for (const auto& ev : src) {
+        if (!dst.add(ev)) copied_all = false;
+    }
+    for (const auto& sx : src.sysex()) {
+        if (sx.data.empty()) {
+            if (!dst.add_sysex({}, sx.sample_offset, sx.timestamp)) copied_all = false;
+        } else if (!dst.add_sysex_copy(sx.data.data(), sx.data.size(), sx.sample_offset,
+                                       sx.timestamp)) {
+            copied_all = false;
+        }
+    }
+    const auto* src_ump = src.ump();
+    auto* dst_ump = dst.ump();
+    if (src_ump != nullptr && dst_ump != nullptr) {
+        for (const auto& ev : *src_ump) {
+            if (!dst_ump->add(ev)) copied_all = false;
+        }
+    } else if (src_ump != nullptr && !src_ump->empty()) {
+        copied_all = false;
+    }
+    return copied_all;
+}
+
+// Clear this node's gathered MIDI input, then append every inbound event
+// connection's source MIDI output into it (whole-buffer copy, summed in inbound
+// order). Topological order guarantees each source's output is final this block.
+// The node's MIDI output is left untouched — a MIDI-emitting binding fills it,
+// and a MidiInput system node's output is supplied by the host before the walk.
+void gather_node_midi(const graph::GraphRuntimePlan& plan,
+                      GraphRuntimeMidiScratch& midi,
+                      const graph::GraphRuntimeNodePlan& node,
+                      std::uint32_t node_index) noexcept {
+    midi::MidiBuffer* in = midi.in(node_index);
+    if (in == nullptr) return;
+    clear_routed_midi(*in);
+    bool incomplete = false;
+    for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+        const auto conn_index =
+            plan.inbound_connection_indices[node.first_inbound_connection + c];
+        const auto& conn = plan.connections[conn_index];
+        if (!conn.event) continue;
+        const midi::MidiBuffer* src = midi.out(conn.source_index);
+        if (src == nullptr) continue;
+        // A source whose output was incomplete, or a copy that drops here,
+        // marks this node's input incomplete (matching the host walk's
+        // node-to-node incompleteness propagation).
+        if (midi.out_incomplete(conn.source_index)) incomplete = true;
+        if (!copy_routed_midi(*src, *in)) incomplete = true;
+    }
+    midi.set_in_incomplete(node_index, incomplete);
+}
+
 // After all nodes run, capture each feedback edge's current source output into
 // its previous-block slot for the next block (the source's output slot is final
 // once the block's walk completes). One-block delay, matching SignalGraph.
@@ -170,7 +245,47 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
     }
 }
 
+// Fixed realtime MIDI capacities for the routed per-node scratch buffers. Match
+// the host graph's per-node MIDI block storage so the routed path never drops an
+// event the legacy walk would have kept.
+constexpr std::size_t kRoutedMidiEventCapacity = 1024;
+constexpr std::size_t kRoutedMidiSysexCapacity = 128;
+constexpr std::size_t kRoutedMidiSysexPayloadCapacity = 4096;
+
 } // namespace
+
+bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count) {
+    clear();
+    try {
+        slots_.reserve(node_count);
+        for (std::uint32_t i = 0; i < node_count; ++i) {
+            auto slot = std::make_unique<Slot>();
+            slot->in_buffer.reserve(kRoutedMidiEventCapacity, kRoutedMidiSysexCapacity,
+                                    kRoutedMidiSysexPayloadCapacity);
+            slot->in_buffer.set_realtime_capacity_limit(true);
+            slot->in_ump.reserve(kRoutedMidiEventCapacity);
+            slot->in_ump.set_realtime_capacity_limit(true);
+            slot->in_buffer.attach_ump(&slot->in_ump);
+            slot->out_buffer.reserve(kRoutedMidiEventCapacity, kRoutedMidiSysexCapacity,
+                                     kRoutedMidiSysexPayloadCapacity);
+            slot->out_buffer.set_realtime_capacity_limit(true);
+            slot->out_ump.reserve(kRoutedMidiEventCapacity);
+            slot->out_ump.set_realtime_capacity_limit(true);
+            slot->out_buffer.attach_ump(&slot->out_ump);
+            slots_.push_back(std::move(slot));
+        }
+    } catch (...) {
+        clear();
+        return false;
+    }
+    node_count_ = node_count;
+    return true;
+}
+
+void GraphRuntimeMidiScratch::clear() noexcept {
+    slots_.clear();
+    node_count_ = 0;
+}
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames) {
     return reset(slot_count, max_frames, {});
@@ -385,6 +500,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     ProcessBlock& block,
     const GraphRuntimeSnapshot& snapshot,
     GraphRuntimeBufferPool& pool,
+    GraphRuntimeMidiScratch* midi,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
@@ -398,6 +514,14 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     const auto frames = block.frame_count;
 
     if (!pool.fits(snapshot, frames)) {
+        GraphRuntimeExecutorResult fail;
+        fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
+        return fail;
+    }
+    // A MIDI scratch, when supplied, must cover every node so the gather can
+    // index any node's in/out buffer; an undersized one fails closed rather than
+    // routing MIDI past the end of the scratch.
+    if (midi != nullptr && !midi->fits(plan.node_count())) {
         GraphRuntimeExecutorResult fail;
         fail.error = GraphRuntimeExecutorErrorCode::BufferPoolTooSmall;
         return fail;
@@ -438,6 +562,9 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         }
 
         gather_node_inputs(plan, assignment, pool, node, slots, frames);
+        if (midi != nullptr) {
+            gather_node_midi(plan, *midi, node, node_index);
+        }
 
         if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
             node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
@@ -480,11 +607,24 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
                 in_ptrs.data(), node.input_ports, frames);
             context.node_outputs = audio::BufferView<float>(
                 out_ptrs.data(), node.output_ports, frames);
+            if (midi != nullptr) {
+                context.node_midi_in = midi->in(node_index);
+                context.node_midi_out = midi->out(node_index);
+            }
             if (!binding.process(block, context, binding.user_data)) {
                 result.error = GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
                 result.failed_node_index = node_index;
                 node_failures_.fetch_add(1, std::memory_order_relaxed);
                 return result;
+            }
+            // A MIDI-emitting binding's output is incomplete if its gathered
+            // input was, or if the binding itself dropped output events —
+            // matching the host walk's per-node midi_out_incomplete.
+            if (midi != nullptr && context.node_midi_out != nullptr) {
+                midi->set_out_incomplete(
+                    node_index,
+                    midi->in_incomplete(node_index) ||
+                        routed_midi_has_drops(*context.node_midi_out));
             }
         }
 
