@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04790"></a>
+## [0.479.0] - 2026-06-25
+
+- feat(host): route sparse parameter automation on the canonical executor path ([#4791](https://github.com/danielraffel/pulp/pull/4791))
+- test(format): generated DSP reaches a graph through ProcessorNode (one path) ([#4783](https://github.com/danielraffel/pulp/pull/4783))
+
 <a id="v04780"></a>
 ## [0.478.0] - 2026-06-25
 
@@ -5073,6 +5079,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.479.0]: https://github.com/danielraffel/pulp/releases/tag/v0.479.0
 [0.478.0]: https://github.com/danielraffel/pulp/releases/tag/v0.478.0
 [0.477.0]: https://github.com/danielraffel/pulp/releases/tag/v0.477.0
 [0.476.0]: https://github.com/danielraffel/pulp/releases/tag/v0.476.0
