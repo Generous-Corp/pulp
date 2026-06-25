@@ -99,11 +99,10 @@ TEST_CASE("CanvasWidget: clear command fills background", "[canvas_widget]") {
     REQUIRE(rc.commands().size() > 0);
 }
 
-// Issue-897 P1 follow-up: CanvasWidget::paint() must snapshot the inbound
-// device matrix at entry so JS-driven setTransform() composes onto the
-// parent View transform instead of overwriting it. Without this baseline
-// the SkiaCanvas backend's setTransform would wipe the parent translation
-// applied by View::paint_all.
+// CanvasWidget::paint() must snapshot the inbound device matrix at entry so
+// JS-driven setTransform() composes onto the parent View transform instead of
+// overwriting it. Without this baseline the SkiaCanvas backend's setTransform
+// would wipe the parent translation applied by View::paint_all.
 TEST_CASE("CanvasWidget::paint captures paint baseline transform at entry",
           "[canvas_widget][issue-897]") {
     RecordingCanvas rc;
@@ -139,7 +138,7 @@ TEST_CASE("CanvasWidget::paint baseline capture is idempotent and ordered",
     REQUIRE_FALSE(rc.commands().empty());
 }
 
-// ── pulp #929 — Canvas widget transparent default + clearRect semantics ──
+// ── Canvas widget transparent default + clearRect semantics ────────────────
 
 // Empty-command paint must not introduce a full-bounds fill that would
 // hide the parent's painted surface. Asserting against RecordingCanvas
@@ -172,8 +171,8 @@ TEST_CASE("CanvasWidget::paint with no JS draw commands does not pre-fill bounds
 
 // JS-issued clearRect should produce a single clear_rect command, not a
 // SrcOver fill that is a no-op. RecordingCanvas captures the dedicated
-// DrawCommand::Type::clear_rect introduced in pulp #929 so this is a
-// straightforward identity assertion.
+// DrawCommand::Type::clear_rect, giving this a straightforward identity
+// assertion.
 TEST_CASE("CanvasWidget::paint translates clearRect into a real clear_rect command",
           "[canvas_widget][issue-929]") {
     RecordingCanvas rc;
@@ -208,8 +207,8 @@ TEST_CASE("CanvasWidget::paint translates clearRect into a real clear_rect comma
     }
 }
 
-// pulp #949 — backend-independent guard for the FilterBank regression. A
-// parent View with a background paints its bg, then a CanvasWidget child
+// Backend-independent guard for the FilterBank regression. A parent View with a
+// background paints its bg, then a CanvasWidget child
 // with a clearRect+fillRect pair runs. The recorded command sequence must
 // be:
 //   1. parent's bg fill_rect (covering parent's local bounds)
@@ -277,8 +276,8 @@ TEST_CASE("CanvasWidget::paint_all under parent View emits correct command order
 
 #ifdef PULP_HAS_SKIA
 
-// Pixel + sample_pixel moved to the shared canvas_pixel_probe.hpp in the
-// pulp #2462 fix (was duplicated here and in test_canvas2d_shim.cpp).
+// Pixel + sample_pixel live in the shared canvas_pixel_probe.hpp instead of
+// being duplicated here and in test_canvas2d_shim.cpp.
 #include "canvas_pixel_probe.hpp"
 using pulp::canvas_test::Pixel;
 using pulp::canvas_test::sample_pixel;
@@ -348,11 +347,11 @@ TEST_CASE("CanvasWidget partial fillRect leaves untouched pixels transparent",
 
 TEST_CASE("CanvasWidget clearRect zeros its own backing store, not the parent",
           "[canvas_widget][skia][issue-929][issue-1368]") {
-    // pulp #1368 contract update: each CanvasWidget paints into its own
-    // save_layer-backed offscreen so JS-driven clearRect (kClear blend)
-    // can only zero THIS canvas's backing store. The parent surface is
-    // untouched by the clear; on layer restore the empty layer composites
-    // back as a no-op SrcOver and the parent pixels survive.
+    // Each CanvasWidget paints into its own save_layer-backed offscreen so
+    // JS-driven clearRect (kClear blend) can only zero THIS canvas's backing
+    // store. The parent surface is untouched by the clear; on layer restore the
+    // empty layer composites back as a no-op SrcOver and the parent pixels
+    // survive.
     //
     // Pre-#1368, clearRect was emitted directly on the inbound parent
     // surface, so it nuked sibling-painted pixels. The check we now want:
@@ -392,8 +391,8 @@ TEST_CASE("CanvasWidget clearRect zeros its own backing store, not the parent",
     REQUIRE(px.b == 255);
 }
 
-// pulp #949 — FilterBank-style repro: a parent View paints a dark navy
-// background, then a CanvasWidget child paints into the same surface using
+// FilterBank-style repro: a parent View paints a dark navy background, then a
+// CanvasWidget child paints into the same surface using
 // the v0.57.0 sequence (clearRect → fillStyle = gradient → fillRect →
 // path-based fillPath). The regression Spectr saw was that the canvas
 // content never appeared on top of the parent's bg even though 1600+
@@ -454,9 +453,9 @@ TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
     REQUIRE(px.b == 255);
 }
 
-// pulp #949 — same scenario but the parent has overflow:visible and an
-// additional sibling. Verifies the canvas widget's draws still land on
-// top, and the parent's bg outside the child's bounds is preserved.
+// Same scenario but the parent has overflow:visible and an additional sibling.
+// Verifies the canvas widget's draws still land on top, and the parent's bg
+// outside the child's bounds is preserved.
 TEST_CASE("CanvasWidget draws on top of sibling-painted parent surface",
           "[canvas_widget][skia][issue-949]") {
     SkImageInfo info = SkImageInfo::Make(80, 60, kRGBA_8888_SkColorType,
@@ -512,8 +511,8 @@ TEST_CASE("CanvasWidget draws on top of sibling-painted parent surface",
 
 #endif  // PULP_HAS_SKIA
 
-// pulp #964 / #967 — Spectr's FilterBank scenario, asserted at the
-// command-stream level so the test runs without Skia.
+// Spectr's FilterBank scenario, asserted at the command-stream level so the
+// test runs without Skia.
 //
 // A parent View has a green setBackground() applied. It contains two
 // empty CanvasWidget children that occupy the full bounds and have
@@ -582,8 +581,8 @@ TEST_CASE("FilterBank repro: empty canvas children don't paint opaque white",
     REQUIRE(full_bounds_fills == 1);
 }
 
-// pulp #967 — A bare View with no setBackground() must emit zero
-// fill_rect commands of any kind. HTML <div> default is transparent.
+// A bare View with no setBackground() must emit zero fill_rect commands of any
+// kind. HTML <div> default is transparent.
 TEST_CASE("Bare View with no setBackground emits no background fill",
           "[view][issue-967]") {
     RecordingCanvas rc;
@@ -601,7 +600,7 @@ TEST_CASE("Bare View with no setBackground emits no background fill",
     REQUIRE(fill_rect_count == 0);
 }
 
-// ── pulp #968 — canvasRect must honour active fillStyle when no color arg ──
+// ── canvasRect must honour active fillStyle when no color arg ──────────────
 //
 // The Canvas2D `ctx.fillRect(x,y,w,h)` API has no color argument — it paints
 // with whatever `ctx.fillStyle` (a CSS color OR a CanvasGradient) was set
@@ -816,7 +815,7 @@ TEST_CASE("CanvasWidget stroke_rect with use_active_style preserves prior set_st
     REQUIRE(is_green);
 }
 
-// ── pulp #964 — `ctx.fillRect()` from web-compat-canvas.js must reach the bridge ──
+// ── `ctx.fillRect()` from web-compat-canvas.js must reach the bridge ───────
 //
 // Pre-#964, `core/view/js/web-compat-canvas.js` defined
 //   CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
@@ -916,8 +915,8 @@ TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the brid
 
     auto* cw = dynamic_cast<CanvasWidget*>(bridge.widget("cv"));
     REQUIRE(cw != nullptr);
-    // Pre-fix the shim's fillRect produces zero commands. The fix wires
-    // canvasFillRect at the bridge so the call is actually recorded.
+    // The shim's fillRect must wire through canvasFillRect at the bridge so
+    // the call is actually recorded.
     REQUIRE(cw->command_count() >= 1);
 
     RecordingCanvas rc;
@@ -941,7 +940,7 @@ TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the brid
     REQUIRE(saw_green_full_fill);
 }
 
-// ── pulp #1368 — CanvasWidget::paint balances save/restore across frames ──
+// ── CanvasWidget::paint balances save/restore across frames ────────────────
 //
 // Spectr's filterbank uses two `<canvas>` widgets in identical configuration.
 // One paints visibly, the other doesn't. The visible one (overlay sibling)
@@ -1068,7 +1067,7 @@ TEST_CASE("CanvasWidget::paint nested under a parent save still balances",
     REQUIRE(rc.save_count() == depth_at_root);
 }
 
-// ── pulp #1368 — per-canvas backing-store isolation via save_layer ─────
+// ── Per-canvas backing-store isolation via save_layer ──────────────────────
 //
 // Root cause beyond the save/restore depth defense above: JS-driven
 // `clearRect` lowers to a kClear blend (SkBlendMode::kClear /
@@ -1139,9 +1138,8 @@ TEST_CASE("CanvasWidget::paint skips save_layer when bounds are degenerate",
 
     cw.paint(rc);
 
-    // No layer push, no draws, no saves. Pre-fix this also held; the
-    // assertion now also holds post-fix because of the degenerate-bounds
-    // guard in CanvasWidget::paint.
+    // No layer push, no draws, no saves: degenerate bounds keep
+    // CanvasWidget::paint from emitting a save layer.
     int save_count_in_stream = 0;
     for (const auto& cmd : rc.commands()) {
         if (cmd.type == DrawCommand::Type::save) ++save_count_in_stream;
@@ -1220,12 +1218,11 @@ TEST_CASE("Two sibling CanvasWidgets each open their own backing store",
 
 #ifdef PULP_HAS_SKIA
 
-// pulp #1368 — visual sibling isolation. Two CanvasWidgets paint
-// against a shared parent surface; sibling-2 starts its frame with
-// clearRect over its full bounds. Pre-fix, the clearRect zeroed the
-// shared parent texels and erased sibling-1's pixels. Post-fix, each
-// canvas paints into its own save_layer-backed offscreen so kClear
-// only affects the layer and sibling-1's draws survive.
+// Visual sibling isolation. Two CanvasWidgets paint against a shared parent
+// surface; sibling-2 starts its frame with
+// clearRect over its full bounds. Each canvas paints into its own
+// save_layer-backed offscreen so kClear only affects that layer and
+// sibling-1's draws survive.
 TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels",
           "[canvas_widget][skia][issue-1368]") {
     SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
@@ -1250,9 +1247,8 @@ TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels"
     }
 
     // Sibling 2: starts its frame with clearRect over its full bounds
-    // (mirrors a JS canvas idiom). Pre-fix this kClear nuked sibling 1's
-    // red on the shared parent. Post-fix, kClear is contained to
-    // sibling 2's own layer and the parent surface keeps sibling 1's red.
+    // (mirrors a JS canvas idiom). kClear is contained to sibling 2's own
+    // layer and the parent surface keeps sibling 1's red.
     auto cw2 = std::make_unique<CanvasWidget>();
     cw2->set_bounds({0, 0, 64, 64});
     {
@@ -1277,7 +1273,7 @@ TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels"
     REQUIRE(px.b == 0);
 }
 
-// pulp #1368 — destination-out compositing must also be contained.
+// Destination-out compositing must also be contained.
 // `globalCompositeOperation = "destination-out"` punches alpha holes
 // in the destination. Without per-canvas isolation, sibling-2's
 // destination-out fill would punch a hole through sibling-1's pixels
@@ -1340,7 +1336,7 @@ TEST_CASE("Sibling CanvasWidget destination-out does not punch holes in siblings
     REQUIRE(px.b == 0);
 }
 
-// pulp #1368 — single-canvas paints should not change output. The
+// Single-canvas paints should not change output. The
 // per-canvas layer must be visually equivalent to direct-on-parent
 // painting for an isolated canvas; the layer's existence is a
 // correctness fix for the multi-canvas case, not a behaviour change
@@ -1401,7 +1397,7 @@ TEST_CASE("Single CanvasWidget paint is pixel-equivalent with the layer wrap",
 }
 
 #endif  // PULP_HAS_SKIA
-// ── pulp #1368 round 2 — current_transform() snapshot for paint diagnostics ──
+// ── current_transform() snapshot for paint diagnostics ─────────────────────
 //
 // The Spectr filterbank repro shows pr_1's first-instruction `fillRect(50,50,…)`
 // landing in the title-bar region above the canvas. Either bounds_.y is wrong
@@ -1470,7 +1466,7 @@ TEST_CASE("RecordingCanvas::current_transform composes translate + scale",
     REQUIRE(t.f == 20.0f);
 }
 
-// ── pulp #1368 round 2 — env-gated paint trace: coverage exercise ───────────
+// ── Env-gated paint trace: coverage exercise ───────────────────────────────
 //
 // PULP_LOG_CANVAS_PAINT=1 is the diagnostic switch Spectr uses to capture
 // per-frame bounds + CTM + cmd_total + per-type summary. The fprintf+map
@@ -1668,7 +1664,7 @@ TEST_CASE("CanvasWidget::paint logging path is silent when env unset or empty",
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// pulp #1387 gap #2 — NaN / Infinity defense at add_command boundary
+// NaN / Infinity defense at add_command boundary
 // ─────────────────────────────────────────────────────────────────────
 //
 // Spectr's filterbank reproduced this: an off-screen drag computed a
@@ -1735,19 +1731,14 @@ TEST_CASE("CanvasWidget paint dispatches set_filter to the canvas",
     REQUIRE(observed_string == "blur(5px) sepia(60%)");
 }
 
-// ── pulp #1739 codecov backfill — 9-arg drawImage paint-replay coverage ──
+// ── 9-arg drawImage paint-replay coverage ─────────────────────────────────
 //
-// PR #1739 wired the canvas2d/drawImage sprite-sheet form
-// (drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh)) end-to-end through the JS
-// shim → WidgetBridge → CanvasWidget::paint() → Canvas::draw_image_*_rect.
-// The end-to-end test in test_widget_bridge.cpp [issue-1737] passes, but
-// codecov reported 0% patch coverage on the new lines because the bridge
-// → JS-shim → widget-paint dispatch chain was too indirect for per-line
-// attribution. These focused tests construct the CanvasDrawCmd directly
-// and call CanvasWidget::paint() against a RecordingCanvas — codecov
-// can attribute the `has_source_rect` branch in canvas_widget.cpp and
-// the `draw_image_from_file_rect` recording in recording_canvas.cpp
-// unambiguously to these test cases.
+// The canvas2d/drawImage sprite-sheet form (drawImage(img, sx,sy,sw,sh,
+// dx,dy,dw,dh)) routes end-to-end through the JS shim → WidgetBridge →
+// CanvasWidget::paint() → Canvas::draw_image_*_rect. These focused tests
+// construct the CanvasDrawCmd directly and call CanvasWidget::paint() against a
+// RecordingCanvas to pin the `has_source_rect` and draw_image_from_file_rect
+// branches without the full bridge dispatch chain.
 
 // 9-arg form: `has_source_rect=true` routes through the `_rect` overload
 // so x2/y2/x3/y3 (sx,sy,sw,sh) ride alongside x/y/w/h (dx,dy,dw,dh) to

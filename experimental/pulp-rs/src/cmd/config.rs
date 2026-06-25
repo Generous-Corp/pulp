@@ -4,9 +4,8 @@
 //!
 //! - `0` — success.
 //! - `1` — environmental failure (can't resolve `$PULP_HOME`, I/O).
-//! - `2` — unknown subcommand or malformed flags (codex P2 on the
-//!   C++ side fixed a bug where this used to return 0; we match the
-//!   new behaviour).
+//! - `2` — unknown subcommand or malformed flags. The C++ side fixed a bug
+//!   where this used to return 0; we match the new behaviour.
 //!
 //! # Subcommand surface
 //!
@@ -83,9 +82,8 @@ pub enum Sub {
 pub fn parse_sub(args: &[String]) -> Result<Sub> {
     let Some(head) = args.first() else {
         // Bare `pulp-rs config` matches C++'s `args.empty()` branch:
-        // print usage + exit 0. #562 Codex P2 kept the NON-empty
-        // unknown-subcommand path at exit 2, which is preserved
-        // below.
+        // print usage + exit 0. Non-empty unknown-subcommand input
+        // still exits 2, preserving the C++ contract fixed in #562.
         return Ok(Sub::Help);
     };
     let tail = &args[1..];
@@ -160,6 +158,9 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "  set <section.key> <value>   Write the value atomically",
         "  list [--json]               Dump current supported settings",
         "",
+        "Supported keys (pr section):",
+        "  pr.workflow                  shipyard | github | manual     (default: shipyard)",
+        "",
         "Supported keys (update section):",
         "  update.mode                   auto | prompt | manual | off  (default: prompt)",
         "  update.check_interval_hours   default: 24",
@@ -170,10 +171,15 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "  import_design.default_mode    live | baked                  (default: live)",
         "  import_design.default_emit    js | ir-json | cpp            (default: js)",
         "",
+        "Supported keys (claude section):",
+        "  claude.send_user_file         on | off                      (default: on)",
+        "",
         "Examples:",
+        "  pulp config set pr.workflow github",
         "  pulp config set update.mode manual",
         "  pulp config set import_design.default_mode baked",
         "  pulp config set import_design.default_emit ir-json",
+        "  pulp config set claude.send_user_file off",
         "  pulp config get update.mode",
         "",
         "Notes:",
@@ -252,9 +258,9 @@ fn do_set(path: &Path, dotted: &str, new_value: &str, out: &mut impl Write) -> R
     writeln!(out, "Set {section}.{key} = {new_value}").map_err(|e| CliError::io("<stdout>", e))?;
     writeln!(out, "    {}", path.display()).map_err(|e| CliError::io("<stdout>", e))?;
 
-    // Slice 5 (#550): a mode change means the user has re-engaged
-    // with update management. Clear the 24h snooze so the new mode
-    // takes effect on the next invocation. Without this, a user who
+    // A mode change means the user has re-engaged with update
+    // management (#550). Clear the 24h snooze so the new mode takes
+    // effect on the next invocation. Without this, a user who
     // dismissed a banner yesterday and switches to `auto` today would
     // still wait 24h for the first auto-download attempt.
     //

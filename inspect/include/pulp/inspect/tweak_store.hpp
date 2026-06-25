@@ -1,14 +1,7 @@
-// tweak_store.hpp — Phase 0b in-memory tweak table + Phase 1 disk persistence.
-//
-// Scope (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-//   Phase 0b landed the data layer — protocol method + in-memory table
-//   + bridge handler stub.
-//   Phase 1 adds `pulp-tweaks.json` read/write so edits survive process
-//   restart. Direct-manipulation gesture capture is Phase 0b PR-B;
-//   property-panel dot indicators are Phase 0b PR-C.
+// tweak_store.hpp — In-memory inspector tweak table and disk persistence.
 //
 // On-disk schema (mirrors @pulp/import-ir/src/tweaks.ts TweaksFile with
-// the Phase 1 bypass + version additions):
+// Pulp's bypass, lock, version, and source-tag extensions):
 //
 //   {
 //     "$schema": "pulp-tweaks://v1",
@@ -19,15 +12,15 @@
 //     "sources":  Record<anchor, Record<dottedPath, string>>   // optional
 //   }
 //
-// Per Codex Phase 0b review: bypass IS a SIBLING overlay, not
-// `applied:false` mixed into the dotted-path tweak map. That preserves
-// v1 backwards compatibility — old files with only `tweaks` still load.
+// Bypass is a sibling overlay, not `applied:false` mixed into the
+// dotted-path tweak map. That preserves v1 backwards compatibility —
+// old files with only `tweaks` still load.
 //
-// Phase 2.5: `locked` is a third sibling overlay — a flat list of
-// anchor ids the user has marked as protected from bulk-clear /
-// reimport. It mirrors the bypass overlay shape (anchor-keyed,
-// additive, omitted entirely when empty) so old v1 files still load
-// and a build that doesn't understand `locked` simply ignores it.
+// `locked` is a third sibling overlay — a flat list of anchor ids the
+// user has marked as protected from bulk-clear / reimport. It mirrors
+// the bypass overlay shape (anchor-keyed, additive, omitted entirely
+// when empty) so old v1 files still load and a build that doesn't
+// understand `locked` simply ignores it.
 //
 // Atomic-write contract: save_to_disk() writes to `<path>.tmp` then
 // renames over the target so a crash mid-write never leaves a
@@ -51,8 +44,8 @@
 namespace pulp::inspect {
 
 /// In-memory record of inspector direct-manipulation edits ("tweaks"),
-/// keyed by stable_anchor_id (Phase 0a) + dotted property path
-/// (e.g. "paint.backgroundColor", "layout.padding").
+/// keyed by stable_anchor_id + dotted property path (e.g.
+/// "paint.backgroundColor", "layout.padding").
 ///
 /// Thread-safety: external mutex; all public methods take the same
 /// internal mutex so the inspector can safely receive concurrent
@@ -92,14 +85,14 @@ public:
 
     /// Apply several tweaks under one anchor as a SINGLE atomic unit.
     ///
-    /// Motivation (planning/2026-05-21 Risk 6): the drag-to-move gesture
-    /// writes three tweaks — `layout.position`, `layout.left`,
-    /// `layout.top` — and `apply_tweak()` auto-saves to disk after EVERY
-    /// call, so three separate calls flush the file three times and a
-    /// crash mid-sequence can persist a partial move (e.g. `left`/`top`
-    /// without `position`). Worse, that partial state is NOT a no-op:
-    /// Yoga applies insets to relative nodes too, so a still-`relative`
-    /// node with stray `left`/`top` shifts in flow.
+    /// Motivation: the drag-to-move gesture writes three tweaks —
+    /// `layout.position`, `layout.left`, `layout.top` — and
+    /// `apply_tweak()` auto-saves to disk after EVERY call, so three
+    /// separate calls flush the file three times and a crash mid-sequence
+    /// can persist a partial move (e.g. `left`/`top` without `position`).
+    /// Worse, that partial state is NOT a no-op: Yoga applies insets to
+    /// relative nodes too, so a still-`relative` node with stray
+    /// `left`/`top` shifts in flow.
     ///
     /// `apply_tweaks_batch` takes the internal lock once, mutates every
     /// (anchor, path) key, and triggers at most ONE auto-save flush after
@@ -132,12 +125,12 @@ public:
     /// set_bypass(id, false)).
     void clear_bypass(std::string_view anchor_id);
 
-    /// Set the lock state for an anchor (Phase 2.5 — tweak management
-    /// panel). A locked anchor is protected from being cleared by a
-    /// bulk operation or by re-import. `locked=true` adds the anchor
-    /// to the lock set; `locked=false` removes it. Lock is a sibling
-    /// overlay — it never affects whether a tweak is applied, only
-    /// whether destructive bulk operations may remove it.
+    /// Set the lock state for an anchor. A locked anchor is protected
+    /// from being cleared by a bulk operation or by re-import.
+    /// `locked=true` adds the anchor to the lock set; `locked=false`
+    /// removes it. Lock is a sibling overlay — it never affects whether
+    /// a tweak is applied, only whether destructive bulk operations may
+    /// remove it.
     void set_locked(std::string_view anchor_id, bool locked);
 
     /// Convenience: clear the lock for an anchor (equivalent to
@@ -172,15 +165,14 @@ public:
 
     /// Return every anchor id that currently has a bypass entry,
     /// regardless of whether it also has tweak records. Used by
-    /// Inspector.listTweaks to surface bypass-only anchors (Codex P2
-    /// follow-up on #2300: a setBypass call on an anchor with no
-    /// active tweaks, or one whose tweaks were later cleared, must
-    /// still show up in the protocol response's `bypassed` map so
-    /// clients and the disk-persistence path (Phase 1) can
+    /// Inspector.listTweaks to surface bypass-only anchors. A
+    /// setBypass call on an anchor with no active tweaks, or one whose
+    /// tweaks were later cleared, must still show up in the protocol
+    /// response's `bypassed` map so clients and disk persistence can
     /// round-trip the bypass state.
     std::vector<std::string> bypassed_anchors() const;
 
-    /// Whether `anchor_id` is currently locked (Phase 2.5).
+    /// Whether `anchor_id` is currently locked.
     bool is_locked(std::string_view anchor_id) const;
 
     /// Return every anchor id that currently carries a lock, in
@@ -189,7 +181,7 @@ public:
     /// round-trips even for anchors with no active tweaks.
     std::vector<std::string> locked_anchors() const;
 
-    // ── Phase 1: disk persistence ───────────────────────────────────
+    // ── Disk persistence ────────────────────────────────────────────
 
     /// On-disk schema version. Bumped if/when we ever break the format.
     static constexpr int kSchemaVersion = 1;
@@ -253,7 +245,7 @@ public:
     /// without touching the filesystem.
     DiskResult from_json(std::string_view json);
 
-    // ── Phase 2: drift detection ────────────────────────────────────
+    // ── Drift detection ─────────────────────────────────────────────
     //
     // A tweak is keyed by (anchor_id, property_path). After a design
     // re-import the live view tree may no longer carry an anchor a
@@ -347,8 +339,8 @@ private:
     std::unordered_map<std::string,
                        std::unordered_map<std::string, Entry>> tweaks_;
     std::unordered_map<std::string, BypassValue> bypassed_;
-    // Phase 2.5: anchor ids the user has marked as locked. A flat set
-    // (lock has no per-path granularity — it protects a whole anchor).
+    // Anchor ids the user has marked as locked. A flat set means lock
+    // has no per-path granularity — it protects a whole anchor.
     std::unordered_set<std::string> locked_;
     std::uint64_t next_sequence_ = 0;
 
@@ -358,10 +350,10 @@ private:
     bool auto_save_ = false;
     std::string auto_save_path_;
 
-    // Batch suspension depth (planning/2026-05-21 Risk 6). While > 0,
-    // maybe_auto_save_unlocked() is a no-op so a multi-key batch flushes
-    // disk exactly once, after the last key is written. Guarded by mtx_.
-    // A counter (not a bool) keeps nested batches correct.
+    // Batch suspension depth. While > 0, maybe_auto_save_unlocked() is
+    // a no-op so a multi-key batch flushes disk exactly once, after the
+    // last key is written. Guarded by mtx_. A counter (not a bool)
+    // keeps nested batches correct.
     int auto_save_suspend_depth_ = 0;
 
     // Helpers (assume mtx_ held by caller unless noted).

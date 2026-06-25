@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression test for install-shipyard.sh queue-truncation repair.
 
-Issue #534 (Codex post-merge review): the queue-file reset block used to
+Issue #534: the queue-file reset block used to
 sit *after* the "already installed" short-circuit, so the documented
 recovery path — "rerun the installer after Shipyard dies with
 JSONDecodeError" — did not actually fire when the pinned binary was
@@ -39,7 +39,7 @@ def _stub_state_dir(home: Path) -> Path:
 
 
 class InstallShipyardQueueRepair(unittest.TestCase):
-    """#534 P1: queue repair must run before the already-installed early exit."""
+    """#534: queue repair must run before the already-installed early exit."""
 
     def _run_install(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

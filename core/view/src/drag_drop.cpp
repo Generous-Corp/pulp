@@ -166,13 +166,14 @@ bool invoke_file_drag_backend(const FileDragRequest& request) {
     return backend ? backend(request) : false;
 }
 
-#if !defined(__APPLE__) && !(defined(__linux__) && defined(PULP_HAS_X11))
+#if !defined(__APPLE__) && !(defined(__linux__) && defined(PULP_HAS_X11)) && !defined(_WIN32)
 // Outbound file drag free-function backend, used by View::start_file_drag when
 // the tree is owned by a WindowHost (standalone app) rather than a plugin host.
-// Real backends live per platform: macOS NSDraggingSession (drag_drop_mac.mm)
-// and Linux XDND (drag_drop_linux.cpp, compiled when Xlib links — PULP_HAS_X11).
-// This no-op covers the platforms without one yet (Windows standalone, headless
-// Linux) so the cross-platform call site links and degrades gracefully; each new
+// Real backends live per platform: macOS NSDraggingSession (drag_drop_mac.mm),
+// Linux XDND (drag_drop_linux.cpp, compiled when Xlib links — PULP_HAS_X11), and
+// Windows OLE DoDragDrop (drag_drop_win.cpp, compiled unconditionally on _WIN32).
+// This no-op covers the platforms without one yet (headless Linux, etc.) so the
+// cross-platform call site links and degrades gracefully; each new
 // backend extends the guard above as it lands.
 bool begin_file_drag(void* /*native_view*/, const FileDragRequest& /*request*/) {
     return false;

@@ -83,7 +83,7 @@ fn projects_list_json_snapshot_multiple_with_stale() {
     insta::assert_json_snapshot!("projects_list_multiple_with_stale", v);
 }
 
-// ── Phase 5: config + upgrade snapshot coverage ─────────────────────────────
+// ── Config + upgrade snapshot coverage ──────────────────────────────────────
 
 fn normalise_config_path_field(mut v: Value) -> Value {
     if let Some(obj) = v.as_object_mut() {

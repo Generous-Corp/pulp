@@ -18,9 +18,9 @@ std::vector<std::string> create_default_build_targets(const std::string& class_n
 // `cmake --build --config <cfg>` and at TEST time via `ctest -C <cfg>`.
 // Single-config generators (Ninja, Unix Makefiles) honor CMAKE_BUILD_TYPE and
 // safely ignore these flags, so emitting `--config`/`-C` unconditionally is
-// correct on every generator. Codex P1 on PR #2133: setting only the
-// configure-time CMAKE_BUILD_TYPE left `pulp create` building Debug on Visual
-// Studio (and made `--debug` a no-op there).
+// correct on every generator. Setting only the configure-time CMAKE_BUILD_TYPE
+// left `pulp create` building Debug on Visual Studio (and made `--debug` a
+// no-op there).
 std::string create_build_config(bool debug);
 
 }  // namespace pulp::cli

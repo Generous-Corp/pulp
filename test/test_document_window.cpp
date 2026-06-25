@@ -324,7 +324,7 @@ TEST_CASE("DocumentWindow::show() routes native closes through the "
     REQUIRE(factory.last_host != nullptr);
 
     // Simulate a native title-bar close. The hook MUST run (otherwise the
-    // bug Codex flagged stands — close affordances bypass the hook).
+    // PR #3006 bug stands — close affordances bypass the hook).
     factory.last_host->fire_native_close();
     REQUIRE(hook_calls == 1);
 

@@ -1,8 +1,7 @@
 // cmd_config.cpp — `pulp config get/set` thin wrappers
 //
-// Release-discovery Slice 2 (#547 / parent #499). Surfaces the
-// `[update]` and `[pr]` sections of ~/.pulp/config.toml so users can
-// toggle modes without hand-editing TOML:
+// Surfaces the `[update]` and `[pr]` sections of ~/.pulp/config.toml so
+// users can toggle modes without hand-editing TOML:
 //
 //   pulp config get pr.workflow
 //   pulp config set pr.workflow github
@@ -11,14 +10,14 @@
 //   pulp config set update.check_interval_hours 24
 //   pulp config set import_design.default_mode baked
 //   pulp config set import_design.default_emit ir-json
+//   pulp config set claude.send_user_file off
 //   pulp config list
 //
-// Slice 5 (#550) wires the auto/prompt/manual/off modes into the
-// invocation path in pulp_cli.cpp and clears the 24h snooze on any
-// mode change (a mode change means the user has re-engaged with
-// update management, so suppressing further notices would be wrong).
-// Slice 5 also reserves the `update.bump_projects` key for Slice 7 —
-// Slice 7 (#564) is where the actual project-bump behavior lands.
+// `update.mode` is wired into the invocation path in pulp_cli.cpp and
+// clears the 24h snooze on any mode change (a mode change means the
+// user has re-engaged with update management, so suppressing further
+// notices would be wrong). `update.bump_projects` is shared with the
+// post-upgrade project-bump nudge in cmd_upgrade.cpp.
 
 #include "cli_common.hpp"
 #include "update_check.hpp"
@@ -56,7 +55,7 @@ bool split_dotted_key(const std::string& in,
 
 // Allowed sections/keys. Kept narrow so `pulp config set foo.bar baz`
 // doesn't silently introduce a typo'd key. Add entries here when new
-// slices need new knobs.
+// features need new knobs.
 bool is_allowed_key(const std::string& section, const std::string& key) {
     if (section == "pr") {
         return key == "workflow";
@@ -65,11 +64,8 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
         return key == "mode" ||
                key == "check_interval_hours" ||
                key == "channel" ||
-               // Slice 5 (#550) reserves this key for Slice 7 (#564)
-               // which implements per-project SDK bump behavior.
-               // Accepting it now lets users configure ahead of time;
-               // Slice 7 will make the value functional. Allowed:
-               // prompt | auto | off. Default: prompt.
+               // Controls the post-upgrade project-bump nudge.
+               // Allowed: prompt | auto | off. Default: prompt.
                key == "bump_projects";
     }
     if (section == "import_design") {
@@ -111,8 +107,6 @@ std::string validate_value(const std::string& section,
         return "update.channel must be one of: stable, beta";
     }
     if (section == "update" && key == "bump_projects") {
-        // Reserved for Slice 7 (#564). Values locked now so Slice 7
-        // doesn't have to re-open the allow-list on day one.
         if (value == "prompt" || value == "auto" || value == "off") return {};
         return "update.bump_projects must be one of: prompt, auto, off";
     }
@@ -145,7 +139,7 @@ int usage() {
     std::cout << "  update.check_interval_hours   default: 24\n";
     std::cout << "  update.channel                stable | beta                 (default: stable)\n";
     std::cout << "  update.bump_projects          prompt | auto | off           (default: prompt)\n";
-    std::cout << "                                [reserved — Slice 7 (#564) implements the behavior]\n";
+    std::cout << "                                controls post-upgrade project bump nudge\n";
     std::cout << "\nSupported keys (import_design section):\n";
     std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
     std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";
@@ -310,7 +304,7 @@ int cmd_config(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // Codex 2026-04-21 wave 2 P2 on #562: previous version returned
+    // #562: previous version returned
     // `usage()` (which exits 0) on unknown subcommands, making invalid
     // invocations like `pulp config foo` look successful to scripts
     // and CI. Print help to stderr and return a non-zero exit so

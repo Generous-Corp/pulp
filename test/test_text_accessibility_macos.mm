@@ -1,4 +1,4 @@
-// macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6).
+// macOS NSAccessibility backend for TextAccessibilityNode.
 //
 // Verifies the platform overlay defined in
 // core/view/platform/mac/text_accessibility_macos.mm. The cross-platform
@@ -225,9 +225,8 @@ TEST_CASE("macOS text-a11y: PulpPluginView::accessibilityChildren surfaces "
 
         // The merged children array must contain a node whose label
         // matches the registered text. Pre-fix, the AX tree ignored the
-        // text registry entirely and Codex's P1 review (#2307) flagged
-        // that VoiceOver could never reach painted text registered
-        // through the scaffold.
+        // text registry entirely (#2307), so VoiceOver could never
+        // reach painted text registered through the scaffold.
         BOOL found = NO;
         for (id child in children) {
             if ([child respondsToSelector:@selector(accessibilityLabel)]) {

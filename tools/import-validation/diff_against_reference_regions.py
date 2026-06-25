@@ -9,9 +9,6 @@ the canvas happens to match. This script computes a per-region score so
 the harness can fail on the FIRST broken region rather than averaging
 everything into one number.
 
-Codex review of planning/spectr-validated-runtime-import-product-spec.md
-flagged this as a hard-gate requirement (2026-05-12).
-
 Regions are defined as percent-of-window rects, so they scale across
 different output sizes (the reference may be 2640x1620, the native render
 1213x812 — the same region maps proportionally to each).

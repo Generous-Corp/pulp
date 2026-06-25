@@ -1,12 +1,10 @@
 // design_import_internal.hpp — PRIVATE shared declarations for the
 // design-import translation units.
 //
-// Created in the 2026-05 Phase 6 (A3) refactor when design_import.cpp
-// was split into design_tokens.cpp + design_codegen.cpp. design_codegen
-// needs the motion-provenance vendor key, which is defined (with
-// external linkage, at namespace scope) in design_import.cpp; this
-// header gives it a single declaration point instead of an ad-hoc
-// extern decl.
+// Shared by the split design-import translation units. design_codegen needs
+// the motion-provenance vendor key, which is defined (with external linkage,
+// at namespace scope) in design_import.cpp; this header gives it a single
+// declaration point instead of an ad-hoc extern decl.
 //
 // PRIVATE: lives under core/view/src/, not the public include tree.
 // Not part of the installed SDK surface — do not reference from headers
@@ -37,10 +35,9 @@ namespace pulp::view {
 void clear_baked_knob_antenna(std::vector<uint8_t>& rgba, int img_w, int img_h,
                               int core_x, int core_y, int core_w, int core_h);
 
-// Phase 9 motion-provenance vendor key — lowercased, slash-friendly
-// token matching the import CLI's `source` argument. Stable across
-// releases (fixtures depend on these strings). Defined in
-// design_import.cpp.
+// Motion-provenance vendor key — lowercased, slash-friendly token matching the
+// import CLI's `source` argument. Stable across releases (fixtures depend on
+// these strings). Defined in design_import.cpp.
 const char* design_source_vendor_key(DesignSource source);
 
 // JSON-encode an arbitrary string for safe embedding inside a JS string
@@ -55,14 +52,13 @@ std::string json_string_literal(const std::string& s);
 // runtime harness (parse_jsx_react) in claude_bundle.cpp.
 std::string v0_html_attr_escape(const std::string& s);
 
-// ── DesignIR JSON split (2026-05-29 frontend-IR refactor, PR-1) ──────────
+// ── DesignIR JSON split boundary ─────────────────────────────────────────
 // These five symbols cross the design_import.cpp / design_ir_json.cpp
-// boundary. The DesignIR JSON serialize/deserialize band moved into
-// design_ir_json.cpp; the asset pipeline and per-source parsers stayed in
-// design_import.cpp. The four parsers below are defined in
-// design_ir_json.cpp (promoted from static to external linkage) and called
-// from design_import.cpp; promote_interactive_frames is the reverse —
-// defined in design_import.cpp and called from the JSON parsers.
+// boundary. DesignIR JSON serialization/deserialization lives in
+// design_ir_json.cpp; the asset pipeline and per-source parsers live in
+// design_import.cpp. The JSON parsers below are defined in design_ir_json.cpp
+// and called from design_import.cpp; promote_interactive_frames is the reverse
+// direction, defined in design_import.cpp and called from the JSON parsers.
 
 // Recursively promotes interactive-frame nodes; defined in design_import.cpp.
 std::size_t promote_interactive_frames(IRNode& root);
@@ -77,6 +73,17 @@ bool is_asset_reference_key(std::string_view key);
 
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
 IRNode parse_ir_node(const choc::value::ValueView& obj);
+
+// Minimal JSON string escaper; defined in design_ir_json.cpp. Shared with
+// design_ir_report.cpp (the import-report JSON emitter) so the report analysis
+// pass can live in its own TU without duplicating the escaper.
+std::string json_escape(std::string_view text);
+
+// InteractiveElementKind → stable wire id (the recognition kind table); defined
+// in design_ir_json.cpp. Shared with design_ir_report.cpp. (The kind↔id table is
+// a recognition concern slated to move to the recognition module; this
+// declaration keeps the report pass decoupled in the meantime.)
+const char* interactive_kind_id(InteractiveElementKind k);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);

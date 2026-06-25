@@ -54,12 +54,12 @@
 #include "package_registry.hpp"
 #include "update_check.hpp"
 
-// ── SDK Constants ────────────────���──────────────────────────────────────────
+// SDK Constants
 
 const char* PULP_SDK_VERSION = PULP_SDK_VERSION_GENERATED;
 const char* PULP_GITHUB_REPO = "danielraffel/pulp";
 
-// ── Color / Terminal ──���────────────────────���────────────────────────────���───
+// Color / Terminal
 
 bool g_color_enabled = true;
 bool g_no_color = false;
@@ -117,7 +117,7 @@ void pulp_debug(const char* phase) {
               << std::flush;
 }
 
-// ── Shell Execution ───��─────────────────────────────────────────────────────
+// Shell Execution
 
 // std::system returns an implementation-defined wait status, NOT the child's
 // exit code. On POSIX it is a waitpid status, so a child that exits 2 comes
@@ -341,7 +341,7 @@ std::string exec_output(const std::string& cmd) {
     return result;
 }
 
-// ── String Utilities ───────────────���───────────────────────────────────���────
+// String Utilities
 
 std::string trim(const std::string& s) {
     return std::string(choc::text::trim(s));
@@ -729,7 +729,7 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
     return run_with_spinner(configure_cmd, "Configuring");
 }
 
-// ── AAX Helpers ─────��────────────────────────────��──────────────────────────
+// AAX Helpers
 
 bool aax_supported_on_host() {
 #if defined(__APPLE__) || defined(_WIN32)
@@ -936,11 +936,6 @@ bool aax_validator_passed(const std::string& output) {
     return false;
 }
 
-// Doctor checks (run_doctor_checks, run_doctor_android_checks,
-// run_doctor_ios_checks) moved to tools/cli/cli_doctor_helpers.cpp
-// in the 2026-05 Phase 2 (R2-4) batch. Public API stays in
-// cli_common.hpp.
-
 // ── Script/Binary Delegation ────────────────────────────────────────────────
 
 int delegate_to_python_script(const fs::path& relative_script,
@@ -1039,7 +1034,7 @@ int delegate_to_build_binary(const fs::path& relative_binary,
     return run(cmd);
 }
 
-// ── Interactive Prompts ────��────────────────────────────────────────────────
+// Interactive Prompts
 
 namespace cli {
 
@@ -1100,7 +1095,7 @@ std::string input(const std::string& prompt, const std::string& default_value) {
 
 } // namespace cli
 
-// ── File Watching ───────────────────��───────────────────────────────────────
+// File Watching
 
 static std::map<fs::path, fs::file_time_type> snapshot_timestamps(const fs::path& root) {
     std::map<fs::path, fs::file_time_type> timestamps;
@@ -1262,7 +1257,7 @@ int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
     return watch_loop(opts);
 }
 
-// ── Fuzzy Matching ─────────────────────────────────────────────��────────────
+// Fuzzy Matching
 
 int fuzzy_score(const std::string& text, const std::string& query) {
     if (query.empty()) return 1;

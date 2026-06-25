@@ -1,7 +1,4 @@
-// test_widget_bridge_html_aria.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// Wave 3 html bundle — two coherent compat surfaces:
+// HTML compatibility bundle — two coherent surfaces:
 //
 //   1. ARIA attribute routing (#1476 / html.2). aria-label and role
 //      attributes flow through the html-compat shim into View's
@@ -40,11 +37,11 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp Wave 3 html bundle (ARIA + querySelector) ─────────────────────
+// ── HTML bundle (ARIA + querySelector) ──────────────────────────────────
 //
-// Wave 3 html.2 / #1476: aria-label / role attributes flow through the
+// pulp #1476: aria-label / role attributes flow through the
 // html-compat shim into View::access_label_ / View::access_role_ slots
-// that the macOS NSAccessibility bridge already consumes.  Wave 3 html.3:
+// that the macOS NSAccessibility bridge already consumes.
 // document.querySelector accepts attribute selectors, compound selectors,
 // and descendant / child combinators in addition to the previously
 // supported tag/.class/#id forms.
@@ -158,11 +155,10 @@ TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",
     REQUIRE(v->access_role() == View::AccessRole::slider);
 }
 
-// pulp #1641 followup — `removeAttribute('role')` /
+// pulp #1641 follow-up — `removeAttribute('role')` /
 // `removeAttribute('aria-label')` must reset View::access_role_ /
-// access_label_. The earlier shim only deleted the JS-side
-// `_attributes[name]` entry, leaving the bridge slot stale (a
-// user-observable bug for assistive tech that reads stale state).
+// access_label_, not just delete the JS-side `_attributes[name]` entry
+// while leaving the bridge slot stale for assistive tech.
 TEST_CASE("HTML removeAttribute resets View accessibility slots",
           "[view][bridge][html][issue-1641-followup-aria-removeattribute]") {
     ScriptEngine engine;
@@ -331,11 +327,11 @@ TEST_CASE("querySelector matches attribute selectors",
     REQUIRE(std::string(engine.evaluate("__withAria").getWithDefault<std::string_view>("")) == "d4");
 }
 
-// pulp #1641 followup — _parseSelector colon-strip bug. Selectors like
+// pulp #1641 follow-up — _parseSelector colon handling. Selectors like
 // `[href="http://x"]` and `[data-time="12:30"]` contain `:` inside the
-// attribute brackets. The earlier scanner used `str.search(/:/)` which
-// found the first colon anywhere — truncating the selector mid-bracket.
-// Fix: scan for `:` at bracket depth 0 only.
+// attribute brackets. A plain `str.search(/:/)` finds the first colon
+// anywhere, so the selector parser must scan for `:` at bracket depth 0
+// only and avoid truncating mid-bracket.
 TEST_CASE("querySelector handles colons inside attribute brackets",
           "[view][bridge][html][issue-1641-followup-querySelector-colon]") {
     ScriptEngine engine;
@@ -424,10 +420,8 @@ TEST_CASE("querySelector descendant and child combinators",
 // `:nth-last-child`, `:only-child`, `:empty`, `:root`), and the
 // functional `:not(<simple>)` form.
 //
-// This first test asserts the contract change: `:hover` no longer
-// matches every `div.foo` — it correctly returns null when no element
-// is currently hovered. Pre-fix the matcher returned the div; post-fix
-// it returns null (no widget is hovered in this synthetic environment).
+// This first test asserts the contract: `:hover` must not match every
+// `div.foo` — it returns null when no element is currently hovered.
 // Importantly, the call MUST NOT throw — unknown / state-false
 // pseudo-classes return no-match per CSS Selectors Level 4 forward-
 // compat, which is what the test now asserts.

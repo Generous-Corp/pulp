@@ -3,7 +3,7 @@
 // pulp::design — the "Ink & Signal" design system, ingested into Pulp code so
 // the components a designer sees in the Figma library are directly usable when
 // building a real UI (a sampler, an effect, an app). This is the umbrella
-// include + the queryable component catalog (Design-System-Import-Plan Phase 8a).
+// include + the queryable component catalog.
 //
 // Two things live here:
 //   1. The umbrella include — pull in <pulp/design/design_system.hpp> and you

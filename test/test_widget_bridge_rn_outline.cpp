@@ -1,8 +1,5 @@
-// test_widget_bridge_rn_outline.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1519 — RN outline cluster.
-// Round-trips outlineColor / outlineOffset / outlineStyle / outlineWidth
+// WidgetBridge RN outline cluster. Round-trips outlineColor / outlineOffset /
+// outlineStyle / outlineWidth
 // from the React-Native style shim through the CSS translator + bridge
 // into View's outline slot. Includes the four longhand setters + the
 // `outline` shorthand decomposition + OOS-tracked non-paintable
@@ -31,7 +28,7 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1519 — RN outline cluster (Color/Offset/Style/Width) ────────────
+// ── RN outline cluster (Color/Offset/Style/Width) ─────────────────────────
 //
 // Outline differs from border: it doesn't take Yoga layout space and
 // it paints OUTSIDE the border-box. Each setter mutates one View slot
@@ -208,4 +205,3 @@ TEST_CASE("dashed outline emits set_line_dash then resets it",
     REQUIRE(last_intervals_count == 0u);  // reset to empty
     REQUIRE(dash_reset_after_stroke);
 }
-

@@ -14,11 +14,25 @@ SKIP_SLASH_COMMANDS = {
     "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "search", "suggest",
     "target", "update",
+    # `pulp macos` and `pulp overflow` are CI runner-pool operator
+    # commands. They're covered by the CLI reference, `--help`, the
+    # ci skill, and the cli-maintenance skill; slash commands would
+    # duplicate policy/workflow surfaces instead of helping agents.
+    "macos", "overflow",
     # `pulp projects` is a registry-management plumbing command; it's
     # adequately documented via `--help` and the cli-maintenance
     # skill. Adding a slash command for pure plumbing would clutter
     # the slash-command surface for agents. #552
     "projects",
+    # `pulp project` is a per-project SDK pin helper; agents call it
+    # directly when bumping/undoing project pins.
+    "project",
+    # `pulp tool` is registry/install plumbing for optional developer
+    # tools and importer add-ons; agents shell out directly.
+    "tool",
+    # `pulp tweaks` is a local pulp-tweaks.json drift diagnostic that
+    # mirrors the inspector drawer; agents shell out directly.
+    "tweaks",
     # `pulp coverage` is the parent CLI command; the user-facing slash
     # command is the more descriptive `/coverage-diff`, which invokes
     # the same underlying script (tools/scripts/local_diff_cover.sh).

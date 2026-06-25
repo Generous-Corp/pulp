@@ -1,4 +1,4 @@
-"""Tests for the visual-harness Dockerfile / manifest Skia-pin lint (P9-4)."""
+"""Tests for the visual-harness Dockerfile / manifest Skia-pin lint."""
 
 from __future__ import annotations
 

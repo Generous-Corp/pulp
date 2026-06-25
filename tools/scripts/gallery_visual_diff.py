@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """gallery_visual_diff.py — tolerance-based PNG visual-regression diff for the
-widget gallery (Design-System-Import-Plan Phase 6a).
+widget gallery.
 
 The existing tools/import-design/fidelity_diff.py serves the figma-plugin import
 lane (it requires a scene.pulp.json + asset_manifest). This is the sibling for
@@ -9,10 +9,10 @@ the native gallery / flat reference PNGs the plan calls for: render the gallery
 per-channel pixel tolerance and an overall changed-fraction threshold.
 
 Why a tolerance and not an exact match: HarfBuzz/Skia/CoreGraphics text
-anti-aliasing differs slightly across machines (plan §5), so an exact-pixel
-golden would be flaky. We count a pixel as "changed" only when a channel differs
-by more than `channel_tol` (0-255), and fail only when the changed fraction
-exceeds `--fail-fraction`.
+anti-aliasing differs slightly across machines, so an exact-pixel golden would
+be flaky. We count a pixel as "changed" only when a channel differs by more than
+`channel_tol` (0-255), and fail only when the changed fraction exceeds
+`--fail-fraction`.
 
 The diff CORE (`changed_fraction`) is pure Python over RGBA tuples and has no
 third-party dependency, so it is unit-testable anywhere. PIL is imported lazily

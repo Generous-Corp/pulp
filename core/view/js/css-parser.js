@@ -75,12 +75,11 @@ function parseCSSColor(str) {
         return "#" + _hex2(rgb[0]) + _hex2(rgb[1]) + _hex2(rgb[2]) + (a2 < 255 ? _hex2(a2) : "");
     }
 
-    // pulp #1434 Triage #8 — modern CSS color spaces. Figma copy-CSS
-    // emits oklch(...) since 2024; v0 / Tailwind ship lab() and lch();
-    // Claude Design transition states emit color-mix(...). Spike-quality
-    // conversion: oklch / oklab / lch / lab / color() → sRGB hex. Deep
-    // wide-gamut path (Skia SkColor4f) tracked separately; this slice
-    // keeps the existing hex pipeline for downstream consumers.
+    // Modern CSS color spaces. Figma copy-CSS emits oklch(...) since
+    // 2024; v0 / Tailwind ship lab() and lch(); Claude Design transition
+    // states emit color-mix(...). This converts oklch / oklab / lch /
+    // lab / color() to sRGB hex and keeps the existing hex pipeline for
+    // downstream consumers until an HDR-aware SkColor4f path exists.
     //
     // CSS 4 syntax: space-separated components, optional `/ <alpha>`.
     //   oklch(0.7 0.18 240 / 50%)
@@ -102,11 +101,10 @@ function parseCSSColor(str) {
     return null;
 }
 
-// pulp #1434 Triage #8 — modern color-space dispatcher. Returns
-// `{ r, g, b, a }` in linear-output [0, 1] sRGB coordinates (gamma-
-// encoded), or null on parse failure. The conversion math mirrors the
-// CSS Color Module Level 4 reference algorithms (with D50→D65
-// chromatic adaptation for CIE Lab/Lch).
+// Modern color-space dispatcher. Returns `{ r, g, b, a }` in [0, 1]
+// gamma-encoded sRGB coordinates, or null on parse failure. The
+// conversion math mirrors the CSS Color Module Level 4 reference
+// algorithms, including D50→D65 chromatic adaptation for CIE Lab/Lch.
 function _parseModernColor(str) {
     // Consume leading function name + interior; alpha isolated by `/`.
     var fnMatch = str.match(/^(oklch|oklab|lch|lab|color)\(\s*(.+?)\s*\)$/);
@@ -377,9 +375,9 @@ function parseTransform(str) {
         var fn = m[1];
         var rawArgs = m[2].split(",").map(function(s) { return s.trim(); });
         var args = rawArgs.map(function(a) {
-            // pulp #1434 Triage #9 — handle rad / turn / grad alongside
-            // deg. Plain numbers in rotate-family functions are degrees;
-            // numeric scale-family / matrix args pass through.
+            // Handle rad / turn / grad alongside deg. Plain numbers in
+            // rotate-family functions are degrees; numeric scale-family
+            // / matrix args pass through.
             var ang = _parseTransformAngle(a);
             if (ang !== null) return ang;
             var l = parseCSSLength(a);
@@ -434,17 +432,16 @@ function parseTransition(str) {
 // pathological self-referential tokens like `--a: var(--a)`; when the
 // cap is hit, the walker returns the input string unmodified
 // (graceful unresolved passthrough, not silent truncation). Named so
-// the cap behavior is grep-able from tests + Codex review on PR C.
+// the cap behavior is grep-able from tests.
 var _VAR_RESOLVE_MAX_DEPTH = 8;
 
 // Resolve var(--name) or var(--name, fallback) against theme tokens.
 //
-// pulp-internal coverage-gap (`css/__var`): the original single-pass regex
-// couldn't handle nested parens because regex isn't context-free — the
-// `[^)]+` for the fallback would stop at the FIRST `)` (the inner one)
-// and leave the outer `)` as part of the surrounding text, producing
-// garbage on `var(--a, var(--b, 0))` and similar nested-fallback shapes
-// that real design systems emit constantly.
+// The original single-pass regex couldn't handle nested parens because
+// regex isn't context-free: the fallback would stop at the FIRST `)`
+// (the inner one) and leave the outer `)` as part of the surrounding
+// text, producing garbage on `var(--a, var(--b, 0))` and similar
+// nested-fallback shapes that real design systems emit constantly.
 //
 // Replaced with a manual balanced-paren walker so:
 //   var(--a, var(--b, 0))    →  resolves correctly through fallback chain
@@ -501,11 +498,10 @@ function _resolveVar(str, depth) {
         }
         if (name.indexOf("--") === 0) name = name.slice(2);
 
-        // pulp #1899 (gap #3) — consult the string-token map first so
-        // font-family-shaped tokens (`--mono: "JetBrains Mono"`)
-        // resolve to the registered string rather than zero. Falls
-        // through to the motion-token (numeric) lookup for legacy
-        // length/spacing tokens.
+        // Consult the string-token map first so font-family-shaped
+        // tokens (`--mono: "JetBrains Mono"`) resolve to the registered
+        // string rather than zero. Falls through to the motion-token
+        // numeric lookup for legacy length/spacing tokens.
         var strVal = (typeof getStringToken === 'function') ? getStringToken(name) : '';
         if (strVal) {
             out += String(strVal);
@@ -551,7 +547,7 @@ function resolveLength(parsed, ctx) {
 
 // Resolve a CSS length string into the same {value, unit} shape that
 // parseCSSLength returns, but with calc() / min() / max() / clamp()
-// support. pulp #1553 — drop-in replacement for parseCSSLength so call
+// support. This is a drop-in replacement for parseCSSLength so call
 // sites in web-compat-style-decl.js gain calc-family expression support
 // without each per-property branch having to special-case the function
 // syntax.
@@ -562,13 +558,13 @@ function resolveLength(parsed, ctx) {
 //
 // Per-input behaviour:
 //   - calc-family with all-percent operands  →  { value, unit: "%" }
-//     so the bridge routes through the percent path (Codex P2 on #1576).
+//     so the bridge routes through the percent path.
 //   - calc-family otherwise                   →  { value: <px>, unit: "px" }
 //     (evaluateCalc resolves mixed-unit operands inline against ctx).
 //   - non-calc-family                         →  parseCSSLength passthrough.
 //   - malformed calc-family (empty parens,
 //     unbalanced parens, no operands)          →  null
-//     (Codex P1 on #1576 — was infinite-recursing through evaluateCalc).
+//     instead of infinite-recursing through evaluateCalc.
 function resolveCSSLength(str, ctx) {
     if (str === undefined || str === null || str === "") return null;
     var s = String(str).trim();
@@ -579,11 +575,10 @@ function resolveCSSLength(str, ctx) {
         s.indexOf("clamp(") === 0;
 
     if (isCalcFamily) {
-        // P1 guard: reject malformed calc-family inputs before delegating
-        // to evaluateCalc. `min()` / `max()` / `clamp()` with empty parens
-        // would otherwise infinite-recurse through evaluateCalc's nested-
-        // function regex (line ~598: /(calc|min|max|clamp)\([^)]*\)/g
-        // matches zero-char inner content).
+        // Reject malformed calc-family inputs before delegating to
+        // evaluateCalc. `min()` / `max()` / `clamp()` with empty parens
+        // would otherwise infinite-recurse through evaluateCalc's nested
+        // function replacement.
         var inner = _calcFamilyInner(s);
         if (inner === null) return null;
 
@@ -595,8 +590,7 @@ function resolveCSSLength(str, ctx) {
         // (e.g. `calc(50% + 10px)`) fall through to evaluateCalc, which
         // resolves them to px against ctx — Pulp has no deferred-
         // resolution layer, so cross-unit arithmetic resolves at the JS
-        // boundary. Closes Codex P2 on #1576 (% preservation) and the
-        // follow-up P1 on #1862 (vh/vw/em/rem preservation).
+        // boundary.
         var single = _calcFamilySingleUnit(s);
         if (single !== null) return single;
 
@@ -618,7 +612,7 @@ function resolveCSSLengthPx(str, ctx) {
 
 // Internal: returns the trimmed contents inside a calc-family's outer
 // parens, or null if the input is malformed (no opening paren, no
-// matching closing paren, or empty operands). Codex P1 guard.
+// matching closing paren, or empty operands).
 function _calcFamilyInner(s) {
     var open = s.indexOf("(");
     if (open < 0 || s.charAt(s.length - 1) !== ")") return null;
@@ -631,22 +625,20 @@ function _calcFamilyInner(s) {
 // resolved `{value, unit}` so the caller can preserve that unit
 // through to the bridge instead of losing it in px-resolution.
 //
-// Closes BOTH Codex P-tier findings on PR #1576 and its follow-up
-// P1 on PR #1862:
-//   - PR #1576 P2: `calc(50%)` → {value: 50, unit: '%'} so the
-//     bridge routes through the percent layout path.
-//   - PR #1862 P1: `calc(10vh)` / `min(1em, 2em)` etc. — unit
-//     preservation extended to every unit parseCSSLength
-//     recognises (px, em, rem, %, vw, vh, vmin, vmax). Units
-//     outside that set (ch, pt, in, cm, etc.) fall through to
-//     px resolution rather than introducing helper-only support
-//     that would diverge from `parseCSSLength` (Codex P2 review).
+// Supported preservation examples:
+//   - `calc(50%)` → {value: 50, unit: '%'} so the bridge routes
+//     through the percent layout path.
+//   - `calc(10vh)` / `min(1em, 2em)` etc. preserve every unit
+//     parseCSSLength recognises: px, em, rem, %, vw, vh, vmin,
+//     and vmax. Units outside that set (ch, pt, in, cm, etc.) fall
+//     through to px resolution rather than introducing helper-only
+//     support that would diverge from `parseCSSLength`.
 //
 // Expressions with operators (`calc(50% + 10px)`) or mixed units
 // (`min(10vh, 20px)`) return null so they fall through to
 // evaluateCalc's px resolution — Pulp has no deferred-resolution
-// layer, so a mixed-unit arithmetic gets resolved at the JS layer
-// using the supplied ctx. Documented in [issue-1576][fallback-behaviour].
+// layer, so mixed-unit arithmetic gets resolved at the JS layer using
+// the supplied ctx.
 //
 // Examples:
 //   calc(50%)               → {value: 50, unit: '%'}
@@ -674,8 +666,7 @@ function _calcFamilySingleUnit(s) {
     // set is intentionally kept aligned with `parseCSSLength` so a
     // bare `3em` and `calc(3em)` resolve the same way (no
     // helper-only units). Number pattern is strict — accepts
-    // `12`, `1.5`, `.5`, `-2`, `-.25` but rejects `.`, `1.2.3`, `..`
-    // (Codex P2 review on PR #1862).
+    // `12`, `1.5`, `.5`, `-2`, `-.25` but rejects `.`, `1.2.3`, `..`.
     var bareRe = /^(-?(?:\d+(?:\.\d+)?|\.\d+))(px|em|rem|%|vw|vh|vmin|vmax)$/;
 
     function parseOperand(tok) {
@@ -753,13 +744,12 @@ function evaluateCalc(expr, ctx) {
     }
 
     // Evaluate arithmetic expression: supports +, -, *, /
-    // First resolve nested function calls. Codex P1 defense-in-depth on
-    // PR #1576: require AT LEAST ONE char inside the inner function
-    // parens. `[^)]*` (zero-or-more) would otherwise match `min()` and
-    // re-enter evaluateCalc with the same empty token, causing
-    // RangeError: maximum call stack size exceeded. `[^)]+` (one-or-
-    // more) means malformed calls fall through to the tokenizer below
-    // where they cleanly evaluate to 0 instead of crashing the engine.
+    // First resolve nested function calls. Require at least one char
+    // inside the inner function parens: `[^)]*` would also match `min()`
+    // and re-enter evaluateCalc with the same empty token, causing
+    // RangeError: maximum call stack size exceeded. `[^)]+` means
+    // malformed calls fall through to the tokenizer below where they
+    // cleanly evaluate to 0 instead of crashing the engine.
     expr = expr.replace(/(calc|min|max|clamp)\([^)]+\)/g, function(match) {
         return String(evaluateCalc(match, ctx));
     });

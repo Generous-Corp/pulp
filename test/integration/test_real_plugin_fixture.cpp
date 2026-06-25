@@ -50,7 +50,7 @@ PluginEntry make_entry(const std::string& id, const std::string& bundle_relpath,
 }
 
 // Write a non-empty placeholder for the resolver's shape check
-// (Codex PR #3015 P2 added the "empty bundle is not a fixture" guard).
+// (the "empty bundle is not a fixture" guard).
 void touch(const fs::path& bundle) {
     fs::create_directories(bundle.parent_path());
     std::ofstream(bundle) << "PULP-FIXTURE-PLACEHOLDER";
@@ -160,7 +160,7 @@ TEST_CASE("resolver: TBD entry without override never silently passes",
     REQUIRE(r.skip_reason.find("PULP_REAL_PLUGIN_CACHE") != std::string::npos);
 }
 
-// Regression: Codex PR #3015 P2. The developer-supplied lane previously
+// Regression (#3015): The developer-supplied lane previously
 // accepted ANY existing path, including zero-byte placeholders left over
 // from a `touch $PULP_REAL_PLUGIN_CACHE/vital/Vital.vst3` mistake.
 // `PluginSlot::load` would then hard-fail on the bogus bundle instead of

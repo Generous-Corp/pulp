@@ -10,10 +10,6 @@
 // it can add the bundle to its ScanBlacklist — see
 // core/host/include/pulp/host/scan_blacklist.hpp.
 //
-// Workstream 03 slice 3.3b. This first commit ships the binary skeleton;
-// the parent-side `ChildProcessManager` wiring that actually spawns the
-// worker and the JSON schema negotiation land in follow-up slices.
-
 #include <pulp/host/scanner.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -110,9 +106,8 @@ int main(int argc, char** argv) {
     }
     const std::string path = argv[1];
 
-    // Pick the scanner by file extension. Extending to heuristic
-    // detection is a follow-up; this first pass keeps the parent in
-    // charge of format routing.
+    // Pick the scanner by file extension and keep the parent in charge of
+    // format routing.
     // Route through the public scan() API with the containing folder
     // added to extra_paths. Filtering to the exact bundle keeps us from
     // reporting other plug-ins that happen to live alongside it.

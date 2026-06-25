@@ -1,8 +1,10 @@
-// Non-Apple PluginViewHost fallback (#299). Apple platforms have
-// native NSView/UIView-backed impls in platform/mac / platform/ios.
-// On Windows/Linux/Android the host app registers a factory; without
-// one, create() returns nullptr explicitly. Factory-registration API
-// is compiled on every platform.
+// Non-Apple PluginViewHost fallback and registration path. Apple platforms have
+// native NSView/UIView-backed impls in platform/mac / platform/ios. Windows and
+// Linux Skia builds can auto-register built-in HWND/X11 hosts through
+// register_platform_plugin_view_host(); Android, custom targets, and builds
+// without a platform host require the app to register a factory. Without either
+// path, create() returns nullptr explicitly. Factory-registration API is
+// compiled on every platform.
 
 #include <pulp/view/plugin_view_host.hpp>
 
@@ -53,16 +55,16 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root,
                                                        const Options& options) {
-    // #3329: install the built-in platform factory (HWND on Windows, X11 on
+    // Install the built-in platform factory (HWND on Windows, X11 on
     // Linux) on first use, so the embed / VST3 / CLAP adapters get a working
     // host without the caller registering one. Idempotent and a no-op if a host
     // already called set_factory() (it stays installed) or on a build with no
     // platform host. A custom factory set AFTER this call still wins.
     register_platform_plugin_view_host();
 
-    // #313 Codex P2: copy the factory out, release the lock, then
-    // invoke. Instantiating a plugin view involves attaching to a
-    // DAW's editor window — can block; definitely shouldn't hold a
+    // Copy the factory out, release the lock, then invoke. Instantiating a
+    // plugin view involves attaching to a DAW's editor window — can block;
+    // definitely shouldn't hold a
     // registration mutex while it does.
     PluginViewHost::Factory local;
     {

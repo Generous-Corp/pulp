@@ -1,15 +1,10 @@
-// inspector_overlay_pass_viewer.cpp — Phase 6.1 per-pass GPU/render
-// attribution viewer for the visual inspector overlay.
+// Per-pass render attribution viewer for the visual inspector overlay.
 //
-// Extracted from inspector_overlay.cpp in the 2026-05 refactor (roadmap
-// P10-2). Pure mechanical move — the InspectorOverlay member methods
-// below are byte-identical to their previous definitions in
-// inspector_overlay.cpp; only their translation unit changed. The
-// file-local kPassTypeNames / kPassTypeColors tables stay private to
-// this TU. Shared color constants live in
-// inspector_overlay_internal.hpp; the structural constants
-// (kPassTypeCount, kPassHistoryFrames) are static-constexpr members of
-// InspectorOverlay reached through the public header.
+// The file-local kPassTypeNames / kPassTypeColors tables stay private to
+// this TU. Shared color constants live in inspector_overlay_internal.hpp;
+// the structural constants (kPassTypeCount, kPassHistoryFrames) are
+// static-constexpr members of InspectorOverlay reached through the public
+// header.
 
 #include "inspector_overlay_internal.hpp"
 
@@ -26,13 +21,12 @@
 
 namespace pulp::inspect {
 
-// ── Phase 6.1 — Per-pass GPU/render attribution viewer ──────────────────────
+// ── Per-pass render attribution viewer ──────────────────────────────────────
 //
 // Surfaces where render time goes, broken down by render pass, over a
 // rolling 60-frame window. Reads RenderPassManager's existing per-pass
-// PassStats — CPU wall-time + draw-call counts. True GPU timestamps are
-// deferred to Phase 6.5 (Dawn timestamp queries); the panel labels its
-// numbers "cpu" so the distinction is honest and explicit.
+// PassStats: CPU wall-time and draw-call counts. The panel labels its
+// numbers "cpu" so it does not imply GPU timestamp availability.
 
 namespace {
 
@@ -101,6 +95,7 @@ bool InspectorOverlay::capture_pass_frame() {
 
 std::vector<InspectorOverlay::PassAttribution>
 InspectorOverlay::pass_attribution() const {
+    static_assert(kPassTypeNames.size() == kPassTypeCount);
     std::vector<PassAttribution> out;
     out.reserve(kPassTypeCount);
     for (std::size_t i = 0; i < kPassTypeCount; ++i) {
@@ -132,6 +127,7 @@ InspectorOverlay::pass_attribution() const {
 
 void InspectorOverlay::paint_pass_attribution(Canvas& canvas, float x, float y,
                                               float w, float h) {
+    static_assert(kPassTypeColors.size() == kPassTypeCount);
     canvas.set_font("monospace", kFontSize);
     float line_y = y + 4;
     const float line_h = 15.0f;
@@ -141,7 +137,7 @@ void InspectorOverlay::paint_pass_attribution(Canvas& canvas, float x, float y,
     canvas.fill_text("Render Passes (P)", x, line_y + 11);
     line_y += line_h;
     canvas.set_fill_color(kPanelDim);
-    canvas.fill_text("cpu time \xc2\xb7 GPU timestamps: Phase 6.5", x, line_y + 10);
+    canvas.fill_text("cpu time \xc2\xb7 wall-clock, not GPU", x, line_y + 10);
     line_y += line_h + 2;
 
     if (!rpm_) {

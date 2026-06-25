@@ -1,15 +1,13 @@
 // test_cli_skew_banner.cpp — Plugin ↔ CLI skew banner smoke tests.
 //
-// Release-discovery Slice 6 (#551). The helper at
-// `tools/scripts/cli_version_check.sh` reads
+// The helper at `tools/scripts/cli_version_check.sh` reads
 // `pulp doctor --versions --json`'s `plugin_min_cli` field and prints a
-// one-line banner on stderr when the installed CLI is older than that
-// minimum. These tests shell out to `bash` with a staged `pulp` shim
-// on PATH, mirroring the real execution environment skills run in.
+// one-line banner on stderr when the installed CLI is older than that minimum.
+// These tests shell out to `bash` with a staged `pulp` shim on PATH, mirroring
+// the real execution environment skills run in.
 //
-// Per CLAUDE.md "Tests ship with fixes — NON-NEGOTIABLE": the helper
-// has a stable banner surface and once-per-session semantics; its test
-// lives here, not in a follow-up coverage PR.
+// The helper has a stable banner surface and once-per-session semantics; its
+// test lives here so changes to the helper and its contract stay together.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>

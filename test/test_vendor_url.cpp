@@ -1,5 +1,4 @@
-// PluginDescriptor::vendor_url / vendor_email field tests
-// (workstream 01 slice 1.8).
+// PluginDescriptor::vendor_url / vendor_email field tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>

@@ -203,8 +203,8 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(reparsed, {"core/foo.cpp": {1: 1}})
 
     def test_all_missing_inputs_returns_dedicated_sentinel(self) -> None:
-        """Codex P1 review on PR #660: the all-missing case must use a
-        DEDICATED exit code (2), not the catch-all "uncaught exception"
+        """The all-missing case must use a dedicated exit code (2),
+        not the catch-all "uncaught exception"
         code 1, so the CI workflow can distinguish a benign
         "no artifacts uploaded" from a real failure (parse error,
         script bug). Pin the contract here."""
@@ -224,8 +224,8 @@ class MainCliTests(unittest.TestCase):
             self.assertFalse(out.exists(), "should not write merged XML when every input is missing")
 
     def test_corrupt_xml_input_exits_with_real_error_code(self) -> None:
-        """Codex P1 review on PR #660: a malformed Cobertura artifact
-        (e.g. truncated upload causing ParseError) must NOT take the
+        """A malformed Cobertura artifact (e.g. truncated upload
+        causing ParseError) must NOT take the
         all-missing fallback path — that would silently bypass the
         required diff-coverage gate. Exit code 1 (real-error) ensures
         the workflow's `rc -eq 2` branch does not match."""

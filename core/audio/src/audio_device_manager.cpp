@@ -1,6 +1,6 @@
 /// @file audio_device_manager.cpp
-/// AudioDeviceManager — persistence + MIDI hub (item 1.2a) + lifecycle
-/// / hotplug / recovery (item 1.2b).
+/// AudioDeviceManager — persistent device state plus the audio/MIDI lifecycle
+/// and hotplug recovery hub.
 
 #include <pulp/audio/audio_device_manager.hpp>
 #include <pulp/state/properties_file.hpp>
@@ -316,7 +316,7 @@ AudioDeviceManager::runtime_telemetry_snapshot() const {
     };
 }
 
-// ── Lifecycle / hotplug / recovery (1.2b) ───────────────────────────
+// ── Lifecycle / hotplug / recovery ──────────────────────────────────
 
 // ── DeviceChangeToken ───────────────────────────────────────────────
 

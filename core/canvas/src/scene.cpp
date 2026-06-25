@@ -1,7 +1,6 @@
-// VectorScene + SceneNode subtree implementation. Item 6.1 of
-// `planning/2026-05-24-macos-plugin-authoring-plan.md` — see
-// `core/canvas/include/pulp/canvas/scene/scene.hpp` for the
-// license-lineage note and design rationale.
+// VectorScene + SceneNode subtree implementation. See
+// `core/canvas/include/pulp/canvas/scene/scene.hpp` for the API
+// contract, license-lineage note, and design rationale.
 
 #include <pulp/canvas/scene/scene.hpp>
 

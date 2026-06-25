@@ -1,4 +1,4 @@
-// Phase iOS-D.2 — AU v3 entry for the iOS Chainer example. Mirrors
+// AU v3 entry for the iOS Chainer example. Mirrors
 // examples/ios-auv3-{synth,gpu-smoke}/src/au_v3_entry.cpp.
 
 #include "chainer_synth.hpp"

@@ -157,7 +157,7 @@ TEST_CASE("WinRT MIDI: sysex7 reassembly framed to F0..F7 for delivery",
 
 TEST_CASE("WinRT MIDI: per-group sysex7 reassembly keeps interleaved streams separate",
           "[midi][ump][sysex][winrt][pr3781]") {
-    // Codex #3781 P2: SysEx7 reassembly is per-stream state, and UMP SysEx7
+    // SysEx7 reassembly is per-stream state, and UMP SysEx7
     // streams can interleave across the 16 UMP groups. The backend keeps one
     // reassembler per group so a Start on group 1 cannot reset/corrupt an
     // in-flight stream on group 0 — which a single shared reassembler would.

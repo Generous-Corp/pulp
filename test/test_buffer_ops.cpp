@@ -115,10 +115,9 @@ TEST_CASE("buffer_ops::clip on BufferView clips every channel", "[audio][buffer_
 
 TEST_CASE("buffer_ops::clip sanitizes NaN to lo (Codex P1 on #2864)",
           "[audio][buffer_ops][regression]") {
-    // The doc contract says NaN inputs become `lo`. The earlier impl
-    // delegated entirely to simd_clamp / std::clamp which propagate
-    // NaN through ordered comparisons, so NaN leaked into downstream
-    // audio. The post-fix impl converts NaN → lo before clamping.
+    // The doc contract says NaN inputs become `lo`. simd_clamp / std::clamp
+    // propagate NaN through ordered comparisons, so the impl converts
+    // NaN → lo before clamping to keep NaN out of downstream audio.
     const float nan = std::numeric_limits<float>::quiet_NaN();
 
     // SIMD-multiple length to exercise the vector path.

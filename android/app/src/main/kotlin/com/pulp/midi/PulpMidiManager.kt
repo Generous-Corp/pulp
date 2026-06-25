@@ -167,13 +167,9 @@ class PulpMidiManager(private val context: Context) {
          * Transport-resolution helper, separated from `Build.VERSION.SDK_INT`
          * so unit tests can drive BOTH branches deterministically.
          *
-         * Codex P2 on PR #1275 — the previous test derived
-         * `expectedTransport` from the same global SDK_INT branch
-         * the production code consulted, so any single test run
-         * exercised at most one side of the API gate. The split
-         * here lets the test assert pre-33 and 33+ behaviour in
-         * the same JVM run, regardless of the host Android level
-         * reported by Robolectric / mock SDK config.
+         * The split lets tests assert pre-33 and 33+ behaviour in the
+         * same JVM run, regardless of the host Android level reported by
+         * Robolectric / mock SDK config.
          */
         @JvmStatic
         fun resolveTransportType(sdkInt: Int, device: MidiDeviceInfo): Int {

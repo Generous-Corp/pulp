@@ -1,7 +1,5 @@
-// Phase 6.1 — unit tests for the prop-applier's normalizeHostProps +
-// classRulesProvider surface. The full @pulp/react/runtime-import API
-// (installBindings, installHostReact, renderFromDesign, etc.) ships in
-// Phase 6.3; this file pins only the 6.1 contract.
+// Unit tests for the prop-applier's normalizeHostProps and
+// classRulesProvider surface.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
@@ -14,7 +12,7 @@ afterEach(() => {
     setClassRulesProvider(null);
 });
 
-describe('normalizeHostProps (Phase 6.1)', () => {
+describe('normalizeHostProps', () => {
     it('returns input unchanged when no style + no className (fast path)', () => {
         const flat = { width: 100, color: 'red' };
         expect(normalizeHostProps('div', flat)).toBe(flat);
@@ -75,7 +73,7 @@ describe('normalizeHostProps (Phase 6.1)', () => {
         expect(out.className).toBeUndefined();
     });
 
-    // Codex P2 (Phase 6.1 review) — prototype-pollution guard.
+    // Class-rule output must not be able to mutate Object.prototype.
     it('class-rules provider returning __proto__ key does not poison Object.prototype', () => {
         setClassRulesProvider(() => ({ __proto__: { polluted: 'yes' } } as Record<string, unknown>));
         normalizeHostProps('div', { className: 'attacker' });
@@ -97,7 +95,7 @@ describe('normalizeHostProps (Phase 6.1)', () => {
     });
 });
 
-describe('classRulesProvider (Phase 6.1)', () => {
+describe('classRulesProvider', () => {
     it('setClassRulesProvider null clears the provider', () => {
         setClassRulesProvider((cls) => ({ width: 100 }));
         expect(getClassRulesProvider()).not.toBeNull();

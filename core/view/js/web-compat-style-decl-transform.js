@@ -1,18 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — transform domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — transform domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the transform / transition / animation CSS properties.
 // `_applyTransformProp(decl, id, key, resolved, value)` returns true if
-// it claimed the key, false otherwise. Each `case` body is byte-
-// identical to the matching arm of the pre-split `_applyProperty`
-// switch. Embed order: loaded AFTER web-compat-style-decl.js.
+// it claimed the key, false otherwise. Embed order: loaded AFTER
+// web-compat-style-decl.js.
 
 function _applyTransformProp(decl, id, key, resolved, value) {
     switch (key) {
         // Transform
         case "transform": {
-            // pulp #1434 Triage #9 — full CSS transform-function fan-out.
+            // full CSS transform-function fan-out.
             // Walk-once accumulator (mirrors the @pulp/react prop-applier
             // walker) so the within-string order produces a single set
             // of consolidated bridge calls instead of multiple
@@ -21,18 +20,15 @@ function _applyTransformProp(decl, id, key, resolved, value) {
             // uniform setScale slot (last-write-wins; bridge gap).
             // skewX(α) skewY(β) → ONE setSkew(α, β).
             //
-            // Deferred (silent no-op + TODO):
+            // Unsupported by the current 2D transform bridge:
             //   • rotateX / rotateY — pulp's 2D View has no 3D rotation
             //     storage; rotateZ aliases to setRotation.
             //   • matrix3d / perspective — ditto, no 3D model.
-            //   • matrix(a b c d tx ty) — 2D affine. Per Codex P1 audit,
-            //     dispatched directly to setTransform(id, a, b, c, d, e, f)
-            //     to preserve all 6 components verbatim. The earlier
-            //     decomposition to translate+uniform-scale+rotate dropped
-            //     the c/d skew components on rotation matrices like
-            //     `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)` and could
-            //     mask zero-scale collapses (a=b=0 was silently rounded
-            //     to scl=1).
+            //
+            // matrix(a b c d tx ty) is supported through the 6-component
+            // setTransform bridge path below. Preserve it verbatim rather
+            // than decomposing into translate/scale/rotate, which loses skew
+            // components and can hide zero-scale matrices.
             var transforms = parseTransform(resolved);
             var tx = 0, ty = 0;
             var rotZ = 0;
@@ -72,9 +68,9 @@ function _applyTransformProp(decl, id, key, resolved, value) {
                         f: t.args[5] !== undefined ? t.args[5] : 0,
                     };
                 }
-                // rotateX / rotateY / matrix3d / perspective: 2D View has
-                // no 3D rotation storage; silently dropped. Tracked for
-                // a follow-up issue (3D model on View).
+                // rotateX / rotateY / matrix3d / perspective: the 2D View
+                // transform surface has no 3D rotation storage, so these are
+                // silently dropped.
             }
             if (matrixCall && typeof setTransform !== "undefined") {
                 // Full-matrix path — 6-component bridge call. Skips the
@@ -108,7 +104,7 @@ function _applyTransformProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // Transition (pulp #1434 Phase A2-1) — pass the full shorthand
+        // Transition — pass the full shorthand
         // string to the bridge, which parses it into a list of
         // TransitionSpecs (one per comma-separated entry; supports
         // duration / delay / easing / property + cubic-bezier + steps).
@@ -179,18 +175,19 @@ function _applyTransformProp(decl, id, key, resolved, value) {
         case "animationFillMode":
             if (typeof setAnimation === "function") setAnimation(id, "fill", resolved);
             return true;
-        // pulp #1434 A4 Bundle 2 — animation-play-state. Forwards the
+        // animation-play-state. Forwards the
         // CSS keyword (`running` | `paused`) through the existing
         // setAnimation control-token ABI so the bridge can route it to
-        // the staged_animation slot. The full pause/resume of the
-        // active_animations playback driver is the follow-up; storing
-        // the keyword today is enough for the catalog to claim partial
-        // and for round-trip validation.
+        // the staged_animation slot. The active_animations playback driver
+        // does not consume it yet; storing the keyword keeps the value
+        // round-trippable for validation.
         case "animationPlayState":
             if (typeof setAnimation === "function") setAnimation(id, "play_state", resolved);
             return true;
         case "animation": {
-            // Shorthand: "name duration easing delay iterations direction fill"
+            // Shorthand path reuses the transition parser, so it applies
+            // name/duration/easing/delay only. Iterations, direction,
+            // fill-mode, and play-state are handled by their longhand cases.
             var atr = parseTransition(resolved); // reuse transition parser for timing
             if (typeof setAnimation === "function") {
                 setAnimation(id, "name", atr.property);

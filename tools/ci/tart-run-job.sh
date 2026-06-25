@@ -2,8 +2,8 @@
 # tart-run-job.sh — run ONE Pulp build+test inside an ephemeral Tart VM cloned
 # from a golden master, with the durable caches mounted from the host, then
 # discard the clone. This is how the VM pool "takes over the build load"
-# (planning/2026-06-01-macos-ci-isolation-plan.md, Phase 3/4): build dirs are
-# disposable, ccache/Skia/FetchContent are host-durable and shared across clones.
+# while build dirs stay disposable and ccache/Skia/FetchContent stay
+# host-durable and shared across clones.
 #
 # Flow:
 #   tart clone <golden> <job-vm>          # CoW, seconds
@@ -11,7 +11,7 @@
 #   ssh → build + ctest in-guest          # SKIA_DIR + ccache point at mounts
 #   tart stop && tart delete <job-vm>      # discard (unless --keep)
 #
-# virtio-fs notes (Phase 3 "unknowns to validate first"):
+# virtio-fs notes:
 #   • Tart mounts a --dir=<name>:<path> at "/Volumes/My Shared Files/<name>".
 #     We symlink each into $HOME to dodge the space in the path.
 #   • ccache must keep its TEMPDIR IN-GUEST (CCACHE_TEMPDIR) — cross-fs renames

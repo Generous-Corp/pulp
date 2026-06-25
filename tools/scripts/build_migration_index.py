@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate `migration_index.cpp` from the `docs/migrations/*.md` tree.
 
-Release-discovery Slice 3 (#548, parent #499).
+Migration-note code generation for #548 (parent #499).
 
 Each migration doc is a Markdown file with a TOML frontmatter block:
 

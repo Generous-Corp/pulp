@@ -526,7 +526,7 @@ TEST_CASE("pulp cache usage and parser errors are deterministic",
 
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
           "[cli][shellout][codex-562]") {
-    // Codex 2026-04-21 wave 2 P2 on #562: `pulp config foo` previously
+    // #562: `pulp config foo` previously
     // fell through to usage() which returned 0, so scripts/CI could
     // not detect a typo'd subcommand. The new behaviour returns
     // exit code 2 with an "Unknown config subcommand" diagnostic on
@@ -653,6 +653,40 @@ TEST_CASE("pulp status and clean reject unexpected arguments before side effects
             std::string::npos);
 }
 
+TEST_CASE("pulp clean removes the active project build directory",
+          "[cli][shellout][misc][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto project = unique_temp_dir("pulp-clean-shellout");
+    auto nested = project / "nested";
+    write_text(project / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
+    write_text(project / "build" / "CMakeCache.txt", "# fixture cache\n");
+    write_text(project / "build" / "artifact.bin", "generated\n");
+    write_text(nested / "build" / "keep.txt", "not the active project build\n");
+    write_text(project / "source.txt", "source file\n");
+
+    auto clean = run_pulp_in_directory(nested, {"clean"});
+    REQUIRE_FALSE(clean.timed_out);
+    REQUIRE(clean.exit_code == 0);
+    REQUIRE(clean.stderr_output.empty());
+    REQUIRE(clean.stdout_output.find("Removing build directory") !=
+            std::string::npos);
+    REQUIRE(clean.stdout_output.find("Clean.") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(project / "build"));
+    REQUIRE(fs::exists(nested / "build" / "keep.txt"));
+    REQUIRE(fs::exists(project / "source.txt"));
+
+    auto clean_again = run_pulp_in_directory(nested, {"clean"});
+    REQUIRE_FALSE(clean_again.timed_out);
+    REQUIRE(clean_again.exit_code == 0);
+    REQUIRE(clean_again.stderr_output.empty());
+    REQUIRE(clean_again.stdout_output.find("Nothing to clean.") !=
+            std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
+
 TEST_CASE("pulp status reports invalid and github PR workflow modes",
           "[cli][shellout][pr-workflow]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -723,6 +757,17 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(set_channel.exit_code == 0);
     REQUIRE(set_channel.stdout_output.find("Set update.channel = beta") != std::string::npos);
 
+    auto list_default_bump_projects = run_pulp({"config", "list"}, 10000);
+    REQUIRE_FALSE(list_default_bump_projects.timed_out);
+    REQUIRE(list_default_bump_projects.exit_code == 0);
+    REQUIRE(list_default_bump_projects.stdout_output.find("update.bump_projects = prompt")
+            != std::string::npos);
+
+    auto set_bump_projects = run_pulp({"config", "set", "update.bump_projects", "auto"}, 10000);
+    REQUIRE_FALSE(set_bump_projects.timed_out);
+    REQUIRE(set_bump_projects.exit_code == 0);
+    REQUIRE(set_bump_projects.stdout_output.find("Set update.bump_projects = auto") != std::string::npos);
+
     auto set_import_mode = run_pulp({"config", "set", "import_design.default_mode", "baked"}, 10000);
     REQUIRE_FALSE(set_import_mode.timed_out);
     REQUIRE(set_import_mode.exit_code == 0);
@@ -742,13 +787,14 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(list.stdout_output.find("update.mode = manual") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.check_interval_hours = 24") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.channel = beta") != std::string::npos);
-    REQUIRE(list.stdout_output.find("update.bump_projects = prompt") != std::string::npos);
+    REQUIRE(list.stdout_output.find("update.bump_projects = auto") != std::string::npos);
     REQUIRE(list.stdout_output.find("import_design.default_mode = baked") != std::string::npos);
     REQUIRE(list.stdout_output.find("import_design.default_emit = cpp") != std::string::npos);
     REQUIRE(config_body.find("[update]") != std::string::npos);
     REQUIRE(config_body.find("[import_design]") != std::string::npos);
     REQUIRE(config_body.find("mode = \"manual\"") != std::string::npos);
     REQUIRE(config_body.find("channel = \"beta\"") != std::string::npos);
+    REQUIRE(config_body.find("bump_projects = \"auto\"") != std::string::npos);
     REQUIRE(config_body.find("default_mode = \"baked\"") != std::string::npos);
     REQUIRE(config_body.find("default_emit = \"cpp\"") != std::string::npos);
 }
@@ -1553,9 +1599,9 @@ TEST_CASE("pulp create validates parser errors before scaffolding",
 // cmd_validate now parses flags up-front and rejects unknown flags
 // with exit code 2 — that gives us a testable distinction between
 // "known flag, can't run because no project" and "unknown flag"
-// without needing a real build tree. Codex P2 on PR #381 correctly
-// flagged that the prior version of this test couldn't tell the two
-// apart: unknown flags were silently ignored, so the assertion would
+// without needing a real build tree. The prior version of this test
+// couldn't tell the two apart (#381): unknown flags were silently ignored,
+// so the assertion would
 // pass even if --strict handling were removed.
 TEST_CASE("pulp validate --strict is a recognized flag",
           "[cli][shellout][validate][issue-356]") {
@@ -1780,7 +1826,7 @@ TEST_CASE("pulp build validates js engine option before compatibility checks",
 // recognized subcommands; bogus subcommand fails with exit 2 + Usage.
 
 
-// Issue #550 Slice 5: `update.mode = off` must produce zero network
+// Issue #550: `update.mode = off` must produce zero network
 // traffic and zero banner output. We can't directly observe the
 // network inside ctest, but we CAN verify that (a) the command
 // finishes well under the anonymous-GitHub round-trip latency (caching
@@ -1844,7 +1890,7 @@ TEST_CASE("pulp with update.mode=off never prints a banner",
     REQUIRE(r.stderr_output.find("downloaded") == std::string::npos);
 }
 
-// Issue #550 Slice 5: `update.mode = manual` prints the one-liner
+// Issue #550: `update.mode = manual` prints the one-liner
 // once per version. The banner shape is locked — it must differ from
 // the prompt-mode banner so users (and shell scripts) can tell them
 // apart. Same PULP_HOME scratch-dir trick as the off-mode test.
@@ -1894,7 +1940,7 @@ TEST_CASE("pulp with update.mode=manual prints the manual notice",
     REQUIRE(r.stderr_output.find("99.99.99") != std::string::npos);
 }
 
-// Issue #564 Slice 7: `pulp project bump --help` must be wired at the
+// Issue #564: `pulp project bump --help` must be wired at the
 // dispatch level. Any future regression where the `project` command
 // falls out of the dispatch table fails loudly here — same class of
 // silent-failure bug that motivated the rest of this file.
@@ -2025,7 +2071,7 @@ TEST_CASE("pulp project unpin switches a pinned project to floating mode",
     fs::remove_all(base);
 }
 
-// Issue #564 Slice 7: `pulp project bump --dry-run` rejects an
+// Issue #564: `pulp project bump --dry-run` rejects an
 // invalid --to value with a diagnostic. No writes happen.
 TEST_CASE("pulp project bump rejects non-semver --to",
           "[cli][shellout][issue-564]") {
@@ -2160,7 +2206,7 @@ TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
 }
 
 
-// #591 Codex P2 / wave-4 sweep: `pulp docs build-site` must resolve
+// #591: `pulp docs build-site` must resolve
 // `mkdocs.yml` from the project root, not the caller's CWD. This test
 // invokes the CLI from inside a subdirectory (`tools/`) and asserts
 // that the composed mkdocs command references the repo-root config —
@@ -2183,7 +2229,7 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     // Walk up from the test CWD (<build>/test) to the repo root, then
     // drop into tools/ — a real subdirectory that exists in every
     // Pulp checkout. This mirrors the "user runs `pulp docs
-    // build-site` from inside tools/" scenario Codex flagged.
+    // build-site` from inside tools/" scenario.
     fs::path repo_root = fs::current_path() / ".." / "..";
     repo_root = fs::weakly_canonical(repo_root);
     if (!fs::exists(repo_root / "mkdocs.yml")) {

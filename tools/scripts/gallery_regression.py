@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """gallery_regression.py — end-to-end visual-regression driver for the widget
-gallery (Design-System-Import-Plan Phase 6b).
+gallery.
 
 Renders the gallery with pulp-widget-gallery, then diffs each theme render
 against its committed golden via gallery_visual_diff.changed_fraction. Wired as

@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <iostream>
-#include <memory>   // pulp #2502 — shared_ptr liveness token for deferred clicks
+#include <memory>   // shared_ptr liveness token for deferred clicks
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -39,7 +39,7 @@
 // our own hidden state and always unhide before setting a different cursor.
 static bool s_cursor_hidden = false;
 
-// ── Diagonal resize cursor (WYSIWYG P2h REGRESSION 5) ────────────────────────
+// ── Diagonal resize cursor ───────────────────────────────────────────────────
 // AppKit exposes no PUBLIC diagonal corner-resize cursor, but NSCursor carries
 // the private `_windowResizeNorthWestSouthEastCursor` (↖↘) and
 // `_windowResizeNorthEastSouthWestCursor` (↗↙) selectors that NSWindow itself
@@ -160,7 +160,7 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 // child-view geometry helpers, and the coordinate / event-translation
 // helpers (modifiers_from_ns_flags, to_local, view_is_in_tree,
 // key_code_from_ns) were extracted to window_host_mac_geometry.mm in
-// the R2-5 refactor — see window_host_mac_internal.hpp. Used here via
+// window_host_mac_geometry.mm — see window_host_mac_internal.hpp. Used here via
 // the `pulp::view::mac_geometry` namespace.
 using namespace pulp::view::mac_geometry;
 
@@ -237,7 +237,7 @@ static void install_app_menu(NSString* appName) {
     pulp::view::View* _focusedView;
     pulp::view::Point _relativeMouseWindowPoint;
     BOOL _relativeMouseMode;
-    // pulp #2502 — liveness token for `mouseUp:`'s deferred-click blocks.
+    // Liveness token for `mouseUp:`'s deferred-click blocks.
     // The block dispatched onto the main queue captures a COPY of this
     // `shared_ptr`, which keeps the `atomic<bool>` alive independently of
     // the PulpView. `prepareForTeardown` flips it to false; any block that
@@ -249,10 +249,6 @@ static void install_app_menu(NSString* appName) {
     // `dispatch_block_create` blocks do not, and cancelling a non-dispatch
     // block aborts.
     std::shared_ptr<std::atomic<bool>> _deferredClickAlive;
-    // WYSIWYG P2h REGRESSION 4 — set in -acceptsFirstMouse: (the click that
-    // brings an inactive window forward), consumed + cleared in the next
-    // -mouseDown: so the window-foregrounding click does not also select a
-    // view in the inspector overlay.
     BOOL _pendingFirstMouse;
 }
 
@@ -260,7 +256,7 @@ static void install_app_menu(NSString* appName) {
     self = [super initWithFrame:frame];
     if (self) {
         pulp_mac_text_input_client_category_anchor();
-        // pulp #1321: ensure the content view tracks the window's content rect
+        // Ensure the content view tracks the window's content rect
         // so AppKit resizes our frame when the user drags the window edge.
         // Without this, the view's bounds stay at the original frame and Yoga
         // never reflows on resize.
@@ -271,7 +267,7 @@ static void install_app_menu(NSString* appName) {
     return self;
 }
 
-// pulp #2502 — invalidate queued callbacks before the owning C++ host and View
+// Invalidate queued callbacks before the owning C++ host and View
 // tree can be destroyed. After this returns, deferred click blocks are
 // guaranteed no-ops and the AppKit animation timer can no longer tick the host's
 // FrameClock after it is freed.
@@ -291,7 +287,7 @@ static void install_app_menu(NSString* appName) {
 }
 
 - (BOOL)isFlipped { return NO; }
-// pulp #1382 — drawRect fills the entire bounds with rgba8(30,30,46)
+// drawRect fills the entire bounds with rgba8(30,30,46)
 // before painting the view tree, so PulpView is opaque by definition.
 // Override isOpaque=YES so AppKit doesn't composite NSWindow.backgroundColor
 // (white in light mode) under us on hover/focus repaints. Without this,
@@ -301,25 +297,20 @@ static void install_app_menu(NSString* appName) {
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e {
     (void)e;
-    // The click that activates an inactive window foregrounds it ONLY — it is
-    // NOT delivered as a mouseDown, so it cannot select a view in the inspector
-    // overlay ("the foregrounding click shouldn't select"). Returning NO (the
-    // AppKit default) also means that once the window IS key, hover (mouseMoved)
-    // and clicks behave normally. The prior YES + _pendingFirstMouse approach
-    // left a NON-key window (e.g. when the floating inspector held key focus)
-    // with dead hover AND every click eaten — the cause of "after Esc I can't
-    // hover/click until I cycle Cmd+I". One click now refocuses the canvas and
-    // hover+click resume. Trade-off: a first click on a widget while the window
-    // is inactive foregrounds rather than interacts — correct for an inspect
-    // surface.
+    // Keep AppKit's default first-mouse behavior: the click that activates an
+    // inactive window foregrounds it but is not delivered as mouseDown, so it
+    // cannot also select a view in the inspector overlay. Once the window is
+    // key, hover and click delivery proceed normally. Trade-off: a first click
+    // on a widget while the window is inactive foregrounds rather than
+    // interacts, which is correct for an inspect surface.
     return NO;
 }
 
-// pulp #2088 — the Obj-C `_focusedView` ivar is a parallel pointer to
+// The Obj-C `_focusedView` ivar is a parallel pointer to
 // `pulp::view::View::focused_input_`. The static is auto-cleared by ~View()
-// (pulp #1708) when the focused widget is destroyed (e.g. React unmount
-// of a clicked widget); the ivar is not. The #1818 fix re-syncs at the
-// TOP of mouseDown — but mouseDown's own work (overlay dispatch, ComboBox
+// when the focused widget is destroyed (e.g. React unmount of a clicked
+// widget); the ivar is not. mouseDown re-syncs at the top, but its own
+// work (overlay dispatch, ComboBox
 // routing, on_mouse_event → React unmount) can destroy the focused view
 // MID-FUNCTION, after which subsequent _focusedView derefs PAC-fault on
 // the vtable load. Read the live pointer through this accessor everywhere
@@ -361,7 +352,7 @@ static void install_app_menu(NSString* appName) {
     } else {
         _relativeMouseWindowPoint = pt;
     }
-    // pulp #59/#63/#64/#65 — when a design viewport is in effect, inverse-
+    // When a design viewport is in effect, inverse-
     // transform window-space coords into root-space before hit_test sees
     // them. Identity when no viewport is set.
     if (self.pointTransform) pt = self.pointTransform(pt);
@@ -373,11 +364,10 @@ static void install_app_menu(NSString* appName) {
     auto pt = [self localPoint:event];
     auto* target = self.rootView->hit_test(pt);
     if (!target) {
-        // WYSIWYG P6 FIX 4 — hovering over EMPTY background inside a scroll
-        // pane returns no hit (no hit-testable child under the point), which
-        // previously dropped the wheel event. Route it to the ScrollView the
-        // cursor is over so scrolling works anywhere in the pane without a
-        // click first.
+        // Hovering over empty background inside a scroll pane returns no hit
+        // because there is no hit-testable child under the point. Route it to
+        // the ScrollView the cursor is over so scrolling works anywhere in
+        // the pane without a click first.
         if (auto* sv = pulp::view::find_scroll_view_at(*self.rootView, pt)) {
             pulp::view::MouseEvent me;
             me.position = pt;
@@ -454,34 +444,25 @@ static void install_app_menu(NSString* appName) {
             }
             auto pt = [self localPoint:event];
 
-            // pulp #1818 / #2088 — the Obj-C `_focusedView` ivar is a parallel
+            // The Obj-C `_focusedView` ivar is a parallel
             // pointer to `pulp::view::View::focused_input_`. The static is
-            // auto-cleared by ~View() (pulp #1708) when the focused widget
+            // auto-cleared by ~View() when the focused widget
             // is destroyed (e.g., a React unmount of a clicked widget); the
-            // ivar is not. The original #1818 fix re-synced ONLY at this top
-            // of mouseDown — but mouseDown's own work (overlay dispatch, ComboBox
+            // ivar is not. This top-level sync is not enough by itself:
+            // mouseDown's own work (overlay dispatch, ComboBox
             // routing, on_mouse_event → React unmount) can destroy the focused
             // view MID-FUNCTION, so subsequent _focusedView derefs PAC-faulted
-            // (#2088: "-[PulpView mouseDown:] + 1172"). The complete fix routes
-            // every deref below through -[liveFocusedView], which performs the
-            // re-sync at each access site. This top-level re-sync is now
-            // redundant with the per-call accessor, but kept as defense-in-depth
-            // for any future deref that forgets to use the accessor.
+            // on the vtable load. Every deref below routes through
+            // -[liveFocusedView], which performs the re-sync at each access
+            // site. This top-level re-sync is now redundant with the per-call
+            // accessor, but kept as defense-in-depth for any future deref that
+            // forgets to use the accessor.
             if (_focusedView && _focusedView != pulp::view::View::focused_input_) {
                 _focusedView = pulp::view::View::focused_input_;
             }
 
         // Inspector intercept — consume clicks when inspector is active.
         //
-        // WYSIWYG P2h REGRESSION 4: when Cmd+I foregrounds the floating
-        // inspector window, clicking the MAIN window to bring it forward
-        // should ONLY foreground it — not also select a view under that
-        // activating click. `acceptsFirstMouse:` returns YES so the
-        // window-activating click IS delivered to mouseDown; we flag it in
-        // -acceptsFirstMouse: and, when set, skip forwarding this one
-        // mouse-down to the inspector hook (and clear the flag). Hover
-        // (mouseMoved) still highlights regardless — only this single
-        // activating press is suppressed, and only for the inspector path.
         {
             auto mods = modifiers_from_ns_flags(event.modifierFlags);
             pulp::view::MouseEvent me;
@@ -489,7 +470,7 @@ static void install_app_menu(NSString* appName) {
             me.modifiers = mods;
             me.is_down = true;
             me.phase = pulp::view::MousePhase::press;
-            // WYSIWYG P4 FIX 1 — pass this window's root so the installed hook
+            // Pass this window's root so the installed hook
             // gates to the inspected canvas root; events in a secondary window
             // (the floating InspectorWindow) must not touch the canvas overlay.
             if (pulp::view::View::call_inspector_mouse_hook(me, self.rootView)) {
@@ -527,7 +508,7 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
-        // pulp #1148 — generalized overlay-click routing for React popovers.
+        // Generalized overlay-click routing for React popovers.
         // Any View that called `claim_overlay()` (e.g. via @pulp/react's
         // `<View overlay>` JSX prop) is checked AFTER the ComboBox path
         // (which stays exact-as-was per regression test in
@@ -542,7 +523,7 @@ static void install_app_menu(NSString* appName) {
                 // Hit-test inside the overlay subtree so nested buttons /
                 // labels still receive the click.
                 //
-                // pulp #1313 (Codex P1 on #1297) — only dispatch when
+                // Only dispatch when
                 // hit_test returns a real view. If hit_test returns
                 // nullptr, the overlay (or some ancestor in its
                 // subtree) failed the visible / enabled / hit_testable
@@ -551,7 +532,7 @@ static void install_app_menu(NSString* appName) {
                 // through to the standard hit_test below instead.
                 auto local_to_overlay = to_local(pt, overlay, self.rootView);
                 if (auto* sub = overlay->hit_test(local_to_overlay)) {
-                    // pulp #1314 (Codex P2 on #1297) — when the
+                    // When the
                     // overlay handles a click, the standard ComboBox
                     // outside-click notification at the bottom of
                     // mouseDown: is bypassed via the early return
@@ -597,7 +578,7 @@ static void install_app_menu(NSString* appName) {
                 // every JSX caller needing a global click listener. The next
                 // mount cycle will re-claim if the popover is still open.
                 //
-                // pulp #1361 — go through dismiss_active_overlay() (not the
+                // Go through dismiss_active_overlay() (not the
                 // bare release_overlay()) so React state can flip
                 // setOpen(false) via on_overlay_dismissed. Falls through to
                 // the standard hit_test below so the click also activates
@@ -685,19 +666,19 @@ static void install_app_menu(NSString* appName) {
                 me.position = {pt_i.x, pt_i.y};
                 me.modifiers = mods;
                 me.is_down = true;  // button still held during drag
-                // WYSIWYG P2h: state the gesture phase explicitly so the
+                // State the gesture phase explicitly so the
                 // overlay's move/resize machine treats this as a DRAG TICK,
                 // not a release. Without this the overlay (which historically
                 // inferred drag-vs-release from is_down) ended the gesture on
                 // the first mac drag tick and fell through to re-selection.
                 me.phase = pulp::view::MousePhase::drag;
-                // WYSIWYG P4 FIX 1 — gate to this window's root (see press).
+                // Gate to this window's root (see press).
                 if (pulp::view::View::call_inspector_mouse_hook(me, self.rootView)) {
                     [self setNeedsDisplay:YES];
                     return;
                 }
             }
-            // pulp #992 — _dragTarget is captured in mouseDown but the View
+            // _dragTarget is captured in mouseDown but the View
             // it points to may be unmounted (and freed) before the next
             // drag event arrives, e.g. when a click triggers a React state
             // change that destroys the widget. Re-validate against the
@@ -712,9 +693,8 @@ static void install_app_menu(NSString* appName) {
             _dragTarget->on_mouse_drag(local);
             if (_dragTarget->on_drag) _dragTarget->on_drag(local);
 
-            // pulp jsx-instrument-import 2026-05-17 — bubble on_drag up
-            // to ancestors with on_drag set. Mirrors what mouseDown
-            // already does for on_pointer_event (window_host_mac.mm:569).
+            // Bubble on_drag up to ancestors with on_drag set. Mirrors what
+            // mouseDown already does for on_pointer_event.
             // Without this, JSX patterns where the click target is an
             // inner presentational widget (Chainer's XY pad dot, the
             // 5px slider track) but the drag handler is on an outer
@@ -752,15 +732,15 @@ static void install_app_menu(NSString* appName) {
                 me.position = {pt_i.x, pt_i.y};
                 me.modifiers = mods;
                 me.is_down = false;  // release
-                me.phase = pulp::view::MousePhase::release;  // WYSIWYG P2h
-                // WYSIWYG P4 FIX 1 — gate to this window's root (see press).
+                me.phase = pulp::view::MousePhase::release;
+                // Gate to this window's root (see press).
                 if (pulp::view::View::call_inspector_mouse_hook(me, self.rootView)) {
                     [self setNeedsDisplay:YES];
                     return;
                 }
             }
             if (_dragTarget) {
-                // pulp #992 — _dragTarget may point at a freed View if
+                // _dragTarget may point at a freed View if
                 // the mouseDown handler triggered a React unmount of the
                 // clicked widget (every dropdown selection in Spectr does
                 // this — clicking a band-count item flushes the React
@@ -776,7 +756,7 @@ static void install_app_menu(NSString* appName) {
                 auto pt = [self localPoint:event];
                 auto local = to_local(pt, _dragTarget, self.rootView);
                 auto released_target = self.rootView ? self.rootView->hit_test(pt) : nullptr;
-                // pulp #1067 — DOM-style click bubbling. `hit_test` returns
+                // DOM-style click bubbling. `hit_test` returns
                 // the deepest hit-testable view under the cursor, but the
                 // `onClick` handler (registered via `registerClick(id)`) may
                 // live on an ancestor. The classic reproducer: @pulp/react
@@ -784,8 +764,8 @@ static void install_app_menu(NSString* appName) {
                 // `<View onClick=...>` parent with a `<Label>Clear</Label>`
                 // child (Spectr's dom-adapter wraps string children in
                 // synthetic Labels). Clicking the visible "Clear" text
-                // hits the Label, which has no `on_click`, so #1006/#1008's
-                // capture-by-_dragTarget path silently dropped the click.
+                // hits the Label, which has no `on_click`, so capturing only
+                // `_dragTarget` silently drops the click.
                 // Walk up the parent chain to find the nearest ancestor
                 // (including `_dragTarget` itself) with a registered
                 // handler — mirrors the browser behaviour @pulp/react users
@@ -824,7 +804,7 @@ static void install_app_menu(NSString* appName) {
                     bubble->on_pointer_event(bme);
                 }
                 if (released_target == _dragTarget && (click_handler || global_click)) {
-                    // pulp #2502 — `click_handler` / `global_click` are
+                    // `click_handler` / `global_click` are
                     // `std::function`s whose closures reference the
                     // WidgetBridge / ScriptEngine that built them. Deferring
                     // their invocation via a bare `dispatch_async` block left
@@ -909,7 +889,7 @@ static void install_app_menu(NSString* appName) {
 
 // ── Keyboard input ───────────────────────────────────────────────
 
-// pulp #2128 follow-up — NSResponder routes Cmd-modified chords through
+// NSResponder routes Cmd-modified chords through
 // performKeyEquivalent:, NOT keyDown:. Without this override every Cmd
 // chord is consumed by the responder chain before View::on_global_key or
 // the script dispatcher, leaving Cmd shortcut listeners silently dead.
@@ -951,12 +931,11 @@ static void install_app_menu(NSString* appName) {
             auto key = key_code_from_ns(event.keyCode);
             auto mods = modifiers_from_ns_flags(event.modifierFlags);
 
-            // pulp #1818 — re-sync the Obj-C `_focusedView` ivar from the
+            // Re-sync the Obj-C `_focusedView` ivar from the
             // auto-clearing `View::focused_input_` static. Same rationale
             // as mouseDown: if the focused View was unmounted between the
             // last input event and this one (~View clears the static),
-            // the ivar still dangles and any deref below (Tab nav at
-            // L749/751 or the final dispatch at L808) would PAC-fault on
+            // the ivar still dangles and any deref below would PAC-fault on
             // freed memory.
             if (_focusedView && _focusedView != pulp::view::View::focused_input_) {
                 _focusedView = pulp::view::View::focused_input_;
@@ -989,7 +968,7 @@ static void install_app_menu(NSString* appName) {
                 }
             }
 
-            // pulp #2088 — re-sync via liveFocusedView so a destroyed prior
+            // Re-sync via liveFocusedView so a destroyed prior
             // focused view doesn't leak a dangling ivar into focus_next/prev
             // and the on_focus_changed/release_input_focus calls below.
             auto* old = [self liveFocusedView];
@@ -1024,7 +1003,7 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
-        // pulp #2128 follow-up — fan out to every live WidgetBridge so
+        // Fan out to every live WidgetBridge so
         // `@pulp/react` apps (Spectr) receive bare-key shortcuts like
         // 'S' or Escape that React effects bind via
         // `window.addEventListener('keydown', ...)`. The bridge's own
@@ -1049,7 +1028,7 @@ static void install_app_menu(NSString* appName) {
                     return;
                 }
             }
-            // pulp #68 — host-level ESC fallback for an open ComboBox dropdown
+            // Host-level ESC fallback for an open ComboBox dropdown
             // whose focus has been stolen by a sibling JS-driven element
             // (common pattern: React mounts a popover next to the combo,
             // grabs focus inside it, but the user hits ESC expecting the
@@ -1064,7 +1043,7 @@ static void install_app_menu(NSString* appName) {
                 [self setNeedsDisplay:YES];
                 return;
             }
-            // pulp #1361 — generic active_overlay_ ESC dismissal. ModalOverlay,
+            // Generic active_overlay_ ESC dismissal. ModalOverlay,
             // ComboBox, and CallOutBox already have their own ESC handlers
             // (ComboBox/CallOutBox sit on the focused view and consume their
             // own KeyCode::escape; modals are handled above). The generic
@@ -1081,7 +1060,7 @@ static void install_app_menu(NSString* appName) {
 
         [self interpretKeyEvents:@[event]];
 
-            // pulp #2088 — interpretKeyEvents above can dispatch IME / app
+            // interpretKeyEvents above can dispatch IME / app
             // commands that ultimately destroy the focused widget (e.g.,
             // a JS key handler triggers a React unmount). Re-sync via
             // liveFocusedView so we don't deref a freed view here.
@@ -1143,8 +1122,8 @@ static void install_app_menu(NSString* appName) {
                 pulp::view::MouseEvent me;
                 me.position = {pt.x, pt.y};
                 me.is_down = false;
-                me.phase = pulp::view::MousePhase::hover;  // WYSIWYG P2h
-                // WYSIWYG P4 FIX 1 — gate to this window's root so hovering the
+                me.phase = pulp::view::MousePhase::hover;
+                // Gate to this window's root so hovering the
                 // floating InspectorWindow does not highlight the canvas.
                 pulp::view::View::call_inspector_mouse_hook(me, self.rootView);
                 // Don't consume — let normal hover handling continue for cursor changes
@@ -1164,7 +1143,7 @@ static void install_app_menu(NSString* appName) {
             self.rootView->simulate_hover(pt);
 
             auto* target = self.rootView->hit_test(pt);
-            // WYSIWYG P2d — the inspector overlay may override the cursor for
+            // The inspector overlay may override the cursor for
             // its move/resize affordances (it owns mouse-move before normal
             // hit-testing). A returned style >= 0 wins over the hit view's
             // own cursor(); -1 defers to the normal path below.
@@ -1173,7 +1152,7 @@ static void install_app_menu(NSString* appName) {
                 pulp::view::MouseEvent cme;
                 cme.position = {pt.x, pt.y};
                 cme.is_down = false;
-                // WYSIWYG P4 FIX 1 — gate to this window's root so the canvas
+                // Gate to this window's root so the canvas
                 // overlay's cursor affordance is not driven by moves inside a
                 // secondary window.
                 inspector_cursor =
@@ -1213,8 +1192,7 @@ static void install_app_menu(NSString* appName) {
                         [[NSCursor resizeUpDownCursor] set]; break;
                     case pulp::view::View::CursorStyle::top_left_resize:
                     case pulp::view::View::CursorStyle::bottom_right_resize:
-                        // WYSIWYG P2h REGRESSION 5 — proper diagonal ↖↘
-                        // resize cursor. AppKit ships no PUBLIC diagonal
+                        // Proper diagonal ↖↘ resize cursor. AppKit ships no public diagonal
                         // resize cursor, but the private
                         // `_windowResizeNorthWestSouthEastCursor` selector
                         // is the standard NSWindow corner-resize arrow.
@@ -1223,13 +1201,12 @@ static void install_app_menu(NSString* appName) {
                         [pulp_diagonal_resize_cursor(YES) set]; break;
                     case pulp::view::View::CursorStyle::top_right_resize:
                     case pulp::view::View::CursorStyle::bottom_left_resize:
-                        // WYSIWYG P2h REGRESSION 5 — proper diagonal ↗↙
+                        // Proper diagonal ↗↙
                         // resize cursor (private
                         // `_windowResizeNorthEastSouthWestCursor`).
                         [pulp_diagonal_resize_cursor(NO) set]; break;
                     case pulp::view::View::CursorStyle::multi_directional_resize:
                         [[NSCursor openHandCursor] set]; break;
-                    // pulp #1550 Tier-4 macOS partial 2026-05-12 — 5
                     // CSS cursor keywords with native NSCursor backings.
                     //   alias → dragLinkCursor (macOS 10.6+).
                     //   copy → dragCopyCursor (macOS 10.6+).
@@ -1296,7 +1273,7 @@ static void install_app_menu(NSString* appName) {
     }
 }
 
-// ── Trackpad gestures (P4: pinch/rotate) ───────────────────────────
+// ── Trackpad gestures (pinch/rotate) ───────────────────────────────
 
 - (void)magnifyWithEvent:(NSEvent*)event {
     if (!self.rootView) return;
@@ -1414,7 +1391,7 @@ static void install_app_menu(NSString* appName) {
 
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
-    // pulp #1321: AppKit resizes us during a window resize. Push the new
+    // AppKit resizes us during a window resize. Push the new
     // bounds into the root View immediately and relayout so hit testing,
     // tracking-area updates, and the next paint all see the new geometry.
     if (self.rootView) {
@@ -1428,7 +1405,7 @@ static void install_app_menu(NSString* appName) {
 
 - (void)dealloc {
     [self.animationTimer invalidate];
-    // pulp #2502 — belt-and-suspenders: even if a host teardown path forgot
+    // Belt-and-suspenders: even if a host teardown path forgot
     // to call -prepareForTeardown, cancel any still-queued deferred-click
     // blocks here so a dangling block can never outlive this view.
     [self prepareForTeardown];
@@ -1463,7 +1440,7 @@ static void install_app_menu(NSString* appName) {
         CGSize backing = NSMakeSize(frame.size.width * scale, frame.size.height * scale);
         layer.drawableSize = backing;
 
-        // pulp #1382 — declare the layer opaque and seed its background to
+        // Declare the layer opaque and seed its background to
         // the standalone-app's base dark fill (matches paint_scene RGB
         // 30,30,46 = 0x1E1E2E). Without this, AppKit auto-clears the
         // layer to its default `backgroundColor` (clear/white-equivalent
@@ -1500,7 +1477,7 @@ static void install_app_menu(NSString* appName) {
     return self;
 }
 
-// pulp #1382 — `wantsUpdateLayer = YES` tells AppKit to use the
+// `wantsUpdateLayer = YES` tells AppKit to use the
 // layer-based drawing path (calls `-updateLayer` instead of
 // `-drawRect:`) and, critically, NOT to auto-clear the backing layer
 // to opaque background between updates. Combined with `layer.opaque
@@ -1553,7 +1530,7 @@ static void install_app_menu(NSString* appName) {
 @interface PulpWindowDelegate : NSObject <NSWindowDelegate>
 @property (nonatomic, copy) void (^onClose)(void);
 @property (nonatomic, copy) void (^onResize)(float, float);
-/// pulp-internal #70 — real-time aspect-lock snap during user drag.
+/// Real-time aspect-lock snap during user drag.
 /// macOS `setContentAspectRatio:` is unreliable in practice (it does
 /// not engage during edge-drag on every monitor configuration, and is
 /// bypassed entirely by the green zoom button / programmatic resize).
@@ -1562,7 +1539,7 @@ static void install_app_menu(NSString* appName) {
 /// design aspect regardless of drag handle or zoom path. When 0, no
 /// constraint is applied.
 @property (nonatomic, assign) CGFloat aspectRatio;
-/// WYSIWYG P4 FIX 4 — explicit window role for the close policy. A SECONDARY
+/// Explicit window role for the close policy. A SECONDARY
 /// window (the floating inspector) only orders itself out on close and never
 /// stops the app; a PRIMARY window (the main canvas, the default) stops the
 /// app on close regardless of whatever secondary windows remain visible. This
@@ -1576,7 +1553,7 @@ static void install_app_menu(NSString* appName) {
 - (BOOL)windowShouldClose:(NSWindow*)sender {
     if (self.onClose) self.onClose();
     [sender orderOut:nil];
-    // WYSIWYG P4 FIX 4 — role-based close policy (replaces the visible-count
+    // Role-based close policy (replaces the visible-count
     // heuristic). A secondary window (e.g. the floating inspector) closing only
     // orders itself out and leaves the main window + app running. A primary
     // window (the main canvas) closing stops the app regardless of any
@@ -1632,7 +1609,7 @@ static void install_app_menu(NSString* appName) {
 // configure_window_type and the child-view geometry helpers
 // (child_view_frame_in_host, attach_child_view_to_host,
 // set_child_view_bounds_in_host, detach_child_view_from_host) were
-// extracted to window_host_mac_geometry.mm in the R2-5 refactor — see
+// extracted to window_host_mac_geometry.mm — see
 // window_host_mac_internal.hpp. Reached here via the file-scope
 // `using namespace pulp::view::mac_geometry` above.
 
@@ -1659,7 +1636,7 @@ public:
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
 
-            // pulp #1382 — NSWindow's default backgroundColor is
+            // NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
             // light-mode. AppKit composites this beneath the contentView
             // on dirty-rect repaints, even when the contentView is opaque.
@@ -1673,7 +1650,7 @@ public:
 
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
-            // Apply multi-window type configuration (Phase 6)
+            // Apply multi-window type configuration.
             configure_window_type(window_, options);
 
             if (options.min_width > 0 || options.min_height > 0)
@@ -1686,7 +1663,7 @@ public:
             view_.frameClock = &frame_clock_;
             [window_ setContentView:view_];
 
-            // WYSIWYG QA BUG 5 — the CPU host backs the FLOATING inspector
+            // The CPU host backs the floating inspector
             // window. Its PulpView tracking area carries NSTrackingMouseMoved,
             // but a tracking area only fans -mouseMoved: out to its owner when
             // the window itself accepts mouse-moved events; NSWindow defaults
@@ -1700,12 +1677,12 @@ public:
             [window_ setAcceptsMouseMovedEvents:YES];
 
             delegate_ = [[PulpWindowDelegate alloc] init];
-            // WYSIWYG P4 FIX 4 — role drives the close policy (see
+            // Role drives the close policy (see
             // windowShouldClose:). Default primary; secondary windows (the
             // floating inspector) opt in via WindowOptions::secondary_window.
             delegate_.isSecondaryWindow = options.secondary_window ? YES : NO;
             delegate_.onResize = ^(float w, float h) {
-                // pulp #1321: belt-and-suspenders relayout — PulpView's
+                // Belt-and-suspenders relayout: PulpView's
                 // setFrameSize: already pushes new bounds + relayouts when
                 // AppKit resizes the content view, but if a host changed
                 // the frame in some other path we still want the root view
@@ -1731,7 +1708,7 @@ public:
         }
         idle_callback_ = nullptr;
 
-        // pulp #2502 — cancel any queued deferred-click blocks before the
+        // Cancel any queued deferred-click blocks before the
         // root View tree / WidgetBridge / ScriptEngine they captured can be
         // freed. This destructor runs synchronously, with no run-loop pump
         // between here and the caller's earlier-destroyed bridge/engine, so
@@ -1818,7 +1795,7 @@ public:
         return !live.empty() ? live : pulp::view::mac_capture::capture_window_content_png(window_, view_);
     }
 
-    // issue #2001 — host-managed pixels only. CG-backed host has no GPU
+    // Host-managed pixels only. CG-backed host has no GPU
     // back-buffer, so the deterministic surface is the rasterized content
     // view. Skips screencapture so hidden windows still produce bytes.
     std::vector<uint8_t> capture_back_buffer_png() override {
@@ -1861,7 +1838,7 @@ public:
             auto dispatcher_token =
                 pulp::events::MainThreadDispatcher::register_backend(
                     make_cocoa_main_thread_backend(dispatcher_alive));
-            // pulp-internal #71 follow-up — see header for initially_hidden.
+            // See header for initially_hidden.
             if (options_initially_hidden_) {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
@@ -1921,7 +1898,7 @@ public:
             [window_ setReleasedWhenClosed:NO];
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
-            // Apply multi-window type configuration (Phase 6)
+            // Apply multi-window type configuration.
             configure_window_type(window_, options);
 
             if (options.min_width > 0 || options.min_height > 0)
@@ -1939,7 +1916,7 @@ public:
             [window_ setContentView:metal_view_];
 
             delegate_ = [[PulpWindowDelegate alloc] init];
-            // WYSIWYG P4 FIX 4 — role drives the close policy (see
+            // Role drives the close policy (see
             // windowShouldClose:). The GPU host is normally the primary main
             // canvas window; secondary windows opt in via
             // WindowOptions::secondary_window.
@@ -1962,7 +1939,7 @@ public:
         stop_display_link();
         render_dispatch_queued_.store(false, std::memory_order_release);
 
-        // WYSIWYG P4 FIX 2 — detach the NSWindow + delegate FIRST, mirroring
+        // Detach the NSWindow + delegate FIRST, mirroring
         // ~MacWindowHost. The GPU host is the MAIN canvas window; if it is
         // destroyed while still visible (e.g. app teardown, host swap) AppKit
         // can otherwise keep the window alive holding a delegate whose onClose
@@ -1979,7 +1956,7 @@ public:
 
         skia_surface_.reset();
         gpu_surface_.reset();
-        // pulp #2502 — cancel any queued deferred-click blocks before the
+        // Cancel any queued deferred-click blocks before the
         // captured View tree / WidgetBridge / ScriptEngine can be freed.
         // PulpMetalView inherits -prepareForTeardown from PulpView.
         [metal_view_ prepareForTeardown];
@@ -2101,9 +2078,8 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
-        // until widgets pass per-rect bounds through
-        // request_repaint(), every host-level repaint() invalidates
-        // the whole viewport. the follow-up partial-rendering slice adds the Rect overload.
+        // Until widgets pass per-rect bounds through request_repaint(),
+        // every host-level repaint() invalidates the whole viewport.
         tracker_.invalidate_all();
         ++request_repaint_dirty_frames_;
     }
@@ -2137,7 +2113,7 @@ public:
         return pulp::view::mac_capture::capture_window_content_png(window_, metal_view_);
     }
 
-    // issue #2001 — deterministic GPU back-buffer readback for hidden /
+    // Deterministic GPU back-buffer readback for hidden /
     // headless test windows. Bypasses screencapture (which fails on hidden
     // windows) and the content-view cache, going straight through the
     // existing render_frame(...) path that already powers the
@@ -2201,7 +2177,7 @@ public:
         resize_callback_ = std::move(cb);
     }
 
-    // pulp #1387 gap #3 — wire the host's idle callback into the
+    // Wire the host's idle callback into the
     // CVDisplayLink dispatch so JS rAF / setTimeout / async-result
     // queues are pumped each vsync. Without this override the GPU
     // host inherited the WindowHost base no-op, which dropped
@@ -2228,7 +2204,7 @@ public:
             auto dispatcher_token =
                 pulp::events::MainThreadDispatcher::register_backend(
                     make_cocoa_main_thread_backend(dispatcher_alive));
-            // pulp-internal #71 follow-up — when initially_hidden is set,
+            // When initially_hidden is set,
             // skip Dock icon, focus stealing, and the show() call. Window
             // is created and the run loop drives the bridge per-vsync as
             // usual; just don't put glass on the user's screen. Used by
@@ -2414,16 +2390,14 @@ private:
     std::atomic<bool> render_dispatch_queued_{false};
     std::shared_ptr<std::atomic<bool>> render_dispatch_alive_ =
         std::make_shared<std::atomic<bool>>(true);
-    // partial-rendering POC. Tracks per-frame invalidations
+    // Tracks per-frame invalidations
     // pushed by repaint() and the animation / FrameClock pump. The
     // render gate still uses the existing needs_repaint_/animation
-    // flags so observable behaviour does not change in this slice —
+    // flags so observable behaviour does not change yet:
     // the tracker is plumbed-but-non-authoritative. Debug-printed once
     // per painted frame when PULP_PARTIAL_RENDERING_DEBUG=1 in the
-    // environment so we can audit "the dirty rect we WOULD have
+    // environment so we can audit "the dirty rect we would have
     // clipped to" against the unconditional repaint that still ships.
-    // the follow-up partial-rendering slice promotes the tracker to the authoritative gate + adds
-    // Skia clipIRect.
     render::DirtyTracker tracker_;
     bool partial_rendering_debug_ = false;
     uint64_t pump_dirty_frames_ = 0;
@@ -2441,7 +2415,7 @@ private:
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     ResizeCallback resize_callback_;
-    // pulp #1387 gap #3 — idle callback wiring. CVDisplayLink reads
+    // Idle callback wiring. CVDisplayLink reads
     // has_idle_callback_ on the display thread; idle_callback_ is
     // invoked on main only.
     std::function<void()> idle_callback_;
@@ -2467,8 +2441,8 @@ private:
             if (sv->scroll_animating()) return true;
         }
 
-        // pulp #1734 (Codex P1): CSS animations on a generic View were
-        // not keeping the CVDisplayLink loop alive. tick_animations()
+        // CSS animations on a generic View must keep the CVDisplayLink loop
+        // alive. tick_animations()
         // is called every frame in advance_widget_animations, but
         // without a continuous-frame request the loop stalls after
         // needs_repaint_ clears once. Check for any unpaused active
@@ -2494,7 +2468,7 @@ private:
         else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
         else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
 
-        // pulp #1668 — also drive CSS animations on every View in the
+        // Also drive CSS animations on every View in the
         // tree. tick_animations honors animation_play_state_ ("paused"
         // → no advance) and is a no-op for Views with no active CSS
         // animations, so the recursive walk is cheap.
@@ -2554,7 +2528,7 @@ private:
                                    static_cast<uint32_t>(height),
                                    static_cast<float>(scale));
         }
-        // pulp #1321: relayout the root view synchronously so hit testing
+        // Relayout the root view synchronously so hit testing
         // and any user resize callback both see the new geometry. paint_scene
         // also calls set_bounds + layout_children, but that runs at the next
         // vsync — too late for input handlers fired during the resize drag.
@@ -2574,7 +2548,7 @@ private:
     }
 
     void paint_scene(canvas::Canvas& canvas) {
-        // pulp #59/#63/#64/#65 — when a design viewport is set, the root
+        // When a design viewport is set, the root
         // is pinned at design size and paint applies an aspect-correct
         // scale + letterbox translate to fit the current window. The
         // letterbox fill covers the entire window first so the
@@ -2597,7 +2571,7 @@ private:
         canvas.fill_rect(0, 0, width_, height_);
 
         if (has_viewport) {
-            // pulp PR #1984 Codex P1 — paint_overlays MUST run inside the
+            // paint_overlays MUST run inside the
             // design-viewport transform. View::OverlayRequest callbacks
             // are documented to draw in root coordinates (ComboBox
             // dropdowns, claimed overlays, inspector layer). The mouse
@@ -2627,10 +2601,9 @@ private:
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
-        // emit the per-frame dirty-rect decision the host
-        // WOULD use to clip in the follow-up partial-rendering slice. The actual paint path is
-        // unchanged; this is a wiring trace only. Gated on env so
-        // production CI logs stay quiet.
+        // Emit the per-frame dirty-rect decision the host would use for
+        // clipping. The actual paint path is unchanged; this is a wiring
+        // trace only. Gated on env so production CI logs stay quiet.
         if (partial_rendering_debug_ && tracker_.is_dirty()) {
             auto b = tracker_.bounds();
             fprintf(stderr,
@@ -2681,9 +2654,8 @@ private:
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
-        // clear the tracker AFTER present so the next frame
-        // starts clean. the follow-up partial-rendering slice will gate begin_frame() on
-        // tracker_.is_dirty() before paying for any of the above work.
+        // Clear the tracker AFTER present so the next frame starts clean.
+        // The current render gate still uses needs_repaint_ / animation state.
         tracker_.clear();
         return captured;
     }
@@ -2694,7 +2666,7 @@ private:
         CVOptionFlags, CVOptionFlags*, void* context)
     {
         auto* self = static_cast<MacGpuWindowHost*>(context);
-        // pulp #1387 gap #3 — guard now also fires when an idle
+        // Guard now also fires when an idle
         // callback is installed, so JS rAF / setTimeout / async-result
         // queues get a vsync-paced pump even when no native widget is
         // animating and no prior request_repaint set needs_repaint_.
@@ -2742,8 +2714,8 @@ private:
                         // frame-clock pumps mutate view state without
                         // going through request_repaint(), so for the
                         // tracker they count as a full-surface dirty
-                        // until the follow-up partial-rendering slice audits and converts the
-                        // animating widget paths to per-rect repaints.
+                        // until animating widget paths are audited and
+                        // converted to per-rect repaints.
                         self->tracker_.invalidate_all();
                         ++self->pump_dirty_frames_;
                     }

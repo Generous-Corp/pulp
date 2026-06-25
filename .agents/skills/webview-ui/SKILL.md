@@ -67,9 +67,10 @@ WebView2 can't start a drag from web content without moving to composition
 hosting). The JS call exists on all platforms for parity.
 
 ⚠ **Interim source:** this lands via an interim fork pin of CHOC
-(`danielraffel/choc` tag `pulp-webview-dnd-poc1`, the Tracktion/choc#64 PoC) —
-see pulp **#3619**. When #64 merges upstream the pin reverts to Tracktion/choc
-with no API change. The runnable reference lives in the choc repo
+(`danielraffel/choc` tag `pulp-webview-dnd-poc1`, carrying WebView drag-and-drop
+support; Tracktion/choc pull request 64 is the upstream tracker).
+When that support is available upstream, the pin reverts to
+Tracktion/choc with no API change. The runnable reference lives in the choc repo
 (`examples/webview_drag_and_drop.cpp`), not in Pulp.
 
 ## Choose A Loading Mode
@@ -247,6 +248,6 @@ When porting a WebView editor to the native bridge (translating browser `<canvas
 1. **`ctx.arc()` does not add to a path** — bridge `canvasArc` strokes immediately. Synthesize as ~32 `canvasLineTo` segments so `ctx.fill()` honors the active gradient. Same applies to `arcTo`, `ellipse`, `roundRect`.
 2. **Gradient stops must be spread as variadic `(color, pos)` pairs** — passing JSON makes the bridge parse zero stops → silent fall-through to default white fill. `canvasSetLinearGradient(id, x0, y0, x1, y1, c1, p1, c2, p2, ...)`.
 3. **Radial gradient bridge takes single outer circle** `(cx, cy, R)`, not the spec's two-circle form. Map `(x0,y0,r0,x1,y1,r1)` → `(x1, y1, r1)` (visually identical when `r0=0`, same center).
-4. **Per-canvas `save_layer` isolation** — only since pulp v0.74.1 (#1372). Pre-#1372, `ctx.clearRect()` on one canvas erased pixels another sibling just painted. Pin SDK `>= 0.74.1` for any multi-canvas editor.
+4. **Per-canvas `save_layer` isolation** — since pulp v0.74.1, `ctx.clearRect()` on one canvas no longer erases pixels another sibling just painted. Pin SDK `>= 0.74.1` for any multi-canvas editor.
 5. **SDK version floor for canvas2d parity** is v0.74.1 (sibling isolation) on top of v0.72.4 (gradient bridge) + v0.72.5 (gradient fills). Anything older has visible gaps.
 6. **Always pixel-sample** after rendering — uniform-fallback bugs (every gradient stop resolved to default white) look superficially "filled" at thumbnail scale but are structurally broken.

@@ -124,10 +124,9 @@ def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
     them must be in the substitution map or the generated project
     silently ships the literal text.
 
-    Regression: Codex PR #3002 review (P1 + P2). The previous
-    implementation called `dir_path.glob("*.template")` which only
-    matched immediate children, so nested template trees escaped the
-    smoke entirely.
+    Regression: the previous implementation called
+    `dir_path.glob("*.template")` which only matched immediate children, so
+    nested template trees escaped the smoke entirely.
     """
     failures: list[str] = []
     required = REQUIRED_FILES_BY_TYPE.get(type_name)
@@ -201,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     all_failures: list[str] = []
     # Use rglob so trees like `standalone/<type>/CMakeLists.txt.template`
     # are recognised even though their immediate parent has no top-level
-    # .template files. Regression: Codex PR #3002 P1.
+    # .template files. Regression: the old top-level glob missed those trees.
     type_dirs = [
         d for d in sorted(templates_root.iterdir())
         if d.is_dir() and any(d.rglob("*.template"))

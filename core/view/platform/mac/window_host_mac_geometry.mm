@@ -1,7 +1,7 @@
 // window_host_mac_geometry.mm — geometry, coordinate, and event-
 // translation helpers extracted from window_host_mac.mm.
 //
-// R2-5 refactor: these are free functions / former file-local statics
+// These are free functions / former file-local statics
 // that do NOT touch PulpView ivars or any Obj-C instance state — pure
 // coordinate math, NSEvent→Pulp event translation, View tree walks, and
 // NSWindow / NSView configuration. The PulpView @implementation block,

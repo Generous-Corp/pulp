@@ -1,0 +1,71 @@
+name: Release publish coordinator
+
+# GitHub now makes a PUBLISHED release IMMUTABLE — no further asset uploads.
+# Pulp builds one release from TWO parallel tag-triggered workflows:
+#   - "Release CLI"       → CLI binaries (artifacts/**)
+#   - "Sign and Release"  → macOS sign/notarize + appcast.xml
+# Whichever published first locked the other out ("Cannot upload asset to an
+# immutable release"), so releases shipped incomplete (e.g. CLI without the
+# Sparkle appcast). Both now create the release as a DRAFT on a tag push
+# (release-cli only on `push`; sign-and-release already did). This coordinator
+# publishes that draft EXACTLY ONCE — when BOTH legs have succeeded for the same
+# tagged commit. If either leg fails, the release stays a draft (incomplete
+# releases never publish) and `release-health.yml` flags the stuck draft.
+
+on:
+  workflow_run:
+    workflows: ["Release CLI", "Sign and Release"]
+    types: [completed]
+
+permissions:
+  contents: write   # publish (un-draft) the release
+  actions: read     # read sibling workflow_run conclusions
+
+concurrency:
+  # Serialize per tag so the two legs' completions can't double-publish.
+  group: release-publish-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Only tag-push release runs (vX.Y.Z). Manual dispatch backfills publish
+    # directly in release-cli.yml and never become a coordinated draft.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    steps:
+      - name: Publish draft once both release legs succeed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "Triggered by '${{ github.event.workflow_run.name }}' for ${TAG} (${SHA})."
+
+          # Both required legs must have a SUCCESSFUL run for this exact commit.
+          ok=1
+          for wf in "Release CLI" "Sign and Release"; do
+            concl=$(gh api "repos/${REPO}/actions/runs?head_sha=${SHA}&per_page=100" \
+              --jq "[.workflow_runs[] | select(.name==\"${wf}\")] | sort_by(.run_started_at) | last | .conclusion // \"none\"")
+            echo "  ${wf}: ${concl}"
+            [ "${concl}" = "success" ] || ok=0
+          done
+          if [ "${ok}" != "1" ]; then
+            echo "Not both legs successful yet — leaving ${TAG} as a draft (will re-evaluate on the other leg's completion)."
+            exit 0
+          fi
+
+          # Publish the draft. Idempotent: if a prior coordinator run already
+          # published it, isDraft is false and we no-op.
+          state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
+          if [ "${state}" = "true" ]; then
+            gh release edit "${TAG}" --repo "${REPO}" --draft=false --latest
+            echo "::notice::Published release ${TAG} (both CLI + sign-and-release legs succeeded)."
+          elif [ "${state}" = "false" ]; then
+            echo "${TAG} already published — nothing to do."
+          else
+            echo "::warning::No release object for ${TAG} (state=${state}); nothing to publish."
+          fi

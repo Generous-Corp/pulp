@@ -1,13 +1,11 @@
-// test_cli_shellout_helpers.hpp — shared helpers for the test_cli_shellout
-// suite and its sibling TUs extracted in the Phase 5 P5-4 refactor.
+// Shared helpers for the test_cli_shellout suite and its sibling TUs.
 //
 // Per CLAUDE.md: shell-out CLI tests assert exit code + stderr content
 // against the built binary. These helpers wrap the platform-specific
 // env-var / process / path plumbing every shell-out test repeats.
 //
 // Helpers are header-inline so each translation unit can include this
-// without ODR issues. They were previously living in an anonymous
-// namespace inside test_cli_shellout.cpp.
+// without ODR issues.
 
 #pragma once
 
@@ -81,18 +79,20 @@ inline fs::path unique_temp_dir(const std::string& prefix) {
     return fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
 }
 
-// After the Rust CLI cutover, the instrumented C++ delegate lands at
-// <build>/tools/cli/pulp-cpp. Older/pre-cutover builds used
-// <build>/tools/cli/pulp. Prefer pulp-cpp so coverage builds exercise
-// the C++ implementation directly, but keep the old fallback for
-// compatibility. PULP_CLI_PATH can still override either path.
+// Shellout tests must use the CMake-provided CLI path for this configure.
+// Warm CI build directories can contain stale <build>/tools/cli/pulp-cpp
+// artifacts from a previous GPU-enabled build even when the current
+// PULP_ENABLE_GPU=OFF configure skips the CLI target. PULP_CLI_PATH is still
+// an explicit test override.
 inline fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
-    auto cpp = fs::current_path() / ".." / "tools" / "cli" / "pulp-cpp";
-    if (fs::exists(cpp)) return cpp;
-    return fs::current_path() / ".." / "tools" / "cli" / "pulp";
+#if defined(PULP_CLI_BINARY)
+    return fs::path(PULP_CLI_BINARY);
+#else
+    return {};
+#endif
 }
 
 inline ProcessResult run_pulp(const std::vector<std::string>& args,

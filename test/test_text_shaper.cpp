@@ -120,7 +120,7 @@ TEST_CASE("TextShaper layout_with_lines max_lines=1 materializes the full string
     REQUIRE(nowrap.lines[0].text.find("delta") != std::string::npos);
 }
 
-// pulp #1410 (Codex pre-merge sweep) — CSS `white-space: nowrap`
+// pulp #1410 — CSS `white-space: nowrap`
 // collapses hard line breaks into a single space, both in the
 // materialized line text and in the width sum. Otherwise an input
 // like "alpha\nbeta" would measure as alpha + beta with no inter-word
@@ -548,7 +548,7 @@ TEST_CASE("TextShaper BreakMode::normal default-arg matches the no-arg overload"
 TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is followed by more text",
           "[canvas][text_shaper][issue-1737]") {
     TextShaper shaper;
-    // Codex P1 on PR #1795: when break_word splits an over-wide segment
+    // When break_word splits an over-wide segment
     // mid-segment AND that segment is NOT the last one, the remainder
     // characters were silently dropped. The fix emits the remnant as
     // its own line unconditionally so materialization downstream sees

@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Web-compat catalog hygiene validator — evidence check (pulp #1657 / #1737).
+"""Web-compat catalog hygiene validator — evidence check.
 
-Extracted from ``verifier.py`` (roadmap P9-3) as a focused validator
+Extracted from ``verifier.py`` as a focused validator
 module. Post-processes PASS results: an entry that claims ``supported``
 in ``compat.json`` must back the claim with at least one runtime test
 reference that (a) names a file that exists AND (b) lists ``[tag]``s
 that appear as ``TEST_CASE`` declarations in that file.
 
-This is a pure mechanical move — the code is byte-identical to the
-``verifier.py`` original. ``verifier.py`` re-imports every public symbol
-defined here so existing ``from tools.harness.verifier import ...``
-call sites keep working unchanged.
+``verifier.py`` re-imports every public symbol defined here so existing
+``from tools.harness.verifier import ...`` call sites keep working unchanged.
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ logger = logging.getLogger("pulp.harness.verifier")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Evidence check (#1657 control #1) — requires runtime tests for supported claims
+# Evidence check — requires runtime tests for supported claims
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -48,7 +46,7 @@ def _grace_active(grace_until: Optional[str]) -> bool:
         return False
 
 
-# ── pulp #1737 — test-tag validation cache ─────────────────────────────────
+# ── Test-tag validation cache ──────────────────────────────────────────────
 # Reading + scanning a test file is cheap, but we do it once per file across
 # all catalog entries that reference it. Cache the extracted TEST_CASE tag
 # sets + name sets so the verifier doesn't re-parse the same file 50× during
@@ -132,9 +130,8 @@ def _validate_test_ref(repo_root: Path, ref: str) -> tuple[bool, str]:
     why the entry is intentionally unverifiable).
     """
     stripped = ref.strip()
-    # Typed prefixes — pulp #1737 followup (Codex P2 on #1768): the
-    # part-after-prefix is validated when it looks like a file path
-    # (contains `/`) so typo'd / stale typed refs don't auto-pass.
+    # Typed prefixes validate the part-after-prefix when it looks like a
+    # file path (contains `/`) so typo'd / stale typed refs don't auto-pass.
     # `cannot-validate:` always passes — it documents intentional
     # un-verifiability. The other prefixes try a file-existence check;
     # if the body doesn't look like a path, fall back to accept-on-prefix
@@ -227,13 +224,11 @@ def check_evidence(repo_root: Path, results: list[Result], compat: dict) -> list
     the repo. During a grace period the result stays PASS with a warning;
     after the grace period it becomes SUPPORTED_NO_EVIDENCE.
 
-    pulp #1737 — also verifies that any ``[tag]`` substrings inside each test
-    reference actually appear in some ``TEST_CASE`` declaration in the named
-    file. Without this, a renamed / deleted TEST_CASE leaves a dangling
-    reference in the catalog (the em-dash glitch fixed in PR #1752 was an
-    instance of exactly this — file existed, tag didn't match because the
-    em-dash made the path string unparseable). Tag-validation gaps are
-    treated the same as file-existence gaps for grace-period demotion.
+    Also verifies that any ``[tag]`` substrings inside each test reference
+    actually appear in some ``TEST_CASE`` declaration in the named file.
+    Without this, a renamed / deleted TEST_CASE leaves a dangling reference
+    in the catalog. Tag-validation gaps are treated the same as file-existence
+    gaps for grace-period demotion.
     """
     grace_until = _get_grace_until(compat)
     in_grace = _grace_active(grace_until)
@@ -247,10 +242,9 @@ def check_evidence(repo_root: Path, results: list[Result], compat: dict) -> list
             continue
         # Check for evidence: at least one test reference must (a) point at a
         # file that exists AND (b) name [tag]s that appear as TEST_CASE
-        # declarations in that file. pulp #1737 — the second check is new;
-        # without it a renamed/deleted TEST_CASE leaves a dangling catalog
-        # reference that the verifier didn't notice (PR #1752 hand-fixed
-        # 6 such cases that the file-existence-only check let through).
+        # declarations in that file. Without this tag check, a renamed or
+        # deleted TEST_CASE leaves a dangling catalog reference that a
+        # file-existence-only check would miss.
         valid_tests: list[str] = []
         invalid_reasons: list[str] = []
         for t in r.entry.tests:

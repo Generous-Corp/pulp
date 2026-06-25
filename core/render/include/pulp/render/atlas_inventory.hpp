@@ -2,9 +2,6 @@
 
 // atlas_inventory.hpp — read-only GPU texture-atlas inventory.
 //
-// Phase 6.2 of the inspector GPU-perf roadmap
-// (planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.2).
-//
 // The render layer owns several shelf-packed texture atlases — the
 // glyph atlas (SDF text), the image atlas, the gradient ramp atlas,
 // and the path atlas (texture_atlas.hpp). Each one is a GPU texture

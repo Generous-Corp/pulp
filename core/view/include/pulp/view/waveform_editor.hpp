@@ -26,7 +26,7 @@ struct WaveformRegion {
 
 /// Interactive waveform editor for audio file editing and sample selection.
 ///
-/// Extends WaveformView with:
+/// Provides:
 /// - Click-drag selection
 /// - Zoom in/out (horizontal)
 /// - Scroll (horizontal)
@@ -232,7 +232,7 @@ public:
         if (event.key == KeyCode::left) { scroll(-visible_length() / 10); return true; }
         if (event.key == KeyCode::right) { scroll(visible_length() / 10); return true; }
 
-        // +/- for zoom
+        // Main-modifier + 0 zooms to fit.
         if (event.key == KeyCode::num0 && event.isMainModifier()) { zoom_to_fit(); return true; }
 
         return false;
@@ -276,8 +276,8 @@ private:
 
 protected:
     // Viewport-aware sample<->pixel mapping, shared with subclasses so custom
-    // overlays (playheads, hit-testing) stay aligned with the rendered waveform
-    // under zoom/scroll. (PulpTempoSampler's WaveformDropView uses these.)
+    // overlays (playheads, hit-testing, drag targets) stay aligned with the
+    // rendered waveform under zoom/scroll.
     WaveformViewport viewport_for_bounds(const Rect& b) const {
         auto viewport = viewport_;
         viewport.set_bounds(b);

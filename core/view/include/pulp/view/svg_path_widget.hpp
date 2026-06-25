@@ -54,7 +54,7 @@ public:
     void set_fill_color(canvas::Color c);
     void clear_fill();
 
-    /// pulp #932 / #1737 PR-4 — gradient fill as a CSS linear-gradient
+    /// pulp #932 / #1737 — gradient fill as a CSS linear-gradient
     /// string. When set (non-empty), `paint()` overrides the solid
     /// fill_color_ with the parsed gradient — calls
     /// `canvas.set_fill_gradient_linear(...)` before
@@ -117,7 +117,7 @@ public:
     /// exits at the `local_bounds().width <= 0` guard — the symptom that
     /// blanked Spectr's preset-manager band-shape thumbnails. Returns 0
     /// when no viewBox is set (caller must provide explicit size, same
-    /// pre-fix behavior).
+    /// explicit-size behavior).
     float intrinsic_width() const override  { return viewbox_w_ > 0 ? viewbox_w_ : 0; }
     float intrinsic_height() const override { return viewbox_h_ > 0 ? viewbox_h_ : 0; }
 

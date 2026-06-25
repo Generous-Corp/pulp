@@ -25,8 +25,14 @@ Search the registry for packages matching a need:
 
 ```bash
 ./build/pulp search "<query>"
+./build/pulp search "<query>" --refresh
 ./build/pulp suggest --description "<what the user needs>"
+./build/pulp suggest --description "<what the user needs>" --include-license-gated
 ```
+
+`pulp suggest` hides packages that require license review or a commercial
+override by default. Add `--include-license-gated` only when the user explicitly
+wants to inspect those candidates; otherwise prefer permissive defaults.
 
 Or read the registry directly for full details:
 
@@ -38,10 +44,37 @@ cat tools/packages/registry.json | python3 -m json.tool
 
 | Category | Packages | What They Provide |
 |----------|----------|-------------------|
-| dsp | signalsmith-stretch, signalsmith-dsp, cycfi-q, pffft, daisysp | Pitch/time stretch, filters, FFT, pitch detection, physical modeling |
-| audio-io | dr-libs, libsamplerate, r8brain-free-src | File decoding, sample rate conversion |
+| dsp | aubio, btrack, cycfi-q, daisysp, essentia, fftw, fluidsynth, freeverb, kfr, kissfft, libpd, pffft, rnnoise, rubber-band, signalsmith-dsp, signalsmith-stretch, soundtouch, speexdsp, stk, tinysoundfont | Pitch/time stretch, filters, FFT, pitch detection, physical modeling, noise reduction, synthesis |
+| audio-io | alac, dr-libs, fdk-aac, lame, libflac, libsamplerate, libsndfile, libvorbis, miniaudio, oboe, opus, r8brain-free-src | File codecs, sample-rate conversion, device/audio I/O |
 | ml | rtneural | Real-time neural network inference |
 | ui | fontaudio | Audio icon font |
+| utilities | libremidi, rtmidi | MIDI I/O helpers |
+
+### Custom design-import controls (P8)
+
+A package that provides a custom control for the **design importer** declares it
+under the optional `design_controls` array on its registry entry
+(`registry-schema.json` → `design-control`). Each entry is FLAT — a Figma identity
+(`component_set_key` — authoritative — or `name_prefix` — fallback) at the top
+level alongside `factory_id` (NOT nested under a `match` object). This shape is in
+lockstep with the TS `DesignControlEntry` (`library-registry.ts`) and the flat
+`library-manifest.json` convention; the schema's `anyOf` requires at least one
+identity field. Each entry maps that identity to
+a `factory_id` the package's `pulp::view::View` registers at host startup via
+`register_design_control_factory` (see the `import-design` skill, P7 Tier-3).
+
+End-to-end the importer consumes these fragments automatically: when it resolves
+a design, it discovers the project's `packages.lock.json` + `registry.json`,
+gathers each installed package's `design_controls` into the recognition merge
+layer (`RecognitionResolver::add_source`, one source per package), and when an
+imported node's identity matches, emits a `kind=custom` interactive element
+carrying that `factory_id`. `DesignFrameView::build_overlays` then builds the
+package's control; an unregistered factory renders inert + diagnoses (never a
+silent knob). With no custom-control package installed, nothing is gathered and
+import behavior is unchanged. The TS resolver `customControlFactoryId` in
+`library-registry.ts` mirrors the same flat-entry shape for the in-Figma plugin
+lane. This is the "give-back" path's long tail: an obvious common control is
+promoted into core `pulp::view` + the shipped `library-manifest.json` instead.
 
 ## Adding a Package
 
@@ -50,7 +83,7 @@ cat tools/packages/registry.json | python3 -m json.tool
 ```
 
 This will:
-1. Check license compatibility (reject GPL/LGPL)
+1. Check license compatibility and require explicit review for restricted licenses
 2. Check platform support against project targets
 3. Warn about overlaps with Pulp built-ins
 4. Generate `cmake/pulp-packages.cmake` with FetchContent declarations
@@ -73,7 +106,9 @@ Before suggesting a package, check if Pulp's built-in `core/signal/` already cov
 
 ## Browsing Guides
 
-Each package has a detailed integration guide:
+The hand-written guide set covers the original curated packages. The registry is
+larger, so use `pulp search <query>` or inspect `tools/packages/registry.json`
+for the full inventory:
 
 ```
 docs/guides/packages/index.md          — category overview
@@ -84,9 +119,17 @@ Read these to answer questions about specific packages.
 
 ## License Policy
 
-Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registry enforces this. If a user asks about a GPL library, explain the incompatibility and suggest the MIT-licensed alternative from the registry.
+MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages install without prompts.
+MPL-2.0 and other unlisted licenses require manual review. GPL/LGPL/AGPL
+packages are restricted: the CLI blocks until the user explicitly accepts the
+package SPDX with `--accept-license <SPDX>` or declares a commercial-license
+basis with `--license-override commercial`. SSPL and proprietary packages are
+blocked by default, but the current CLI also accepts
+`--license-override commercial` for them, records a compliance warning, and
+leaves distribution responsibility with the project. Prefer permissive
+alternatives from the registry when available.
 
-## Attribution Audit (2026-04-22)
+## Attribution Audit
 
 `tools/deps/audit.py` now runs **two** invariants under `--strict`:
 
@@ -97,9 +140,9 @@ Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registr
    `FetchContent_Declare`, `external/<dir>/`) must be represented in
    `manifest.json` via name or `external_names` alias.
 
-The completeness check closes the #582 class of miss where MkDocs
-Material landed with zero attribution coverage because the audit only
-verified cross-file consistency, not that declared deps were present.
+The completeness check prevents misses where a declared dependency lands with
+zero attribution coverage because the audit only verifies cross-file
+consistency, not that declared deps are present.
 
 When adding a dep, always touch all four attribution files (manifest,
 DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored
@@ -135,8 +178,8 @@ device, iOS simulator, visionOS device, visionOS simulator, mac-x86_64,
 and `Skia.xcframework` slices upstream does not. While upstream stays on
 m144, this fork is the active dependency; revisit when upstream catches up.
 
-iOS-specific layout gotcha (PR #3011): unlike the mac / linux / windows
-slices, the iOS zips ship libs under a per-arch subdir
+iOS-specific layout gotcha: unlike the mac / linux / windows slices, the iOS
+zips ship libs under a per-arch subdir
 (`build/ios-gpu/lib/Release/{device-arm64,simulator-arm64,simulator-x86_64}/libskia.a`)
 because the device and fat-simulator zips would otherwise collide on
 identical lib names when unpacked into one tree. `FindSkia.cmake` picks

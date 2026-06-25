@@ -203,7 +203,7 @@ TEST_CASE("View: overflow default is visible (CSS default, pulp #972)", "[view][
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: margin
+// margin
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: margin adds space around child", "[layout][w3c][margin]") {
@@ -238,7 +238,7 @@ TEST_CASE("Layout: per-side margin overrides uniform", "[layout][w3c][margin]") 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: align-self
+// align-self
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: align-self center overrides parent stretch", "[layout][w3c][align-self]") {
@@ -277,7 +277,7 @@ TEST_CASE("Layout: align-self auto inherits parent", "[layout][w3c][align-self]"
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: flex-basis
+// flex-basis
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: flex-basis overrides preferred width", "[layout][w3c][flex-basis]") {
@@ -295,7 +295,7 @@ TEST_CASE("Layout: flex-basis overrides preferred width", "[layout][w3c][flex-ba
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: order
+// order
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: order changes rendering sequence", "[layout][w3c][order]") {
@@ -316,7 +316,7 @@ TEST_CASE("Layout: order changes rendering sequence", "[layout][w3c][order]") {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: directional gap
+// directional gap
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: column_gap for row direction", "[layout][w3c][gap]") {
@@ -337,7 +337,7 @@ TEST_CASE("Layout: column_gap for row direction", "[layout][w3c][gap]") {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Phase 13.1: intrinsic sizing with Label
+// intrinsic sizing with Label
 // ═══════════════════════════════════════════════════════════════════
 
 TEST_CASE("Layout: Label intrinsic height in column", "[layout][w3c][intrinsic]") {

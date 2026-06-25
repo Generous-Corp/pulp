@@ -99,6 +99,29 @@ cmake -S . -B build -DPULP_SANITIZER=address
 ./build/pulp build --watch       # watch + rebuild loop
 ```
 
+### Non-interactive signing + notarization (no keychain / 1Password prompt)
+
+`codesign` / `notarytool` pop a macOS keychain "allow access" dialog or a
+1Password prompt when the signing key is in the *login* keychain or notarytool
+runs off a keychain *profile* — which wedges any headless / SSH / CI sign. The
+hardened, codified solution:
+
+```bash
+pulp ship doctor                 # self-heal: dedicated signing keychain + validate .p8 (offline)
+pulp ship doctor --check-online  # also prove the .p8 vs Apple (read-only) + refresh pulp-notary profile
+```
+
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`, tests in
+`tools/scripts/test_ensure_signing_ready.sh`) materializes a **dedicated signing
+keychain** authorized for `codesign` via `set-key-partition-list` (never the
+login keychain / 1Password), and verifies a **file-based App Store Connect `.p8`
+notary key** (no keychain to lock or lose). `pulp ship sign` runs it as a
+best-effort quiet preflight. The working recipe: sign from the dedicated keychain
+with the identity hash + `--options runtime --timestamp` (inner dylibs/frameworks
+first), then `notarytool submit --key <.p8> --wait`, `stapler staple`, `spctl
+--assess`. **Secrets live in `~/.config/pulp/secrets/` (`keychain.env` +
+`notary.env`), never in the repo**; env vars of the same name override the files.
+
 After the Rust CLI cutover, source builds produce `./build/pulp` as
 the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
 delegate for commands that still live in C++.
@@ -151,6 +174,30 @@ Format adapters translate:
   AU v3: PulpAudioUnit (AUAudioUnit) ↔ Processor
   CLAP: PulpClapPlugin (clap_plugin_t) ↔ Processor
 ```
+
+### Choosing a Processing Model (Processor vs SignalGraph)
+
+Pulp has one DSP **authoring** model and one **composition** engine. Default to
+the authoring model; reach for the graph only when routing is dynamic at run time.
+
+- **Default to `Processor`** for any plugin, effect, instrument, MIDI effect, or
+  agent-generated DSP. One plugin = one `Processor`; compose internal multi-stage
+  DSP from `pulp::signal::*` helpers inside `process()`.
+- **Reach for `SignalGraph` only when the routing itself is runtime-dynamic:**
+  hosting external plugins, a user-editable rack/mixer/node-editor, or a topology
+  loaded/saved as `.pulpgraph`. A graph node *wraps* a built unit — it is not a way
+  to author DSP.
+- **"Fixed topology" can still be complex.** Polyphony (synths/samplers),
+  multi-bus inputs, sidechain, internal parallel/serial chains, mid/side,
+  oversampling, and convolution are **all `Processor` concerns** — not reasons to
+  reach for `SignalGraph`. Never express a one-in/one-out (or any fixed) chain as a
+  graph without a stated runtime-routing reason.
+- **Heuristic:** fixed at build time → `Processor`; edited/loaded at run time →
+  `SignalGraph`.
+- A `CustomNodeType` is a graph utility node, **not** a plugin authoring surface.
+
+Full guidance and reserved terminology: `docs/reference/processing-models.md`.
+Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
 ### Thread Model
 
@@ -225,6 +272,8 @@ This repo will be open-sourced. Every commit, every file, every directory name s
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
 Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
+
+**This applies to source code too — comments AND test names/tags, not just docs.** Do NOT write phase/PR/issue/wave/handoff breadcrumbs in `core/`, `test/`, or any shipped source. Specifically forbidden in code: `(Phase N)` / `Phase N will…` / `4f`-style sub-phase labels, `[phaseN]` Catch2 tags, "sub-PR"/"slice N of", and bare `#1234` issue/PR references. Write the comment as a present-tense statement of what the code does or a neutral capability note (e.g. "feedback needs a previous-block slot" — not "Phase 4d adds feedback"). A test tag should say what it covers (`[parity]`, `[rt-safety]`), never which session shipped it. The phase/PR narrative goes in the **commit message** and the **planning submodule**, where reviewers expect it. (`docs_noise_lint.py`'s diff-scoped scan enforces this for docs/skills today; source-comment enforcement is the author's responsibility until the lint's source scope lands.)
 
 ### Verify Against Code, Not Planning Docs
 
@@ -781,6 +830,22 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+**Reclaiming coverage build dirs.** `local_diff_cover.sh` (and shipyard's
+local validation, which runs it) creates a per-worktree `build-cov/` and never
+cleans it. Across many worktrees these accumulate into hundreds of GB and fill
+the disk — which then fails the next coverage build with "No space left on
+device" (looks like a code failure; it is not). Reclaim them with:
+
+```bash
+tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
+tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
+```
+
+It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+a source tree or the primary `build/`), scans sibling worktrees by default
+(override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
+process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
+
 ### Pre-Push Gates Check
 
 `tools/scripts/gates.sh` is the on-demand runner for the cheap
@@ -968,6 +1033,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
 | `skia-gpu-build` | Enable Skia+Dawn GPU builds: prebuilt skia-builder libs, headers-only worktree trap, `SKIA_DIR` reuse, `MacGpuWindowHost` verify, raster-fallback + GPU-wedge gotchas |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
+| `stretch` | Offline time-stretch / pitch / varispeed: character modes, fine-tune presets, A/B eval toolkit, honest quality state |
 | `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
@@ -976,7 +1042,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-29 skills as of 2026-06-15. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+30 skills as of 2026-06-17. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 

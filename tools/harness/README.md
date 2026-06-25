@@ -1,10 +1,7 @@
 # Pulp catalog harness
 
-The catalog harness converts `compat.json` (the hand-edited 490-entry compatibility
-catalog) into an automated, machine-derived coverage measurement.
-
-> Strategic context: see `planning/approach-bounded-translator.md` and
-> `planning/pulp-agent-prompt-harness-week1.md`.
+The catalog harness converts `compat.json` into an automated,
+machine-derived coverage measurement.
 
 ## Layout
 
@@ -16,26 +13,38 @@ tools/harness/
 ├── adapters/
 │   ├── __init__.py
 │   ├── base.py                     CatalogEntry / Result dataclasses + AdapterBase
-│   ├── yoga.py                     yoga/* surface adapter (Week 1)
-│   └── canvas2d.py                 canvas2d/* surface adapter (Week 1)
+│   ├── canvas2d.py                 canvas2d/* surface adapter
+│   ├── css.py                      css/* surface adapter
+│   ├── html.py                     html/* surface adapter
+│   ├── rn.py                       rn/* surface adapter
+│   └── yoga.py                     yoga/* surface adapter
 └── oracles/
+    ├── canvas2d/
+    │   ├── README.md               oracle definition + regeneration recipe
+    │   └── canvas2d-supported.json reference table of HTML5 Canvas2D + bridge mapping
+    ├── css/
+    │   ├── README.md               oracle definition + regeneration recipe
+    │   └── css-supported.json      CSS enum/property reference table
+    ├── html/
+    │   ├── README.md               oracle definition + regeneration recipe
+    │   └── html-supported.json     DOM-lite / HTML reference table
+    ├── rn/
+    │   ├── README.md               oracle definition + regeneration recipe
+    │   └── rn-viewstyle.json       React Native ViewStyle reference table
     ├── yoga/
     │   ├── README.md               oracle definition + regeneration recipe
     │   └── yoga-supported.json     reference list of Yoga properties + supported values
-    └── canvas2d/
-        ├── README.md               oracle definition + regeneration recipe
-        └── canvas2d-supported.json reference table of HTML5 Canvas2D + bridge mapping
 ```
 
 ## Surfaces
 
-| Surface | Adapter                | Oracle                                                | Week |
-| ------- | ---------------------- | ----------------------------------------------------- | ---- |
-| yoga    | `adapters/yoga.py`     | `oracles/yoga/yoga-supported.json` (static)           | 1    |
-| canvas2d| `adapters/canvas2d.py` | `oracles/canvas2d/canvas2d-supported.json` (static)   | 1    |
-| css     | _planned_              | Chromium headless snapshots                           | 2-3  |
-| rn      | _planned_              | derived from CSS oracle + RN snapshot tests           | 3-4  |
-| html    | _planned_              | jsdom reference                                       | 5-6  |
+| Surface  | Adapter                 | Oracle                                                |
+| -------- | ----------------------- | ----------------------------------------------------- |
+| canvas2d | `adapters/canvas2d.py`  | `oracles/canvas2d/canvas2d-supported.json` (static)   |
+| css      | `adapters/css.py`       | `oracles/css/css-supported.json` (static)             |
+| html     | `adapters/html.py`      | `oracles/html/html-supported.json` (static)           |
+| rn       | `adapters/rn.py`        | `oracles/rn/rn-viewstyle.json` (static)               |
+| yoga     | `adapters/yoga.py`      | `oracles/yoga/yoga-supported.json` (static)           |
 
 ## Status taxonomy
 
@@ -68,12 +77,7 @@ Outputs:
 
 ## Drift list
 
-The drift list is the diff between catalog `status` and the harness verdict. Today
-the catalog is hand-edited; tomorrow the harness is the source of truth. During
-Week 1 we report drift and file a follow-up issue but do **not** rewrite
-`compat.json`. The optional `--update-compat` flag is reserved for Week 2+.
-
-## Authoritative parents
-
-* Umbrella: pulp #1387
-* Children: #1391 (verifier core), #1392 (per-surface adapters), #1393 (oracles), #1394 (CLI + CI)
+The drift list is the diff between catalog `status` and the harness verdict.
+The catalog is still hand-edited, so the harness reports drift without
+rewriting `compat.json` by default. A future `--update-compat` mode is reserved
+for explicit catalog-maintenance passes.

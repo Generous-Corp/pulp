@@ -18,36 +18,37 @@ for humans who do not want Shipyard in their checkout.
 
 ## Installation
 
-### From a local clone (current method)
+### From the marketplace (recommended)
 
-Since Pulp is not yet a public repository, install the plugin from your local clone:
+Install the Pulp CLI first so `pulp` and `pulp-mcp` are on `$PATH`, then add
+the Claude Code plugin from the public marketplace:
 
 ```bash
-# Clone the repository
-git clone https://github.com/danielraffel/pulp.git
-cd pulp
+# 1. Install the Pulp CLI and MCP binary.
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 
-# Install the plugin into Claude Code
-claude plugin add /path/to/pulp
+# 2. Add the marketplace and install the plugin.
+claude plugin marketplace add danielraffel/pulp
+claude plugin install pulp
 ```
 
 Then restart Claude Code or run `/reload-plugins` to activate.
 
-### From the marketplace (when public)
+### From a local clone (source-tree development)
 
-Once Pulp is a public repository, you'll be able to install from the Claude Code plugin marketplace:
+If you're developing Pulp from a checkout, or testing local plugin changes,
+install the plugin from that clone instead:
 
 ```bash
-# 1. Add the Pulp marketplace (one time)
-/plugin marketplace add danielraffel/pulp
+# Clone the repository.
+git clone https://github.com/danielraffel/pulp.git
+cd pulp
 
-# 2. Install the plugin
-/plugin install pulp@danielraffel/pulp
-
-# 3. Restart Claude Code to load the plugin
+# Install the checkout into Claude Code.
+claude plugin add "$PWD"
 ```
 
-This is not yet available because the Pulp repository is currently private. These instructions will work once the repository is public.
+Then restart Claude Code or run `/reload-plugins` to activate.
 
 ## What You Get
 
@@ -59,7 +60,7 @@ This is not yet available because the Pulp repository is currently private. Thes
 | `/test [pattern]` | Run tests, optionally filtered by pattern |
 | `/create <name>` | Scaffold a new plugin or app project |
 | `/status` | Show project status, build state, configuration |
-| `/validate` | Run plugin format validators (auval, clap-validator) |
+| `/validate` | Run plugin format validators and validation reports |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
 | `/import-design` | Import from Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX |
@@ -97,7 +98,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
-| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
+| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |

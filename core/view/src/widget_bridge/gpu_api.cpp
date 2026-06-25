@@ -227,12 +227,9 @@ void WidgetBridge::register_gpu_api() {
         auto usage = static_cast<uint32_t>(args.get<int32_t>(4, 0));
         auto alpha_mode = args.get<std::string>(5, "opaque");
 
-        // iOS-D.3b Slice 4: surface the GpuSurface's presentable/offscreen
-        // distinction to JS. Until slice 5 wires per-frame
-        // current_texture_handle() acquisition into getCurrentTexture(),
-        // configure() returning `presentable: true` is the program's
-        // contract that JS draws WILL hit the visible swapchain rather
-        // than a silent offscreen texture (Codex pass-1 finding #3).
+        // Surface the GpuSurface's presentable/offscreen distinction to JS.
+        // `presentable: true` is the program's contract that JS draws will hit
+        // the visible swapchain rather than a silent offscreen texture.
         //
         // `has_surface()` is a member of render::GpuSurface; the full type
         // is only visible when pulp/render/gpu_surface.hpp is on the
@@ -294,11 +291,10 @@ void WidgetBridge::register_gpu_api() {
         state.texture = device_ptr->CreateTexture(&texture_desc);
         state.configured = (state.texture != nullptr);
         if (state.configured) {
-            // PULP_WEBGPU_BRIDGE log markers (slice 4 contract) - surface
-            // the presentable distinction in the runtime log so iPad
-            // device walk-throughs can grep the value without
-            // introspecting the JS-returned object. The `presentable`
-            // value comes from gpu_surface_->has_surface() above.
+            // Surface the presentable distinction in the runtime log so device
+            // walks can grep the value without introspecting the JS-returned
+            // object. The `presentable` value comes from
+            // gpu_surface_->has_surface() above.
             runtime::log_info(
                 "PULP_WEBGPU_BRIDGE: canvas.getContext('webgpu') ok (presentable={}, canvas={})",
                 presentable ? "true" : "false", canvas_id);
@@ -320,13 +316,11 @@ void WidgetBridge::register_gpu_api() {
     });
 
     register_bridge_function(api, "__gpuCanvasDescribeCurrentTextureImpl", [this](choc::javascript::ArgumentList args) {
-        // iOS-D.3b Slice 4: surface the presentable flag here too so
-        // JS can verify per-frame that the texture it's about to draw
-        // into IS the visible swapchain (slice 5 wires
-        // gpu_surface_->current_texture_handle() through this path;
-        // slice 4 just plumbs the boolean). Same PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
-        // gate as the configure path above - no-GPU configures keep
-        // presentable=false because there is no swapchain to address.
+        // Surface the presentable flag here too so JS can verify per-frame that
+        // the texture it is about to draw into is the visible swapchain. Same
+        // PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE gate as the configure path above:
+        // no-GPU configures keep presentable=false because there is no
+        // swapchain to address.
 #if PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
         const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
 #else
@@ -640,12 +634,11 @@ void WidgetBridge::register_gpu_api() {
         auto command_buffer = encoder.Finish();
         queue_ptr->Submit(1, &command_buffer);
 
-        // iOS-D.3b Slice 5: surface the queue.submit success in the
-        // runtime log so iPad device walks can grep `PULP_WEBGPU_BRIDGE:
-        // queue.submit ok` without instrumenting JS. `commands=1` is
-        // accurate for this single-command-buffer code path; the buffered
-        // shim (`__gpuQueueDrawBufferedImpl` etc.) handles multi-command
-        // submissions and would emit a different count.
+        // Surface queue.submit success in the runtime log so device walks can
+        // grep `PULP_WEBGPU_BRIDGE: queue.submit ok` without instrumenting JS.
+        // `commands=1` is accurate for this single-command-buffer code path;
+        // the buffered shim (`__gpuQueueDrawBufferedImpl` etc.) handles
+        // multi-command submissions and would emit a different count.
         runtime::log_info(
             "PULP_WEBGPU_BRIDGE: queue.submit ok (canvas={}, commands=1)",
             canvas_id);
@@ -1232,9 +1225,9 @@ void WidgetBridge::register_gpu_api() {
         std::vector<wgpu::Texture> bind_group_textures;
         std::vector<wgpu::TextureView> bind_group_texture_views;
         std::vector<wgpu::BindGroup> bind_groups;
-        // iOS-D.3c (#3217): (group_index, entries) captured during serialization
-        // and turned into bind groups AFTER the pipeline is built with an auto
-        // layout - see the deferred-creation comment below.
+        // (group_index, entries) captured during serialization and turned into
+        // bind groups AFTER the pipeline is built with an auto layout - see the
+        // deferred-creation comment below.
         std::vector<std::pair<uint32_t, std::vector<wgpu::BindGroupEntry>>> deferred_bind_groups;
         if (payload.hasObjectMember("bindGroups") && payload["bindGroups"].isArray()) {
             auto bind_groups_payload = payload["bindGroups"];
@@ -1566,9 +1559,9 @@ void WidgetBridge::register_gpu_api() {
                     return choc::value::createBool(false);
                 }
 
-                // iOS-D.3c (#3217): defer bind-group creation until the pipeline
-                // exists. The JS serializer guesses each entry's visibility/type
-                // by regex-scanning the WGSL
+                // Defer bind-group creation until the pipeline exists. The JS
+                // serializer guesses each entry's visibility/type by
+                // regex-scanning the WGSL
                 // (web-compat-gpu-buffered.js inferVisibilityFromShaders); an
                 // explicit BindGroupLayout built from those guesses can silently
                 // diverge from Three.js's `layout:"auto"` pipeline interface.
@@ -1583,14 +1576,12 @@ void WidgetBridge::register_gpu_api() {
             }
         }
 
-        // iOS-D.3c (#3217 Codex pass 1): the pipeline's color attachment
-        // format MUST match the actual target texture's format, NOT the
-        // JS-supplied payload `format` field. Three.js may request a
-        // bgra8unorm RenderPass but the intermediate texture is created
-        // as rgba8unorm - Metal SoftwareRenderer silently rejects the
-        // pipeline (the mismatch is suppressed by skip_validation). Use
-        // the target's actual format so the pipeline matches the
-        // attachment.
+        // The pipeline's color attachment format MUST match the actual target
+        // texture's format, not the JS-supplied payload `format` field.
+        // Three.js may request a bgra8unorm RenderPass while the intermediate
+        // texture is rgba8unorm; Metal SoftwareRenderer can silently reject the
+        // pipeline when validation is suppressed. Use the target's actual
+        // format so the pipeline matches the attachment.
         std::string actual_target_format = target_canvas_state != nullptr
             ? target_canvas_state->format
             : (target_texture_state != nullptr ? target_texture_state->format : format);
@@ -1603,21 +1594,19 @@ void WidgetBridge::register_gpu_api() {
         }
         wgpu::ColorTargetState color_target{};
         color_target.format = texture_format_from_string(actual_target_format);
-        // iOS-D.3c (#3217): writeMask was unset -> defaulted to None ->
-        // pipeline executed but never wrote color. The immediate __gpuQueueDrawImpl
-        // path sets `writeMask = All` (line 8767); buffered path must too,
-        // otherwise the magenta-clear test paints but Three.js's actual
-        // shader output silently vanishes. (Codex root-cause for #3217.)
+        // The write mask must be explicit. A defaulted None mask lets the
+        // pipeline execute without writing color; the immediate
+        // __gpuQueueDrawImpl path sets `writeMask = All`, and the buffered path
+        // must match it.
         color_target.writeMask = wgpu::ColorWriteMask::All;
 
-        // iOS-D.3c (#3217): for canvas-targeted draws specifically, drop
-        // the alpha channel from writeMask so the shader's alpha=0 output
-        // (Three.js's WebGPURenderer composite path) doesn't reset the
-        // destination alpha to 0. Combined with the loadOp=Clear/alpha=1
-        // override below at color_attachment, this keeps the canvas
-        // swapchain alpha at 1 (opaque) regardless of shader output -
-        // Skia then composites the RGB content the shader wrote instead
-        // of compositing src.alpha=0 against the canvasCard CSS bg.
+        // For canvas-targeted draws specifically, drop the alpha channel from
+        // writeMask so the shader's alpha=0 output (Three.js's WebGPURenderer
+        // composite path) doesn't reset the destination alpha to 0. Combined
+        // with the loadOp=Clear/alpha=1 override below at color_attachment, this
+        // keeps the canvas swapchain alpha at 1 (opaque) regardless of shader
+        // output. Skia then composites the RGB content the shader wrote instead
+        // of compositing src.alpha=0 against the canvasCard CSS background.
         if (target_canvas_state != nullptr) {
             color_target.writeMask = wgpu::ColorWriteMask::Red
                                    | wgpu::ColorWriteMask::Green
@@ -1631,10 +1620,10 @@ void WidgetBridge::register_gpu_api() {
         fragment_state.targets = &color_target;
 
         wgpu::RenderPipelineDescriptor pipeline_desc{};
-        // iOS-D.3c (#3217): always use an AUTO pipeline layout. Bind groups are
-        // created below from pipeline.GetBindGroupLayout(group_index), so the
-        // layout is derived from the actual shader interface rather than the
-        // JS-side guessed layout (see deferred_bind_groups above).
+        // Always use an AUTO pipeline layout. Bind groups are created below
+        // from pipeline.GetBindGroupLayout(group_index), so the layout is
+        // derived from the actual shader interface rather than the JS-side
+        // guessed layout (see deferred_bind_groups above).
         pipeline_desc.layout = nullptr;
         pipeline_desc.vertex.module = vertex_module;
         pipeline_desc.vertex.entryPoint = vertex_entry.c_str();
@@ -1669,11 +1658,11 @@ void WidgetBridge::register_gpu_api() {
         auto pipeline = device_ptr->CreateRenderPipeline(&pipeline_desc);
         if (!pipeline) return choc::value::createBool(false);
 
-        // iOS-D.3c (#3217): now that the pipeline (auto layout) exists, build
-        // each bind group against the layout Dawn derived from the shader
-        // interface. This guarantees the binding visibility/types match what
-        // the WGSL actually declares, instead of the JS-side guessed layout
-        // that left the vertex stage reading zeroed uniforms on the Simulator.
+        // Now that the pipeline (auto layout) exists, build each bind group
+        // against the layout Dawn derived from the shader interface. This
+        // guarantees the binding visibility/types match what the WGSL actually
+        // declares, instead of the JS-side guessed layout that left the vertex
+        // stage reading zeroed uniforms on the Simulator.
         for (auto& dg : deferred_bind_groups) {
             wgpu::BindGroupDescriptor bind_group_desc{};
             bind_group_desc.layout = pipeline.GetBindGroupLayout(dg.first);
@@ -1703,13 +1692,12 @@ void WidgetBridge::register_gpu_api() {
                 static_cast<float>(clear_value.hasObjectMember("a") ? clear_value["a"].getWithDefault<double>(1.0) : 1.0)
             };
         }
-        // iOS-D.3c (#3217): for canvas-targeted draws, force loadOp=Clear
-        // with alpha=1 so the destination alpha starts opaque. Combined
-        // with the canvas-specific writeMask (RGB only, set above on the
-        // pipeline's color_target), this keeps the canvas swapchain
-        // alpha at 1 across all draws regardless of what alpha the
-        // shader emits. Without this, Three.js's composite (which
-        // writes alpha=0 for the canvas pass) leaves the canvas
+        // For canvas-targeted draws, force loadOp=Clear with alpha=1 so the
+        // destination alpha starts opaque. Combined with the canvas-specific
+        // writeMask (RGB only, set above on the pipeline's color_target), this
+        // keeps the canvas swapchain alpha at 1 across all draws regardless of
+        // what alpha the shader emits. Without this, Three.js's composite
+        // (which writes alpha=0 for the canvas pass) leaves the canvas
         // transparent and the canvasCard CSS background shows through.
         if (target_canvas_state != nullptr) {
             color_attachment.loadOp = wgpu::LoadOp::Clear;
@@ -2145,12 +2133,12 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
                                              wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::CopySrc;
                             auto gpu_buf = device_ptr->CreateBuffer(&buf_desc);
 
-                            // Issue #491 P2: decode the base64 payload the JS
-                            // serializer (web-compat-gpu-buffered.js) attaches
-                            // as `bufferDataBase64` and upload it to the GPU
-                            // buffer. Without this every compute dispatch
-                            // runs against zeroed buffers regardless of what
-                            // the JS shader seeded them with.
+                            // Decode the base64 payload the JS serializer
+                            // (web-compat-gpu-buffered.js) attaches as
+                            // `bufferDataBase64` and upload it to the GPU
+                            // buffer. Without this every compute dispatch runs
+                            // against zeroed buffers regardless of what the JS
+                            // shader seeded them with.
                             if (entry.hasObjectMember("bufferDataBase64") && buf_size > 0) {
                                 auto b64 = entry["bufferDataBase64"].getWithDefault<std::string>("");
                                 if (!b64.empty()) {
@@ -2251,7 +2239,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     register_bridge_function(api, "__writeNativeBuffer", [this](choc::javascript::ArgumentList args) {
         auto buffer_id = args.get<std::string>(0, "");
         auto offset = static_cast<size_t>(args.get<int64_t>(1, 0));
-        auto data_b64 = args.get<std::string>(2, "");  // Still base64 for now, but in chunks
+        auto data_b64 = args.get<std::string>(2, "");  // Chunked base64 payload.
         if (buffer_id.empty() || data_b64.empty() || !native_gpu_bridge_state_)
             return choc::value::createBool(false);
 

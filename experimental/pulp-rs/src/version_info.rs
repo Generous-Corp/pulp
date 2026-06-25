@@ -23,7 +23,7 @@
 //!   — identical to the C++ `locate_plugin_json` precedence, reused
 //!   via the existing `parse::plugin_json::locate` helper.
 //! - Every field is a `SemverCompat`, so the JSON shape matches the
-//!   Phase 2 doctor writer exactly (raw + comparable + M.N.P).
+//!   doctor writer exactly (raw + comparable + M.N.P).
 
 use std::path::{Path, PathBuf};
 
@@ -85,7 +85,7 @@ pub fn collect(cwd: &Path) -> VersionSnapshot {
 ///
 /// Stable key order (`cli` before `plugin` before `plugin_min_cli`
 /// before `plugin_json_path`) is important for byte-level diffing
-/// against captured C++ output in Phase 5 parity tests.
+/// against captured C++ output in parity tests.
 #[must_use]
 pub fn emit_json(snap: &VersionSnapshot) -> String {
     let mut obj = serde_json::Map::new();

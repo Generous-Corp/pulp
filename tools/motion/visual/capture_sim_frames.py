@@ -166,7 +166,7 @@ def capture(
                 else _capture_simulator(grab_path)
             )
             if not ok:
-                # Exit code semantics (Codex #2168 P1, also tracked as #2152):
+                # Exit code semantics (#2168, #2152):
                 #   0 — full requested capture completed
                 #   3 — nothing was saved (e.g. source misconfigured at start)
                 #   4 — partial capture (grabbed some frames then aborted)

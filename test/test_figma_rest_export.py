@@ -13,15 +13,16 @@ frx = importlib.util.module_from_spec(spec); spec.loader.exec_module(frx)
 
 class FontCaptureTest(unittest.TestCase):
     def setUp(self):
-        frx.FONT_ASSETS.clear()
+        # P2: fonts accumulate in an explicit ExtractContext, not a module global.
+        self.ctx = frx.ExtractContext()
 
     def test_record_font_dedupes_by_family_style_weight(self):
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}})
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}})  # dup
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 700}})  # diff weight
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Inter", "fontWeight": 400, "italic": True}})
-        frx._record_font({"type": "TEXT", "style": {}})  # no family → ignored
-        out = list(frx.FONT_ASSETS.values())
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}}, self.ctx)
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}}, self.ctx)  # dup
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 700}}, self.ctx)  # diff weight
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Inter", "fontWeight": 400, "italic": True}}, self.ctx)
+        frx._record_font({"type": "TEXT", "style": {}}, self.ctx)  # no family → ignored
+        out = list(self.ctx.fonts.values())
         self.assertEqual(len(out), 3)
         clash = [f for f in out if f["family"] == "Clash Grotesk"]
         self.assertEqual({f["weight"] for f in clash}, {500, 700})
@@ -41,24 +42,50 @@ class FontCaptureTest(unittest.TestCase):
 
 
 class CodexP2FollowupTest(unittest.TestCase):
-    def setUp(self):
-        frx.FONT_ASSETS.clear(); frx.ASSET_IDS.clear(); frx.IMAGE_FILL_REFS.clear()
+    # P2: walk() is now driven via node_tree_to_ir(), which returns (ir, ctx) with
+    # explicit side-effect accumulators — no module globals to clear.
 
     def test_container_named_like_widget_not_promoted(self):
-        # Codex #3234: a "Knob Row" frame holding Knob instances must NOT be
+        # #3234: a "Knob Row" frame holding Knob instances must NOT be
         # promoted to a leaf widget (which would drop its children).
         container = {"type": "FRAME", "name": "Knob Row", "id": "1:1",
                      "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 60},
                      "children": [{"type": "INSTANCE", "name": "Knob", "id": "1:2",
                                    "absoluteBoundingBox": {"x": 0, "y": 0, "width": 60, "height": 60}}]}
-        out = frx.walk(container, None, 0)
+        out, _ctx = frx.node_tree_to_ir(container)
         self.assertNotIn("audio_widget", out)        # not promoted
         self.assertTrue(out.get("children"))         # children preserved
         # A leaf knob instance (vector/group visual children) IS promoted.
         leaf = {"type": "INSTANCE", "name": "Knob Small", "id": "2:1",
                 "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41},
                 "children": [{"type": "GROUP", "name": "g"}, {"type": "VECTOR", "name": "v"}]}
-        self.assertEqual(frx.walk(leaf, None, 0).get("audio_widget"), "knob")
+        self.assertEqual(frx.node_tree_to_ir(leaf)[0].get("audio_widget"), "knob")
+
+    def test_node_tree_to_ir_returns_side_effects_explicitly(self):
+        # P2 decomposition: walk()'s three side effects (asset ids, fonts, image
+        # fills) come back on the ExtractContext, not via module globals — and two
+        # independent calls don't leak into each other.
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "fills": [{"type": "IMAGE", "imageRef": "img-abc"}],
+                "children": [
+                    {"type": "TEXT", "name": "label", "id": "0:2", "characters": "Hi",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 16},
+                     "style": {"fontFamily": "Inter", "fontWeight": 600}},
+                    {"type": "VECTOR", "name": "icon", "id": "0:3",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 24, "height": 24}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        self.assertEqual(ir["type"], "frame")
+        self.assertIn("img-abc", ctx.image_fills)            # IMAGE fill captured
+        self.assertEqual(ctx.asset_ids, ["0:3"])             # vector → PNG asset
+        self.assertEqual([f["family"] for f in ctx.fonts.values()], ["Inter"])
+        # A SECOND walk is independent — no cross-call leakage (the old global bug).
+        ir2, ctx2 = frx.node_tree_to_ir({"type": "FRAME", "name": "Empty", "id": "9:9",
+                                         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}})
+        self.assertEqual(ctx2.asset_ids, [])
+        self.assertEqual(ctx2.fonts, {})
+        self.assertEqual(ctx2.image_fills, set())
 
     def test_parse_url_handles_percent_encoded_node_id(self):
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3%3A42"), ("KEY", "3:42"))
@@ -441,6 +468,46 @@ class FaithfulVectorTest(unittest.TestCase):
         els = frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0))
         self.assertEqual(len([e for e in els if e["kind"] == "tab_group"]), 1)
 
+    def test_emitted_overlay_kinds_conform_to_schema(self):
+        # P1a contract guard: the REST producer emits overlay kinds the knob-only
+        # schema used to forbid. The schema's interactive_element.kind enum must
+        # be a SUPERSET of every kind this producer can emit, and each emitted
+        # overlay must carry the per-kind required box [x,y,w,h] the schema's
+        # allOf branch demands. This pins the producer<->schema contract from the
+        # REST side so the drift the plan flagged can't silently return.
+        import json
+        schema_path = (REPO / "tools" / "figma-plugin" / "schema"
+                       / "figma-plugin-export-v1.json")
+        schema = json.loads(schema_path.read_text())
+        kind_enum = set(schema["$defs"]["interactive_element"]["properties"]["kind"]["enum"])
+        # Every kind the producers emit (knob + the overlays) plus the P1a additions.
+        self.assertTrue({"knob", "fader", "toggle", "dropdown", "text_field",
+                         "tab_group", "stepper"}.issubset(kind_enum))
+
+        # A fixture exercising dropdown + stepper + text_field + tab_group output.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Dropdown", "id": "d1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 100, "y": 80, "width": 160, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Sine"},
+                              {"name": "expand_more", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8}}]},
+                {"name": "Dropdown", "id": "st1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 100, "y": 120, "width": 180, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Short Plucks"},
+                              {"name": "Frame 41", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 12}}]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (0.0, 0.0))
+        self.assertTrue(els)  # produced something
+        for e in els:
+            self.assertIn(e["kind"], kind_enum,
+                          f"producer emitted kind {e['kind']!r} the schema forbids")
+            for f in ("x", "y", "w", "h"):
+                self.assertIn(f, e, f"overlay {e['kind']!r} must carry required {f!r}")
+
 
 class FaithfulVectorDefaultTest(unittest.TestCase):
     """The faithful-vector lane (interactive overlays) must be the DEFAULT — a
@@ -616,6 +683,46 @@ class RateLimitRetryTest(unittest.TestCase):
         self._patch_seq([self._http_error(429, {"Retry-After": "99999"}), self._Resp(b"OK")])
         frx.figma_get("https://api.figma.com/x", token="t", what="unit")
         self.assertEqual(self.slept, [300])  # capped, never sleeps for a day
+
+
+class WidgetKindFromNameTest(unittest.TestCase):
+    """P2 resolver unification — whole-word match, in lockstep with the C++
+    detect_audio_widget and the TS audioWidgetKindFromName."""
+
+    def test_true_positives_match_whole_words(self):
+        self.assertEqual(frx.widget_kind_from_name("Cutoff Knob"), "knob")
+        self.assertEqual(frx.widget_kind_from_name("Knobs"), "knob")       # plural tolerated
+        self.assertEqual(frx.widget_kind_from_name("Volume Fader"), "fader")
+        self.assertEqual(frx.widget_kind_from_name("Main Slider"), "fader")
+        self.assertEqual(frx.widget_kind_from_name("VUMeter"), "meter")    # acronym split
+        self.assertEqual(frx.widget_kind_from_name("XY Pad"), "xy_pad")
+        self.assertEqual(frx.widget_kind_from_name("XYPad"), "xy_pad")
+        self.assertEqual(frx.widget_kind_from_name("Waveform"), "waveform")
+        self.assertEqual(frx.widget_kind_from_name("Spectrum"), "spectrum")
+
+    def test_full_vocab_in_lockstep_with_cpp(self):
+        # These tokens are recognized by C++ detect_audio_widget and TS
+        # audioWidgetKindFromName; the Python lane was previously missing them,
+        # so a "Level"/"Oscilloscope"/"Analyzer"-named leaf was rasterized as a
+        # PNG sprite instead of promoted to a native widget. Pin parity here.
+        self.assertEqual(frx.widget_kind_from_name("Level Meter"), "meter")
+        self.assertEqual(frx.widget_kind_from_name("Output Level"), "meter")   # bare "level"
+        self.assertEqual(frx.widget_kind_from_name("Oscilloscope"), "waveform")
+        self.assertEqual(frx.widget_kind_from_name("Analyzer"), "spectrum")
+        self.assertEqual(frx.widget_kind_from_name("Spectrum Analyser"), "spectrum")  # British spelling
+
+    def test_substring_false_positives_are_rejected(self):
+        # These used to mis-resolve under the substring `in` match.
+        self.assertIsNone(frx.widget_kind_from_name("Dialog"))    # was knob ("dial")
+        self.assertIsNone(frx.widget_kind_from_name("Radial"))    # was knob ("dial")
+        self.assertIsNone(frx.widget_kind_from_name("Diameter"))  # was meter ("meter")
+        self.assertIsNone(frx.widget_kind_from_name("Parameter"))  # was meter ("meter")
+        self.assertIsNone(frx.widget_kind_from_name("Reverb"))
+
+    def test_tokenize_name_matches_cpp_boundaries(self):
+        self.assertEqual(frx._tokenize_name("VUMeter"), ["vu", "meter"])
+        self.assertEqual(frx._tokenize_name("Knob_1"), ["knob", "1"])
+        self.assertEqual(frx._tokenize_name("Dialog"), ["dialog"])
 
 
 if __name__ == "__main__":

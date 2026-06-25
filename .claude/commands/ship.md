@@ -44,8 +44,8 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
 
 1. **Build** — `pulp build` (must complete before signing)
 2. **Sign** — `pulp ship sign` (must sign before notarizing)
-3. **Notarize** — `pulp ship notarize` (macOS only, after signing)
-4. **Package** — `pulp ship package` (creates installer from signed bundles)
+3. **Package** — `pulp ship package` (creates installer from signed bundles)
+4. **Notarize** — `pulp ship notarize --path <pkg|dmg|zip>` (macOS only, after packaging)
 5. **Appcast** — `pulp ship appcast` (generate update feed pointing to packaged artifact)
 
 Or collapse 2–4 into one command: `pulp ship release --pkg` / `--dmg` signs,
@@ -65,10 +65,19 @@ Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android
 - `pulp ship sign --path MyApp.app` — sign one explicit `.app`/`.dmg`/bundle (not the whole build dir)
 
 **Notarization (macOS only):**
-- `pulp ship notarize` — uses apple_id/team_id from config
-- `pulp ship notarize --apple-id you@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD`
+- `pulp ship notarize --path MyPlugin-1.0.pkg` — picks credentials up from config/env/notary.env
+- `pulp ship notarize --path MyPlugin-1.0.pkg --apple-id you@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD`
 - `pulp ship notarize --path MyApp-1.0.dmg` — notarize + staple one explicit artifact (repeatable)
 - `pulp ship notarize --staple` — staple only (skip submission)
+
+Prefer `pulp ship release` or `notarize --path <pkg|dmg|zip>` for distribution.
+Loose plugin bundle scans are a legacy low-level path; package the artifact you
+will hand to users before notarizing.
+
+**Release pipeline (macOS only):**
+- `pulp ship release --pkg --identity "Developer ID Application: ..." --installer-identity "Developer ID Installer: ..."` — sign, package, notarize, and staple the installer it builds
+- `pulp ship release --dmg --identity "Developer ID Application: ..."` — same pipeline for a standalone app DMG
+- `--skip-sign`, `--skip-package`, and `--skip-notarize` make individual stages explicit for CI dry-runs
 
 **One-off share (macOS only) — sign + notarize + verify in one shot:**
 - `pulp ship share MyApp.app --identity "Developer ID Application: ..."` — for an
@@ -86,6 +95,10 @@ Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android
 - `pulp ship package --target android --aab-only` — AAB only (for Play Store)
 - `pulp ship package --target android --apk-only` — APK only (for direct distribution)
 - `pulp ship package --per-user` — per-user NSIS install (Windows, no admin)
+
+**AUv3 Xcode project (macOS only):**
+- `pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator` — generate a CMake Xcode build directory for the AUv3 target
+- `--sdk iphoneos|macosx`, `--output <dir>`, `--open`, and `--dry-run` control the generated project
 
 **Update feeds:**
 - `pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0 --notes "Bug fixes"`
@@ -165,8 +178,10 @@ This "show then confirm" pattern applies to:
 - `pulp ship notarize` — show credentials and bundles
 - `pulp ship package` — show target, version, and signing mode
 - `pulp ship package --target android` — show ABIs, keystore, Gradle project
+- `pulp ship release` — show the sign/package/notarize/staple stages and resolved identities
 - `pulp ship share <artifact>` — show the input, resolved identity, and the
   sign→wrap→notarize→staple→verify plan (offer `--dry-run` first if creds are unconfirmed)
+- `pulp ship auv3-xcodeproj <target>` — show target, SDK, output directory, and whether Xcode will open
 
 Run the appropriate subcommand based on $ARGUMENTS. If no arguments, run `pulp ship check` to show current signing status, then use AskUserQuestion to suggest next steps:
 - "Sign plugin bundles" (if unsigned bundles found)

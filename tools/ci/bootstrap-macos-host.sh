@@ -6,8 +6,7 @@
 # layout, ccache tuning, Skia verification, and Shipyard. Runner
 # registration is a separate, explicit phase (--with-runners=N).
 #
-# Idempotent: safe to re-run. Plan + rationale:
-#   planning/2026-05-20-macos-ci-modernization-proposal.md
+# Idempotent: safe to re-run.
 #
 # Usage:
 #   tools/ci/bootstrap-macos-host.sh                  # deps + cache + verify

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the footprint size/footprint helpers.
-
-Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
-extracted footprint module directly instead of the local_ci.py facade.
-"""
+"""Tests for the footprint size/footprint helpers."""
 
 import os
 import tempfile

@@ -1,17 +1,11 @@
 // cli_sdk.cpp — SDK resolution, project-config, and version-banner
-// helpers for the pulp CLI. Extracted from cli_common.cpp in the
-// 2026-05 Phase 2 (R2-4) refactor.
+// helpers for the pulp CLI.
 //
-// This is the "SDK / Config" + "#2087 newer-SDK-available banner"
-// cluster of cli_common.cpp — SDK cache/checkout resolution, pulp.toml
-// + project-CMake version reads, the newer-SDK banner, CLI/project
-// compatibility enforcement, PR-workflow + user-config accessors, and
-// the pinned-Shipyard-version probe.
-//
-// All public functions stay declared in cli_common.hpp (global scope,
-// matching cli_common.cpp); this TU only relocates their definitions
-// (plus the file-local anonymous-namespace helpers used nowhere else)
-// so SDK/config work no longer recompiles the 2k-line cli_common.cpp.
+// Owns SDK cache/checkout resolution, pulp.toml + project-CMake version
+// reads, the newer-SDK banner, CLI/project compatibility enforcement,
+// PR-workflow + user-config accessors, and the pinned-Shipyard-version
+// probe. Public functions stay declared in cli_common.hpp; this file
+// contains their definitions plus file-local helpers.
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
@@ -35,7 +29,7 @@
 
 #include <pulp/runtime/system.hpp>
 
-// ── SDK / Config ──────────────��────────────────────────────���────────────────
+// SDK / Config
 
 fs::path pulp_home() {
     if (auto pulp_home_env = pulp::runtime::get_env("PULP_HOME"))
@@ -90,16 +84,15 @@ std::string detect_platform() {
 #endif
 }
 
-// ── #2087 follow-up: newer-SDK-available banner ─────────────────────────
+// ── Newer-SDK-available banner ──────────────────────────────────────────
 //
-// Pulp #2087 follow-up (#22): emit a one-line banner when a newer SDK
-// is available on GitHub Releases. To keep CLI invocations fast and
-// avoid hitting GitHub on every command, we cache the result at
-// `~/.pulp/cache/latest_release.txt` with a 24h TTL. Cache is plain
-// text — first line is the version string (no leading `v`), second
-// line is the Unix timestamp of the fetch. Cache miss / stale →
-// opportunistic refresh via curl with a hard 2s timeout so a slow
-// network never blocks the user.
+// Emit a one-line banner when a newer SDK is available on GitHub Releases. To
+// keep CLI invocations fast and avoid hitting GitHub on every command, we cache
+// the result at `~/.pulp/cache/latest_release.txt` with a 24h TTL. Cache is
+// plain text — first line is the version string (no leading `v`), second line
+// is the Unix timestamp of the fetch. Cache miss / stale → opportunistic
+// refresh via curl with a hard 2s timeout so a slow network never blocks the
+// user.
 
 namespace {
 
@@ -161,8 +154,8 @@ std::string latest_available_sdk_version() {
                       + "/releases/latest";
     std::string cmd = "curl -fsSL --max-time 2 -H 'Accept: application/vnd.github+json' "
                       + shell_quote(url) + " 2>/dev/null";
-    // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping used
-    // elsewhere in tools/cli/ so this builds on Windows.
+    // Mirror the _WIN32 popen/pclose mapping used elsewhere in
+    // tools/cli/ so this builds on Windows.
 #if defined(_WIN32)
     FILE* pipe = _popen(cmd.c_str(), "r");
 #else
@@ -648,8 +641,7 @@ bool cache_preflight_check(const fs::path& project_root,
     auto entries = fcc::discover_fetchcontent_cache(env);
     // Only gate on states that genuinely break configure/build —
     // StaleCommit entries are harmless because CMake's override path
-    // keys on the *current* sanitized ref. See blocks_preflight() and
-    // the Codex P1 review on PR #753.
+    // keys on the *current* sanitized ref. See blocks_preflight().
     if (!fcc::blocks_preflight(entries)) return true;
 
     std::cerr << "Error: " << command_name

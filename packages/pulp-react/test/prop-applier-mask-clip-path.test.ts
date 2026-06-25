@@ -1,11 +1,7 @@
-// pulp #1515 — CSS clip-path + mask cluster. Verify @pulp/react
-// prop-applier forwards `clipPath` / `mask` / `maskImage` to the
-// matching bridge fns. The bridge stores the value on the View;
-// Skia paint side honors the `path("...")` form via
-// SkPath::FromSVGString. URL refs / named shape forms (circle / inset
-// / polygon) and the saveLayer + SkBlendMode::kDstIn shader composite
-// for mask painting are deferred — at the prop-applier layer we just
-// confirm the dispatch lands at the right bridge fn.
+// The prop applier forwards `clipPath`, `mask`, and `maskImage`
+// values to the matching bridge functions without parsing them. The
+// native bridge owns storage, clearing, and renderer-specific support
+// for the forwarded syntax forms.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -37,7 +33,7 @@ function callOf(b: MockBridge, fn: string) {
     return b.calls.find((c) => c.fn === fn);
 }
 
-describe('clip-path / mask cluster (pulp #1515)', () => {
+describe('clip-path and mask prop forwarding', () => {
     it('clipPath path() form forwards verbatim to setClipPath', () => {
         applyChangedProps(makeInstance(), {}, {
             clipPath: 'path("M 0 0 L 100 0 L 100 100 Z")',

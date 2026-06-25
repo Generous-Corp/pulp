@@ -133,9 +133,9 @@ bool has_pending() {
     return !midi_fifo().empty();
 }
 
-// Build a MidiEvent from raw bytes. Only handles short (1-3 byte)
-// channel voice messages in Phase 1. SysEx and longer messages are
-// skipped (the FIFO truncated them anyway).
+// Build a MidiEvent from raw bytes. The Android FIFO currently carries
+// short (1-3 byte) channel voice messages; SysEx and longer messages are
+// skipped because the FIFO entry has already truncated them.
 static MidiEvent decode_short(const std::uint8_t* bytes, int count) {
     MidiEvent ev;
     if (count >= 3) {

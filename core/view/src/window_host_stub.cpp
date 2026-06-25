@@ -1,4 +1,4 @@
-// Non-Apple WindowHost fallback (#299). Apple platforms have the
+// Non-Apple WindowHost fallback. Apple platforms have the
 // real NSWindow/UIWindow impls in platform/mac / platform/ios and
 // supply their own WindowHost::create(). On Windows/Linux/Android
 // the host app registers a factory via set_factory(); without a
@@ -49,7 +49,7 @@ void WindowHost::set_resize_callback(ResizeCallback cb) {
     (void) cb;
 }
 
-// Slice 16 — VBlank-locked safe-repaint. When a RenderLoop is attached AND
+// VBlank-locked safe-repaint. When a RenderLoop is attached AND
 // running, route the dirty mark through request_frame() so every call
 // between two vblanks coalesces into a single vsync-paced repaint. Otherwise
 // fall through to the platform repaint() — existing behavior, no regression.
@@ -77,9 +77,9 @@ void WindowHost::mark_dirty() {
 
 std::unique_ptr<WindowHost> WindowHost::create(View& root,
                                                 const WindowOptions& options) {
-    // #313 Codex P2: copy the factory out, release the lock, then
-    // invoke. Creating a native window can take milliseconds and
-    // the factory might call back into set_factory/has_factory.
+    // Copy the factory out, release the lock, then invoke. Creating a native
+    // window can take milliseconds and the factory might call back into
+    // set_factory/has_factory.
     WindowHost::Factory local;
     {
         std::lock_guard lock(g_factory_mu);

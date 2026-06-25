@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Conformance test for the shared source-contract-v0 schema (pulp #3116, slice 1).
+"""Conformance test for the shared source-contract-v0 schema.
 
-Goal of the slice: one serialized `source-contract` schema that both the C++
+Current goal: one serialized `source-contract` schema that both the C++
 importer overlay (`source_contract_overlay.node_route_rows`) and the JS audit
 summary (`inputs.sourceAuditSummary`) can be validated against in tests, so
 native route readiness stops depending on two parallel inference models that can

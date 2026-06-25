@@ -1,11 +1,7 @@
-// test_design_import_react_runtime.cpp — extracted from test_design_import.cpp
-// in the 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
 // React-runtime parser cluster — TSX/runtime React bundle parsers for
 // every supported design-tool source. All four parsers share a
 // consistent contract: parse fixture, materialize via host React shim,
-// accept sanitized TSX, reject out-of-matrix surfaces. Originally lived
-// across ~830 contiguous lines in test_design_import.cpp.
+// accept sanitized TSX, reject out-of-matrix surfaces.
 //
 // Covered:
 //   * parse_v0_tsx + parse_v0_dev_react           (v0.dev)

@@ -1,5 +1,4 @@
-// macOS Cocoa backend registration for MainThreadDispatcher in plugin mode
-// (item 6.4b macOS plan).
+// macOS Cocoa backend registration for MainThreadDispatcher in plugin mode.
 //
 // Adapter code (AU v3 / VST3 / CLAP on macOS) calls register_plugin_backend()
 // at instance construction time and unregister_plugin_backend() at teardown.

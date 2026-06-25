@@ -62,7 +62,8 @@ void WidgetBridge::register_layout_grid_api() {
         } else if (key == "row_end") {
             v->grid().grid_row_end = static_cast<int>(args.get<double>(2, 0));
         }
-        // pulp #1434 Phase A2-2 — extended grid surface.
+        // Extended CSS grid surface: implicit tracks, auto-flow, template
+        // areas, and named/numeric grid-area assignment.
         else if (key == "auto_columns") {
             auto tracks = GridStyle::parse_template(args.get<std::string>(2, "auto"));
             if (!tracks.empty()) v->grid().auto_columns = tracks[0];
@@ -115,11 +116,10 @@ void WidgetBridge::register_layout_flex_api() {
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         auto val = args.get<double>(2, 0);
-        // pulp-internal #70 — slider/drag jitter diagnostic. When
-        // PULP_DEBUG_FLEX_THRASH=1, log every setFlex call so the
-        // per-frame style update rate during a slider drag becomes
-        // visible. Reading getenv every call is cheap and only fires
-        // when the env var is set, so production paths stay quiet.
+        // Slider/drag jitter diagnostic. When PULP_DEBUG_FLEX_THRASH is set to
+        // any value, log every setFlex call so per-frame style churn during a
+        // drag is visible.
+        // The getenv result is cached on first call and only emits when enabled.
         static const bool flex_thrash_log = std::getenv("PULP_DEBUG_FLEX_THRASH") != nullptr;
         if (flex_thrash_log) {
             std::string sval;
@@ -127,12 +127,9 @@ void WidgetBridge::register_layout_flex_api() {
             std::fprintf(stderr, "[flex-thrash] id=%s key=%s num=%.3f str='%s'\n",
                          id.c_str(), key.c_str(), val, sval.c_str());
         }
-        // pulp #1434 (rn batch B) — accept all five flexDirection
-        // spellings: 'row' / 'column' (CSS / RN canonical), 'col' (legacy
-        // pulp shorthand emitted by web-compat-style-decl.js's
-        // setFlex(direction)), plus the reverse modes 'row-reverse' /
-        // 'column-reverse'. Anything else falls through to column
-        // (matches the prior default behavior for unknown values).
+        // Accept the flexDirection spellings used by CSS/RN: `row`,
+        // `column`, and the reverse modes. `column`, the bridge shorthand
+        // `col`, and unknown values all resolve to column.
         if (key == "direction") {
             auto dir = args.get<std::string>(2, "col");
             if (dir == "row")                 f.direction = FlexDirection::row;
@@ -142,12 +139,11 @@ void WidgetBridge::register_layout_flex_api() {
         }
         else if (key == "gap") f.gap = (float)val;
         else if (key == "padding") f.padding = (float)val;
-        // pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
-        // either a number ("10" → px) or a percentage string ("5%" →
-        // percent of parent main-axis size). Yoga's padding does NOT
-        // support "auto" (only margin does), so unrecognized strings fall
-        // through to the px path with the parsed numeric value (or 0 on
-        // total parse failure). Mirrors width/height/min/max patterns.
+        // Per-edge padding accepts either a number ("10" -> px) or a
+        // percentage string ("5%" -> percent of the parent's width / inline
+        // size). Yoga padding does not support "auto", so unrecognized strings
+        // fall through to the px path with the parsed numeric value, or 0 on
+        // total parse failure. Mirrors width/height/min/max patterns.
         else if (key == "padding_top") {
             auto sval = args.get<std::string>(2, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -206,12 +202,10 @@ void WidgetBridge::register_layout_flex_api() {
         }
         else if (key == "flex_grow") f.flex_grow = (float)val;
         else if (key == "flex_shrink") f.flex_shrink = (float)val;
-        // pulp #1434 (rn batch C) — flex_basis accepts a number ("100"
-        // → px), a percentage string ("50%" → percent of parent), or
-        // the keyword "auto" (Yoga's YGAuto: "use the preferred size").
-        // The unit lives on FlexStyle::dim_flex_basis; yoga_layout.cpp
-        // dispatches to YGNodeStyleSetFlexBasis{Percent,Auto} for the
-        // non-px paths.
+        // flex_basis accepts a number ("100" -> px), a percentage string
+        // ("50%" -> percent of parent), or "auto" for Yoga's preferred-size
+        // path. The unit lives on FlexStyle::dim_flex_basis; yoga_layout.cpp
+        // dispatches to YGNodeStyleSetFlexBasis{Percent,Auto}.
         else if (key == "flex_basis") {
             auto sval = args.get<std::string>(2, "");
             if (sval == "auto") {
@@ -230,9 +224,8 @@ void WidgetBridge::register_layout_flex_api() {
             }
         }
         else if (key == "flex_wrap") {
-            // pulp #1434 Triage #14 — accept numeric (legacy 0/1) and
-            // the CSS keyword strings, including the previously-
-            // inexpressible `wrap-reverse`.
+            // Accept numeric bridge values and CSS keyword strings, including
+            // `wrap-reverse`.
             auto sval = args.get<std::string>(2, "");
             if (sval == "wrap-reverse")        f.flex_wrap = FlexWrap::wrap_reverse;
             else if (sval == "wrap")           f.flex_wrap = FlexWrap::wrap;
@@ -240,19 +233,15 @@ void WidgetBridge::register_layout_flex_api() {
             else                                f.flex_wrap = (val > 0) ? FlexWrap::wrap : FlexWrap::no_wrap;
         }
         else if (key == "order") f.order = (int)val;
-        // pulp #1423 — width/height accept either a number ("100" → px)
-        // or a percentage string ("100%" → percent of parent). The CSS
-        // translator passes the raw resolved string for these two keys
-        // so the unit survives the bridge boundary; Yoga's native
-        // YGNodeStyleSet{Width,Height}Percent path is reached via
-        // FlexStyle::dim_width / dim_height in yoga_layout.cpp.
+        // width/height accept either a number ("100" -> px) or a percentage
+        // string ("100%" -> percent of parent). The CSS translator passes the
+        // raw resolved string so the unit survives the bridge boundary;
+        // yoga_layout.cpp routes percent values through FlexStyle::dim_*.
         else if (key == "width") {
             auto sval = args.get<std::string>(2, "");
-            // pulp #1434 (sub-agent #12 follow-up) — accept the keyword
-            // `'auto'` for "hug contents" sizing. Yoga supports this
+            // Accept `'auto'` for hug-contents sizing. Yoga supports this
             // natively via YGNodeStyleSetWidthAuto. Figma auto-layout,
-            // v0 intrinsic-sizing cards, and Claude Design responsive
-            // containers all emit this. The dispatch path in
+            // intrinsic-sizing cards, and responsive containers all emit this.
             // yoga_layout.cpp keys on `dim_width.unit == auto_`.
             if (sval == "auto") {
                 f.dim_width.unit = pulp::view::DimensionUnit::auto_;
@@ -288,12 +277,10 @@ void WidgetBridge::register_layout_flex_api() {
                 f.dim_height.unit = pulp::view::DimensionUnit::px;
             }
         }
-        // pulp #1434 (rn batch C) — min/max width/height accept either a
-        // number ("100" → px) or a percentage string ("50%" → percent of
-        // parent). Same shape as #1426's width/height: store unit on
-        // FlexStyle::dim_*; yoga_layout.cpp dispatches to
-        // YGNodeStyleSet{Min,Max}{Width,Height}Percent for the percent
-        // path and the existing px API otherwise.
+        // min/max width/height accept either a number ("100" -> px) or a
+        // percentage string ("50%" -> percent of parent). Units are stored on
+        // FlexStyle::dim_*; yoga_layout.cpp dispatches to Yoga's percent path
+        // or the existing px API.
         else if (key == "min_width") {
             auto sval = args.get<std::string>(2, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -350,27 +337,23 @@ void WidgetBridge::register_layout_flex_api() {
                 f.dim_max_height.unit = pulp::view::DimensionUnit::px;
             }
         }
-        // Aspect ratio (pulp #1434) — width/height ratio. A value <= 0 or
-        // NaN clears the slot (matches CSS `aspect-ratio: auto`); a finite
-        // positive value pins the slot. The CSS shim in
-        // web-compat-style-decl.js parses both `1.5` and `16/9` forms
-        // before reaching here, and the @pulp/react prop-applier accepts
-        // `aspectRatio` directly as a number.
+        // Aspect ratio is the width/height ratio. Any non-finite or
+        // non-positive value clears the slot, matching CSS `aspect-ratio: auto`;
+        // a finite positive value pins it. The CSS shim parses both `1.5` and
+        // `16/9` before reaching here, and @pulp/react accepts `aspectRatio`
+        // directly as a number.
         else if (key == "aspect_ratio" || key == "aspectRatio") {
             if (val > 0.0 && std::isfinite(val)) f.aspect_ratio = (float)val;
             else f.aspect_ratio.reset();
         }
         // Margin
         else if (key == "margin") f.margin = (float)val;
-        // pulp #1434 (cross-surface mega-batch) — per-edge margin accepts
-        // a number ("10" → px), a percentage string ("5%" → percent of
-        // parent main-axis size), or the keyword "auto" (Yoga
-        // YGNodeStyleSetMarginAuto — used for centering with
-        // `marginLeft: 'auto'; marginRight: 'auto'` etc.). Yoga supports
-        // `auto` on margin only, not padding. yoga_layout.cpp dispatches
-        // on dim_margin_*.unit; the legacy float field is kept (-1
-        // sentinel) so consumers still using uniform `margin` work
-        // unchanged.
+        // Per-edge margin accepts a number ("10" -> px), a percentage string
+        // ("5%" -> percent of the parent's width / inline size), or "auto" for
+        // Yoga's YGNodeStyleSetMarginAuto path. Yoga supports `auto` on margin
+        // only, not padding. yoga_layout.cpp dispatches on dim_margin_*.unit;
+        // the legacy float field uses -1 as a sentinel so uniform `margin`
+        // consumers keep working.
         else if (key == "margin_top") {
             auto sval = args.get<std::string>(2, "");
             if (sval == "auto") {
@@ -439,13 +422,11 @@ void WidgetBridge::register_layout_flex_api() {
                 f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
             }
         }
-        // pulp #1542 — yoga logical-edge fan-out. `margin_start` /
-        // `margin_end` / `padding_start` / `padding_end` / `start` /
-        // `end` route to Yoga's YGEdgeStart / YGEdgeEnd which flip
-        // with the writing direction (set via `direction_writing` —
-        // the existing `direction` key is taken by flex-direction).
-        // Same value coverage as the per-side _left/_right siblings:
-        // px (number), percent string, plus `auto` for margin.
+        // Logical-edge fan-out. `margin_start`, `margin_end`,
+        // `padding_start`, `padding_end`, `start`, and `end` route to Yoga's
+        // YGEdgeStart / YGEdgeEnd, which flip with `direction_writing` (the
+        // existing `direction` key is flex-direction). Same value coverage as
+        // the _left/_right siblings: px, percent, plus `auto` for margin.
         else if (key == "margin_start") {
             auto sval = args.get<std::string>(2, "");
             if (sval == "auto") {
@@ -505,11 +486,9 @@ void WidgetBridge::register_layout_flex_api() {
             }
         }
         else if (key == "start") {
-            // pulp DIVERGE→PASS sweep — accept `'auto'` so `inset-inline-
-            // start: auto` (CSS) and the equivalent RN style key route
-            // through Yoga's `YGNodeStyleSetPositionAuto`. Without this
-            // path the keyword fell through to (float)val == 0 and
-            // pinned the start edge to 0px.
+            // Accept `'auto'` so `inset-inline-start: auto` and the equivalent
+            // RN style key route through Yoga's `YGNodeStyleSetPositionAuto`.
+            // Otherwise the keyword would parse as 0 and pin the edge to 0px.
             auto sval = args.get<std::string>(2, "");
             if (sval == "auto") {
                 f.dim_start.unit = pulp::view::DimensionUnit::auto_;
@@ -539,9 +518,9 @@ void WidgetBridge::register_layout_flex_api() {
                 f.dim_end.unit = pulp::view::DimensionUnit::px;
             }
         }
-        // pulp #1542 — node writing direction. Distinct from
-        // `direction` (which is flex-direction). Accepts `'ltr'`,
-        // `'rtl'`, `'inherit'`. Anything else reverts to `inherit`.
+        // Node writing direction, distinct from `direction` (flex-direction).
+        // Accepts `'ltr'`, `'rtl'`, and `'inherit'`; anything else reverts to
+        // `inherit`.
         else if (key == "direction_writing") {
             auto a = args.get<std::string>(2, "inherit");
             if (a == "ltr")      f.writing_direction = pulp::view::FlexStyle::WritingDirection::ltr;
@@ -549,14 +528,10 @@ void WidgetBridge::register_layout_flex_api() {
             else                 f.writing_direction = pulp::view::FlexStyle::WritingDirection::inherit;
         }
         // Directional gap.
-        // pulp Wave 2 css.2 — accept a `'NN%'` string for parity with
-        // padding/margin edges. Yoga itself does not have a
-        // YGNodeStyleSetGapPercent API today, so the percent value is
-        // stored on the scalar `row_gap` / `column_gap` slot verbatim
-        // (treated as px until the Yoga update lands). This is the same
-        // best-effort treatment we apply to other percent-but-Yoga-
-        // doesn't-honor cases — the catalog entry stays `partial` and
-        // documents the gap.
+        // Accept a `'NN%'` string for parity with padding/margin edges. Yoga
+        // does not have a YGNodeStyleSetGapPercent API today, so the percent
+        // value is stored on the scalar gap slot and treated as px until Yoga
+        // grows percent-gap support. The catalog entry remains `partial`.
         else if (key == "row_gap") {
             auto sval = args.get<std::string>(2, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -576,29 +551,21 @@ void WidgetBridge::register_layout_flex_api() {
             }
         }
         // Alignment.
-        // pulp #1434 (rn batch B) — accept both bare `start`/`end`
-        // (Yoga / pulp short forms) and the `flex-start`/`flex-end`
-        // CSS / RN canonical spellings. The CSS shim's _cssToFlex
-        // already maps the prefixed forms to the bare ones for the
-        // CSS path, but @pulp/react's prop-applier passes RN values
-        // through verbatim — so the bridge has to accept both.
-        // FlexAlign has no `baseline` variant yet (separate gap;
-        // would need YGAlignBaseline plumbing); falls through to
-        // stretch / auto_ as before.
+        // Accept both bare `start`/`end` bridge forms and the `flex-start` /
+        // `flex-end` CSS/RN spellings. The CSS shim maps prefixed forms to the
+        // bare ones, but @pulp/react's prop-applier passes RN values through
+        // verbatim, so the bridge has to accept both.
         else if (key == "align_items") {
             auto a = args.get<std::string>(2,"stretch");
             if (a=="start" || a=="flex-start") f.align_items=FlexAlign::start;
             else if (a=="center")              f.align_items=FlexAlign::center;
             else if (a=="end" || a=="flex-end") f.align_items=FlexAlign::end;
-            // pulp #1434 Tier 1 (css/alignItems) — CSS-spec `first baseline`
-            // aliases to plain `baseline`. The baseline-set "first" selector
-            // is the default behaviour (and what Yoga's YGAlignBaseline
-            // computes), so collapsing them is observable-behaviour-preserving.
-            // NOTE: `last baseline` is intentionally NOT aliased — it requires
-            // baseline-set tracking (align children against the LAST baseline
-            // line in a multi-line flex container) that YGAlignBaseline does
-            // not implement. Codex P1 on PR #1853 — keeping `last baseline`
-            // in compat.json/unsupportedValues is the honest answer.
+            // CSS `first baseline` aliases to plain `baseline`. The baseline-set
+            // "first" selector is the default behavior and what Yoga's
+            // YGAlignBaseline computes, so collapsing them preserves behavior.
+            // `last baseline` is intentionally not aliased: it requires
+            // baseline-set tracking that Yoga does not implement, so compat
+            // keeps it in unsupportedValues.
             else if (a=="baseline" || a=="first baseline")
                                                 f.align_items=FlexAlign::baseline;
             else                               f.align_items=FlexAlign::stretch;
@@ -612,15 +579,11 @@ void WidgetBridge::register_layout_flex_api() {
             else if (a=="baseline")            f.align_self=FlexAlign::baseline;
             else                               f.align_self=FlexAlign::auto_;
         }
-        // pulp #1434 (sub-agent #12 follow-up) — align_content controls
-        // multi-line flex cross-axis distribution. Yoga supports this
-        // natively via YGNodeStyleSetAlignContent. Accepts both bare
-        // `start`/`end` (Yoga / pulp short forms) and `flex-start` /
-        // `flex-end` (CSS / RN canonical). Space-* values (space-between
-        // / space-around / space-evenly) live on a sibling enum field
-        // (FlexStyle::align_content_space) because FlexAlign has no
-        // space variants — those don't make sense for align_items /
-        // align_self, only for align_content.
+        // align_content controls multi-line flex cross-axis distribution.
+        // Yoga supports this natively via YGNodeStyleSetAlignContent. Accepts
+        // both bare `start`/`end` bridge forms and `flex-start` / `flex-end`
+        // CSS/RN spellings. Space-* values live on FlexStyle's sibling
+        // align_content_space enum because FlexAlign has no space variants.
         else if (key == "align_content") {
             auto a = args.get<std::string>(2,"start");
             using AcSpace = pulp::view::FlexStyle::AlignContentSpace;
@@ -643,8 +606,7 @@ void WidgetBridge::register_layout_flex_api() {
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");
-            // INTENTIONALLY NOT aliased (Codex P1 on PR #1853, two
-            // separate findings, both kept honest):
+            // Intentionally not aliased:
             //
             //   `left` / `right` — direction-context-dependent. CSS spec:
             //       on a row container, `right` ≡ flex-end (LTR) /
@@ -697,8 +659,8 @@ void WidgetBridge::register_layout_query_api() {
     // getLayoutRect(id) -> {x, y, width, height, top, right, bottom, left}
     // Returns layout-resolved bounds in root-relative coordinates.
     //
-    // pulp #1899 — force a fresh layout pass before reading bounds.
-    // Spectr's editor (and any React-imported tree) calls this via
+    // Force a fresh layout pass before reading bounds. Spectr's editor and any
+    // React-imported tree call this via
     // Element.getBoundingClientRect() in mount-time effects to size
     // a canvas / SVG / drawing surface. If the JS commit that mounted
     // the React tree hasn't yet been followed by a yoga_layout pass,
@@ -739,11 +701,12 @@ void WidgetBridge::register_layout_query_api() {
 void WidgetBridge::register_layout_box_model_api() {
     BridgeApiContext api{engine_};
 
-    // pulp #1516 — CSS box-sizing keyword. Yoga 3.x's
-    // `YGNodeStyleSetBoxSizing` honors the spec, so we just record the
-    // enum on FlexStyle and let `build_yoga_subtree` route it through.
-    // Default `content-box` matches the CSS spec; web designs typically
-    // reset to `border-box` via `* { box-sizing: border-box }`.
+    // CSS box-sizing keyword. Yoga's `YGNodeStyleSetBoxSizing` honors the spec,
+    // so record the enum on FlexStyle and let `build_yoga_subtree` route it
+    // through.
+    // The unset FlexStyle default is `border-box` to match Yoga/imported web
+    // layout convention; this setter maps absent or unknown keywords to
+    // `content-box`, the CSS-spec keyword default.
     register_bridge_function(api, "setBoxSizing", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "content-box");
@@ -765,12 +728,10 @@ void WidgetBridge::register_layout_box_model_api() {
 void WidgetBridge::register_layout_position_api() {
     BridgeApiContext api{engine_};
 
-    // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
-    // pulp-internal #70 — instrument under PULP_DEBUG_FLEX_THRASH so we
-    // can see whether the JSX's `position: "absolute"` actually reaches
-    // the bridge (it has been observed missing for runtime-React
-    // imports, which makes inline absolute children render at the
-    // wrong place).
+    // setPosition(id, "static"/"relative"/"absolute"/"fixed"/"sticky") — CSS position
+    // Instrument under PULP_DEBUG_FLEX_THRASH so we can see whether JSX
+    // `position: "absolute"` reaches the bridge. When runtime React imports
+    // miss this path, inline absolute children render at the wrong place.
     register_bridge_function(api, "setPosition", [this](choc::javascript::ArgumentList args) {
         static const bool flex_thrash_log = std::getenv("PULP_DEBUG_FLEX_THRASH") != nullptr;
         if (flex_thrash_log) {
@@ -792,13 +753,11 @@ void WidgetBridge::register_layout_position_api() {
 
 
     // setTop/setRight/setBottom/setLeft(id, px-or-percent) — CSS positioning
-    // offsets. pulp #1434 batch 6 — accept either a number ("50" → px) or
-    // a percentage string ("50%" → percent of parent). The CSS translator
-    // and @pulp/react prop-applier pass the raw resolved string for these
-    // four keys when the value is a percent, so the unit survives the
-    // bridge boundary; Yoga's YGNodeStyleSetPositionPercent path is reached
-    // via View::top_unit_ / etc. in yoga_layout.cpp. Mirrors the
-    // FlexStyle::dim_width pattern from pulp #1423 (PR #1426) for width/height.
+    // offsets. Accept either a number ("50" -> px) or a percentage string
+    // ("50%" -> percent of parent). The CSS translator and @pulp/react
+    // prop-applier pass raw percent strings for these keys, so the unit
+    // survives the bridge boundary; yoga_layout.cpp routes them through
+    // View::top_unit_ / right_unit_ / bottom_unit_ / left_unit_.
     register_bridge_function(api, "setTop", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) {

@@ -1,4 +1,5 @@
-// test_text_run_planner_parallel.cpp — Pulp #2163, font v2 Slice 3.7.
+// test_text_run_planner_parallel.cpp — Pulp #2163, font v2 Slice 3.7:
+// parallel shaping.
 //
 // Parallel shaping: shape_batch fans out N inputs across futures.
 // Asserts (a) per-input output matches the serial path, (b) empty

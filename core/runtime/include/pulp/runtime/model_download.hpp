@@ -1,6 +1,6 @@
 #pragma once
 
-// Streaming HTTPS file downloader for the model manager (MM-PR2). Unlike
+// Streaming HTTPS file downloader for the model manager. Unlike
 // runtime/http.hpp's http_download (whole-body, in-memory — fine for small JSON,
 // fatal for GB-scale weights), this streams the body incrementally to disk with a
 // progress callback, HTTP Range **resume**, request **headers** (e.g. HuggingFace

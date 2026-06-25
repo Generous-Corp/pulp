@@ -31,17 +31,15 @@ void WidgetBridge::register_tokens_api(std::function<canvas::Color(const std::st
         return choc::value::createFloat64(d.value_or(0.0f));
     });
 
-    // pulp #1899 (gap #3) - string-valued theme-token lookup.
-    // setStringToken(name, value) / getStringToken(name) parallel the
+    // String-valued theme-token lookup. setStringToken(name, value) /
+    // getStringToken(name) parallel the
     // motion-token / color-token APIs but back onto `theme.strings`
     // (the same map that already stores design-system font names
     // imported via Stitch / W3C tokens - see design_import.cpp). The
     // React-side prop-applier consults this to resolve `var(--mono)`
-    // in `fontFamily` / `color` / `borderColor` etc. before forwarding
-    // to setFontFamily / setTextColor - without this, Skia's font
-    // matcher received the literal string "var(--mono)" as a family
-    // name and fell through to a proportional sans, which is visible
-    // as the Spectr top-bar "faint label" symptom from #1899.
+    // in `fontFamily` / `color` / `borderColor` etc. before forwarding to
+    // setFontFamily / setTextColor; otherwise Skia's font matcher receives
+    // the literal string "var(--mono)" as a family name.
     register_bridge_function(api, "setStringToken", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto value = args.get<std::string>(1, "");

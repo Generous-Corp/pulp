@@ -42,7 +42,7 @@
 
 @implementation PulpIOSDragDrop {
     pulp::view::View* _root;                       // not owned
-    __weak UIView* _hostView;
+    UIView* _hostView;                             // not owned; host invalidates before teardown
     pulp::view::Point (^_xform)(pulp::view::Point);
     pulp::view::DragSession _session;              // hover state for dispatch_drag_*
     NSMutableArray<NSString*>* _pendingPaths;      // staged outbound payload
@@ -55,13 +55,19 @@
     if (self = [super init]) {
         _root = root;
         _hostView = hostView;
-        _xform = xform;
-        _pendingPaths = [NSMutableArray array];
+        _xform = [xform copy];
+        _pendingPaths = [[NSMutableArray alloc] init];
     }
     return self;
 }
 
 - (void)invalidate { _root = nullptr; }
+
+- (void)dealloc {
+    [_xform release];
+    [_pendingPaths release];
+    [super dealloc];
+}
 
 - (pulp::view::Point)rootPointFor:(id<UIDropSession>)session {
     CGPoint loc = [session locationInView:_hostView];
@@ -119,13 +125,16 @@
             performDrop:(id<UIDropSession>)session {
     if (!_root) return;
     const pulp::view::Point pt = [self rootPointFor:session];
-    __weak PulpIOSDragDrop* weakSelf = self;
+    PulpIOSDragDrop* retainedSelf = [self retain];
     // Completion is delivered on the main queue (UIKit guarantee), so touching
     // the view tree here is thread-safe.
     [session loadObjectsOfClass:[NSURL class]
                      completion:^(NSArray<__kindof id<NSItemProviderReading>> *objects) {
-        PulpIOSDragDrop* strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf->_root) return;
+        PulpIOSDragDrop* strongSelf = retainedSelf;
+        if (!strongSelf->_root) {
+            [retainedSelf release];
+            return;
+        }
         pulp::view::DropData data;
         data.type = pulp::view::DropData::Type::files;
         for (id obj in objects) {
@@ -137,6 +146,7 @@
         }
         if (!data.file_paths.empty())
             pulp::view::dispatch_drop(*strongSelf->_root, strongSelf->_session, data, pt);
+        [retainedSelf release];
     }];
 }
 
@@ -493,9 +503,8 @@ private:
 // `pulp::view::pulp::render::*` and Metal's Objective-C `@protocol`
 // declarations land inside a C++ namespace, which the compiler rejects
 // ("Objective-C declarations may only appear in global scope"). The
-// bug was inert before Phase iOS-D.1 because no iOS configure had
-// `PULP_HAS_SKIA` defined; turning Skia on for iOS surfaced it
-// immediately.
+// bug is specific to GPU-enabled iOS configures because CPU-only iOS
+// builds never include these headers.
 }  // namespace pulp::view
 
 #ifdef PULP_HAS_SKIA
@@ -555,7 +564,7 @@ pulp::view::Point ios_root_to_local(pulp::view::Point root_pt, pulp::view::View*
 // drag target can be destroyed (editor rebuild / JS unmount) between touch
 // events. Walking needle→parent would deref the freed pointer; walking
 // root→children only touches live nodes and compares addresses. Mirrors
-// window_host_mac_geometry.mm's view_is_in_tree (Codex P1).
+// window_host_mac_geometry.mm's view_is_in_tree.
 bool ios_view_in_tree(pulp::view::View* needle, pulp::view::View* root) {
     if (!needle || !root) return false;
     if (needle == root) return true;
@@ -664,7 +673,7 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         target->on_mouse_event(local);  // fires on_pointer_event → JS pointerdown
         // Also drive the native press virtual so View subclasses that init
         // drag state in on_mouse_down (knobs, faders) work in the GPU host —
-        // mirrors mac's pulp_plugin_mouse_down (Codex P2).
+        // mirrors mac's pulp_plugin_mouse_down.
         target->on_mouse_down(local.position);
         for (pulp::view::View* b = target->parent(); b; b = b->parent()) {
             if (!b->on_pointer_event) continue;
@@ -736,7 +745,7 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
             me.is_cancelled = cancelled;
             me.position = ios_root_to_local(me.window_position, target);
             // Distinct native cancel path so widgets can roll back in-progress
-            // gestures instead of treating a cancel as a commit (Codex P2).
+            // gestures instead of treating a cancel as a commit.
             if (cancelled) target->on_mouse_cancel(me.position);
             else target->on_mouse_up(me.position);
             target->on_mouse_event(me);  // fires on_pointer_event → JS pointerup/cancel
@@ -932,7 +941,6 @@ public:
                skia_surface_->is_available();
     }
 
-    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
     // Mirrors WindowHost::gpu_surface() so a scripted UI mounted inside an
     // AUv3 editor can route navigator.gpu / canvas.getContext('webgpu')
     // through the same wgpu::Surface that paints the editor.
@@ -1182,7 +1190,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
             return host;
         }
         // GPU init failed — fall back to the CoreGraphics host so the editor
-        // never disappears (item 9). The runtime scream-guard in the adapter
+        // never disappears. The runtime scream-guard in the adapter
         // (`warn_if_unexpected_cpu_fallback`) logs the mismatch loudly.
         host.reset();
     }

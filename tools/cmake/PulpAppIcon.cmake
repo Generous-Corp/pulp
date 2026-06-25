@@ -129,8 +129,7 @@ function(_pulp_icon_configure_macos target source_path)
         # source on the target so a later packaging step (or a portable
         # `.icns` generator) can finish the job. This is a prototype
         # escape hatch — production cross artifacts must ship a real
-        # `.icns` before publication. See
-        # planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
+        # `.icns` before publication.
         if(PULP_MACOS_CROSS_ALLOW_MISSING_ICON_TOOLS)
             message(WARNING
                 "pulp_app_icon(${target}): macOS icon generation requires "

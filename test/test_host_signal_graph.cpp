@@ -3776,4 +3776,60 @@ TEST_CASE("SignalGraph sidechain edges participate in cycle detection",
     REQUIRE_FALSE(graph.connect_sidechain(follow, 0, comp, 1));
 }
 
+TEST_CASE("SignalGraph node_loads() reports per-node CPU load after processing",
+          "[host][graph][telemetry]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(2, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+
+    // No telemetry before prepare() builds the measurers.
+    REQUIRE(graph.node_loads().empty());
+
+    constexpr int kFrames = 64;
+    REQUIRE(graph.prepare(48000.0, kFrames));
+
+    std::vector<float> l(kFrames, 0.5f), r(kFrames, 0.5f);
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l.data(), r.data()};
+    std::array<float*, 2> out_ch{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    constexpr std::uint64_t kBlocks = 5;
+    for (std::uint64_t i = 0; i < kBlocks; ++i) {
+        graph.process(out_view, in_view, kFrames);
+    }
+
+    const auto loads = graph.node_loads();
+    REQUIRE(loads.size() == 3);  // input, gain, output
+    for (const auto& report : loads) {
+        // Every prepared node's work ran through its measurer each block.
+        REQUIRE(report.load.callback_count == kBlocks);
+        // A non-zero available-ns budget proves the sample rate reached the
+        // per-node measurer (begin(num_frames, sample_rate)).
+        REQUIRE(report.load.available_ns > 0);
+    }
+
+    // Re-prepare preserves the measurers (persistent across snapshots): the
+    // callback_count carries over rather than resetting.
+    REQUIRE(graph.prepare(48000.0, kFrames));
+    graph.process(out_view, in_view, kFrames);
+    for (const auto& report : graph.node_loads()) {
+        REQUIRE(report.load.callback_count == kBlocks + 1);
+    }
+
+    // Removing a node drops it from node_loads() — the lingering measurer is
+    // filtered out rather than reported as a phantom node.
+    REQUIRE(graph.remove_node(gain));
+    REQUIRE(graph.prepare(48000.0, kFrames));
+    const auto after_remove = graph.node_loads();
+    REQUIRE(after_remove.size() == 2);  // input + output, gain gone
+    for (const auto& report : after_remove) {
+        REQUIRE(report.node_id != gain);
+    }
+}
+
 // ── Phase 3 GraphSerializer round-trip ──────────────────────────────────

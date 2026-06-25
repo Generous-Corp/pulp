@@ -136,7 +136,9 @@ half-valid buffer.
 - Bus 0 and one sidechain input are routed. Additional input buses and
   secondary output buses are not exposed through the simple `Processor`
   callback.
-- No GUI extension is wired.
+- Desktop CLAP plugin targets expose `CLAP_EXT_GUI` when built with
+  `PULP_CLAP_GUI=1`; headless/CI/test environments and WCLAP builds do not
+  expose a live desktop editor.
 - Per-note modulation (`note_id`, `port_index`, `channel`, `key` fields in
   param mod events) is accepted but not per-note routed.
 
@@ -226,11 +228,17 @@ Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are 
 - `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to
   `kInfiniteTail`.
 
+### Editor / GUI
+
+`createView("editor")` returns a `PulpPlugView` when the VST3 target is built
+with `PULP_VST3_GUI` and the processor reports an editor. Automation, headless,
+CI, and test environments intentionally return `nullptr` so validators and
+non-interactive runs do not launch editor windows.
+
 ### Known Limitations
 
-- Only the first input/output bus channels are passed to `process()`. Sidechain bus routing is declared but not yet connected.
-- Channel count in `setupProcessing()` defaults to 2; dynamic bus arrangement queries are not yet implemented.
-- No VST3 GUI (`IPlugView`) is wired.
+- Bus 0 and one sidechain input are routed through `ProcessBuffers`. Secondary output buses are zero-filled today rather than exposed as writable processor outputs.
+- Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation.
 
 ---
 
@@ -255,7 +263,24 @@ PULP_AU_PLUGIN(MyPluginAU, my_namespace::create_my_processor)
 - A factory function `ClassNameFactory` for the `Info.plist` `factoryFunction` entry
 - Plugin registration via `PULP_REGISTER_PLUGIN`
 
-The factory function name must match the `factoryFunction` in your AU's `Info.plist`.
+Use this macro for audio-only `aufx` effects. The factory function name must
+match the `factoryFunction` in your AU's `Info.plist`.
+
+### Macro (MIDI-receiving Effect)
+
+```cpp
+#include "my_processor.hpp"
+#include <pulp/format/au_v2_entry.hpp>
+
+PULP_AU_MIDI_PLUGIN(MyMidiEffectAU, my_namespace::create_my_processor)
+```
+
+`PULP_AU_MIDI_PLUGIN(ClassName, factory_fn)` generates the same effect adapter
+class shape as `PULP_AU_PLUGIN`, but registers it through the AudioUnitSDK MIDI
+effect factory so `MusicDeviceMIDIEvent` and SysEx selectors reach the adapter.
+Pair it with an `aumf` component type: either let CMake emit `aumf` by setting
+the processor descriptor's `accepts_midi = true` / `ACCEPTS_MIDI`, or keep a
+custom `Info.plist.au` in sync manually.
 
 ### Macro (Instrument)
 
@@ -305,9 +330,19 @@ Stepped parameters with a `to_string` function get value string arrays via `GetP
 
 ### MIDI Routing
 
-**Effects:** No MIDI. `ProcessBufferLists()` passes empty `MidiBuffer` objects to `Processor::process()`.
+**Audio-only effects (`aufx`):** AU hosts do not route MIDI to plain effect
+components. Use `PULP_AU_PLUGIN` only when the processor does not accept MIDI.
 
-**Instruments:** MIDI notes arrive via `HandleNoteOn()` and `HandleNoteOff()` callbacks. These are buffered in `pending_midi_` (protected by a mutex) and drained into `midi_in` at the start of each `Render()` call. The sample offset (`inStartFrame`) is preserved.
+**MIDI-receiving effects (`aumf`):** Use `PULP_AU_MIDI_PLUGIN` and package the
+component as `aumf`. Host MIDI and SysEx arrive via `HandleMIDIEvent()` /
+`HandleSysEx()`, are queued on bounded lock-free queues, and are drained into
+`midi_in` at the start of each `ProcessBufferLists()` call. Sample offsets from
+`inStartFrame` are preserved for short MIDI messages.
+
+**Instruments (`aumu`):** MIDI notes arrive via `HandleNoteOn()` and
+`HandleNoteOff()` callbacks. These are buffered in `pending_midi_` (protected by
+a mutex) and drained into `midi_in` at the start of each `Render()` call. The
+sample offset (`inStartFrame`) is preserved.
 
 ### State Save/Load
 
@@ -345,6 +380,7 @@ The type codes (`aufx`, `aumu`) and four-character codes are set in your AU's `I
 ### Known Limitations
 
 - Effects do not emit parameter output changes back to the host.
+- AU v2 effects can receive MIDI as `aumf`, but outgoing MIDI from `midi_out` is not emitted back to the host yet.
 - AU v2 effects use `ProcessBufferLists` which receives interleaved audio. The adapter de-interleaves per buffer.
 - Instruments use a `std::mutex` to buffer MIDI between the host's note callbacks and the render call. This is safe because Apple guarantees these calls occur on the same thread or with proper synchronization, but it adds a small overhead.
 
@@ -389,6 +425,17 @@ each event into the realtime `ParameterEventQueue` and also updates
 `StateStore` with the latest value. The queue is fixed-capacity; events beyond
 capacity are dropped from the sparse queue and counted as overflow, while the
 latest value still reaches `StateStore` for block-rate reads.
+
+### Multi-Bus / Sidechain
+
+AU v3 exposes descriptor input bus 0 as the main input and descriptor input bus
+1 as an optional sidechain `AUAudioUnitBus` when it has a positive channel
+count. The render block pulls input bus 1 separately, publishes it through
+`Processor::set_sidechain()`, and includes it as the sidechain bus in
+`ProcessBuffers`.
+
+Additional input buses and secondary output buses are not exposed through the
+AUv3 adapter surface yet; the adapter creates one main output bus.
 
 ---
 
@@ -572,7 +619,7 @@ For setup, download, and rules, see [AAX Setup](aax.md).
 
 ## Standalone Host
 
-**Header:** `core/format/src/standalone.hpp`
+**Header:** `<pulp/format/standalone.hpp>`
 
 `StandaloneApp` runs a Processor as a native desktop application with real audio I/O:
 
@@ -722,19 +769,19 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 
 ## Comparison Table
 
-| Feature | CLAP | VST3 | AU v2 |
-|---|---|---|---|
-| Entry macro | `PULP_CLAP_PLUGIN` | `PULP_VST3_PLUGIN` | `PULP_AU_PLUGIN` / `PULP_AU_INSTRUMENT` |
-| Param values | Raw float | Normalized 0-1 | Raw float |
-| Param modulation | Yes (`PARAM_MOD` events) | No | No |
-| Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) |
-| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: no, Instruments: yes |
-| State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` |
-| Multi-bus declared | Yes | Yes | No |
-| Plugin-side param output | Yes | Yes | Not yet |
-| Latency reporting | Yes | Yes | Yes (seconds) |
-| Tail reporting | Yes | Yes | Yes (seconds) |
-| Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist |
+| Feature | CLAP | VST3 | AU v2 | AU v3 |
+|---|---|---|---|---|
+| Entry macro | `PULP_CLAP_PLUGIN` | `PULP_VST3_PLUGIN` | `PULP_AU_PLUGIN` / `PULP_AU_INSTRUMENT` | `pulp_add_plugin(... FORMATS AUv3 ...)` |
+| Param values | Raw float | Normalized 0-1 | Raw float | Raw float |
+| Param modulation | Yes (`PARAM_MOD` events) | No | No | No |
+| Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
+| MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
+| State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
+| Multi-bus declared | Yes | Yes | No | Main input + sidechain input |
+| Plugin-side param output | Yes | Yes | Not yet | Yes |
+| Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
+| Tail reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
+| Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist | Bundle identifier |
 
 Optional AAX uses its own runtime and follows the constraints listed
 in the AAX section above.

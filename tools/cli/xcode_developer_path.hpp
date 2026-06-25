@@ -10,8 +10,7 @@
 // We must NOT hard-match the literal substring `Xcode.app` because
 // beta-channel users run `Xcode-beta.app`, `Xcode_15.app`, custom-named
 // app bundles, etc. The previous hard match blocked all of them and
-// blocked `pulp ship auv3-xcodeproj` for beta users entirely. See
-// #2969 / Codex comment 3305628892.
+// blocked `pulp ship auv3-xcodeproj` for beta users entirely.
 
 #include <string>
 

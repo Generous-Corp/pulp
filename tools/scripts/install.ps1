@@ -124,7 +124,7 @@ if ($env:PATH -notlike "*$InstallDir*") {
 # ── Done ────────────────────────────────────────────────────────────────────
 
 Write-Host ""
-Write-Host "  Done! Run ``pulp new my-plugin`` to create your first plugin."
+Write-Host "  Done! Run ``pulp create my-plugin`` to create your first plugin."
 Write-Host ""
 Write-Host "  If 'pulp' is not found, restart your terminal."
 Write-Host ""

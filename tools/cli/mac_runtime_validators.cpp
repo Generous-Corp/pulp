@@ -163,7 +163,7 @@ ValidatorResult run_standalone_validator(const fs::path& bundle,
         // Distinguish "this isn't a .app at all" (legitimately skip) from
         // "this IS a .app bundle but the runnable binary inside is
         // missing/broken" (fail). The latter is a packaging regression
-        // that MUST surface as a non-zero exit (Codex PR #3005 P2).
+        // that MUST surface as a non-zero exit.
         const bool looks_like_app_bundle = bundle.extension() == ".app";
         if (looks_like_app_bundle) {
             return make_result("standalone", "exec", bundle, "fail", -1,
@@ -176,7 +176,7 @@ ValidatorResult run_standalone_validator(const fs::path& bundle,
     // Execute the binary directly so we get the real exit code (open
     // --wait-apps would route through LaunchServices and lose detail).
     //
-    // Env recipe (regression: Codex PR #3005 review):
+    // Env recipe:
     //   PULP_HEADLESS=1  → run_with_editor() takes the headless path
     //                      and returns false IF no screenshot target is
     //                      provided. We MUST give a screenshot path so
@@ -373,7 +373,8 @@ std::string extract_min_macos_version(const std::string& otool_output) {
     //   minos 13.0
     // We pull the FIRST occurrence — multi-arch slices share the same
     // floor in Pulp's build, so this is enough for the AudioWorkgroup
-    // floor check. The actual lipo-slice-walk lives in Phase 6.
+    // floor check. Full per-architecture lipo walking is a separate
+    // validator concern.
     auto find_keyword = [&](const std::string& keyword) -> std::string {
         auto pos = otool_output.find(keyword);
         if (pos == std::string::npos) return {};

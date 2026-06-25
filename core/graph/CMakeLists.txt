@@ -9,6 +9,7 @@ target_include_directories(pulp-graph
 
 target_sources(pulp-graph PRIVATE
     src/graph_runtime_plan.cpp
+    src/graph_runtime_buffer_assignment.cpp
 )
 
 target_link_libraries(pulp-graph

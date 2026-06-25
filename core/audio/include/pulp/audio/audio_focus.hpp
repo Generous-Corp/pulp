@@ -1,6 +1,6 @@
 #pragma once
 
-// Cross-platform audio-focus registry (#334).
+// Cross-platform audio-focus registry.
 //
 // Android's AudioManager.OnAudioFocusChangeListener fires lost / duck /
 // gained / lost-transient events when another app grabs the speaker
@@ -16,8 +16,8 @@
 // but neither is ever called from the audio thread.
 //
 // Shape mirrors pulp::platform::Environment so clients see a consistent
-// observer pattern across system-signal surfaces. iOS support goes
-// through AVAudioSession interruption notifications in a future slice;
+// observer pattern across system-signal surfaces. iOS support uses
+// AVAudioSession interruption notifications when that backend is present;
 // on platforms without an OS-level audio-focus concept (desktop
 // macOS/Linux/Windows) the registry stays idle and reports `gained`.
 

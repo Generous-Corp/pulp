@@ -188,7 +188,8 @@ fi
 # Hotspot size guard. Freezes known refactor hotspot LOC baselines and warns
 # on newly added large core/tools files before another monolith forms.
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
-    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report
+    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
+        --require-ceiling-reduction
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -222,6 +223,26 @@ DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 if [ -f "$DEPS_AUDIT" ]; then
     if ! "$PYTHON" "$DEPS_AUDIT" --strict >/dev/null; then
         echo "[pre-push] deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict\` for details." >&2
+        fail=1
+    fi
+fi
+
+# Codecov config drift — codecov.yml's flags + components must mirror the live
+# core/* tree (no missing subsystem, no platform double-count) and its `ignore:`
+# list must mirror coverage_config.json's diff_cover_excludes. A new
+# core/<sub>/ subsystem landing without a codecov.yml edit silently drops its
+# coverage from the dashboard (graph/scene drifted this way) — so this runs
+# unconditionally, not diff-scoped. Sub-second; needs PyYAML — skip cleanly if
+# the local interpreter lacks it, since CI's codecov-config-validation job is
+# the authoritative gate.
+CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
+CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
+if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
+    if ! "$PYTHON" -c "import yaml" >/dev/null 2>&1; then
+        : # PyYAML missing locally — CI enforces this gate.
+    elif ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
+            || ! "$PYTHON" "$CODECOV_COMP_TEST" >/dev/null 2>&1; then
+        echo "[pre-push] codecov-config: drift detected — codecov.yml is stale. Run \`python3 tools/scripts/test_codecov_config.py\` and \`python3 tools/scripts/test_codecov_components.py\` for details." >&2
         fail=1
     fi
 fi

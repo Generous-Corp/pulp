@@ -6,9 +6,8 @@
 // non-Apple platforms (Windows, Linux, Android) the open/save/folder
 // dialog methods route through
 // the registered backend; without one every call returns an explicit
-// "no selection" (#301 P1 — replaces the old silent-nullopt stubs
-// so the JS bridge can distinguish "user cancelled" from "platform
-// unsupported").
+// "no selection" so the JS bridge can distinguish "user cancelled" from
+// "platform unsupported".
 
 #include <pulp/platform/file_dialog.hpp>
 
@@ -27,7 +26,7 @@
 
 // TargetConditionals provides TARGET_OS_OSX / TARGET_OS_IOS macros
 // so has_backend() can narrow its unconditional-true to macOS only
-// (Apple has no built-in file_dialog impl on iOS yet — #316 P2).
+// (Apple has no built-in file_dialog impl on iOS yet).
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -106,13 +105,11 @@ bool file_dialog_open_file_via_backend(const std::string& title,
 }  // namespace detail
 
 bool FileDialog::has_backend() {
-    // #312 + #316 Codex P2s: report "true" only on platforms where a
-    // real native dialog impl is compiled in. macOS ships
-    // file_dialog_mac.mm; iOS does NOT have a built-in file_dialog
-    // impl yet (UIDocumentPicker wiring is a follow-up). Narrow the
-    // unconditional-true to macOS only; iOS and everyone else
-    // reflect the host-registered state so callers get honest
-    // "unsupported" signaling until the iOS impl lands.
+    // Report "true" only on platforms where a real native dialog impl is
+    // compiled in. macOS ships file_dialog_mac.mm; iOS does not have a
+    // built-in file_dialog impl yet. Narrow the unconditional-true to macOS
+    // only; iOS and everyone else reflect the host-registered state so callers
+    // get honest "unsupported" signaling until a backend is installed.
 #if defined(__APPLE__) && TARGET_OS_OSX
     return true;
 #else
@@ -121,13 +118,12 @@ bool FileDialog::has_backend() {
 #endif
 }
 
-// iOS has no built-in file_dialog backend (no `file_dialog_ios.mm` yet —
-// #316 P2). Without these definitions the link step for any iOS bundle
-// that pulls pulp-view-core fails on Undefined symbols for
-// FileDialog::{open_file, save_file, choose_folder}. Provide the same
-// backend-routed fallback that the non-Apple stub uses so the symbols
-// exist; until a real UIDocumentPicker impl lands callers get an honest
-// "no backend installed" nullopt instead of a link error.
+// iOS has no built-in file_dialog backend (no `file_dialog_ios.mm` yet).
+// Without these definitions the link step for any iOS bundle that pulls
+// pulp-view-core fails on undefined symbols for FileDialog::{open_file,
+// save_file, choose_folder}. Provide the same backend-routed fallback that the
+// non-Apple stub uses so the symbols exist; until a backend is installed
+// callers get an honest "no backend installed" nullopt instead of a link error.
 #if !defined(__APPLE__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
 
 std::optional<std::string> FileDialog::open_file(

@@ -1,6 +1,6 @@
 // audio_doctor_artifacts.cpp — JSON curve artifacts for the Audio Doctor
-// (harness Phase 7, slice 1). See audio_doctor_artifacts.hpp for the schema
-// contract; mirrors the audio_artifacts.cpp CHOC-first style.
+// See audio_doctor_artifacts.hpp for the schema contract; mirrors the
+// audio_artifacts.cpp CHOC-first style.
 
 #include <pulp/audio/analysis/audio_doctor_artifacts.hpp>
 

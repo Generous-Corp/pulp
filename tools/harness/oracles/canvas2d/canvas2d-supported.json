@@ -1,7 +1,7 @@
 {
   "version": "html5-canvas-living-standard",
-  "source": "https://html.spec.whatwg.org/multipage/canvas.html#2dcontext + core/view/js/web-compat-canvas.js + core/view/src/widget_bridge.cpp register_function('canvas...') + .agents/skills/import-design/SKILL.md gotchas #1-#8",
-  "_note": "Static reference table for canvas2d week-1 harness. 'Bridge' here refers to the C++-side widget_bridge.cpp register_function('canvas...') surface. Entries claim what the bridge SHOULD route to. Gotchas section documents known production-hardened deviations from spec; harness flags DIVERGE when a catalog entry is marked 'supported' but the gotcha says it can't be fully implemented.",
+  "source": "https://html.spec.whatwg.org/multipage/canvas.html#2dcontext + core/view/js/web-compat-canvas.js + core/view/src/widget_bridge/canvas2d_api.cpp + core/view/src/widget_bridge_api_manifest.tsv + .agents/skills/import-design/SKILL.md gotchas #1-#8",
+  "_note": "Static reference table for the canvas2d harness. 'Bridge' here refers to the C++-side Canvas2D bridge registrations indexed by widget_bridge_api_manifest.tsv. Entries claim what the bridge SHOULD route to. Gotchas section documents known production-hardened deviations from spec; harness flags DIVERGE when a catalog entry is marked 'supported' but the gotcha says it can't be fully implemented.",
   "entries": {
     "fillRect": {
       "kind": "method",

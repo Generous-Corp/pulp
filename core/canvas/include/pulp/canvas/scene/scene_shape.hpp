@@ -1,7 +1,5 @@
 // SceneShape — retained primitive-shape node (rect, rounded-rect,
 // circle, ellipse, line). Anything more complex composes into ScenePath.
-//
-// Item 6.1 / Pulp-native names.
 #pragma once
 
 #include <pulp/canvas/scene/scene_node.hpp>

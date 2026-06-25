@@ -6,7 +6,7 @@
 
 ## Summary
 
-A simple 8-voice polyphonic oscillator synth with MIDI input. Validates the instrument plugin path including audio output without audio input, MIDI note handling, and the parameter system across all four plugin formats.
+A simple 8-voice polyphonic oscillator synth with MIDI input. Validates the instrument plugin path including audio output without audio input, MIDI note handling, and the parameter system across VST3, AU v2, CLAP, and Standalone targets.
 
 ## What It Demonstrates
 
@@ -16,7 +16,7 @@ A simple 8-voice polyphonic oscillator synth with MIDI input. Validates the inst
 - Sine, saw, and square waveform generation
 - Simple attack/release envelope per voice
 - Infinite tail length declaration for synth plugins (`tail_samples = -1`)
-- Building instrument targets for VST3 (`aumu`), AU, CLAP, and Standalone
+- Building instrument targets for VST3, AU v2 (`aumu`), CLAP, and Standalone
 
 ## Supported Formats
 
@@ -32,8 +32,8 @@ A simple 8-voice polyphonic oscillator synth with MIDI input. Validates the inst
 | Platform | Supported |
 |----------|-----------|
 | macOS | Yes |
-| Windows | Build stubs present, not yet validated |
-| Linux | Build stubs present, not yet validated |
+| Windows | Build targets present; validation pending |
+| Linux | Build targets present; validation pending |
 
 ## Key Files
 

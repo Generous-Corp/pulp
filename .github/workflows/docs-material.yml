@@ -7,8 +7,7 @@
 #
 # PR 2 additions:
 #   - Install Doxygen and build the API reference so the homepage's
-#     `api/index.html` link resolves in the preview artifact (Codex P2 on
-#     #582).
+#     `api/index.html` link resolves in the preview artifact (#582).
 #   - Trigger on header changes under `core/**/include/**` so API-reference
 #     drift is caught in the parallel lane.
 name: Docs (Material preview)
@@ -24,7 +23,7 @@ on:
       - 'tools/build-api-docs.sh'
       - 'core/**/include/**'
       # `build-api-docs.sh` reads the version from CMakeLists.txt
-      # (#591 Codex P2 / wave-4 sweep) — keep the preview lane in sync
+      # (#591 / wave-4 sweep) — keep the preview lane in sync
       # with docs-deploy.yml.
       - 'CMakeLists.txt'
       - '.github/workflows/docs-material.yml'

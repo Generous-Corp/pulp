@@ -92,10 +92,8 @@ TEST_CASE("svg-1926: <svg><rect>...</rect></svg> creates an SvgRectWidget",
 
 TEST_CASE("svg-followup: <rect> live setAttribute after mount updates the widget",
           "[svg][import][issue-3656]") {
-    // Parity with <path>: pre-fix, only PATH was wired in the live
-    // Element.prototype.setAttribute path, so post-mount mutations of a
-    // <rect>'s geometry / paint were silently dropped. This drives the
-    // RECT live-update branch.
+    // Parity with <path>: live Element.prototype.setAttribute mutations of
+    // a <rect>'s geometry / paint must drive the RECT live-update branch.
     TestEnvironment env(400, 200);
     env.eval(R"JS(
         var __svg = document.createElement('svg');

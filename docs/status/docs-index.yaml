@@ -197,12 +197,12 @@ docs:
   - slug: examples
     path: guides/examples.md
     kind: guide
-    summary: Walkthroughs of all example plugins
+    summary: Curated walkthroughs of core example plugins, standalone demos, and source-only DSP lanes
 
   - slug: examples-index
     path: examples/index.md
     kind: guide
-    summary: Gallery index of all example projects by category
+    summary: Curated gallery index of documented example pages by category
 
   - slug: example-pulp-gain
     path: examples/pulp-gain.md
@@ -272,7 +272,7 @@ docs:
   - slug: design-tokens
     path: guides/design-tokens.md
     kind: guide
-    summary: Theme system — token categories, inheritance, JSON creation, CSS/WGSL/Figma export
+    summary: Theme system — token categories, inheritance, JSON creation, CSS/WGSL export, and W3C token handoff
 
   - slug: custom-rendering
     path: guides/custom-rendering.md
@@ -286,8 +286,12 @@ docs:
 
   - slug: example-pulp-sampler
     path: examples/pulp-sampler.md
+    kind: guide
+    summary: PulpSampler - audio file sampler with MIDI, ADSR, and pitch control
   - slug: example-pulp-pluck
     path: examples/pulp-pluck.md
+    kind: guide
+    summary: PulpPluck - Karplus-Strong plucked string synth
   - slug: example-showcase
     path: examples/showcase.md
     kind: example
@@ -378,6 +382,11 @@ docs:
     path: reference/native-components.md
     kind: reference
     summary: Opt-in native-language (Rust-first) audio components behind a language-neutral C ABI, with iOS static-only limits
+
+  - slug: processing-models
+    path: reference/processing-models.md
+    kind: reference
+    summary: When to author a Processor vs. compose with SignalGraph, plus reserved terminology
 
   # Policies
   - slug: code-style

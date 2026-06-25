@@ -74,6 +74,12 @@ bool write_midi_file(const std::string& path, const MidiFileData& data) {
         if (!file.is_open()) return false;
         file.write(reinterpret_cast<const char*>(output.data()),
                    static_cast<std::streamsize>(output.size()));
+        // Flush/close BEFORE reporting success: ofstream is buffered, so a
+        // small payload sits in the buffer and file.good() would report the
+        // healthy buffered state while a deferred flush failure (e.g. ENOSPC)
+        // only surfaces at close. close() sets failbit on a flush error and
+        // preserves any failbit already set by a synchronous write failure.
+        file.close();
         return file.good();
     } catch (...) {
         return false;

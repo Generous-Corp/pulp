@@ -98,10 +98,10 @@ TEST_CASE("Result operator-> reaches T members", "[runtime][result]") {
     REQUIRE(r->front() == 'h');
 }
 
-// Regression for the Codex P2 review comment "Preserve Result object
-// when assignment construction throws" — earlier implementation
-// destroyed the current member before constructing the new one, so a
-// throwing copy ctor left the union in an indeterminate state.
+// Regression for the strong-exception guarantee during Result assignment:
+// earlier implementation destroyed the current member before constructing
+// the new one, so a throwing copy ctor left the union in an indeterminate
+// state.
 namespace {
 
 struct Throwing {

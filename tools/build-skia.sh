@@ -45,7 +45,7 @@ fi
 # (e.g. an older checkout from olilarkin/skia-builder + a newer SKIA_BUILDER_URL
 # override). Without this, subsequent `git fetch origin <ref>` calls would
 # silently pull from the stale remote and either fail to resolve the requested
-# branch or build from the wrong fork. Codex review on #2785 caught this.
+# branch or build from the wrong fork.
 current_origin=$(git -C "$SKIA_BUILDER_DIR" remote get-url origin 2>/dev/null || echo "")
 if [ "$current_origin" != "$SKIA_BUILDER_URL" ]; then
     echo "Updating origin: $current_origin → $SKIA_BUILDER_URL"

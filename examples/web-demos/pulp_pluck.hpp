@@ -10,6 +10,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <cmath>
 #include <array>
+#include <cstdlib>
 #include <vector>
 
 namespace pulp::examples {
@@ -32,9 +33,12 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({kPluckDecay, "Decay", "s", {0.1f, 5.0f, 1.0f, 0.01f}});
-        store.add_parameter({kPluckBright, "Brightness", "%", {0.0f, 100.0f, 70.0f, 1.0f}});
-        store.add_parameter({kPluckVolume, "Volume", "dB", {-60.0f, 6.0f, -6.0f, 0.1f}});
+        store.add_parameter({.id = kPluckDecay, .name = "Decay",
+                             .unit = "s", .range = {0.1f, 5.0f, 1.0f, 0.01f}});
+        store.add_parameter({.id = kPluckBright, .name = "Brightness",
+                             .unit = "%", .range = {0.0f, 100.0f, 70.0f, 1.0f}});
+        store.add_parameter({.id = kPluckVolume, .name = "Volume",
+                             .unit = "dB", .range = {-60.0f, 6.0f, -6.0f, 0.1f}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -126,7 +130,8 @@ private:
         voice->delay_line.resize(delay_len, 0.0f);
         for (int i = 0; i < delay_len; ++i) {
             // Simple pseudo-random noise
-            float noise = (static_cast<float>(rand()) / RAND_MAX) * 2.0f - 1.0f;
+            float noise = (static_cast<float>(std::rand()) /
+                           static_cast<float>(RAND_MAX)) * 2.0f - 1.0f;
             voice->delay_line[i] = noise * velocity;
         }
     }

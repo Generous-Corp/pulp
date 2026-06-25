@@ -1,11 +1,10 @@
 """Provenance helpers for local CI job records.
 
-Extracted from local_ci.py as part of the R2-1 phased split. Provenance
-tracks who/what dispatched a CI run — direct vs hosted, which control
-plane, which runner provider/selector, and the run id/URL. Both job
-records and result records carry a `provenance` dict normalised through
-these helpers so downstream consumers (status display, evidence) can
-read a stable shape regardless of how the job was submitted.
+Provenance tracks who/what dispatched a CI run — direct vs hosted, which control
+plane, which runner provider/selector, and the run id/URL. Both job records and
+result records carry a `provenance` dict normalised through these helpers so
+downstream consumers (status display, evidence) can read a stable shape
+regardless of how the job was submitted.
 
 All three functions are pure: no I/O, no globals, no exceptions on
 malformed input — missing fields default to empty strings.

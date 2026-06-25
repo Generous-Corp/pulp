@@ -1,4 +1,4 @@
-// Release-discovery Slice 2 (#547) — unit tests for the update-check core.
+// Unit tests for the update-check core.
 //
 // Covers:
 //   - Cache JSON round-trip

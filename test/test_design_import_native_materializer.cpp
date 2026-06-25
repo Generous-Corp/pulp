@@ -686,6 +686,59 @@ TEST_CASE("baked native materializer renders a faithful_svg node as a DesignFram
                                       "native-materialize-faithful-svg-unresolved"));
 }
 
+TEST_CASE("render-patch golden: a knob's needle visibly rotates with value (P3)",
+          "[view][import][native-materializer][faithful-svg][p3][render]") {
+    // P3 render-patch golden-gate: the faithful-vector lane rotates ONLY the
+    // knob's needle path (svg_patch_d) around (cx,cy) by value and re-renders the
+    // SVG — the chrome stays pixel-exact. Render the SAME frame at value 0.05 vs
+    // 0.95 and prove the raster differs (the needle moved) — the render-patch is
+    // live, not a static repaint. Mirrors the tab-group live-pill golden.
+    const std::string svg =
+        R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="80" height="80" rx="4" fill="#cccccc"/>)"
+        R"(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)"
+        R"(<path d="M50 38L50 30" stroke="white" stroke-width="3"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 50; knob.cy = 50; knob.hit_radius = 22;
+    knob.svg_patch_d = "M50 38L50 30";   // the needle the patch rotates
+    knob.default_value = 0.5f;
+    ir.root.interactive_elements.push_back(knob);
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    frame->set_bounds({0, 0, frame->panel_width(), frame->panel_height()});
+    frame->layout_children();
+
+    auto render_at = [&](float v) {
+        frame->set_element_value(0, v);
+        return render_to_png(*frame, static_cast<int>(frame->panel_width()),
+                             static_cast<int>(frame->panel_height()), 2.0f,
+                             ScreenshotBackend::skia);
+    };
+    const auto lo = render_at(0.05f);
+    if (lo.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto hi = render_at(0.95f);
+    REQUIRE_FALSE(hi.empty());
+    const auto cmp = compare_screenshots(lo, hi);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f) SKIP("native raster unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the needle visibly rotated between the two values
+}
+
 TEST_CASE("baked native materializer resolves a faithful_svg base64 data asset",
           "[view][import][native-materializer][faithful-svg]") {
     // The same path, but the SVG arrives base64-encoded (the form the REST/SVG
@@ -862,6 +915,235 @@ TEST_CASE("faithful_svg flows producer envelope -> parse -> materialize -> Desig
     CHECK(frame->element_value(0) == 0.5f);
     REQUIRE_FALSE(diagnostics_contain(diagnostics,
                                       "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("materializer maps every interactive kind to its DesignFrameElement::Kind",
+          "[view][import][native-materializer][faithful-svg][p1a]") {
+    // P1a acceptance: fader + toggle + the already-emitted overlays each
+    // materialize (JSON -> IR -> to_frame_elements -> DesignFrameView) to the
+    // matching runtime Kind — no silent collapse to knob. The SVG underneath
+    // always renders; this asserts the INTERACTION wired on top is correct.
+    const std::string svg =
+        R"(<svg width="240" height="200" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="220" height="180" fill="#1c1d1d"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    auto add = [&](InteractiveElementKind k, float x, float y, float value) {
+        IRInteractiveElement el;
+        el.kind = k;
+        el.x = x; el.y = y; el.w = 40; el.h = 20;
+        el.cx = x + 6; el.cy = y + 6; el.hit_radius = 10;
+        el.svg_patch_d = "M0 0L0 1";
+        el.default_value = value;
+        if (k == InteractiveElementKind::dropdown ||
+            k == InteractiveElementKind::tab_group ||
+            k == InteractiveElementKind::stepper) {
+            el.options = {"A", "B"};
+        }
+        if (k == InteractiveElementKind::text_field) el.placeholder = "Search";
+        if (k == InteractiveElementKind::toggle) el.flash = true;
+        ir.root.interactive_elements.push_back(el);
+    };
+    using K = InteractiveElementKind;
+    // Distinct (non-default) values so a dropped field-copy in to_frame_elements
+    // would FAIL the value assertions below — not just the Kind mapping.
+    add(K::knob, 20, 20, 0.1f);
+    add(K::fader, 20, 50, 0.2f);
+    add(K::toggle, 20, 80, 0.3f);
+    add(K::dropdown, 20, 110, 0.4f);
+    add(K::text_field, 90, 20, 0.6f);
+    add(K::tab_group, 90, 50, 0.7f);
+    add(K::stepper, 90, 80, 0.8f);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 7);
+    using FK = DesignFrameElement::Kind;
+    CHECK(frame->element_kind(0) == FK::knob);
+    CHECK(frame->element_kind(1) == FK::fader);
+    CHECK(frame->element_kind(2) == FK::toggle);
+    CHECK(frame->element_kind(3) == FK::dropdown);
+    CHECK(frame->element_kind(4) == FK::text_field);
+    CHECK(frame->element_kind(5) == FK::tab_group);
+    CHECK(frame->element_kind(6) == FK::stepper);
+    // Carried render fields survive the IR -> DesignFrameElement copy (so the
+    // overlay actually renders, not just types correctly). A regression that
+    // dropped `el.value = e.default_value` would redden these.
+    CHECK(frame->element_value(0) == Catch::Approx(0.1f));  // knob
+    CHECK(frame->element_value(1) == Catch::Approx(0.2f));  // fader thumb position
+    CHECK(frame->element_value(2) == Catch::Approx(0.3f));  // toggle on/off state
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("materializer maps swap / action / xy_pad / value_label with their fields",
+          "[view][import][native-materializer][faithful-svg][p1b]") {
+    // P1b acceptance: each of the four new kinds materializes (JSON -> IR ->
+    // to_frame_elements -> DesignFrameView) to the matching runtime Kind AND
+    // carries its typed data (target_frame / action / value_y / text).
+    const std::string svg =
+        R"(<svg width="240" height="240" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="220" height="220" fill="#1c1d1d"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement swap;
+    swap.kind = InteractiveElementKind::swap;
+    swap.x = 20; swap.y = 20; swap.w = 60; swap.h = 24; swap.target_frame = 2;
+    ir.root.interactive_elements.push_back(swap);
+
+    IRInteractiveElement act;
+    act.kind = InteractiveElementKind::action;
+    act.x = 20; act.y = 60; act.w = 30; act.h = 24; act.action = "octave_up";
+    ir.root.interactive_elements.push_back(act);
+
+    IRInteractiveElement pad;
+    pad.kind = InteractiveElementKind::xy_pad;
+    pad.x = 20; pad.y = 100; pad.w = 100; pad.h = 100;
+    pad.default_value = 0.3f; pad.default_value_y = 0.7f;
+    ir.root.interactive_elements.push_back(pad);
+
+    IRInteractiveElement lbl;
+    lbl.kind = InteractiveElementKind::value_label;
+    lbl.x = 20; lbl.y = 210; lbl.w = 80; lbl.h = 16; lbl.text = "-6.0 dB";
+    lbl.value_left_align = true;
+    ir.root.interactive_elements.push_back(lbl);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 4);
+    using FK = DesignFrameElement::Kind;
+    CHECK(frame->element_kind(0) == FK::swap);
+    CHECK(frame->element_kind(1) == FK::action);
+    CHECK(frame->element_kind(2) == FK::xy_pad);
+    CHECK(frame->element_kind(3) == FK::value_label);
+    // Every typed payload survives the IR -> DesignFrameElement copy — not just
+    // the Kind. A dropped field-copy in to_frame_elements would redden these.
+    CHECK(frame->element_target_frame(0) == 2);             // swap link target
+    CHECK(frame->element_action(1) == "octave_up");         // action command id
+    CHECK(frame->element_value(2) == Catch::Approx(0.3f));  // xy_pad X axis
+    CHECK(frame->element_value_y(2) == Catch::Approx(0.7f));// xy_pad Y axis
+    CHECK(frame->element_text(3) == "-6.0 dB");             // value_label readout
+    CHECK(frame->element_left_align(3) == true);            // value_label alignment
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
+namespace {
+// A trivial custom control used to prove the Tier-3 factory dispatch.
+struct TestCustomControl : pulp::view::View {};
+}  // namespace
+
+TEST_CASE("materializer builds a custom control via its registered factory (P7 Tier-3)",
+          "[view][import][native-materializer][faithful-svg][p7]") {
+    clear_design_control_factories();
+    bool called = false;
+    DesignControlContext seen;
+    register_design_control_factory("my.control", [&](const DesignControlContext& ctx) {
+        called = true; seen = ctx;
+        return std::make_unique<TestCustomControl>();
+    });
+
+    const std::string svg =
+        R"(<svg width="120" height="80" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="100" height="60" fill="#1c1d1d"/></svg>)";
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 20; c.y = 20; c.w = 40; c.h = 20;
+    c.factory_id = "my.control";
+    c.custom_props = "{\"gain\":0.7}";
+    c.default_value = 0.3f;
+    c.source_node_id = "9:1";
+    ir.root.interactive_elements.push_back(c);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    CHECK(frame->element_kind(0) == DesignFrameElement::Kind::custom);
+    CHECK(called);
+    CHECK(seen.factory_id == "my.control");
+    CHECK(seen.props == "{\"gain\":0.7}");
+    CHECK(seen.source_node_id == "9:1");
+    CHECK(seen.default_value == Catch::Approx(0.3f));
+    // The factory's View is the live overlay.
+    CHECK(dynamic_cast<TestCustomControl*>(frame->overlay_widget(0)) != nullptr);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-custom-factory-unregistered"));
+    clear_design_control_factories();
+}
+
+TEST_CASE("an unregistered custom factory renders inert + diagnoses (P7 Tier-3)",
+          "[view][import][native-materializer][faithful-svg][p7]") {
+    clear_design_control_factories();  // ensure "missing" is not registered
+    const std::string svg =
+        R"(<svg width="120" height="80" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="100" height="60" fill="#1c1d1d"/></svg>)";
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 20; c.y = 20; c.w = 40; c.h = 20;
+    c.factory_id = "missing";
+    ir.root.interactive_elements.push_back(c);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);          // the element still exists (SVG renders)
+    CHECK(frame->element_kind(0) == DesignFrameElement::Kind::custom);
+    CHECK(frame->overlay_widget(0) == nullptr);     // inert — no overlay widget
+    CHECK(diagnostics_contain(diagnostics,
+                              "native-materialize-custom-factory-unregistered"));
 }
 
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",

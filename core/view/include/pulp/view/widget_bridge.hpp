@@ -63,7 +63,6 @@ public:
     // the format adapter opens ViewBridge / ScriptedUiSession first, then
     // builds the PluginViewHost — only THEN is `host->gpu_surface()` non-null).
     //
-    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
     // Without this attach call, the JS-side navigator.gpu / canvas.getContext
     // ('webgpu') bridge falls through to mocks and Three.js renders black.
     //
@@ -72,13 +71,12 @@ public:
     // same surface twice is a no-op.
     void attach_gpu_surface(render::GpuSurface* gpu_surface);
 
-    // Read-back accessor for diagnostics + tests. Slice 1 test asserts this
-    // returns non-null after attach.
+    // Read-back accessor for diagnostics + tests.
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
 
-    // Introspection for Slice 1 tests: true iff a GpuSurface is attached AND
-    // its adapter reports `native_bridge=true` (i.e. JS navigator.gpu /
-    // canvas.getContext('webgpu') will route through Pulp's Dawn).
+    // True iff a GpuSurface is attached AND its adapter reports
+    // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
+    // will route through Pulp's Dawn).
     bool has_native_gpu_bridge() const noexcept;
 
     // Load and execute a UI script
@@ -100,13 +98,12 @@ public:
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
-    /// Phase 9: load_script overload that retains a script identifier.
-    /// `script_id` is recorded as `active_script_id_` and threaded into
-    /// every rAF callback registered while the script is active so
-    /// `motion.publishValue(...)` calls from inside an rAF body emit
-    /// events tagged with `source_kind="rAF"`,
-    /// `source_id="<script_id>:<callback_id>"`. The legacy overload
-    /// continues to work unchanged.
+    /// load_script overload that retains a script identifier. `script_id` is
+    /// recorded as `active_script_id_` and threaded into every rAF callback
+    /// registered while the script is active so `motion.publishValue(...)` calls
+    /// from inside an rAF body emit events tagged with `source_kind="rAF"`,
+    /// `source_id="<script_id>:<callback_id>"`. The legacy overload continues
+    /// to work unchanged.
     void load_script(const std::string& code, const std::string& script_id);
 
     /// Set the active script identifier without re-evaluating a script.
@@ -167,7 +164,7 @@ public:
     // the host frame loop.
     void service_frame_callbacks();
 
-    // ── Runtime design import (pulp #468 follow-up) ──────────────
+    // ── Runtime design import ─────────────────────────────────────
     //
     // Registers the `__pulpRuntimeImport__(html, source)` and
     // `__pulpRuntimeSettle__(rounds)` native functions on the bridge's
@@ -179,7 +176,6 @@ public:
     // Call ONCE after constructing the bridge, before consumer code
     // calls renderFromDesign(). Subsequent calls are no-ops.
     //
-    // See planning/pulp-runtime-import-FINAL-design.md.
     void install_runtime_import_handlers();
 
 private:
@@ -204,7 +200,7 @@ public:
     // (e.g. the standalone window's editor uses the WindowHost directly).
     //
     // Without a wired callback, JS `requestAnimationFrame` callbacks queue
-    // but never schedule a second paint — see pulp #899.
+    // but never schedule a second paint.
     void set_repaint_callback(std::function<void()> cb);
 
     // Override the AI CLI command used by the design tool chat.
@@ -222,7 +218,7 @@ public:
 #ifdef PULP_BENCHMARK
     // Install (or clear) the zero-copy benchmark perf-counter sink. The
     // counters are accumulated inline around WriteBuffer calls on the
-    // JS-driven GPU resource setup path (widget_bridge.cpp ~line 3984).
+    // JS-driven GPU resource setup path in widget_bridge/gpu_api.cpp.
     // Tooling-only; compiled out unless PULP_BENCHMARK is defined.
     void set_bench_counters(render::bench::PerfCounters* counters);
 #endif
@@ -246,8 +242,7 @@ private:
     // re-render of a React tree that re-runs the registration would
     // multiply the dispatch cost by the render count. These sets gate
     // the registrations so each (widget id, channel) wires the native
-    // hook exactly once. See pulp #1XXX (was the silent cause of
-    // Spectr's editor going sluggish over time as components remount).
+    // hook exactly once.
     std::unordered_set<std::string> pointer_registered_;
     std::unordered_set<std::string> wheel_registered_;
 
@@ -259,10 +254,10 @@ private:
     };
     std::vector<ShortcutBinding> shortcuts_;
 
-    /// pulp #1434 Phase A2-1 — application-wide @keyframes registry.
-    /// `defineKeyframes(name, stops)` populates this; `setAnimation`
-    /// looks up by name when resolving animation-name. Per-View
-    /// playback state lives on View::active_animations_.
+    /// Application-wide @keyframes registry. `defineKeyframes(name, stops)`
+    /// populates this; `setAnimation` looks up by name when resolving
+    /// animation-name. Per-View playback state lives on
+    /// View::active_animations_.
     CssKeyframesRegistry css_keyframes_registry_;
 public:
     CssKeyframesRegistry& css_keyframes_registry() { return css_keyframes_registry_; }
@@ -282,21 +277,21 @@ private:
         std::make_shared<std::vector<AsyncExecResult>>();
     std::vector<int> pending_frame_ids_;
     bool frame_preamble_loaded_ = false;
-    // Phase 9: identity of the most-recently loaded script (via
+    // Identity of the most-recently loaded script (via
     // `load_script(code, script_id)` or `set_active_script_id`). When
     // non-empty, rAF callbacks and `motion.publishValue` bindings use
     // it as the `source_id` prefix on emitted motion events.
     std::string active_script_id_;
-    // pulp #468 — install_runtime_import_handlers() is idempotent. Tracked
-    // per-bridge (not as a static thread_local on `this`, because heap reuse
-    // across tests gave duplicate addresses → spurious skip).
+    // install_runtime_import_handlers() is idempotent. Tracked per-bridge
+    // (not as a static thread_local on `this`, because heap reuse across tests
+    // gave duplicate addresses → spurious skip).
     bool runtime_import_installed_ = false;
 
-    // pulp #915 — native-side timer queue for setTimeout / setInterval.
-    // Callbacks themselves live in JS (`__timerCallbacks__`); native
-    // tracks (id, deadline, repeat, interval) so service_frame_callbacks()
-    // can fire expired timers regardless of which JS-side scheduler the
-    // consumer wants to feature-detect against.
+    // Native-side timer queue for setTimeout / setInterval. Callbacks
+    // themselves live in JS (`__timerCallbacks__`); native tracks (id,
+    // deadline, repeat, interval) so service_frame_callbacks() can fire expired
+    // timers regardless of which JS-side scheduler the consumer wants to
+    // feature-detect against.
     struct PendingTimer {
         int id;
         std::chrono::steady_clock::time_point deadline;
@@ -317,16 +312,15 @@ private:
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);
 
-    // pulp 2026-06-08 (routing-parity sweep) — the single source-of-truth
-    // table that maps a lowercase widget tag (`knob`/`fader`/`toggle`/`combo`/
-    // `checkbox`/`spectrum`/`waveform`/`meter`/`xypad`/`listbox`/`icon`, plus
-    // the `select`/`progress`/`img` HTML aliases) to a freshly constructed,
-    // id-set, callback-wired native widget. Returns nullptr for non-widget
-    // tags (so callers fall through to their container default). Used by the
-    // `__domAppend` React-commit fast path; mirrors the `createX` factory
-    // functions and the JS `_ensureNative` / `@pulp/react` host-config maps so
-    // the four widget-routing surfaces can't drift again (asserted by the
-    // routing-parity sweep test).
+    // Single source-of-truth table that maps a lowercase widget tag
+    // (`knob`/`fader`/`toggle`/`combo`/`checkbox`/`spectrum`/`waveform`/
+    // `meter`/`xypad`/`listbox`/`icon`, plus the `select`/`progress`/`img`
+    // HTML aliases) to a freshly constructed, id-set, callback-wired native
+    // widget. Returns nullptr for non-widget tags so callers fall through to
+    // their container default. Used by the `__domAppend` React-commit fast path;
+    // mirrors the `createX` factory functions and the JS `_ensureNative` /
+    // `@pulp/react` host-config maps so the four widget-routing surfaces can't
+    // drift again (asserted by the routing-parity test).
     std::unique_ptr<View> make_widget_for_tag(const std::string& tag,
                                               const std::string& id);
 

@@ -1,11 +1,9 @@
 """Target enable/parse/resolve helpers for local CI.
 
-Extracted from local_ci.py as part of the R2-1 phased split. These
-three pure functions own the `--targets` CLI argument plumbing and the
-config-driven default-target resolution. They do NOT know about
-target *type* (local/ssh/windows-session-agent) or remote bootstrap —
-those are downstream concerns owned by the orchestrator and the
-normalize-desktop helpers.
+These pure functions own the `--targets` CLI argument plumbing and the
+config-driven default-target resolution. They do NOT know about target *type*
+(local/ssh/windows-session-agent) or remote bootstrap — those are downstream
+concerns owned by the orchestrator and the normalize-desktop helpers.
 
 `resolve_targets` is the canonical entry point. Order of precedence:
 

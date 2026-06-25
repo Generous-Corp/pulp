@@ -232,9 +232,9 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(sorted(tar.getnames()), ["libwgpu_native.so", "pulp"])
 
     def test_main_packages_dual_binary_tarball_with_cpp_binary(self) -> None:
-        # Phase 8 contract: --cpp-binary bundles `pulp-cpp` alongside
-        # `pulp` so the Rust upgrade --install can land both binaries
-        # from a single archive. rpath rewrite runs on both.
+        # Dual-binary archives bundle `pulp-cpp` alongside `pulp` so
+        # upgrade --install can land both binaries from one archive.
+        # rpath rewrite runs on both.
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             pulp = root / "pulp-built"

@@ -199,7 +199,7 @@ jobs:
           # clean run. Capture the state alongside the number so the
           # zero-drift close-path can skip already-closed trackers
           # (avoids a fresh "closed" comment + re-close on every weekly
-          # run — Codex finding on #475).
+          # run — #475).
           existing_json=$(
               gh issue list \
                   --repo "$repo" \

@@ -1,7 +1,7 @@
 {
   "name": "@pulp/import-ir",
   "version": "0.0.1",
-  "description": "Pulp design-import IR — typed intermediate representation that survives reimport. Adapters lower source formats (Figma / Mitosis / HTML / etc.) into IRNode trees keyed by stable_anchor_id; tweaks layer survives source regeneration. Phase 1 spike — Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1).",
+  "description": "Pulp design-import IR — typed intermediate representation that survives reimport. Adapters lower source formats (Figma / Mitosis / HTML / etc.) into IRNode trees keyed by stable_anchor_id; tweaks layer survives source regeneration. Includes the Claude Design HTML adapter and scenario harness.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

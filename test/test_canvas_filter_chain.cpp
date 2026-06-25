@@ -1,8 +1,5 @@
-// test_canvas_filter_chain.cpp — extracted from test_canvas.cpp in the
-// 2026-05 Phase 5 (P5-2 follow-up) refactor.
-//
-// pulp #1434 Phase A2-4 — CSS filter chain coverage, two sub-clusters
-// shipped together since both pin the same backend contract:
+// CSS filter chain coverage has two sub-clusters that pin the same backend
+// contract:
 //
 //   1. Skia-only pixel readback. contrast(0) renders ~mid-gray;
 //      invert(1) maps black → white; opacity ordering with
@@ -40,15 +37,15 @@
 using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
-// ── pulp #1434 Phase A2-4 — CSS filter chain pixel readback ────────────
-// Codex P1 #3195880597: SkColorFilters::Matrix translation column is in
-// 0..255 space. `contrast(0)` must produce mid-gray (~128) and
-// `invert(1)` must map black to white pixel-for-pixel.
-// Codex P2 #3195880608: opacity() must remain in the composed chain at
-// its source-order position so subsequent filters (drop-shadow) see the
+// ── CSS filter chain pixel readback ────────────────────────────────────
+// Regression: SkColorFilters::Matrix translation column is in 0..255
+// space. `contrast(0)` must produce mid-gray (~128) and `invert(1)`
+// must map black to white pixel-for-pixel.
+// Regression: opacity() must remain in the composed chain at its
+// source-order position so subsequent filters (drop-shadow) see the
 // reduced alpha as their input.
 TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
-          "[canvas][skia][filter-chain][issue-1434][!mayfail]") {
+          "[canvas][skia][filter-chain][!mayfail]") {
     constexpr int kW = 16;
     constexpr int kH = 16;
     SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
@@ -75,9 +72,8 @@ TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
     REQUIRE(surface->peekPixels(&pm));
     SkColor c = pm.getColor(kW / 2, kH / 2);
     // contrast(0) collapses any input color to 0.5 * 255 = 128 on every
-    // RGB channel. Pre-fix the bias was normalized 0..1 so output landed
-    // at ~1/255 (effectively black). Allow a tolerance for premultiplied
-    // round-tripping.
+    // RGB channel. This pins the bias in 8-bit color space, with tolerance
+    // for premultiplied round-tripping.
     REQUIRE(SkColorGetR(c) >= 120);
     REQUIRE(SkColorGetR(c) <= 136);
     REQUIRE(SkColorGetG(c) >= 120);
@@ -87,7 +83,7 @@ TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
 }
 
 TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
-          "[canvas][skia][filter-chain][issue-1434]") {
+          "[canvas][skia][filter-chain]") {
     constexpr int kW = 16;
     constexpr int kH = 16;
     SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
@@ -113,8 +109,8 @@ TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
     SkPixmap pm;
     REQUIRE(surface->peekPixels(&pm));
     SkColor c = pm.getColor(kW / 2, kH / 2);
-    // invert(1) on black = white. Pre-fix the bias was 1.0 (normalized)
-    // instead of 255 so the output stayed near black (0..1).
+    // invert(1) on black = white. The bias must be 255, not normalized
+    // 0..1, or the output stays near black.
     REQUIRE(SkColorGetR(c) >= 250);
     REQUIRE(SkColorGetG(c) >= 250);
     REQUIRE(SkColorGetB(c) >= 250);
@@ -122,7 +118,7 @@ TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
 
 TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
           "with drop-shadow",
-          "[canvas][skia][filter-chain][issue-1434]") {
+          "[canvas][skia][filter-chain]") {
     // CSS spec: filters apply in source order. `opacity(0.5) drop-shadow(...)`
     // must reduce the source alpha BEFORE the shadow generates, while
     // `drop-shadow(...) opacity(0.5)` reduces the alpha of the already-
@@ -189,7 +185,7 @@ TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
 // must return non-null and the resulting SkImageFilter must produce a
 // visible offset shadow when rendered through SkiaCanvas::set_filter().
 TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
-          "[canvas][skia][filter-chain][drop-shadow][wave6-canvas2d][!mayfail]") {
+          "[canvas][skia][filter-chain][drop-shadow][!mayfail]") {
     constexpr int kW = 32;
     constexpr int kH = 32;
     SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
@@ -230,7 +226,7 @@ TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
 }
 
 TEST_CASE("SkiaCanvas set_filter parsers drop-shadow with hex color",
-          "[canvas][skia][filter-chain][drop-shadow][wave6-canvas2d]") {
+          "[canvas][skia][filter-chain][drop-shadow]") {
     constexpr int kW = 32;
     constexpr int kH = 32;
     SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
@@ -251,7 +247,7 @@ TEST_CASE("SkiaCanvas set_filter parsers drop-shadow with hex color",
 }
 
 TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
-          "[canvas][skia][filter-chain][wave6-canvas2d]") {
+          "[canvas][skia][filter-chain]") {
     SkiaCanvas canvas(nullptr);  // null canvas for this test
     canvas.set_filter("none");
     SkPaint paint;
@@ -261,14 +257,14 @@ TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
 
 #endif  // PULP_HAS_SKIA
 
-// ── pulp #1434 Phase A2-4 — portable filter-chain matrix math ──────────
+// ── Portable filter-chain matrix math ──────────────────────────────────
 // These tests run on every platform (no Skia required) and dry-run the
 // SAME float math the production save_layer_with_filters() switch uses
-// to populate SkColorMatrix entries. They guard against the two Codex
+// to populate SkColorMatrix entries. They guard against the two
 // regressions independently of whether Skia is linked into the test
 // binary:
-//   - P1 #3195880597: contrast / invert bias must be in 0..255 space.
-//   - P2 #3195880608: opacity() must be a per-position color matrix.
+//   - contrast / invert bias must be in 0..255 space.
+//   - opacity() must be a per-position color matrix.
 //
 // Helpers below mirror the matrix construction in
 // core/canvas/src/skia_canvas.cpp; if those formulas drift here without
@@ -296,8 +292,7 @@ Px apply_matrix(const float m[20], Px in) {
 }
 
 // Mirrors the contrast(c) matrix construction in
-// core/canvas/src/skia_canvas.cpp. Pre-fix `t` was `0.5*(1-c)` (0..1),
-// post-fix it is `0.5*(1-c)*255` (0..255).
+// core/canvas/src/skia_canvas.cpp: `t` is an 8-bit-space bias.
 void build_contrast_matrix(float c, float m[20]) {
     const float t = 0.5f * (1.0f - c) * 255.0f;
     float src[20] = {
@@ -323,7 +318,7 @@ void build_invert_matrix(float amount, float m[20]) {
     for (int i = 0; i < 20; ++i) m[i] = src[i];
 }
 
-// Mirrors the opacity(amount) matrix construction (post-P2 fix).
+// Mirrors the opacity(amount) matrix construction.
 void build_opacity_matrix(float amount, float m[20]) {
     const float a = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount);
     float src[20] = {
@@ -338,7 +333,7 @@ void build_opacity_matrix(float amount, float m[20]) {
 } // namespace
 
 TEST_CASE("Filter chain: contrast(0) bias lands at mid-gray (~128)",
-          "[canvas][filter-chain][issue-1434]") {
+          "[canvas][filter-chain]") {
     float m[20];
     build_contrast_matrix(0.0f, m);
     // Any input -> 128 because slope=0, intercept=128.
@@ -358,12 +353,11 @@ TEST_CASE("Filter chain: contrast(0) bias lands at mid-gray (~128)",
     REQUIRE(orr.r == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.g == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.b == Catch::Approx(127.5f).margin(0.5f));
-    // Pre-fix the bias was 0.5 (0..1 space), so `apply_matrix` would have
-    // produced ~0 on every channel, NOT 128.
+    // A normalized 0..1 bias would produce ~0 on every channel, not 128.
 }
 
 TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
-          "[canvas][filter-chain][issue-1434]") {
+          "[canvas][filter-chain]") {
     float m[20];
     build_invert_matrix(1.0f, m);
     Px black{0, 0, 0, 255};
@@ -378,13 +372,12 @@ TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
     REQUIRE(ow.r == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.g == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.b == Catch::Approx(0.0f).margin(0.5f));
-    // Pre-fix the bias was 1.0 (0..1 space), so black->white would have
-    // produced ~1 on every channel — effectively still black after clamp
-    // to 8-bit.
+    // A normalized 0..1 bias would produce ~1 on every channel,
+    // effectively still black after clamp to 8-bit.
 }
 
 TEST_CASE("Filter chain: invert(0) is identity",
-          "[canvas][filter-chain][issue-1434]") {
+          "[canvas][filter-chain]") {
     float m[20];
     build_invert_matrix(0.0f, m);
     Px in{42, 137, 200, 255};
@@ -396,10 +389,10 @@ TEST_CASE("Filter chain: invert(0) is identity",
 }
 
 TEST_CASE("Filter chain: opacity(a) scales alpha and preserves RGB",
-          "[canvas][filter-chain][issue-1434]") {
-    // P2 fix: opacity is a color matrix in the chain (alpha *= a),
-    // not a final-layer alpha multiplier. RGB channels pass through
-    // unchanged so subsequent filters operate on the same color.
+          "[canvas][filter-chain]") {
+    // Opacity is a color matrix in the chain (alpha *= a), not a
+    // final-layer alpha multiplier. RGB channels pass through unchanged
+    // so subsequent filters operate on the same color.
     float m[20];
     build_opacity_matrix(0.5f, m);
     Px in{200, 100, 50, 255};

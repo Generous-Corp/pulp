@@ -1,11 +1,11 @@
 #pragma once
 
-// Generic model store/state primitive (promoted from tools/audio). Owns the on-disk
+// Generic model store/state primitive. Owns the on-disk
 // layout under PULP_HOME (`<home>/<subsystem>/model-state.json` for the active model,
 // `<home>/<subsystem>/models/<id>.json` for per-model install metadata), the
 // installed/active queries, list (over a caller-supplied registry), and activate.
 // Parameterized by `subsystem` (e.g. "audio", "magenta") so multiple consumers share
-// one mechanism. The downloader (install) lands in a follow-up (MM-PR2).
+// one mechanism. Install/remove stream checkpoints through the runtime downloader.
 
 #include <filesystem>
 #include <functional>
@@ -60,7 +60,7 @@ struct ActivateModelResult {
 };
 
 // PULP_HOME resolution: explicit override → $PULP_HOME → $HOME/.pulp (USERPROFILE on
-// Windows). NOTE (path policy, see plan): a sandboxed AUv3/iOS host may not have HOME
+// Windows). NOTE (path policy): a sandboxed AUv3/iOS host may not have HOME
 // access — callers in those contexts should pass an explicit container path.
 std::filesystem::path resolve_pulp_home(const std::filesystem::path& override_path = {});
 
@@ -81,7 +81,7 @@ ActivateModelResult activate_model(const std::vector<ModelEntry>& registry, std:
 std::string to_json(const ModelListResult& result);
 std::string to_json(const ActivateModelResult& result);
 
-// ---- install / remove (MM-PR2: built on the streaming downloader) -------------------
+// ---- install / remove (streaming, resumable, sha256-verified downloader) -----------
 
 struct InstallModelResult {
     bool ok = false;

@@ -1,4 +1,5 @@
-// PulpTempoSampler — headless integration tests (Phase 4.11).
+// PulpTempoSampler — headless integration tests for loop analysis, slicing,
+// tempo matching, and editor/audio interaction.
 //
 // Exercises the full instrument pipeline without a host: load loop -> detect
 // BPM + slices -> background OfflineStretch render to host tempo (generation-
@@ -24,10 +25,16 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifndef PULP_TEMPO_SAMPLER_SOURCE_DIR
+#  error "PULP_TEMPO_SAMPLER_SOURCE_DIR must be defined by the PulpTempoSampler test target"
+#endif
 
 using namespace pulp;
 using namespace pulp::examples;
@@ -75,6 +82,13 @@ bool write_wav(const std::string& path, const std::vector<float>& mono, int sr) 
     return static_cast<bool>(o);
 }
 
+std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    REQUIRE(input.good());
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+}
+
 template <typename Pred>
 bool wait_for(Pred p, std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -120,11 +134,30 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     PulpTempoSamplerProcessor p;
     const auto d = p.descriptor();
     REQUIRE(d.name == "PulpTempoSampler");
+    REQUIRE(d.version == kPulpTempoSamplerVersion);
     REQUIRE(d.category == format::PluginCategory::Instrument);
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
     REQUIRE(s.param_count() == 12);
+}
+
+TEST_CASE("PulpTempoSampler package metadata uses the descriptor version", "[tempo-sampler]") {
+    const auto source_dir = std::filesystem::path(PULP_TEMPO_SAMPLER_SOURCE_DIR);
+
+    const auto cmake = read_text_file(source_dir / "CMakeLists.txt");
+    const auto cmake_version_key = cmake.find("VERSION");
+    REQUIRE(cmake_version_key != std::string::npos);
+    REQUIRE(cmake.find(std::string("\"") + kPulpTempoSamplerVersion + "\"",
+                       cmake_version_key) != std::string::npos);
+
+    // These sources compile against the header constant; the text check guards
+    // against reintroducing per-entry version literals.
+    const auto standalone = read_text_file(source_dir / "main.cpp");
+    REQUIRE(standalone.find("kPulpTempoSamplerVersion") != std::string::npos);
+
+    const auto vst3 = read_text_file(source_dir / "vst3_entry.cpp");
+    REQUIRE(vst3.find("kPulpTempoSamplerVersion") != std::string::npos);
 }
 
 TEST_CASE("loads loop, detects bpm/slices, publishes a tempo-matched buffer", "[tempo-sampler]") {

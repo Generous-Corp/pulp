@@ -47,11 +47,10 @@ StyleSheet.prototype._applyTo = function(el) {
         // match, not the live state. The live state check is then either
         // (a) deferred to the event-handler wiring (`:hover` / `:focus` /
         // `:active`), or (b) done explicitly here (`:disabled` reads
-        // `el._disabled` after the structural match). The new
-        // querySelector-side _matchesSelector pseudo evaluator (pulp
-        // #1737) honours pseudo when present, but is bypassed here so
-        // the wire-up still sees structural matches before the user has
-        // moused over anything.
+        // `el._disabled` after the structural match). The querySelector-
+        // side _matchesSelector pseudo evaluator honours pseudo when
+        // present, but is bypassed here so the wire-up still sees
+        // structural matches before the user has moused over anything.
         var parsedNoPseudo = parsed;
         if (parsed.pseudo) {
             parsedNoPseudo = {
@@ -92,8 +91,8 @@ function _applyStyles(el, props) {
 }
 
 function _setupPseudoHover(el, props) {
-    // pulp #1323 — multiple `:hover` rules on the same element layer
-    // their property maps. We keep a per-element list so `mouseleave`
+    // Multiple `:hover` rules on the same element layer merge their
+    // property maps. We keep a per-element list so `mouseleave`
     // restores the union of all hover-touched properties to their
     // pre-hover values, even when a later rule introduced a new key.
     // The list is keyed on the props *object identity* so repeated
@@ -115,7 +114,7 @@ function _setupPseudoHover(el, props) {
     }
     if (!alreadyHave) hoverState.propsList.push(props);
 
-    // pulp #1173 — registerHover(id) arms the native dispatcher. The C++
+    // registerHover(id) arms the native dispatcher. The C++
     // side requires the widget to exist before the call lands, so we
     // defer wiring until _nativeCreated. _applyTo() runs again from
     // appendChild's _reapplyStylesheets() after _nativeCreated flips,
@@ -165,7 +164,7 @@ function _setupPseudoHover(el, props) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSS text → StyleSheet translator (pulp #1323)
+// CSS text → StyleSheet translator
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Converts the contents of a `<style>` element into a StyleSheet so the
@@ -174,15 +173,14 @@ function _setupPseudoHover(el, props) {
 // suffixed with a single `:hover` / `:focus` / `:active` pseudo-class,
 // comma-separated selector lists, and `prop: value;` declarations.
 //
-// Out of scope for this slice (deferred follow-ups):
+// Out of scope for this conservative CSS-text parser:
 //   - Descendant / child / sibling combinators in the CSS-text input
 //     (the underlying matcher supports them via `_parseSelector` but
 //     bringing them through the text parser opens a larger correctness
-//     surface — Spectr's editor.js sticks to flat selectors).
+//     surface).
 //   - At-rules (@media, @keyframes, @supports, @import).
 //   - CSS variable resolution at parse time (handled by the existing
 //     style-decl path on apply).
-//   - `:active` pseudo-class wiring (#1149 part b explicit non-goal).
 
 function _stripCssComments(text) {
     return text.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -370,8 +368,8 @@ var document = {
     createTextNode: function(text) {
         // Backed by an Element (`<span>`) so renderers handle text uniformly,
         // but flagged as a DOM-spec text node so reconcilers (React 18, etc.)
-        // see `node.nodeType === 3` and `node.nodeName === "#text"`. Per
-        // pulp #468 — React's reconciler reads both on every node it walks.
+        // see `node.nodeType === 3` and `node.nodeName === "#text"`.
+        // React's reconciler reads both on every node it walks.
         var el = new Element("span");
         el._textContent = text;
         el._isTextNode = true;
@@ -436,16 +434,15 @@ var document = {
         return el;
     },
 
-    // pulp #2128 follow-up — document-level EventTarget with real fan-out.
+    // document-level EventTarget with real fan-out.
     //
-    // Previously these were no-ops (pulp #2101), kept that way so Three.js
+    // Previously these were no-ops, kept that way so Three.js
     // OrbitControls' `ownerDocument.removeEventListener` didn't throw on
     // cleanup. That cleanup story is preserved (removeEventListener still
     // doesn't throw on unknown handlers) but listeners now actually fire,
     // which is needed so React "click-outside" patterns that hook
-    // `document.addEventListener('mousedown', onDoc)` work — Spectr's
-    // PickerDropdown, ContextMenu close-on-outside-click, and every
-    // React popover that uses this pattern were silently dead before.
+    // `document.addEventListener('mousedown', onDoc)` work. Popovers and
+    // context menus using this pattern were silently dead before.
     //
     // The bridge dispatches into this map via `__dispatch__('document',
     // eventName, eventObj)` from C++ (see widget_bridge.cpp __dispatch__
@@ -564,7 +561,7 @@ var navigator = globalThis.navigator || {};
 if (typeof navigatorGPU !== "undefined" && navigatorGPU) {
     navigator.gpu = navigatorGPU;
     navigator.gpu.requestAdapter = function() {
-        // pulp #2101 — prefer the native Dawn adapter when the host advertises one
+        // prefer the native Dawn adapter when the host advertises one
         // via __describeNativeAdapterImpl. Falls back to the pure-mock adapter so
         // headless test paths (no host bridge) still resolve cleanly.
         var descriptor = null;
@@ -624,7 +621,7 @@ globalThis.localStorage = localStorage;
 window.sessionStorage = localStorage;
 globalThis.sessionStorage = localStorage;
 
-// pulp #3206 — `self` alias for the window object.
+// `self` alias for the window object.
 //
 // Browser/WebGPU spec: `self`, `window`, and `globalThis` all reference the
 // same object in a page context. Three.js's `Animation` class (and many
@@ -1015,7 +1012,7 @@ window.pulp.gpu = {
         descriptor = descriptor || {};
         return __createMockGPUDevice(adapter, descriptor);
     },
-    // pulp #2101 — explicit accessors for the native Dawn adapter so test
+    // explicit accessors for the native Dawn adapter so test
     // harnesses and demos can opt into the bridge path without relying on
     // requestAdapter's auto-detection.
     describeNativeAdapter: function() {

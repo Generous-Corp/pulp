@@ -1,4 +1,4 @@
-// pulp #1486 — Tweaks layer (§7, §8 of the spec).
+// Tweaks layer.
 //
 // Reads `pulp-tweaks.json` from disk, applies dev overrides on top of
 // a freshly-lowered IRNode tree. Pure functions — no side effects.
@@ -68,12 +68,12 @@ function applyTweakValue(node: IRNode, tweak: TweakValue): IRNode {
 
 /**
  * Set a dotted-path field on an IRNode without mutating the original.
- * Phase 1 supports flat paths into typed top-level fields:
+ * Supports flat paths into typed top-level fields:
  *   'paint.backgroundColor'
  *   'text.fontSize'
  *   'layout.padding'
  *   'meta.role'
- * `null` value clears the field (deletion semantics per §8.3).
+ * `null` value clears the field.
  */
 export function setByDottedPath(node: IRNode, path: string, value: unknown): IRNode {
     const segments = path.split('.');
@@ -100,10 +100,10 @@ export function setByDottedPath(node: IRNode, path: string, value: unknown): IRN
     } as IRNode;
 }
 
-// ── File I/O — narrow API surface for the spike ──────────────────────
+// ── File I/O ─────────────────────────────────────────────────────────
 //
-// Phase 1 keeps fs access optional so the IR core stays browser-loadable.
-// CLI integration (pulp import design ...) will inject the fs hook.
+// fs access stays optional so the IR core remains browser-loadable. Callers
+// inject the fs hook when they need disk-backed tweaks.
 
 export interface TweaksIO {
     readTweaks(filePath: string): Promise<TweaksFile | null>;

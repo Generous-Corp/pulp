@@ -1,13 +1,11 @@
 //! `pulp identity record` + identity-lock comparison helpers.
 //!
-//! Implements Track 3.12 of the macOS plugin-authoring plan
-//! (`planning/2026-05-24-macos-plugin-authoring-plan.md`): a committed
-//! `.pulp/identity.lock` records the canonical AU 4CC, manufacturer
-//! code, VST3 FUID, CLAP plugin ID, AAX product ID, and version of
-//! each plugin in a Pulp project. The lock travels with the source so
-//! that drift in any of those identity fields surfaces at build /
-//! review time instead of as a "my DAW lost its preset" mystery
-//! months later.
+//! A committed `.pulp/identity.lock` records the canonical AU 4CC,
+//! manufacturer code, VST3 FUID, CLAP plugin ID, AAX product ID, and
+//! version of each plugin in a Pulp project. The lock travels with the
+//! source so that drift in any of those identity fields surfaces at
+//! build / review time instead of as a "my DAW lost its preset"
+//! mystery months later. See `docs/reference/identity-lock.md`.
 //!
 //! # Why a lockfile, not a derived value?
 //!
@@ -41,10 +39,9 @@
 //!
 //! `vst3_fuid` and `clap_plugin_id` are optional because they're
 //! typically declared in the plugin's C++ source, not in
-//! `pulp_add_plugin(...)`. The Rust port reads what's present in
-//! `CMakeLists.txt` today; a follow-up slice can teach the recorder
-//! to scrape `Steinberg::FUID(...)` literals out of source files
-//! once a regex shape is locked in.
+//! `pulp_add_plugin(...)`. The recorder reads what's present in
+//! `CMakeLists.txt` today; source-file scraping for
+//! `Steinberg::FUID(...)` literals would need a locked regex shape.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -320,9 +317,9 @@ fn diff_field(
 ///
 /// This is intentionally a single-file regex scan today — the same
 /// shape Pulp uses elsewhere (see `cmd::version::plugin_re`). A
-/// follow-up slice can teach it to follow `add_subdirectory` /
-/// `include` directives if real projects start hiding plugin
-/// declarations in nested files.
+/// broader parser can follow `add_subdirectory` / `include`
+/// directives if real projects start hiding plugin declarations in
+/// nested files.
 ///
 /// # Errors
 ///

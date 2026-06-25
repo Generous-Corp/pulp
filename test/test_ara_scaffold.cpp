@@ -34,9 +34,8 @@ TEST_CASE("ARA scaffold reports SDK-not-compiled-in by default",
 
 TEST_CASE("ARA host_supports_ara starts false (host query lives in adapters)",
           "[format][ara][scaffold]") {
-    // The cross-format `host_supports_ara()` returns false until per-
-    // format companion factories (VST3 / AU v3 / CLAP) land — see the
-    // workstream 06 slices referenced in ara.hpp. Default behavior is
+    // The cross-format `host_supports_ara()` returns false until per-format
+    // companion factories (VST3 / AU v3 / CLAP) land. Default behavior is
     // deterministic: false regardless of the SDK build-flag, because
     // *runtime* host-availability is independent of compile-time
     // SDK-inclusion.
@@ -87,8 +86,7 @@ TEST_CASE("Companion-factory accessor returns nullptr without SDK",
     const void* factory = ara_companion_factory_for(&c);
 #ifdef PULP_HAS_ARA
     // With the SDK linked in, ara_factory.cpp builds and returns a
-    // real ARAFactory struct — never nullptr (Codex P2 on #2854 noted
-    // the prior assertion was a no-op).
+    // real ARAFactory struct — never nullptr (#2854).
     REQUIRE(factory != nullptr);
 #else
     // Without the SDK, no factory can exist.

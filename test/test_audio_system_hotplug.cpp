@@ -1,4 +1,4 @@
-// Verifies AudioSystem's base-class hotplug plumbing (workstream 02 slice 2.7).
+// Verifies AudioSystem's base-class hotplug plumbing.
 // A non-macOS backend can now store a callback via the default
 // set_device_change_callback() and fire it via fire_device_change()
 // without having to reimplement the storage in each subclass.

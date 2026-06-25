@@ -243,7 +243,7 @@ TEST_CASE("NSD preserves backend failure and no-callback discovery paths",
     REQUIRE(nsd.discovered().empty());
 }
 
-// Codex P2 on #310: re-announces with changed metadata must refresh
+// #310: re-announces with changed metadata must refresh
 // the cached entry and fire on_service_found, not silently drop.
 TEST_CASE("NSD refreshes cached entries when metadata changes on re-announce",
           "[events][service-discovery][issue-310]") {
@@ -278,7 +278,7 @@ TEST_CASE("NSD refreshes cached entries when metadata changes on re-announce",
     REQUIRE(nsd.discovered().front().address == "10.0.0.2");
 }
 
-// Codex P2 on #310: swapping backends must clear the cache so a
+// #310: swapping backends must clear the cache so a
 // stale discovery from the previous backend doesn't leak into
 // queries against the new one. on_service_lost should fire for
 // each evicted entry so subscribers can react.
@@ -306,7 +306,7 @@ TEST_CASE("NSD clears discoveries and fires on_service_lost when swapping backen
     REQUIRE((lost[0] == "alpha" || lost[0] == "beta"));
 }
 
-// Codex P2 follow-up on #314: if a subscriber's on_service_lost
+// #314: if a subscriber's on_service_lost
 // handler re-enters the NSD API during a backend swap, it must see
 // the NEW backend state — not the torn-down old one.
 TEST_CASE("NSD install_backend: on_service_lost re-entry sees the new backend",
@@ -671,7 +671,7 @@ TEST_CASE("LockingAsyncUpdater trigger_and_wait handles synchronously",
     REQUIRE(updater.handles.load() == 2);
 }
 
-// ── TXT records + RAII wrappers (gap-doc 2026-05-24) ────────────────────
+// ── TXT records + RAII wrappers ─────────────────────────────────────────
 
 namespace {
 

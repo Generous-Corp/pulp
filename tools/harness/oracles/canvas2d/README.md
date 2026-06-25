@@ -5,9 +5,9 @@ attributes, and Pulp-specific extensions, sourced from:
 
 1. The HTML Living Standard `2dcontext` section
    (<https://html.spec.whatwg.org/multipage/canvas.html#2dcontext>).
-2. The actual bridge surface in `core/view/src/widget_bridge.cpp` —
-   `register_function("canvasX", ...)` is the truth-of-record for what
-   reaches the C++ side.
+2. The actual bridge surface in
+   `core/view/src/widget_bridge/canvas2d_api.cpp`, with
+   `core/view/src/widget_bridge_api_manifest.tsv` as the registration index.
 3. The JS shim at `core/view/js/web-compat-canvas.js` — the layer that
    translates `ctx.fillRect()` etc. into `canvasX(id, ...)` bridge calls.
 4. The hard-won gotchas catalogued in `.agents/skills/import-design/SKILL.md`
@@ -16,10 +16,9 @@ attributes, and Pulp-specific extensions, sourced from:
 
 ## Why static, not Chromium-headless?
 
-Per the week-1 plan in `planning/pulp-agent-prompt-harness-week1.md`, the
-"oracle" for canvas2d is a static reference table, NOT a Chromium-headless
-pixel-diff harness. The latter is a week-3+ upgrade once the static
-classifier is in place. The benefits of static for week 1:
+The canvas2d oracle is a static reference table, NOT a Chromium-headless
+pixel-diff harness. A future runtime oracle can layer pixel verification on
+top of the same entries. The benefits of the static table are:
 
 * Portable — no headless-Chromium runtime dependency at verifier time.
 * Stable — Canvas2D's API surface is well-bounded (~36 methods + ~20
@@ -63,9 +62,9 @@ combining:
 1. **Oracle entry** — does the entry exist + what bridge functions does spec
    route through + what's the spec-allowed value set + are there documented
    gotchas?
-2. **Bridge presence** — grep `widget_bridge.cpp` for the named
-   `register_function("canvasX", ...)` call. Missing-on-bridge ⇒ `NOT-IMPL`
-   for any entry whose oracle says it should route there.
+2. **Bridge presence** — scan the Canvas2D bridge source, falling back to the
+   manifest for the named `canvasX` registration. Missing-on-bridge ⇒
+   `NOT-IMPL` for any entry whose oracle says it should route there.
 3. **Shim presence** — grep `web-compat-canvas.js` for the prototype
    method or attribute. Missing-in-shim ⇒ `NOT-IMPL`.
 4. **Catalog `mapsTo`** — heuristic markers like "Not implemented", "shim
@@ -77,12 +76,13 @@ combining:
 The oracle is hand-maintained for now. To refresh:
 
 1. Walk new entries in `compat.json` under `canvas2d/`.
-2. Cross-reference to bridge: `grep 'register_function("canvas' core/view/src/widget_bridge.cpp`.
+2. Cross-reference to bridge: inspect `core/view/src/widget_bridge/canvas2d_api.cpp`
+   and `core/view/src/widget_bridge_api_manifest.tsv`.
 3. Cross-reference to shim: `grep 'CanvasRenderingContext2D.prototype' core/view/js/web-compat-canvas.js`.
 4. Verify gotchas list is still in sync with `.agents/skills/import-design/SKILL.md` § "Canvas2D Bridge Gotchas".
 5. Run `python3 tools/harness/verifier.py --surface=canvas2d` and review the drift list.
 
-## Future: Chromium-headless oracle (week 3+)
+## Future: Chromium-headless oracle
 
 When per-op pixel verification matters, swap this static oracle for a
 headless-Chromium harness that:

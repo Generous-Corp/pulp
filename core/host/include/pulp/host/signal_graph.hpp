@@ -16,7 +16,10 @@
 
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/load_measurer.hpp>
+#include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -25,6 +28,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -58,7 +62,7 @@ struct CustomNodeType {
     std::string default_name;
     CustomNodeProcessFn process;  // stateless (used when `create` is empty)
 
-    // ── Optional stateful lifecycle (Phase 5) ──────────────────────────────
+    // Optional stateful lifecycle.
     // When `create` is set, the graph owns ONE opaque instance per node (RAII
     // via `destroy`). `process_instance` runs instead of `process`, and
     // prepare/release/reset/save_state/load_state operate on that instance. All
@@ -104,7 +108,7 @@ struct Connection {
     bool audio_rate_modulation = false; // dense CV edge into an AudioRate param.
     bool sidechain = false;   // sidechain-edge: like a normal audio edge, but
                               // routes into one of the destination plugin's
-                              // sidechain-bus input ports (item 4.7). The
+                              // sidechain-bus input ports. The
                               // topological-sort + PDC treat sidechain as a
                               // hard edge — it is not a back-edge.
 
@@ -113,7 +117,7 @@ struct Connection {
     uint32_t automation_param_id  = 0;
     float automation_range_lo     = 0.0f;  // plain param domain
     float automation_range_hi     = 1.0f;  // plain param domain
-    float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew (item 4.6)
+    float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew
     AutomationMix automation_mix  = AutomationMix::Replace;
 
     bool operator==(const Connection& o) const {
@@ -157,8 +161,8 @@ struct GraphNode {
     std::string custom_type_id;
     int custom_type_version = 0;
 
-    // Phase 5 — opaque state for a stateful custom node. `custom_instance` is
-    // the live per-node object (RAII via the type's destroy), created on the UI
+    // Opaque state for a stateful custom node. `custom_instance` is the live
+    // per-node object (RAII via the type's destroy), created on the UI
     // thread in prepare() and captured into each compiled snapshot like a
     // plugin shared_ptr so old audio snapshots stay alive. `custom_state_blob`
     // is the serialized form, preserved even when the type is unresolved (so a
@@ -264,7 +268,7 @@ public:
                                       int num_outputs,
                                       const std::string& name);
 
-    // Phase 5 — opaque per-node state for stateful custom nodes.
+    // Opaque per-node state for stateful custom nodes.
     // custom_node_state() returns the live instance's save_state() when the node
     // is resolved + stateful, else the last-loaded blob (preserved for
     // unresolved nodes). Empty when `id` is not a custom node or has no state.
@@ -294,8 +298,8 @@ public:
     // audio connections.
     bool connect_midi(NodeId source, NodeId dest);
 
-    // Sidechain connection (item 4.7): routes a source's audio output port
-    // into the destination plugin's sidechain bus port. The destination
+    // Sidechain connection: routes a source's audio output port into the
+    // destination plugin's sidechain bus port. The destination
     // port is `dest_sidechain_port` — the caller supplies the absolute
     // port index on the destination node (the host knows how many main
     // input ports a plugin exposes via PluginInfo::num_inputs; sidechain
@@ -382,6 +386,66 @@ public:
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
+
+    // Per-node CPU-load telemetry, accumulated by process() and read from the
+    // control/UI thread. process() wraps each node's work in an
+    // AudioProcessLoadMeasurer begin()/end() (relaxed-atomic, RT-safe); these
+    // measurers persist across re-prepare() so a node's load history survives
+    // topology recompiles. Returns one entry per currently-present node that
+    // has been prepared (removed nodes' lingering measurers are filtered out),
+    // each a latest-value snapshot (may mix adjacent callbacks). Safe to poll
+    // while the audio thread runs.
+    struct NodeLoadReport {
+        NodeId node_id = 0;
+        audio::AudioProcessLoadSnapshot load;
+    };
+    std::vector<NodeLoadReport> node_loads() const;
+
+    // ── Canonical-executor migration ─────────────────────────────────────
+    // Hooks the SignalGraph→GraphRuntimeExecutor translation needs without
+    // exposing the private CompiledGraph. The translation lives in
+    // signal_graph_executor_routing.{hpp,cpp}; these are control-thread only.
+
+    // True once prepare() has published a live compiled snapshot.
+    bool is_prepared() const noexcept { return live_ != nullptr; }
+    // Max block size the live snapshot was prepared for (0 if not prepared).
+    int prepared_max_block_size() const noexcept;
+    // The live compiled snapshot's per-node gain atomic (Gain nodes only), or
+    // nullptr. The pointer stays valid only while the snapshot returned by
+    // live_snapshot_handle() is retained AND no re-prepare has occurred; a
+    // routing built from it must be rebuilt after the graph recompiles.
+    std::atomic<float>* live_gain_atomic(NodeId id) const noexcept;
+    // The live compiled snapshot's PluginSlot for a Plugin node, or nullptr.
+    // Same lifetime contract as live_gain_atomic: valid only while
+    // live_snapshot_handle() is retained and no re-prepare has occurred.
+    PluginSlot* live_plugin_slot(NodeId id) const noexcept;
+    // Opaque keepalive for the live compiled snapshot so a translated routing
+    // can pin the lifetime of the gain atomics + plugin slots it references.
+    std::shared_ptr<const void> live_snapshot_handle() const noexcept;
+
+    // Opt in to driving the audio callback through the canonical
+    // GraphRuntimeExecutor when the live snapshot is executor-eligible (only
+    // AudioInput/AudioOutput/Gain nodes, plain audio connections). Default OFF:
+    // the legacy walk runs. Ineligible graphs always fall back to the legacy
+    // walk regardless of this flag. The flag is a control-thread toggle read
+    // relaxed on the audio thread. The two paths produce bit-identical output
+    // per block for eligible graphs, so toggling mid-stream is RT-safe and
+    // seamless for feedforward graphs. For graphs with FEEDBACK, the legacy walk
+    // and the executor keep INDEPENDENT one-block-delay state (the legacy
+    // ConnectionDelay::feedback_prev vs the executor's per-edge prev slot), so a
+    // mid-stream switch resets feedback history to whatever the destination path
+    // last wrote — a one-block transient, not a crash or a permanent divergence.
+    // Pick a path before starting a feedback graph and keep it for the stream.
+    void set_canonical_executor_routing_enabled(bool enabled) noexcept {
+        canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
+    }
+    // Returns the requested opt-in flag, not a promise that the current block
+    // is taking the executor path. Actual dispatch also requires an eligible
+    // prepared snapshot and a scratch pool sized for the block.
+    bool canonical_executor_routing_enabled() const noexcept {
+        return canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
+    }
+
     RuntimeBudgetReport evaluate_optional_runtime_budget(
         runtime::RuntimeBudgetFrame& frame,
         runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
@@ -411,11 +475,11 @@ public:
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
 
-    // Set a parameter on a Plugin node at the graph level. The call is
-    // forwarded to PluginSlot::set_parameter(). Returns false if the node
-    // is not a Plugin node or has no loaded slot. This is the single-value
-    // knob — full automation-curve routing (one node's output driving
-    // another node's parameter over a block) is follow-up work.
+    // Set a single parameter value on a Plugin node at the graph level. The
+    // call is forwarded to PluginSlot::set_parameter(). Returns false if the
+    // node is not a Plugin node or has no loaded slot. For block-rate routing
+    // from graph audio into parameters, use connect_automation() or
+    // connect_audio_rate_modulation().
     bool set_node_parameter(NodeId id, uint32_t param_id, float value);
 
     // Read a parameter's current value from a Plugin node (returns 0.0f if
@@ -472,6 +536,14 @@ private:
         int64_t input_latency = 0;
         int64_t output_latency = 0;
 
+        // Per-node CPU-load telemetry. Points at a SignalGraph-owned
+        // AudioProcessLoadMeasurer that PERSISTS across CompiledGraph snapshots
+        // (keyed by NodeId in node_load_), so re-prepare() doesn't reset a
+        // node's accumulated load. process() wraps this node's work in
+        // begin()/end(); the measurer is relaxed-atomic (RT-safe). Null until
+        // resolved in compile_(); never owned by NodeRuntime.
+        pulp::audio::AudioProcessLoadMeasurer* load = nullptr;
+
         struct ParamBounds {
             uint32_t id = 0;
             float min_value = 0.0f;
@@ -504,7 +576,7 @@ private:
         uint64_t midi_input_sequence_seen = 0;
 
         // Audio-rate modulation scratch. Each listed param gets one
-        // max-block-sized slice in audio_rate_param_data, filled immediately
+        // max-block-sized region in audio_rate_param_data, filled immediately
         // before the destination plugin processes.
         struct DenseAutomationAccum {
             float lo = 0.0f;
@@ -530,7 +602,7 @@ private:
         // destination can read it before the source writes the current block.
         std::vector<float> feedback_prev;  // size = max_block_size_
 
-        // Item 4.6 — per-source automation slew state. Holds the value
+        // Per-source automation slew state. Holds the value
         // we last delivered to the destination (post-slew, post range-
         // map) so the next block can resume ramping toward a new target
         // instead of snapping. `primed` tracks whether `last_value` has
@@ -577,10 +649,50 @@ private:
         std::unordered_map<NodeId, NodeShape> shapes;
         std::vector<OrderedRuntime> ordered_runtime;
         int max_block_size = 0;
-        double sample_rate = 0.0;  // item 4.6 — needed to convert
-                                   // automation_smoothing_ms into samples.
+        double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
+                                   // into samples.
         int64_t total_latency_samples = 0;
         MidiBlockSnapshot midi_publish_scratch;
+
+        // Immutable canonical-executor routing for this snapshot, built in
+        // compile_() when the topology is eligible (only AudioInput/AudioOutput/
+        // Gain, plain audio connections). Empty/invalid otherwise. Its Gain
+        // bindings reference this snapshot's own `runtime[id].gain` atomics, so
+        // it carries no keepalive — it lives and dies exactly with this
+        // CompiledGraph, published atomically with it via live_raw_.
+        format::GraphRuntimeSnapshot routing_snapshot;
+        bool routing_valid = false;
+        // Per-snapshot scratch pool driving the routed path, sized in compile_()
+        // to routing_snapshot's slot count × max_block_size. Owned by THIS
+        // snapshot (like the legacy per-node runtime scratch), so a re-prepare
+        // builds a fresh pool on a fresh cg and never mutates the buffers an
+        // in-flight audio-thread reader is using on a retired snapshot. Feedback
+        // previous-block state lives here and resets with the snapshot.
+        format::GraphRuntimeBufferPool exec_pool;
+        // Plugin-binding storage for the routed path, owned per-snapshot like
+        // exec_pool. routing_plugin_ctx is reserved in compile_() to the plugin
+        // count so the snapshot's Plugin bindings can point their user_data at
+        // stable elements; routing_plugin_scratch is the shared MIDI/param
+        // scratch every Plugin binding hands to PluginSlot::process. The slots
+        // themselves live in `plugins` above (same cg lifetime).
+        std::vector<PluginBindingContext> routing_plugin_ctx;
+        PluginRoutingScratch routing_plugin_scratch;
+        // Per-node MIDI buffers for the routed path's event edges, owned
+        // per-snapshot like exec_pool. Empty (node_count 0) for graphs with no
+        // MIDI. The routed dispatch bridges the SignalGraph MIDI mailboxes to
+        // these buffers around process_routed: a MidiInput node's mailbox is read
+        // into its scratch output before the walk, and a MidiOutput node's
+        // gathered scratch input is published to its mailbox after. `routing_midi_io`
+        // lists those system nodes by (dense plan index, NodeId) so the bridge
+        // avoids a per-block NodeId lookup.
+        format::GraphRuntimeMidiScratch routing_midi;
+        // `pending_seq` is audio-thread scratch: the mailbox sequence a MidiInput
+        // would consume this block, captured during the ingress pre-fill and
+        // committed to midi_input_sequence_seen only after the routed dispatch
+        // succeeds (so a fallback to the legacy walk re-consumes the same block).
+        struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
+        std::vector<RoutedMidiNode> routing_midi_inputs;
+        std::vector<RoutedMidiNode> routing_midi_outputs;
     };
 
     std::vector<GraphNode> nodes_;
@@ -595,6 +707,16 @@ private:
     std::shared_ptr<CompiledGraph> live_;
     std::atomic<CompiledGraph*> live_raw_{nullptr};
     std::vector<std::shared_ptr<CompiledGraph>> retired_snapshots_;
+
+    // Canonical-executor opt-in (control toggle, read relaxed on the audio
+    // thread). One long-lived executor whose telemetry survives re-prepare; it
+    // is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
+    // pool as arguments) and prepare() never mutates it, so the single audio
+    // thread is its only writer (relaxed stat counters). The mutable scratch
+    // pool is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool)
+    // so it rides the existing RCU lifetime and is never resized under a reader.
+    std::atomic<bool> canonical_executor_routing_enabled_{false};
+    format::GraphRuntimeExecutor executor_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
@@ -606,6 +728,20 @@ private:
     std::atomic<std::size_t> prepared_automation_buffer_bytes_{0};
     std::atomic<std::size_t> prepared_delay_buffer_bytes_{0};
     std::atomic<std::size_t> prepared_total_buffer_bytes_{0};
+
+    // Persistent per-node load measurers, keyed by NodeId. Control-thread
+    // owned; compile_() resolves each NodeRuntime::load to one of these (only
+    // ever ADDS entries while a snapshot may be live, never erases, so the
+    // audio thread's raw measurer pointers stay valid across snapshot swaps —
+    // the measurers are heap-stable behind unique_ptr regardless of map
+    // rehash). node_loads() reads their snapshots.
+    std::unordered_map<NodeId, std::unique_ptr<audio::AudioProcessLoadMeasurer>>
+        node_load_;
+    // Guards node_load_ MAP structure (insert in compile_ vs iterate in
+    // node_loads()) — those can run on different control threads (host
+    // prepare() vs UI poll). Control-side only; the audio thread never takes
+    // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
+    mutable std::mutex node_load_mu_;
 
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;
@@ -620,7 +756,7 @@ private:
                                        const std::vector<Connection>& connections);
 };
 
-// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+// Drag-add helper.
 //
 // `add_plugin_node_from_drop` is the host-side companion to
 // `pulp::view::PluginManagerPanel::on_row_drag_start`. It attempts to

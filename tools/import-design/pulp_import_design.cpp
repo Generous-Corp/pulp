@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/recognition_resolver.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -50,7 +51,7 @@ using namespace pulp::state;
 
 namespace {
 
-// ── Minimal PNG → RGBA8 decoder (pulp #3191) ────────────────────────────────
+// ── Minimal PNG → RGBA8 decoder ─────────────────────────────────────────────
 // AssetManager::decode_png only stores raw bytes + IHDR dims (the real decode
 // happens in the Skia renderer, which isn't linked in the GPU-off importer
 // build). For the fader/meter skin sampler we need actual pixels, so decode
@@ -844,7 +845,7 @@ SwiftOutputPaths resolve_swift_output_paths(const std::string& output_file) {
     // Theme artifact + type are derived per-view (`<RootView>Theme`) so two
     // SwiftUI imports never clobber a shared PulpTheme.swift on disk nor emit a
     // duplicate `enum PulpTheme` / dynamic-color symbol when compiled into one
-    // Swift target (Codex review). The theme file (<RootView>Theme.swift) is
+    // Swift target. The theme file (<RootView>Theme.swift) is
     // always distinct from the view (<RootView>.swift), so no path collision.
     paths.theme_type_name = paths.root_view_name + "Theme";
     paths.theme = paths.view.parent_path() / (paths.root_view_name + "Theme.swift");
@@ -860,8 +861,8 @@ static void print_usage() {
     std::cout << "Usage:\n";
     std::cout << "  pulp import-design --from <source> [options]\n\n";
     std::cout << "Sources:\n";
-    std::cout << "  figma    Figma export JSON or MCP data\n";
-    std::cout << "  stitch   Google Stitch screen HTML or MCP data\n";
+    std::cout << "  figma, figma-plugin  Figma JSON/normalized IR, or Pulp plugin envelope\n";
+    std::cout << "  stitch   Google Stitch screen HTML or normalized IR file\n";
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
     std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
@@ -908,6 +909,14 @@ static void print_usage() {
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
+    std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
+    std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
+    std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
+    std::cout << "  --recognition-manifest <path>\n";
+    std::cout << "                    User recognition manifest (flat library-manifest shape) mapping\n";
+    std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
+    std::cout << "                    kinds; merged OVER the built-in Pulp Figma Library so the importer\n";
+    std::cout << "                    wires controls on third-party designs. figma / figma-plugin only.\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
@@ -978,7 +987,7 @@ static std::string read_file(const std::string& path) {
     return ss.str();
 }
 
-// ── .pulp.zip auto-unpack (issue #47) ──────────────────────────────────
+// ── .pulp.zip auto-unpack ───────────────────────────────────────────────
 //
 // The Pulp Figma plugin's "Export to Pulp" button emits a `.pulp.zip` that
 // contains scene.pulp.json + assets/*.png. Asking users to manually unzip
@@ -1652,6 +1661,8 @@ int main(int argc, char* argv[]) {
     std::string export_format = "w3c";
     std::string reference_image;     // --reference: PNG of source design for validation
     std::string diff_output;         // --diff: output path for visual diff image
+    std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
+    bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
     bool dry_run = false;
     bool include_tokens = true;
     bool include_comments = true;
@@ -1672,8 +1683,8 @@ int main(int argc, char* argv[]) {
     // Per-node override: a Figma node name ending in `@sprite` or
     // `@silver` overrides the global default for THAT knob only.
     bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
-    bool skin_faders = true;         // pulp #3191; plain via --fader-style=default
-    bool skin_meters = true;         // pulp #3191; plain via --meter-style=default
+    bool skin_faders = true;         // plain via --fader-style=default
+    bool skin_meters = true;         // plain via --meter-style=default
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
@@ -1687,25 +1698,25 @@ int main(int argc, char* argv[]) {
     pulp::view::ScreenshotBackend screenshot_backend =
         pulp::view::ScreenshotBackend::skia;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
-    bool bridge_output_explicit = false;                 // pulp friction-fix #4
+    bool bridge_output_explicit = false;                 // bridge output was set explicitly
     bool emit_bridge_scaffold = true;                    // default on for --from claude
-    bool execute_bundle = false;                         // pulp #468 native-runtime path
-    std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
-    bool classnames_output_explicit = false;             // pulp friction-fix #4
+    bool execute_bundle = false;                         // native-runtime path
+    std::string classnames_output = "classnames.json";   // claude classname map
+    bool classnames_output_explicit = false;             // classname output was set explicitly
     bool emit_classnames = true;                          // default on for --from claude
-    // pulp #2116 V2 — keyboard shortcuts auto-imported from source.
+    // Keyboard shortcuts are auto-imported from source.
     // Default-on; opt out with --no-import-shortcuts.
     std::string shortcuts_output = "shortcuts.json";
     bool shortcuts_output_explicit = false;
     bool import_shortcuts = true;
-    // Phase A defaults — auto-bind platform conventions (Cmd+, → Settings,
+    // Auto-bind platform conventions (Cmd+, → Settings,
     // etc.) when the source has a high-confidence component match. Default-on;
     // `--no-default-shortcuts` opts out without affecting the source-extracted
     // path above.
     bool default_shortcuts = true;
-    bool output_explicit = false;                         // pulp friction-fix #4
-    bool tokens_file_explicit = false;                    // pulp friction-fix #4
-    // pulp #1031 — versioned detect surface
+    bool output_explicit = false;                         // output path was set explicitly
+    bool tokens_file_explicit = false;                    // tokens file was set explicitly
+    // Versioned detect surface.
     bool detect_only = false;
     bool report_new_format = false;
     std::string input_directory;                          // --directory: alternative to --file
@@ -1719,6 +1730,12 @@ int main(int argc, char* argv[]) {
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
     std::unordered_map<std::string, std::string> expected_asset_hashes;
+    // --recognition-manifest: a user-supplied recognition manifest mapping the
+    // designer's OWN Figma component-set keys (and/or name prefixes) to Pulp
+    // control kinds, MERGED OVER the built-in Pulp Figma Library. Lets the
+    // importer wire controls on third-party designs that don't use the
+    // published Pulp library. See recognition_resolver.hpp for the merge module.
+    std::string recognition_manifest_path;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -1758,6 +1775,12 @@ int main(int argc, char* argv[]) {
             validate = true;
         } else if (std::strcmp(argv[i], "--diff") == 0 && i + 1 < argc) {
             diff_output = argv[++i];
+        } else if (std::strcmp(argv[i], "--import-report") == 0 && i + 1 < argc) {
+            import_report_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--recognition-manifest") == 0 && i + 1 < argc) {
+            recognition_manifest_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
+            fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
             // Parse WxH
             std::string sz = argv[++i];
@@ -1938,7 +1961,7 @@ int main(int argc, char* argv[]) {
 
     // --format css-variables emits a CSS file, so its sidecar defaults to
     // theme.css rather than tokens.json (the W3C default). The leaf name also
-    // feeds the friction-fix #4 anchoring below.
+    // feeds the sidecar anchoring below.
     const char* tokens_default_leaf =
         (export_format == "css-variables") ? "theme.css" : "tokens.json";
     if (export_format == "css-variables" && !tokens_file_explicit)
@@ -1955,8 +1978,8 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    // pulp friction-fix #4 — when the user passes --output <dir>/ui.js,
-    // anchor the sidecar files (bridge_handlers.cpp, classnames.json,
+    // When the user passes --output <dir>/ui.js, anchor the sidecar files
+    // (bridge_handlers.cpp, classnames.json,
     // tokens.json) to the same directory so they don't scatter to cwd.
     // Only applies when the sidecar flag wasn't given explicitly.
     if (output_explicit) {
@@ -2011,7 +2034,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── pulp #1031 — versioned detect-only path ─────────────────────────
+    // ── Versioned detect-only path ──────────────────────────────────────
     // Runs against compat.json without invoking the source parsers.
     if (detect_only) {
         namespace det = pulp::import_detect;
@@ -2104,7 +2127,7 @@ int main(int argc, char* argv[]) {
     auto source = parse_design_source(source_str);
     if (!source) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
-        std::cerr << "Valid sources: figma, stitch, v0, pencil, claude, designmd, jsx\n";
+        std::cerr << "Valid sources: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
     }
 
@@ -2241,8 +2264,8 @@ int main(int argc, char* argv[]) {
         } else {
             switch (*source) {
                 case DesignSource::figma:
-                    // Guardrail (pulp #41 follow-up): a Figma-plugin export
-                    // envelope passed to `--from figma` would otherwise be fed
+                    // Guardrail: a Figma-plugin export envelope passed to
+                    // `--from figma` would otherwise be fed
                     // to parse_figma_json, which finds none of its structure and
                     // silently yields an empty root-only import. Auto-route to
                     // the plugin parser and tell the user once.
@@ -2405,6 +2428,126 @@ int main(int argc, char* argv[]) {
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
+    // ── Extensible key-based recognition (issue #4676) ───────────────────────
+    // Re-resolve each Figma component instance's component-set key / name prefix
+    // against the MERGED recognition table (built-in Pulp Figma Library + the
+    // user-supplied --recognition-manifest, the latter merged OVER the former),
+    // and stamp `audio_widget` on any instance that matched but the in-Figma TS
+    // plugin did not already recognize. This wires controls on a THIRD-PARTY
+    // design whose instances carry their own component-set keys.
+    //
+    // Only the figma sources carry the component identity the resolver reads
+    // (parse_ir_node stamps figmaComponentKey / figmaMainComponentName from the
+    // envelope's `figma` block). For every other source the resolver is empty of
+    // matchable nodes, so this is a no-op there.
+    //
+    // Strictly additive: NO --recognition-manifest and a design with no
+    // resolvable third-party keys leaves behavior exactly as before (the built-in
+    // library path stays authoritative; an already-stamped audio_widget is never
+    // overridden). Unmatched-but-present component instances are surfaced as an
+    // import diagnostic — never guessed into a wrong kind (P7).
+    if (*source == DesignSource::figma_plugin || *source == DesignSource::figma) {
+        auto resolver = pulp::view::RecognitionResolver::with_builtin_library();
+        if (!recognition_manifest_path.empty()) {
+            const std::string manifest_json = read_file(recognition_manifest_path);
+            if (manifest_json.empty()) {
+                std::cerr << "Error: could not read --recognition-manifest "
+                          << recognition_manifest_path << "\n";
+                return 2;
+            }
+            std::string parse_err;
+            auto user_source = pulp::view::RecognitionResolver::parse_manifest_json(
+                manifest_json, "user-manifest", &parse_err);
+            if (!user_source) {
+                std::cerr << "Error: invalid --recognition-manifest "
+                          << recognition_manifest_path << ": " << parse_err << "\n";
+                return 2;
+            }
+            resolver.add_source(std::move(*user_source));
+        }
+
+        // Installed-package custom controls (P8): gather each installed
+        // package's `design_controls` fragment and add it as its own source,
+        // MERGED OVER the built-in library and the user manifest. With no
+        // custom-control package installed this contributes nothing, so behavior
+        // is unchanged. Discovery walks up from the design's directory for a
+        // packages.lock.json / registry.json pair (a project root).
+        {
+            // Anchor discovery at the OUTPUT location (the user's project), not
+            // the input file (which may be a temp/extracted export). Fall back to
+            // cwd when no output directory is set (dry-run / stdout).
+            fs::path search_start = fs::path(output_file).parent_path();
+            if (search_start.empty()) search_start = fs::current_path();
+            auto pkg_sources =
+                pulp::view::discover_package_design_controls(search_start);
+            for (auto& w : pkg_sources.warnings)
+                std::cerr << "recognition: " << w << "\n";
+            for (auto& s : pkg_sources.sources) {
+                const auto entry_count = s.entries.size();
+                const std::string pkg_name = s.name;
+                resolver.add_source(std::move(s));
+                std::cerr << "recognition: merged " << entry_count
+                          << " custom control"
+                          << (entry_count == 1 ? "" : "s") << " from package '"
+                          << pkg_name << "'\n";
+            }
+        }
+
+        std::vector<pulp::view::UnmatchedComponent> unmatched;
+        const int wired = pulp::view::apply_recognition_resolver(
+            ir.root, resolver, &unmatched);
+        // Materialize half: turn resolved custom-control matches (stamped as the
+        // `recognitionFactoryId` node attribute) into kind=custom interactive
+        // elements the native materializer builds — or renders inert + diagnoses
+        // when the factory isn't registered (never a silent knob).
+        pulp::view::materialize_recognized_custom_controls(ir.root);
+        if (wired > 0)
+            std::cerr << "recognition: wired " << wired
+                      << " control" << (wired == 1 ? "" : "s")
+                      << " from the recognition manifest set\n";
+        // Surface present-but-unmatched component instances so they are SEEN
+        // (a candidate for a --recognition-manifest entry), never silently
+        // rendered inert (P7 never-silent-knob). Recorded in the IR diagnostics
+        // AND printed directly to stderr — the shared print helper drops `info`
+        // severity, and a missing knob the user must notice is not "info noise".
+        for (const auto& u : unmatched) {
+            ir.diagnostics.push_back(make_cli_diagnostic(
+                ImportDiagnosticSeverity::info,
+                ImportDiagnosticKind::unknown,
+                "unmapped-component",
+                "<component>",
+                "component '" + u.name + "' (key " + u.component_key +
+                    ") is present in the design but not mapped by any "
+                    "recognition manifest; add it to --recognition-manifest "
+                    "to wire it as a control"));
+            std::cerr << "recognition: unmapped component '" << u.name
+                      << "' (key " << u.component_key << ") — present in the "
+                      << "design but mapped by no recognition manifest; add it "
+                      << "to --recognition-manifest to wire it as a control\n";
+        }
+    }
+
+    // P7 import report — surface every interactive control's resolution provenance
+    // (rung / confidence / conflicts / verification) for EVERY output mode (codegen
+    // and DesignIR-v1 alike), so a low-confidence or conflicted control is SEEN at
+    // import time. Printed to stderr (stdout may carry dry-run JSON);
+    // --import-report writes the machine-readable JSON a CI gate can threshold;
+    // --fail-on-unresolved makes a conflicted/inert control a nonzero exit.
+    // P7 render-placement verification (structural): flag overlays that can't
+    // render (degenerate extent) or fall entirely outside the frame, BEFORE the
+    // report collects verification_pass — so the report and the gate see it.
+    apply_placement_verification(ir.root,
+                                 ir.root.style.width.value_or(0.0f),
+                                 ir.root.style.height.value_or(0.0f));
+    const auto import_report = collect_import_report(ir.root);
+    if (!import_report.controls.empty())
+        std::cerr << import_report_to_text(import_report);
+    if (!import_report_path.empty() &&
+        !write_file(import_report_path, import_report_to_json(import_report)))
+        std::cerr << "warning: could not write import report to "
+                  << import_report_path << "\n";
+    const int report_exit = (fail_on_unresolved && !import_report.ok()) ? 2 : 0;
+
     if (artifact_emit == ArtifactEmit::ir_json) {
         const auto asset_options = make_asset_options(input_file,
                                                       input_url,
@@ -2419,7 +2562,7 @@ int main(int argc, char* argv[]) {
         const auto ir_json = serialize_design_ir(ir);
         if (dry_run) {
             std::cout << ir_json << "\n";
-            return 0;
+            return report_exit;
         }
         if (!write_file(output_file, ir_json)) return 1;
         if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
@@ -2427,7 +2570,7 @@ int main(int argc, char* argv[]) {
                   << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s")
                   << ")\n";
-        return 0;
+        return report_exit;
     }
 
     if (artifact_emit == ArtifactEmit::cpp) {
@@ -2460,7 +2603,7 @@ int main(int argc, char* argv[]) {
             std::cout << cpp.source;
             std::cout << "\n=== Generated Pulp C++ binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
             std::cout << cpp.binding_manifest;
-            return 0;
+            return report_exit;   // honor --fail-on-unresolved on the cpp dry-run path
         }
 
         if (!write_files_atomically({
@@ -2480,7 +2623,7 @@ int main(int argc, char* argv[]) {
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels, " << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s") << ")\n";
-        return 0;
+        return report_exit;   // honor --fail-on-unresolved on the cpp write path
     }
 
     if (artifact_emit == ArtifactEmit::swiftui) {
@@ -2562,7 +2705,7 @@ int main(int argc, char* argv[]) {
     opts.skin_faders = skin_faders;
     opts.skin_meters = skin_meters;
 
-    // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
+    // Auto-import keyboard shortcuts from the source.
     // Default-on. Source-agnostic helper: the extractor takes a raw
     // TSX/JS/HTML string and regex-scans for `e.key === '…'` patterns,
     // so all source types (claude, v0, figma code blobs, stitch inline
@@ -2573,15 +2716,15 @@ int main(int argc, char* argv[]) {
     if (import_shortcuts) {
         detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
 
-        // Phase A defaults — only fire when the developer's React source
-        // has a high-confidence match. `apply_default_shortcuts` lowers
+        // Default shortcuts only fire when the developer's React source has a
+        // high-confidence match. `apply_default_shortcuts` lowers
         // accepted DefaultShortcutCandidates into the same DetectedShortcut
         // form so they ride V2's codegen path with no fork. Suppressed
         // chord-by-chord against `detected_shortcuts` so an extracted
         // binding always wins.
         //
-        // Codex P2 on #2128: the import CLI runs at build time, but the
-        // generated ui.js ships to many platforms (mac standalone, win
+        // The import CLI runs at build time, but the generated ui.js ships to
+        // many platforms (mac standalone, win
         // standalone, plugin hosts on either). Emit BOTH macOS and
         // Win/Linux variants — at runtime only the chord matching the
         // physical key press fires its registerShortcut entry, so the
@@ -2738,7 +2881,7 @@ int main(int argc, char* argv[]) {
                             }
                         }
 
-                        // pulp #3191 — derive a value-driven skin for recognised
+                        // Derive a value-driven skin for recognised
                         // faders/meters by SAMPLING the captured PNG (not baking
                         // it). The widget then redraws the recovered colours /
                         // gradient procedurally so the thumb/level still move
@@ -2773,7 +2916,7 @@ int main(int argc, char* argv[]) {
                                     // exports at 2× but we derive it from the
                                     // data rather than assume, so a re-scaled
                                     // export still maps art px → logical px.
-                                    // pulp #3191 width fix.
+                                    // Derive the asset scale from the captured width.
                                     float node_w = n.style.width.value_or(0.0f);
                                     float asset_scale =
                                         (node_w > 0.0f && img.width > 0)
@@ -2945,8 +3088,8 @@ int main(int argc, char* argv[]) {
 
     // Write output files. DESIGN.md describes a system, not a screen —
     // there is no UI tree to scaffold, so skip the ui.js write entirely
-    // and emit only tokens.json. Phase 3 may add a `--with-scaffold` flag
-    // once name-based widget detection is consistent across sources.
+    // and emit only tokens.json. Future work may add a `--with-scaffold`
+    // flag once name-based widget detection is consistent across sources.
     if (*source != DesignSource::designmd) {
         if (!write_file(output_file, js)) return 1;
 
@@ -3011,7 +3154,7 @@ int main(int argc, char* argv[]) {
         std::cout << ")\n";
     }
 
-    // Bridge handler scaffold for Claude Design imports (pulp #709).
+    // Bridge handler scaffold for Claude Design imports.
     // Only emitted for --from claude; other sources keep their existing
     // output shape unchanged.
     if (*source == DesignSource::claude && emit_bridge_scaffold) {
@@ -3022,7 +3165,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Classnames artifact for Claude Design imports (pulp #1035).
+    // Classnames artifact for Claude Design imports.
     // Spectr's `tools/extract-html-bundle/extract.mjs` emits the same
     // map by hand; pulling it into the CLI lets `@pulp/css-adapt`
     // consume the file directly without a separate Node-side pass.
@@ -3039,8 +3182,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // pulp #2116 V2 — shortcuts manifest alongside classnames. Mirror
-    // shape so a reviewer can audit what the auto-import will bind. The
+    // Shortcuts manifest alongside classnames. Mirror shape so a reviewer can
+    // audit what the auto-import will bind. The
     // generated ui.js already contains the matching registerShortcut(...)
     // calls; this file is for human/CI audit.
     if (import_shortcuts && !detected_shortcuts.empty()) {
@@ -3065,8 +3208,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Phase A — diagnostic dump of the defaults scan alongside the bound
-    // manifest. Writes even when no defaults fired, so a reviewer can see
+    // Diagnostic dump of the defaults scan alongside the bound manifest.
+    // Writes even when no defaults fired, so a reviewer can see
     // *why* (collisions, low confidence). Mirror naming convention.
     if (import_shortcuts && default_shortcuts &&
         (!default_scan.accepted.empty() || !default_scan.collisions.empty())) {
@@ -3084,8 +3227,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // pulp friction-fix #3 — native-react detection (heuristic shared
-    // with the lib so tests can exercise it directly; see
+    // Native-react detection (heuristic shared with the lib so tests can
+    // exercise it directly; see
     // design_import.hpp::looks_like_bundler_entry). When the static
     // parser produces only a handful of elements AND the HTML looks
     // like a JS-bundler entry, the user almost certainly wanted to run
@@ -3267,5 +3410,5 @@ int main(int argc, char* argv[]) {
     // code so callers/harness can tell it apart from a parse/IO error).
     if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     if (fidelity_failed) return 4;
-    return 0;
+    return report_exit;  // 0, or 2 under --fail-on-unresolved with a conflicted/inert control
 }

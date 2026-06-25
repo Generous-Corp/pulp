@@ -1,5 +1,4 @@
-// Real ARA::ARAFactory construction (workstream 06 slice 6 — follow-up
-// to the stub that 6.5 landed). Active only when PULP_HAS_ARA is set;
+// Real ARA::ARAFactory construction. Active only when PULP_HAS_ARA is set;
 // non-ARA builds compile to an empty TU.
 //
 // This file publishes a static ARAFactory whose strings come from the
@@ -31,8 +30,7 @@ namespace {
 // Every ARA controller call gets a safe no-op implementation so a host
 // calling through the factory never lands on a null pointer. Plug-ins
 // that want real ARA behaviour override the corresponding method on
-// their AraDocumentController subclass; a future slice wires those
-// overrides into the interface table.
+// their AraDocumentController subclass.
 
 using ARA::ARADocumentControllerRef;
 using ARA::ARADocumentControllerInstance;
@@ -47,12 +45,10 @@ void ARA_CALL stub_begin_editing(ARADocumentControllerRef) {}
 void ARA_CALL stub_end_editing(ARADocumentControllerRef) {}
 void ARA_CALL stub_notify_model_updates(ARADocumentControllerRef) {}
 
-// ── Batch 2: document / musical-context / audio-source management (#253).
-// These are the next-most-called callbacks after the five above.
-// Stubs are no-ops that return opaque *unique* refs when the SDK
-// expects one — ARA treats the ref as a runtime identity token, so
-// returning the same pointer for two live objects would make them
-// indistinguishable to hosts.
+// ── Document / musical-context / audio-source management ─────────────────
+// Stubs are no-ops that return opaque *unique* refs when the SDK expects one:
+// ARA treats the ref as a runtime identity token, so returning the same pointer
+// for two live objects would make them indistinguishable to hosts.
 //
 // We mint unique refs by handing out distinct integer ticks cast to
 // the ref type. Atomicity covers the case where the host calls create
@@ -123,9 +119,9 @@ ARA::ARAAudioModificationRef ARA_CALL stub_create_audio_modification(
 {
     return mint_unique_ref<ARA::ARAAudioModificationRef>();
 }
-// Codex P1 follow-up: hosts that created a modification expect the
-// clone + undo-history callbacks to exist once create succeeds.
-// Stubs still, just non-null. A real clone mints a new ref.
+// Hosts that created a modification expect the clone + undo-history callbacks
+// to exist once create succeeds. These are still stubs, just non-null. A real
+// clone mints a new ref.
 ARA::ARAAudioModificationRef ARA_CALL stub_clone_audio_modification(
     ARADocumentControllerRef,
     ARA::ARAAudioModificationRef,
@@ -191,7 +187,7 @@ ARADocumentControllerInterface build_controller_interface() {
     iface.deactivateAudioSourceForUndoHistory = stub_deactivate_audio_source_for_undo_history;
     iface.destroyAudioSource                  = stub_destroy_audio_source;
 
-    // Audio modification (5 — clone + undo-history added per Codex P1)
+    // Audio modification (5, including clone + undo-history callbacks)
     iface.createAudioModification                = stub_create_audio_modification;
     iface.cloneAudioModification                 = stub_clone_audio_modification;
     iface.updateAudioModificationProperties      = stub_update_audio_modification_properties;

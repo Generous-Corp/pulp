@@ -1285,16 +1285,10 @@ int main(){return 0;}"#;
         assert_eq!(v, vec!["foo.h", "bar.h"]);
     }
 
-    // ── #45 coverage uplift slice 2 ────────────────────────────────
+    // ── Pure helper and empty-state coverage ───────────────────────
     //
-    // pkg.rs was at ~15% line coverage — overwhelmingly the
-    // single-largest gap blocking the 80% line gate. The existing 8
-    // tests only hit the parse_* surface and a couple of helpers;
-    // every run_* and do_* function was uncovered. This block adds
-    // 18 small, hermetic tests targeting the cheap pure-function /
-    // help-path / empty-state branches that don't need a fully
-    // populated registry. Combined they push pkg.rs comfortably
-    // past 50% and pull the aggregate over 80%.
+    // Small, hermetic tests for pure-function, help-path, and empty-state
+    // branches that do not need a fully populated package registry.
 
     use std::io::Cursor;
 
@@ -1448,11 +1442,8 @@ int main(){return 0;}"#;
         assert!(matches!(s, TargetSub::Help));
     }
 
-    // NOTE: these two tests pre-date the `with_cwd` mutex helper
-    // below — they use an inline cwd save/restore which races
-    // against parallel cwd-touching tests in the slice 4 batch.
-    // They're moved later in the file (after the helper) so they
-    // can use the same locked path.
+    // These tests stay before the cwd-sensitive cases below because they
+    // do not mutate process cwd and can run without the with_cwd mutex.
 
     #[test]
     fn run_search_empty_query_prints_help() {
@@ -1472,7 +1463,7 @@ int main(){return 0;}"#;
         assert!(s.contains("target"), "expected target usage in help: {s:?}");
     }
 
-    // ── #45 coverage uplift slice 4 — run_* error/empty paths ──────
+    // ── run_* error/empty paths ────────────────────────────────────
     //
     // pkg.rs's biggest remaining gap is the run_add / run_remove /
     // run_update / run_suggest error and empty-input paths. Each one
@@ -1671,7 +1662,7 @@ int main(){return 0;}"#;
         assert!(res.1.contains("pulp add"), "missing add hint: {:?}", res.1);
     }
 
-    // ── #45 coverage uplift slice 7 — pkg.rs run_* with real registry ──
+    // ── pkg.rs run_* with real registry ────────────────────────────────
     //
     // Up to now, pkg.rs tests only exercised the empty-state /
     // outside-project / parse-args branches. The real meat — license
@@ -1680,8 +1671,8 @@ int main(){return 0;}"#;
     // paths require a registry fixture on disk. This block plants a
     // minimal `tools/packages/registry.json` and exercises run_search
     // / run_add / run_target paths against it. Combined with the
-    // earlier slices, pulls pkg.rs above 60% line coverage, which is
-    // the headroom needed to clear the aggregate 80% line gate.
+    // earlier empty-state coverage, these tests cover the registry-backed
+    // branches as well.
 
     fn td_with_registry() -> tempfile::TempDir {
         let td = td_with_pulp_toml();

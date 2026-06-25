@@ -128,12 +128,23 @@ lanes, and verify a runner is actually busy before blaming capacity.
   `faithful_svg` as a `DesignFrameView`), raise that file's `max_loc` in the same
   PR — splitting a tightly-coupled emitter mid-feature would hurt readability
   more than the extra LOC. Reserve the split for genuine grab-bag growth.
+  When a PR shrinks a tracked hotspot, lower that file's `max_loc` in
+  `hotspot_size_guard.json` to the new exact LOC in the same PR; the
+  `--require-ceiling-reduction` gate compares the merge-base blob against `HEAD`
+  for branch-touched tracked hotspots, so leaving headroom after a shrink fails
+  the pre-push/CI guard.
   Editing `hotspot_size_guard.json` itself trips the `ci` skill-sync gate; the
   ceiling bump is normally part of a non-`ci` feature PR, so either fold this
   note's rationale into that PR or skip the `ci` gate with a
   `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
   commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
   the tip, so updating this SKILL is the more robust path).
+- **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
+  added `inspect/**` files and freezes the current inspector overlay, window,
+  domain handler, and tweak-store hotspots. When an inspector extraction shrinks
+  a tracked file, lower its `max_loc` to the exact new line count in the same
+  change. When a new overlay companion file triggers the large-file warning,
+  split it before it becomes another hotspot.
 - **Reskinnability ratchet (`token-coverage-ratchet` ctest).** Driven by
   `tools/scripts/token_coverage_check.py`: fails if a `core/view/src` paint file
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
@@ -674,6 +685,36 @@ than parsing error strings.
 ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see danielraffel/pulp#120).
+
+**Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
+limit.** Shipyard authenticates with its own **GitHub App token**
+(higher rate budget), so PR-create / check-watching / merge aren't bound
+by the developer's personal 5,000/hr `gh` budget — which is *shared*
+across interactive `gh`, Shipyard, and every self-hosted runner
+authenticating as the same user. Operational rules:
+
+- **`gh` "The token in keyring is invalid" / `gh auth status` failing /
+  `gh api` 403 "rate limit exceeded" is almost always a rate-limit FALSE
+  POSITIVE, not a broken token.** `gh auth status` validates by calling
+  the API; a rate-limited 403 gets mislabeled as an invalid token. Do
+  **not** `gh auth refresh` — it wastes a round-trip and fixes nothing.
+  First run `gh api rate_limit --jq .resources`. High `core.remaining`
+  (e.g. 4900/5000) *with* a 403 ⇒ the **secondary/abuse limit** (fires on
+  bursts / concurrent / expensive calls like `gh api .../git/trees/
+  ...?recursive=1`), which clears in ~1–5 min; a low `core.remaining` ⇒
+  the primary limit, resets at the top of the hour.
+- **`git push`/clone over HTTPS use a separate budget** and keep working
+  when `gh api` 403s — so push branches with `git`, then let `shipyard
+  pr` open the PR via its App token.
+- **`shipyard pr`'s local target-reachability probe still shells out to
+  local `gh auth status`,** so a rate-limited probe prints "Target 'mac'
+  (cloud) is unreachable / gh auth status failed". Push past it with
+  `--allow-unreachable-targets` (the required GitHub-Actions `macos` gate
+  still guards the merge). Do **not** `--skip-target mac` to dodge it —
+  `mac` is the only validation target, so skipping leaves none ("No
+  targets remain after --skip-target filtering").
+- Reduce burst: `git clone --depth 1` instead of recursive tree-API
+  dumps; space `gh` calls; never tight-loop `gh` (back off / schedule).
 
 ```bash
 # Primary: Shipyard
@@ -2305,7 +2346,7 @@ HEAD reporting.
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the node ABI and hotspot-size gates, advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
-- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + node-ABI + hotspot-size + deps-audit). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
+- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
 **Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:
 
@@ -2324,7 +2365,11 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 
 **CLI ↔ MCP parity (pulp #1997):** `tools/scripts/check_cli_mcp_parity.py` is the fourth invariant gate, added by pulp #1997. It enforces that every top-level CLI command added to `tools/cli/pulp_cli.cpp` either gets a matching `pulp_<command>` tool in `tools/mcp/pulp_mcp.cpp` OR an entry in `tools/scripts/cli_mcp_parity_baseline.json` with a one-line reason. Whole-tree check (no diff base needed) — runs as the `CLI ↔ MCP parity check` step in `version-skill-check.yml` in `--mode=report` (hard fail) and as a hint in `hooks/scripts/cli-plugin-sync.sh`. There is no commit-trailer bypass — the baseline file is itself the bypass mechanism. To intentionally defer MCP exposure for a new CLI command, add an entry to `cli_mcp_parity_baseline.json` in the same PR. The full guidance lives in the `cli-maintenance` skill ("Decide: does this need an MCP tool?").
 
-**Hotspot-size guard (P0.1 refactor roadmap):** `tools/scripts/hotspot_size_guard.py` hard-fails when a tracked monolith exceeds the frozen LOC ceiling in `tools/scripts/hotspot_size_guard.json`. It also warns, without blocking, when a newly added `core/**` or `tools/**` file is already over the configured warning threshold. Lower a ceiling in the same PR that shrinks a hotspot; only raise one when the PR explains why the growth is intentional and still reviewable.
+**Hotspot-size guard (P0.1 refactor roadmap):** `tools/scripts/hotspot_size_guard.py` hard-fails when a tracked monolith exceeds the frozen LOC ceiling in `tools/scripts/hotspot_size_guard.json`. It also warns, without blocking, when a newly added `core/**`, `tools/**`, or `inspect/**` file is already over the configured warning threshold. Lower a ceiling in the same PR that shrinks a hotspot; only raise one when the PR explains why the growth is intentional and still reviewable.
+
+`tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
+When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`
+and lower that ceiling to the new exact LOC in the same PR that moves code out.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 
@@ -2988,3 +3033,42 @@ report and exits 0 — it does **not** open issues (no false-positive spam).
 Promoting it to auto-open tracking issues is a future opt-in. Detection
 lives in the pure `stale_entries()` fn (unit-tested in
 `tools/scripts/test_host_quirks_staleness.py`), so it needs no clock/network.
+
+## Gotcha: sign-and-release fallback must be macOS 15
+
+`sign-and-release.yml` once fell back to GitHub-hosted `macos-14`, whose default
+Xcode 15.4 Apple clang lacked C++20 P0960 (parenthesized aggregate init). The
+self-hosted PR `macos` lane used a newer clang, so CLI/import translation units
+compiled on every PR but failed only in the tagged release path; tags kept
+advancing while no Release/binaries published. Fix: route the GitHub-hosted
+fallback to `macos-15` and keep selecting the newest installed Xcode 16.x
+(`release-cli.yml` and the Build/Test gate already use macOS 15). If the
+GitHub-hosted macOS image changes again, verify the fallback runner still has
+C++20 parity with the PR lane before changing release routing.
+
+## Release health escalation (`release-health.yml`)
+
+Beyond the auto-release/cadence/release-cli watchdogs, `release-health.yml`
+(every 2h) is the SYMPTOM-LEVEL catch-all: it fails RED + keeps ONE rolling
+`release-health`-labelled issue when the newest N tags (default 2) have no
+non-draft release with assets — i.e. published releases aren't keeping pace with
+tags, regardless of which leg broke. To debug a "release stuck" report: check
+this workflow's latest run + the open `release-health` issue, then the failing
+`sign-and-release.yml`/`release-cli.yml` legs for the newest tag. Discord push is
+wired but OFF unless the `RELEASE_ALERT_DISCORD_WEBHOOK` secret is set.
+
+## Release is built by TWO workflows → publish via the coordinator (immutable releases)
+
+A Pulp release is assembled from two parallel tag-triggered workflows: `Release
+CLI` (release-cli.yml → CLI binaries) and `Sign and Release` (sign-and-release.yml
+→ macOS sign/notarize + appcast.xml). GitHub now makes a PUBLISHED release
+IMMUTABLE, so the leg that published first locked the other out ("Cannot upload
+asset to an immutable release") and releases shipped incomplete. Both legs now
+create the release as a DRAFT on a tag push; `release-publish.yml` (the "Release
+publish coordinator", workflow_run on both) flips it to published EXACTLY ONCE,
+when BOTH legs succeed for the same SHA. Consequences to know: a release stays a
+draft until both legs are green (incomplete releases never publish), and
+release-health.yml treats a stuck draft as unhealthy. When debugging "tag exists
+but no published release", check both legs' runs AND the coordinator. A manual
+release-cli workflow_dispatch backfill still publishes directly (draft only on
+`push`).

@@ -1,4 +1,4 @@
-// Tests for SdfEffect mask + presets (Phase 4 host-side API).
+// Tests for SdfEffect mask + presets (host-side API).
 
 #include <pulp/canvas/sdf_effects.hpp>
 

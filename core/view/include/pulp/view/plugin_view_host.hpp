@@ -37,19 +37,20 @@ public:
 
     // Create a plugin view host for the given view tree.
     //
-    // Platform support (#299):
+    // Platform support:
     //   - macOS: NSView-backed impl in plugin_view_host_mac.mm, including
     //     native child-view attach/bounds/detach.
     //   - iOS: UIView-backed impl in plugin_view_host_ios.mm, including
     //     native child-view attach/bounds/detach.
-    //   - Windows/Linux/Android: no built-in impl — host app registers a
-    //     factory via set_factory(). Without a factory, create() returns
-    //     nullptr explicitly.
+    //   - Windows/Linux: native child-window hosts are registered on demand.
+    //   - Android or custom hosts: host app registers a factory via
+    //     set_factory(). Without a factory, create() returns nullptr
+    //     explicitly.
     static std::unique_ptr<PluginViewHost> create(View& root, Size size);
     static std::unique_ptr<PluginViewHost> create(View& root, const Options& options);
 
-    // Host-registered factory (#299). Installed by the host app's
-    // platform layer on non-Apple targets.
+    // Host-registered factory. Installed by built-in platform hosts or by
+    // embedding apps on targets without a built-in host.
     using Factory = std::function<std::unique_ptr<PluginViewHost>(
         View& root, const Options& options)>;
     static void set_factory(Factory factory);
@@ -129,14 +130,12 @@ public:
     // pointer at construction (or via a later attach call) and forwards it
     // to __describeNativeAdapterImpl / __createNativeAdapterImpl /
     // __gpuCanvasConfigureImpl. Without a real surface here, those native
-    // impls return mocks and JS-rendered 3D output is black (per
-    // `threejs-bridge` skill's "gpu_surface MUST be passed to WidgetBridge"
-    // gotcha and Phase iOS-D.3b Slice 1).
+    // impls return mocks and JS-rendered 3D output is black. Always pass
+    // the GPU surface to WidgetBridge when constructing a scripted GPU view.
     //
     // Lifetime: the GpuSurface is owned by the PluginViewHost. Consumers
     // capture the raw pointer; the WidgetBridge must be destroyed before
-    // the host. See planning/2026-05-29-ios-d3b-threejs-webgpu-program.md
-    // § Slice 1 risks.
+    // the host.
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
 
     // Native-frame resize notification. AU v2 has no host size callback — the

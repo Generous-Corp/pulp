@@ -1,5 +1,4 @@
-// skia_canvas_text.cpp — Canvas2D text shaping + text-paint methods,
-// extracted from skia_canvas.cpp in the 2026-05 Phase 4 (R2-3) refactor.
+// skia_canvas_text.cpp — Canvas2D text shaping + text-paint methods.
 //
 // The SkParagraph-based text surface: cluster-aware shaping with
 // HarfBuzz + ICU + color-emoji fallback, and every SkiaCanvas text
@@ -8,10 +7,9 @@
 // fill_text_sdf, measure_text, and the file-local shape helpers
 // (shape_with_glyph_fallback, active_typeface_covers_text).
 //
-// Definitions only; declarations stay in skia_canvas.hpp. Relocated so
-// text-shaping work no longer recompiles the whole 2.9k-line
-// skia_canvas.cpp. The include block mirrors skia_canvas.cpp's so the
-// SkParagraph / SkShaper / font headers are all in scope.
+// Definitions only; declarations stay in skia_canvas.hpp. The include block
+// mirrors skia_canvas.cpp's so the SkParagraph / SkShaper / font headers are
+// all in scope.
 
 #include <algorithm>
 #include <cctype>
@@ -134,12 +132,12 @@ PreparedParagraph make_paragraph(const std::string& text,
                                 : skia::textlayout::TextDirection::kRtl);
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
-    // Codex P2 (PR #2157): split CSS font-family lists. `family` can be a
-    // comma-separated CSS fallback list ("Inter, sans-serif"). Passing the
-    // whole string as one SkString makes SkParagraph treat it as a single
-    // literal family name and miss the fallback resolution. Split on commas
-    // and strip surrounding whitespace + optional quote marks so each entry
-    // resolves independently in the font collection.
+    // `family` can be a comma-separated CSS fallback list ("Inter,
+    // sans-serif"). Passing the whole string as one SkString makes
+    // SkParagraph treat it as a single literal family name and miss the
+    // fallback resolution. Split on commas and strip surrounding whitespace
+    // + optional quote marks so each entry resolves independently in the
+    // font collection.
     if (!family.empty()) {
         size_t cursor = 0;
         while (cursor < family.size()) {
@@ -238,9 +236,9 @@ bool needs_paragraph_for_text_metrics(
 } // namespace
 
 
-// pulp #2163 — minimal UTF-8 decoder. Skia's SkUTF helper isn't in our
-// public include set, but the format is small and well-defined; inline
-// here so we can check codepoint coverage without pulling skia/private.
+// Minimal UTF-8 decoder. Skia's SkUTF helper isn't in our public include set,
+// but the format is small and well-defined; inline here so we can check
+// codepoint coverage without pulling skia/private.
 // Returns U+FFFD on malformed input and always advances at least one
 // byte so the caller cannot infinite-loop.
 static SkUnichar next_utf8(const char* s, const char* end, int* advance) {
@@ -263,12 +261,11 @@ static SkUnichar next_utf8(const char* s, const char* end, int* advance) {
     return uc;
 }
 
-// pulp #2163 — per-glyph font fallback for fill_text. Walks the codepoints
-// using `active` as the preferred typeface; for any codepoint missing
-// from `active`, asks SkFontMgr::matchFamilyStyleCharacter for a
-// fallback typeface that contains the codepoint. Builds contiguous
-// runs sharing one typeface, shapes each run with SkShaper, then
-// concatenates the resulting blobs.
+// Per-glyph font fallback for fill_text. Walks the codepoints using `active`
+// as the preferred typeface; for any codepoint missing from `active`, asks
+// SkFontMgr::matchFamilyStyleCharacter for a fallback typeface that contains
+// the codepoint. Builds contiguous runs sharing one typeface, shapes each run
+// with SkShaper, then concatenates the resulting blobs.
 //
 // Motivated by JSX imports (e.g. Chainer) that request fonts the host
 // machine doesn't have installed. The fallback typeface that
@@ -358,6 +355,11 @@ static void shape_with_glyph_fallback(SkCanvas* canvas,
         SkFont rf = base_font;
         rf.setTypeface(r.tf);
 
+        // The RunHandler origin MUST be {0,0}; the draw position is passed
+        // exclusively to drawTextBlob() to avoid double-offset in nested
+        // save/translate/clip contexts. If the handler is seeded with {x,y}
+        // AND drawTextBlob also receives {x,y}, glyph positions are offset
+        // twice: once inside the blob and once by the draw call.
         SkTextBlobBuilderRunHandler handler(r.text.c_str(), {0, 0});
         shaper->shape(r.text.c_str(), r.text.size(), rf, ltr,
                       SK_ScalarInfinity, &handler);
@@ -411,13 +413,11 @@ void SkiaCanvas::fill_text_anchored(const std::string& text,
                                     float x, float y, TextAnchor anchor) {
     GUARD_CANVAS;
     if (text.empty()) return;
-    // pulp #2163 / font v2 Slice 1.2.b — translate the anchor's y
-    // reference into a baseline-y, then delegate to fill_text. The
-    // worst-case-glyph metrics (SkFontMetrics::fTop / fBottom flipped
-    // positive) come from TextShaper, which pulls them from the same
-    // resolved typeface the painter will use — guarantees that the
-    // anchor-y → baseline-y math matches what the painter actually
-    // does, slice-1.3 parity harness asserts pixel-equal output.
+    // Translate the anchor's y reference into a baseline-y, then delegate to
+    // fill_text. The worst-case-glyph metrics (SkFontMetrics::fTop / fBottom
+    // flipped positive) come from TextShaper, which pulls them from the same
+    // resolved typeface the painter will use. That keeps the anchor-y to
+    // baseline-y math aligned with what the painter actually does.
     if (anchor == TextAnchor::Baseline) {
         fill_text(text, x, y);
         return;
@@ -458,9 +458,8 @@ void SkiaCanvas::fill_text_anchored(const std::string& text,
 void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     GUARD_CANVAS;
     if (text.empty()) return;
-    // pulp #2163 — `PULP_FILL_TEXT_TRACE=1` env var prints the (text, x, y)
-    // arguments reaching the Skia path for the labels named below.
-    // Useful for triage during the font-hardening rollout — pair with
+    // `PULP_FILL_TEXT_TRACE=1` prints the (text, x, y) arguments reaching
+    // the Skia path for the labels named below. Pair with
     // PULP_LABEL_DEBUG_BOX to compare Label::paint's computed baseline
     // against the y argument fill_text actually receives.
     if (std::getenv("PULP_FILL_TEXT_TRACE")) {
@@ -473,44 +472,40 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
         }
     }
 
-    // pulp #1899 (gap #3) — when any currently-open save_layer carries
-    // alpha < 1, Skia's LCD subpixel AA degrades on the non-opaque
-    // destination and glyphs render faint. make_font() falls back to
-    // greyscale AA in that case (browser parity).
+    // When any currently-open save_layer carries alpha < 1, Skia's LCD
+    // subpixel AA degrades on the non-opaque destination and glyphs render
+    // faint. make_font() falls back to greyscale AA in that case (browser
+    // parity).
     SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_,
                             inside_non_opaque_layer());
     if (!font.getTypeface()) return;
 
-    // pulp Wave 3 c2d.6 — gradient (and pattern) fillStyle on text. Route
-    // through current_fill_paint() so any active gradient_shader_ flows
-    // onto the glyph paint. Without this, ctx.fillStyle =
-    // createLinearGradient(...); ctx.fillText('Hi', x, y) silently
-    // degraded to the first stop colour. The shader's geometry maps in
-    // device space, so the gradient stretches across the rendered glyphs
-    // exactly like Blink / WebKit. current_fill_paint() also folds in
-    // the sticky Canvas2D shadow* state and the CSS filter chain (issue-
-    // 1434 batch 7 / pulp #1520) so text honors `ctx.shadowBlur` and
-    // `ctx.filter` in the same call.
+    // Route gradient and pattern fillStyle through current_fill_paint() so
+    // any active gradient_shader_ flows onto the glyph paint. Without this,
+    // ctx.fillStyle = createLinearGradient(...); ctx.fillText('Hi', x, y)
+    // silently degrades to the first stop colour. The shader's geometry maps
+    // in device space, so the gradient stretches across the rendered glyphs
+    // like Blink / WebKit. current_fill_paint() also folds in the sticky
+    // Canvas2D shadow* state and the CSS filter chain so text honors
+    // `ctx.shadowBlur` and `ctx.filter` in the same call.
     auto paint = current_fill_paint();
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // pulp #2163 — per-glyph font fallback. If the resolved typeface
-    // lacks a glyph for any codepoint in `text` (common when JSX
-    // imports request a host-uninstalled font like "IBM Plex Mono"
-    // and Pulp falls back to the system default which lacks Unicode
-    // arrows/dashes/etc.), partition the text into runs by typeface
-    // and shape each separately. ASCII text bypasses the scan; it's
+    // Per-glyph font fallback. If the resolved typeface lacks a glyph for any
+    // codepoint in `text` (common when JSX imports request a host-uninstalled
+    // font like "IBM Plex Mono" and Pulp falls back to the system default
+    // which lacks Unicode arrows/dashes/etc.), partition the text into runs by
+    // typeface and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
     //
     const bool needs_paragraph =
         needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
 
-    // pulp #2163 — for plain letter_spacing_ == 0 text only, route
-    // missing-glyph text through SkShaper-based per-run fallback for
-    // best kerning / ligature quality. Emoji, variation selectors,
-    // font features, and tracked text must use SkParagraph instead:
-    // that path preserves cluster shaping and reports the advance used
-    // for Canvas2D textAlign.
+    // For plain letter_spacing_ == 0 text only, route missing-glyph text
+    // through SkShaper-based per-run fallback for best kerning / ligature
+    // quality. Emoji, variation selectors, font features, and tracked text
+    // must use SkParagraph instead: that path preserves cluster shaping and
+    // reports the advance used for Canvas2D textAlign.
     if (letter_spacing_ == 0.0f
         && !needs_paragraph
         && !active_typeface_covers_text(font.getTypeface(), text)) {
@@ -521,40 +516,22 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
         return;
     }
 
-    // pulp #2163 — if letter_spacing_ != 0 OR letter_spacing_ == 0
-    // path-1 (SkShaper) gave up (above), but the active typeface
-    // covers the text, fall through to the unified per-glyph builder.
-    // For letter-spaced text with missing glyphs, the per-glyph builder
-    // handles fallback inline so we never reach this point with .notdef
-    // boxes — the bullet ● in '● READY' now renders via system fallback
-    // even when letter_spacing_ > 0.
+    // If letter_spacing_ != 0 OR letter_spacing_ == 0 path-1 (SkShaper) gave
+    // up above, but the active typeface covers the text, fall through to the
+    // unified per-glyph builder. For letter-spaced text with missing glyphs,
+    // the per-glyph builder handles fallback inline so we never reach this
+    // point with .notdef boxes.
     //
     // For letter_spacing_ == 0 + fully covered text the path-1 SkShaper
     // already returned above, so we won't double-render.
 
-    // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
+    // SkParagraph handles cluster-aware emoji fallback, CSS letter-spacing,
+    // OpenType font features, bidi direction, kerning, and ligatures.
     //
-    // The RunHandler origin MUST be {0,0}. The draw position is passed
-    // exclusively to drawTextBlob() to avoid double-offset in nested
-    // save/translate/clip contexts (issue #75). The bug: if the handler
-    // is seeded with {x,y} AND drawTextBlob also receives {x,y}, glyph
-    // positions are offset twice — once inside the blob and once by the
-    // draw call — producing a ghost/double image that worsens with each
-    // nesting level in the widget paint pipeline.
-    //
-    // SkParagraph handles cluster-aware emoji fallback, CSS letter-
-    // spacing, OpenType font features, and bidi direction.
-    //
-    // Codex P1 (PR #2157): previously this branch was gated on
-    // `needs_paragraph` (features/letter-spacing/rtl/emoji) and routed
-    // plain LTR ASCII text into the per-glyph SkTextBlob fallback as a
-    // hot-path optimization. That fallback has NO kerning or ligatures,
-    // so common strings like "AV" / "ffi" / "fl" rendered with the
-    // wrong advances and bare-glyph spacing — a visual + width-sensitive
-    // regression vs. the pre-emoji code, which always shaped through
-    // SkParagraph. The per-glyph blob path is now only reached when
-    // shaping is compile-time disabled (`PULP_HAS_TEXT_SHAPING` off) or
-    // SkParagraph fails to build a paragraph at runtime.
+    // The per-glyph blob path has no kerning or ligatures, so SkParagraph is
+    // the default text path whenever it can build a paragraph. The per-glyph
+    // blob path is only reached when shaping is compile-time disabled
+    // (`PULP_HAS_TEXT_SHAPING` off) or SkParagraph fails at runtime.
     {
         const bool ltr = (direction_ != TextDirection::rtl);
         auto prepared = make_paragraph(text, font_family_, font_size_,
@@ -575,17 +552,12 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     }
 #endif
 
-    // pulp #2163 — unified per-glyph fallback path with per-codepoint
-    // font fallback AND letter-spacing support. Reached when
-    // PULP_HAS_TEXT_SHAPING is compile-time disabled OR (post-PR #2157)
-    // when make_paragraph fails to build a paragraph. One code path so
-    // every fill_text call ends up at the same baseline placement,
-    // regardless of whether the text has missing glyphs or letter-spacing.
-    // Replaces the prior split where letter-spaced text rendered missing
-    // glyphs as .notdef boxes while non-letter-spaced text routed through
-    // shape_with_glyph_fallback — the divergent baselines between paths
-    // showed up as visibly stacked labels (pulp #2163 #31 iMX8/READY
-    // regression).
+    // Unified per-glyph fallback path with per-codepoint font fallback and
+    // letter-spacing support. Reached when PULP_HAS_TEXT_SHAPING is
+    // compile-time disabled or when make_paragraph fails to build a
+    // paragraph. One code path keeps every fill_text call at the same
+    // baseline placement regardless of whether the text has missing glyphs
+    // or letter-spacing.
     //
     // Algorithm:
     //  1. Walk UTF-8 codepoints.
@@ -603,8 +575,8 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // SkShaper's kerning + ligature quality is lost on this path,
     // but it's only entered for letter-spaced or non-fully-covered
     // text — both cases that already preclude useful kerning. The
-    // best-quality SkParagraph path (#2157) is still chosen for the
-    // common case at the top of fill_text above.
+    // best-quality SkParagraph path is still chosen for the common case at
+    // the top of fill_text above.
     auto font_mgr_for_fallback = get_font_manager();
     SkFontStyle style{font_weight_, SkFontStyle::kNormal_Width,
                       font_slant_ ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant};
@@ -713,14 +685,12 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
 
 void SkiaCanvas::fill_text_with_max_width(const std::string& text,
                                            float x, float y, float max_width) {
-    // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. When the
-    // measured advance exceeds `max_width` the spec requires the user
-    // agent to either pick a narrower font OR scale the text horizontally
-    // so the resulting run is exactly `max_width` px wide. We take the
-    // scaling path: it preserves the active typeface (no fallback font
-    // surprises), preserves vertical metrics, and matches HarfBuzz's
-    // per-cluster shape / draw model — each glyph cluster shrinks as a
-    // rigid unit, keeping cluster boundaries spec-compliant.
+    // Canvas2D `fillText(text, x, y, maxWidth)`. When the measured advance
+    // exceeds `max_width`, the spec requires the user agent to either pick a
+    // narrower font or scale the text horizontally so the resulting run is
+    // exactly `max_width` px wide. We take the scaling path: it preserves the
+    // active typeface, preserves vertical metrics, and matches HarfBuzz's
+    // per-cluster shape / draw model.
     //
     // Sentinel: `max_width <= 0` means "no constraint" — fall through
     // to the unconstrained `fill_text` path bit-for-bit.
@@ -750,33 +720,29 @@ void SkiaCanvas::fill_text_with_max_width(const std::string& text,
 
 void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
                               float max_width) {
-    // pulp #1525 — true stroked-glyph rendering. Build a paint with
-    // SkPaint::kStroke_Style so each glyph outline is honoured at the
-    // active line width / stroke colour, rather than the pre-#1525
-    // approximation that re-routed through fillText with strokeStyle as
-    // the fill colour. HarfBuzz / SkShaper still handles cluster shaping
-    // — we only swap the paint's style flag.
+    // True stroked-glyph rendering. Build a paint with SkPaint::kStroke_Style
+    // so each glyph outline is honoured at the active line width / stroke
+    // colour. HarfBuzz / SkShaper still handles cluster shaping; we only swap
+    // the paint's style flag.
     GUARD_CANVAS;
     if (text.empty()) return;
-    // pulp #1899 (gap #3) — see fill_text comment. Mirror the edging
-    // policy so stroked glyphs inside an opacity layer track the
-    // greyscale-AA path that fill_text uses.
+    // Mirror the fill_text edging policy so stroked glyphs inside an opacity
+    // layer track the same greyscale-AA path.
     SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_,
                             inside_non_opaque_layer());
     if (!font.getTypeface()) return;
 
     auto stroke_paint = make_stroke_paint(stroke_color_, line_width_);
     stroke_paint.setAntiAlias(true);
-    // Codex P2 (PR #1555): propagate sticky stroke state — lineJoin,
-    // lineCap, miterLimit, and any stroke pattern shader — onto the
-    // text-stroke paint. Without this, ctx.lineJoin / ctx.lineCap /
-    // ctx.miterLimit / ctx.strokeStyle=createPattern(...) are silently
-    // dropped on strokeText, even though every other stroke primitive
-    // (stroke_rect, stroke_path, stroke_circle, …) honours them.
+    // Propagate sticky stroke state (lineJoin, lineCap, miterLimit, and any
+    // stroke pattern shader) onto the text-stroke paint. Without this,
+    // ctx.lineJoin / ctx.lineCap / ctx.miterLimit /
+    // ctx.strokeStyle=createPattern(...) are silently dropped on strokeText,
+    // even though every other stroke primitive honours them.
     apply_stroke_state(stroke_paint);
     apply_shadow_filter(stroke_paint);
 
-    // pulp #1525 — apply maxWidth squeeze around (x, y) before drawing.
+    // Apply maxWidth squeeze around (x, y) before drawing.
     bool needs_restore = false;
     if (max_width > 0.0f) {
         const float measured = measure_text(text);
@@ -918,12 +884,11 @@ void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
     // The smoothstep is applied per-pixel by Skia's shader pipeline
     // when we use kAlpha_8 — we just draw with the fill color's paint.
     //
-    // pulp Wave 3 c2d.6 — gradient/pattern fillStyle on SDF-drawn text.
-    // Mirror the fill_text() update: route through current_fill_paint()
-    // so an active gradient_shader_ tints the glyph quad consistently
-    // with the shape-fill paths. The SDF channel is sampled out of the
-    // alpha-only atlas image; the paint shader supplies the colour, so
-    // gradients composite identically to the Skia-shaped text path.
+    // Route SDF-drawn gradient/pattern fillStyle through current_fill_paint()
+    // so an active gradient_shader_ tints the glyph quad consistently with
+    // the shape-fill paths. The SDF channel is sampled out of the alpha-only
+    // atlas image; the paint shader supplies the colour, so gradients
+    // composite identically to the Skia-shaped text path.
     auto paint = current_fill_paint();
     for (auto& [g, x_off] : draws) {
         float gx = draw_x + x_off + g->bearing_x * scale;
@@ -980,11 +945,11 @@ float SkiaCanvas::measure_text(const std::string& text) {
 
     float total = 0;
     for (int i = 0; i < glyph_count; ++i) total += widths[i];
-    // pulp #927: include CSS letter-spacing in measurement so layout code
-    // (e.g. ellipsis truncation in Label::paint) reasons over the same
-    // total advance the renderer will draw. Legacy fallback path —
-    // glyph-pair tracking, not cluster-aware. Hit only when the
-    // shaper / text-shaping module is unavailable.
+    // Include CSS letter-spacing in measurement so layout code (e.g.
+    // ellipsis truncation in Label::paint) reasons over the same total
+    // advance the renderer will draw. Legacy fallback path: glyph-pair
+    // tracking, not cluster-aware. Hit only when the shaper / text-shaping
+    // module is unavailable.
     if (glyph_count > 1) total += letter_spacing_ * static_cast<float>(glyph_count - 1);
     return total;
 }
@@ -1060,8 +1025,7 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // SkFont::measureText returns the advance width and stores the
     // tight rendering bbox in `bounds`. The advance is what
     // CanvasRenderingContext2D.measureText.width returns; the bbox
-    // gives us the actualBoundingBoxLeft/Right/Ascent/Descent fields
-    // (issue-916).
+    // gives us the actualBoundingBoxLeft/Right/Ascent/Descent fields.
     SkScalar advance = font.measureText(
         text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
 

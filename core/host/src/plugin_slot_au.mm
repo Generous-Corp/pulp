@@ -1,10 +1,10 @@
 // Audio Unit v2 plugin slot (macOS only).
 //
 // Loads an AU v2 effect/instrument via AudioComponent APIs, exposes the
-// PluginSlot interface, and drives audio through AudioUnitRender. Scope
-// for Phase 1: stereo in/out, parameter metadata, bypass, basic
-// activation. MIDI routing to instruments is Phase 2; editor view,
-// state save/restore via ClassInfo, and sidechain ports land later.
+// PluginSlot interface, and drives audio through AudioUnitRender. The backend
+// covers stereo in/out, parameter metadata, bypass, activation, MIDI routing,
+// and state save/restore via ClassInfo. Editor views and sidechain ports are
+// not exposed by this backend yet.
 //
 // Identified by {componentType, componentSubType, componentManufacturer}
 // encoded into PluginInfo.unique_id as "TYPE:SUBT:MANU" (OSType 4CCs).
@@ -142,11 +142,10 @@ public:
         }
 
         // Deliver MIDI input via MusicDeviceMIDIEvent, AU v2's sample-
-        // accurate MIDI write path. Workstream 03 slice 3.6 — previously
-        // midi_in was discarded, so hosted AU instruments received no
-        // MIDI. Skips malformed messages (length outside [1..3] or no
-        // status byte) to avoid polluting the plugin with garbage, same
-        // validation the AUv3 adapter adopted in PR #179.
+        // accurate MIDI write path. Without this, hosted AU instruments
+        // receive no MIDI. Skips malformed messages (length outside [1..3] or
+        // no status byte) to avoid polluting the plugin with garbage, matching
+        // the AUv3 adapter's validation.
         for (auto it = midi_in.begin(); it != midi_in.end(); ++it) {
             const auto& me = *it;
             const auto& m = me.message;
@@ -155,7 +154,7 @@ public:
             // Clamp to [0, num_samples - 1]. SignalGraph::inject_midi
             // forwards caller-provided offsets without normalization, so
             // a >= num_samples value can sneak in; AU rejects or mistimes
-            // such events. Fix per #191 review.
+            // such events.
             int32_t offset = me.sample_offset;
             if (offset < 0) offset = 0;
             if (offset >= num_samples) offset = num_samples - 1;
@@ -279,13 +278,13 @@ public:
         return st == noErr;
     }
 
-    bool has_editor() const override { return false; }      // Phase 4
+    bool has_editor() const override { return false; }
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-    void* create_editor_view() override { return nullptr; } // Phase 4
-    void destroy_editor_view() override {}                  // Phase 4
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic pop
 #endif
@@ -313,9 +312,9 @@ public:
         return 0;
     }
 
-    // Item 4.5 — typed plugin introspection. Surface the AudioUnit
-    // instance and its component description so callers can talk directly
-    // to AudioToolbox / use vendor-specific properties.
+    // Typed plugin introspection surfaces the AudioUnit instance and its
+    // component description so callers can talk directly to AudioToolbox or
+    // use vendor-specific properties.
     void accept(ExtensionsVisitor& visitor) const override {
         AudioUnitExtension ext;
         ext.component_instance = au_;

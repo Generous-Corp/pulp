@@ -1,4 +1,4 @@
-// FileChooser widget tests — macOS plan item 6.2.
+// FileChooser widget tests — builder + dialog-forwarding contract.
 //
 // Coverage:
 //   * Builder accessors (title / initial directory / default name /

@@ -53,7 +53,7 @@ struct BlobData {
 //   - File path
 //   - Memory buffer
 //   - Embedded resource (registered at startup via CMake pulp_add_binary_data)
-//   - data: URI (for Phase 13 Three.js bridge compatibility)
+//   - data: URI (for Three.js bridge compatibility)
 //
 // All load functions are synchronous. For async loading, use load_async()
 // which accepts a completion callback.

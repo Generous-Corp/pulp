@@ -93,7 +93,7 @@ jobs:
 
           for sha in "${candidates[@]}"; do
               # Did this commit actually change the SDK VERSION line?
-              # Codex P1 on #512: `python3 - <<'PY'` reads the SCRIPT
+              # #512: `python3 - <<'PY'` reads the SCRIPT
               # from stdin, so piping `diff_content` in would be silently
               # discarded (heredoc wins). Pass the diff through argv so
               # both script AND data reach Python.

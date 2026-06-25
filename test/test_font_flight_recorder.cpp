@@ -1,4 +1,4 @@
-// test_font_flight_recorder.cpp — Pulp #2163, font v2 Slice 2.2.
+// test_font_flight_recorder.cpp — font fallback trace recorder coverage.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,7 +33,7 @@ TEST_CASE("FlightRecorder: record + drain round-trip", "[font][diagnostics]") {
     REQUIRE(r.size() == 0u);
     REQUIRE(out[0].requested_family == "Inter");
     REQUIRE(out[1].requested_family == "JetBrains Mono");
-    REQUIRE(out[0].sequence < out[1].sequence);  // monotonic
+    REQUIRE(out[0].sequence < out[1].sequence);
 }
 
 TEST_CASE("FlightRecorder: capacity overflow drops oldest", "[font][diagnostics]") {
@@ -44,14 +44,15 @@ TEST_CASE("FlightRecorder: capacity overflow drops oldest", "[font][diagnostics]
     r.record_fallback({"a", "a", 0u, 0u, 0u});
     r.record_fallback({"b", "b", 0u, 0u, 0u});
     r.record_fallback({"c", "c", 0u, 0u, 0u});
-    r.record_fallback({"d", "d", 0u, 0u, 0u});  // pushes 'a' off
+    // Over capacity: the oldest record should be dropped.
+    r.record_fallback({"d", "d", 0u, 0u, 0u});
 
     auto out = r.snapshot();
     REQUIRE(out.size() == 3u);
     REQUIRE(out[0].requested_family == "b");
     REQUIRE(out[2].requested_family == "d");
 
-    r.set_capacity(1024);  // restore default
+    r.set_capacity(1024);
     r.clear();
 }
 

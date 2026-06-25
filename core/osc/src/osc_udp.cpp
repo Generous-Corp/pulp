@@ -382,7 +382,7 @@ void Receiver::stop() {
 }
 
 void Receiver::stop_impl(bool destroying) {
-    // Shutdown ordering matters (#490). The receive thread may be
+    // Shutdown ordering matters. The receive thread may be
     // blocked inside recv() on this FD right now. If we close the FD
     // before joining, POSIX kernels are free to recycle that FD number
     // for an unrelated file/socket immediately — the receive thread's

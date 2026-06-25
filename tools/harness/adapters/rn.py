@@ -1,4 +1,4 @@
-"""RN ViewStyle surface adapter — week 1 deliverable (third of 5).
+"""RN ViewStyle surface adapter.
 
 Classifies each `rn/*` entry in compat.json against three layers of evidence:
 
@@ -70,11 +70,11 @@ class RnAdapter(AdapterBase):
     def __init__(self, repo_root: Path):
         super().__init__(repo_root)
         self._oracle = self._load_oracle()
-        # P5-NEW-A split the former monolithic prop-applier switch into a
-        # thin dispatcher plus per-domain modules. Concatenate all of them
-        # before extracting `case 'X':` arms so the RN harness sees the live
-        # JSX bridge surface instead of only the handful of type-dispatched
-        # cases that remain in prop-applier.ts.
+        # The prop-applier switch is split into a thin dispatcher plus
+        # per-domain modules. Concatenate all of them before extracting
+        # `case 'X':` arms so the RN harness sees the live JSX bridge surface
+        # instead of only the handful of type-dispatched cases that remain in
+        # prop-applier.ts.
         self._prop_applier_text = "\n".join(
             self._read(rel)
             for rel in (

@@ -348,17 +348,10 @@ private:
     void feed_engine(const float* const* in, int num_samples) {
         int done = 0;
         while (done < num_samples) {
-            // Chunk exactly to the next analysis-frame boundary so
-            // offset_in_block_ is the TRUE in-block offset at which the frame
-            // completes. handle_frame evaluates the smoothed pitch/formant
-            // ratio at offset_in_block_; the old analysis_hop_-sized chunking
-            // pre-set it to the chunk END, so when a frame landed mid-chunk the
-            // control trajectory was sampled too far ahead. That fed an
-            // inconsistent synthesis hop into the overlap-add and collapsed the
-            // output to near-silence under rapid pitch/formant changes — and,
-            // because the bad hop sequence perturbs the running phase/position
-            // state, it stayed collapsed until reset(). Boundary-aligned chunks
-            // make the per-frame control offset exact.
+            // Chunk exactly to the next analysis-frame boundary so offset_in_block_
+            // is the true in-block offset at which the frame completes. handle_frame
+            // evaluates the smoothed pitch/formant ratio at offset_in_block_, so a
+            // boundary-aligned chunk makes that per-frame control offset exact.
             const int until = std::max(1, engine_.samples_until_next_frame());
             const int run = std::min(num_samples - done, until);
             offset_in_block_ = done + run;
@@ -416,7 +409,7 @@ private:
         // giving a coherent split; per-channel morphers decorrelate the
         // stereo noise. The mask carries the StnDecomposer's small inherent
         // delay, applied to the current frame — inaudible for stationary
-        // noise (a finer time-alignment is a future refinement).
+        // noise.
         if (morph) {
             for (int k = 0; k < bins; ++k)
                 mag_scratch_[static_cast<size_t>(k)] = std::abs(frames[0][k]);

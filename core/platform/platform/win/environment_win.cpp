@@ -1,4 +1,4 @@
-// Windows adapter for the unified Environment API (#342).
+// Windows adapter for the unified Environment API.
 //
 // Pure Win32 — no UWP/WinRT — so this works in every plugin host
 // (DAW process, standalone, AAX wrapper) regardless of WinRT init.

@@ -215,16 +215,16 @@ struct ShipShelloutFixture {
 }  // namespace
 
 TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship outside a project directory errors out",
+                 "pulp ship default help does not require a project directory",
                  "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship"});
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code != 0);
-    auto combined = r.stdout_output + r.stderr_output;
-    // The handler early-exits with "not in a Pulp project directory"
-    // — that wording is the contract hosts/users rely on.
-    REQUIRE(contains(combined, "Pulp project"));
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "Subcommands:"));
+    REQUIRE(contains(r.stdout_output, "check"));
+    REQUIRE_FALSE(contains(r.stderr_output, "Build directory not found"));
+    REQUIRE_FALSE(contains(r.stderr_output, "not in a Pulp project"));
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
@@ -270,6 +270,30 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship help does not require a project or build directory",
+                 "[cli][shellout][ship][help][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    auto outside = run_pulp_in(fs::temp_directory_path(), {"ship", "--help"});
+    REQUIRE_FALSE(outside.timed_out);
+    REQUIRE(outside.exit_code == 0);
+    REQUIRE(contains(outside.stdout_output, "Subcommands:"));
+    REQUIRE(contains(outside.stdout_output, "check"));
+    REQUIRE_FALSE(contains(outside.stderr_output, "Build directory not found"));
+    REQUIRE_FALSE(contains(outside.stderr_output, "not in a Pulp project"));
+
+    auto root = make_fake_project("help-no-build", false);
+    auto in_project = run_pulp_in(root, {"ship"});
+    REQUIRE_FALSE(in_project.timed_out);
+    REQUIRE(in_project.exit_code == 0);
+    REQUIRE(contains(in_project.stdout_output, "Subcommands:"));
+    REQUIRE(contains(in_project.stdout_output, "check"));
+    REQUIRE_FALSE(contains(in_project.stderr_output, "Build directory not found"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package outside a project errors cleanly",
                  "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
@@ -290,7 +314,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(r.exit_code == 0);
     // Help branch reached — every shipping subcommand must be listed.
     for (const char* sub : {"sign", "notarize", "package", "appcast",
-                            "check", "auv3-xcodeproj", "release", "share"}) {
+                            "check", "doctor", "auv3-xcodeproj", "release", "share"}) {
         INFO("ship help missing subcommand: " << sub);
         REQUIRE(contains(r.stdout_output, sub));
     }
@@ -327,6 +351,54 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto combined = r.stdout_output + r.stderr_output;
     REQUIRE(contains(combined, "Build directory not found"));
     REQUIRE(contains(combined, "pulp build"));
+
+    fs::remove_all(root);
+}
+
+// `pulp ship doctor` makes signing non-interactive. It is dispatched ABOVE the
+// build-dir guard (it must work before any build exists) and shells out to
+// tools/scripts/ensure_signing_ready.sh. We drop a stub script into the fake
+// project so the test exercises the dispatch + arg pass-through without touching
+// the real keychain or Apple.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor runs without a build dir and shells the readiness script",
+                 "[cli][shellout][ship][doctor]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("doctor-no-build", /*with_build_cache=*/false);
+    auto scripts = root / "tools" / "scripts";
+    fs::create_directories(scripts);
+    auto stub = scripts / "ensure_signing_ready.sh";
+    {
+        std::ofstream out(stub);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"DOCTOR-STUB-RAN args=$*\"\n"
+               "exit 0\n";
+    }
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read |
+                              fs::perms::others_read);
+
+    auto r = run_pulp_in(root, {"ship", "doctor", "--check-online"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(combined, "DOCTOR-STUB-RAN"));
+    REQUIRE(contains(combined, "--check-online"));          // arg pass-through
+    REQUIRE_FALSE(contains(combined, "Build directory not found"));  // ran above the guard
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor reports a clear error when the readiness script is missing",
+                 "[cli][shellout][ship][doctor]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("doctor-missing-script", /*with_build_cache=*/false);
+
+    auto r = run_pulp_in(root, {"ship", "doctor"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "missing"));
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "ensure_signing_ready.sh"));
 
     fs::remove_all(root);
 }
@@ -717,7 +789,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif
 
-// Item 7.5 (macos-plugin-authoring-plan): per-artifact .pkg / .dmg
+// macOS authoring item 7.5: per-artifact .pkg / .dmg
 // selection. The parser-level checks belong here next to the other
 // `ship package` arg cases; real codesign + pkgbuild integration
 // runs on the self-hosted Mac runner.
@@ -737,7 +809,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// Item 7.4 (macos-plugin-authoring-plan): `pulp ship release` orchestrates
+// macOS authoring item 7.4: `pulp ship release` orchestrates
 // sign → package → notarize → staple as one command. The shellout
 // covers argv parsing and the macOS-only guard; the real signing /
 // notarization round-trip lives on the self-hosted Mac runner because
@@ -830,7 +902,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// Item 7.4b (macos-plugin-authoring-plan): `pulp build --install` exists
+// macOS authoring item 7.4b: `pulp build --install` exists
 // and rejects invalid flag combinations before touching the filesystem.
 // The end-to-end install path is unit-tested via install_paths_mac;
 // here we cover the CLI-surface contract.
@@ -962,7 +1034,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-// ── ASC API key notary flow (2026-05-26) ────────────────────────────
+// ── ASC API key notary flow ─────────────────────────────────────────
 //
 // `pulp ship notarize --dry-run` prints the resolved `xcrun notarytool`
 // argv without contacting Apple. These tests pin the resolution
@@ -1204,7 +1276,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto root = make_fake_project("notarize-path-app", true);
     auto appp = (root / "Demo.app").string();
 
-    // notarytool can't submit a bare .app (Codex P2). Reject it with a
+    // notarytool can't submit a bare .app (P2). Reject it with a
     // pointer to `share`, before any submission — even in --dry-run.
     auto r = run_pulp_in(root, {"ship", "notarize", "--path", appp, "--dry-run"});
     REQUIRE_FALSE(r.timed_out);
@@ -1231,8 +1303,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
       out << "<plist><dict></dict></plist>\n"; }
 
     // --skip-sign leaves the dmg unsigned. The signature guard must skip it
-    // rather than submit an unsigned image to notarytool (Codex P1 fix:
-    // never route an unsigned .pkg/.dmg to notarization).
+    // rather than submit an unsigned image to notarytool: never route an
+    // unsigned .pkg/.dmg to notarization.
     auto r = run_pulp_in(root, {"ship", "release", "--dmg", "--skip-sign"}, 90000);
     REQUIRE_FALSE(r.timed_out);
     auto combined = r.stdout_output + r.stderr_output;

@@ -1,7 +1,5 @@
 // mac_runtime_validators.hpp — macOS runtime validators for `pulp validate`
 //
-// Phase 5 of the Linux→macOS cross-build chainer plan
-// (planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md).
 // These validators run on Apple Silicon to confirm that artifacts
 // produced by the Linux-hosted cross lane will actually load and run
 // before they are published as part of a private release. They are

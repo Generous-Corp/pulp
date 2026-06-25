@@ -112,12 +112,10 @@ if [ -x "${INSTALL_DIR}/pulp-mcp" ]; then
     info "Installed: pulp-mcp (Claude Code plugin MCP server)"
 fi
 
-# #2087: Pulp users running `curl install.sh | sh` historically ended
-# up with a fresh CLI but no SDK. Any project then built against
-# whatever stale ~/.pulp/sdk/<old>/ they had — sometimes months behind
-# — silently missing every framework fix in between (Spectr was the
-# visible victim). Auto-install the latest SDK matching the CLI's own
-# version so install.sh leaves the user with a coherent CLI+SDK pair.
+# The installer must leave curl-installed users with a coherent CLI+SDK
+# pair. Without the matching SDK install, existing projects can build
+# against an old ~/.pulp/sdk/<old>/ and silently miss framework fixes
+# even though the CLI itself updated successfully.
 #
 # Failure mode: SDK install can fail on a transient network error.
 # Don't fail the whole install — the CLI is still usable; the user can
@@ -135,8 +133,8 @@ info "Installing matching SDK v${SDK_VERSION_FROM_CLI}..."
 # Capture pulp sdk install's exit code via PIPESTATUS, not the pipeline's
 # overall status. set -e doesn't help here: a successful `sed` would mask
 # a failed `pulp sdk install`, and we'd print "Installed SDK" even when no
-# SDK landed. Codex P2 review on PR #2091 caught this — pre-fix users
-# saw a confident success message while sitting on a broken CLI+SDK pair.
+# SDK landed, leaving users with a confident success message while sitting
+# on a broken CLI+SDK pair.
 PATH="${INSTALL_DIR}:$PATH" "${INSTALL_DIR}/pulp" sdk install 2>&1 \
     | sed 's/^/  /'
 sdk_install_rc=${PIPESTATUS[0]}

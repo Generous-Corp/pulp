@@ -4,7 +4,7 @@
 //   1. Synchronous FileStream writes cache a byte payload to disk.
 //   2. Synchronous HttpStream issues an HTTP GET and reports status.
 //   3. AsyncStream wraps the FileStream, dispatches reads onto a
-//      pulp::events::EventLoop, and demonstrates backpressure + cancel.
+//      pulp::events::EventLoop, and reports completion through callbacks.
 //
 // Run without arguments to exercise the offline path (file + async); pass
 // `--http <url>` to additionally fetch a URL.
@@ -53,13 +53,19 @@ void demo_file_roundtrip() {
 
 void demo_async_stream() {
     auto path = std::filesystem::temp_directory_path() / "pulp_stream_demo_async.bin";
+    constexpr std::size_t payload_size = 256;
 
     // Pre-populate a file so the async read has something to chew on.
     {
         FileStream w(path.string(), FileStream::Mode::Write);
-        std::vector<std::uint8_t> payload(256, 42);
+        std::vector<std::uint8_t> payload(payload_size, 42);
         w.write(payload.data(), payload.size());
     }
+
+    std::mutex m;
+    std::condition_variable cv;
+    std::atomic<std::size_t> total_read{0};
+    std::atomic<bool> closed{false};
 
     pulp::events::EventLoop loop;
     AsyncStreamOptions opts;
@@ -68,13 +74,10 @@ void demo_async_stream() {
     auto file = std::make_unique<FileStream>(path.string(), FileStream::Mode::Read);
     AsyncStream stream(std::move(file), opts);
 
-    std::mutex m;
-    std::condition_variable cv;
-    std::atomic<std::size_t> total_read{0};
-    std::atomic<bool> closed{false};
-
     stream.on_data([&](const std::uint8_t*, std::size_t n) {
         total_read.fetch_add(n);
+        std::lock_guard<std::mutex> lock(m);
+        cv.notify_all();
     });
     stream.on_close([&] {
         closed.store(true);
@@ -84,8 +87,15 @@ void demo_async_stream() {
 
     stream.start();
 
-    std::unique_lock<std::mutex> lock(m);
-    cv.wait_for(lock, 1s, [&] { return closed.load(); });
+    {
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait_for(lock, 1s, [&] { return total_read.load() >= payload_size; });
+    }
+    stream.stop();
+    {
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait_for(lock, 1s, [&] { return closed.load(); });
+    }
 
     std::printf("[demo] async read delivered %zu bytes; closed=%d\n",
                 total_read.load(), int(closed.load()));
@@ -96,10 +106,8 @@ void demo_http_fetch(const std::string& url) {
     std::printf("[demo] http GET %s\n", url.c_str());
     auto req = HttpStream::Request{url, "GET", {}, "application/json", 10};
     HttpStream http(req);
-    std::printf("[demo]   status_code=%d body_len=%zu transport_error=\"%s\"\n",
-                http.status_code(),
-                http.eof() ? std::size_t{0} : std::size_t{0} /* body bytes read */,
-                http.transport_error().c_str());
+    std::printf("[demo]   status_code=%d transport_error=\"%s\"\n",
+                http.status_code(), http.transport_error().c_str());
 
     std::uint8_t buf[128]{};
     std::size_t total = 0;

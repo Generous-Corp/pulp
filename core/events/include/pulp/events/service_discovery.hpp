@@ -2,8 +2,7 @@
 
 // pulp::events::ServiceBrowser / ServicePublisher — RAII wrappers around
 // NetworkServiceDiscovery for the common single-publish / single-browse
-// shapes called out in the reference-framework gap analysis (Phase 2:
-// "NetworkServiceDiscovery platform backends — Bonjour / Avahi / WinRT").
+// shapes.
 //
 // The underlying NSD object remains the configurable dispatcher when a
 // caller needs install_backend / multiple browses; these wrappers exist
@@ -28,7 +27,7 @@ enum class ServiceDiscoveryAction {
 
 /// Try to install the host platform's default mDNS backend on `nsd`.
 /// Returns true if a real backend was installed (Bonjour on Apple
-/// platforms today; Avahi / WinRT are deferred — see the gap doc).
+/// platforms today; Avahi / WinRT are not built in yet).
 /// Returns false when the build was not compiled with a backend for
 /// this OS, so callers can `install_backend(my_own)` and try again or
 /// log a clear "no mDNS available" message instead of silently

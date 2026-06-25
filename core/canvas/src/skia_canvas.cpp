@@ -13,7 +13,6 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/utils/SkParsePath.h"
-#include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
@@ -43,6 +42,7 @@
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/svg_dom_cache.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
@@ -80,7 +80,7 @@ static SkColor4f to_sk_color4f(Color c) {
 }
 
 // Solid-color fill paint. For shape fills that should honor an active
-// gradient, prefer SkiaCanvas::current_fill_paint() — see #1350.
+// gradient, prefer SkiaCanvas::current_fill_paint().
 static SkPaint make_solid_fill_paint(Color c) {
     SkPaint paint;
     paint.setColor4f(to_sk_color4f(c));
@@ -98,9 +98,6 @@ SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
-// Cached typeface loaded directly from a known path — bypasses family name
-// matching for deterministic metrics (Visage-style approach). Cache key
-// pulp #1737 (#932 followup) — comma-separated CSS family list walker.
 // Splits a CSS `font-family` value (e.g. `"SF Pro, system-ui, sans-serif"`)
 // into individual family names, stripping outer quotes and whitespace.
 // Used by get_cached_typeface to walk the fallback chain — each family
@@ -131,9 +128,9 @@ static std::vector<std::string> split_font_family_list(const std::string& list) 
 static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
                                                     int weight, int slant);
 
-// pulp #1737 (#932 followup) — public entry point: walks a comma-separated
-// CSS family list and returns the first typeface that resolves. A single-
-// family input (no comma) just delegates to get_cached_typeface_single.
+// Walks a comma-separated CSS family list and returns the first typeface that
+// resolves. A single-family input (no comma) just delegates to
+// get_cached_typeface_single.
 // Empty string or all-fail returns the default typeface (last fallback in
 // get_cached_typeface_single's chain).
 static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
@@ -180,25 +177,17 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
     return get_cached_typeface_single("", weight, slant);
 }
 
-// includes weight + slant so setFontWeight(700) actually returns a bold
-// typeface rather than the same Regular blob (pulp #927).
-//
-// Cache is gated on `pulp::canvas::font_registration_generation()` so that
-// calling `register_font(...)` or `register_emoji_fallback(...)` mid-process
-// flushes stale `SkTypeface`s — the registration header documents this
-// idempotent-with-invalidation contract, but the cache never honored it
-// before this fix (Codex review on emoji-parity branch).
+// Includes weight + slant so setFontWeight(700) resolves a bold typeface
+// rather than the same Regular blob.
 static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
                                              int weight, int slant) {
-    // pulp #2163 / font v2 Slice 1.1.a (caller migration) — routes through
-    // FontResolver so registered / bundled / platform cascade and the
-    // typeface cache live in one place. FontResolver keys on the full
-    // FontOptions hash including registry_generation, so registration
-    // changes invalidate automatically — replaces the
-    // font_registration_generation()-watching cache that lived here.
+    // Route through FontResolver so registered / bundled / platform cascade
+    // and the typeface cache live in one place. FontResolver keys on the full
+    // FontOptions hash including registry_generation, so registration changes
+    // invalidate automatically.
     // The Android Roboto direct-file load is preserved as a pre-resolver
     // fast path (the resolver doesn't yet honor platform-specific file
-    // overrides; restored in Slice 1.1.a finish).
+    // overrides).
 #if defined(__ANDROID__)
     if (weight == 400 && slant == 0 &&
         (family == "sans-serif" || family == "Roboto" || family.empty())) {
@@ -230,21 +219,17 @@ SkFont make_font(const std::string& family, float size,
                         int slant = 0,
                         bool non_opaque_dst = false) {
     SkFont font;
-    // pulp #1899 — Spectr's drawSpectrum() can fire ctx.fillText calls
-    // before the ctx.font setter has propagated through the JS shim
-    // (race between React useEffect commit and canvas command replay).
-    // If size is 0 here, fill_text would record commands but produce
-    // zero-height glyphs — clamp to a minimal visible default so labels
-    // render even when the JS-side font sync raced the paint.
+    // If size is 0 here, fill_text records commands but produces zero-height
+    // glyphs; clamp to a minimal visible default so labels render even when the
+    // JS-side font sync races the paint.
     if (!(size > 0.0f)) size = 14.0f;
     font.setSize(size);
     font.setSubpixel(true);                               // Subpixel glyph positioning
-    // pulp #1899 (gap #3) — LCD subpixel AA visibly degrades when the
-    // destination surface isn't opaque: Skia's documented behavior is
-    // that subpixel patterns can't antialias correctly into a partially
-    // transparent pixel, so glyphs come out faint inside save_layer
-    // contexts that carry alpha < 1 (e.g. an ancestor View opens
-    // saveLayer(opacity = 0.6) for CSS opacity). Browsers
+    // LCD subpixel AA visibly degrades when the destination surface isn't
+    // opaque: Skia's documented behavior is that subpixel patterns can't
+    // antialias correctly into a partially transparent pixel, so glyphs come
+    // out faint inside save_layer contexts that carry alpha < 1 (e.g. an
+    // ancestor View opens saveLayer(opacity = 0.6) for CSS opacity). Browsers
     // (Blink / WebKit) flip the same way — greyscale AA inside
     // non-opaque layers. Callers pass `non_opaque_dst=true` when any
     // currently-open SkiaCanvas layer was opened with alpha < 1.
@@ -256,14 +241,9 @@ SkFont make_font(const std::string& family, float size,
 
     auto typeface = get_cached_typeface(family, weight, slant);
     if (!typeface) {
-        // pulp #1899 — when no typeface resolves (empty family, missing
-        // font, or pulp-screenshot's headless context missing the JS-side
-        // ctx.font sync), fall back to the SkFontMgr default rather than
-        // letting fill_text silently no-op. The previous behavior caused
-        // all canvas text (dB axis labels, frequency labels, IIR·analog
-        // sub-label) to render as nothing in Spectr's native runtime-
-        // import path — bars + grid rendered fine because they don't
-        // need typeface, but every fillText call silently dropped.
+        // When no typeface resolves (empty family, missing font, or a
+        // headless context missing the JS-side ctx.font sync), fall back to the
+        // SkFontMgr default rather than letting fill_text no-op.
         auto mgr = get_font_manager();
         if (mgr) {
             SkFontStyle sk_style{
@@ -298,12 +278,11 @@ SkiaCanvas::~SkiaCanvas() = default;
 
 void SkiaCanvas::save() { GUARD_CANVAS; canvas_->save(); }
 
-// pulp #1737 / #1515 — restore() override applies any pending mask
-// composite for the layer being restored before delegating to Skia's
-// restore. Detects the matching mask layer via the save count we
-// captured at save_layer_with_mask time. If no mask is pending for
-// this restore (the common case — non-mask save / save_layer / etc.),
-// behaves identically to the legacy `canvas_->restore()` one-liner.
+// restore() applies any pending mask composite for the layer being restored
+// before delegating to Skia's restore. Detects the matching mask layer via the
+// save count we captured at save_layer_with_mask time. If no mask is pending
+// for this restore (the common case: non-mask save / save_layer / etc.), it
+// behaves identically to `canvas_->restore()`.
 //
 // The mask paint pattern (see CSS Masking Module Level 1 §5):
 //   1. saveLayer(content, opacity)   <- already happened at open time
@@ -336,8 +315,8 @@ void SkiaCanvas::restore() {
         }
         // Falls through to the outer restore() below.
     }
-    // pulp #1899 (gap #3) — pop the non-opaque layer stack if the
-    // layer we're about to close was tracked. Save count is captured
+    // Pop the non-opaque layer stack if the layer we're about to close was
+    // tracked. Save count is captured
     // before delegating to canvas_->restore() so it matches the depth
     // recorded at push time.
     if (!non_opaque_layer_stack_.empty() &&
@@ -347,12 +326,11 @@ void SkiaCanvas::restore() {
     canvas_->restore();
 }
 
-// pulp #1368 — expose Skia's save-stack depth so CanvasWidget::paint()
-// can snapshot it at entry and `restore_to_count()` back to baseline at
-// exit. Without this defense an unbalanced JS draw script (e.g. a
-// `ctx.save()` whose matching `ctx.restore()` is skipped on an
-// early-return path) leaks GState onto the parent View's paint scope
-// and silently corrupts subsequent siblings' transform/clip.
+// Expose Skia's save-stack depth so CanvasWidget::paint() can snapshot it at
+// entry and `restore_to_count()` back to baseline at exit. Without this defense
+// an unbalanced JS draw script (e.g. a `ctx.save()` whose matching
+// `ctx.restore()` is skipped on an early-return path) leaks GState onto the
+// parent View's paint scope and corrupts subsequent siblings' transform/clip.
 int SkiaCanvas::save_count() const {
     if (!canvas_) return 0;
     return canvas_->getSaveCount();
@@ -365,9 +343,8 @@ void SkiaCanvas::restore_to_count(int target) {
     // == 4 at entry and got back depth 7 (three leaked saves) returns
     // to exactly 4 at exit. SkCanvas guards target == 0 internally.
     const int safe_target = target < 1 ? 1 : target;
-    // pulp #1899 (gap #3) — drop any tracked non-opaque layers whose
-    // save count is strictly above the target, since SkCanvas is about
-    // to close all of them in one shot.
+    // Drop any tracked non-opaque layers whose save count is strictly above the
+    // target, since SkCanvas is about to close all of them in one shot.
     while (!non_opaque_layer_stack_.empty() &&
            non_opaque_layer_stack_.back() > safe_target) {
         non_opaque_layer_stack_.pop_back();
@@ -420,7 +397,7 @@ void SkiaCanvas::concat_transform(float a, float b, float c,
     canvas_->concat(m);
 }
 
-// pulp #1368 round 2 — diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
+// Diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
 // Returns the current device matrix in CanvasRenderingContext2D affine order
 // so the env-gated CanvasWidget::paint logging can record what transform the
 // inbound canvas actually has when paint() runs.
@@ -449,10 +426,9 @@ void SkiaCanvas::clip(FillRule rule) {
     if (!path_builder_) return;
     // Snapshot the path (don't detach — Canvas2D allows continued use of
     // the same path after clip()) and intersect with the current clip.
-    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
-    // (`ctx.clip('evenodd')`) by stamping the path's fill type before
-    // SkCanvas::clipPath consumes it. Default 'nonzero' matches the
-    // pre-Wave-2 behaviour (SkPathFillType::kWinding).
+    // Honour the JS-supplied fillRule arg (`ctx.clip('evenodd')`) by stamping
+    // the path's fill type before SkCanvas::clipPath consumes it. Default
+    // 'nonzero' maps to SkPathFillType::kWinding.
     SkPath p = path_builder_->snapshot();
     p.setFillType(rule == FillRule::evenodd
                       ? SkPathFillType::kEvenOdd
@@ -461,11 +437,10 @@ void SkiaCanvas::clip(FillRule rule) {
 }
 
 void SkiaCanvas::clip_path_svg(const std::string& svg_path_d) {
-    // CSS `clip-path: path("...")` (pulp #1515). Parse the SVG-path-d
-    // string via Skia's SVG path parser and install it as the canvas
-    // clip. Caller owns save()/restore() balancing; we install the
-    // clip on the current Skia clip stack so a paired restore() lifts
-    // it. Unparseable / empty strings are silently ignored — same
+    // CSS `clip-path: path("...")`: parse the SVG-path-d string via Skia's SVG
+    // path parser and install it as the canvas clip. Caller owns save()/restore()
+    // balancing; we install the clip on the current Skia clip stack so a paired
+    // restore() lifts it. Unparseable / empty strings are silently ignored: same
     // graceful-degrade contract as the other paint-time clip helpers.
     GUARD_CANVAS;
     if (svg_path_d.empty()) return;
@@ -474,12 +449,12 @@ void SkiaCanvas::clip_path_svg(const std::string& svg_path_d) {
     canvas_->clipPath(path, /*doAntiAlias=*/true);
 }
 
-// pulp #1350 — single source of truth for shape-fill paints. Mirrors
+// Single source of truth for shape-fill paints. Mirrors
 // `fill_current_path()` so a gradient set via `set_fill_gradient_*`
 // is honored by every shape helper (rect / rrect / circle / arc /
 // oval / polygon), not just path fills. The free `make_solid_fill_paint`
 // remains for paths that intentionally want a solid color regardless
-// of the active gradient (text glyphs today).
+// of the active gradient (text glyphs intentionally use solid color).
 SkPaint SkiaCanvas::current_fill_paint() const {
     SkPaint paint;
     paint.setStyle(SkPaint::kFill_Style);
@@ -495,16 +470,14 @@ SkPaint SkiaCanvas::current_fill_paint() const {
     return paint;
 }
 
-// ── Canvas2D shadow* state (issue-1434 batch 7) ──────────────────────────────
+// ── Canvas2D shadow* state ───────────────────────────────────────────────────
 //
 // Sticky values set via `ctx.shadowColor` / `shadowBlur` /
 // `shadowOffsetX` / `shadowOffsetY`. Every subsequent fill/stroke draw
 // queries `apply_shadow_filter` and, when active, attaches an
 // `SkImageFilters::DropShadow` so the geometry emits both itself and a
 // blurred shadow underneath — mirroring WebKit / Blink. Sigma mapping is
-// the same `sigma = blur / 2` Chromium's Canvas2D implementation uses
-// (third_party/blink/.../canvas_rendering_context_2d.cc) and matches the
-// WebView reference within ~5px (same acceptance bar as #925).
+// the same `sigma = blur / 2` Chromium's Canvas2D implementation uses.
 
 bool SkiaCanvas::shadow_is_active() const {
     return shadow_color_.a > 0.0f &&
@@ -540,11 +513,10 @@ void SkiaCanvas::set_line_join(LineJoin join) {
     line_join_ = join;
 }
 
-// pulp #1434 bridge-thin gap-fill — wire ctx.miterLimit through to
-// SkPaint::setStrokeMiter. The current stroke helpers build a fresh
-// SkPaint per draw via make_stroke_paint(); we apply the miter limit
-// at draw-time in stroke_current_path / stroke_rect / etc., so this
-// setter just stores the value and lets the apply_* helper read it.
+// Wire ctx.miterLimit through to SkPaint::setStrokeMiter. The current stroke
+// helpers build a fresh SkPaint per draw via make_stroke_paint(); we apply the
+// miter limit at draw-time in stroke_current_path / stroke_rect / etc., so this
+// setter stores the value and lets the apply_* helper read it.
 // Spec: non-positive / non-finite values are silently ignored.
 void SkiaCanvas::set_miter_limit(float limit) {
     if (std::isfinite(limit) && limit > 0.0f) {
@@ -552,23 +524,22 @@ void SkiaCanvas::set_miter_limit(float limit) {
     }
 }
 
-// pulp #1434 bridge-thin gap-fill — wire ctx.imageSmoothingEnabled and
-// ctx.imageSmoothingQuality through. The flag is read at drawImage
-// time by sampling_options_for_image_smoothing() below; we just store
-// the chosen state here so it sticks across draws.
+// Wire ctx.imageSmoothingEnabled and ctx.imageSmoothingQuality through. The flag
+// is read at drawImage time by sampling_options_for_image_smoothing() below; we
+// store the chosen state here so it sticks across draws.
 void SkiaCanvas::set_image_smoothing(bool enabled,
                                      ImageSmoothingQuality quality) {
     image_smoothing_enabled_ = enabled;
     image_smoothing_quality_ = quality;
 }
 
-// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ─────────────────────
+// ── Canvas2D ctx.direction / ctx.filter ──────────────────────────────────────
 // Direction is stored on the canvas state and read at fill_text() time
 // to choose the SkShaper leftToRight flag. RTL flips the flag, which is
 // the correct first step for proper Arabic / Hebrew shaping; full bidi
 // (mixed-script paragraphs requiring the Unicode Bidi Algorithm) needs
-// SkParagraph plumbing tracked under #1506. inherit currently behaves
-// as ltr until per-View writing-direction lookup lands.
+// SkParagraph plumbing. inherit currently behaves as ltr until per-View
+// writing-direction lookup lands.
 void SkiaCanvas::set_direction(TextDirection direction) {
     direction_ = direction;
 }
@@ -597,13 +568,9 @@ void SkiaCanvas::apply_filter(SkPaint& paint) const {
     }
 }
 
-// pulp #1434 bridge-thin gap-fill — apply sticky stroke-paint state. The
-// existing stroke paths constructed an SkPaint via make_stroke_paint()
-// but never propagated the JS-side line_join / miter_limit state. The
-// canvas2d harness flagged miterLimit as silently dropped; setStrokeJoin
-// and setStrokeMiter close that gap without touching every call site.
-// line_cap_ is plumbed here too so the existing line_cap_ field finally
-// reaches the GPU paint — matches Canvas2D ctx.lineCap semantics.
+// Apply sticky stroke-paint state. Stroke paths construct an SkPaint via
+// make_stroke_paint(), then this helper propagates JS-side line_join,
+// miter_limit, and line_cap_ state to match Canvas2D stroke semantics.
 void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     SkPaint::Cap sk_cap = SkPaint::kButt_Cap;
     switch (line_cap_) {
@@ -621,15 +588,15 @@ void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     }
     paint.setStrokeJoin(sk_join);
     paint.setStrokeMiter(miter_limit_);
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern on
-    // strokeStyle. Wins over the solid stroke colour when present.
+    // Canvas2D ctx.createPattern on strokeStyle wins over the solid stroke
+    // colour when present.
     if (stroke_shader_) {
         paint.setShader(stroke_shader_);
     }
 }
 
-// pulp #1434 bridge-thin gap-fill — translate Canvas2D
-// imageSmoothingEnabled / imageSmoothingQuality into Skia sampling.
+// Translate Canvas2D imageSmoothingEnabled / imageSmoothingQuality into Skia
+// sampling.
 // `enabled = false` => nearest (pixel-art preservation). `enabled = true`
 // honours the quality enum: low = bilinear (matches the existing default),
 // medium = mipmap-aware bilinear, high = cubic Mitchell. Falls through
@@ -655,13 +622,10 @@ void SkiaCanvas::fill_rect(float x, float y, float w, float h) {
     GUARD_CANVAS; canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), current_fill_paint());
 }
 
-// pulp #929 — clearRect must actually clear pixels rather than compose a
+// clearRect must actually clear pixels rather than compose a
 // transparent SrcOver fill (which is a visual no-op). Use SkBlendMode::kClear
 // so the destination texels become transparent black, mirroring the HTML
-// CanvasRenderingContext2D.clearRect semantics. Without this, the canvas
-// widget sat over whatever the parent had previously painted (or the
-// undefined swapchain-texture pixels), which on FilterBank looked like a
-// stuck white inner area.
+// CanvasRenderingContext2D.clearRect semantics.
 void SkiaCanvas::clear_rect(float x, float y, float w, float h) {
     GUARD_CANVAS;
     SkPaint paint;
@@ -670,7 +634,7 @@ void SkiaCanvas::clear_rect(float x, float y, float w, float h) {
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
-// Apply the active line-dash pattern to a stroke paint (issue-916).
+// Apply the active line-dash pattern to a stroke paint.
 // Skia's SkDashPathEffect requires an even-length pattern with
 // nonnegative entries; the JS bridge ensures both, so we treat any
 // validation failure as "no dash" rather than silently dropping it.
@@ -773,7 +737,7 @@ void SkiaCanvas::set_font_full(const std::string& family, float size,
     letter_spacing_ = letter_spacing;
 }
 
-// pulp #1737 — capture OpenType feature flags (e.g. tnum / smcp) for
+// Capture OpenType feature flags (e.g. tnum / smcp) for
 // SkShaper's 8-arg shape() overload. Empty vector clears the active
 // features. Per-feature semantics:
 //   value = 0 → disable the feature
@@ -812,7 +776,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
-    // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
+    // Honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
@@ -829,7 +793,7 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
-    // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
+    // Honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
@@ -838,8 +802,8 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
 bool SkiaCanvas::draw_svg(const std::string& svg_document,
                           float x, float y, float w, float h) {
     if (!canvas_ || svg_document.empty() || w <= 0.0f || h <= 0.0f) return false;
-    SkMemoryStream stream(svg_document.data(), svg_document.size(), /*copyData=*/false);
-    auto dom = SkSVGDOM::Builder().make(stream);
+    // Parse via SvgDomCache (content-keyed; patched docs re-parse). See header.
+    auto dom = SvgDomCache::instance().get_or_build(svg_document);
     if (!dom) return false;
     // Scale the SVG's intrinsic size to the [x,y,w,h] box. Prefer the document's
     // own intrinsic size; fall back to the requested box so a viewBox-only SVG
@@ -864,7 +828,7 @@ bool SkiaCanvas::draw_skia_image(const sk_sp<SkImage>& image,
     return true;
 }
 
-// pulp #1737 — 9-arg drawImage source-rect form. Skia's drawImageRect has
+// 9-arg drawImage source-rect form. Skia's drawImageRect has
 // a four-rect overload that maps `src` (in image coords) onto `dst` (in
 // canvas coords) with the active sampling. Used by sprite-sheet slicing.
 bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
@@ -907,7 +871,7 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
     return true;
 }
 
-// pulp #1737 — peek-only image dimensions for ImageView object-fit /
+// Peek-only image dimensions for ImageView object-fit /
 // object-position layout. Decode is deferred until first paint, so this
 // just builds the SkImage header to read width()/height() — Skia caches
 // the SkImageInfo so the next draw_image_from_file in the same paint
@@ -928,7 +892,7 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
 
 // ── Blend modes ─────────────────────────────────────────────────────────────
 
-// pulp #1549 — shared canvas BlendMode -> SkBlendMode lookup. Used by
+// Shared canvas BlendMode -> SkBlendMode lookup. Used by
 // set_blend_mode() and save_layer_with_blend() so the two paths can never
 // drift on the keyword set.
 static SkBlendMode skia_blend_mode_for(Canvas::BlendMode mode) {
@@ -961,7 +925,7 @@ static SkBlendMode skia_blend_mode_for(Canvas::BlendMode mode) {
 void SkiaCanvas::set_blend_mode(BlendMode mode) {
     // Indices 0..15 — advanced/W3C blend modes (must stay in sync with
     // canvas.hpp BlendMode enum).
-    // Indices 16..26 — Porter-Duff compositing modes (issue-896).
+    // Indices 16..26 — Porter-Duff compositing modes.
     blend_mode_ = skia_blend_mode_for(mode);
 }
 
@@ -991,7 +955,7 @@ void SkiaCanvas::close_path() {
     if (path_builder_) path_builder_->close();
 }
 
-// ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──
+// ── Native arc / arcTo / ellipse / roundRect path builders ───────────────────
 //
 // Replaces the JS shim's bezier approximation with Skia's native arc APIs.
 // Skia ships a closed-form arc-to-cubic implementation behind SkPath::arcTo;
@@ -1092,13 +1056,11 @@ void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
     SkPath rotated = tmp.detach();
     // Append rotated path into the live builder, preserving the current
     // subpath. kExtend connects the rotated arc's first point to the
-    // existing pen position with an implicit lineTo (matching CSS
-    // Canvas2D semantics for ellipse: "If the current point is not at
-    // the start of the arc, a straight line is added."). The earlier
-    // kAppend default replaced that with a moveTo, breaking contour
-    // continuity for fills (Codex #1616 P1 on #1556). When the builder
-    // is empty kExtend degrades to kAppend, so unrotated standalone
-    // ellipses still work.
+    // existing pen position with an implicit lineTo (matching CSS Canvas2D
+    // semantics for ellipse: "If the current point is not at the start of the
+    // arc, a straight line is added."). Do not use kAppend here: it emits a
+    // moveTo and breaks contour continuity for fills. When the builder is empty
+    // kExtend degrades to kAppend, so unrotated standalone ellipses still work.
     path_builder_->addPath(rotated, SkPath::kExtend_AddPathMode);
 }
 
@@ -1130,12 +1092,9 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    // pulp #1806 — snapshot, not detach. Canvas2D spec: `ctx.fill()` and
-    // `ctx.stroke()` paint the scratch path WITHOUT consuming it. A
-    // subsequent `stroke()` on the same path must produce the outlined
-    // version of the filled shape. `detach()` was leaving the builder
-    // empty, so any caller doing `fill → stroke` (SvgPathWidget compound
-    // paths, common JS canvas idiom) silently dropped the second op.
+    // Snapshot, not detach. Canvas2D spec: `ctx.fill()` and `ctx.stroke()` paint
+    // the scratch path without consuming it. A subsequent `stroke()` on the same
+    // path must produce the outlined version of the filled shape.
     // Stamp the JS-supplied fillRule (`ctx.fill('evenodd')`) onto the
     // snapshot so Skia honours it when computing the filled area;
     // default 'nonzero' keeps the SkPathFillType::kWinding behaviour.
@@ -1158,7 +1117,7 @@ void SkiaCanvas::stroke_current_path() {
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    // pulp #1806 — snapshot (preserve), not detach. See fill_current_path.
+    // Snapshot (preserve), not detach. See fill_current_path.
     canvas_->drawPath(path_builder_->snapshot(), paint);
 }
 

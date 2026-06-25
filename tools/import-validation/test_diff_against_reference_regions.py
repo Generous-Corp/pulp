@@ -2,7 +2,7 @@
 """Unit tests for diff_against_reference_regions.py — schema validation and
 --strict flag semantics.
 
-Pins the Codex P2 contract on PR #1871:
+Pins the validation contract:
   - load_regions() validates region type/coord values upfront and exits
     2 with a clear message before any scoring runs.
   - --strict flag is actually consulted; without it region misses are
@@ -108,7 +108,7 @@ class TestSchemaValidation(unittest.TestCase):
             self.assertIn("non-numeric", result.stderr)
 
     def test_bool_coord_rejected(self) -> None:
-        # bool is an int subclass; remote fix rejects it explicitly so
+        # bool is an int subclass; reject it explicitly so
         # `"x": true` doesn't silently become 1.
         with tempfile.TemporaryDirectory() as tdir:
             tmp = Path(tdir)

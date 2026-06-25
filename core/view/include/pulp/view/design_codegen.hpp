@@ -40,24 +40,23 @@ struct CodeGenOptions {
     /// override via `@sprite` or `@silver` suffix on the Figma layer name.
     bool use_silver_knobs = true;
 
-    /// pulp #3191 — when true (default), recognised faders/meters are emitted
-    /// with a value-driven skin DERIVED from the captured asset (track / fill /
-    /// thumb colours for a fader; gradient stops for a meter) so they render
-    /// like the captured Figma art while the thumb/level still move with their
-    /// bound value. When false (`--fader-style=default` / `--meter-style=default`)
+    /// When true (default), recognised faders/meters are emitted with a
+    /// value-driven skin derived from the captured asset (track / fill / thumb
+    /// colours for a fader; gradient stops for a meter) so they render like the
+    /// captured Figma art while the thumb/level still move with their bound
+    /// value. When false (`--fader-style=default` / `--meter-style=default`)
     /// they fall back to the plain native look. The derived style attributes
     /// are stamped onto the node by the import CLI's asset-resolution pass.
     bool skin_faders = true;
     bool skin_meters = true;
 
-    /// pulp #2116 V2 — shortcuts pulled from the source by
-    /// `extract_keyboard_shortcuts(...)` (Strategy A: synthetic keydown
-    /// re-dispatch). The generator emits one `registerShortcut(...)` plus
-    /// a matching `__pulpShortcutHandler_N` thunk per entry. The thunk
-    /// calls `__dispatch__('__global__', 'keydown', {...})` so the
-    /// original React handlers in the bundled JS still own the closure
-    /// state — we just intercept the OS chord and re-fire the synthetic
-    /// keydown into the engine. Empty vector = no shortcut emission.
+    /// Shortcuts pulled from the source by `extract_keyboard_shortcuts(...)`.
+    /// The generator emits one `registerShortcut(...)` plus a matching
+    /// `__pulpShortcutHandler_N` thunk per entry. The thunk calls
+    /// `__dispatch__('__global__', 'keydown', {...})` so the original React
+    /// handlers in the bundled JS still own the closure state; native shortcut
+    /// interception just re-fires the synthetic keydown into the engine. Empty
+    /// vector = no shortcut emission.
     std::vector<DetectedShortcut> shortcuts;
 
     /// Optional fidelity-report sink. When non-null, codegen runs every
@@ -100,13 +99,14 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
                                   const IRAssetManifest& manifest,
                                   const CppExportOptions& opts = {});
 
-// ── Baked SwiftUI (Workstream B1) ───────────────────────────────────────
+// ── Baked SwiftUI code generation ───────────────────────────────────────
 //
 // `--emit swiftui` lowers the same baked DesignIR to native SwiftUI — a
 // fourth lowering alongside DOM/native-JS/baked-C++. Baked-only: SwiftUI is a
-// compiled declarative target with no Pulp JS-runtime story. B1 is an MVP
-// skeleton (stacks / Text / fixed frame-padding-background / knob+slider+
-// toggle + a code-first PulpTheme partition + a minimal name-keyed binding).
+// compiled declarative target with no Pulp JS-runtime story. The current
+// emitter covers stacks / Text / fixed frame-padding-background /
+// knob+slider+toggle + a code-first PulpTheme partition + a minimal
+// name-keyed binding.
 
 struct SwiftExportOptions {
     /// Generated root `View` struct name. Sanitized to a Swift type name; an
@@ -118,8 +118,8 @@ struct SwiftExportOptions {
     bool emit_theme = true;            ///< emit the PulpTheme.swift partition
     bool emit_binding_manifest = true; ///< emit the minimal SwiftUI binding manifest
     int indent_spaces = 4;
-    /// Optional fidelity sink (parity with CodeGenOptions). B1 does not yet
-    /// populate SwiftUI-specific layout issues — that is B2.
+    /// Optional fidelity sink (parity with CodeGenOptions). SwiftUI-specific
+    /// layout issues are not populated yet.
     std::vector<FidelityIssue>* fidelity_report = nullptr;
 };
 
@@ -134,7 +134,7 @@ struct SwiftExportResult {
 /// a `<root_view_name>` View plus a `<theme_type_name>` token partition. The
 /// generated View binds knob/slider/toggle controls to `PulpParameter`s via the
 /// `PulpParameterResolving` protocol (exact `PulpParameter.name` match — there
-/// is no stable string param key today; see the B1 plan).
+/// is no stable string param key today).
 SwiftExportResult generate_pulp_swift(const DesignIR& ir,
                                       const IRAssetManifest& manifest,
                                       const SwiftExportOptions& opts = {});
@@ -153,9 +153,10 @@ int key_string_to_keycode(const std::string& key);
 
 /// Combine modifier strings (`"shift"`, `"ctrl"`, `"alt"`, `"meta"`)
 /// into the bitmask `registerShortcut` consumes. `"meta"` maps to
-/// `kModCmd` (the platform-primary modifier) per the cross-platform
-/// idiom captured in `extract_keyboard_shortcuts` (metaKey || ctrlKey
-/// collapses to "meta"). Unknown strings are silently dropped.
+/// `kModCmd` (the platform-primary modifier). `"ctrl"` maps separately to
+/// `kModCtrl`, including when `extract_keyboard_shortcuts` captures both
+/// modifiers from the `metaKey || ctrlKey` idiom. Unknown strings are silently
+/// dropped.
 int modifier_strings_to_mask(const std::vector<std::string>& mods);
 
 } // namespace pulp::view

@@ -11,8 +11,7 @@ namespace pulp::view {
 // One interactive element overlaid on a faithfully-rendered design frame. The
 // element list is TYPED and supplied by the importer (source-side semantics) —
 // DesignFrameView does NOT guess from the SVG. Bounds/coords are in the SVG's own
-// coordinate space. (Per the Plan-B review: real behavior comes from source
-// metadata, not SVG structure.)
+// coordinate space. Real behavior comes from source metadata, not SVG structure.
 struct DesignFrameElement {
     // `knob` is SVG-patch (rotates its needle path in the SVG). `text_field` /
     // `dropdown` / `tab_group` / `stepper` are NATIVE-OVERLAY: an opaque child
@@ -44,8 +43,14 @@ struct DesignFrameElement {
     // [x,y,w,h] moves the puck element (needle_d) to follow — `value` is the X
     // position (0→left, 1→right), `value_y` the Y (0→top, 1→bottom). cx/cy = the
     // puck's baked center.
+    // `custom` is a registered native control: the overlay is built by a factory
+    // looked up under `factory_id` in the design-control registry
+    // (register_design_control_factory). If no factory is registered the element
+    // renders inert (the baked SVG underneath always shows) and the importer
+    // diagnoses it — a custom control never blanks or silently mis-renders.
     enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
-                      stepper, momentary, swap, action, value_label, xy_pad };
+                      stepper, momentary, swap, action, value_label, xy_pad,
+                      custom };
 
     Kind kind = Kind::knob;
 
@@ -107,6 +112,14 @@ struct DesignFrameElement {
     /// leftward over the label.
     bool value_left_align = false;
 
+    // ── custom (registered native control) ───────────────────────────────
+    /// For Kind::custom: the id the overlay factory is registered under
+    /// (register_design_control_factory). Empty/unregistered → inert render.
+    std::string factory_id;
+    /// For Kind::custom: opaque props handed to the factory (typically a JSON
+    /// string the factory parses). Pulp does not interpret these.
+    std::string custom_props;
+
     // ── provenance (design-import) ───────────────────────────────────────
     /// Source node id this overlay came from (e.g. a Figma node id like
     /// "1273:33424"), copied from the IR's IRInteractiveElement during
@@ -115,6 +128,45 @@ struct DesignFrameElement {
     /// to its design node — to flag "not wired up" and fetch that exact frame.
     std::string source_node_id;
 };
+
+// ── Custom-control factory registry ──────────────────────────────────────────
+// Runtime name→View table for genuinely novel controls in imported designs. A
+// host or shared package registers a factory under an id; the importer emits a
+// Kind::custom element carrying that id; DesignFrameView builds the overlay by
+// looking the factory up.
+
+// Geometry + opaque props handed to a custom-control factory so it can build and
+// bind its View. Panel coordinates (the same space DesignFrameView positions
+// overlays in).
+struct DesignControlContext {
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+    std::string factory_id;
+    std::string props;            ///< opaque (typically JSON); Pulp does not parse it
+    std::string source_node_id;
+    float default_value = 0.5f;
+};
+
+// Builds a native overlay View for a Kind::custom element. Returns the View
+// (ownership moves to the DesignFrameView) or nullptr to render inert.
+using DesignControlFactory =
+    std::function<std::unique_ptr<View>(const DesignControlContext&)>;
+
+// Register / query a custom-control factory by id. UI-THREAD-ONLY: registration
+// happens at host startup and lookup at overlay build, both on the UI thread, so
+// the registry needs no locking. Re-registering an id replaces the prior factory.
+//
+// LIFETIME: the factory is stored for the process lifetime (until replaced or
+// clear_design_control_factories()). It must remain callable for that whole time,
+// so do NOT capture by reference/pointer any state that outlives the registrant —
+// register a free function or a lambda over owned/static state. A factory
+// capturing stack locals is a latent use-after-free the moment those locals go
+// out of scope. (The factory itself runs on the UI thread, synchronously, from
+// DesignFrameView::build_overlays.)
+void register_design_control_factory(std::string factory_id,
+                                     DesignControlFactory factory);
+bool has_design_control_factory(const std::string& factory_id);
+// Test/teardown helper: drop all registered factories.
+void clear_design_control_factories();
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
 // the given box, returning true if one was erased. Used to suppress a design's
@@ -144,10 +196,15 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 // typed element list. This is the faithful-vector design-import lane's view: the
 // importer materializes one of these per imported frame.
 //
-// B1 scope: render + crop + interactive knobs (drag to turn). Each drag patches
-// only the dragged knob's needle in the SVG and repaints. The SVG is currently
-// re-rendered per repaint (SkSVGDOM rebuilds the DOM each draw_svg call) — fine
-// at interactive rates here, but a parsed-DOM cache is a planned optimization.
+// Each drag patches only the dragged knob's needle in the SVG and repaints.
+// Canvas::draw_svg parses the SVG into an SkSVGDOM keyed on the document bytes
+// (process-wide SvgDomCache), so a repaint of an UNCHANGED document — static
+// chrome, or a frame whose only motion is a native-overlay child — reuses the
+// parsed DOM instead of rebuilding it. A render-patched document (rotated knob
+// needle, translated fader/xy_pad thumb, toggle-switch slide) is a different
+// string, so it misses the cache and rebuilds, keeping the dragged element
+// live. The rasterized output is byte-identical to the uncached path; only the
+// parse step is skipped on a hit.
 class DesignFrameView : public View {
 public:
     // `svg` is the full SVG document. The panel (the design body the window
@@ -178,6 +235,24 @@ public:
     const std::string& element_action(int i) const {
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].action : kEmpty;
+    }
+    // The Y axis (0=top, 1=bottom) of an xy_pad element `i`, or 0.5. The X axis is
+    // element_value(i).
+    float element_value_y(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].value_y : 0.5f;
+    }
+    // The frame index a Kind::swap element activates on click, or -1 if unset.
+    int element_target_frame(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].target_frame : -1;
+    }
+    // The readout string of a Kind::value_label element `i`, or empty.
+    const std::string& element_text(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].text : kEmpty;
+    }
+    // Whether a Kind::value_label element `i` left-aligns its readout.
+    bool element_left_align(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) && elements_[i].value_left_align;
     }
     // The design-source node id of element `i` (e.g. a Figma node id), or empty
     // when the element wasn't lowered from a design import. The inspector's
@@ -327,7 +402,8 @@ private:
 // control drawn opaque over the design's tab strip (so it replaces the baked
 // tabs + highlight). Clicking a slot selects it and moves the highlight — the
 // "regular selection state" a static SVG can't provide. Styling approximates the
-// design's dark strip; pixel-exact theming is a follow-up.
+// design's dark strip; it is intentionally an approximation rather than
+// pixel-exact theming.
 class DesignTabGroup : public View {
 public:
     DesignTabGroup(std::vector<std::string> labels, int selected);

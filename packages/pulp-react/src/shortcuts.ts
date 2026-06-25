@@ -1,12 +1,11 @@
-// @pulp/react keyboard shortcut runtime injection (pulp #135 Phase B).
+// @pulp/react keyboard shortcut runtime injection.
 //
 // Counterpart to the pulp-import-design CLI's static codegen path
-// (pulp #2128). That path emits `registerShortcut(key, mod, cbName)`
-// + a separate top-level callback function into the generated ui.js.
-// This module gives React app authors the same surface at runtime via
-// a hook, plus clash detection so two parts of the app (or one app +
-// the import-design path) registering the same chord can be surfaced
-// instead of silently overwriting.
+// that emits `registerShortcut(key, mod, cbName)` + a separate top-level
+// callback function into the generated ui.js. This module gives React app
+// authors the same surface at runtime via a hook, plus clash detection so
+// two parts of the app (or one app + the import-design path) registering
+// the same chord can be surfaced instead of silently overwriting.
 //
 // Architecture: one dispatcher callback per unique (keyCode, modMask)
 // pair is registered C++-side. The dispatcher consults a JS-side
@@ -188,7 +187,7 @@ function ensureDispatcher(parsed: ParsedShortcut): void {
 /// unregister fn. Useful for non-React call sites (the import-design
 /// runtime injection path) and as the primitive `useShortcut` builds
 /// on. `source` is a free-form label that appears in clash warnings —
-/// pass something the user can grep for (`'spectr-mode-switch'`, the
+/// pass something the user can grep for (`'settings-mode-switch'`, the
 /// component's display name, etc.).
 export function registerShortcut(
     spec: string,

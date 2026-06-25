@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file quirk_apply.hpp
-/// StateStore-aware host-quirk application helpers (host-quirks plan, P3).
+/// StateStore-aware host-quirk application helpers.
 ///
 /// Kept separate from `host_quirks.hpp` so that header stays free of a
 /// `pulp::state` dependency — only adapters that actually mutate the
@@ -13,12 +13,12 @@
 
 namespace pulp::format {
 
-/// Reserved ParamID for the synthesized Bypass parameter (P3b). Chosen
+/// Reserved ParamID for the synthesized Bypass parameter. Chosen
 /// high + distinctive so it does not collide with plugin-declared IDs.
 /// Stable across builds so host automation envelopes survive reloads.
 inline constexpr state::ParamID kSynthesizedBypassParamId = 0x70427970;  // 'pByp'
 
-/// synthesize_bypass_parameter (host-quirks P3b): when the plugin declares
+/// synthesize_bypass_parameter: when the plugin declares
 /// no Bypass parameter and the quirk is enforced, inject an automatable
 /// boolean "Bypass" parameter into the StateStore so the host gets a
 /// bypass control. Returns true if one was synthesized.

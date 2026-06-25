@@ -1,8 +1,8 @@
 if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
-    # pulp-internal #70 — pulp-design-tool requires the GPU host. The
-    # design viewport pin + aspect-locked uniform scale used to fit
-    # runtime-imported JSX into a window are implemented ONLY in
-    # MacGpuWindowHost (window_host_mac.mm, gated by PULP_HAS_SKIA).
+    # pulp-design-tool requires the GPU host. The design viewport pin +
+    # aspect-locked uniform scale used to fit runtime-imported JSX into a
+    # window are implemented only in MacGpuWindowHost (window_host_mac.mm,
+    # gated by PULP_HAS_SKIA).
     # Without Skia linked, WindowHost::create() returns MacWindowHost,
     # where set_design_viewport() and set_fixed_aspect_ratio() are
     # no-op base-class methods. The example still builds and runs but
@@ -10,7 +10,6 @@ if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
     # size as the window grows, with the dark fill exposed past the
     # design surface. Hard-fail at configure so a missing Skia tarball
     # surfaces immediately instead of as a baffling runtime UX bug.
-    # Burned ~3h of session debugging this in 2026-05.
     if(NOT PULP_HAS_SKIA)
         message(FATAL_ERROR
             "pulp-design-tool requires PULP_HAS_SKIA=TRUE (Skia + Dawn linked). "
@@ -19,7 +18,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
             "example. See planning/2026-05-19-gpu-host-fallback.md.")
     endif()
     add_executable(pulp-design-tool main.cpp)
-    # WYSIWYG T6 — pulp::inspect supplies the in-canvas InspectorOverlay
+    # pulp::inspect supplies the in-canvas InspectorOverlay
     # (move/resize/reflow manipulation layer) wired via install_inspector_hooks,
     # the same overlay ui-preview uses. pulp::inspect itself requires the
     # GPU/Skia stack, which this branch already guarantees

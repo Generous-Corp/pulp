@@ -1,6 +1,6 @@
 #pragma once
 
-// Persistent plugin scan cache — workstream 03 slice 3.1.
+// Persistent plugin scan cache.
 //
 // Stores PluginInfo results keyed by (path, mtime, size). On the second scan
 // of an unchanged plugin file, the cache returns the stored PluginInfo

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Phase 3 codecov batch: focused coverage for the tiny header-only JSON
+// Focused coverage for the tiny header-only JSON
 // parser shared by CLI registry/import-design helpers. These tests stay on
 // deterministic parser/accessor behavior and avoid tying the parser to any
 // one registry schema.

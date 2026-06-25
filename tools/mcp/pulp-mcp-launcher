@@ -7,8 +7,8 @@
 #   2. ~/.pulp/bin/pulp-mcp                   (canonical install dest)
 #   3. pulp-mcp on $PATH                      (fallback for custom installs)
 #
-# Why probe ~/.pulp/bin BEFORE $PATH (pulp #2087 follow-up): Claude Code
-# spawns the MCP server with a sanitized environment — the user's
+# Why probe ~/.pulp/bin BEFORE $PATH: Claude Code spawns the MCP server
+# with a sanitized environment — the user's
 # interactive-shell PATH (which includes ~/.pulp/bin via install.sh)
 # does NOT propagate, so `command -v pulp-mcp` returns empty even on
 # a healthy install. Without this probe, `/mcp` reports

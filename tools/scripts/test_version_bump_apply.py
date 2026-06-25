@@ -3,9 +3,7 @@
 
 `--mode=apply` version-file rewriting and `render_report` verdict
 rendering (including the partial-multi-file-bump regression). Mirrors
-`version_bump_apply.py` and `version_bump_render.py`. Split from
-`test_gates.py` (P9-NEW refactor, 2026-05); test bodies are
-byte-identical to their previous definitions.
+`version_bump_apply.py` and `version_bump_render.py`.
 
 Runs standalone (`python3 tools/scripts/test_version_bump_apply.py`)
 or as part of the aggregate suite via `test_gates.py`.
@@ -39,8 +37,8 @@ class VersionBumpApplyTests(GateFixtureTestCase):
             self.assertIs(vbh._h("git_range_trailers"), vbh.git_range_trailers)
 
     def test_partial_multi_file_bump_fails(self) -> None:
-        """Plugin surface with two version files: bumping only ONE used to
-        let the gate pass (Codex P1). Now fails hard."""
+        """Plugin surface with two version files: bumping only ONE must
+        fail hard."""
         r = self.tmp
         (r / ".claude-plugin" / "marketplace.json").write_text(
             json.dumps({"name": "test", "version": "0.1.0"}, indent=2) + "\n"
@@ -102,11 +100,10 @@ class VersionBumpApplyTests(GateFixtureTestCase):
         )
 
     def test_apply_bumps_writes_version_files_only_post_c1(self) -> None:
-        # Post-C1 (2026-05): apply_bumps writes version files only.
-        # CHANGELOG.md is owned by Shipyard post-tag sync via
-        # `.github/workflows/post-tag-sync.yml`. Two PRs both proposing
-        # `sdk=minor` must produce identical CHANGELOG.md state to avoid
-        # the multi-PR-train rebase class.
+        # apply_bumps writes version files only. CHANGELOG.md is owned by
+        # Shipyard post-tag sync via `.github/workflows/post-tag-sync.yml`.
+        # Two PRs both proposing `sdk=minor` must produce identical
+        # CHANGELOG.md state to avoid the multi-PR-train rebase class.
         vbc = self._import_gate_module("version_bump_check")
 
         cfg_path = self.tmp / "tools/scripts/versioning.json"
@@ -169,9 +166,9 @@ class VersionBumpApplyTests(GateFixtureTestCase):
             text=True,
         ).stdout
         self.assertIn("M  CMakeLists.txt", status)
-        # Post-C1: CHANGELOG.md is NOT staged — `apply_bumps()` skips it
-        # entirely so Shipyard's post-tag regen owns the file without
-        # racing PRs over identical stub headers.
+        # CHANGELOG.md is NOT staged; `apply_bumps()` skips it entirely so
+        # Shipyard's post-tag regen owns the file without racing PRs over
+        # identical stub headers.
         self.assertNotIn("CHANGELOG.md", status)
 
 

@@ -179,14 +179,14 @@ TEST_CASE("SvgImage::render emits cubic_to for curved paths [issue-72]",
     REQUIRE(canvas.count(DrawCommand::Type::move_to) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::cubic_to) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::stroke_current_path) >= 1);
-    // Pre-fix bug: emitted stroke_line commands.
+    // Stroke path rendering must not degrade to stroke_line commands.
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
 }
 
 TEST_CASE("SvgImage::render forwards evenodd fill-rule [issue-72]",
           "[canvas][svg][issue-72]") {
-    // Codex review on PR #2011 — paths with `fill-rule="evenodd"` are
-    // common in preset-thumbnail SVGs that use cutouts/holes. The fill
+    // Paths with `fill-rule="evenodd"` are common in preset-thumbnail
+    // SVGs that use cutouts/holes. The fill
     // rule must reach Canvas's path API, not be hardcoded to nonzero.
     auto evenodd = SvgImage::from_string(R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">

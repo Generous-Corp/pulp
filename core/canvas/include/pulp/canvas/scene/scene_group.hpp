@@ -1,7 +1,7 @@
 // SceneGroup — retained container node.
 //
-// Item 6.1 / Pulp-native names. Owns its children by value via
-// `std::unique_ptr<SceneNode>`. Mutation propagates upward via
+// Owns its children by value via `std::unique_ptr<SceneNode>`.
+// Mutation propagates upward via
 // `SceneNode::mark_dirty()`; the group's local_bounds() is the union
 // of its visible children's transformed local bounds.
 #pragma once

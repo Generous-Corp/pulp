@@ -40,10 +40,10 @@ public:
     /// Line height for this text
     float line_height() const { return line_height_; }
 
-    /// pulp #2163 — SkFontMetrics-derived line box of the resolved
-    /// typeface. `ascent` is the distance ABOVE the baseline (positive
-    /// — Skia's fAscent is negative, we flip it here). `descent` is
-    /// distance below baseline. `leading` is the extra inter-line gap.
+    /// SkFontMetrics-derived line box of the resolved typeface. `ascent`
+    /// is the positive distance ABOVE the baseline (Skia's fAscent is
+    /// negative, so we flip it here). `descent` is distance below baseline.
+    /// `leading` is the extra inter-line gap.
     /// `line_height` equals ascent + descent + leading. `real` is true
     /// when these came from a resolved typeface, false when the
     /// fallback heuristic ran (no Skia, family unresolvable, etc.).
@@ -89,7 +89,7 @@ struct ShapedLayout {
     int line_count = 0;
 };
 
-/// pulp #1737 — CSS overflow-wrap / word-break break opportunity mode.
+/// CSS overflow-wrap / word-break break opportunity mode.
 /// Default is `normal` so existing callers keep word-boundary-only wrapping.
 ///
 /// CSS Text Module Level 3 §6.1 maps to:
@@ -140,13 +140,13 @@ public:
     /// Layout prepared text at a specific width — this is the cheap call.
     /// Pure arithmetic over cached segment widths. Call on every resize.
     ///
-    /// `max_lines` (pulp #1410): when > 0, truncate the result to N
-    /// lines. `max_lines == 1` is the canonical CSS `white-space: nowrap`
+    /// When `max_lines > 0`, truncate the result to N lines.
+    /// `max_lines == 1` is the canonical CSS `white-space: nowrap`
     /// path — it ignores wrapping at the right edge and emits a single
     /// line whose width is the text's full intrinsic width (segments
     /// past `max_width` still count toward the line width so consumers
-    /// that pair this with #1407's ellipsis truncation can see they
-    /// overflow). 0 = unlimited (default).
+    /// that pair this with ellipsis truncation can see they overflow).
+    /// 0 = unlimited (default).
     ShapedLayout layout(const PreparedText& prepared, float max_width,
                         float line_height = 0, int max_lines = 0,
                         BreakMode break_mode = BreakMode::normal) const;
@@ -176,5 +176,14 @@ private:
 
 /// Global text shaper singleton (uses the best available backend)
 TextShaper& global_text_shaper();
+
+/// Monotonic count of TextShaper::prepare() invocations across all shapers.
+///
+/// Always compiled (a single relaxed atomic increment per prepare() — cheap
+/// enough for release). Exposed so widget-level layout caches (e.g. Label's
+/// shaped-layout cache) can be proven in headless tests: paint a cached widget
+/// twice and assert the counter advanced by exactly one. Not part of the
+/// rendering contract — purely an observability hook for tests/diagnostics.
+std::uint64_t text_shaper_prepare_call_count();
 
 }  // namespace pulp::canvas

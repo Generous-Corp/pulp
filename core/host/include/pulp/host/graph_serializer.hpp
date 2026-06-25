@@ -12,7 +12,8 @@
 // error. Plugin binaries are NEVER embedded — that breaks signing,
 // notarization, and AU/AUv3 component-manager registration.
 //
-// Phase 3 of planning/signal-graph-followups-plan.md.
+// Schema changes must go through registered migrations so older saved graphs
+// either upgrade deterministically or fail with an explicit load error.
 
 #include <pulp/host/signal_graph.hpp>
 #include <functional>

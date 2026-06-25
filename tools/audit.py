@@ -49,8 +49,8 @@ def is_allowed_vendor_name_source(path, root):
     Security: explicitly rejects symlinks so a forbidden file can't be
     allowlisted by pointing at a canonical entry. We also avoid `Path.resolve()`
     here for the same reason — resolving would erase the symlink and trick the
-    relative-path comparison into matching the allowlist. (Codex #2939 finding
-    3302833422.)
+    relative-path comparison into matching the allowlist. Traceability: #2939
+    finding 3302833422.
     """
     p = Path(path)
     # Reject symlinks outright. The allowlist names canonical real files.

@@ -510,9 +510,9 @@ struct EventBlock {
     }
 };
 
-/// Additive block-scoped process contract for future graph/offline/sampler code.
+/// Additive block-scoped process contract.
 ///
-/// This does not replace Processor::process() in this slice. It packages the
+/// This does not replace Processor::process(). It packages the
 /// existing transport context with explicit bus, event, scratch, mode, and
 /// render-speed state so new runtime paths can share one contract.
 struct ProcessBlock {

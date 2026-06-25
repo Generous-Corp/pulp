@@ -5,24 +5,25 @@
     "max_loc": 1000,
     "paths": [
       "core/**",
-      "tools/**"
+      "tools/**",
+      "inspect/**"
     ]
   },
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1204,
-      "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
+      "max_loc": 1160,
+      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
-      "max_loc": 1318,
+      "max_loc": 1294,
       "note": "WidgetBridge Canvas2D registrar split hotspot"
     },
     {
       "path": "core/view/src/widget_bridge/gpu_api.cpp",
-      "max_loc": 2283,
-      "note": "WidgetBridge GPU registrar split hotspot"
+      "max_loc": 2271,
+      "note": "WidgetBridge GPU registrar split hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "tools/local-ci/local_ci.py",
@@ -31,12 +32,12 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6149,
-      "note": "shared test registration hotspot"
+      "max_loc": 6109,
+      "note": "shared test registration hotspot; lowered after removing dead PulpGain_CLAP fixture-guard blocks (real wiring is the root CMakeLists block after add_subdirectory(examples))"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
-      "max_loc": 2035,
+      "max_loc": 2094,
       "note": "design-import codegen test split"
     },
     {
@@ -46,7 +47,7 @@
     },
     {
       "path": "test/test_design_import_ir.cpp",
-      "max_loc": 851,
+      "max_loc": 1192,
       "note": "design-import IR test split"
     },
     {
@@ -76,62 +77,97 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3642,
-      "note": "Renderer3D implementation hotspot"
+      "max_loc": 3474,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3271,
-      "note": "import-design CLI orchestration hotspot"
+      "max_loc": 3414,
+      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2801,
+      "max_loc": 2735,
       "note": "Mac window host lifecycle/capture/geometry hotspot"
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2473,
-      "note": "design-import orchestration hotspot"
+      "max_loc": 2471,
+      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2102,
-      "note": "DesignIR serialization contract hotspot"
+      "max_loc": 2200,
+      "note": "DesignIR serialization contract hotspot; net after extracting the analysis passes to design_ir_analysis.cpp (-) and parse_ir_node preserving component_key for the recognition resolver (+21)"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2155,
+      "max_loc": 2185,
       "note": "DesignIR C++ codegen contract hotspot"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2024,
+      "max_loc": 2067,
       "note": "native materialization/import boundary hotspot"
     },
     {
       "path": "core/view/src/design_codegen.cpp",
-      "max_loc": 1997,
-      "note": "generated JS bridge contract hotspot"
+      "max_loc": 1961,
+      "note": "generated JS bridge contract hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1677,
+      "max_loc": 1611,
       "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",
-      "max_loc": 1546,
+      "max_loc": 1535,
       "note": "public canvas header trim candidate (+UTF-8 codepoint clamp in text_x_for_byte, prevents nil-NSString host-process crash)"
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1296,
+      "max_loc": 1291,
       "note": "CLI common cleanup candidate"
     },
     {
+      "path": "tools/cli/kit_commands.cpp",
+      "max_loc": 3927,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md"
+    },
+    {
+      "path": "inspect/src/inspector_overlay.cpp",
+      "max_loc": 2587,
+      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
+    },
+    {
+      "path": "inspect/src/inspector_overlay_paint.cpp",
+      "max_loc": 1530,
+      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
+    },
+    {
+      "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
+      "max_loc": 1491,
+      "note": "Inspector overlay public header hotspot; reduce private state deliberately"
+    },
+    {
+      "path": "inspect/src/inspector_window.cpp",
+      "max_loc": 1301,
+      "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
+    },
+    {
+      "path": "inspect/src/domain_handler.cpp",
+      "max_loc": 912,
+      "note": "Inspector protocol dispatch hub; preserve optional-source errors"
+    },
+    {
+      "path": "inspect/src/tweak_store.cpp",
+      "max_loc": 807,
+      "note": "Inspector tweak schema and disk contract hotspot"
+    },
+    {
       "path": "core/canvas/src/skia_canvas.cpp",
-      "max_loc": 1197,
+      "max_loc": 1136,
       "note": "Skia canvas split stabilization candidate"
     }
   ]

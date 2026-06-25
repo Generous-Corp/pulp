@@ -1,17 +1,15 @@
-// Phase iOS-D.2 — Chainer-style iOS AUv3 example.
+// Chainer-style iOS AUv3 example.
 //
 // Smallest viable JS-UI-style synth on iPad GPU: a sine instrument
 // driven by ONE parameter (Drive, exposed on the AU parameter tree)
 // whose editor view paints a Pulp-native widget tree (title Label +
 // Knob bound to Drive + Meter showing audio output) through the same
-// Skia/Dawn GPU path the iOS-D.1 smoke proved end-to-end.
+// Skia/Dawn GPU path the GPU smoke example validates end to end.
 //
 // On iOS, JS-driven editor wiring (script_engine + widget_bridge) is
-// not yet validated in-process inside an AUv3 .appex — see
-// planning/2026-05-24-auv3-ios-validation.md Phase iOS-D. This example
-// uses the native widget tree as the equivalent "JS UI shape" so the
-// visible deliverable lands without dragging an iOS QuickJS bring-up
-// onto the critical path.
+// not yet validated in-process inside an AUv3 .appex. This example uses
+// the native widget tree as the equivalent "JS UI shape" so the visible
+// deliverable stays focused on AUv3 editor mounting and GPU rendering.
 
 #pragma once
 

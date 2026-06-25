@@ -1,9 +1,8 @@
 // test_audio_inspector_window.cpp — headless coverage for the developer
-// Audio Inspector tool window (Phase 6 of the audio observability harness,
-// planning/2026-06-09-audio-inspector-separate-tool-window-proposal.md).
+// Audio Inspector tool window.
 //
 // The window is a SIBLING of the layout InspectorWindow, not a tab in it. It
-// owns its own state model and consumes the Phase 5 RT probe schema. These
+// owns its own state model and consumes the RT probe schema. These
 // tests drive a REAL AudioProbe as the synthetic source (the production data
 // path — analyze_output() publishes snapshots, the window reads latest()), and
 // assert on state, not pixels:

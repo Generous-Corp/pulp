@@ -216,9 +216,9 @@ void ValidationHarness::set_capture_inspector_provider(
 ReportEntry ValidationHarness::capture_screenshot(
     const std::filesystem::path& output_path)
 {
-    // #298: delegate to the registered provider. Without one, the
-    // entry is explicitly `skip` so callers cannot confuse the
-    // headless state with a successful validation.
+    // Delegate to the registered provider. Without one, the entry is
+    // explicitly `skip` so callers cannot confuse the headless state with a
+    // successful validation.
     ReportEntry entry;
     entry.type = "screenshot";
     entry.target = descriptor().name;
@@ -285,13 +285,13 @@ ReportEntry ValidationHarness::compare_screenshots(
 
     // Byte-level file comparison. Good enough to detect bit-identical
     // regression-rendered output (the common case in deterministic
-    // golden-file tests); pixel-level tolerant diff ships when a PNG
-    // codec becomes available to the format layer (#298 follow-up).
+    // golden-file tests); pixel-level tolerant diff can be added once a PNG
+    // codec is available to the format layer.
     // Produces pass/fail — never skip — so callers can't confuse
     // "images differ" with "comparison not available."
-    // #308 Codex P1: std::filesystem::file_size throws on non-regular
-    // files (e.g. a directory accidentally passed as an argument) and
-    // on some I/O failures. Use the non-throwing overload + is_regular_file
+    // std::filesystem::file_size throws on non-regular files (e.g. a
+    // directory accidentally passed as an argument) and on some I/O failures.
+    // Use the non-throwing overload + is_regular_file
     // so the harness can always return a report entry with
     // ValidationStatus::error instead of propagating an exception that
     // aborts the whole validation run.

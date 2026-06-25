@@ -151,7 +151,7 @@ def map_node_type(t):
 def first_visible(paints):
     return next((p for p in paints if p.get("visible", True) is not False), None)
 
-def extract_style(n):
+def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
     if bb:
@@ -174,7 +174,11 @@ def extract_style(n):
                 ih = f.get("imageRef") or f.get("imageHash")
                 if ih:
                     s["background_image"] = f"pending:{ih}"
-                    IMAGE_FILL_REFS.add(ih)  # resolved → real path after the walk
+                    # P2: accumulate into the explicit context (no module global).
+                    # ctx is None only on direct extract_style() calls (unit tests
+                    # that don't exercise image-fill resolution).
+                    if ctx is not None:
+                        ctx.image_fills.add(ih)  # resolved → real path after the walk
             elif t in ("GRADIENT_RADIAL", "GRADIENT_DIAMOND"):
                 g = gradient_radial_css(f)
                 if g: s["background_gradient"] = g
@@ -329,17 +333,53 @@ def is_pure_vector_illustration(n):
 # meter — the figma-plugin lane default) at the node's own size, instead of
 # capturing its internal vectors as images (which suppresses recognition and
 # renders a misplaced raw sprite). Mirror this in the TS extractor (P2/P3).
+def _tokenize_name(name):
+    """Whole-word tokens mirroring the C++ tokenize_name (design_import.cpp):
+    split on non-alphanumerics AND camelCase / acronym / digit boundaries,
+    lowercased. "VUMeter" -> [vu, meter]; "Dialog" -> [dialog]."""
+    n = name or ""
+    tokens = []
+    cur = ""
+    for i, c in enumerate(n):
+        if not c.isalnum():
+            if cur:
+                tokens.append(cur); cur = ""
+            continue
+        if cur:
+            p = n[i - 1]
+            nxt = n[i + 1] if i + 1 < len(n) else ""
+            boundary = False
+            if p.islower() and c.isupper():
+                boundary = True
+            elif p.isupper() and c.isupper() and nxt.islower():
+                boundary = True
+            elif p.isdigit() != c.isdigit():
+                boundary = True
+            if boundary:
+                tokens.append(cur); cur = ""
+        cur += c.lower()
+    if cur:
+        tokens.append(cur)
+    return tokens
+
+
 def widget_kind_from_name(name):
-    low = (name or "").lower()
-    if "knob" in low or "dial" in low: return "knob"
-    if "fader" in low or "slider" in low: return "fader"
-    if "meter" in low or "vu" in low: return "meter"
-    if "xy" in low and "pad" in low: return "xy_pad"
-    if "waveform" in low: return "waveform"
-    if "spectrum" in low: return "spectrum"
+    # WHOLE-WORD match (not substring), mirroring the C++ detect_audio_widget — so
+    # "Dialog"/"Radial" no longer become knobs and "Diameter" no longer a meter.
+    toks = set(_tokenize_name(name))
+    def has(w):
+        return w in toks or (w + "s") in toks
+    # Vocabulary kept in lockstep with C++ detect_audio_widget
+    # (core/view/src/design_import.cpp) and the TS audioWidgetKindFromName.
+    if has("knob") or has("dial"): return "knob"
+    if has("fader") or has("slider"): return "fader"
+    if has("meter") or has("level") or has("vu"): return "meter"
+    if (has("xy") and has("pad")) or has("xypad"): return "xy_pad"
+    if has("waveform") or has("oscilloscope"): return "waveform"
+    if has("spectrum") or has("analyzer") or has("analyser"): return "spectrum"
     return None
 
-# ── Faithful-vector import (Plan B / B4) ────────────────────────────────────
+# ── Faithful-vector import ──────────────────────────────────────────────────
 # Geometry auto-detect of knobs in an exported frame SVG, ported verbatim from
 # the vector-knob PoC (examples/vector-knob parse_frame_knobs) and the C++
 # DesignFrameView convention. A knob DOME is a gradient-filled <circle>
@@ -443,12 +483,22 @@ def extract_layout(n):
         l["width_mode"] = "fixed"; l["height_mode"] = "fixed"
     return l
 
-ASSET_IDS = []  # node ids to export as PNG via /images (filled during walk)
-FONT_ASSETS = {}  # (family, style, weight) -> {family, style, weight} (deduped, fill order)
-IMAGE_FILL_REFS = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
+class ExtractContext:
+    """P2 — explicit accumulators for walk()'s side effects, replacing the old
+    module globals (ASSET_IDS / FONT_ASSETS / IMAGE_FILL_REFS). node_tree_to_ir()
+    creates one, threads it through walk()/extract_style()/_record_font(), and
+    returns it so the caller reads the outputs explicitly instead of reaching into
+    process-global state — the decomposed seam the plan calls for."""
+    __slots__ = ("asset_ids", "fonts", "image_fills")
 
-def _record_font(n):
-    """Collect a text node's font into FONT_ASSETS (deduped by family/style/weight).
+    def __init__(self):
+        self.asset_ids = []      # node ids to export as PNG via /images
+        self.fonts = {}          # (family, style, weight) -> entry (deduped, fill order)
+        self.image_fills = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
+
+
+def _record_font(n, ctx):
+    """Collect a text node's font into ctx.fonts (deduped by family/style/weight).
     Mirrors the plugin's font_family_assets[] (#43a). REST exposes the family +
     weight; the bundled .ttf binary is NOT available via REST, so asset_id is
     omitted — the importer #43b path then keeps the family name (falls back to a
@@ -462,16 +512,26 @@ def _record_font(n):
     italic = bool(st.get("italic"))
     style = "Italic" if italic else "Regular"
     key = (family, style, weight)
-    if key not in FONT_ASSETS:
+    if key not in ctx.fonts:
         entry = {"family": family, "style": style, "weight": weight}
         if italic:
             entry["italic"] = True
-        FONT_ASSETS[key] = entry
+        ctx.fonts[key] = entry
 
-def walk(n, parent, z):
+
+def node_tree_to_ir(root):
+    """Walk a Figma node tree into the Pulp IR, returning (ir_node, ExtractContext)
+    so the side effects (asset ids / fonts / image fills) are EXPLICIT outputs —
+    no module globals. The decomposed seam (P2 'the real refactor')."""
+    ctx = ExtractContext()
+    ir = walk(root, None, 0, ctx)
+    return ir, ctx
+
+
+def walk(n, parent, z, ctx):
     ntype = n.get("type")
     t = map_node_type(ntype)
-    style = extract_style(n)
+    style = extract_style(n, ctx)
     layout = extract_layout(n)
     # Absolute positioning when parent isn't auto-layout (extract.ts:158-188)
     if parent is not None and not is_auto_layout(parent):
@@ -484,7 +544,7 @@ def walk(n, parent, z):
     if ntype == "TEXT":
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
-        _record_font(n)
+        _record_font(n, ctx)
         runs = extract_text_runs(n)
         if runs:
             out["runs"] = runs
@@ -498,7 +558,7 @@ def walk(n, parent, z):
     tiny = bb.get("width", 0) < 1 and bb.get("height", 0) < 1
     captured = False
     wkind = widget_kind_from_name(n.get("name", ""))
-    # Codex #3234 P2: only promote LEAF-ish nodes. A CONTAINER whose name merely
+    # Only promote LEAF-ish nodes. A CONTAINER whose name merely
     # contains a widget word (e.g. "Knob Row", "Fader Bank") must NOT be promoted
     # to a leaf widget — that would drop its children (the real knobs inside).
     # Mirrors the importer's detect_node_audio_widget has_child_containers rule.
@@ -508,10 +568,10 @@ def walk(n, parent, z):
     # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
     # Pure-vector-illustration frames → whole-frame PNG, drop children.
     elif is_vector_like(ntype) and not tiny:
-        out["type"] = "image"; out["asset_ref"] = n["id"]; ASSET_IDS.append(n["id"]); captured = True
+        out["type"] = "image"; out["asset_ref"] = n["id"]; ctx.asset_ids.append(n["id"]); captured = True
     elif (ntype in ("FRAME", "GROUP") and n.get("children")
           and is_pure_vector_illustration(n)):
-        out["type"] = "image"; out["asset_ref"] = n["id"]; ASSET_IDS.append(n["id"]); captured = True
+        out["type"] = "image"; out["asset_ref"] = n["id"]; ctx.asset_ids.append(n["id"]); captured = True
 
     style = {k: v for k, v in style.items() if v not in (None, "")}
     layout = {k: v for k, v in layout.items() if v is not None}
@@ -523,7 +583,7 @@ def walk(n, parent, z):
     if not captured:  # illustration frames drop their children (rasterized whole)
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
-            out["children"] = [walk(c, n, i) for i, c in enumerate(kids)]
+            out["children"] = [walk(c, n, i, ctx) for i, c in enumerate(kids)]
     return out
 
 def export_assets(file_key, ids, token, out_dir):
@@ -573,8 +633,8 @@ def resolve_token(explicit):
 
 def parse_url(url):
     # https://figma.com/design/<KEY>/<name>?node-id=<a-b>  (node-id uses '-'; API uses ':')
-    # Codex #3225 P2: copied URLs commonly percent-encode the separator
-    # (node-id=3%3A42, or %2D); unquote first so the regex still matches.
+    # Copied URLs commonly percent-encode the separator (node-id=3%3A42, or
+    # %2D); unquote first so the regex still matches.
     import urllib.parse
     url = urllib.parse.unquote(url)
     m = re.search(r"/(?:design|file)/([A-Za-z0-9]+)", url)
@@ -589,8 +649,8 @@ def fetch_nodes(file_key, node_id, token):
         token=token, what="file nodes")
 
 def resolve_image_fills(file_key, refs, token, out_dir):
-    """Codex #3225 P2: resolve IMAGE-fill imageRefs into real assets. The image
-    fill on a node references a file image by `imageRef`; the file-images
+    """Resolve IMAGE-fill imageRefs into real assets. The image fill on a node
+    references a file image by `imageRef`; the file-images
     endpoint maps each ref to a (temporary) download URL. Download → assets/
     (sha256-named, like node captures) → return (manifest_entries, {ref: rel_path})
     so the caller can rewrite each node's `background_image: "pending:<ref>"` into
@@ -747,7 +807,7 @@ def parse_panel_bounds(svg):
 def detect_overlay_controls(figma_root, root_abs, panel_origin):
     """Detect NATIVE-OVERLAY controls (search/dropdown/tabs) from the Figma node
     tree by name/structure — source metadata, more reliable than SVG glyphs
-    (Codex review). Node coords are mapped into SVG space:
+    Node coords are mapped into SVG space:
       svg = (node_abs - root_abs) + panel_origin
     because the node tree is frame-local while the SVG export adds the drop-shadow
     margin (so the panel sits at panel_origin, not 0,0). text_field (search) +
@@ -1101,8 +1161,8 @@ def build_argparser():
     ap.add_argument("--token", help="Figma PAT (else $FIGMA_TOKEN or ~/.config/pulp/figma-token)")
     ap.add_argument("--no-assets", action="store_true", help="skip /images PNG capture (geometry+style only)")
     ap.add_argument("--node-json", help="use a pre-fetched /v1/.../nodes JSON instead of calling REST")
-    # Faithful-vector is the DEFAULT import lane (Plan B): it captures the frame's
-    # own SVG and renders it pixel-faithfully via DesignFrameView, overlaying the
+    # Faithful-vector is the DEFAULT import lane: it captures the frame's own
+    # SVG and renders it pixel-faithfully via DesignFrameView, overlaying the
     # auto-detected INTERACTIVE controls (knobs, search field, dropdowns, steppers,
     # tab groups). Without it the importer emits a flat, STATIC node tree with no
     # live widgets — which is almost never what a plugin UI wants — so it is opt-OUT
@@ -1140,22 +1200,22 @@ def main():
 
     doc = json.load(open(args.node_json)) if args.node_json else fetch_nodes(file_key, node_id, token)
     root = doc["nodes"][node_id]["document"]
-    root_node = walk(root, None, 0)
+    root_node, ctx = node_tree_to_ir(root)
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     asset_manifest_entries = []
-    if not args.no_assets and token and ASSET_IDS:
-        print(f"exporting {len(ASSET_IDS)} assets via /images ...")
-        asset_manifest_entries = export_assets(file_key, ASSET_IDS, token, out_dir)
+    if not args.no_assets and token and ctx.asset_ids:
+        print(f"exporting {len(ctx.asset_ids)} assets via /images ...")
+        asset_manifest_entries = export_assets(file_key, ctx.asset_ids, token, out_dir)
         print(f"  captured {len(asset_manifest_entries)} PNGs")
     # Resolve IMAGE-fill imageRefs → real assets, rewrite the dangling pending:
-    # markers (Codex #3225 P2). Even with --no-assets/--node-json we strip the
-    # pending: placeholders so the envelope never carries a dead reference.
-    if IMAGE_FILL_REFS:
+    # markers. Even with --no-assets/--node-json we strip the pending:
+    # placeholders so the envelope never carries a dead reference.
+    if ctx.image_fills:
         ref_to_rel = {}
         if not args.no_assets and token:
-            print(f"resolving {len(IMAGE_FILL_REFS)} image fill(s) ...")
-            fill_entries, ref_to_rel = resolve_image_fills(file_key, IMAGE_FILL_REFS, token, out_dir)
+            print(f"resolving {len(ctx.image_fills)} image fill(s) ...")
+            fill_entries, ref_to_rel = resolve_image_fills(file_key, ctx.image_fills, token, out_dir)
             asset_manifest_entries += fill_entries
             print(f"  resolved {len(fill_entries)} image fill(s)")
         _rewrite_image_fills(root_node, ref_to_rel)
@@ -1192,14 +1252,14 @@ def main():
         "library_manifest": None,
         "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
         "asset_manifest": {"version": 1, "assets": asset_manifest_entries},
-        "font_family_assets": list(FONT_ASSETS.values()),
+        "font_family_assets": list(ctx.fonts.values()),
         "diagnostics": [],
         "root": root_node,
     }
     json.dump(envelope, open(args.out, "w"), indent=1)
-    if FONT_ASSETS:
-        print(f"  font_family_assets: {len(FONT_ASSETS)} families "
-              f"({', '.join(sorted({f['family'] for f in FONT_ASSETS.values()}))})")
+    if ctx.fonts:
+        print(f"  font_family_assets: {len(ctx.fonts)} families "
+              f"({', '.join(sorted({f['family'] for f in ctx.fonts.values()}))})")
     cnt = [0]
     def c(n):
         cnt[0] += 1

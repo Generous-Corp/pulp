@@ -4,8 +4,6 @@
 
 namespace pulp::view {
 
-// pulp #97 — make AutoUi look intentional at any param count.
-//
 // AutoUi is the default editor for Processors that don't supply a
 // custom create_view() (and aren't using a scripted UI). That's the
 // majority of in-tree examples and the natural starting point for
@@ -14,7 +12,7 @@ namespace pulp::view {
 // stock 400x300 editor window rendered the cluster in the top-left
 // with ~70% of the window empty — looked like a layout bug.
 //
-// New layout (Codex-consult on 2026-05-14):
+// Layout:
 //
 //   root: column, padding 14, gap 12
 //   ├── title: "Parameters" 16pt

@@ -53,11 +53,87 @@ static int unknown_ship_arg(const std::string& subcommand,
     return 2;
 }
 
+static int print_ship_help() {
+    std::cout << "pulp ship — signing, notarization, packaging, and update feeds\n\n";
+    std::cout << "Subcommands:\n";
+    std::cout << "  sign       Sign plugin bundles or Android artifacts\n";
+    std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
+    std::cout << "             --path <app|dmg|bundle>  (sign one explicit artifact)\n";
+    std::cout << "             --target android --keystore key.jks  (Android)\n";
+    std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
+    std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
+    std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
+    std::cout << "             --path <dmg|pkg|zip>  (notarize+staple an explicit artifact; repeatable; not a raw .app)\n";
+    std::cout << "             --env-file <path>  (override ~/.config/pulp/secrets/notary.env)\n";
+    std::cout << "             --staple   (staple only, skip submission)\n";
+    std::cout << "             --dry-run  (print resolved notarytool argv, no submission)\n";
+    std::cout << "  package    Create installers for the target platform\n";
+    std::cout << "             --version 1.0.0\n";
+    std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
+    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
+    std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
+    std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
+    std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
+    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
+    std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
+    std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
+    std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
+    std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [creds]\n";
+    std::cout << "             --dry-run  (print the plan without doing anything)\n";
+    std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
+    std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
+    std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
+    std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
+    std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
+    std::cout << "             --check-online  (validate the .p8 against Apple, refresh pulp-notary profile)\n";
+    std::cout << "             --print-env     (emit resolved identity/keychain handles; no secrets)\n";
+    std::cout << "  auv3-xcodeproj  Generate an Xcode project for an AUv3 target\n";
+    std::cout << "             <target> [--sdk iphonesimulator|iphoneos|macosx]\n";
+    std::cout << "             [--output <dir>] [--open] [--dry-run]\n";
+    return 0;
+}
+
+// Path to the non-interactive-signing doctor script (tools/scripts).
+static fs::path signing_doctor_script(const fs::path& root) {
+    return root / "tools" / "scripts" / "ensure_signing_ready.sh";
+}
+
+// Best-effort, quiet, idempotent preflight: materialize the dedicated signing
+// keychain + validate the .p8 notary key so codesign/notarytool never pop a
+// keychain/1Password prompt. Never fails the caller — if the doctor reports
+// not-ready, the subsequent sign/notarize surfaces the real error itself.
+static void run_signing_preflight(const fs::path& root) {
+    auto script = signing_doctor_script(root);
+    if (fs::exists(script))
+        run("/bin/bash \"" + script.string() + "\" --quiet >/dev/null 2>&1 || true");
+}
+
 int cmd_ship(const std::vector<std::string>& args) {
+    // Parse subcommand
+    std::string sub = args.empty() ? "help" : args[0];
+    if (sub == "help" || sub == "--help" || sub == "-h")
+        return print_ship_help();
+
     auto root = find_project_root();
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
+    }
+
+    // ── doctor: ensure non-interactive signing + notarization readiness ───────
+    // Runs the self-healing keychain/.p8 doctor. Independent of a build dir, so
+    // it is handled before the build-dir check below. Flags (--check-online,
+    // --print-env, --quiet) pass straight through.
+    if (sub == "doctor") {
+        auto script = signing_doctor_script(root);
+        if (!fs::exists(script)) {
+            std::cerr << "pulp ship doctor: missing " << script.string() << "\n";
+            return 1;
+        }
+        std::string cmd = "/bin/bash \"" + script.string() + "\"";
+        for (size_t i = 1; i < args.size(); ++i)
+            cmd += " \"" + args[i] + "\"";
+        return run(cmd);
     }
 
     auto build_dir = root / "build";
@@ -66,11 +142,9 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // Parse subcommand
-    std::string sub = args.empty() ? "help" : args[0];
-
     // ── sign ────────────────────────────────────────────────────────────────
     if (sub == "sign") {
+        run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit artifact (.app/.dmg/bundle)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
@@ -209,12 +283,12 @@ int cmd_ship(const std::vector<std::string>& args) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
                     std::cout << "Signing " << entry.path().filename().string() << "...\n";
-                    std::string cmd = "codesign --force --sign \"" + identity
-                        + "\" --timestamp --options runtime"
-                        + " --entitlements \"" + entitlements + "\""
-                        + " \"" + entry.path().string() + "\"";
-                    if (run(cmd) == 0) ++signed_count;
-                    else std::cerr << "  FAILED\n";
+                    if (pulp::ship::codesign(entry.path().string(), identity,
+                                             entitlements)) {
+                        ++signed_count;
+                    } else {
+                        std::cerr << "  FAILED\n";
+                    }
                 }
             }
         }
@@ -394,13 +468,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
         return 0;
 #else
-        // macOS / Linux. On macOS we honour the item 7.5 per-artifact
-        // selection: `.pkg` for AU/VST3/CLAP plugin bundles, `.dmg`
-        // for `.app` standalones. `--pkg` and `--dmg` flags override
-        // the per-artifact default for the entire run (e.g. `--dmg`
-        // wraps even plugin bundles in a disk image when that's
-        // explicitly requested, useful for the "drag to Plug-Ins"
-        // distribution pattern).
+        // macOS / Linux. On macOS we honour the per-artifact selection:
+        // `.pkg` for AU/VST3/CLAP plugin bundles, `.dmg` for `.app`
+        // standalones. `--pkg` and `--dmg` flags override the per-artifact
+        // default for the entire run (e.g. `--dmg` wraps even plugin bundles
+        // in a disk image when that's explicitly requested, useful for the
+        // "drag to Plug-Ins" distribution pattern).
 #if defined(__linux__)
         // Linux: produce a real `.deb` from the plugin bundles via the
         // first-party helper in ship/platform/linux/package_linux.cpp. The
@@ -616,9 +689,8 @@ int cmd_ship(const std::vector<std::string>& args) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
                     std::cout << entry.path().filename().string() << ": ";
-                    int rc = run("codesign --verify --deep --strict \""
-                                 + entry.path().string() + "\" 2>/dev/null");
-                    std::cout << (rc == 0 ? "signed" : "unsigned") << "\n";
+                    auto info = pulp::ship::check_codesign(entry.path().string());
+                    std::cout << (info.is_valid ? "signed" : "unsigned") << "\n";
                 }
             }
         }
@@ -982,7 +1054,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
 
         // Stage 2: package. The pkg vs dmg decision lives in cmd_ship
-        // 'package' itself (item 7.5 wiring below).
+        // 'package' itself.
         //
         // We notarize the *distributable* (the `.dmg`/`.pkg` this stage
         // produces), not the loose plugin bundles — otherwise `release
@@ -1118,7 +1190,7 @@ int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
-    // ── auv3-xcodeproj (item 3.10 follow-up: one-click Xcode flow) ──────────
+    // ── auv3-xcodeproj (one-click Xcode flow) ───────────────────────────────
     //
     // Thin wrapper around `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` that
     // generates an Xcode project ready to "Run" on an iOS Simulator or a
@@ -1251,10 +1323,9 @@ int cmd_ship(const std::vector<std::string>& args) {
         // `<...>/Xcode*.app/Contents/Developer`. We must NOT hard-match
         // the literal substring `Xcode.app` because beta-channel users
         // run `Xcode-beta.app`, `Xcode_15.app`, etc., and the previous
-        // check blocked all of them. Regression: #2969 / Codex comment
-        // 3305628892. We still reject the command-line-tools-only
-        // selection (`/Library/Developer/CommandLineTools`) by requiring
-        // both `.app/` AND `/Contents/Developer` in the path.
+        // check blocked all of them. We still reject the command-line-tools-only
+        // selection (`/Library/Developer/CommandLineTools`) by requiring both
+        // `.app/` AND `/Contents/Developer` in the path.
         std::string xcselect = exec_output("xcode-select -p 2>/dev/null");
         // trim trailing newline
         while (!xcselect.empty() &&
@@ -1594,44 +1665,6 @@ int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
-    if (sub != "help" && sub != "--help" && sub != "-h") {
-        std::cerr << "pulp ship: unknown subcommand: " << sub << "\n";
-        return 2;
-    }
-
-    // ── help ────────────────────────────────────────────────────────────────
-    std::cout << "pulp ship — signing, notarization, packaging, and update feeds\n\n";
-    std::cout << "Subcommands:\n";
-    std::cout << "  sign       Sign plugin bundles or Android artifacts\n";
-    std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
-    std::cout << "             --path <app|dmg|bundle>  (sign one explicit artifact)\n";
-    std::cout << "             --target android --keystore key.jks  (Android)\n";
-    std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
-    std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
-    std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
-    std::cout << "             --path <dmg|pkg|zip>  (notarize+staple an explicit artifact; repeatable; not a raw .app)\n";
-    std::cout << "             --env-file <path>  (override ~/.config/pulp/secrets/notary.env)\n";
-    std::cout << "             --staple   (staple only, skip submission)\n";
-    std::cout << "             --dry-run  (print resolved notarytool argv, no submission)\n";
-    std::cout << "  package    Create installers for the target platform\n";
-    std::cout << "             --version 1.0.0\n";
-    std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
-    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
-    std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
-    std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
-    std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
-    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
-    std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
-    std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
-    std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
-    std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [creds]\n";
-    std::cout << "             --dry-run  (print the plan without doing anything)\n";
-    std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
-    std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
-    std::cout << "  check      Check signing status of built plugins\n";
-    std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
-    std::cout << "  auv3-xcodeproj  Generate an Xcode project for an AUv3 target\n";
-    std::cout << "             <target> [--sdk iphonesimulator|iphoneos|macosx]\n";
-    std::cout << "             [--output <dir>] [--open] [--dry-run]\n";
-    return 0;
+    std::cerr << "pulp ship: unknown subcommand: " << sub << "\n";
+    return 2;
 }

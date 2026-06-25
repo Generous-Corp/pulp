@@ -176,7 +176,7 @@ public:
     /// True if there's room in the retire ring for one more displaced
     /// IR. Audio thread checks this before consuming pending so a
     /// swap never strands a displaced IR without an off-thread free
-    /// path (Codex P1 on #2881).
+    /// path.
     bool has_retire_capacity() const {
         return retired_queue_.size_approx() < kRetireRingCapacity;
     }
@@ -226,8 +226,8 @@ private:
     std::atomic<ConvolverIrState*> pending_{nullptr};
     // Consumer → producer: ring of displaced IRs awaiting off-thread
     // deletion. Replaces the single-slot atomic the original impl used
-    // (Codex P1 #2881 — single slot starved on rapid IR automation,
-    // forcing audio-thread frees when the slot was full).
+    // so rapid IR automation can queue multiple displaced states
+    // without forcing audio-thread frees when one drain tick is missed.
     pulp::runtime::SpscQueue<ConvolverIrState*, kRetireRingCapacity> retired_queue_;
 
     ConvolverIrState* pop_retired_raw() {

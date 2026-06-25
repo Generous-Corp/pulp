@@ -1,10 +1,9 @@
 // cmd_projects.cpp — `pulp projects {list,add,remove}` commands.
 //
-// Issue #499 / #552 Slice 1b. Thin CLI-side wrapper over
-// projects_registry.{hpp,cpp}. The registry is also written to from
-// `cmd_create` on successful scaffold; these commands exist so users
-// can manage projects created outside `pulp create` (clones, manual
-// checkouts) and prune stale entries.
+// Thin CLI-side wrapper over projects_registry.{hpp,cpp}. The registry
+// is also written to from `cmd_create` on successful scaffold; these
+// commands exist so users can manage projects created outside
+// `pulp create` (clones, manual checkouts) and prune stale entries.
 
 #include "cli_common.hpp"
 #include "projects_registry.hpp"
@@ -66,12 +65,11 @@ int do_list(bool json_mode) {
 
     if (json_mode) {
         // Schema mirrors `experimental/pulp-rs/src/cmd/projects.rs`'s
-        // `render_json` so cross-binary consumers (incl. the Phase 8
-        // sandbox harness and any user automation) see identical
-        // output regardless of which binary served the call. The
-        // Rust port already implemented this; the C++ port silently
-        // ignored the flag and printed human text — caught by the
-        // post-Phase-8 cross-binary parity probe.
+        // `render_json` so cross-binary consumers and user automation
+        // see identical output regardless of which binary served the
+        // call. The Rust port already implemented this; the C++ port
+        // silently ignored the flag and printed human text — caught by the
+        // cross-binary parity probe.
         std::cout << "{\n  \"registry\": \""
                   << json_escape(reg.generic_string()) << "\",\n  \"projects\": [";
         for (size_t i = 0; i < projects.size(); ++i) {
@@ -149,7 +147,7 @@ int do_add(const std::vector<std::string>& args) {
     name = target.filename().string();
 
     auto reg = prjreg::registry_path();
-    // Codex 2026-04-21 wave 2 P2 on #563: surface registry write
+    // #563: surface registry write
     // failures so an unwritable ~/.pulp doesn't silently present as
     // success. The in-memory update still returns the refreshed list,
     // but the caller deserves to know the file wasn't persisted.

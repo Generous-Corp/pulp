@@ -1,6 +1,5 @@
-// pulp #1434 small-wins bundle (Triage #7 + #14) — verify @pulp/react
-// prop-applier forwards the new keyword vocabularies on the cursor and
-// flexWrap surfaces.
+// Verify @pulp/react prop-applier forwards flexWrap keyword values and
+// preserves the legacy boolean routing.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -28,7 +27,7 @@ function makeInstance(id: string = 'k', type: string = 'View'): PulpInstance {
     };
 }
 
-describe('flexWrap reverse (Triage #14)', () => {
+describe('prop-applier flexWrap keyword routing', () => {
     it('forwards "wrap-reverse" string verbatim', () => {
         applyChangedProps(makeInstance(), {}, { flexWrap: 'wrap-reverse' });
         const c = bridge.calls.find((x) => x.fn === 'setFlex' && x.args[1] === 'flex_wrap');

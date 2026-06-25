@@ -28,8 +28,8 @@ def malformed_cases(manifest):
     invalid_sha["consumers"][0]["live_head"] = "210836ce"
 
     missing_command = copy.deepcopy(manifest)
-    missing_command["consumers"][3]["required_commands"] = missing_command[
-        "consumers"][3]["required_commands"][:1]
+    missing_command["consumers"][1]["required_commands"] = missing_command[
+        "consumers"][1]["required_commands"][:1]
 
     missing_expected = copy.deepcopy(manifest)
     missing_expected["consumers"][0]["required_commands"][0]["expected"].pop(
@@ -37,10 +37,6 @@ def malformed_cases(manifest):
 
     project_design_merge = copy.deepcopy(manifest)
     project_design_merge["schema_boundary"]["project_ir_is_not_design_ir"] = False
-
-    project_importer_claims_design_ir = copy.deepcopy(manifest)
-    project_importer_claims_design_ir["consumers"][3][
-        "dependency_surfaces"].append("DesignIR JSON")
 
     adapter_without_sdk = copy.deepcopy(manifest)
     adapter_without_sdk["consumers"][2]["dependency_surfaces"] = [
@@ -72,7 +68,7 @@ def malformed_cases(manifest):
         (
             "missing-command",
             missing_command,
-            "consumers[3].required_commands must contain at least 2 commands",
+            "consumers[1].required_commands must contain at least 2 commands",
         ),
         (
             "missing-expected",
@@ -83,11 +79,6 @@ def malformed_cases(manifest):
             "project-design-merge",
             project_design_merge,
             "schema_boundary.project_ir_is_not_design_ir must be true",
-        ),
-        (
-            "project-importer-claims-design-ir",
-            project_importer_claims_design_ir,
-            "pulp-import-iplug must not claim DesignIR covers ProjectIR",
         ),
         (
             "adapter-without-sdk",

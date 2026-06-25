@@ -4,12 +4,12 @@
 Catches the bug-classes the script is meant to detect:
 
   1. CHANGELOG advertises a version higher than CMakeLists VERSION
-     (the Codex P2 on #2331 — auto-release wouldn't tag, entry sits
+     (the #2331 regression — auto-release wouldn't tag, entry sits
      orphaned).
   2. plugin.json ≠ marketplace.json top-level version (mismatched
      bumps).
-  3. plugin.json ≠ marketplace.json plugins[0].version (the Codex P2
-     on #2341 — bump script only updated top-level, nested field
+  3. plugin.json ≠ marketplace.json plugins[0].version (the #2341
+     regression — bump script only updated top-level, nested field
      went stale).
 
 Also verifies the script does NOT false-flag the harmless reverse

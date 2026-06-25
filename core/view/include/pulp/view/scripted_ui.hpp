@@ -54,9 +54,9 @@ public:
     void set_repaint_callback(std::function<void()> cb);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
-    // Phase iOS-D.3b Slice 1 — attach the host's GpuSurface so the JS-side
-    // navigator.gpu / canvas.getContext('webgpu') bridge routes through
-    // Pulp's live Dawn instance. The format adapters open this session
+    // Attach the host's GpuSurface so the JS-side navigator.gpu /
+    // canvas.getContext('webgpu') bridge routes through Pulp's live Dawn
+    // instance. The format adapters open this session
     // BEFORE the PluginViewHost exists, so the surface arrives via this
     // setter once the host is built (e.g. inside `au_view_controller_ios.mm`
     // after `PluginViewHost::create`).
@@ -85,7 +85,7 @@ private:
     std::unique_ptr<WidgetBridge> bridge_;
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
-    render::GpuSurface* gpu_surface_ = nullptr;  // Phase iOS-D.3b Slice 1
+    render::GpuSurface* gpu_surface_ = nullptr;
 
     Theme base_theme_;
     bool last_theme_exists_ = false;

@@ -1,8 +1,4 @@
-// test_cli_shellout_pr.cpp — extracted from test_cli_shellout.cpp in
-// the 2026-05 Phase 5 P5-4 follow-up refactor.
-//
-// `pulp pr` shell-out tests — 11 TEST_CASEs spread across two contiguous
-// clusters in the parent TU. Covers:
+// `pulp pr` shell-out tests. Covers:
 //
 //   * pr.workflow validation (manual / github / shipyard delegation)
 //   * Shipyard binary pin handling
@@ -310,7 +306,7 @@ TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
     // Report the version the pulp CLI's skew check expects (tools/shipyard.toml
     // pin), stripped of the leading 'v' since that's what `shipyard --version`
     // emits in practice. Reading dynamically keeps the test honest across pin
-    // bumps — the old hardcoded "0.46.0" broke on the v0.56.2 bump.
+    // bumps.
     std::string version = pinned_shipyard_version_for_test();
     if (!version.empty() && version[0] == 'v') version.erase(0, 1);
     {

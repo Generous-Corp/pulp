@@ -1,6 +1,9 @@
 # Examples
 
-Pulp ships with eight plugin examples plus standalone apps (GPU demo, UI preview, web demos) that validate different capabilities of the framework. Each example is self-contained under `examples/` and builds as part of the standard CMake build.
+This page is the curated gallery for the documented core examples. The broader
+`examples/` tree also contains subsystem demos and platform-specific proof
+projects such as Bendr, PulpTempoSampler, MPE, WebView, Three.js, SDF, Stream,
+Plugin Host, Audio Inspector, and iOS AUv3 examples.
 
 ## Gallery
 
@@ -10,7 +13,7 @@ These examples are polished and demonstrate best practices for building Pulp plu
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpGain](example-pulp-gain.html) | Stereo gain effect with input/output gain and bypass | VST3, AU, CLAP, Standalone |
+| [PulpGain](example-pulp-gain.html) | Stereo gain effect with input/output gain and bypass | VST3, AU v2/AUv3, CLAP, Standalone, optional AAX |
 
 ### Validation
 
@@ -18,13 +21,13 @@ These examples exist to test and validate specific subsystems of the framework.
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU, CLAP, Standalone |
-| [PulpEffect](example-pulp-effect.html) | Biquad filter with frequency, resonance, type, and mix | VST3, AU, CLAP |
-| [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU, CLAP |
+| [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU v2, CLAP, Standalone |
+| [PulpEffect](example-pulp-effect.html) | Biquad filter with frequency, resonance, type, and mix | VST3, AU v2, CLAP |
+| [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU v2, CLAP |
 | [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |
 | [PulpSynth](example-pulp-synth.html) | Macro oscillator synth using the signal DSP library | CLAP |
 | [PulpSampler](example-pulp-sampler.html) | Audio file sampler with MIDI, ADSR, pitch control | CLAP |
-| [PulpPluck](example-pulp-pluck.html) | Karplus-Strong plucked string synth | VST3, AU, CLAP |
+| [PulpPluck](example-pulp-pluck.html) | Karplus-Strong plucked string synth | VST3, AU v2, CLAP |
 
 ### Experimental
 
@@ -36,10 +39,11 @@ These examples explore features that are not yet stable across all platforms.
 
 ## Building Examples
 
-All examples build as part of the standard CMake build:
+The CMake-backed gallery examples build as part of the standard CMake build
+when their platform and option gates are satisfied:
 
 ```bash
-cmake -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 

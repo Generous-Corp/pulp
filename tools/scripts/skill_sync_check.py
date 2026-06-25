@@ -24,9 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-# Shared substrate (extracted in 2026-05 refactor batch). Single-file
-# script invocation puts this directory on sys.path, so a plain import
-# works from CI, hooks, and ad-hoc runs.
+# Shared gate helpers. Single-file script invocation puts this directory
+# on sys.path, so a plain import works from CI, hooks, and ad-hoc runs.
 from gate_common import (
     repo_root,
     git_diff_names,

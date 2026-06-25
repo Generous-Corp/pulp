@@ -305,8 +305,8 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
 
 TEST_CASE("set_theme repaints and cascades to children",
           "[view][theme][reskin]") {
-    // Design-System-Import-Plan Phase 2: a theme swap must invalidate the
-    // surface (previously set_theme updated the member silently) and the new
+    // Regression: a theme swap must invalidate the surface (previously
+    // set_theme updated the member silently) and the new
     // tokens must reach descendants that resolve up the parent chain.
     View root;
     auto child = std::make_unique<View>();
@@ -456,7 +456,7 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     // No painting root supplied → hook receives nullptr (legacy/headless path).
     REQUIRE(last_painting_root == nullptr);
 
-    // WYSIWYG P2e: paint_overlays forwards the painting root to the hook so it
+    // paint_overlays forwards the painting root to the hook so it
     // can gate which root the inspector overlay paints into.
     View probe_root;
     View::set_inspector_paint_hook(
@@ -471,7 +471,7 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     View::set_inspector_paint_hook({});
 }
 
-// WYSIWYG P4 FIX 1 — the mouse / cursor / text inspector hooks now carry the
+// The mouse / cursor / text inspector hooks now carry the
 // event's root View so the installed hook can gate to the inspected canvas
 // root (mirroring the paint-hook root-gate above). This proves the call
 // forwards the root and that an installed gate dispatches only when the event
@@ -1088,7 +1088,7 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
 }
 
-// pulp #1171 (Codex P2 on #1044) — uniform set_border_radius() followed
+// pulp #1171 — uniform set_border_radius() followed
 // by a single per-corner override must NOT zero the other three corners.
 // Previously: set_border_radius(10); set_corner_radius_tl(2);
 // rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
@@ -1129,7 +1129,7 @@ TEST_CASE("simulate_click bubble does NOT walk past `this` receiver",
     // outer has on_click set. root + child have no on_click.
     // Calling root->simulate_click(...) MUST NOT bubble up to outer —
     // that would leak the synthetic click across component boundaries
-    // (the bug Codex flagged on #1073).
+    // (the bug flagged on #1073).
     View outer;
     outer.set_bounds({0, 0, 200, 200});
     bool outer_clicked = false;
@@ -1286,10 +1286,10 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
 }
 
 
-// ── pulp #1368 round 2 — absolute children with inset:0 + explicit height ──
+// ── pulp #1368 — absolute children with inset:0 + explicit height ─────────
 //
-// Spectr filterbank repro per round-2 investigation. Two `<canvas>` siblings
-// share the same wrap parent (1320×860) with `position: absolute; inset: 0`
+// Spectr filterbank repro. Two `<canvas>` siblings share the same wrap parent
+// (1320×860) with `position: absolute; inset: 0`
 // (top/right/bottom/left = 0), but each has an explicit setFlex height —
 // pr_1 = 760, pr_2 = 860. The visible-rendering symptom on the live plugin
 // is consistent with pr_1's bounds_.y landing above the visible window
@@ -1304,8 +1304,8 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
 // the box to the bottom because inset top:0 + bottom:0 conflicts with the
 // explicit height), the Spectr symptom reappears.
 //
-// As of v0.74.0 this test is expected to FAIL when the resolved y is
-// non-zero — the FAIL is the round-2 reproduction.
+// This test must fail when the resolved y is non-zero; that is the off-window
+// paint-position regression.
 
 TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
           "[view][issue-1368][round2]") {
@@ -1345,9 +1345,9 @@ TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
          << "," << pr2_ptr->bounds().width << "," << pr2_ptr->bounds().height << ")");
 
     // Both children must paint flush with the parent's top-left. Negative or
-    // shifted y values reproduce the #1368 round-2 hypothesis: parent's
-    // translate(bounds_.x, bounds_.y) in View::paint_all pushes the canvas
-    // child off-window so fillRect at (50, 50) lands in the title-bar region.
+    // shifted y values reproduce #1368: parent's translate(bounds_.x, bounds_.y)
+    // in View::paint_all pushes the canvas child off-window so fillRect at
+    // (50, 50) lands in the title-bar region.
     REQUIRE(pr1_ptr->bounds().x == 0.0f);
     REQUIRE(pr1_ptr->bounds().y == 0.0f);
     REQUIRE(pr2_ptr->bounds().x == 0.0f);
@@ -1448,7 +1448,7 @@ TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
     REQUIRE(registry.get("phase3.live.editor") == Catch::Approx(5.0f));
 }
 
-// Phase 3d (inspector roadmap) — per-component paint timing.
+// Per-component paint timing.
 // View::paint_all() now records nanoseconds spent inside paint() (self)
 // and the recursive children walk (with_children) so the inspector can
 // show per-view cost without adding new instrumentation per query.
@@ -1537,7 +1537,7 @@ TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
     REQUIRE(v->last_paint_self_ns() > 0u);
 }
 
-// Codex P2 follow-up on #2338: paint timing must cover framework-owned
+// Regression (#2338): paint timing must cover framework-owned
 // drawing (background fills, borders, gradients, layer setup) — not
 // just the paint(canvas) override. A styled View with no paint()
 // override should still report non-zero last_paint_self_ns because
@@ -1548,10 +1548,9 @@ TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override view
     // Use the BASE pulp::view::View (no paint() override) but set a
     // background color so the framework's background fill runs in
     // paint_all() between save() and the (no-op) paint() call. The
-    // pre-fix implementation timed only the paint() override and
-    // reported ~0ns; the post-fix implementation times the whole
-    // paint_all body, so we should see > 0ns even for a no-override
-    // styled View.
+    // Timing only the paint() override reports ~0ns for this case; timing the
+    // whole paint_all body should report > 0ns even for a no-override styled
+    // View.
     auto v = std::make_unique<pulp::view::View>();
     v->set_bounds({0, 0, 200, 200});
     v->set_background_color(pulp::canvas::Color::rgba(0.5f, 0.3f, 0.7f, 1.0f));
@@ -1559,8 +1558,8 @@ TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override view
     pulp::canvas::RecordingCanvas canvas;
     v->paint_all(canvas);
 
-    // The whole paint_all body has run on the way out — self_ns must
-    // be > 0 even though paint() was a no-op. Pre-fix this was ~0.
+    // The whole paint_all body has run on the way out — self_ns must be > 0
+    // even though paint() was a no-op.
     REQUIRE(v->last_paint_self_ns() > 0u);
     REQUIRE(v->last_paint_with_children_ns() >= v->last_paint_self_ns());
 }

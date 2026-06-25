@@ -228,8 +228,8 @@ void set_env_var(const char* name, const std::string& value) {
 // verifier spawns the tool via std::system, which inherits our environment); a
 // `pulp-screenshot.bytes` sidecar is written as a fallback. Using a real
 // executable (built as the `pulp-fake-screenshot-tool` target) keeps the
-// kit-verify screenshot-execution path identical across platforms; the previous
-// generated .cmd/.sh shims were a recurring Windows-only failure source.
+// kit-verify screenshot-execution path identical across platforms; generated
+// .cmd/.sh shims were Windows-flaky.
 void write_fake_screenshot_tool(const fs::path& project_root, const std::string& bytes) {
     const auto screenshot_tool = screenshot_tool_path_for_test(project_root);
     std::error_code ec;

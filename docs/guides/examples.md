@@ -1,6 +1,9 @@
 # Examples
 
-Pulp ships with eight example plugins plus standalone apps (GPU demo, UI preview, web demos). Each example validates a specific capability of the framework.
+Pulp's curated example guide covers the core plugin gallery, selected standalone
+apps, and source-only DSP lanes. The broader `examples/` tree also contains
+subsystem demos and platform-specific proof projects; use each example's local
+README or subsystem guide for those specialized workflows.
 
 All examples live under `examples/`.
 
@@ -8,12 +11,12 @@ All examples live under `examples/`.
 
 **Path**: `examples/pulp-gain/`
 **Type**: Effect
-**Formats**: VST3, AU v2, CLAP, Standalone
+**Formats**: VST3, AU v2, AUv3, CLAP, Standalone, optional AAX
 **Purpose**: The simplest possible plugin. A gain knob. Validates that the build system works, format entry points are correct, and audio passes through.
 
 Features:
 - Single gain parameter (dB)
-- All four output formats
+- Default VST3, CLAP, and Standalone targets; AU v2/AUv3 on Apple; optional AAX on macOS/Windows
 - Golden-file audio test
 - Includes `Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`
 
@@ -46,12 +49,12 @@ Features:
 **Path**: `examples/pulp-compressor/`
 **Type**: Effect
 **Formats**: VST3, AU v2, CLAP
-**Purpose**: A dynamics processor. Validates the sidechain API, latency reporting, and more complex DSP.
+**Purpose**: A dynamics processor. Validates the sidechain API, multi-bus routing, and more complex DSP.
 
 Features:
 - Threshold, ratio, attack, release parameters
 - Sidechain input support
-- Latency compensation
+- Envelope follower and gain reduction
 
 ## PulpDrums
 
@@ -61,8 +64,8 @@ Features:
 **Purpose**: A generative drum sequencer. The first example using MIDI output. Validates MIDI effect processing.
 
 Features:
-- Three voices (kick, snare, hi-hat)
-- Density and chaos controls
+- Four tracks (kick, snare, hi-hat, clap)
+- Density, velocity, pattern, and randomize controls
 - Pattern generation
 - MIDI output
 
@@ -78,11 +81,48 @@ Features:
 - Modulation parameters
 - Polyphonic voice handling
 
+## PulpSampler
+
+**Path**: `examples/PulpSampler/`
+**Type**: Instrument
+**Formats**: CLAP
+**Purpose**: An audio-file sampler with MIDI triggering, ADSR envelope, and
+pitch control. Validates sample loading, multi-voice playback, and sampler
+state round-trips.
+
+Features:
+- Audio file sample loading
+- MIDI note triggering with velocity
+- ADSR envelope and pitch control
+- Multi-voice polyphony
+
+## PulpPluck
+
+**Path**: `examples/pulp-pluck/`
+**Type**: Instrument
+**Formats**: VST3, AU v2, CLAP
+**Purpose**: A Karplus-Strong plucked-string synthesizer. Validates the
+instrument plugin path with a compact physical-modeling processor that also
+feeds the web demo lane.
+
+Features:
+- Plucked-string synthesis
+- MIDI note input
+- Decay, brightness, and volume parameters
+- Native plugin targets plus WAM demo reuse
+
 ## UI Preview
 
 **Path**: `examples/ui-preview/`
 **Type**: Standalone application (not a plugin)
 **Purpose**: A standalone app for testing the view/widget system and GPU rendering pipeline without building a full plugin.
+
+## Additional CMake-Backed Examples
+
+`examples/CMakeLists.txt` includes more shipped targets than the curated plugin
+gallery above. Current examples include Bendr, PulpTempoSampler, PulpMpeSynth,
+ViewBridge, Audio Inspector, Plugin Host, Stream, SDF, WebView, Three.js, and iOS
+AUv3 demos. Some are gated by platform, optional dependencies, or feature flags.
 
 ## FAUST Examples
 
@@ -154,10 +194,12 @@ the bounded subset.
 
 ## Building Examples
 
-All examples are built as part of the main build:
+CMake-backed examples in the root example graph build as part of the main build
+when their platform and option gates are satisfied. Source-only Cmajor and JSFX
+examples use the lane-specific validators below.
 
 ```bash
-cmake -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 

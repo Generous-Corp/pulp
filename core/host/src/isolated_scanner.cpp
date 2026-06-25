@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Crash-isolated plugin scanner — macOS plan item 4.1.
+// Crash-isolated plugin scanner.
 //
 // Spawns `pulp-scan-worker` per bundle via `pulp::platform::ChildProcess`
 // and classifies the worker's outcome into a `ScanStatus`. The worker's

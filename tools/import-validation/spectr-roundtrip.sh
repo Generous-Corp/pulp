@@ -68,8 +68,8 @@ mkdir -p "$OUT_DIR"
 if [[ $SKIP_IMPORT -eq 0 ]]; then
   echo "[1/5] Re-import editor.html via pulp import-design…"
   cd "$PULP"
-  # Workaround for "not in a Pulp project directory" — run from pulp tree
-  # with absolute path to spectr's HTML (P-1 in spectr-reimport-validation-plan.md).
+  # Workaround for "not in a Pulp project directory": run from the Pulp tree
+  # with an absolute path to spectr's HTML.
   if ! pulp import-design --from claude --file "$EDITOR_HTML" >/tmp/spectr-rt-import.log 2>&1; then
     red "ERROR: pulp import-design failed"
     tail -20 /tmp/spectr-rt-import.log

@@ -1,7 +1,7 @@
 // cmd_misc.cpp — pulp test, status, clean, cache commands
 //
-// Note: `pulp upgrade` moved to cmd_upgrade.cpp in release-discovery
-// Slice 2 (#547) so the update-check surface can grow independently.
+// Note: `pulp upgrade` lives in cmd_upgrade.cpp so the update-check
+// surface can grow independently.
 
 #include "cli_common.hpp"
 #include "sdk_cache_paths.hpp"
@@ -350,16 +350,15 @@ int cmd_clean(const std::vector<std::string>& args) {
 
 // ── cmd_fmt ─────────────────────────────────────────────────────────────────
 //
-// Tier A Slice 10: surface clang-format against the project root's
-// .clang-format. Walks `core/`, `examples/`, `inspect/`, `test/`,
-// `tools/`, and `ship/` for .cpp / .hpp / .h / .mm files and runs
-// `clang-format -i` per file. `--dry-run` prints what would change
-// (clang-format --dry-run --Werror, exit 1 on any diff). `--check`
-// is a CI-friendly alias that doesn't rewrite.
+// Surface clang-format against the project root's .clang-format. Walks
+// `core/`, `examples/`, `inspect/`, `test/`, `tools/`, and `ship/` for
+// .cpp / .hpp / .h / .mm files and runs `clang-format -i` per file.
+// `--dry-run` prints what would change (clang-format --dry-run
+// --Werror, exit 1 on any diff). `--check` is a CI-friendly alias that
+// doesn't rewrite.
 //
-// The .clang-format file landed with this slice (LLVM-derived,
-// 100-col, 4-space indent). See docs/guides/coming-from-juce.md or
-// `.clang-format` itself for the full rules.
+// See docs/guides/coming-from-juce.md or `.clang-format` itself for
+// the full LLVM-derived formatting rules.
 
 int cmd_fmt(const std::vector<std::string>& args) {
     auto root = resolve_active_project_root(nullptr);

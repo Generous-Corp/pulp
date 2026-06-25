@@ -9,30 +9,31 @@
 //! easier to test and easier to read.
 //!
 //! The split with `cmd::dev` / `cmd::docs` / `cmd::design` /
-//! `cmd::create` (deferred in Phase 6) is deliberate — those
-//! commands bring subsystems the orchestrators don't touch (watch
-//! loops, docs index YAML, template tree, `design_binding`).
+//! `cmd::create` is deliberate — those commands bring subsystems the
+//! orchestrators don't touch (watch loops, docs index YAML, template
+//! tree, `design_binding`).
 //!
-//! # What's ported
+//! # Command coverage
 //!
-//! | Command     | Status in Phase 6                                        |
-//! |-------------|----------------------------------------------------------|
-//! | `build`     | Ported without `--watch`. Configure + build via `cmake`. |
-//! | `test`      | Ported — delegates to `ctest --output-on-failure`.       |
-//! | `run`       | Ported — finds a standalone binary under `build/`.       |
-//! | `clean`     | Ported — `rm -rf build/`.                                |
-//! | `status`    | Ported (partial) — reports root/branch/build/mode.        |
-//! | `cache`     | Ported status + clean subcommands. `fetch` stays on C++. |
+//! | Command  | Runtime behavior                                           |
+//! |----------|------------------------------------------------------------|
+//! | `build`  | Configure + build via `cmake`; watch/validate/install delegate. |
+//! | `test`   | Delegates to `ctest --output-on-failure`.                  |
+//! | `run`    | Finds a standalone binary under `build/`.                  |
+//! | `clean`  | Removes `build/`.                                         |
+//! | `status` | Reports root/branch/build/mode and SDK details.            |
+//! | `cache`  | Status + clean are Rust-native; `fetch` delegates to C++.  |
 //!
-//! # `build` simplifications vs C++
+//! # `build` delegation vs C++
 //!
-//! - **No `--watch`.** The C++ watcher is a cross-platform `FSEvents` /
-//!   `ReadDirectoryChangesW` / inotify polyfill. Reimplementing that
-//!   properly is a multi-day port; re-shelling every change in a
-//!   while-loop would work on macOS but be pathological on Linux.
-//!   Phase 6 documents the gap and defers. The watch surface lives
-//!   in `cmd_build`'s own `watch_loop` which the C++ `dev` command
-//!   also consumes.
+//! - **`--watch` delegates.** The C++ watcher is a cross-platform
+//!   `FSEvents` / `ReadDirectoryChangesW` / inotify polyfill. The Rust
+//!   path keeps normal configure/build native, but forwards watch mode
+//!   to `pulp-cpp`.
+//! - **`--install` delegates.** The C++ path owns the macOS plugin
+//!   install destinations and validation gate, so Rust recognizes the
+//!   flags and forwards the install branch rather than passing them to
+//!   `cmake --build`.
 //! - **No `--local` SDK build path.** That path calls
 //!   `ensure_checkout_sdk` which runs `setup.sh --deps-only` and a
 //!   bespoke `cmake --install` chain. The Rust port assumes a
@@ -52,25 +53,34 @@ use crate::project::{self, ActiveProject};
 
 /// Flag surface for `pulp-rs build`.
 ///
-/// `--watch`, `--test`, `--test-filter`, and `--validate` are parsed
-/// here for completeness, but the `watch_mode` variants are rejected
-/// in [`build`] with a clear error pointing to the C++ binary.
+/// `--watch`, `--validate`, and `--install` delegate to `pulp-cpp` for
+/// the C++ watcher, validator chain, and macOS install pipeline.
+/// `--test` stays Rust-native and runs `ctest` after a successful build.
 #[derive(Debug, Default, Clone)]
 pub struct BuildArgs {
+    /// Original CLI tail after `build`. Used to preserve spelling and
+    /// ordering when a delegated branch needs to call `pulp-cpp`.
+    pub raw_tail: Vec<String>,
     /// Extra args to pass to `cmake --build` (e.g. `--target`, `-j`).
     pub passthrough: Vec<String>,
     /// Forced JS engine selection (`auto|quickjs|jsc|v8`).
     pub js_engine: Option<String>,
-    /// `--watch` — deferred, prints a stub notice when set.
+    /// `--watch` — delegates to `pulp-cpp` when set.
     pub watch: bool,
     /// `--test` — run `ctest` after a successful build.
     pub test: bool,
     /// `--validate` — run plugin validators after a successful build
-    /// (also deferred; needs `cmd::validate` port).
+    /// (delegates to `pulp-cpp`; needs validator-chain parity to run
+    /// Rust-native).
     pub validate: bool,
+    /// `--install` — after build, validate and copy plugin bundles to
+    /// the user's macOS plug-in folders. Delegates to `pulp-cpp`.
+    pub install: bool,
+    /// `--skip-validation` — debug-only escape hatch for `--install`.
+    /// Only valid when paired with `--install`.
+    pub skip_validation: bool,
     /// `--check-identity` — verify `.pulp/identity.lock` matches the
-    /// current plugin identity before configuring. Implements Track
-    /// 3.12 of the macOS plugin-authoring plan.
+    /// current plugin identity before configuring.
     pub check_identity: bool,
     /// `--allow-identity-change` — paired with `--check-identity`,
     /// treats drift as a soft warning instead of failing the build.
@@ -82,11 +92,14 @@ pub struct BuildArgs {
 #[must_use]
 pub fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = BuildArgs::default();
+    out.raw_tail = args.to_vec();
     for a in args {
         match a.as_str() {
             "--watch" | "-w" => out.watch = true,
             "--test" | "-t" => out.test = true,
             "--validate" => out.validate = true,
+            "--install" => out.install = true,
+            "--skip-validation" => out.skip_validation = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             _ if a.starts_with("--js-engine=") => {
@@ -96,6 +109,41 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
         }
     }
     out
+}
+
+fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
+    let tail = if args.raw_tail.is_empty() {
+        let mut synthesized = Vec::new();
+        if args.watch {
+            synthesized.push("--watch".to_owned());
+        }
+        if args.test {
+            synthesized.push("--test".to_owned());
+        }
+        if args.validate {
+            synthesized.push("--validate".to_owned());
+        }
+        if args.install {
+            synthesized.push("--install".to_owned());
+        }
+        if args.skip_validation {
+            synthesized.push("--skip-validation".to_owned());
+        }
+        if let Some(engine) = &args.js_engine {
+            synthesized.push(format!("--js-engine={engine}"));
+        }
+        synthesized.extend(args.passthrough.clone());
+        synthesized
+    } else {
+        args.raw_tail.clone()
+    };
+
+    let mut argv = vec!["build".to_owned()];
+    argv.extend(
+        tail.into_iter()
+            .filter(|arg| arg != "--check-identity" && arg != "--allow-identity-change"),
+    );
+    argv
 }
 
 /// Run `pulp-rs build` with the system spawner.
@@ -121,18 +169,33 @@ pub fn build<S: Spawner>(
 ///
 /// # Errors
 ///
-/// [`CliError::Other`] when `cmake`/`ctest` exits non-zero. The
-/// child exit code also propagates as the return value of the
-/// successful case so callers can forward to the shell.
+/// Propagates spawn/fallthrough failures. Non-zero child exit codes
+/// are returned as `Ok(rc)` so callers can forward them to the shell.
 pub fn build_with<S: Spawner>(
     proj: &ActiveProject,
     args: &BuildArgs,
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
+    if args.skip_validation && !args.install {
+        return Err(CliError::BadUsage(
+            "--skip-validation only applies with --install".to_owned(),
+        ));
+    }
+
+    if args.install && args.watch {
+        // Preserve the C++ parser's exact rejection for the dangerous
+        // install+watch pairing.
+        let cpp_argv = build_delegate_argv(args);
+        let stub = "pulp-rs build --install --watch: install/watch validation stays on the \
+                    C++ parser; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
+    }
+
     if args.check_identity {
-        // Track 3.12: refuse to configure / build when the project's
-        // current plugin identity has drifted from `.pulp/identity.lock`
+        // Refuse to configure / build when the project's current
+        // plugin identity has drifted from `.pulp/identity.lock`
         // without `--allow-identity-change`. Runs early so a doomed
         // build doesn't waste a configure step.
         let cmake = proj.root.join("CMakeLists.txt");
@@ -145,21 +208,32 @@ pub fn build_with<S: Spawner>(
         }
     }
 
+    if args.install {
+        // C++ owns the validated install path. Keep Rust-only identity
+        // flags out of the delegated argv so `cmd_build.cpp` does not
+        // pass them through to `cmake --build`.
+        let cpp_argv = build_delegate_argv(args);
+        let stub =
+            "pulp-rs build --install: install pipeline is not ported; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
+    }
+
     if args.watch {
-        // Phase 7: route --watch through the C++ binary if it's on
-        // PATH, otherwise fall back to the "not ported" stub so
-        // users in a Rust-only sandbox still see a clear error.
+        // Route --watch through the C++ binary if it's on PATH,
+        // otherwise fall back to the stub so users in a Rust-only
+        // sandbox still see a clear error.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         let stub = "pulp-rs build --watch: watch loop is not ported; install pulp-cpp to enable.";
         let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
         return Ok(rc);
     }
     if args.validate {
-        // Phase 7: delegate the entire `build --validate` invocation
-        // to pulp-cpp so the validator chain (pluginval / auval /
+        // Delegate the entire `build --validate` invocation to
+        // pulp-cpp so the validator chain (pluginval / auval /
         // clap-validator) runs against the same build. Fall back to
         // a warning + continued Rust build when pulp-cpp is absent,
-        // preserving pre-Phase-7 behaviour for Rust-only sandboxes.
+        // preserving behavior for Rust-only sandboxes.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         match crate::fallthrough::delegate(&cpp_argv)? {
             crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
@@ -285,7 +359,7 @@ pub fn parse_run_args(args: &[String]) -> RunArgs {
 ///
 /// Search roots:
 /// - `build/bin/`  for standalone product projects.
-/// - `build/examples/*/` for in-repo examples.
+/// - `build/examples/*/`, then `build/bin/`, for in-repo examples.
 ///
 /// When `target` is `Some`, the filename must match stem-or-full.
 /// When `None`, the first executable regular file that passes
@@ -692,6 +766,7 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
     )
     .map_err(io_err)?;
 
+    write_pr_workflow_status(&proj, out)?;
     write_import_design_default_status(out)?;
 
     if proj.standalone {
@@ -701,6 +776,128 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
         write_plugin_format_availability(&proj, out)?;
     }
     Ok(())
+}
+
+fn write_pr_workflow_status(proj: &ActiveProject, out: &mut impl Write) -> Result<()> {
+    let workflow = crate::config::effective_pr_workflow();
+    if let Some(error) = workflow.error {
+        writeln!(out, "PR workflow: invalid ({})", workflow.source).map_err(io_err)?;
+        writeln!(out, "PR workflow detail: {error}").map_err(io_err)?;
+        return Ok(());
+    }
+
+    if proj.standalone {
+        writeln!(
+            out,
+            "PR workflow: project-owned (Pulp source ship flow not active)"
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+
+    writeln!(
+        out,
+        "PR workflow: {} ({})",
+        workflow.workflow, workflow.source
+    )
+    .map_err(io_err)?;
+
+    match workflow.workflow.as_str() {
+        "shipyard" => write_shipyard_status(&proj.root, out),
+        "github" => write_github_workflow_status(out),
+        "manual" => {
+            writeln!(
+                out,
+                "PR automation: manual (no push or PR creation by `pulp pr`)"
+            )
+            .map_err(io_err)?;
+            writeln!(out, "Shipyard tracking: disabled by pr.workflow=manual").map_err(io_err)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn write_shipyard_status(root: &Path, out: &mut impl Write) -> Result<()> {
+    let shipyard = crate::proc::which("shipyard");
+    let pinned = crate::cmd::pr::read_pinned_shipyard_version(root);
+
+    let Some(shipyard) = shipyard else {
+        writeln!(
+            out,
+            "Shipyard: missing (run `./tools/install-shipyard.sh` in this checkout)"
+        )
+        .map_err(io_err)?;
+        if let Some(pinned) = pinned {
+            writeln!(out, "Shipyard pinned: {pinned}").map_err(io_err)?;
+        }
+        return Ok(());
+    };
+
+    write!(out, "Shipyard: {}", shipyard.display()).map_err(io_err)?;
+    let actual = capture_shipyard_version(&shipyard);
+    if let Some(actual) = actual.as_ref() {
+        write!(out, " ({actual})").map_err(io_err)?;
+    }
+    if let Some(pinned) = pinned.as_ref() {
+        write!(out, " pinned {pinned}").map_err(io_err)?;
+        if actual.as_ref().is_some_and(|a| a != pinned) {
+            write!(out, " [pin mismatch]").map_err(io_err)?;
+        }
+    }
+    writeln!(out).map_err(io_err)?;
+    Ok(())
+}
+
+fn write_github_workflow_status(out: &mut impl Write) -> Result<()> {
+    if let Some(gh) = crate::proc::which("gh") {
+        writeln!(out, "GitHub CLI: {}", gh.display()).map_err(io_err)?;
+    } else {
+        writeln!(
+            out,
+            "GitHub CLI: missing (`gh` required for github workflow)"
+        )
+        .map_err(io_err)?;
+    }
+    writeln!(out, "Shipyard tracking: disabled by pr.workflow=github").map_err(io_err)
+}
+
+fn capture_shipyard_version(shipyard_bin: &Path) -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let output = Command::new(shipyard_bin)
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_shipyard_version_output(if stdout.trim().is_empty() {
+        stderr.trim()
+    } else {
+        stdout.trim()
+    })
+}
+
+fn parse_shipyard_version_output(output: &str) -> Option<String> {
+    let cleaned: String = output
+        .chars()
+        .map(|c| if matches!(c, ',' | '(' | ')') { ' ' } else { c })
+        .collect();
+    for raw in cleaned.split_whitespace() {
+        let token = raw.trim_end_matches([',', ';', ':']);
+        let check = token.strip_prefix('v').unwrap_or(token);
+        let first = check.chars().next()?;
+        if !first.is_ascii_digit() || !check.contains('.') {
+            continue;
+        }
+        return Some(if token.starts_with('v') {
+            token.to_owned()
+        } else {
+            format!("v{token}")
+        });
+    }
+    None
 }
 
 fn write_import_design_default_status(out: &mut impl Write) -> Result<()> {
@@ -897,13 +1094,40 @@ pub enum CacheSub {
 /// # Errors
 ///
 /// Returns [`CliError::UnknownSubcommand`] for any unrecognised
-/// keyword.
+/// keyword and [`CliError::BadUsage`] for extra positional args.
 pub fn parse_cache_sub(args: &[String]) -> Result<CacheSub> {
     match args.first().map(String::as_str) {
-        None | Some("help" | "--help" | "-h") => Ok(CacheSub::Help),
-        Some("status") => Ok(CacheSub::Status),
-        Some("clean") => Ok(CacheSub::Clean),
+        None => Ok(CacheSub::Help),
+        Some("help" | "--help" | "-h") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache help argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Help)
+        }
+        Some("status") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache status argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Status)
+        }
+        Some("clean") => {
+            if let Some(extra) = args.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache clean argument: {extra}"
+                )));
+            }
+            Ok(CacheSub::Clean)
+        }
         Some("fetch") => {
+            if let Some(extra) = args.get(2) {
+                return Err(CliError::BadUsage(format!(
+                    "Unexpected cache fetch argument: {extra}"
+                )));
+            }
             let asset = args.get(1).cloned().unwrap_or_default();
             Ok(CacheSub::Fetch(asset))
         }
@@ -916,7 +1140,7 @@ pub fn parse_cache_sub(args: &[String]) -> Result<CacheSub> {
 /// # Errors
 ///
 /// [`CliError::Other`] when the home dir can't be resolved or a
-/// fetch is requested (deferred).
+/// fetch is requested and cannot be delegated.
 pub fn cache(sub: &CacheSub, json: bool, out: &mut impl Write) -> Result<()> {
     let home = pulp_home().ok_or_else(|| {
         CliError::Other(
@@ -958,8 +1182,8 @@ pub fn cache_with_home(
         CacheSub::Status => do_cache_status(home, json, out),
         CacheSub::Clean => do_cache_clean(home, json, out),
         CacheSub::Fetch(_) => {
-            // Phase 7: delegate to pulp-cpp; fall back to the stub
-            // message when the legacy binary is unavailable.
+            // Delegate to pulp-cpp; fall back to the stub message
+            // when the C++ binary is unavailable.
             let cpp_argv = crate::fallthrough::current_argv_tail();
             let stub_msg = "pulp-rs cache fetch: download + platform detect not ported; \
                             install pulp-cpp to enable.";
@@ -1063,10 +1287,49 @@ fn io_err(e: std::io::Error) -> CliError {
 mod tests {
     use super::*;
     use crate::proc::testing::RecordingSpawner;
+    use std::ffi::OsString;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
         ActiveProject::new(root.to_path_buf(), true)
+    }
+
+    fn source_tree_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("core/runtime")).unwrap();
+        std::fs::write(root.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        std::fs::write(root.join("core/runtime/foo.cpp"), "").unwrap();
+        std::fs::write(root.join("core/runtime/foo.hpp"), "").unwrap();
+        std::fs::write(root.join("core/runtime/bar.h"), "").unwrap();
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(root.join("test/test_foo.cpp"), "").unwrap();
+        std::fs::write(root.join("test/test_bar.cpp"), "").unwrap();
+        std::fs::create_dir_all(root.join("examples/a")).unwrap();
+        std::fs::create_dir_all(root.join("examples/b")).unwrap();
     }
 
     fn configure_build(proj: &ActiveProject) {
@@ -1080,6 +1343,8 @@ mod tests {
             "--watch".to_owned(),
             "--test".to_owned(),
             "--validate".to_owned(),
+            "--install".to_owned(),
+            "--skip-validation".to_owned(),
             "--check-identity".to_owned(),
             "--allow-identity-change".to_owned(),
             "--js-engine=v8".to_owned(),
@@ -1087,9 +1352,28 @@ mod tests {
             "pulp-gain".to_owned(),
         ]);
         assert!(a.watch && a.test && a.validate);
+        assert!(a.install && a.skip_validation);
         assert!(a.check_identity && a.allow_identity_change);
         assert_eq!(a.js_engine.as_deref(), Some("v8"));
         assert_eq!(a.passthrough, vec!["--target", "pulp-gain"]);
+    }
+
+    #[test]
+    fn build_delegate_argv_strips_rust_only_identity_flags() {
+        let a = parse_build_args(&[
+            "--install".to_owned(),
+            "--check-identity".to_owned(),
+            "--allow-identity-change".to_owned(),
+            "--skip-validation".to_owned(),
+        ]);
+        assert_eq!(
+            build_delegate_argv(&a),
+            vec![
+                "build".to_owned(),
+                "--install".to_owned(),
+                "--skip-validation".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -1150,6 +1434,7 @@ mod tests {
 
     #[test]
     fn build_watch_errors() {
+        let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let proj = standalone_project(td.path());
         let spawner = RecordingSpawner::ok();
@@ -1165,6 +1450,27 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn build_skip_validation_without_install_errors_before_cmake() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let err = build_with(
+            &proj,
+            &BuildArgs {
+                skip_validation: true,
+                ..Default::default()
+            },
+            &spawner,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(msg) if msg.contains("--skip-validation")));
+        assert!(spawner.calls.borrow().is_empty());
     }
 
     #[test]
@@ -1350,17 +1656,7 @@ mod tests {
     #[test]
     fn status_source_tree_reports_counts_and_formats() {
         let td = tempfile::tempdir().unwrap();
-        // Source-tree fixture: has `core/` + `CMakeLists.txt`.
-        std::fs::create_dir_all(td.path().join("core/runtime")).unwrap();
-        std::fs::write(td.path().join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
-        std::fs::write(td.path().join("core/runtime/foo.cpp"), "").unwrap();
-        std::fs::write(td.path().join("core/runtime/foo.hpp"), "").unwrap();
-        std::fs::write(td.path().join("core/runtime/bar.h"), "").unwrap();
-        std::fs::create_dir_all(td.path().join("test")).unwrap();
-        std::fs::write(td.path().join("test/test_foo.cpp"), "").unwrap();
-        std::fs::write(td.path().join("test/test_bar.cpp"), "").unwrap();
-        std::fs::create_dir_all(td.path().join("examples/a")).unwrap();
-        std::fs::create_dir_all(td.path().join("examples/b")).unwrap();
+        source_tree_fixture(td.path());
         let probe = StubGitProbe {
             branch: None,
             commit: None,
@@ -1375,6 +1671,86 @@ mod tests {
         assert!(s.contains("Plugin Formats:"));
         assert!(s.contains("VST3: SDK not found"));
         assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_source_tree_reports_manual_pr_workflow_from_config() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.toml"),
+            "[pr]\nworkflow = \"manual\"\n",
+        )
+        .unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", home.path().to_str().unwrap());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: manual (config:pr.workflow)"));
+        assert!(s.contains("Shipyard tracking: disabled by pr.workflow=manual"));
+        assert!(s.contains("Import design defaults:"));
+    }
+
+    #[test]
+    fn status_reports_invalid_pr_workflow_from_env() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "subversion");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: invalid (env:PULP_PR_WORKFLOW)"));
+        assert!(s.contains("pr.workflow must be one of: shipyard, github, manual"));
+    }
+
+    #[test]
+    fn status_source_tree_reports_github_pr_workflow_from_env() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "github");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: github (env:PULP_PR_WORKFLOW)"));
+        assert!(s.contains("GitHub CLI:"));
+        assert!(s.contains("Shipyard tracking: disabled by pr.workflow=github"));
+    }
+
+    #[test]
+    fn status_standalone_reports_project_owned_pr_workflow() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "sdk_version = \"9.9.9\"\n").unwrap();
+        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "manual");
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("PR workflow: project-owned (Pulp source ship flow not active)"));
     }
 
     #[test]
@@ -1427,7 +1803,7 @@ mod tests {
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
-    // ── #45 coverage uplift slice 12 — orchestrate parse + run_cmd ─
+    // ── orchestrate parse + run_cmd coverage ──────────────────────
 
     #[test]
     fn parse_run_args_handles_no_args_returns_default() {
@@ -1508,6 +1884,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_cache_sub_rejects_extra_args_for_single_word_commands() {
+        let status = parse_cache_sub(&["status".to_owned(), "extra".to_owned()]).unwrap_err();
+        assert!(matches!(
+            status,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache status argument: extra")
+        ));
+
+        let clean = parse_cache_sub(&["clean".to_owned(), "extra".to_owned()]).unwrap_err();
+        assert!(matches!(
+            clean,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache clean argument: extra")
+        ));
+    }
+
+    #[test]
     fn parse_cache_sub_fetch_with_and_without_asset() {
         match parse_cache_sub(&["fetch".to_owned(), "skia".to_owned()]).unwrap() {
             CacheSub::Fetch(a) => assert_eq!(a, "skia"),
@@ -1517,6 +1908,16 @@ mod tests {
             CacheSub::Fetch(a) => assert!(a.is_empty()),
             other => panic!("expected Fetch with empty asset, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_cache_sub_fetch_rejects_extra_arg() {
+        let err = parse_cache_sub(&["fetch".to_owned(), "skia".to_owned(), "extra".to_owned()])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::BadUsage(msg) if msg.contains("Unexpected cache fetch argument: extra")
+        ));
     }
 
     #[test]

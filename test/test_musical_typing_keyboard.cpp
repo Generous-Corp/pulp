@@ -770,3 +770,24 @@ TEST_CASE("MusicalTypingKeyboard: number-row keys 1–8 + tab are consumed",
         e.is_down = false; kb.on_key_event(e);
     }
 }
+
+TEST_CASE("MusicalTypingKeyboard: pitch-bend/modulation pad highlight covers the full baked button",
+          "[view][musical-typing][controls]") {
+    // Regression: the baked pitch-bend/modulation pads span panel y[53,90]
+    // (pixel-measured from the rendered SVG). The momentary element rect doubles
+    // as BOTH the hit target and the lit-teal press highlight, so it must reach
+    // the pad bottom. An earlier h=32 (rect ended at y=85) left the bottom ~5px
+    // of the pad uncovered — the lit highlight showed a dark band under it.
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    for (const char* tag : {"pb_down", "pb_up", "mod_0", "mod_1", "mod_2",
+                            "mod_3", "mod_4", "mod_5"}) {
+        const int idx = tag_idx(kb, tag);
+        REQUIRE(idx >= 0);
+        const auto r = kb.element_rect(idx);
+        INFO("control pad tag=" << tag);
+        REQUIRE(r.height == Catch::Approx(37.0f));   // full baked-button height
+        REQUIRE(r.bottom() == Catch::Approx(90.0f)); // reaches the pad bottom
+        // a point near the bottom (below the old h=32 edge at y=85) is covered
+        REQUIRE(r.contains({r.center().x, 88.0f}));
+    }
+}

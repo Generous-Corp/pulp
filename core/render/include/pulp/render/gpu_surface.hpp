@@ -60,11 +60,10 @@ public:
 
     /// Typed X11 surface handle. Pass a pointer to one of these as
     /// Config::native_surface_handle on Linux so Dawn can build an
-    /// SurfaceSourceXlibWindow (#3329 Win/Linux parity). `display` is an
-    /// `Display*` and `window` is an X11 `Window` (an `unsigned long`); both are
-    /// kept opaque here so this header stays Xlib-include-free for non-Linux and
-    /// no-X11 consumers. The pointed-to struct only needs to outlive the
-    /// initialize() call.
+    /// SurfaceSourceXlibWindow. `display` is an `Display*` and `window` is an
+    /// X11 `Window` (an `unsigned long`); both are kept opaque here so this
+    /// header stays Xlib-include-free for non-Linux and no-X11 consumers. The
+    /// pointed-to struct only needs to outlive the initialize() call.
     struct X11NativeHandle {
         void*         display = nullptr;  // Display*
         unsigned long window  = 0;        // Window

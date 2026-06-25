@@ -1,9 +1,9 @@
 // Unit tests for `pulp::cli::looks_like_full_xcode_developer_dir`.
 //
-// Pins the regression for #2969 (Codex comment 3305628892): the
-// `pulp ship auv3-xcodeproj` developer-path check used to hard-match
-// the literal substring `Xcode.app`, blocking beta-channel users with
-// `Xcode-beta.app` (and any other custom-named full Xcode install).
+// Pins the regression for #2969: the `pulp ship auv3-xcodeproj`
+// developer-path check used to hard-match the literal substring `Xcode.app`,
+// blocking beta-channel users with `Xcode-beta.app` (and any other
+// custom-named full Xcode install).
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,9 +17,9 @@ TEST_CASE("looks_like_full_xcode_developer_dir — canonical Xcode.app path",
         "/Applications/Xcode.app/Contents/Developer"));
 }
 
-// Regression: #2969 / Codex comment 3305628892. These are real paths
-// produced by `xcode-select -p` on common beta / pinned installs that
-// the previous literal `Xcode.app` substring check rejected.
+// Regression: #2969. These are real paths produced by `xcode-select -p` on
+// common beta / pinned installs that the previous literal `Xcode.app`
+// substring check rejected.
 TEST_CASE("looks_like_full_xcode_developer_dir — accepts beta / versioned bundles",
           "[cli][ship][xcode-select][issue-2969]") {
     REQUIRE(looks_like_full_xcode_developer_dir(

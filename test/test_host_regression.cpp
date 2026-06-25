@@ -1100,13 +1100,13 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
     // Point the scanner at a scratch directory containing only PulpGain so
     // it discovers the plugin via the normal path (NOT default_paths, which
     // would collide with system-installed bundles on the dev's machine).
-    // Codex 2026-04-21 review on #545: `extra_paths` alone does not
-    // suppress the default scan roots — the scanner still enumerated
-    // every user/system CLAP, which can execute unrelated plugin
-    // `clap_entry` code during CI. `only_extra_paths = true` restricts
-    // the scan to the scratch directory. Keep that directory single-plugin:
-    // the build output directory may contain other CLAP examples whose
-    // descriptor probes should not affect this load/process/unload test.
+    // Regression for #545: `extra_paths` alone does not suppress the default
+    // scan roots — the scanner still enumerated every user/system CLAP, which
+    // can execute unrelated plugin `clap_entry` code during CI.
+    // `only_extra_paths = true` restricts the scan to the scratch directory.
+    // Keep that directory single-plugin: the build output directory may contain
+    // other CLAP examples whose descriptor probes should not affect this
+    // load/process/unload test.
     ScratchDir scratch("clap-isolated");
     const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
     auto parent = isolated_clap_path.parent_path().string();
@@ -1162,11 +1162,11 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 }
 #endif
 
-// Codex 2026-04-21 review on #545: sanity-check that `only_extra_paths`
-// actually suppresses the default scan roots. Uses an empty scratch
-// directory so the scanner has nothing legitimate to find — under the
-// fix, the plugin count is zero; under the old behaviour it would
-// happily enumerate every user/system CLAP on the dev's machine.
+// Regression for #545: sanity-check that `only_extra_paths` actually
+// suppresses the default scan roots. Uses an empty scratch directory so
+// the scanner has nothing legitimate to find — under the fix, the plugin
+// count is zero; under the old behaviour it would happily enumerate every
+// user/system CLAP on the dev's machine.
 TEST_CASE("PluginScanner::scan honors only_extra_paths",
           "[host][scanner][issue-545][codex-545]") {
     using pulp::host::PluginScanner;

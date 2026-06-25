@@ -5,8 +5,8 @@ target (direct command, app bundle, bundle id, or a Terminal.app proof session),
 optionally records a video proof around the interaction, captures screenshots /
 ViewInspector state, and assembles the run manifest (including composed +
 issue-ready video variants). Video-only helpers live in
-macos_desktop_action_video; see the reland plan for the follow-up to re-split
-this orchestration over macos_desktop_action_{launch,capture,manifest}.
+macos_desktop_action_video; launch, capture, and manifest orchestration live
+here.
 """
 
 from __future__ import annotations

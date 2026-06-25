@@ -1,11 +1,9 @@
 #pragma once
 
-// TableModel — data + sort layer for the eventual sortable TableView
-// widget (workstream 07 slice 7.3). The audit spec calls out "sortable
-// columns, column reordering, virtualized rows". This slice delivers the
-// data-model core: rows, columns, per-column sort order, click-to-sort
-// logic. The widget shell (header row, drag-to-reorder, virtualization)
-// lives in a follow-up slice.
+// TableModel — data + sort layer for sortable table-like views.
+// Owns rows, columns, per-column sort order, and click-to-sort cycling.
+// Rendering concerns such as header chrome, column reordering, and row
+// virtualization live outside this model.
 //
 // The model is string-first: each cell carries a display string plus an
 // optional sort key. A numeric sort key lets a column display "3 dB" but
@@ -88,7 +86,7 @@ public:
     void clear_sort() {
         sort_column_ = -1;
         sort_order_ = TableSortOrder::None;
-        // Rows are kept; `apply_row_permutation_` restores on next sort.
+        // Rows are kept; restore_original_order_() reorders them immediately.
         restore_original_order_();
     }
 

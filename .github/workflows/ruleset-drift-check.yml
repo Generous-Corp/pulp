@@ -1,8 +1,8 @@
 name: Ruleset Drift Check
 
-# Issue #462. Detects drift between the checked-in branch-protection intent
-# (.github/rulesets/main-protection.json) and the live ruleset configured on
-# GitHub. Keeps the UI and the repo honest.
+# Detects drift between the checked-in branch-protection intent
+# (.github/rulesets/main-protection.json) and the live ruleset configured
+# on GitHub. Keeps the UI and the repo honest.
 #
 # Behavior:
 #   - On pull requests that touch .github/rulesets/** or this workflow:

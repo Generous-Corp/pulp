@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the fail-open / correctness fixes from the PR #3128 deep review.
+"""Regression tests for the fail-open / correctness fixes from PR #3128.
 
 Each test pins one previously-confirmed bug so the fix cannot silently regress.
 See planning/2026-05-29-frontend-ir-review-findings.md for the full ledger.

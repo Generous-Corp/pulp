@@ -13,12 +13,17 @@ Work through each section as a checklist.
 ### CLI source files
 
 - [ ] `tools/cli/package_commands.hpp`
+- [ ] `tools/cli/package_commands_internal.hpp`
 - [ ] `tools/cli/package_commands.cpp`
+- [ ] `tools/cli/package_commands_add.cpp`
+- [ ] `tools/cli/package_commands_search.cpp`
+- [ ] `tools/cli/package_commands_util.cpp`
 - [ ] `tools/cli/package_registry.hpp`
 - [ ] `tools/cli/package_registry.cpp`
-- [ ] `tools/cli/tool_registry.hpp`
-- [ ] `tools/cli/tool_registry.cpp`
-- [ ] `tools/cli/json_parser.hpp`
+
+Do not delete `tools/cli/tool_registry.{hpp,cpp}` or `tools/cli/json_parser.hpp`
+as part of a package-only removal. They are shared by `pulp tool`, importers,
+content, kits, version parsing, and other CLI lanes.
 
 ### Registry and tooling
 
@@ -51,9 +56,11 @@ Work through each section as a checklist.
 - [ ] `tools/packages/test-stubs/signalsmith-stretch/CMakeLists.txt`
 - [ ] `tools/packages/test-stubs/signalsmith-stretch/main.cpp`
 
-- [ ] `tools/packages/tool-registry.json`
+Do not remove `tools/packages/tool-registry.json` unless the separate
+`pulp tool` / importer lane is also being removed.
 
-Or simply: `rm -rf tools/packages/`
+Do not blindly run `rm -rf tools/packages/`: that directory now contains both
+the curated dependency registry and the shared tool/importer registry.
 
 ### Extended entitlements
 
@@ -152,10 +159,14 @@ if (pkg_flag || plat_flag || lic_flag) {
 
 ### `tools/cli/CMakeLists.txt`
 
-**Source list (line ~3):** Remove `package_registry.cpp` and `package_commands.cpp` from the source file list:
+**Source list:** Remove the package registry and command implementation files from the source list:
 
 ```
-package_registry.cpp package_commands.cpp
+package_registry.cpp
+package_commands.cpp
+package_commands_add.cpp
+package_commands_search.cpp
+package_commands_util.cpp
 ```
 
 ---
@@ -215,8 +226,8 @@ Also check and update:
 
 ## 7. Branch Cleanup
 
-- [ ] Delete `develop/package-manager` branch (local and remote)
-- [ ] Delete any `feature/pkg-*` branches (e.g., `feature/pkg-prerequisites`, `feature/pkg-registry`, `feature/pkg-cli`, `feature/pkg-community`)
+- [ ] Delete any remaining package-manager rollout branches if they still exist locally or remotely
+- [ ] Delete any `feature/pkg-*` branches (e.g., historical `feature/pkg-prerequisites`, `feature/pkg-registry`, `feature/pkg-cli`, `feature/pkg-community`)
 - [ ] Remove any worktrees associated with these branches
 
 ---

@@ -252,6 +252,15 @@ public:
         std::unique_ptr<View> content;
     };
 
+    /// Visual treatment of the tab bar. `filled` (default) paints a
+    /// `bg.secondary` strip behind the row with a teal underline marking the
+    /// active tab — the historic look, unchanged for every existing consumer.
+    /// `underline` is the Ink & Signal navigation treatment: NO background
+    /// strip (titles sit directly on the panel), the active tab marked by a
+    /// teal underline, and a faint full-width `divider` rule under the whole
+    /// row. Opt-in via set_tab_bar_style(); it never changes the default.
+    enum class TabBarStyle { filled, underline };
+
     // Reserve the tab-bar height as top padding so tab content flows BELOW the tab bar
     // (instead of painting over it). Uses flex padding so child hit-testing stays correct.
     TabPanel() { flex().padding_top = tab_height_; }
@@ -273,6 +282,11 @@ public:
         flex().padding_top = show ? tab_height_ : 0.0f;
     }
 
+    /// Select the tab-bar visual treatment (see TabBarStyle). Opt-in; defaults
+    /// to `filled` so existing apps render identically.
+    void set_tab_bar_style(TabBarStyle style) { tab_bar_style_ = style; }
+    TabBarStyle tab_bar_style() const { return tab_bar_style_; }
+
     /// Called when the active tab changes.
     std::function<void(int index)> on_tab_change;
 
@@ -284,6 +298,62 @@ private:
     int active_ = 0;
     float tab_height_ = 32.0f;
     bool show_tab_bar_ = true;
+    TabBarStyle tab_bar_style_ = TabBarStyle::filled;
+};
+
+// ── SegmentedControl ───────────────────────────────────────────────────────
+
+/// Horizontal segmented selector — a row of mutually-exclusive labelled
+/// segments sharing one inset track, with the selected segment raised as an
+/// "elevated" pill (the Ink & Signal navigation treatment, Figma 227:1763).
+///
+/// Distinct from `ThemeModeControl` (a fixed 3-icon system/light/dark picker)
+/// and from `TabPanel` (which owns and swaps child content): SegmentedControl
+/// is a stateless N-way switch that just reports the chosen index. Fully
+/// token-driven (`bg.surface` track, `bg.elevated` active pill, `divider`
+/// pill border, `text.primary`/`tab.inactive` labels). Brand-new widget — no
+/// existing consumer, so it carries zero blast radius.
+///
+/// @code
+/// SegmentedControl seg;
+/// seg.set_segments({"Amp", "EQ", "Comp", "Reverb"});
+/// seg.set_selected(0);
+/// seg.on_change = [&](int i) { show_page(i); };
+/// @endcode
+class SegmentedControl : public View {
+public:
+    SegmentedControl() {
+        set_focusable(true);
+        set_access_role(AccessRole::group);
+    }
+
+    void set_segments(std::vector<std::string> segments) {
+        segments_ = std::move(segments);
+        if (selected_ >= static_cast<int>(segments_.size())) selected_ = 0;
+        request_repaint();
+    }
+    const std::vector<std::string>& segments() const { return segments_; }
+
+    int selected() const { return selected_; }
+    void set_selected(int index);          ///< clamps + notifies on_change
+    void set_selected_silent(int index);   ///< clamps, no callback
+
+    /// Called when the selected segment changes (user click or set_selected).
+    std::function<void(int index)> on_change;
+
+    int hovered_segment() const { return hover_; }  ///< for tests; -1 = none
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    float intrinsic_height() const override { return 28.0f; }
+
+private:
+    int segment_at_(Point pos) const;  ///< -1 outside
+
+    std::vector<std::string> segments_;
+    int selected_ = 0;
+    int hover_ = -1;
 };
 
 // ── ScrollView ───────────────────────────────────────────────────────────
@@ -375,10 +445,28 @@ ScrollView* find_scroll_view_at(View& root, Point root_point);
 /// @endcode
 class ListBox : public View {
 public:
+    /// Selected-row treatment. `standard` (default) fills the row with
+    /// `bg.elevated` and keeps the normal text colour — the historic look, so
+    /// every existing list renders identically. `accent` is the Ink & Signal
+    /// sidebar-nav treatment (Figma 227:1830): a translucent accent tint
+    /// (`nav.selected.bg`) plus a teal left-edge bar, with the label drawn in
+    /// the accent colour (`nav.selected.text`). Opt-in via set_selection_style().
+    enum class SelectionStyle { standard, accent };
+
     ListBox() { set_focusable(true); }
 
     void set_items(std::vector<std::string> items) { items_ = std::move(items); }
     const std::vector<std::string>& items() const { return items_; }
+
+    /// Optional per-row leading icon glyphs (parallel to items()). When set,
+    /// each row paints its glyph before the label; rows past the icon list, or
+    /// when no icons are set, render label-flush as before. Opt-in.
+    void set_icons(std::vector<std::string> icons) { icons_ = std::move(icons); }
+
+    /// Select the selected-row treatment (see SelectionStyle). Opt-in; defaults
+    /// to `standard`.
+    void set_selection_style(SelectionStyle s) { selection_style_ = s; }
+    SelectionStyle selection_style() const { return selection_style_; }
 
     int selected() const { return selected_; }
     void set_selected(int index);
@@ -400,6 +488,8 @@ public:
 
 private:
     std::vector<std::string> items_;
+    std::vector<std::string> icons_;
+    SelectionStyle selection_style_ = SelectionStyle::standard;
     int selected_ = -1;
     float row_height_ = 24.0f;
     float scroll_offset_ = 0.0f;

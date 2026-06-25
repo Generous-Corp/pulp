@@ -32,36 +32,18 @@ static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) 
         JS_SetMaxStackSize(qjctx->runtime, size);
 }
 
-// CHOC's QuickJS backend declares pumpMessageLoop() with an empty body
-// (see external choc_javascript_QuickJS.h). That makes
-// queueMicrotask / Promise.then / async-await never drain when callers
-// invoke pump_message_loop() — see pulp #746. We work around it the
-// same way set_quickjs_stack_size does: reach into the pimpl, grab the
-// JSContext*, and call JS_ExecutePendingJob until the queue is empty.
-// JS_ExecutePendingJob returns 1 when it ran a job, 0 when the queue is
-// empty, and a negative value on a JS exception inside the job — we
-// stop on either terminal state.
+// Drive QuickJS's pending-job queue ourselves: CHOC's pumpMessageLoop() is
+// an empty no-op for QuickJS (issue #746), so queueMicrotask / Promise.then /
+// async-await never drain unless we run JS_ExecutePendingJob to completion.
+// It returns 1 when it ran a job, 0 when the queue is empty, and a negative
+// value on a JS exception inside the job; stop on either terminal state.
 //
-// Per Codex P2 on PR #769: the previous implementation capped at 4096
-// jobs and returned silently, which meant a Promise/microtask chain
-// larger than the cap (rare but possible with bundled frameworks)
-// would be silently half-drained. PR #874 removed the cap entirely
-// (`for (;;)`) so finite chains drain to completion as the JS spec
-// requires.
-//
-// Per Codex P1 on PR #874 (issue #902): an unbounded `for (;;)` will
-// hard-freeze the UI thread if JS schedules a self-rearming microtask
-// (e.g. `queueMicrotask(step)` inside `step`). Production callers
-// (`WidgetBridge::service_frame_callbacks`, design-import drain) call
-// this synchronously on the UI thread and assume it returns. We
-// therefore cap at 1,000,000 jobs — well past any legitimate framework
-// boot chain (5K observed for React 18 + Babel + bundled prelude in
-// the existing test_web_compat_react_shims case) but low enough to
-// surface a runaway self-loop in seconds rather than freezing the host
-// indefinitely. When the cap fires we log a warning so the bug is
-// visible instead of silent. The signature stays `void` so existing
-// callers (and the `JsEngine` virtual override on V8 / JSC) need no
-// changes.
+// The job count is capped rather than looping forever. Production callers
+// (`WidgetBridge::service_frame_callbacks`, design-import drain) run this
+// synchronously on the UI thread, and a self-rearming microtask
+// (`queueMicrotask(step)` inside `step`) would otherwise hang the host. The
+// cap sits far above any legitimate boot chain (~5K for React 18 + Babel +
+// bundled prelude) and logs a warning when it fires so the runaway is visible.
 namespace {
 constexpr int kQuickJsPumpJobCap = 1'000'000;
 }

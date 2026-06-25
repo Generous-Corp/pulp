@@ -1,8 +1,8 @@
-// In-memory model produced by extract.ts (Phase 2a) and consumed by
-// serialize.ts (Phase 2b) + the future Phase 3 recognizer.
+// In-memory model produced by extract.ts and consumed by serialize.ts and the
+// library-widget recognizer.
 //
 // Field names mirror the JSON envelope in schema/figma-plugin-export-v1.json so
-// the Phase 2b serializer is mostly a passthrough.
+// the serializer is mostly a passthrough.
 
 import type { InteractiveElement } from "./faithful-vector";
 
@@ -10,7 +10,7 @@ export type AudioWidgetKind = "knob" | "fader" | "meter" | "xy_pad" | "waveform"
 
 export interface ExtractedFigmaNode {
   // Identity
-  type: string;             // "frame" | "text" | "image" | "vector" | (after Phase 3) audio widget kinds
+  type: string;             // "frame" | "text" | "image" | "vector" | audio widget kinds
   figma_type: string;       // raw SceneNode.type (FRAME, RECTANGLE, INSTANCE, ...)
   name: string;
   figma_node_id: string;
@@ -32,11 +32,11 @@ export interface ExtractedFigmaNode {
   // Text
   content?: string;
 
-  // Image / vector — populated in slice 2
+  // Image / vector assets
   exported_asset?: { content_hash: string; mime: string; bytes_size: number };
   asset_ref?: string;       // reference into AssetCache; serialized as node.asset_ref
 
-  // Faithful-vector import (Plan B / B4b). When set, the node renders its own
+  // Faithful-vector import. When set, the node renders its own
   // SVG export via DesignFrameView with the interactive overlays below, instead
   // of the widget-recognition rebuild. Mirrors the canonical IR keys the C++
   // parser reads (design_ir_json.cpp::parse_ir_node).
@@ -44,7 +44,7 @@ export interface ExtractedFigmaNode {
   svg_asset_id?: string;                       // → asset_manifest entry (image/svg+xml)
   interactive_elements?: InteractiveElement[];
 
-  // Component / instance metadata — populated when walking INSTANCE nodes (slice 2)
+  // Component / instance metadata — populated when walking INSTANCE nodes
   component_key?: string;
   component_set_name?: string;
   main_component_id?: string;
@@ -53,24 +53,23 @@ export interface ExtractedFigmaNode {
   component_properties?: Record<string, { type: string; value: string | number | boolean }>;
   variant_properties?: Record<string, string>;
 
-  // Library awareness (Phase 3)
+  // Library awareness
   library_widget_kind?: AudioWidgetKind;
   library_version?: string;
 
-  // Structured audio-widget properties (Phase 3). Populated when a Pulp
-  // library widget is recognised; carried into the JSON envelope at the
-  // node root so design_import.cpp::parse_ir_node maps them onto
-  // IRNode.audio_label / audio_min / audio_max / audio_default and the
-  // attributes map (units, binding).
+  // Structured audio-widget properties. Populated when a Pulp library widget is
+  // recognised; carried into the JSON envelope at the node root so
+  // design_import.cpp::parse_ir_node maps them onto IRNode.audio_label /
+  // audio_min / audio_max / audio_default and the attributes map.
   audio_label?: string;
   audio_min?: number;
   audio_max?: number;
   audio_default?: number;
   audio_units?: string;
   audio_binding?: string;
-  // Phase 5 — XYPad carries a Y-axis binding alongside the primary
-  // `binding` (which holds the X-axis route). Lands in IRNode.attributes.binding_y.
-  // Populated only for `Pulp / XYPad` library instances.
+  // XYPad carries a Y-axis binding alongside the primary `binding` (which holds
+  // the X-axis route). Lands in IRNode.attributes.binding_y. Populated only for
+  // `Pulp / XYPad` library instances.
   audio_binding_y?: string;
 
   children: ExtractedFigmaNode[];

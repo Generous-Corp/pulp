@@ -21,6 +21,9 @@ push or PR in the current repo state.
 - Module dependencies in `modules.yaml` match CMake `target_link_libraries`
 - Format adapters claimed in `support-matrix.yaml` have real source files
 - Subsystem directories listed in `modules.yaml` exist
+- Generated capability tables match `docs/status/support-matrix.yaml`
+- Reserved `Processor` vs. `SignalGraph` terminology stays unambiguous
+- Widget reference docs stay in sync with view primitives
 
 If any check fails, the local docs check or manually dispatched workflow fails.
 
@@ -44,7 +47,8 @@ Run the docs consistency check locally at any time:
 tools/check-docs.sh
 ```
 
-Both do the same thing: run all manifest/link/vocabulary/dependency checks and report errors and warnings.
+Both do the same thing: run all manifest, link, vocabulary, dependency, and
+terminology checks and report errors and warnings.
 
 ## What Triggers a Docs Update
 
@@ -75,7 +79,9 @@ always-on cloud gate for every workflow.
 
 ## README Accuracy
 
-The CI check also validates that README.md's claimed test count matches the actual `ctest` count in the build directory. This catches drift like "53 tests" persisting while the repo has 270.
+The docs check rejects hardcoded test-count claims such as "270 automated
+tests." Test counts churn every PR; docs should describe validation coverage and
+link to current CI evidence instead of pinning a number.
 
 ## Docs Site
 

@@ -1,9 +1,8 @@
 //! `pulp-rs` — Rust implementation of the Pulp CLI.
 //!
-//! The crate owns the user-facing `pulp` binary after the Phase 8
-//! cutover. CMake still builds and installs the legacy C++ CLI as
-//! `pulp-cpp` so Rust can fall through for commands that have not moved
-//! yet.
+//! The crate owns the user-facing `pulp` binary. CMake still builds
+//! and installs the C++ CLI as `pulp-cpp` so Rust can fall through for
+//! commands that remain there.
 //!
 //! [issue #686]: https://github.com/danielraffel/pulp/issues/686
 //!
@@ -14,7 +13,7 @@
 //!
 //! ```text
 //!   ┌─────────────────────────────────────────────────────────┐
-//!   │  bin/pulp-rs  (src/main.rs)                              │
+//!   │  bin/pulp  (src/main.rs)                                 │
 //!   │  ── clap parser + subcommand dispatch ──────────────────│
 //!   └─────────────────┬───────────────────────────────────────┘
 //!                     │ calls

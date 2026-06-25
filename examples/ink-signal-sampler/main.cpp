@@ -1,7 +1,7 @@
 // Ink & Signal Sampler — a starter sampler UI assembled entirely from the
-// pulp::design component catalog (Design-System-Import-Plan Phase 8d). It is the
-// end-to-end proof that the ingested design system is usable: knobs, waveform,
-// stepper, pan, meter, badge, and buttons, all token-driven and reskinnable.
+// pulp::design component catalog. It proves the design system is usable
+// end-to-end: knobs, waveform, stepper, pan, meter, badge, and buttons,
+// all token-driven and reskinnable.
 //
 //   pulp-ink-signal-sampler --out /tmp/sampler [--theme light|dark|both]
 //

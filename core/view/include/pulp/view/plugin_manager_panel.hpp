@@ -522,7 +522,7 @@ public:
     // scanned row and drags past `drag_threshold_px_`. The host is
     // responsible for taking the row's `PluginInfo` and adding the node
     // to whichever `SignalGraph` the drop landed on (see
-    // `pulp::host::add_plugin_node_from_row`).
+    // `pulp::host::add_plugin_node_from_drop`).
     //
     // The drag callback fires only for rows in the `scanned` bucket —
     // dragging a failed or blacklisted entry into the graph would create

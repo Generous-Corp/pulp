@@ -1,9 +1,6 @@
-// pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture). Verify the
-// `@pulp/react` prop-applier forwards the 16 W3C blend-mode keywords to
-// the matching bridge fn `setMixBlendMode`. The bridge keyword→
-// canvas::Canvas::BlendMode mapping itself is exercised by C++ tests; this
-// test guarantees the JSX dispatch is wired and routes the string through
-// verbatim.
+// The prop applier forwards supported `mixBlendMode` keywords to the
+// bridge verbatim. Native-side tests cover keyword-to-renderer mapping;
+// this suite protects the JSX dispatch path.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -42,7 +39,7 @@ const W3C_BLEND_KEYWORDS = [
     'hue', 'saturation', 'color', 'luminosity',
 ] as const;
 
-describe('rn mixBlendMode (pulp #1549)', () => {
+describe('mixBlendMode prop forwarding', () => {
     it('multiply forwards verbatim', () => {
         applyChangedProps(makeInstance(), {}, { mixBlendMode: 'multiply' });
         expect(callOf(bridge, 'setMixBlendMode')?.args).toEqual(['m', 'multiply']);

@@ -13,7 +13,7 @@
 #       PkgConfig::<name>
 #     but the target was not found.
 # The smoke workflow at .github/workflows/install-consumer-smoke.yml
-# catches this on every PR (pulp #2087 follow-up). QUIET probes match
+# catches this on every PR. QUIET probes match
 # the in-tree builds — a consumer without one of the dev headers
 # degrades the same way the build does (no compile-time PULP_HAS_*
 # define, no link-interface entry).

@@ -24,11 +24,14 @@ public:
     AudioFormatReaderSource() = default;
 
     explicit AudioFormatReaderSource(std::shared_ptr<MemoryMappedAudioReader> reader)
-        : reader_(std::move(reader)) {}
+        : reader_(std::move(reader)) {
+        reserve_channel_scratch();
+    }
 
     void set_reader(std::shared_ptr<MemoryMappedAudioReader> reader) {
         reader_ = std::move(reader);
         read_pos_ = 0;
+        reserve_channel_scratch();
     }
 
     /// Non-owning accessor — useful when the caller already owns the
@@ -38,7 +41,9 @@ public:
     // ── AudioSource ────────────────────────────────────────────────────────
 
     void prepare_to_play(int /*samples_per_block*/, double /*sample_rate*/) override {
-        // Memory-mapped reader needs no per-block scratch.
+        // Pre-size the channel-pointer scratch so get_next_audio_block() — an
+        // audio-thread call per the AudioSource contract — never allocates.
+        reserve_channel_scratch();
     }
 
     void release_resources() override {
@@ -50,13 +55,13 @@ public:
                                int num_samples) override {
         if (num_samples <= 0 || out.num_channels() == 0) return;
         const auto num_channels = static_cast<uint32_t>(out.num_channels());
-        // Build a per-channel pointer array offset by `start_sample`.
-        std::vector<float*> channels(num_channels);
-        for (uint32_t c = 0; c < num_channels; ++c) {
-            channels[c] = out.channel_ptr(c) + start_sample;
-        }
+        // Reuse the persistent channel-pointer scratch (sized in
+        // prepare_to_play()); grow only if a caller exceeds the prepared count,
+        // so the steady-state audio-thread path allocates nothing.
+        if (channel_scratch_.size() < num_channels)
+            channel_scratch_.resize(num_channels);
         if (!reader_) {
-            zero_fill(channels.data(), num_channels, 0, num_samples);
+            zero_fill(out, num_channels, start_sample, num_samples);
             return;
         }
         int frames_filled = 0;
@@ -76,22 +81,22 @@ public:
                     continue;
                 }
                 // No more data and not looping → silence the rest.
-                zero_fill(channels.data(), num_channels,
-                          frames_filled, num_samples - frames_filled);
+                zero_fill(out, num_channels,
+                          start_sample + frames_filled, num_samples - frames_filled);
                 return;
             }
-            // Read `chunk` frames into channels offset by frames_filled.
-            std::vector<float*> chunk_ptrs(num_channels);
+            // Point the persistent scratch at this chunk's destination span.
+            float** chunk_ptrs = channel_scratch_.data();
             for (uint32_t c = 0; c < num_channels; ++c) {
-                chunk_ptrs[c] = channels[c] + frames_filled;
+                chunk_ptrs[c] = out.channel_ptr(c) + start_sample + frames_filled;
             }
-            const bool ok = reader_->read_frames(chunk_ptrs.data(),
+            const bool ok = reader_->read_frames(chunk_ptrs,
                                                   num_channels,
                                                   read_pos_,
                                                   static_cast<uint64_t>(chunk));
             if (!ok) {
-                zero_fill(channels.data(), num_channels,
-                          frames_filled, num_samples - frames_filled);
+                zero_fill(out, num_channels,
+                          start_sample + frames_filled, num_samples - frames_filled);
                 return;
             }
             read_pos_ += static_cast<uint64_t>(chunk);
@@ -114,21 +119,33 @@ public:
 
     uint64_t get_total_length() const override {
         if (!reader_) return 0;
-        return reader_->info().total_frames;
+        return reader_->info().num_frames;
     }
 
     bool is_looping() const override { return looping_; }
     void set_looping(bool should_loop) override { looping_ = should_loop; }
 
 private:
-    static void zero_fill(float* const* channels, uint32_t num_channels,
+    // Grow (never shrink) the channel-pointer scratch to the reader's channel
+    // count, so the audio-thread block path can reuse it without allocating.
+    void reserve_channel_scratch() {
+        if (!reader_) return;
+        const auto needed = static_cast<std::size_t>(reader_->info().num_channels);
+        if (channel_scratch_.size() < needed) channel_scratch_.resize(needed);
+    }
+
+    static void zero_fill(BufferView<float>& out, uint32_t num_channels,
                            int start, int count) {
         for (uint32_t c = 0; c < num_channels; ++c) {
-            for (int i = 0; i < count; ++i) channels[c][start + i] = 0.0f;
+            float* p = out.channel_ptr(c) + start;
+            for (int i = 0; i < count; ++i) p[i] = 0.0f;
         }
     }
 
     std::shared_ptr<MemoryMappedAudioReader> reader_;
+    // Persistent per-channel pointer scratch — reused across blocks so the
+    // audio thread does not allocate. Sized in prepare_to_play(); grows only.
+    std::vector<float*> channel_scratch_;
     uint64_t read_pos_ = 0;
     bool looping_ = false;
 };

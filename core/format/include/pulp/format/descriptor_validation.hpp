@@ -1,6 +1,6 @@
 #pragma once
 
-// PluginDescriptor validation (workstream 01 slice 1.9).
+// PluginDescriptor validation.
 //
 // Runs at plugin registration / test time — NEVER on the audio thread.
 // Catches the common descriptor mistakes that otherwise surface as

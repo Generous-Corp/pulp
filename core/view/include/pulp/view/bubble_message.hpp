@@ -2,10 +2,7 @@
 
 /// @file bubble_message.hpp
 /// BubbleMessageComponent — small floating message bubble anchored to a
-/// source View with auto-dismiss + transient lifetime (closes the
-/// gap-doc Phase 3 row
-/// "TooltipWindow + BubbleMessageComponent + AlertWindow styled" for
-/// the BubbleMessage half).
+/// source View with auto-dismiss + transient lifetime.
 ///
 /// A `BubbleMessageComponent` is conceptually a tooltip with a stronger
 /// caller-driven story:
@@ -24,8 +21,7 @@
 /// `position()`, `text()`, and `source_view()` and paint accordingly.
 ///
 /// License-lineage note: the type, accessors, and lifetime contract
-/// are Pulp-native per the gap-doc rule. The "anchored bubble" idea is
-/// generic UI.
+/// are Pulp-native. The "anchored bubble" idea is generic UI.
 
 #include <algorithm>
 #include <functional>

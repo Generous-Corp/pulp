@@ -14,6 +14,7 @@ Commands:
   design         Launch the AI design tool
   docs           Browse local documentation
   clean          Remove build directory
+  fmt            Run clang-format on the source tree
   cache          Manage SDK and asset cache
   audio          Repo-level audio model and bundle tooling
   sdk            Manage the Pulp SDK installation

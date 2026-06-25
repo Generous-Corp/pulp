@@ -1,4 +1,4 @@
-// WYSIWYG T3 — settle-probe responsive auto-sizing for imported designs.
+// Settle-probe responsive auto-sizing for imported designs.
 //
 // Header-only, pure-Yoga (no paint) helper that resolves the natural design
 // viewport for an imported view tree when the user did NOT pass --size and the
@@ -11,8 +11,8 @@
 // only width it ever saw. The settle-probe instead lays the tree out at a
 // GENEROUS width and binary-searches for the narrowest width at which the
 // layout "settles" (content height stops shrinking) — the design's natural
-// max-content width. Mirrors the design-tool #70 resolver in
-// examples/design-tool/main.cpp so the two hosts size imports identically.
+// max-content width. Mirrors the design-tool resolver in examples/design-tool/main.cpp
+// so the two hosts size imports identically.
 //
 // Deterministic: pure Yoga layout, runs once at startup. Extracted to a header
 // so it can be unit-tested headlessly (test/test_ui_preview_viewport.cpp)

@@ -3,9 +3,7 @@
 
 Path/content heuristic, conventional-commit classification, trailer
 overrides, glob matching, revert suppression. Mirrors
-`version_bump_heuristics.py`. Split from `test_gates.py` (P9-NEW
-refactor, 2026-05); test bodies are byte-identical to their previous
-definitions.
+`version_bump_heuristics.py`.
 
 Runs standalone (`python3 tools/scripts/test_version_bump_heuristics.py`)
 or as part of the aggregate suite via `test_gates.py`.
@@ -173,7 +171,7 @@ class VersionBumpHeuristicsTests(GateFixtureTestCase):
             ("CMakeLists.txt", "core/**"),
             # Prefix that looks like a subdir but isn't.
             ("coretools/foo.cpp", "core/**"),
-            # Codex 2026-04-21 review on #554 — zero-segment '**'
+            # Regression #554: zero-segment '**'
             # collapse must preserve the surrounding '/' boundaries.
             # `tools/cli/**/*.cpp` must NOT match `tools/clicmd.cpp`
             # (the '/' after `cli` is a required anchor).

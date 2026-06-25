@@ -122,44 +122,6 @@
           "expected_evidence": "JUCE embed example builds"
         }
       ]
-    },
-    {
-      "name": "pulp-import-iplug",
-      "repo_url": "https://github.com/danielraffel/pulp-import-iplug.git",
-      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-import-iplug",
-      "reviewed_head": "2ba9883",
-      "contract": "ProjectIR importer SPI, separate from Pulp DesignIR",
-      "dependency_surfaces": [
-        "ProjectIR schema",
-        "pulp import CLI/package story",
-        "scaffold emission"
-      ],
-      "required_checks": [
-        {
-          "id": "importer-tests",
-          "command": "cd ${CHECKOUT}/spike && ./run_spike.sh && python3 test_spi.py",
-          "expected_evidence": "iPlug ProjectIR extraction and scaffold tests pass"
-        }
-      ]
-    },
-    {
-      "name": "pulp-import-juce",
-      "repo_url": "https://github.com/danielraffel/pulp-import-juce.git",
-      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-import-juce",
-      "reviewed_head": "e06b04b",
-      "contract": "ProjectIR importer SPI, separate from Pulp DesignIR",
-      "dependency_surfaces": [
-        "ProjectIR schema",
-        "pulp import CLI/package story",
-        "scaffold emission"
-      ],
-      "required_checks": [
-        {
-          "id": "importer-tests",
-          "command": "cd ${CHECKOUT}/spike && ./run_spike.sh && python3 test_spi.py && python3 emit/test_emit.py",
-          "expected_evidence": "JUCE ProjectIR extraction and scaffold tests pass"
-        }
-      ]
     }
   ]
 }

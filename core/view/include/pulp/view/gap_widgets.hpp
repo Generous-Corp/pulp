@@ -1,8 +1,8 @@
 #pragma once
 
 // Gap widgets — the short, finite list of native primitives the "Ink & Signal"
-// design system needs that Pulp didn't already ship (Design-System-Import-Plan
-// §3.2 / Phase 4): Badge, InlineBanner, Toast, EmptyState, Stepper, PanControl
+// design system needs that Pulp didn't already ship: Badge, InlineBanner,
+// Toast, EmptyState, Stepper, PanControl
 // (1-D), Popover, InCanvasDialog, and ChannelStrip.
 //
 // Every widget paints entirely from theme tokens via View::resolve_color, so a

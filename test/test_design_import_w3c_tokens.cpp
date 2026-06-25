@@ -1,11 +1,7 @@
-// test_design_import_w3c_tokens.cpp — extracted from test_design_import.cpp
-// in the 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
 // W3C Design Tokens module — parse_w3c_tokens / export_w3c_tokens +
 // composite token shapes (typography, shadow), alias resolution, math
 // expression evaluation, group $type inheritance, and round-trips
-// to / from Theme. Originally lived inside test_design_import.cpp under
-// the "// ── W3C Design Tokens ──" section.
+// to / from Theme.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/store.hpp>
@@ -368,4 +364,3 @@ TEST_CASE("theme_to_ir_tokens converts Theme to token maps", "[view][import]") {
 }
 
 // ── Stitch HTML parsing ─────────────────────────────────────────────────
-

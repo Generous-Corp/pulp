@@ -2,8 +2,7 @@
 """Fixture tests for the version_bump Surface cluster.
 
 Config loading + version-file readers/writers. Mirrors
-`version_bump_surfaces.py`. Split from `test_gates.py` (P9-NEW refactor,
-2026-05); test bodies are byte-identical to their previous definitions.
+`version_bump_surfaces.py`.
 
 Runs standalone (`python3 tools/scripts/test_version_bump_surfaces.py`)
 or as part of the aggregate suite via `test_gates.py`.

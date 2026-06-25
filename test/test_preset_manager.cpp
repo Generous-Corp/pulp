@@ -1,14 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <choc/text/choc_JSON.h>
 #include "preset_test_sandbox.hpp"
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/state/content_registry.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include "../external/miniz/miniz.h"
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -198,6 +201,120 @@ TEST_CASE("PresetManager save and load round-trip", "[state][preset]") {
     REQUIRE(found);
     REQUIRE(store.get_value(1) < -5.0f); // approximately -6
     REQUIRE(store.get_value(2) > 70.0f); // approximately 75
+}
+
+TEST_CASE("PresetManager save is atomic and leaves no temp file behind",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-atomic");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.save("Atomic"));
+
+    const fs::path preset = fs::path(pm.user_presets_dir()) / "Atomic.json";
+    REQUIRE(fs::exists(preset));
+    REQUIRE_FALSE(fs::exists(fs::path(pm.user_presets_dir()) / "Atomic.json.tmp"));
+
+    // The written file is valid, parseable JSON (not a half-written fragment).
+    std::ifstream f(preset);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    REQUIRE_NOTHROW(choc::json::parse(content));
+}
+
+TEST_CASE("PresetManager escapes metadata so special characters stay valid JSON",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-escape");
+    StateStore store;
+    setup_test_store(store);
+
+    // Manufacturer / plugin / preset name carrying quotes and backslashes used
+    // to produce a corrupt, unparseable preset file via raw `<<` interpolation.
+    // Windows preset filenames cannot contain quotes or backslashes, so keep
+    // the preset name filesystem-safe there while still exercising metadata
+    // escaping through the manufacturer and plugin fields.
+    PresetManager pm(store, R"(Acme "Audio" \ Co)", R"(Plug"in)");
+#ifdef _WIN32
+    const std::string preset_name = "My Best Preset";
+#else
+    const std::string preset_name = R"(My "Best" \ Preset)";
+#endif
+    REQUIRE(pm.save(preset_name));
+
+    const fs::path preset = fs::path(pm.user_presets_dir()) / (preset_name + ".json");
+    REQUIRE(fs::exists(preset));
+
+    std::ifstream f(preset);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+
+    // The file parses, and the escaped metadata round-trips through a real
+    // JSON parser with the exact original (unescaped) values.
+    auto doc = choc::json::parse(content);
+    REQUIRE(doc.isObject());
+    REQUIRE(std::string(doc["manufacturer"].getString()) == R"(Acme "Audio" \ Co)");
+    REQUIRE(std::string(doc["plugin"].getString()) == R"(Plug"in)");
+    REQUIRE(std::string(doc["name"].getString()) == preset_name);
+}
+
+#if defined(_WIN32)
+TEST_CASE("PresetManager sanitizes Windows preset identity path components",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-windows-path-components");
+    StateStore store;
+    setup_test_store(store);
+
+    PresetManager pm(store, "..", R"(C:\Temp\..\Plug|In?)");
+
+    REQUIRE(fs::path(pm.user_presets_dir()) ==
+            sandbox.root / "AppData" / "_" / "C__Temp_.._Plug_In_" / "Presets");
+    REQUIRE(pm.save("PathSafe"));
+    REQUIRE(fs::exists(fs::path(pm.user_presets_dir()) / "PathSafe.json"));
+}
+#endif
+
+TEST_CASE("PresetManager writes valid JSON even for non-finite param values",
+          "[state][preset][reliability]") {
+    // std::clamp does not filter NaN/inf, so a misbehaving setter or corrupt
+    // restored state can leave a non-finite param value. Streaming it raw would
+    // emit the bare token `nan`/`inf` and produce an unparseable preset file;
+    // save() substitutes a finite value so the JSON always parses.
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-nonfinite");
+    StateStore store;
+    setup_test_store(store);  // params id 1 (Gain) and 2 (Mix)
+
+    // setup_test_store defaults: Gain (id 1) → 0, Mix (id 2) → 50.
+    // NaN is the reachable non-finite case: std::clamp(±inf) returns a finite
+    // range bound, but std::clamp(NaN) returns NaN, so a NaN set_value survives
+    // into get_value() and would stream as the bare `nan` token.
+    PresetManager pm(store, "TestCo", "TestPlugin");
+    store.set_value(1, std::numeric_limits<float>::quiet_NaN());
+    store.set_value(2, std::numeric_limits<float>::quiet_NaN());
+    REQUIRE(pm.save("NonFinite"));
+
+    const fs::path preset = fs::path(pm.user_presets_dir()) / "NonFinite.json";
+    REQUIRE(fs::exists(preset));
+    std::ifstream f(preset);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+
+    // The bug streamed bare `nan`/`inf` tokens, which are NOT valid JSON, so
+    // choc::json::parse would throw. Parsing must now succeed.
+    auto doc = choc::json::parse(content);  // throws on the old bare-token output
+    REQUIRE(doc.isObject());
+    REQUIRE(doc.hasObjectMember("parameters"));
+
+    // End-to-end: a non-finite param is persisted as its registered DEFAULT
+    // (not a blanket 0, which for Mix's [0,100] default=50 would be a real
+    // non-default value / range-min on reload). Reload and confirm each param
+    // restored to its default.
+    store.set_value(1, 5.0f);
+    store.set_value(2, 25.0f);   // perturb before reloading
+    auto restored = require_user_preset(pm, "NonFinite");
+    REQUIRE(pm.load(restored));
+    REQUIRE(std::fabs(store.get_value(1) - 0.0f) < 0.01f);    // Gain default 0
+    REQUIRE(std::fabs(store.get_value(2) - 50.0f) < 0.01f);   // Mix default 50
 }
 
 TEST_CASE("PresetManager unsaved changes tracking", "[state][preset]") {

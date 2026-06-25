@@ -1,5 +1,5 @@
-// test_audio_doctor.cpp — offline Audio Doctor analyzers (harness Phase 7,
-// slice 1): magnitude/frequency response and THD/THD+N.
+// test_audio_doctor.cpp — offline Audio Doctor analyzers:
+// magnitude/frequency response and THD/THD+N.
 //
 // ── Analyzer Determinism Contract (uniform across this file) ───────────────
 // All renders are deterministic: sine/impulse stimulus (no seed, no clock),

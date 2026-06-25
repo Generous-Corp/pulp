@@ -15,8 +15,8 @@ void WidgetBridge::register_widget_border_radius_api() {
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.
     //
-    // pulp #1663 - accepts either a number (px) or a string with % suffix
-    // (e.g. "50%"). Percent values are stored separately and resolved at
+    // Accepts either a number (px) or a string with % suffix (e.g. "50%").
+    // Percent values are stored separately and resolved at
     // paint time as `pct * 0.01 * min(width, height)` so the radius
     // tracks the View's actual bounds.
     auto parseRadiusArg = [](choc::javascript::ArgumentList& args, int idx) -> std::pair<float, float> {
@@ -42,13 +42,13 @@ void WidgetBridge::register_widget_border_radius_api() {
         return choc::value::Value();
     });
 
-    // pulp #1026 - Per-corner border-radius shorthands (RN parity).
-    // Equivalent to `setCornerRadius(id, "TopLeft", r)` but matches the
+    // Per-corner border-radius shorthands for RN parity. Equivalent to
+    // `setCornerRadius(id, "TopLeft", r)` but matches the
     // RN style-prop name 1:1 so @pulp/react's prop-applier can bind them
     // without a translation layer. Sets the `has_corner_radii_` flag on
     // the View; paint_all() then routes background/border through the
-    // per-corner path builder rather than fill_rounded_rect.
-    // pulp #1663 - same %-string handling as setBorderRadius.
+    // per-corner path builder rather than fill_rounded_rect. Uses the same
+    // %-string handling as setBorderRadius.
     register_bridge_function(api, "setBorderTopLeftRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);

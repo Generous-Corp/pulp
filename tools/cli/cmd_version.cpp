@@ -2,6 +2,7 @@
 // Show, bump, and verify version consistency across all surfaces.
 
 #include "cli_common.hpp"
+#include "cmd_version_internal.hpp"
 #include "json_parser.hpp"
 
 #include <cstdlib>
@@ -44,10 +45,7 @@ static bool write_cmake_project_version(const fs::path& cmake_path,
         if (pos == std::string::npos) return false;
         content.replace(pos, old_ver.size(), new_ver);
     }
-    std::ofstream f(cmake_path);
-    if (!f) return false;
-    f << content;
-    return true;
+    return pulp::cli::version_internal::write_text_file_checked(cmake_path, content);
 }
 
 struct SemVer {
@@ -156,10 +154,11 @@ static int version_bump(const std::vector<std::string>& args) {
             } else {
                 cl_content = new_entry + cl_content;
             }
-            std::ofstream f(changelog);
-            if (f) {
-                f << cl_content;
+            if (pulp::cli::version_internal::write_text_file_checked(changelog, cl_content)) {
                 print_ok("Added CHANGELOG.md entry for " + new_str);
+            } else {
+                std::cerr << "Warning: failed to write CHANGELOG.md entry for "
+                          << new_str << "\n";
             }
         }
 
@@ -173,7 +172,7 @@ static int version_bump(const std::vector<std::string>& args) {
 
 // Read the TOP-LEVEL "version" field from a JSON file using the in-repo
 // parser. Reformatting the file (different indent width, tabs, minification)
-// no longer breaks the check. Codex P2 on PR #152.
+// no longer breaks the check.
 static std::string read_json_version_field(const fs::path& path) {
     if (!fs::exists(path)) return {};
     auto content = read_file_contents(path);
@@ -193,7 +192,7 @@ static std::string read_json_version_field(const fs::path& path) {
 // MARKETPLACE format version and drifts independently.
 //
 // Uses the in-repo JSON parser so indentation changes don't silently
-// re-introduce the drift this check exists to catch (Codex P2 on #152).
+// re-introduce the drift this check exists to catch.
 static std::string read_marketplace_plugin_entry_version(const fs::path& path) {
     if (!fs::exists(path)) return {};
     auto content = read_file_contents(path);

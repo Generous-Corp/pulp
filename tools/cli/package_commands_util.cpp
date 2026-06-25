@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // package_commands_util.cpp — shared helpers for the `pulp` package
-// CLI surface. Extracted from package_commands.cpp in the 2026-05
-// roadmap item P11-2 file-split.
+// CLI surface.
 //
 // This TU holds the formerly file-local helpers that every package
 // sub-command cluster depends on: print/colour helpers, argument and
@@ -10,10 +9,8 @@
 // DEPENDENCIES.md / NOTICE.md metadata edits. The sub-command bodies
 // now live in package_commands_search.cpp / package_commands_add.cpp
 // / package_commands.cpp and reach these helpers via the private
-// package_commands_internal.hpp header. Code below is moved
-// byte-identically from the original package_commands.cpp; the only
-// change is dropping `static` from the helpers now shared across TUs
-// (their declarations live in package_commands_internal.hpp).
+// package_commands_internal.hpp header. Helpers shared across TUs have
+// declarations in package_commands_internal.hpp.
 
 #include "package_commands_internal.hpp"
 #include "package_registry.hpp"

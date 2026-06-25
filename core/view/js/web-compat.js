@@ -345,9 +345,7 @@ Element.prototype.appendChild = function(child) {
         // First time: create directly under this parent (no remove+re-create)
         _reparentNative(child, this._id);
         if (child._textContent) setText(child._id, child._textContent);
-        // Defer style flush to reduce call stack depth
-        // child.style._flushAll();
-        // child._reapplyStylesheets();
+        // Defer style flush to reduce call stack depth.
     } else {
         // Already in tree: remove and re-parent
         removeWidget(child._id);
@@ -428,18 +426,16 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name.indexOf("data-") === 0) {
         this._dataset[_camelCase(name.slice(5))] = value;
     }
-    // pulp #2163 — font v2 Slice 2.5. The HTML `dir` attribute
-    // (`<div dir="rtl">…</div>`) parallels the CSS `direction: rtl`
-    // path (web-compat-style-decl.js → setDirection). Both routes
-    // land on View::WritingDirection which Yoga consumes for
-    // container child-order flip + the shaper consumes for bidi
-    // base direction. Values: "ltr" | "rtl" | "auto" (CSS spec).
+    // The HTML `dir` attribute (`<div dir="rtl">…</div>`) parallels the CSS
+    // `direction: rtl` path (web-compat-style-decl.js -> setDirection). Both
+    // routes land on View::WritingDirection, which Yoga consumes for container
+    // child-order flip and the shaper consumes for bidi base direction. Values:
+    // "ltr" | "rtl" | "auto" (CSS spec).
     else if (name === "dir" && typeof setDirection !== "undefined") {
-        // Codex review on PR #2181 (P2): the CSS `direction` path
-        // forwards every value to the bridge and lets it coerce
-        // unknowns to `auto_`. Mirror that here so dynamic updates
-        // from `dir="rtl"` to an unsupported value reset to default
-        // rather than leaving the previous bidi/layout state stuck.
+        // Match the CSS `direction` path: forward every value to the bridge and
+        // let it coerce unknowns to `auto_`. That lets dynamic updates from
+        // `dir="rtl"` to an unsupported value reset to default rather than
+        // leaving the previous bidi/layout state stuck.
         setDirection(this._id, String(value).toLowerCase());
     }
 };
@@ -541,7 +537,7 @@ Element.prototype.dispatchEvent = function(event) {
     _dispatchEvent(this, event);
 };
 
-// ── P1: closest(), matches(), contains(), querySelector on elements ──────
+// ── Selector-backed Element traversal APIs ───────────────────────────────
 
 Element.prototype.closest = function(selector) {
     var parsed = _parseSelector(selector);
@@ -575,7 +571,7 @@ Element.prototype.querySelectorAll = function(selector) {
     return _querySelectorAll(this, selector);
 };
 
-// ── P1: innerHTML (simple HTML parser for common patterns) ───────────────
+// ── innerHTML / outerHTML for common markup patterns ─────────────────────
 
 Object.defineProperty(Element.prototype, "innerHTML", {
     get: function() {
@@ -661,7 +657,7 @@ function _parseAttrs(el, attrStr) {
     }
 }
 
-// ── P2: Modern DOM insertion methods ─────────────────────────────────────
+// ── DOM insertion convenience methods ────────────────────────────────────
 
 Element.prototype.append = function() {
     for (var i = 0; i < arguments.length; i++) {
@@ -736,7 +732,7 @@ Element.prototype.replaceWith = function() {
     }
 };
 
-// ── P2: focus() / blur() ─────────────────────────────────────────────────
+// ── focus() / blur() event shims ─────────────────────────────────────────
 
 Element.prototype.focus = function() {
     if (this._nativeCreated) {
@@ -1101,10 +1097,9 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // Display / flex direction
         case "display":
             if (resolved === "none") { setVisible(id, false); }
-            // pulp #1420 — inline-block ≡ block, inline-flex ≡ flex in pulp's
-            // non-text-flowing layout (matches RN + CSS formatting-context
-            // semantics where there is no inline flow). 4 of these were
-            // silently dropped by Spectr today.
+            // inline-block ≡ block and inline-flex ≡ flex in Pulp's
+            // non-text-flowing layout. That matches the RN-style bridge where
+            // there is no inline formatting context to preserve.
             else if (resolved === "flex" || resolved === "block" ||
                      resolved === "inline-block" || resolved === "inline-flex") {
                 setVisible(id, true);
@@ -1112,9 +1107,9 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             break;
         case "flexDirection":
-            // pulp #1434 (rn batch B) — forward all four CSS values
-            // verbatim so the bridge can route to YGFlexDirectionRow /
-            // RowReverse / Column / ColumnReverse.
+            // Forward reverse/row keywords verbatim and map CSS `column` to the
+            // bridge shorthand `col`; the bridge routes these to
+            // YGFlexDirectionRow / RowReverse / Column / ColumnReverse.
             setFlex(id, "direction",
                 resolved === "row" ? "row" :
                 resolved === "row-reverse" ? "row-reverse" :
@@ -1122,8 +1117,8 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 "col");
             break;
         case "flexWrap":
-            // pulp #1434 Triage #14 — forward keyword verbatim so the
-            // bridge can route wrap-reverse through YGWrapWrapReverse.
+            // Forward keyword values verbatim so the bridge can route
+            // wrap-reverse through YGWrapWrapReverse.
             setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
@@ -1172,8 +1167,8 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Dimensions — pulp #1423 forwards percent values verbatim so
-        // the bridge can route to Yoga's percent API.
+        // Dimensions forward percent values verbatim so the bridge can route
+        // to Yoga's percent API.
         case "width": {
             var w = parseCSSLength(resolved);
             if (!w) break;
@@ -1407,8 +1402,8 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "position":
             setPosition(id, resolved);
             break;
-        // pulp #1434 batch 6 — top/right/bottom/left forward percent
-        // values verbatim so the bridge can route to Yoga's percent API.
+        // top/right/bottom/left forward percent values verbatim so the bridge
+        // can route to Yoga's percent API.
         case "top": {
             var tv = parseCSSLength(resolved); if (!tv) break;
             if (tv.unit === "%") setTop(id, tv.value + "%"); else setTop(id, tv.value);
@@ -1435,7 +1430,8 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setZIndex(id, parseInt(resolved) || 0);
             break;
 
-        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or "inset 2px 4px 8px ..." (issue-925)
+        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or
+        // "inset 2px 4px 8px ...".
         case "boxShadow": {
             if (resolved === "none" || resolved === "" || resolved == null) {
                 if (typeof clearBoxShadow === "function") clearBoxShadow(id);
@@ -1551,11 +1547,9 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
     // --custom-property -> set as theme token
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
-        // pulp #1918 (Codex review) — clear every non-active slot
-        // first so a var() reassignment that changes the value type
-        // (string ↔ length ↔ color) doesn't leave a stale token in
-        // one of the other slots. See the matching fix and rationale
-        // in web-compat-style-decl.js.
+        // Clear the non-color token slots first so a var() reassignment between
+        // string and length values doesn't leave a stale token in the other
+        // slot. See the matching rationale in web-compat-style-decl.js.
         if (typeof setStringToken === 'function') setStringToken(tokenName, "");
         if (typeof setMotionToken === 'function') setMotionToken(tokenName, 0);
         var parsed = parseCSSLength(value);
@@ -1568,9 +1562,8 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
                 // Use applyTokenDiff for color tokens
                 applyTokenDiff('{"colors":{"' + tokenName + '":"' + color + '"}}');
             } else if (typeof setStringToken === 'function') {
-                // pulp #1899 (gap #3) — string-valued custom property
-                // (font family / arbitrary string). Mirrors
-                // web-compat-style-decl.js.
+                // String-valued custom property (font family / arbitrary
+                // string). Mirrors web-compat-style-decl.js.
                 setStringToken(tokenName, String(value));
             }
         }
@@ -1584,8 +1577,7 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
 CSSStyleDeclaration.prototype.getPropertyValue = function(name) {
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
-        // pulp #1899 (gap #3) — string-token round-trip; mirrors
-        // web-compat-style-decl.js.
+        // String-token round-trip; mirrors web-compat-style-decl.js.
         if (typeof getStringToken === 'function') {
             var s = getStringToken(tokenName);
             if (s) return s;
@@ -1942,4 +1934,3 @@ var window = {
     // window.onerror
     onerror: null
 };
-

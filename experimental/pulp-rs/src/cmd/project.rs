@@ -2,9 +2,9 @@
 //!
 //! # Scope
 //!
-//! Phase 6b ports `cmd_project.cpp`. The pure-logic surface lives in
-//! [`crate::bump`] so the dispatcher stays small enough to read in one
-//! sitting. The subcommands this module exposes:
+//! The pure-logic surface lives in [`crate::bump`] so the dispatcher
+//! stays small enough to read in one sitting. The subcommands this
+//! module exposes:
 //!
 //! - `pulp-rs project bump` — update the CWD project's pin to the
 //!   CLI's own version.
@@ -25,17 +25,16 @@
 //!
 //! # Divergences from C++
 //!
-//! 1. **Verify-builds shells to `cmake` like the C++ port does.** The
-//!    integration tests gate this behind a `PULP_RS_ENABLE_CMAKE_TEST`
-//!    env var so unit/parity runs stay hermetic.
+//! 1. **Verify-builds shells to `cmake` like the C++ port does.**
+//!    Tests inject a `VerifyFn` seam so unit/parity runs stay
+//!    hermetic.
 //! 2. **Git-dirty probe uses `git -C <path> status --porcelain -- CMakeLists.txt`**
 //!    via a subprocess, identical to C++ semantics. Missing `git` is
 //!    treated as "not a git repo" — same as the C++ behaviour.
 //! 3. **Migration-note rendering is stubbed.** The C++ side links
 //!    `migration_runtime.cpp` to print per-hop migration notes after a
-//!    successful bump. Phase 6b leaves that to the C++ binary — the
-//!    Rust port prints a one-line pointer instead so users know where
-//!    to look. Tracked in `UPSTREAM_SYNC.md` as a Ported-partial note.
+//!    successful bump. Rust prints a one-line pointer instead so users
+//!    know where to look.
 
 // `doc_markdown` flags domain words (CMake, CMakeLists) as missing
 // backticks — they're not Rust items, leave them clean.
@@ -596,14 +595,14 @@ pub(crate) fn bump_one(
         return entry;
     }
 
-    // pulp#740 Slice C — standalone-mode dispatch. Standalone consumer
-    // projects pin Pulp via `pulp.toml sdk_version` (the source of
-    // truth) and optionally mirror to `find_package(Pulp X.Y.Z)`. The
-    // `project(... VERSION ...)` line in those projects is the
-    // app/plugin product version, NOT the SDK pin, and must stay
-    // untouched. Defer to `bump_one_standalone` for that path; the
-    // existing source-tree logic below handles the in-tree pin shapes
-    // (FetchContent / pulp_add_project / project VERSION).
+    // Standalone consumer projects pin Pulp via `pulp.toml
+    // sdk_version` (the source of truth) and optionally mirror to
+    // `find_package(Pulp X.Y.Z)`. The `project(... VERSION ...)` line
+    // in those projects is the app/plugin product version, NOT the
+    // SDK pin, and must stay untouched. Defer to
+    // `bump_one_standalone` for that path; the existing source-tree
+    // logic below handles the in-tree pin shapes (FetchContent /
+    // pulp_add_project / project VERSION).
     let standalone = is_standalone_project(project_path);
     if standalone {
         return bump_one_standalone(project_path, &mut entry, target_version, opts);
@@ -658,11 +657,11 @@ pub(crate) fn bump_one(
         entry.failure_reason = "already at target version".to_owned();
         return entry;
     }
-    // pulp#740 Slice B — redundant-pin probe. If the origin/main tip
-    // already pins the SDK to target-or-newer, refuse the bump with
-    // a pointer at `--allow-redundant`. Fail-open: any probe error
-    // (network failure, no remote, no git in PATH, missing file) is
-    // treated as "no main-side pin visible" and the bump proceeds.
+    // Redundant-pin probe. If the origin/main tip already pins the SDK
+    // to target-or-newer, refuse the bump with a pointer at
+    // `--allow-redundant`. Fail-open: any probe error (network
+    // failure, no remote, no git in PATH, missing file) is treated as
+    // "no main-side pin visible" and the bump proceeds.
     if !opts.allow_redundant {
         if let Some(main_pin) = probe_origin_main_pin(project_path) {
             if !bump::is_downgrade(&main_pin, target_version) {
@@ -860,13 +859,13 @@ pub(crate) fn is_standalone_project(dir: &Path) -> bool {
 /// old_value_style_has_v}` so `pulp project undo` can replay them
 /// in reverse.
 ///
-/// # Slice-C scope (pulp#740)
+/// # Managed-cache scope
 ///
 /// This first-pass port covers the two highest-leverage edits:
 /// `sdk_version` rewrite + `find_package` mirror. The conservative
-/// `sdk_path` managed-cache rewrite is intentionally deferred to a
-/// follow-up — it depends on shared standalone-SDK resolution helpers
-/// from `cli_common.cpp` that aren't ported yet (Slice C2 / E).
+/// `sdk_path` managed-cache rewrite is intentionally left to the C++
+/// delegate for now — it depends on shared standalone-SDK resolution
+/// helpers from `cli_common.cpp` that aren't ported yet.
 fn bump_one_standalone(
     project_path: &Path,
     entry: &mut crate::bump::UndoEntry,
@@ -1146,14 +1145,13 @@ fn do_undo(args: &UndoArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
             skipped += 1;
             continue;
         }
-        // Multi-edit batch (Phase 8 / pulp#740) — iterate over the
-        // recorded edits and revert each one separately. Standalone
-        // bumps write two edits (pulp.toml sdk_version + the
-        // `find_package(Pulp ...)` mirror); legacy source-tree bumps
-        // write one. The path-keyed staging mirrors the C++ undo at
-        // `tools/cli/cmd_project.cpp:910` so the on-disk format is
-        // round-trippable across binaries (caught by sandbox-e2e
-        // `test_bump_undo_round_trips_cpp_to_rust`).
+        // Multi-edit undo batches iterate over the recorded edits and
+        // revert each one separately. Standalone bumps write two edits
+        // (pulp.toml sdk_version + the `find_package(Pulp ...)`
+        // mirror); legacy source-tree bumps write one. The path-keyed
+        // staging mirrors the C++ undo at `tools/cli/cmd_project.cpp:910`
+        // so the on-disk format is round-trippable across binaries
+        // (caught by sandbox-e2e `test_bump_undo_round_trips_cpp_to_rust`).
         if !e.edits.is_empty() {
             let mut staged: std::collections::BTreeMap<std::path::PathBuf, String> =
                 std::collections::BTreeMap::new();
@@ -1725,7 +1723,7 @@ mod tests {
         assert_eq!(undo_files.len(), 1);
     }
 
-    // ── pulp#740 Slice A: safety rails ────────────────────────────────
+    // ── safety rails ─────────────────────────────────────────────────
 
     #[test]
     fn is_pulp_source_checkout_matches_framework_tree() {
@@ -2043,7 +2041,7 @@ mod tests {
         assert_eq!(e.status, "bumped", "entry: {e:?}");
     }
 
-    // ── pulp#740 Slice C: standalone-mode bump ───────────────────────
+    // ── standalone-mode bump ────────────────────────────────────────
 
     #[test]
     fn is_standalone_project_detects_pulp_toml_only() {

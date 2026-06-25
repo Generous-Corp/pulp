@@ -3,7 +3,7 @@
 // Built from Apple AudioToolbox documentation
 //
 // ─────────────────────────────────────────────────────────────────────────
-// Per-method audit checklist (macOS plan item 3.1)
+// Per-method audit checklist
 // ─────────────────────────────────────────────────────────────────────────
 //
 // Each `PulpAudioUnit` override below is audited against three axes:
@@ -25,7 +25,7 @@
 //  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
 //  │ supportsUserPresets                      │ BOOL=NO   │ main         │ NO (const)   │
 //  │ canProcessInPlace                        │ BOOL=YES  │ main + audio │ NO (const)   │
-//  │ parameterTree                            │ AUParam…  │ main         │ YES (per call) │
+//  │ parameterTree                            │ AUParam…  │ main         │ YES (first call) │
 //  │ shouldBypassEffect                       │ BOOL      │ main + audio │ NO (atomic)  │
 //  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
 //  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
@@ -76,15 +76,14 @@ namespace pulp::format::au {
 
 static constexpr int kMaxChannels = 8;
 
-// AU v3 row 21 (DAW quirks) — the bypass parameter has to be tracked on
-// two surfaces: AUAudioUnit's `shouldBypassEffect` AUValue **and** the
-// plugin-provided `Bypass` parameter when present. We scan the
-// descriptor's parameter list at init for a parameter named "Bypass"
-// (boolean, 0..1, step==1) and route both surfaces to it. Hosts that
-// observe one but not the other (Logic vs MainStage) then see a
-// consistent value. When no such parameter exists, we still track the
-// bypass flag in a bridge-local atomic so the host's
-// `setShouldBypassEffect:` request is honoured at the audio thread.
+// The bypass parameter has to be tracked on two surfaces: AUAudioUnit's
+// `shouldBypassEffect` AUValue and the plugin-provided `Bypass` parameter
+// when present. We scan the descriptor's parameter list at init for a
+// parameter named "Bypass" (boolean, 0..1, step==1) and route both surfaces
+// to it. Hosts that observe one but not the other (Logic vs MainStage) then
+// see a consistent value. When no such parameter exists, we still track the
+// bypass flag in a bridge-local atomic so the host's `setShouldBypassEffect:`
+// request is honoured at the audio thread.
 struct AUBridge {
     std::unique_ptr<Processor> processor;
     state::StateStore store;
@@ -92,11 +91,11 @@ struct AUBridge {
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;
     int output_channels = 0;
-    // Workstream 01 slice 1.4: sidechain bus channel count. 0 when the
-    // descriptor has no second input bus — the render block then skips
-    // the sidechain pull + calls Processor::set_sidechain(nullptr).
+    // Sidechain bus channel count. 0 when the descriptor has no second input
+    // bus; the render block then skips the sidechain pull and calls
+    // Processor::set_sidechain(nullptr).
     int sidechain_channels = 0;
-    // Item 3.1 — dual-tracked bypass.
+    // Dual-tracked bypass.
     //   * `bypass_param_id != 0` means the plugin declared a "Bypass"
     //     parameter; the AUAudioUnit's `shouldBypassEffect` reads/writes
     //     it through StateStore.
@@ -129,18 +128,16 @@ struct AUBridge {
     } sidechain_abl = {};
     // Backing buffer for the sidechain pull — AURenderPullInputBlock writes
     // into this on each process call. Keeps the audio thread allocation-free
-    // (sized at init to match max_frames * kMaxChannels).
+    // (sized to max_frames * kMaxChannels during render-resource allocation).
     std::vector<float> sidechain_storage;
     state::ParameterEventQueue param_events;
 
-    // Item 1.3 — previous-block transport snapshot used to derive the
-    // change flags on `ProcessContext`. Default-constructed (no
-    // previous block) so the first render-block invocation reports no
-    // changes.
+    // Previous-block transport snapshot used to derive the change flags on
+    // `ProcessContext`. Default-constructed (no previous block) so the first
+    // render-block invocation reports no changes.
     detail::PlayheadSnapshot playhead_prev;
 
-    // Host accommodations, resolved once at init via the runtime policy
-    // (host-quirks plan, P3).
+    // Host accommodations, resolved once at init via the runtime policy.
     HostQuirks host_quirks{};
 };
 
@@ -190,9 +187,9 @@ static thread_local bool g_au_v3_host_writing = false;
     AUAudioUnitBus *_outputBus;
     AUAudioUnitBusArray *_inputBusArray;
     AUAudioUnitBusArray *_outputBusArray;
-    // Item 6.4b — MainThreadDispatcher backend token. Held for the lifetime
-    // of this plugin instance so DAW-hosted code can post work to the
-    // main thread via pulp::events::MainThreadDispatcher::call_async().
+    // MainThreadDispatcher backend token. Held for the lifetime of this plugin
+    // instance so DAW-hosted code can post work to the main thread via
+    // pulp::events::MainThreadDispatcher::call_async().
     pulp::events::MainThreadDispatcher::Token _mainThreadToken;
 
     // Parameter automation (UI → host recording). The AUParameterTree is built
@@ -218,13 +215,13 @@ static thread_local bool g_au_v3_host_writing = false;
 /// see pulp::format::kAuAraFactoryPropertyKey). Returns an opaque
 /// ARA::ARAFactory* when Pulp was built with PULP_HAS_ARA and the
 /// plug-in's Processor overrode create_ara_document_controller();
-/// otherwise NULL. Issue #252.
+/// otherwise NULL.
 @property (nonatomic, readonly, nullable) void *audioUnitARAFactory;
 
-/// Item 3.1 — diagnostic accessor for the bypass-param wiring decision
-/// the adapter made at init. Returns 0 when no plugin-declared bypass
-/// parameter matched (the synthesized-AUValue path is in use); otherwise
-/// the StateStore parameter ID that proxies the bypass surface.
+/// Diagnostic accessor for the bypass-param wiring decision the adapter made
+/// at init. Returns 0 when no plugin-declared bypass parameter matched (the
+/// synthesized-AUValue path is in use); otherwise the StateStore parameter ID
+/// that proxies the bypass surface.
 - (uint32_t)pulpBypassParameterId;
 
 - (NSUInteger)pulpLastParameterEventCount;
@@ -249,12 +246,12 @@ static thread_local bool g_au_v3_host_writing = false;
                                          error:outError];
     if (!self) return nil;
 
-    // Item 6.4b — opt this plugin instance into the process-wide
-    // MainThreadDispatcher backend. On macOS this installs (or refcount-
-    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so
-    // KVO publishes (e.g. the `latency` / `tailTime` dispatch_async at
-    // line ~801) and any future view-side code reaches the host's main
-    // thread without needing its own per-callsite dispatch_async.
+    // Opt this plugin instance into the process-wide MainThreadDispatcher
+    // backend. On macOS this installs (or refcount-bumps) a Cocoa backend
+    // posting to `dispatch_get_main_queue`, so KVO publishes (e.g. the
+    // `latency` / `tailTime` dispatch_async below) and view-side code reaches
+    // the host's main thread without needing its own per-callsite
+    // dispatch_async.
     _mainThreadToken = pulp::events::register_plugin_backend();
 
     // Get processor factory from global registry
@@ -278,8 +275,8 @@ static thread_local bool g_au_v3_host_writing = false;
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
 
-    // Resolve host accommodations once (host-quirks plan, P3) via the
-    // runtime policy (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
+    // Resolve host accommodations once via the runtime policy
+    // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
     // Qualified: this @implementation method body is at file scope, not
     // inside namespace pulp::format::au, so unqualified lookup misses it.
     {
@@ -288,17 +285,17 @@ static thread_local bool g_au_v3_host_writing = false;
             pulp::format::resolved_quirks(host_info.type, host_info.version);
     }
 
-    // synthesize_bypass_parameter (host-quirks P3b): inject an automatable
-    // "Bypass" param when the plugin declared none, BEFORE the detection
-    // pass below — which then mirrors it onto the AU bypass surface. No-op
-    // when the quirk is filtered out. Qualified (Obj-C method file scope).
+    // Inject an automatable "Bypass" param when the plugin declared none,
+    // BEFORE the detection pass below, which then mirrors it onto the AU
+    // bypass surface. No-op when the quirk is filtered out. Qualified
+    // (Obj-C method file scope).
     pulp::format::maybe_synthesize_bypass(_bridge.store, _bridge.host_quirks);
 
-    // Item 3.1 — auto-detect a plugin-declared Bypass parameter so the
-    // host's `shouldBypassEffect` AUValue and the plugin's
-    // automatable parameter stay in lockstep. Match the same heuristic
-    // VST3 uses for `kIsBypass`: name == "Bypass", boolean range 0..1
-    // with step >= 1. When found, the AUv3 surface mirrors it.
+    // Auto-detect a plugin-declared Bypass parameter so the host's
+    // `shouldBypassEffect` AUValue and the plugin's automatable parameter stay
+    // in lockstep. Match the same heuristic VST3 uses for `kIsBypass`:
+    // name == "Bypass", boolean range 0..1 with step >= 1. When found, the
+    // AUv3 surface mirrors it.
     for (const auto& p : _bridge.store.all_params()) {
         if (p.name == "Bypass" &&
             p.range.min == 0.0f && p.range.max == 1.0f &&
@@ -341,10 +338,9 @@ static thread_local bool g_au_v3_host_writing = false;
         [inBusses addObject:_inputBus];
     }
 
-    // Workstream 01 slice 1.4 — sidechain input. When the descriptor declares
-    // a second input_bus, expose it as a second AUAudioUnitBus so hosts can
-    // connect a sidechain source that the render block will route through
-    // Processor::set_sidechain(). Mirrors CLAP slice 1.1 / VST3 slice 1.2.
+    // Sidechain input. When the descriptor declares a second input_bus, expose
+    // it as a second AUAudioUnitBus so hosts can connect a sidechain source
+    // that the render block will route through Processor::set_sidechain().
     if (desc.input_buses.size() > 1 && desc.input_buses[1].default_channels > 0) {
         AVAudioFormat *scFormat = [[AVAudioFormat alloc]
             initStandardFormatWithSampleRate:48000.0
@@ -376,8 +372,8 @@ static thread_local bool g_au_v3_host_writing = false;
 
 - (NSTimeInterval)latency {
     if (!_bridge.processor) return 0.0;
-    // clamp_latency_to_nonneg (host-quirks P3): route the existing clamp
-    // through the quirk so PULP_HOST_QUIRKS=off reports raw latency too.
+    // Route the non-negative latency clamp through the host-quirks policy so
+    // PULP_HOST_QUIRKS=off reports raw latency too.
     int samples = pulp::format::reported_latency_samples(
         _bridge.processor->latency_samples(), _bridge.host_quirks);
     return _bridge.sample_rate > 0 ? static_cast<double>(samples) / _bridge.sample_rate : 0.0;
@@ -525,7 +521,7 @@ static thread_local bool g_au_v3_host_writing = false;
     return _parameterTree;
 }
 
-// Item 3.1 — dual-tracked bypass.
+// Dual-tracked bypass.
 //
 // Hosts read these to render the bypass button in their channel-strip UI
 // (Logic) or treat them as the source of truth for the bypass automation
@@ -591,8 +587,7 @@ static thread_local bool g_au_v3_host_writing = false;
     [super deallocateRenderResources];
 }
 
-// Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
-// installed in init.
+// Symmetric teardown of the MainThreadDispatcher backend installed in init.
 - (void)dealloc {
     // Tear down parameter-automation wiring while the C++ StateStore (_bridge) is
     // still alive: drop the gesture callbacks + store listener that capture self,
@@ -618,13 +613,13 @@ static thread_local bool g_au_v3_host_writing = false;
 - (AUInternalRenderBlock)internalRenderBlock {
     auto* bridge = &_bridge;
 
-    // Item 1.3 — capture the host's musical-context and transport-state
-    // blocks at render-block construction time, per Apple's render-block
-    // contract. AUAudioUnit::musicalContextBlock and transportStateBlock
-    // are KVO-able read/write properties the host installs (often only
-    // after `allocateRenderResources`). They are safe to invoke from
-    // the render thread; the block we hand back to the host captures
-    // them via `__block` so the call sites below stay self-contained.
+    // Capture the host's musical-context and transport-state blocks at
+    // render-block construction time, per Apple's render-block contract.
+    // AUAudioUnit::musicalContextBlock and transportStateBlock are KVO-able
+    // read/write properties the host installs, often only after
+    // `allocateRenderResources`. They are safe to invoke from the render
+    // thread; the block we hand back to the host captures them via `__block`
+    // so the call sites below stay self-contained.
     AUHostMusicalContextBlock musicalContextBlock = self.musicalContextBlock;
     AUHostTransportStateBlock transportStateBlock = self.transportStateBlock;
 
@@ -704,10 +699,9 @@ static thread_local bool g_au_v3_host_writing = false;
             }
         }
 
-        // Sidechain: pull bus 1 into its own ABL so it doesn't alias the
-        // main input block. Processor::set_sidechain() takes a BufferView
-        // that remains valid for the duration of process(). Workstream 01
-        // slice 1.4.
+        // Sidechain: pull bus 1 into its own ABL so it doesn't alias the main
+        // input block. Processor::set_sidechain() takes a BufferView that
+        // remains valid for the duration of process().
         pulp::audio::BufferView<const float> sidechain_view;
         int scChans = bridge->sidechain_channels;
         if (pullInputBlock && scChans > 0) {
@@ -748,12 +742,10 @@ static thread_local bool g_au_v3_host_writing = false;
             bridge->processor->set_sidechain(nullptr);
         }
 
-        // MIDI events. Short messages arrive as AURenderEventMIDI;
-        // sysex (and long MIDI 2.0 UMP groups from AU v3.1+) arrive
-        // as AURenderEventMIDIEventList. Workstream 01 #288 completes
-        // the sysex triad — CLAP half #269, VST3 half #274, AU half
-        // here — by routing long packets into MidiBuffer's variable-
-        // length sysex sidecar (#231).
+        // MIDI events. Short messages arrive as AURenderEventMIDI; sysex (and
+        // long MIDI 2.0 UMP groups from AU v3.1+) arrive as
+        // AURenderEventMIDIEventList. Long packets are routed into
+        // MidiBuffer's variable-length sysex sidecar.
         pulp::midi::MidiBuffer midi_in, midi_out;
         const AURenderEvent* event = realtimeEventListHead;
         while (event) {
@@ -790,13 +782,9 @@ static thread_local bool g_au_v3_host_writing = false;
                 }
             } else if (event->head.eventType == AURenderEventMIDIEventList) {
                 // AUMIDIEventList delivers UMP-encoded events. The
-                // UMP message-type nibble (bits 28-31 of word 0)
-                // identifies the message class; nibble 0x3 is sysex7
-                // and reassembly is delegated to the shared
-                // UmpSysex7Reassembler in core/midi (macOS plan 8.2 —
-                // extracts the previously inline #292 fix to a
-                // single, tested implementation shared with the
-                // CoreMIDI device backend).
+                // UMP message-type nibble (bits 28-31 of word 0) identifies
+                // the message class; nibble 0x3 is sysex7 and reassembly is
+                // delegated to the shared UmpSysex7Reassembler in core/midi.
                 //
                 // The reassembler emits each completed logical sysex
                 // exactly once; we tag the resulting payload with the
@@ -830,10 +818,9 @@ static thread_local bool g_au_v3_host_writing = false;
                             // UMP message word length by type. Types
                             // not listed default to 1 so we still
                             // advance past unknown messages safely.
-                            // Each type-3 message is 2 UMP words; the
-                            // cursor advances by `ump_words`, not 1,
-                            // so word1 cannot masquerade as a fresh
-                            // message header (#292 P1).
+                            // Each type-3 message is 2 UMP words; the cursor
+                            // advances by `ump_words`, not 1, so word1 cannot
+                            // masquerade as a fresh message header.
                             UInt32 ump_words = 1;
                             switch (mt) {
                                 case 0x0: case 0x1: case 0x2:
@@ -868,10 +855,10 @@ static thread_local bool g_au_v3_host_writing = false;
         }
         bridge->param_events.sort();
 
-        // Item 3.1 — bypass short-circuit. Consult the plugin's Bypass
-        // parameter when it has one; otherwise the bridge-local atomic
-        // the host wrote via setShouldBypassEffect:. When bypassed we
-        // skip `processor_->process()` entirely and emit pass-through:
+        // Bypass short-circuit. Consult the plugin's Bypass parameter when it
+        // has one; otherwise the bridge-local atomic the host wrote via
+        // setShouldBypassEffect:. When bypassed we skip `processor_->process()`
+        // entirely and emit pass-through:
         //   * effects (input_channels > 0): copy input → output per
         //     channel, padding extra outputs with silence;
         //   * instruments / generators: zero-fill (no input to copy).
@@ -903,13 +890,11 @@ static thread_local bool g_au_v3_host_writing = false;
         ctx.process_mode = pulp::format::ProcessMode::Realtime;
         ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
 
-        // Item 1.3 — populate transport fields from the host blocks the
-        // AUv3 host installed via the KVO-able properties on
-        // AUAudioUnit. The blocks may legitimately be nil (hosts that
-        // don't expose transport state, AUv2-bridged hosts, render
-        // tests). In that case the fields stay at their documented
-        // defaults so the plugin's process() sees the same
-        // pre-extension behaviour.
+        // Populate transport fields from the host blocks the AUv3 host
+        // installed via the KVO-able properties on AUAudioUnit. The blocks may
+        // legitimately be nil (hosts that don't expose transport state,
+        // AUv2-bridged hosts, render tests). In that case the fields stay at
+        // their documented defaults.
         if (musicalContextBlock) {
             double tempo_bpm = 0.0;
             double time_sig_numerator = 0.0;
@@ -1021,13 +1006,11 @@ static thread_local bool g_au_v3_host_writing = false;
         bridge->processor->set_param_events(&bridge->param_events);
         bridge->processor->process(process_buffers, midi_in, midi_out, ctx);
 
-        // Item 3.11 — drain RT-safe pending flags the processor may have
-        // set during process() and publish them via KVO. AUAudioUnit
-        // exposes `latency` and `tailTime` as KVO-able read-only
-        // properties; an AU v3 host observes them and re-queries.
-        // dispatch_async (vs the synchronous KVO call) keeps the audio
-        // thread out of Foundation's KVO machinery, matching the spec
-        // for #3.11 ("no host calls from process()").
+        // Drain RT-safe pending flags the processor may have set during
+        // process() and publish them via KVO. AUAudioUnit exposes `latency`
+        // and `tailTime` as KVO-able read-only properties; an AU v3 host
+        // observes them and re-queries. dispatch_async (vs the synchronous KVO
+        // call) keeps the audio thread out of Foundation's KVO machinery.
         const bool publish_latency =
             bridge->processor->consume_latency_changed_flag();
         const bool publish_tail =
@@ -1053,11 +1036,10 @@ static thread_local bool g_au_v3_host_writing = false;
             });
         }
 
-        // Forward any MIDI the Processor emitted to the host via the
-        // AUv3 MIDIOutputEventBlock. The block is installed by the host
-        // on an ARC-managed retained property; we capture it via `self`
-        // at block-creation time so the retain cycle stays safe.
-        // Workstream 01 — AUv3 MIDI-out (#242).
+        // Forward any MIDI the Processor emitted to the host via the AUv3
+        // MIDIOutputEventBlock. The block is installed by the host on an
+        // ARC-managed retained property; we capture it via `self` at
+        // block-creation time so the retain cycle stays safe.
         if (midi_out.size() > 0) {
             AUMIDIOutputEventBlock outBlock = self.MIDIOutputEventBlock;
             if (outBlock) {
@@ -1161,10 +1143,9 @@ static thread_local bool g_au_v3_host_writing = false;
     return events[index].value;
 }
 
-// ARA-aware AU hosts (Logic Pro 11+, etc.) read this property via KVO
-// during scan. Returns an opaque ARA::ARAFactory* when the plug-in
-// participates in ARA; nullptr otherwise. See issue #252 and the
-// A2c ralph slice.
+// ARA-aware AU hosts (Logic Pro 11+, etc.) read this property via KVO during
+// scan. Returns an opaque ARA::ARAFactory* when the plug-in participates in
+// ARA; nullptr otherwise.
 - (void *)audioUnitARAFactory {
     return const_cast<void *>(
         pulp::format::ara_companion_factory_for(nullptr));

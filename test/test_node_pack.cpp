@@ -1,4 +1,4 @@
-// Phase 7 — signed node-pack loader. Builds a manifest for a real loadable node
+// Signed node-pack loader tests. Builds a manifest for a real loadable node
 // MODULE, signs it with a test Ed25519 key, and asserts the loader accepts the
 // trusted/intact pack and rejects every tampering: untrusted signer, bad
 // signature, hash mismatch, ABI mismatch, and a missing binary. The dlopen path

@@ -25,9 +25,9 @@ using LogCallback = std::function<void(std::string_view level, std::string_view 
 using NativeFunction = std::function<choc::value::Value(const choc::value::Value* args, size_t num_args)>;
 using NativePromiseFunction = NativeFunction;
 
-// First host-object slice: native-backed global objects with snapshot properties
+// Native-backed global objects with snapshot properties
 // and native method callbacks. This is intentionally smaller than a full opaque
-// proxy / HostObject API, but it gives later bridge phases a truthful native
+// proxy / HostObject API, but it gives the bridge a truthful native
 // object seam to build on.
 struct HostObjectProperty {
     std::string name;
@@ -139,8 +139,8 @@ public:
         register_host_object_impl(name, std::move(descriptor));
     }
 
-    // First promise slice: expose a native callback as a JS function that
-    // returns a real Promise and resolves on the JS microtask queue.
+    // Expose a native callback as a JS function that returns a real Promise
+    // and resolves on the JS microtask queue.
     // This does not yet provide a held native resolver for later completion.
     void register_promise_function(const std::string& name, NativePromiseFunction fn) {
         claim_native_symbol(name);
@@ -154,7 +154,7 @@ public:
     // for engines that do not expose an explicit pump hook.
     virtual void pump_message_loop() {}
 
-    // ── Phase 13 forward-compatibility (HostObject / TypedArray / Promise) ──
+    // ── Forward-compatibility capability flags (HostObject / TypedArray / Promise) ──
     // These are defined now so all backends can be designed with them in mind.
     // Default implementations return false / no-op. Backends enable as ready.
 

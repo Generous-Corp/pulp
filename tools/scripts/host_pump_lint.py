@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""host_pump_lint.py — guard against the pulp-internal #71 foot-gun.
+"""host_pump_lint.py — guard against the host idle-pump foot-gun.
 
 Every live-host main.cpp (examples/design-tool, examples/ui-preview, future
 hosts) must drive BOTH halves of the WidgetBridge idle pump on every tick:
@@ -11,8 +11,8 @@ Calling only the first half silently freezes every imported app's polling
 state path: setInterval(fn, N) returns a valid id but `fn` never fires. The
 underlying chart/canvas (which paints from a separate ref store) keeps
 updating, but every React label that reads polled state stays frozen.
-See scripted_ui.cpp:67-81 for the contract documentation; see PR #1957
-follow-up commit for the concrete regression.
+The contract is documented next to the bridge implementation in
+scripted_ui.cpp.
 
 This lint scans every examples/*/main.cpp (and other host main files we
 extend the map to) and flags any call to poll_async_results() whose
@@ -99,9 +99,9 @@ def main() -> int:
         print(
             "\nFix: add `bridge->service_frame_callbacks();` immediately after "
             "the `poll_async_results()` call in the same handler block.\n"
-            "Background: pulp-internal #71. Without the second half, every "
-            "imported app's setTimeout/setInterval queues forever and any "
-            "polling-driven React state freezes.\n"
+            "Background: without the second half, every imported app's "
+            "setTimeout/setInterval queues forever and any polling-driven "
+            "React state freezes.\n"
             "Genuine one-shot CLI exemption: append "
             f'`// {SKIP_MARKER} — <reason>` to the line.',
             file=sys.stderr,

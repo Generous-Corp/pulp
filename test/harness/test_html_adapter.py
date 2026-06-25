@@ -1,9 +1,7 @@
 """Tests for the HTML catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the HTML adapter (#1392 partial, week 1 cut). Mirrors
-`test_yoga_adapter.py` so the test conventions stay aligned across
-parallel adapters (#1391 / #1392 / #1393).
+Mirrors `test_yoga_adapter.py` so the test conventions stay aligned across
+the surface adapters.
 
 Run via::
 
@@ -92,9 +90,9 @@ class HtmlAdapterClassifyTest(unittest.TestCase):
     # ── DIVERGE entries (binding present + listed gaps) ──────────────
 
     def test_element_method_with_unsupported_values_is_DIVERGE(self):
-        """`addEventListener` is wired but the catalog lists a few event
-        types that route differently. The harness must say DIVERGE so the
-        gap shows up in the drift list."""
+        """A wired Element method can still be DIVERGE when its catalog row
+        records a known gap. Keep this synthetic entry separate from the live
+        `html/Element_addEventListener` row, which is currently PASS."""
         e = CatalogEntry(
             surface="html",
             name="html/Element_addEventListener",
@@ -102,13 +100,12 @@ class HtmlAdapterClassifyTest(unittest.TestCase):
             maps_to="Element.addEventListener — registers click/mouseenter/...",
             supported_values=["click", "mouseenter"],
             unsupported_values=[
-                "dragstart/drag/dragend (use registerDrop)",
-                "wheel (use registerWheel)",
+                "source-side drag lifecycle (native drag image / dragstart / dragend)",
             ],
         )
         result = self.adapter.run(e)
         self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
-        self.assertEqual(len(result.extra_unsupported), 2)
+        self.assertEqual(len(result.extra_unsupported), 1)
 
     def test_html_tag_with_unsupported_values_is_DIVERGE(self):
         """`<style>` is wired, but the catalog lists @media/@import/etc. as
@@ -242,18 +239,23 @@ class HtmlVerifierEndToEndTest(unittest.TestCase):
             self.assertIsInstance(r.status, Status, msg=e.name)
 
     def test_coverage_distribution_is_nonzero(self):
-        """Sanity: with the catalog as-is, we have at least some PASS and
-        some DIVERGE entries. (We don't require NOT-IMPL to be non-zero —
-        the html surface is more mature than yoga, but we DO require ARIA
-        to classify as NOT-IMPL.)"""
+        """Sanity: the live HTML catalog has implemented rows, and stale
+        evidence references are surfaced as SUPPORTED-NO-EVIDENCE instead of
+        being mistaken for implementation drift."""
         results = run_surface(REPO_ROOT, "html")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
         self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
-        self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
-        # ARIA is documented missing — assert its specific verdict.
-        aria = next(r for r in results if r.entry.name == "html/ARIA")
-        self.assertEqual(aria.status, Status.NOT_IMPL)
+        self.assertGreater(
+            counts.supported_no_evidence,
+            0,
+            "expected stale evidence references to stay visible",
+        )
+        self.assertEqual(counts.diverge, 0)
+        self.assertEqual(counts.not_impl, 0)
+        self.assertEqual(counts.oos, 0)
+        wheel = next(r for r in results if r.entry.name == "html/Element_addEventListener")
+        self.assertEqual(wheel.status, Status.PASS)
 
     def test_json_output_contains_all_entries(self):
         from tools.harness.verifier import render_json

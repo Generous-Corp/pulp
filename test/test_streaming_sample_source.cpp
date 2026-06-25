@@ -15,7 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -32,6 +32,14 @@ namespace {
 float expected_sample(std::uint64_t frame, std::uint32_t ch) {
     return (static_cast<float>(frame % 997) / 997.0f) * 0.5f - 0.25f +
            static_cast<float>(ch) * 0.1f;
+}
+
+std::string temp_wav(const char* suffix) {
+    static int counter = 0;
+    auto name = "pulp_streaming_src_test_"
+              + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(counter++) + suffix;
+    return (std::filesystem::temp_directory_path() / name).string();
 }
 
 // A FrameReader that synthesizes expected_sample() for any requested range.
@@ -243,9 +251,7 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
     // FrameReader. This exercises the true zero-copy disk-streaming path.
     const std::uint32_t channels = 2;
     const std::uint64_t total = 12000;
-    const std::string path =
-        std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") +
-        "/pulp_streaming_src_test.wav";
+    const std::string path = temp_wav(".wav");
 
     pulp::audio::AudioFileData data;
     data.sample_rate = 48000;

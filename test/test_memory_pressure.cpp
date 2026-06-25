@@ -1,4 +1,4 @@
-// Verifies Processor::on_memory_pressure() hook (workstream 05 slice 5.3).
+// Verifies Processor::on_memory_pressure() hook.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>

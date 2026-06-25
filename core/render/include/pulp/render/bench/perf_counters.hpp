@@ -1,11 +1,10 @@
 #pragma once
 
 /// @file perf_counters.hpp
-/// Zero-copy benchmark perf counters (Slice 0 of the zero-copy ralph loop).
+/// Benchmark perf counters for copy/upload/readback costs.
 ///
-/// Part of the zero-copy initiative (#516 / #517). This header is
-/// compiled out entirely when `PULP_BENCHMARK` is not defined, so the
-/// production audio/UI paths see zero overhead by default.
+/// This header is compiled out entirely when `PULP_BENCHMARK` is not defined,
+/// so the production audio/UI paths see zero overhead by default.
 ///
 /// Counters accumulate microseconds (or byte counts) via
 /// `std::atomic<double>::fetch_add`. Writers on different threads (audio
@@ -60,15 +59,12 @@ struct PerfCounters {
     // Number of samples (frames) rolled into the above totals.
     std::atomic<double> sample_count{0.0};
 
-    // Slice 0.5 additions — real JS→GPU upload instrumentation (#516).
-    // Captures the JS-driven WebGPU resource setup path in
-    // `core/view/src/widget_bridge.cpp`: base64 decode cost (for the
-    // __gpuComputeDispatchImpl bufferDataBase64 path added in #535),
-    // the number of WriteBuffer calls (so per-upload cost is derivable
-    // from `gpu_upload_total_us / gpu_buffer_upload_count`), and the
-    // peak resident GPU-buffer memory so we can tell whether a workload
-    // actually stresses the bridge (vs. the oscilloscope/spectrogram
-    // paths that allocate effectively nothing).
+    // JS→GPU upload instrumentation. Captures the JS-driven WebGPU resource
+    // setup path in `core/view/src/widget_bridge.cpp`: base64 decode cost,
+    // the number of WriteBuffer calls (so per-upload cost is derivable from
+    // `gpu_upload_total_us / gpu_buffer_upload_count`), and the peak resident
+    // GPU-buffer memory so we can tell whether a workload actually stresses
+    // the bridge.
     //
     // The peak is tracked via a `compare_exchange` loop in
     // `observe_resident_peak` so concurrent writers stay monotonic

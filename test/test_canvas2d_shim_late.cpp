@@ -1,14 +1,11 @@
-// test_canvas2d_shim_late.cpp — extracted from test_canvas2d_shim.cpp
-// in the 2026-05 Phase 5 (P5-2 follow-up) refactor.
-//
-// Post-Wave-2 Canvas2D shim coverage. Each cluster pins runtime path
-// for entries that landed under specific issues:
+// Canvas2D shim coverage. Each cluster pins runtime paths for entries
+// that landed under specific issues:
 //
 //   * #1525 — fillText / strokeText maxWidth + glyph cluster handling
 //   * #1521 — arc-as-path cluster (DIVERGE → PASS)
 //   * #1520 — ctx.direction / ctx.filter
 //   * #1526 — catalog hygiene round-trip for already-supported properties
-//   * Wave 4 c2d cleanup — lineDashOffset re-flushes on assignment
+//   * lineDashOffset re-flushes on assignment
 //   * #1527 — getTransform / resetTransform + isPointInPath / isPointInStroke
 
 #include <catch2/catch_test_macros.hpp>
@@ -35,10 +32,8 @@ using namespace pulp::view;
 using namespace pulp::state;
 
 // Local copies of run_in_bridge + ScriptedBridge — file-static in the
-// parent test_canvas2d_shim.cpp. Duplicated here per the extracted-TU
-// pattern. Updating one without the other is a documented gotcha; this
-// is the same trade-off the canvas2d-wave2 + svg + other widget-bridge
-// splits already accept.
+// parent test_canvas2d_shim.cpp. Updating one without the other is a
+// documented gotcha.
 namespace {
 
 std::string run_in_bridge(const std::string& js) {
@@ -84,15 +79,14 @@ struct ScriptedBridge {
 
 // ── pulp #1525 — fillText / strokeText maxWidth + glyph cluster handling ──
 //
-// Promotion target: 2 DIVERGE → PASS for canvas2d/fillText and
-// canvas2d/strokeText. Pre-#1525 the JS shim accepted `maxWidth` as a
-// 4th arg but discarded it (`void maxWidth;`) and `strokeText` re-routed
-// through `fillText` with the strokeStyle as the fill colour — visually
-// approximate but spec-incompatible (no real outlined glyphs, no
-// horizontal squeeze).
+// The catalog marks canvas2d/fillText and canvas2d/strokeText as supported.
+// The JS shim must forward `maxWidth` and route `strokeText` through the
+// dedicated stroke path; rerouting through `fillText` with strokeStyle as the
+// fill colour is visually approximate but spec-incompatible (no real outlined
+// glyphs, no horizontal squeeze).
 //
-// These tests cover the full JS → bridge → CanvasDrawCmd surface so the
-// catalog can flip from `partial` to `supported`.
+// These tests cover the full JS → bridge → CanvasDrawCmd surface that backs
+// the supported catalog entries.
 
 TEST_CASE("Canvas2D fillText threads maxWidth through to bridge",
           "[view][canvas2d][issue-1525]") {
@@ -175,12 +169,10 @@ TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentin
 
 TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
           "[view][canvas2d][issue-1525]") {
-    // Pre-#1525: strokeText re-routed through canvasFillText with
-    // strokeStyle as the fill colour, recording a fill_text cmd. Post-
-    // #1525: strokeText records a dedicated stroke_text cmd carrying
-    // the strokeStyle in cmd.color and the optional maxWidth in cmd.w
-    // — the paint loop dispatches to Canvas::stroke_text for true
-    // outlined-glyph rendering (Skia / CG override).
+    // strokeText records a dedicated stroke_text cmd carrying the strokeStyle
+    // in cmd.color and the optional maxWidth in cmd.w — the paint loop dispatches
+    // to Canvas::stroke_text for true outlined-glyph rendering (Skia / CG
+    // override).
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
@@ -210,8 +202,7 @@ TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
         }
     }
     REQUIRE(stroke_count == 2);
-    // strokeText must NOT have leaked into fill_text — that's the
-    // pre-#1525 approximation we're explicitly replacing.
+    // strokeText must NOT leak into fill_text; it has its own command lane.
     REQUIRE(fill_text_count == 0);
     REQUIRE(seen_max_width == Catch::Approx(80.0f));
 }
@@ -300,14 +291,10 @@ TEST_CASE("Canvas2D fillText with maxWidth horizontally squeezes raster output",
     REQUIRE(rightmost <= 5 + 60 + 6);
 }
 
-// Codex P2 (PR #1555): SkiaCanvas::stroke_text built its stroke paint
-// via make_stroke_paint() but never called apply_stroke_state(), so
-// ctx.lineJoin / ctx.lineCap / ctx.miterLimit / ctx.strokeStyle pattern
-// shaders were silently dropped on strokeText only — every other stroke
-// primitive honoured them. This test renders a heavy-stroke glyph twice
-// against identical surfaces, once with the default (miter) line join
-// and once with LineJoin::round, and asserts the rasters differ. With
-// the apply_stroke_state call missing, both paths would resolve to the
+// SkiaCanvas::stroke_text must apply sticky stroke state. The test renders a
+// heavy-stroke glyph twice against identical surfaces, once with the default
+// (miter) line join and once with LineJoin::round, and asserts the rasters
+// differ. If stroke_text skips apply_stroke_state(), both paths resolve to the
 // same default-join SkPaint and produce identical pixels.
 TEST_CASE("SkiaCanvas::stroke_text honors sticky line_join state",
           "[canvas][skia][issue-1525-fix]") {
@@ -370,12 +357,9 @@ TEST_CASE("SkiaCanvas::stroke_text honors sticky line_join state",
 //
 // The JS shim now routes ctx.arc / arcTo / ellipse / roundRect through the
 // new canvasPathArc / canvasPathArcTo / canvasPathEllipse /
-// canvasPathRoundRect bridge fns. Before this PR the shim emitted
-// canvasMoveTo + canvasCubicTo (arc / ellipse) or canvasLineTo (arcTo /
-// roundRect) — N approximation segments per arc. After this PR each call
-// emits exactly one path_arc / path_arc_to / path_ellipse /
-// path_round_rect command, and the cubic_to / line_to fallbacks no
-// longer fire from the arc family.
+// canvasPathRoundRect bridge fns. Each call emits exactly one path_arc /
+// path_arc_to / path_ellipse / path_round_rect command; the cubic_to /
+// line_to approximation fallbacks must not fire from the arc family.
 TEST_CASE("Canvas2D arc shim emits path_arc, not bezier approximation",
           "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
@@ -526,10 +510,9 @@ TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
 
 // ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ────────────────────
 //
-// canvas2d/direction and canvas2d/filter were the last two NOT-IMPL
-// entries in compat.json's canvas2d catalog. This block flips them to
-// `partial` by routing the JS shim through the bridge and into Skia's
-// SkShaper / SkImageFilter chain. The tests below exercise:
+// canvas2d/direction and canvas2d/filter are supported by routing the JS shim
+// through the bridge and into Skia's SkShaper / SkImageFilter chain. The tests
+// below exercise:
 //   * round-trip getter/setter on the JS shim
 //   * defensive coercion of unknown direction strings
 //   * sticky flush of direction setter before fillText
@@ -537,9 +520,9 @@ TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
 //   * sticky flush of filter setter before fill / drawImage
 //   * cache invalidation across save/restore
 // SkImageFilter chain rasterisation parity is intentionally not asserted
-// here — the parser is exercised by the [issue-1520] subset; full visual
-// parity with Chrome is a follow-up shared with #1503's element-side
-// CSS filter parser.
+// here — the parser is exercised by the [issue-1520] subset, while full
+// visual parity with Chrome belongs with #1503's element-side CSS filter
+// parsing.
 
 TEST_CASE("Canvas2D shim exposes direction property as round-trip field",
           "[view][canvas2d][issue-1520]") {
@@ -776,13 +759,11 @@ TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
 //
 // Ten entries — globalAlpha, lineCap, lineJoin, lineDashOffset,
 // textAlign, textBaseline, globalCompositeOperation, quadraticCurveTo,
-// bezierCurveTo, arc — were cataloged in PR #1366 / wired in PR #1348 /
-// fanned out across #1480 (line cap/join paint plumbing) and the pre-
-// existing FilterBank repro suite. Their bridge-side coverage is split
-// across the issue-964 cases above, but no single test exercises the
-// 10-as-a-set as the catalog claims. This test pins each one's full
-// round-trip through the JS shim → bridge → CanvasWidget command stream
-// so a regression in any of them surfaces directly under [issue-1526].
+// bezierCurveTo, arc — have bridge-side coverage split across the
+// issue-964 cases in test_canvas2d_shim.cpp, but no single test exercises the
+// 10-as-a-set as the catalog claims. This test pins each one's full round-trip
+// through the JS shim → bridge → CanvasWidget command stream so a
+// regression in any of them surfaces directly under [issue-1526].
 TEST_CASE("Canvas2D shim flushes the 10-entry catalog set to the bridge",
           "[view][canvas2d][issue-1526]") {
     ScriptedBridge env;
@@ -969,17 +950,17 @@ TEST_CASE("Canvas2D shim getter round-trip for the 10-entry catalog set",
         "methods-ok");
 }
 
-// ── Wave 4 c2d cleanup — lineDashOffset re-flushes on assignment ─────────
+// ── lineDashOffset re-flushes on assignment ─────────────────────────────
 //
 // HTML5 spec: ctx.lineDashOffset is a sticky phase property; assigning to
 // it must shift the dash phase on subsequent strokes without requiring a
-// redundant setLineDash call. Pre-Wave-4 the field was tracked locally
-// but only sent on the next setLineDash, so phase mutations between
-// draws were silently dropped.
+// redundant setLineDash call. The field used to be tracked locally but
+// only sent on the next setLineDash, so phase mutations between draws
+// were silently dropped.
 //
-// Wave 4 converted lineDashOffset to an Object.defineProperty getter/
-// setter pair: the setter re-pushes the active dash pattern via
-// canvasSetLineDash with the new phase. Verify that:
+// lineDashOffset now uses an Object.defineProperty getter/setter pair:
+// the setter re-pushes the active dash pattern via canvasSetLineDash
+// with the new phase. Verify that:
 //   1. The default (lineDashOffset=0) reads back as 0.
 //   2. Assigning a new value with a pattern in place re-pushes
 //      canvasSetLineDash with the new phase.
@@ -1116,11 +1097,10 @@ TEST_CASE("Canvas2D resetTransform returns matrix to identity",
 // The fix forwards the FULL composed matrix via canvasSetTransform.
 TEST_CASE("Canvas2D transform() concats on right and forwards to bridge",
           "[view][canvas2d][issue-1348][codex-p1]") {
-    // Scale * translate: result must be the JS-side composed matrix,
-    // and getTransform() must reflect that (post-fix the bridge state
-    // matches; pre-fix only the JS mirror was correct, but
-    // getTransform() reads from the JS mirror anyway, so the failure
-    // mode was a *paint-time* divergence, not a getTransform read).
+    // Scale * translate: result must be the JS-side composed matrix, and
+    // getTransform() must reflect that. Because getTransform() reads from the JS
+    // mirror, the guarded failure mode is a *paint-time* divergence, not a
+    // getTransform read.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe';
@@ -1395,10 +1375,8 @@ TEST_CASE("Canvas2D getTransform DOMMatrix scaleSelf + isIdentity recompute",
 
 TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf takes degrees [issue-1730]",
           "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: rotateSelf() input is DEGREES per the
-    // DOMMatrix spec (https://drafts.fxtf.org/geometry/#dom-dommatrix-rotateself).
-    // Previously this test passed Math.PI/2 and expected a 90deg
-    // rotation — that documented the BUG. Now we pass 90 (degrees).
+    // rotateSelf() input is DEGREES per the DOMMatrix spec:
+    // https://drafts.fxtf.org/geometry/#dom-dommatrix-rotateself
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1433,7 +1411,7 @@ TEST_CASE("Canvas2D DOMMatrix rotateSelf(180) flips signs [issue-1730]",
 
 TEST_CASE("Canvas2D DOMMatrix rotateSelf() omitted arg defaults to 0 [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: omitted angle defaults to 0 — must not be NaN.
+    // Omitted angle defaults to 0 — must not be NaN.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1447,8 +1425,8 @@ TEST_CASE("Canvas2D DOMMatrix rotateSelf() omitted arg defaults to 0 [issue-1730
 
 TEST_CASE("Canvas2D DOMMatrix scaleSelf() omitted args default to identity [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 on #1730: spec says scaleX defaults to 1 when omitted,
-    // scaleY defaults to scaleX when omitted. Was producing NaN before.
+    // Per spec, scaleX defaults to 1 when omitted and scaleY defaults to
+    // scaleX when omitted.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1483,11 +1461,9 @@ TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
 
 TEST_CASE("Canvas2D DOMMatrix singular inverse: all 16 components are NaN [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 follow-up on #1754: spec says ALL 16 matrix components
-    // become NaN for a non-invertible inverse. Constructor only NaN'd
-    // the 2D aliases; m13/m14/m23/m24/m31..m34/m43/m44 stayed at
-    // constructor-default identity. toFloat32Array/toFloat64Array
-    // would return mixed finite/NaN, violating the contract.
+    // Per spec, ALL 16 matrix components become NaN for a non-invertible
+    // inverse. toFloat32Array/toFloat64Array must not return a mixed
+    // finite/NaN matrix.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1506,9 +1482,8 @@ TEST_CASE("Canvas2D DOMMatrix singular inverse: all 16 components are NaN [issue
 
 TEST_CASE("Canvas2D DOMMatrix toJSON honors actual is2D [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 follow-up on #1754: toJSON used to hardcode is2D=true;
-    // a singular-inverse result has is2D=false but JSON serialization
-    // would lose the inversion-failure indicator.
+    // A singular-inverse result has is2D=false; JSON serialization must keep
+    // that inversion-failure indicator.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1527,11 +1502,9 @@ TEST_CASE("Canvas2D DOMMatrix toJSON honors actual is2D [issue-1730]",
 
 TEST_CASE("Canvas2D DOMMatrix inverse round-trips identity; singular yields NaN matrix [issue-1730]",
           "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: per spec
-    // (https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-inverse),
-    // a non-invertible matrix produces a matrix with NaN components and
-    // is2D=false. It does NOT throw. The previous test asserted "throws
-    // TypeError" — that was documenting the BUG.
+    // Per spec, a non-invertible matrix produces a matrix with NaN components
+    // and is2D=false. It does NOT throw:
+    // https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-inverse
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);

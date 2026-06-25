@@ -49,7 +49,7 @@ bool DocumentWindow::show() {
     // Route native close affordances (title-bar X, Cmd+W, Alt+F4) through
     // request_close() so the close-confirmation handler ALWAYS runs. Without
     // this wiring, the title-bar X would bypass close_handler_ and let
-    // unsaved-changes veto logic be silently overridden (Codex PR #3006).
+    // unsaved-changes veto logic be silently overridden.
     host_->set_close_callback([this]() {
         (void)this->request_close();
     });
@@ -84,8 +84,7 @@ bool DialogWindow::show(bool modal) {
     if (!host_) return false;
     // Wire the native close affordance to dismiss(closed) so callers waiting
     // on the completion handler always receive a result — closing via the
-    // title-bar X / Cmd+W must not leave a modal dance pending forever
-    // (Codex PR #3006).
+    // title-bar X / Cmd+W must not leave a modal dance pending forever.
     host_->set_close_callback([this]() {
         this->dismiss(DialogResult::closed);
     });

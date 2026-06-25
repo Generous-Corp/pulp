@@ -138,11 +138,76 @@ std::vector<Entry> entries() {
     });
     add("Tab", 300, 90, [](Cell& c) {
         auto t = std::make_unique<TabPanel>();
+        // Underline treatment — the Ink & Signal navigation tabs (Figma
+        // 227:1763): no filled strip, teal underline + full-width divider.
+        t->set_tab_bar_style(TabPanel::TabBarStyle::underline);
         t->add_tab("Amp", std::make_unique<View>());
         t->add_tab("Filter", std::make_unique<View>());
         t->add_tab("FX", std::make_unique<View>());
         t->set_active_tab(0);
         t->set_bounds({20, 16, 260, 58}); c.add_child(std::move(t));
+    });
+    add("Segmented", 300, 70, [](Cell& c) {
+        auto s = std::make_unique<SegmentedControl>();
+        s->set_segments({"Amp", "EQ", "Comp", "Reverb"});
+        s->set_selected(0);
+        s->set_bounds({20, 20, 260, 30}); c.add_child(std::move(s));
+    });
+    add("Toolbar", 300, 70, [](Cell& c) {
+        auto tb = std::make_unique<Toolbar>();
+        tb->add_button("prev", "\xe2\x8f\xae", [] {});  // ⏮
+        tb->add_button("play", "\xe2\x96\xb6", [] {});  // ▶
+        tb->add_button("rec",  "\xe2\x97\x8f", [] {});  // ●
+        tb->add_toggle("loop", "\xe2\x86\xba", [](bool) {});  // ↺
+        tb->set_toggled("loop", true);                  // active (teal) — Figma
+        tb->add_separator();
+        tb->add_custom("bpm", [] {
+            auto l = std::make_unique<Label>("120 BPM");
+            l->set_text_align(LabelAlign::center);
+            l->flex().preferred_width = 70.0f;  // wide readout, not a square icon
+            return l;
+        }());
+        tb->set_bounds({16, 18, 268, 36}); c.add_child(std::move(tb));
+    });
+    add("Breadcrumb", 300, 56, [](Cell& c) {
+        auto bc = std::make_unique<Breadcrumb>();
+        bc->set_show_background(false);                  // flat — Figma 227:1830
+        bc->set_items({{"Library", {}}, {"Reverb", {}}, {"Halls", {}}});
+        bc->set_bounds({16, 14, 268, 24}); c.add_child(std::move(bc));
+    });
+    add("Sidebar", 220, 200, [](Cell& c) {
+        // The Figma "sidebar" is a labelled vertical nav list with a teal-tinted
+        // selected row — rendered here with ListBox's opt-in accent selection +
+        // leading icons (Pulp's Sidebar class is a slide container, not a list).
+        auto nav = std::make_unique<ListBox>();
+        nav->set_items({"Oscillators", "Filter", "Envelopes", "Effects", "Macros"});
+        nav->set_icons({"\xe2\x99\xaa", "\xe2\x96\xa4", "\xe2\x9a\x99",
+                        "\xe2\x98\xb0", "\xe2\x97\x88"});
+        nav->set_selection_style(ListBox::SelectionStyle::accent);
+        nav->set_row_height(32.0f);
+        nav->set_selected(1);
+        nav->set_bounds({16, 16, 188, 168}); c.add_child(std::move(nav));
+    });
+    add("Tree", 260, 200, [](Cell& c) {
+        auto tree = std::make_unique<TreeView>();
+        tree->set_selection_style(TreeView::SelectionStyle::accent);
+        // Folders are signalled by the disclosure chevron + indentation;
+        // leaves (presets) carry a ♪ icon. (Geometric "folder" glyphs fall
+        // back to a shapes font whose descent misaligns at small row heights,
+        // so the chevron is the cleaner folder cue here.)
+        auto& root = tree->root();
+        auto& factory = root.add_child("Factory");
+        factory.expanded = true;
+        auto& reverb = factory.add_child("Reverb");
+        reverb.expanded = true;
+        reverb.add_child("Concert Hall").icon = "\xe2\x99\xaa";
+        reverb.add_child("Velvet Plate").icon = "\xe2\x99\xaa";
+        auto& delay = factory.add_child("Delay");     // collapsed folder
+        delay.add_child("Tape Echo").icon = "\xe2\x99\xaa";
+        auto& user = root.add_child("User");          // collapsed folder
+        user.add_child("My Plate").icon = "\xe2\x99\xaa";
+        tree->set_selected_node(&reverb);
+        tree->set_bounds({16, 14, 228, 172}); c.add_child(std::move(tree));
     });
     add("Spectrum", 300, 140, [](Cell& c) {
         auto s = std::make_unique<SpectrumView>(); s->set_spectrum(demo_spectrum());

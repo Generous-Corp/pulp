@@ -41,7 +41,6 @@ std::vector<std::string> create_default_build_targets(const std::string& class_n
     // input to nothing (e.g. a name made only of separators); the
     // create flow should fall back to "no buildable targets" rather
     // than emit a guaranteed-broken target string.
-    // Codex P2 on PR #1271.
     if (include_test_target && !class_name.empty()) {
         add_target(class_name + "-test");
     }
@@ -50,7 +49,6 @@ std::vector<std::string> create_default_build_targets(const std::string& class_n
         // Same defensive skip as the test target above — an empty
         // class_name would emit `_VST3`, `_CLAP`, etc. which look like
         // CMake CLI options to `cmake --build --target ...`.
-        // Codex P2 on PR #1271.
         if (class_name.empty()) return;
         if (has_format(format)) {
             add_target(class_name + "_" + suffix);

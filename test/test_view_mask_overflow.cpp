@@ -1,7 +1,4 @@
-// test_view_mask_overflow.cpp — extracted from test_view.cpp in the
-// 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
-// Two coherent View paint/hit-test surfaces shipped together:
+// View mask and overflow tests for two coherent paint/hit-test surfaces:
 //
 //   1. pulp #1148 slice (a) — symmetric overflow:visible hit-test
 //      extension. PR #1297 added a 500px-radius extension so that
@@ -187,4 +184,3 @@ TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask
     // treated as if no mask were set (no layer overhead, no composite).
     REQUIRE(canvas.mask_calls.empty());
 }
-

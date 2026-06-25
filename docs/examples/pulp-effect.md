@@ -6,7 +6,7 @@
 
 ## Summary
 
-A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/bandpass), dry/wet mix, and bypass parameters. Validates diverse parameter types and more complex DSP than PulpGain across the three plugin formats.
+A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/bandpass), dry/wet mix, and bypass parameters. Validates diverse parameter types and more complex DSP than PulpGain across the three configured plugin formats.
 
 ## What It Demonstrates
 
@@ -16,7 +16,7 @@ A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/
 - Dry/wet mix blending
 - Per-channel filter state management (supports up to 8 channels)
 - The `release()` lifecycle method for clearing DSP state
-- Parameter diversity validation across VST3, AU, and CLAP adapters
+- Parameter diversity validation across VST3, AU v2, and CLAP adapters
 
 ## Supported Formats
 
@@ -32,8 +32,8 @@ A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/
 | Platform | Supported |
 |----------|-----------|
 | macOS | Yes |
-| Windows | Build stubs present, not yet validated |
-| Linux | Build stubs present, not yet validated |
+| Windows | Build targets present; validation pending |
+| Linux | Build targets present; validation pending |
 
 ## Key Files
 

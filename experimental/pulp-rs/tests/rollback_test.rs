@@ -3,8 +3,7 @@
 //! The rollback lever is the user-facing escape hatch post-swap: any
 //! user who hits a Rust-side regression can `export PULP_USE_CPP=1`
 //! and get back to the C++ binary without reinstalling. This test
-//! binary verifies two invariants that the Phase 8 swap PR will rely
-//! on:
+//! binary verifies two invariants that the Rust CLI swap relies on:
 //!
 //! 1. When `PULP_USE_CPP=1` is set and no `pulp-cpp` binary is on
 //!    PATH, the Rust binary exits with code 2 and prints a clear
@@ -24,7 +23,7 @@ use std::path::PathBuf;
 use assert_cmd::Command;
 
 /// Resolve the binary name the crate's `[[bin]]` manifest declares.
-/// Phase 8 binary swap (#767 / #686) renamed this from `pulp-rs` to
+/// The Rust CLI binary swap (#767 / #686) renamed this from `pulp-rs` to
 /// `pulp` along with the Cargo `[[bin]] name` field.
 const BIN_NAME: &str = "pulp";
 

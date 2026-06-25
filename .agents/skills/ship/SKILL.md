@@ -35,20 +35,60 @@ source "$(git rev-parse --show-toplevel)/tools/scripts/cli_version_check.sh"
 pulp_cli_version_check
 ```
 
-Advisory only — never blocks. Full contract + override knobs in the
-`upgrade` skill. Release-discovery Slice 6 (#551).
+Advisory only — never blocks. Full contract + override knobs live in the
+`upgrade` skill.
 
 ## Subcommands
 
 | Command | Platform | What It Does |
 |---------|----------|-------------|
 | `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit `.app`/`.dmg`/bundle |
-| `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.app` (repeatable) |
+| `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.zip` (repeatable), not a raw `.app` |
 | `package` | All | Create .pkg/.dmg (macOS), NSIS (Windows), APK+AAB (Android) |
 | `release` | macOS only | One command: sign → package → **notarize + staple the .pkg/.dmg it builds** → verify |
 | `share` | macOS only | One-off: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify a single artifact for sharing |
+| `auv3-xcodeproj` | macOS only | Generate an Xcode project for an AUv3 target |
 | `appcast` | All | Generate Sparkle-compatible XML update feed |
 | `check` | All | Verify signing status of built artifacts |
+| `doctor` | macOS | Make signing+notarization non-interactive: self-heal the dedicated signing keychain and validate the `.p8` notary key. No build dir required. |
+
+## Non-interactive signing (no keychain / 1Password prompt)
+
+On a workstation, `codesign` and `notarytool` can pop a macOS **keychain "allow
+access"** dialog or a **1Password** prompt — which silently wedges any headless,
+SSH, or CI sign. Two root causes, two durable fixes, both codified in
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`):
+
+1. **Signing key in the *login* keychain** → `codesign`/1Password prompt. Fix:
+   sign from a **dedicated keychain** whose key is authorized for `codesign` via
+   `security set-key-partition-list`. The doctor creates/unlocks it, imports the
+   `.p12`, runs the partition-list step, and adds it to the search list — all
+   idempotent.
+2. **`notarytool` driven by a keychain *profile*** re-prompts when the login
+   keychain locks (and the profile periodically vanishes on churny hosts). Fix:
+   notarize from a **file-based App Store Connect `.p8` API key** — no keychain
+   at all. The doctor validates it; `--check-online` also re-mints the optional
+   `pulp-notary` convenience profile from the same `.p8`.
+
+```bash
+pulp ship doctor                 # heal + report; exit 0 = ready (offline, deterministic)
+pulp ship doctor --check-online  # also prove the .p8 against Apple (read-only) + refresh profile
+pulp ship doctor --print-env     # emit resolved identity/keychain/keypath handles (no secrets) for eval
+```
+
+`pulp ship sign` runs this doctor as a **best-effort, quiet preflight** so the
+hardened path is automatic. The doctor itself NEVER prints secret values.
+
+**Secrets live OUTSIDE the repo** (never committed), in
+`~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
+- `keychain.env` — `PULP_SIGN_KEYCHAIN`, `PULP_SIGN_KEYCHAIN_PW`, `PULP_SIGN_P12`,
+  `PULP_SIGN_P12_PW`, `PULP_SIGN_IDENTITY_HASH` (+ optional `…_INSTALLER_HASH`)
+- `notary.env` — `PULP_NOTARY_KEY_PATH` (`.p8`), `PULP_NOTARY_KEY_ID`,
+  `PULP_NOTARY_ISSUER_ID` (the same trio `notary_env.cpp` resolves for `notarize`)
+
+Each value may also come from the same-named environment variable; **env wins
+over the file**. If no dedicated keychain is configured, the doctor falls back to
+the login keychain and warns loudly that signing **may** prompt.
 
 ## Configuration
 
@@ -125,7 +165,7 @@ it. Two defenses now exist:
 
 The composable primitives underneath:
 - `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
-- `pulp ship notarize --path <dmg|pkg|app>` — notarize + staple one artifact (repeatable).
+- `pulp ship notarize --path <dmg|pkg|zip>` — notarize + staple one artifact (repeatable). Use `share` for a raw `.app`.
 
 **Do not confuse with the production release.** `share`/`release`/`sign`/
 `notarize` are local developer commands. The versioned GitHub Release (all
@@ -173,13 +213,25 @@ artifact" warning instead of a failed notarytool submission. `notarize --path`
 likewise rejects a raw `.app` (notarytool needs a `.dmg`/`.pkg`/`.zip`
 container — use `share` for an app).
 
-### macOS: Build → Sign → Notarize → Package → Appcast
+### AUv3 Xcode handoff: `pulp ship auv3-xcodeproj`
+
+```bash
+pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
+pulp ship auv3-xcodeproj MyPlugin --sdk iphoneos --open
+```
+
+Generates a separate CMake Xcode build directory for an AUv3 target. `--sdk`
+accepts `iphonesimulator`, `iphoneos`, or `macosx`; the default output is
+`build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake invocation
+without requiring Xcode.
+
+### macOS: Build → Sign → Package → Notarize → Appcast
 
 ```bash
 pulp build                                              # Must build first
 pulp ship sign                                          # Uses identity from config
-pulp ship notarize                                      # Reads ASC key from notary.env (preferred)
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
+pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
 ```
 
@@ -193,7 +245,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 
    ```bash
    # One-shot CLI form
-   pulp ship notarize --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                      --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
                       --api-key-id XXX --api-issuer <uuid>
 
    # Persisted form (recommended) — store once, reuse forever:
@@ -201,8 +254,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
    #   PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
    #   PULP_NOTARY_KEY_ID="XXX"
    #   PULP_NOTARY_ISSUER_ID="<issuer-uuid>"
-   pulp ship notarize                  # picks creds up from notary.env
-   pulp ship notarize --dry-run        # prints resolved notarytool argv, no submit
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg --dry-run
    ```
 
    For the full reusable dev-signing stub (schema template + sourceable
@@ -212,7 +265,8 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 2. **Legacy Apple-ID + app-specific password** — kept working as a fallback.
 
    ```bash
-   pulp ship notarize --apple-id you@example.com --team-id ABCDE12345
+   pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
+                      --apple-id you@example.com --team-id ABCDE12345
    # password defaults to @keychain:AC_PASSWORD — store via
    #   security add-generic-password -s AC_PASSWORD -a you@example.com -w
    ```
@@ -433,7 +487,7 @@ still define every public notarization symbol from
 `pulp-test-codesign` links on Windows and the cross-platform API surface
 stays in lockstep with macOS/Linux.
 
-**signtool failure contract (W7, #295 lesson).** `codesign()` on Windows
+**signtool failure contract.** `codesign()` on Windows
 must never report success for an unusable signature: it rejects an empty
 identity/path up front (no `signtool sign /n ""`), and after signing it runs
 `signtool verify /pa` and returns false if verification fails — so a sign that
@@ -682,8 +736,7 @@ Root cause: `core/view/CMakeLists.txt` defaults `PULP_BUILD_WEBVIEW=OFF`,
 so any release SDK build that forgets to opt in will ship a
 `libpulp-view-core` / `pulp-view-core.lib` without the native WebView objects.
 
-Fix (active since pulp #695): keep the release SDK path aligned with the
-GitHub release workflow:
+Keep the release SDK path aligned with the GitHub release workflow:
 1. Configure release SDK builds with `-DPULP_BUILD_WEBVIEW=ON`.
 2. On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` before
    configuring.
@@ -728,7 +781,7 @@ The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
-### Never run `validation` ctest tests in `sign-and-release.yml` (#720)
+### Never run `validation` ctest tests in `sign-and-release.yml`
 
 The `Test` step in `.github/workflows/sign-and-release.yml` MUST pass
 `-LE validation` to ctest. Without that flag, the suite includes
@@ -745,9 +798,8 @@ FATAL ERROR: didn't find the component
 ```
 
 The Test step then exits non-zero and the entire sign / notarize /
-publish pipeline silently fails. This is the failure mode that lost
-~30 consecutive sign-and-release runs across v0.20.x → v0.41.0 (see
-issue #720 for the full backlog).
+publish pipeline silently fails. This failure mode can block many
+consecutive tag-triggered release runs before anyone notices.
 
 The validation gates already run in `.github/workflows/validate.yml`
 on PR with the documented codesigning caveat. Re-running them in the
@@ -759,7 +811,7 @@ test that asserts `-LE validation` stays in the workflow; it is wired
 into `.github/workflows/workflow-lint.yml` so any future PR touching
 `.github/workflows/**` runs it automatically.
 
-### `sign-and-release.yml` must declare `contents: write` (#724)
+### `sign-and-release.yml` must declare `contents: write`
 
 Every release workflow that uses `softprops/action-gh-release@v2` with
 `generate_release_notes: true` — or that otherwise PATCHes the release
@@ -795,7 +847,7 @@ workflow, do the same. The regression test
 `tools/scripts/test_release_workflow_test_step.py` now includes
 `SignAndReleaseContentsWriteTest` to block reintroduction.
 
-### Skia-builder zip layout drift breaks the release matrix (#1962)
+### Skia-builder zip layout drift breaks the release matrix
 
 `release-cli.yml` fetches prebuilt Skia binaries via
 `tools/scripts/fetch_skia_for_release.py` after `setup.sh --deps-only`.
@@ -826,8 +878,7 @@ If the lib path has a NEW level (not arch — e.g. a config subdir like
 `Release/optimized/`), the flatten heuristic needs extending. The flat
 + single-arch-subdir layouts are the only two seen to date.
 
-**Also eyeball exposed symbols.** chrome/m144 broke release-cli's Linux
-leg a second way (#1970): the new Skia static lib re-exposes fontconfig
+**Also eyeball exposed symbols.** Some Skia static lib builds re-expose fontconfig
 symbols (`FcInitLoadConfigAndFonts`, `FcConfigGetSysRoot`,
 `FcPatternGetString` et al.) that the previous release kept private.
 `core/canvas/CMakeLists.txt` already has the
@@ -899,3 +950,13 @@ from the tag's source. Two safe options:
 - NDK version (r26+ required for C++20)
 - Java version (17+ required for AGP 8+)
 - Build-tools availability (apksigner, zipalign)
+
+## Release publishing is coordinated across two workflows (immutable releases)
+
+A full Pulp release = CLI binaries (`release-cli.yml`) + macOS sign/notarize &
+Sparkle appcast (`sign-and-release.yml`), built in parallel on a tag. Because
+GitHub published releases are now immutable, both legs create the release as a
+DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release only
+appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
+leaves the release a draft. See the `ci` skill's coordinator note for the full
+mechanism and debugging steps.

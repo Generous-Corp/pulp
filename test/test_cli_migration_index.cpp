@@ -1,5 +1,4 @@
-// Release-discovery Slice 3 (#548, parent #499) — unit tests for the
-// migration-index runtime.
+// Unit tests for the migration-index runtime.
 //
 // Covers:
 //   - TOML frontmatter parse round-trip via the Python codegen (shell out)
@@ -216,7 +215,7 @@ TEST_CASE("render_notes_json - stable-shape keys present for agent consumers",
     REQUIRE(out.find("\"from\": \"0.23.0\"") != std::string::npos);
     REQUIRE(out.find("\"to\": \"0.29.0\"")   != std::string::npos);
     REQUIRE(out.find("\"entries\":")          != std::string::npos);
-    // Per-entry keys — Slice 4 contract.
+    // Per-entry keys in the JSON contract.
     REQUIRE(out.find("\"version\":")    != std::string::npos);
     REQUIRE(out.find("\"breaking\":")   != std::string::npos);
     REQUIRE(out.find("\"summary\":")    != std::string::npos);

@@ -1990,7 +1990,7 @@ TEST_CASE("Label getters round-trip font_family", "[view][widget][issue-927]") {
     REQUIRE(label.font_family() == "Inter Display");
 }
 
-// ── pulp #1737 sweep — Codex P1 on #1791: clear font_features at end ──────
+// ── pulp #1737 — #1791: clear font_features at end ────────────────────────
 // Label::paint sets font_features on the shared canvas when fontVariant
 // is non-empty (translates CSV → SkShaper Feature tags so HarfBuzz
 // honors the OpenType lookup). Because the canvas keeps font_features
@@ -2307,7 +2307,7 @@ TEST_CASE("Widget set_value programmatic mutation requests repaint [issue-73]",
     }
 }
 
-// Codex P2 on PR #2013 — the no-change guard. WidgetBridge::sync_from_store
+// PR #2013 — the no-change guard. WidgetBridge::sync_from_store
 // and restore_values(...) call set_value() / set_on() in tight loops
 // during sync/reload. Firing a host repaint when the value didn't change
 // burns wall-clock on large widget trees. These tests fence the guard

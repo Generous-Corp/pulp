@@ -6,7 +6,7 @@ pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
 
-# Additive process-block contract for graph/offline/sampler runtime slices.
+# Additive process-block contract for graph/offline/sampler runtime paths.
 pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
 
 # Release-safe no-allocation probes for graph/event/sampler DSP hot paths.
@@ -34,6 +34,32 @@ pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::v
 
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
 pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
+# Sibling drift check for the core-runtime RT-safety contract registry
+# (lock-free primitives, automation queue, graph walk, Processor entry).
+pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
+
+# The canonical GraphRuntimeExecutor gain output must match SignalGraph
+# bit-for-bit (regression baseline for the host-graph-on-executor seam).
+pulp_add_test_suite(pulp-test-graph-executor-parity
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# Off-RT scratch-slot buffer-assignment layout + reuse.
+pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
+# Executor routing path moves audio between nodes (chain/diamond/feedback/
+# multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
+pulp_add_test_suite(pulp-test-graph-executor-routing
+    SOURCES test_graph_executor_routing.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# A SignalGraph translated to the executor produces bit-identical output to its
+# own walk for the eligible node/connection subset.
+pulp_add_test_suite(pulp-test-signal-graph-executor-parity
+    SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+# Differential routing parity: random audio-only DAGs driven through both
+# SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
+# fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
+pulp_add_test_suite(pulp-test-graph-routing-differential-parity
+    SOURCES test_graph_routing_differential_parity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
@@ -122,6 +148,19 @@ endif()
 pulp_add_test_suite(pulp-test-graph-runtime-executor
     LIBRARIES pulp::format)
 
-# ProcessBlock to legacy Processor::process() adapter for migration slices.
+# ProcessBlock to legacy Processor::process() adapter for migration compatibility.
 pulp_add_test_suite(pulp-test-processor-block-adapter
     LIBRARIES pulp::format)
+
+# I2 parity: the same Processor produces identical output standalone (HeadlessHost)
+# and as an in-graph ProcessorNode driven through the routed GraphRuntimeExecutor.
+pulp_add_test_suite(pulp-test-processor-node-adapter
+    SOURCES test_processor_node_adapter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
+# A generated/native DSP core (C-ABI native_core) reaches a graph through the
+# SAME ProcessorNode path as any Processor — no separate generated-DSP runtime.
+# Standalone (HeadlessHost) and in-graph (ProcessorNode) output must be bit-exact.
+pulp_add_test_suite(pulp-test-generated-dsp-graph-parity
+    SOURCES test_generated_dsp_graph_parity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

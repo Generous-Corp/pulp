@@ -219,10 +219,18 @@ if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
     fi
 fi
 
-# ── Generated-table drift check (workstream 08 slice 8.3) ─────────────────────
+# ── Generated-table drift check ───────────────────────────────────────────────
 if [ -x "$ROOT/tools/docs_generate.py" ]; then
     echo "Checking generated-table drift in capabilities.md..."
     if ! python3 "$ROOT/tools/docs_generate.py" check; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# ── Processing-model terminology ─────────────────────────────────────────────
+if [ -f "$ROOT/tools/scripts/processing_model_terms_lint.py" ]; then
+    echo "Checking Processor vs SignalGraph terminology..."
+    if ! python3 "$ROOT/tools/scripts/processing_model_terms_lint.py"; then
         ERRORS=$((ERRORS + 1))
     fi
 fi

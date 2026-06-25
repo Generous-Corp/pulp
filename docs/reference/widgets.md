@@ -62,6 +62,7 @@ interactive version of this set (dark + light), build and run
 
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
+| `SegmentedControl` | Mutually-exclusive section selector | labelled segments, selected/hovered index, click + arrow-key selection, change callback | `ui_components.hpp` |
 | `TabPanel` | Tabbed container | tabs (title+content), active index, hide-bar card-stack mode, change callback | `ui_components.hpp` |
 | `Toolbar` | Tool bar of items | button/toggle/separator/spacer/custom items, orientation, enable/toggle by id | `toolbar.hpp` |
 | `Breadcrumb` | Breadcrumb trail | items, separator, push/pop/pop-to, navigate callback | `breadcrumb.hpp` |
@@ -126,7 +127,7 @@ interactive version of this set (dark + light), build and run
 | `PropertyPanel` | Stack of property sections | sections of property rows | `property_panel.hpp` |
 | `PropertyList` | List of labeled property rows | label + control rows | `property_panel.hpp` |
 | `ColorPicker` | HSL/HSB/hex color picker | color/HSL/hex getters, swatches, mode, alpha, change callback | `color_picker.hpp` |
-| `CodeEditor` | Code editor (Monaco via WebView) | language, line numbers, minimap, wrap, read-only, markers, callbacks | `code_editor.hpp` |
+| `CodeEditor` | Native code editor | text buffer, language mode, line numbers, lightweight token coloring, read-only flag, append/line navigation; marker API is currently a no-op | `code_editor.hpp` |
 | `FileDropZone` | Drag-and-drop file target | accepted extensions, hover/valid state, drop callback | `file_drop_zone.hpp` |
 | `FileBrowser` | In-canvas file browser | directory listing + selection | `file_browser.hpp` |
 | `FileTree` | Hierarchical file tree | directory expansion, file selection | `file_browser.hpp` |

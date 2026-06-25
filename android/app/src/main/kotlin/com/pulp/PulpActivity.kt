@@ -36,7 +36,7 @@ class PulpActivity : ComponentActivity() {
         // soon as the decor view has window insets. Also subscribe to
         // subsequent updates (keyboard show/hide, notch enter/exit on
         // rotation, split-screen insets). Forwards into the C++
-        // Environment API (#342).
+        // Environment API.
         if (PulpApplication.nativeLoaded) {
             nativeOnOrientationChanged(orientationToEnum())
 
@@ -48,8 +48,7 @@ class PulpActivity : ComponentActivity() {
                     // space (already divided by content scale). Android's
                     // WindowInsetsCompat returns physical pixels — divide
                     // by display density so high-DPI devices don't get
-                    // 3x oversized insets. See #438 P2 Codex review on
-                    // #443.
+                    // oversized insets.
                     val density = resources.displayMetrics.density
                     nativeOnSafeAreaChanged(
                         bars.top    / density,
@@ -103,9 +102,8 @@ class PulpActivity : ComponentActivity() {
 
     // Map current display rotation to the Pulp C++ Orientation enum
     // values (declared in environment.hpp). Configuration.ORIENTATION_*
-    // collapses both landscape sides into LANDSCAPE; we use
-    // display.rotation to recover the side. See #438 P2 Codex review
-    // on #443. Enum values:
+    // collapses both landscape sides into LANDSCAPE; use display.rotation
+    // to recover the side. Enum values:
     //   0 portrait, 1 portrait_upside_down,
     //   2 landscape_left, 3 landscape_right,
     //   4 flat, 5 unknown

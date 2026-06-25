@@ -6,9 +6,11 @@ Same architectural pattern as [Ink](https://github.com/vadimdemedes/ink) (termin
 
 ## Status
 
-**v0** — design validated by Codex consult + RepoPrompt review on 2026-04-25 (pulp #772). Source scaffolded; needs build + smoke test + draft PR. See spectr #26 (live tracker) for what's done.
+`@pulp/react` is the in-tree React host for Pulp view trees. It supports the
+core intrinsic widgets, Yoga layout props, bridge-backed visual props, keyboard
+shortcuts, and mock-bridge tests used by the package build lane.
 
-## Install (after first publish)
+## Install
 
 ```bash
 npm install @pulp/react
@@ -25,7 +27,7 @@ function App({ analyzerData }) {
   return (
     <View flexGrow={1} background="#0a0e14">
       <Row gap={10} paddingLeft={20} paddingRight={20} alignItems="center" height={44}>
-        <Label textColor="#ffffff">SPECTR</Label>
+        <Label textColor="#ffffff">ANALYZER</Label>
         <Button>LIVE</Button>
         <Button>PRECISION</Button>
       </Row>
@@ -90,7 +92,7 @@ Text (Label/Button/TextEditor): `text`, `textColor`, `textAlign`.
 - Mutation mode (Ink/R3F pattern), `isPrimaryRenderer: true`
 - `shouldSetTextContent` selectively for `Label` / `Button` / `TextEditor` so `<Label>hello</Label>` lowers to `setText(id, "hello")` instead of a child node
 - Ink-style scheduler: `supportsMicrotasks: true` + `queueMicrotask`
-- Concurrent mode: deferred for v0 (synchronous rendering only)
+- Synchronous rendering only; concurrent mode is not enabled
 - Single commit-time layout flush owned by `resetAfterCommit` (calls `layout()` once per React commit)
 
 ## Testing
@@ -110,9 +112,6 @@ bridge.uninstall();
 
 ## References
 
-- [pulp #772](https://github.com/danielraffel/pulp/issues/772) — design + validation
-- [spectr #25](https://github.com/danielraffel/spectr/issues/25) — Spectr master roadmap (first consumer)
-- [spectr #26](https://github.com/danielraffel/spectr/issues/26) — live progress tracker
 - Reference implementations: `ink/src/reconciler.ts`, `react-three-fiber/packages/fiber/src/core/reconciler.tsx`, `react-native-skia/packages/skia/src/sksg/HostConfig.ts`
 
 ## License

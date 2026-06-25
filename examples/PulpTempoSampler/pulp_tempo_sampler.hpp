@@ -56,6 +56,8 @@
 
 namespace pulp::examples {
 
+inline constexpr const char* kPulpTempoSamplerVersion = "1.0.2";
+
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
 // extra cross-example include path.
@@ -498,7 +500,7 @@ public:
             .name = "PulpTempoSampler",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.tempo-sampler",
-            .version = "1.0.2",
+            .version = kPulpTempoSamplerVersion,
             .category = format::PluginCategory::Instrument,
             .input_buses = {},
             .output_buses = {{"Audio Out", 2}},
@@ -889,7 +891,7 @@ public:
 
     /// Build the plugin editor: a graphite panel with a signal-teal waveform
     /// view of the loaded loop, slice regions shaded per onset. This is the
-    /// Phase-5 waveform-editor pilot for the Ink & Signal design language.
+    /// waveform-editor pilot for the Ink & Signal design language.
     std::unique_ptr<view::View> create_view() override {
         using namespace pulp::view;
         using canvas::Color;

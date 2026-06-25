@@ -188,7 +188,6 @@ void copy_midi(const midi::MidiBuffer& in, midi::MidiBuffer& out) {
     // them. Without this the bypass MIDI-thru path silently drops
     // every F0..F7 run while short MIDI passes through, which breaks
     // bulk dumps and MIDI-CI workflows in bypass mode specifically.
-    // See #438 P2 Codex review on #408.
     for (const auto& sx : in.sysex()) {
         out.add_sysex_copy(sx.data.data(),
                            sx.data.size(),
@@ -228,7 +227,7 @@ void decode_midi_node(AAX_IMIDINode* node, midi::MidiBuffer* midi_in) {
         // F0 status in the first packet and F7 terminator in the last.
         // AAX docs allow continuation packets without a status byte;
         // the accumulator treats every byte while `sysex_in_progress`
-        // as payload until F7 is seen. #239 AAX parity.
+        // as payload until F7 is seen.
         std::vector<uint8_t> sysex_buffer;
         bool sysex_in_progress = false;
         int32_t sysex_start_offset = 0;
@@ -310,7 +309,7 @@ void encode_midi_node(AAX_IMIDINode* node, const midi::MidiBuffer& midi_out) {
     // Sysex outbound — chunk each SysexEvent into 4-byte AAX packets.
     // AAX_CMidiPacket::mData is exactly 4 bytes; the full F0..F7 byte
     // stream is delivered as ceil(N / 4) consecutive packets sharing
-    // the same timestamp. #239 AAX parity.
+    // the same timestamp.
     for (const auto& sx : midi_out.sysex()) {
         if (sx.data.empty()) continue;
         const uint32_t ts = static_cast<uint32_t>(

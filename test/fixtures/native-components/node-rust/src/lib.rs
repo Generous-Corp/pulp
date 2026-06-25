@@ -1,6 +1,6 @@
 //! A Rust custom node implementing the public `pulp_node_v1` C ABI, used to
-//! prove a C node and a Rust node load through the SAME contract (Phase 6).
-//! TEST FIXTURE ONLY. Hand-mirrors the `#[repr(C)]` structs from
+//! prove a C node and a Rust node load through the SAME contract. TEST FIXTURE
+//! ONLY. Hand-mirrors the `#[repr(C)]` structs from
 //! core/native-components/include/pulp/native_components/pulp_node_v1.h.
 
 #![allow(non_camel_case_types)]

@@ -135,10 +135,15 @@ ignore:
   - "**/window_host_ios.mm"
   - "**/au_view_controller_mac.mm"
   - "**/plugin_view_host_mac.mm"
+  - "**/plugin_view_host_win.cpp"
+  - "**/plugin_view_host_linux.cpp"
+  - "**/drag_drop_mac.mm"
   - "**/sdl_window_host.cpp"
   - "**/scanner_clap.cpp"
   - "**/au_v2_adapter.cpp"
+  - "**/au_v2_instrument.cpp"
   - "**/cmd_projects.cpp"
+  - "**/cmd_ci_host.cpp"
   - "**/canvas.hpp"
   - "**/skia_canvas.cpp"
   - "**/gpu_surface_dawn.cpp"
@@ -192,6 +197,10 @@ flags:
     paths:
       - core/format/
     carryforward: true
+  graph:
+    paths:
+      - core/graph/
+    carryforward: true
   host:
     paths:
       - core/host/
@@ -219,6 +228,10 @@ flags:
   runtime:
     paths:
       - core/runtime/
+    carryforward: true
+  scene:
+    paths:
+      - core/scene/
     carryforward: true
   signal:
     paths:
@@ -331,7 +344,7 @@ component_management:
     # Core subsystems - mirror every top-level core/** directory.
     #
     # Subsystems that house platform-specific subtrees (`audio`, `midi`,
-    # `view`, `render`, `platform`, `canvas`) explicitly exclude those
+    # `view`, `render`, `platform`, `canvas`, `events`) explicitly exclude those
     # subtrees so each first-party file lands in exactly one component
     # bucket - see #1055. Platform-specific code is owned by the
     # `apple`/`android`/`linux`/`windows` components below; without the
@@ -352,10 +365,15 @@ component_management:
       paths: ["core/dsl/**"]
     - component_id: events
       name: events
-      paths: ["core/events/**"]
+      paths:
+        - "core/events/**"
+        - "!core/events/platform/**"
     - component_id: format
       name: format
       paths: ["core/format/**"]
+    - component_id: graph
+      name: graph
+      paths: ["core/graph/**"]
     - component_id: host
       name: host
       paths: ["core/host/**"]
@@ -392,6 +410,9 @@ component_management:
     - component_id: runtime
       name: runtime
       paths: ["core/runtime/**"]
+    - component_id: scene
+      name: scene
+      paths: ["core/scene/**"]
     - component_id: signal
       name: signal
       paths: ["core/signal/**"]

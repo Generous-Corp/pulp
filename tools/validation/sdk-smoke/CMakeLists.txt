@@ -7,8 +7,8 @@ cmake_minimum_required(VERSION 3.24)
 # format the installed SDK advertises and builds a single probe plugin
 # (PulpSDKSmokeProbe) against them.
 #
-# Two opt-in tightenings for the Linux/macOS Chainer gap-closure plan
-# (planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md, Phase 3):
+# Two opt-in tightenings keep production SDK packaging checks from
+# silently passing when a consumer-required format is missing:
 #
 #   PULP_SDK_SMOKE_REQUIRE_FORMATS — semicolon-separated list of formats
 #       that MUST be present in the installed SDK. Configure-time

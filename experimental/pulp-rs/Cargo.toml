@@ -22,12 +22,9 @@ name = "pulp_rs"
 path = "src/lib.rs"
 
 [[bin]]
-# Phase 8 binary swap: this name was `pulp-rs` while the C++ binary
-# owned `pulp`. The default flip (PR #2 of #767) renames the Cargo
-# bin to `pulp` and renames the C++ output to `pulp-cpp` in the same
-# diff. Rollback for users: `PULP_USE_CPP=1 pulp …` execs into
-# `pulp-cpp` with full argv unchanged (handled at the top of
-# `src/main.rs`).
+# The Rust binary owns the user-facing `pulp` name; the C++ delegate ships as
+# `pulp-cpp`. Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into
+# `pulp-cpp` with full argv unchanged (handled at the top of `src/main.rs`).
 name = "pulp"
 path = "src/main.rs"
 

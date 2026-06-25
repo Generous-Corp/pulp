@@ -43,7 +43,7 @@ runs:
           # RETRY_SCRIPT. Without this, a transient early-command failure
           # (e.g. apt-get update or wget) gets masked if a later command
           # in the same multi-line script exits 0, and the action doesn't
-          # actually retry. See #438 P1 Codex review on #432.
+          # actually retry.
           bash -euo pipefail -c "${RETRY_SCRIPT}"
           status=$?
           echo "::endgroup::"

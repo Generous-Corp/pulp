@@ -1,12 +1,11 @@
-// pulp Wave 4 rn extensive DIVERGE sweep — verifies the wiring landed
-// for the harness rn surface drift bundle (16 DIVERGE → 0 DIVERGE):
+// The React prop applier forwards these React Native-compatible shadow
+// forms to the bridge:
 //
 //   • RN Fabric `BoxShadowValue[]` array form on `boxShadow`
 //   • textShadow* per-attribute setters now register on the bridge
 //
-// Other entries in the sweep flipped via catalog reclassification only
-// (gotcha-ifying paint-side gaps that were over-reported as
-// `unsupportedValues`); those don't need new prop-applier behavior tests.
+// Paint-only compatibility notes are handled in the catalog; this file
+// stays focused on prop-applier behavior with bridge-visible effects.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -38,7 +37,7 @@ function callsOf(b: MockBridge, fn: string) {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('Wave 4 rn — boxShadow BoxShadowValue[] array form', () => {
+describe('React prop forwarding for BoxShadowValue[] arrays', () => {
     it('dispatches one setBoxShadow per element + clearBoxShadow first', () => {
         applyChangedProps(makeInstance(), {}, {
             boxShadow: [
@@ -105,7 +104,7 @@ describe('Wave 4 rn — boxShadow BoxShadowValue[] array form', () => {
     });
 });
 
-describe('Wave 4 rn — textShadow* per-attribute dispatch (#1548)', () => {
+describe('React prop forwarding for textShadow attributes', () => {
     it('dispatches setTextShadowColor with the color string', () => {
         applyChangedProps(makeInstance(), {}, { textShadowColor: '#ff00aa' } as any);
         const calls = callsOf(bridge, 'setTextShadowColor');

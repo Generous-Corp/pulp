@@ -1,7 +1,6 @@
 """Tests for the rn (React Native ViewStyle) catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the rn adapter (#1392, week 1 cut, third of 5 surfaces).
+Exercises the RN adapter against focused fixtures before the full catalog run.
 
 Run via::
 

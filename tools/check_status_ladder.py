@@ -2,7 +2,7 @@
 """
 Enforce the Pulp status ladder on docs/status/support-matrix.yaml.
 
-Ladder rule (production-readiness workstream 08 sub-deliverable 8.4):
+Ladder rule for production readiness:
 A capability may be labeled `usable` only if it has ONE OF:
   (a) cross-platform validation — evidenced by either being nested under a
       platform-scoped parent (e.g. `platform_maturity.accessibility.macos`)

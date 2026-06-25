@@ -91,9 +91,14 @@ pulp build --target PulpGain_VST3  # Build specific target
 pulp build -j8                # Parallel jobs
 pulp build --watch            # Build and watch for changes
 pulp build --watch --test     # Build, watch, run tests on change
+pulp build --watch --test-filter=Gain # Watch and run matching tests on change
+pulp build --watch --validate # Build, watch, run quick validation on change
+pulp build --install          # macOS: validate, then install built plugin bundles
+pulp build --install --skip-validation # macOS debug escape hatch; bypasses validation
 pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupported)
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
+pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
 ```
 
 Extra arguments are passed through to `cmake --build`.
@@ -101,6 +106,8 @@ Extra arguments are passed through to `cmake --build`.
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
 The `--watch` flag enters a file-watching loop after the initial build. It polls source files every 500ms and rebuilds on changes. Combine with `--test` to run tests after each successful rebuild and `--validate` to run quick dlopen checks.
+
+On macOS, `--install` runs the strict validator gate before copying AU, VST3, and CLAP bundles into the user's plug-in folders. `--skip-validation` is only accepted together with `--install` and is intended for adapter debugging; `--install` cannot be combined with `--watch`.
 
 For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 Before configure/build, `pulp build` also compares the active project's pinned `sdk_version` / `cli_min_version` against the running CLI. If the project is ahead, it fails fast and points at `pulp upgrade`; use `--allow-unsupported-sdk` only as an explicit unsupported escape hatch.
@@ -158,6 +165,8 @@ pulp validate --all        # Also run vstvalidator and full AAX validation if in
 pulp validate --json       # Print JSON report to stdout
 pulp validate --report out.json  # Write JSON report to file
 pulp validate --strict     # CI gate: skipped-because-missing-tool ⇒ exit 1
+pulp validate --screenshot # Capture plugin editor PNGs under artifacts/screenshots/
+pulp validate --target standalone ./build/MyApp.app  # Validate an explicit macOS app bundle
 ```
 
 **Validator-discovery preflight.** Before launching any validator,
@@ -190,6 +199,9 @@ Flags:
 - `--all` — run every available validator, including `vstvalidator` and full AAX validation
 - `--json` — emit a machine-readable JSON report to stdout (conforms to `validation-report-v1.schema.json`)
 - `--report <path>` — write the JSON report to a file
+- `--strict` — treat skipped-because-missing-tool as a hard failure
+- `--screenshot` — capture plugin editor PNGs under `artifacts/screenshots/`
+- `--target <standalone|auv3|macho|all> <bundle...>` — run macOS runtime validators on explicit bundle paths instead of walking `build/{CLAP,VST3,AU,AAX}`
 
 When a validator tool is not installed, the check is reported as SKIPPED with a clear message.
 The JSON report conforms to `docs/contracts/validation-report-v1.schema.json`.
@@ -333,6 +345,7 @@ pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
 pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
 pulp doctor quirks                   # synonym for --host-quirks
+pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
 ```
 
 `pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
@@ -355,6 +368,13 @@ Per-quirk provenance — `source_type`, `evidence`, and `last_verified`
 dates — lives in `core/format/host-quirks.json`. See
 [host-quirks policy](host-quirks-policy.md) for the full opt-in / opt-out
 story and the precedence rules.
+
+`pulp doctor --au-cache` refreshes macOS Audio Unit registration metadata by
+stopping `AudioComponentRegistrar` so macOS respawns it on the next AU host scan.
+Use it after changing AU `Info.plist` metadata such as type, manufacturer, or
+description when `auval` or a DAW still sees stale values. `--dry-run` prints
+the command instead of running it. On non-macOS hosts the flag is accepted as a
+no-op and exits 0 so cross-platform scripts do not need OS conditionals.
 
 Checks are platform-gated — only relevant checks run on each OS:
 - **macOS**: git, compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, optional AAX SDK/validator, build state
@@ -512,12 +532,12 @@ The `status` field uses the lowercased label set above
 
 **Status**: usable
 
-Manage the `~/.pulp/projects.json` registry. `pulp create` and
-`pulp new` register new projects automatically on successful
-scaffold; these commands exist so users can add projects created
-outside of `pulp create` (clones, manual checkouts) and prune stale
-entries. Registry entries are read by `pulp doctor --versions` to
-produce per-project skew reports.
+Manage the `~/.pulp/projects.json` registry. `pulp create` registers
+new projects automatically on successful scaffold; these commands
+exist so users can add projects created outside of `pulp create`
+(clones, manual checkouts) and remove stale entries. Registry entries
+are read by `pulp doctor --versions` to produce per-project skew
+reports.
 
 ```bash
 pulp projects list                       # show registered projects
@@ -817,10 +837,13 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
-pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
+pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
+pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
 pulp ship notarize --dry-run                       # print resolved argv, no submit
+pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
+pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
 **Subcommands**:
@@ -828,17 +851,23 @@ pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+ver
 | Subcommand | What it does |
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
-| `notarize` | Submit signed bundles (or `--path` artifacts) to Apple notarytool (macOS) |
+| `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
 | `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
-| `check`    | Check signing status of all built plugins |
+| `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
+| `check`    | Check signing status of built desktop plugins or Android APK/AAB artifacts |
+| `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
+
+`doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
 `--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
 `.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
 
 `package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary.
+
+For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
@@ -862,6 +891,11 @@ and are only notarized + verified.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
+
+`auv3-xcodeproj` generates a separate CMake Xcode build directory for an AUv3
+target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; default
+output is `build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake
+invocation without requiring Xcode.
 
 #### `pulp ship notarize`
 
@@ -972,7 +1006,7 @@ Notes:
 
 **Status**: usable
 
-Browse local documentation and status manifests. All subcommands read from local files in `docs/` only -- no web calls.
+Browse local documentation and status manifests. Reader subcommands read from local files in `docs/` only -- no web calls. Build subcommands invoke the local docs tooling.
 
 ```bash
 pulp docs                         # Show help
@@ -984,6 +1018,8 @@ pulp docs show command <name>     # Look up a CLI command
 pulp docs show cmake <name>       # Look up a CMake function
 pulp docs show style              # Show code style rules
 pulp docs check                   # Validate docs consistency
+pulp docs build-site              # Generate the static docs site
+pulp docs build-api               # Generate API reference docs
 ```
 
 **Subcommands**:
@@ -998,6 +1034,8 @@ pulp docs check                   # Validate docs consistency
 | `show cmake <name>` | Look up a CMake function from `cmake-functions.yaml` |
 | `show style` | Display style rules from `style-rules.yaml` with links to policy docs |
 | `check` | Validate docs consistency: manifest links, index completeness, status vocabulary, module dependencies vs CMake |
+| `build-site` | Generate the static docs site through MkDocs |
+| `build-api` | Generate API reference docs through Doxygen |
 
 ### design
 
@@ -1110,7 +1148,7 @@ directory.
 pulp inspect
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
-pulp inspect --command Capture.screenshot --output shot.json
+pulp inspect --command State.getParameters
 ```
 
 Options:
@@ -1120,6 +1158,11 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+
+`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode` are
+reserved inspector protocol methods, but currently return explicit unavailable
+errors until script-engine and host-capture references are wired into the
+inspector domain.
 
 ### tweaks
 
@@ -1177,12 +1220,13 @@ file error.
 
 **Status**: experimental
 
-Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX, or
-Google DESIGN.md source files into generated Pulp UI code.
+Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
+React JSX, or Google DESIGN.md source files into generated Pulp UI code.
 
 ```bash
 pulp import-design --from figma --file frame.json
 pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'
+pulp import-design --from figma-plugin --file design.pulp.zip
 pulp import-design --from stitch --file screen.html --screen 'Main'
 pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
@@ -1193,7 +1237,7 @@ pulp import-design --from jsx --file bundle.js --mode live --emit js --output li
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `figma`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection), and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1203,7 +1247,7 @@ For `--from designmd`, the CLI emits **only** a `tokens.json` (W3C
 DTCG) — no `ui.js`, because DESIGN.md describes a design system, not
 a screen. See [Import: DESIGN.md](imports/designmd.md) for the full
 contract (supported subset, reference resolution, detection rules,
-exit codes, diagnostics, and the staged rollout split).
+exit codes, diagnostics, and current limitations).
 
 | Flag | Description |
 |------|-------------|
@@ -1269,14 +1313,14 @@ pulp export-tokens --dry-run
 
 **Status**: experimental
 
-Repo-level audio analysis tooling. Manages offline audio models (text-to-audio / text-to-excerpt retrieval) and reads reproducible excerpt bundles. This is developer tooling for building datasets and evaluation corpora — not a runtime API.
+Repo-level audio analysis tooling. Manages offline audio model metadata, reads reproducible excerpt bundles, and runs live/offline Audio Scope analysis. The current `excerpt-find` path is a WAV-first deterministic/null-backend ranking scaffold for dataset and evaluation workflows; it does not run semantic text/audio embedding inference yet. This is developer tooling for building datasets and evaluation corpora — not a runtime API.
 
 ```bash
 pulp audio                                      # Show help
 pulp audio model list [--json]                  # List registered models
 pulp audio model status [--json]                # Show configured + resolved model
-pulp audio model activate <model-id> [--json]   # Pick the active model
-pulp audio excerpt-find --text "warm analog pad" --input /path/to/corpus [options]
+pulp audio model activate <model-id> [--json]   # Activate an installed model
+pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
@@ -1292,8 +1336,8 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 |------------|-------------|
 | `model list` | List all registered audio models with backend and tags |
 | `model status` | Show the configured model, resolved checkpoint, and whether it is loadable |
-| `model activate <id>` | Select the active model and persist the state file |
-| `excerpt-find` | Score audio files (or a directory) against a text query and emit an excerpt bundle |
+| `model activate <id>` | Activate an installed audio model and persist the state file |
+| `excerpt-find` | Rank WAV windows deterministically from a text query, then emit an excerpt bundle with backend metadata |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
@@ -1301,9 +1345,9 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
 
-Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
+Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
-The `validate` subcommands are the offline harness CLI over captured audio (Phase 7). They analyze WAVs and stored artifact bundles with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
+The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use
@@ -1515,6 +1559,8 @@ Manage the third-party developer tools Pulp can optionally use (formatters, vali
 ```bash
 pulp tool                           # Show help
 pulp tool list                      # Show every registered tool and its install state
+pulp tool info video-proof          # Show one tool's install/package metadata
+pulp tool info video-proof --json   # Emit the same metadata as JSON
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install --all             # Install every tool available on the current platform
 pulp tool install <id> --force      # Reinstall even if already present
@@ -1613,6 +1659,25 @@ Supported Claude Code plugin keys:
   injection. Read at session start by
   `hooks/scripts/inject-claude-prefs.sh`.
 
+### coverage
+
+**Status**: experimental
+
+Run local coverage tooling that mirrors CI's `Diff coverage required` gate.
+
+```bash
+pulp coverage                  # show coverage tooling help
+pulp coverage diff             # run the full local diff-coverage check
+pulp coverage diff TARGET ...  # build specific test targets before checking
+```
+
+`pulp coverage diff` shells out to `tools/scripts/local_diff_cover.sh`.
+Thresholds and file filters live in `tools/scripts/coverage_config.json`, the
+same source consumed by the GitHub Actions coverage workflow.
+
+Set `PULP_SKIP_DIFF_COVER=1` for docs-only or workflow-only changes where the
+diff-coverage build is intentionally out of scope.
+
 ### clean
 
 **Status**: usable
@@ -1654,7 +1719,7 @@ pulp help
 
 **Status**: usable
 
-Show, bump, or check version consistency across all surfaces (CMakeLists.txt, SDK constant, CHANGELOG, AU Info.plist).
+Show, bump, or check version consistency across the framework, plugin, changelog, and generated metadata surfaces.
 
 ```bash
 pulp version                  # Show current SDK and project versions
@@ -1662,6 +1727,7 @@ pulp version bump patch       # Increment patch version
 pulp version bump minor       # Increment minor version
 pulp version bump major --plugin  # Bump plugin version (pulp_add_plugin VERSION)
 pulp version check            # Verify version consistency
+pulp version check --with-bump-check  # Also run the PR version-bump gate report
 ```
 
 The `bump` subcommand updates `CMakeLists.txt project(VERSION)` and adds a CHANGELOG.md entry. The SDK version constant is derived from CMake via `configure_file`, so a rebuild picks up the change automatically. Use `--plugin` to bump the `pulp_add_plugin(... VERSION ...)` line instead.
@@ -1670,6 +1736,10 @@ The `check` subcommand verifies:
 - SDK version constant matches CMakeLists.txt
 - AU Info.plist template uses a computed version integer (not hardcoded)
 - CHANGELOG latest heading matches CMakeLists.txt
+- Claude plugin manifest version is valid semver
+- Claude marketplace top-level version matches the plugin manifest
+- Claude marketplace `plugins[0].version` matches the plugin manifest
+- `--with-bump-check` also runs `tools/scripts/version_bump_check.py --mode=report`
 
 ### kit
 
@@ -1827,12 +1897,13 @@ Add a curated third-party dependency from the Pulp package registry.
 
 ```bash
 pulp add signalsmith-stretch                       # add a package
-pulp add rtneural --license-override commercial    # accept a non-standard license
+pulp add lame --accept-license LGPL-2.0            # accept a restricted copyleft license after review
+pulp add rubber-band --license-override commercial # use a separate commercial license
 pulp add some-lib --platform-guard                 # add with platform guard
 pulp add dr-libs --no-cmake                        # metadata only, skip CMake wiring
 ```
 
-Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`.
+Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`. Restricted licenses require `--accept-license <SPDX>` after review. `--license-override commercial` is a project-owned assertion that separate commercial terms cover a package the registry policy would otherwise block.
 
 ### remove
 
@@ -1867,7 +1938,12 @@ Search the package registry.
 pulp search "pitch detection"
 pulp search dsp
 pulp search fft --format json
+pulp search fft --refresh
 ```
+
+Use `--refresh` with a query to bypass the remote-registry cache while
+searching. `--format json` emits machine-readable output; omit `--format` for
+the default text output.
 
 ### update
 
@@ -1890,7 +1966,13 @@ Context-aware package recommendations.
 pulp suggest --description "pitch shifting"
 pulp suggest --analyze src/my_processor.cpp
 pulp suggest --alternative pffft
+pulp suggest --description "onset detection" --include-license-gated
 ```
+
+Suggestions omit packages that require license review or a commercial override
+by default. Pass `--include-license-gated` when you explicitly want those
+candidates included. `--format json` emits machine-readable output; omit
+`--format` for the default text output.
 
 ### target
 
@@ -1931,5 +2013,7 @@ Color output is auto-detected based on TTY. Non-TTY environments (pipes, CI) get
 - Standalone projects are detected by walking up from the current directory looking for `pulp.toml` without `core/`.
 - If both a standalone project and a parent Pulp repo are present, the standalone project wins.
 - Pulp repo mode is detected by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
-- The `ship` subcommands are macOS-specific (they use `codesign` and `pkgbuild`).
+- Most `ship` subcommands are platform-specific: macOS signing/notarization uses
+  `codesign`, `pkgbuild`, and `notarytool`; Windows signing uses `signtool`;
+  Android packaging/signing uses Gradle and Android SDK build tools.
 - `pulp upgrade` requires internet access and `curl` (macOS/Linux) or PowerShell (Windows).

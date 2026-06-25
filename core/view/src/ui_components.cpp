@@ -674,9 +674,21 @@ void TabPanel::paint(canvas::Canvas& canvas) {
     if (!show_tab_bar_) return;  // card-stack mode: no tab bar, content fills the panel
     auto b = local_bounds();
 
-    // Tab bar background
-    canvas.set_fill_color(resolve_color("bg.secondary", canvas::Color::hex(0x16213e)));
-    canvas.fill_rect(b.x, b.y, b.width, tab_height_);
+    const bool underline = (tab_bar_style_ == TabBarStyle::underline);
+
+    // Tab bar background. The `filled` style paints a `bg.secondary` strip
+    // behind the row (historic look). The `underline` style omits the strip —
+    // titles sit directly on the panel — and instead draws a faint full-width
+    // divider rule under the whole row (Ink & Signal navigation treatment).
+    if (!underline) {
+        canvas.set_fill_color(resolve_color("bg.secondary", canvas::Color::hex(0x16213e)));
+        canvas.fill_rect(b.x, b.y, b.width, tab_height_);
+    } else {
+        canvas.set_stroke_color(resolve_color("divider", canvas::Color::hex(0x2a3550)));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_line(b.x, b.y + tab_height_ - 0.5f,
+                           b.x + b.width, b.y + tab_height_ - 0.5f);
+    }
 
     // Draw tabs — active tab is marked by a teal underline only (matching the
     // Ink & Signal design language; no filled active block).
@@ -710,6 +722,96 @@ void TabPanel::on_mouse_event(const MouseEvent& event) {
     set_active_tab(index);
 }
 
+// ── SegmentedControl ───────────────────────────────────────────────────────
+
+void SegmentedControl::set_selected(int index) {
+    if (segments_.empty()) return;
+    index = std::clamp(index, 0, static_cast<int>(segments_.size()) - 1);
+    if (index == selected_) return;
+    selected_ = index;
+    request_repaint();
+    if (on_change) on_change(selected_);
+}
+
+void SegmentedControl::set_selected_silent(int index) {
+    if (segments_.empty()) return;
+    selected_ = std::clamp(index, 0, static_cast<int>(segments_.size()) - 1);
+    request_repaint();
+}
+
+int SegmentedControl::segment_at_(Point pos) const {
+    auto b = local_bounds();
+    if (segments_.empty() || b.width <= 0) return -1;
+    if (pos.x < b.x || pos.x >= b.x + b.width) return -1;
+    if (pos.y < b.y || pos.y >= b.y + b.height) return -1;
+    float seg_w = b.width / static_cast<float>(segments_.size());
+    int i = static_cast<int>((pos.x - b.x) / seg_w);
+    return std::clamp(i, 0, static_cast<int>(segments_.size()) - 1);
+}
+
+void SegmentedControl::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    if (segments_.empty()) return;
+
+    const float radius = 6.0f;
+
+    // Inset track — the darker recessed groove the pills sit in.
+    canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::hex(0x12161f)));
+    canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
+
+    const float seg_w = b.width / static_cast<float>(segments_.size());
+    const auto active_text   = resolve_color("text.primary",  canvas::Color::hex(0xe0e0e0));
+    const auto inactive_text = resolve_color("tab.inactive",  canvas::Color::hex(0x808090));
+
+    for (int i = 0; i < static_cast<int>(segments_.size()); ++i) {
+        const float sx = b.x + static_cast<float>(i) * seg_w;
+
+        if (i == selected_) {
+            // Raised "elevated" pill — lighter fill than the track with a hair
+            // border, so the active segment reads as lifted (Figma 227:1763).
+            const float pad = 2.0f;
+            canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::hex(0x232a36)));
+            canvas.fill_rounded_rect(sx + pad, b.y + pad,
+                                     seg_w - 2 * pad, b.height - 2 * pad, radius - 1.0f);
+            canvas.set_stroke_color(resolve_color("divider", canvas::Color::hex(0x2a3550)));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(sx + pad, b.y + pad,
+                                       seg_w - 2 * pad, b.height - 2 * pad, radius - 1.0f);
+        }
+
+        canvas.set_font("system", 12);
+        canvas.set_text_align(canvas::TextAlign::center);
+        canvas.set_fill_color(i == selected_ ? active_text : inactive_text);
+        canvas.fill_text(segments_[static_cast<size_t>(i)],
+                         sx + seg_w / 2.0f, b.y + b.height / 2.0f + 4.0f);
+    }
+}
+
+void SegmentedControl::on_mouse_event(const MouseEvent& event) {
+    if (event.is_down) {
+        int i = segment_at_(event.position);
+        if (i >= 0) set_selected(i);
+        return;
+    }
+    // Hover tracking (repaint only on change to avoid churn).
+    int h = segment_at_(event.position);
+    if (h != hover_) { hover_ = h; request_repaint(); }
+}
+
+bool SegmentedControl::on_key_event(const KeyEvent& event) {
+    if (!event.is_down) return false;
+    if (event.key == KeyCode::left && selected_ > 0) {
+        set_selected(selected_ - 1);
+        return true;
+    }
+    if (event.key == KeyCode::right &&
+        selected_ < static_cast<int>(segments_.size()) - 1) {
+        set_selected(selected_ + 1);
+        return true;
+    }
+    return false;
+}
+
 // ── ScrollView ───────────────────────────────────────────────────────────
 
 void ScrollView::clamp_scroll_targets() {
@@ -736,7 +838,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     target_scroll_y_ += dy;
     clamp_scroll_targets();
 
-    // pulp #1737 RN-OOS-fixup — honor CSS `scroll-behavior`. CSS
+    // pulp #1737 — honor CSS `scroll-behavior`. CSS
     // default is `auto` (instant); Pulp's historic default has been
     // smooth, so we treat empty / `smooth` / anything-else as smooth
     // (preserves the existing scroll feel for callers that don't set
@@ -744,7 +846,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     // explicitly sets `scroll-behavior: auto`.
     const std::string& sb = scroll_behavior();
     if (sb == "auto" || !animate) {
-        // WYSIWYG P6 FIX 4 — wheel/trackpad scroll passes animate=false so
+        // Wheel/trackpad scroll passes animate=false so
         // the offset jumps instantly. A trackpad sends a continuous delta
         // stream; the OS already smooths/inerts it, so animating each delta
         // lags behind the fingers. Programmatic scroll (animate defaults to
@@ -878,7 +980,7 @@ View* ScrollView::hit_test(Point local_point) {
     if (!visible() || !enabled() || !hit_testable()) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
-    // React Native pointerEvents parity (pulp #1170 Codex P1 on #1044/#1026):
+    // React Native pointerEvents parity (pulp #1170):
     // ScrollView shadows the base View::hit_test, so without this honor the
     // setPointerEvents(box-only/box-none/none) path silently no-ops on
     // scrollables. Mirror View::hit_test's policy here.
@@ -1087,17 +1189,43 @@ void ListBox::paint(canvas::Canvas& canvas) {
     int visible_start = static_cast<int>(scroll_offset_ / row_height_);
     int visible_count = static_cast<int>(b.height / row_height_) + 2;
 
+    const bool accent = (selection_style_ == SelectionStyle::accent);
+
     for (int i = visible_start; i < std::min(visible_start + visible_count, static_cast<int>(items_.size())); ++i) {
         float y = b.y + static_cast<float>(i) * row_height_ - scroll_offset_;
+        const bool is_sel = (i == selected_);
 
-        if (i == selected_) {
-            canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::hex(0x0f3460)));
-            canvas.fill_rect(b.x, y, b.width, row_height_);
+        // Selected-row fill. `accent` uses a translucent accent tint plus a
+        // teal left-edge bar (Ink & Signal sidebar nav); `standard` keeps the
+        // historic opaque elevated fill.
+        if (is_sel) {
+            if (accent) {
+                canvas.set_fill_color(resolve_color("nav.selected.bg", canvas::Color::rgba8(20, 184, 166, 38)));
+                canvas.fill_rect(b.x, y, b.width, row_height_);
+                canvas.set_fill_color(resolve_color("nav.selected.text", canvas::Color::hex(0x14b8a6)));
+                canvas.fill_rect(b.x, y, 3.0f, row_height_);
+            } else {
+                canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::hex(0x0f3460)));
+                canvas.fill_rect(b.x, y, b.width, row_height_);
+            }
+        }
+
+        float text_x = b.x + 8;
+
+        // Optional leading icon glyph, when set for this row.
+        if (i < static_cast<int>(icons_.size()) && !icons_[static_cast<size_t>(i)].empty()) {
+            canvas.set_font("system", 13);
+            canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::hex(0x808090)));
+            canvas.fill_text(icons_[static_cast<size_t>(i)], text_x, y + row_height_ * 0.65f);
+            text_x += 22.0f;
         }
 
         canvas.set_font("system", 13);
-        canvas.set_fill_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-        canvas.fill_text(items_[static_cast<size_t>(i)], b.x + 8, y + row_height_ * 0.65f);
+        canvas.set_fill_color(
+            (is_sel && accent)
+                ? resolve_color("nav.selected.text", canvas::Color::hex(0x14b8a6))
+                : resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
+        canvas.fill_text(items_[static_cast<size_t>(i)], text_x, y + row_height_ * 0.65f);
     }
 
     canvas.restore();

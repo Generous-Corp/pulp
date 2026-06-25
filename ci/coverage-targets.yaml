@@ -23,11 +23,11 @@
 # Consumed by `tools/scripts/coverage_tier_check.py`, invoked from the
 # `coverage-diff-gate` job alongside the existing diff-cover invocation.
 #
-# Coverage scope (#1056, #1886):
+# Coverage scope:
 #   This file gates two Cobertura lanes that share one per-tier YAML:
 #     1. The Clang-instrumented native diff lane (C / C++ / Obj-C).
 #     2. The vitest v8 JS/TS lane in `packages/pulp-react/**`
-#        (pulp #1886 Phase 1 — measure-only at first).
+#        (currently measured before enforcement).
 #   `coverage_tier_check.py::is_instrumented_source` filters non-Cobertura
 #   files at aggregate time, so Kotlin (`.kt`) and Swift (`.swift`)
 #   sources never bias a tier score even if their paths match a glob.
@@ -39,7 +39,7 @@
 #
 #   Tier completeness is locked in structurally by
 #   `tools/scripts/test_coverage_tier_check.py::TierCoverageCompleteness`
-#   per the audit pattern in #1049 / #841 / #1056.
+#   so new first-party source paths must be assigned deliberately.
 
 version: 1
 
@@ -65,19 +65,19 @@ tiers:
       - core/scene/**
       - inspect/**
       - tools/cli/**
-      # pulp #1886 Phase 1 — JS/TS sources in @pulp/react are user-visible
-      # SDK surface. Coverage data comes from the vitest v8 → Cobertura
-      # pipeline in `.github/workflows/pulp-react-build.yml`, not from
+      # JS/TS sources in @pulp/react are user-visible SDK surface.
+      # Coverage data comes from the vitest v8 → Cobertura pipeline in
+      # `.github/workflows/pulp-react-build.yml`, not from
       # scripts/run_coverage.sh. The per-tier gate runs continue-on-error
-      # in coverage.yml so this entry is measure-only at first; Phase 2
-      # flips enforcement once a stable baseline is observed.
+      # in coverage.yml so this entry remains measure-only until a stable
+      # baseline supports enforcement.
       - packages/pulp-react/**
 
   - name: infrastructure
     line_target: 50
     paths:
       - core/events/**
-      - core/dsl/**          # pulp #1056 — DSL processor scaffolding (Faust wrapper headers)
+      - core/dsl/**          # DSL processor scaffolding (Faust wrapper headers)
       - core/runtime/**
       - core/state/**
       - core/canvas/**

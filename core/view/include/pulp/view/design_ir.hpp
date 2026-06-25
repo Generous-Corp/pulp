@@ -54,9 +54,9 @@ enum class SizingMode { fixed, hug, fill };
 
 /// A single CSS `box-shadow` layer. CSS `box-shadow` is a comma-separated
 /// list of these layers (painted first-to-last, so the first sits on top);
-/// `IRStyle::box_shadow` keeps them in author order. Before pulp #41 the IR
-/// stored the whole declaration as one opaque string, which silently dropped
-/// every layer past the first — multi-shadow designs lost their stack.
+/// `IRStyle::box_shadow` keeps them in author order; collapsing the declaration
+/// into one opaque string would drop every layer past the first, losing the
+/// multi-shadow stack.
 struct IRBoxShadow {
     float offset_x = 0.0f;
     float offset_y = 0.0f;
@@ -101,7 +101,7 @@ struct IRStyle {
     std::optional<std::string> backdrop_filter;
     // CSS clip-path / mask. The engine (View::set_clip_path / set_mask /
     // set_mask_image / set_mask_size) + the setClipPath/setMask* bridge
-    // (pulp #1515) consume these; sources that carry them — and Figma mask
+    // consume these; sources that carry them — and Figma mask
     // layers once the extractor emits a clip-path — survive the IR.
     std::optional<std::string> clip_path;
     std::optional<std::string> mask;                   // `mask` shorthand
@@ -229,11 +229,10 @@ std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css);
 /// reconstructing from the parsed fields. Empty input yields an empty string.
 std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
 
-// ── Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-// additive identity fields on IRNode. The TS-side @pulp/import-ir package
-// already defines the canonical shape; the C++ IR lags. Phase 0a is
-// deliberately additive — IRStyle/IRLayout migration to TS-style
-// paint/text/layout is a separate ~1-month effort tracked elsewhere.
+// ── Additive identity fields on IRNode ────────────────────────────────────
+// The TS-side @pulp/import-ir package already defines the canonical shape.
+// These fields are deliberately additive; IRStyle/IRLayout migration to
+// TS-style paint/text/layout is tracked separately.
 //
 // stable_anchor_id is the key the tweaks layer (pulp-tweaks.json) uses to
 // match user edits back to nodes across re-imports. Computed by the
@@ -299,12 +298,20 @@ enum class NodeRenderMode {
 // Two materialization mechanisms (see DesignFrameView):
 //   - `knob` is SVG-PATCH: its needle path is rotated in the SVG and re-rendered
 //     (pixel-perfect, uses cx/cy/hit_radius/svg_patch_d/default_value).
+//   - `fader` is SVG-PATCH like `knob` but TRANSLATES its thumb (svg_patch_d) by
+//     value along the track box [x,y,w,h] (orientation follows the track shape).
+//   - `toggle` is a click-to-flip control over the box [x,y,w,h]; with
+//     svg_patch_d set it is a SWITCH whose moving dot is that path.
 //   - `dropdown` / `text_field` / `tab_group` / `stepper` are NATIVE-OVERLAY: an
 //     opaque child widget (ComboBox / TextEditor / tab group / < > stepper) is
 //     positioned over the element's `rect` and replaces that baked SVG region
 //     with a live control.
+// Every value here maps 1:1 to a DesignFrameElement::Kind in to_frame_elements()
+// (design_import_native_common.cpp); the runtime already backs all of them.
 enum class InteractiveElementKind {
     knob,
+    fader,
+    toggle,
     dropdown,
     text_field,
     tab_group,
@@ -313,6 +320,26 @@ enum class InteractiveElementKind {
     // pair, not a down-chevron). Uses `options` + `selected_index` like a
     // dropdown, but steps through them in place instead of opening a popup.
     stepper,
+    // `swap` is a swap-link button: clicking its rect activates `target_frame`
+    // (a mode/page switch the design wires up).
+    swap,
+    // `action` is a command button: clicking its rect fires the named `action`
+    // (e.g. "octave_up") — the consumer maps the id to its own state. It does not
+    // light, emit notes, or swap frames.
+    action,
+    // `xy_pad` is SVG-patch like `fader` but 2D: dragging in its rect [x,y,w,h]
+    // moves the puck (svg_patch_d). `default_value` is the X (0→left, 1→right),
+    // `default_value_y` the Y (0→top, 1→bottom).
+    xy_pad,
+    // `value_label` is a live read-only text overlay painted over its rect (the
+    // design's baked readout). `text` is the initial string; `value_left_align`
+    // left-aligns it (for a "LABEL <value>" readout that grows rightward).
+    value_label,
+    // `custom` is a registered native control: the materializer maps
+    // it to DesignFrameElement::Kind::custom, whose overlay is built by the
+    // factory registered under `factory_id` (+ opaque `custom_props`). Unmapped
+    // factory → inert render + an import diagnostic (never a silent knob).
+    custom,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.
@@ -326,9 +353,14 @@ struct IRInteractiveElement {
     float cy = 0.0f;
     float hit_radius = 0.0f;         ///< click-target radius, SVG coords
     /// Knob: the `d` of its needle path in the SVG (the patch target a drag
-    /// rotates around (cx, cy)).
+    /// rotates around (cx, cy)). fader/switch reuse this as the translated thumb.
     std::string svg_patch_d;
     float default_value = 0.5f;      ///< 0..1
+
+    /// toggle only: press-flash command button (sample next/prev/random, dice) —
+    /// lights on press, clears on release, instead of the sticky on/off flip.
+    /// Maps 1:1 to DesignFrameElement::flash. Defaults false (sticky toggle).
+    bool flash = false;
 
     // ── overlay controls (dropdown / text_field / tab_group) ─────────────
     /// Element bounding box in SVG coords — where the native overlay widget is
@@ -349,12 +381,58 @@ struct IRInteractiveElement {
     /// the default dark field color.
     std::string bg_color;
 
+    // ── swap / action / xy_pad / value_label ─────────────────────────────
+    /// swap only: the frame index to activate when clicked (-1 = unset).
+    /// Maps 1:1 to DesignFrameElement::target_frame.
+    int target_frame = -1;
+    /// action only: the command id fired on click (e.g. "octave_up"). Empty =
+    /// unset. Maps 1:1 to DesignFrameElement::action.
+    std::string action;
+    /// value_label only: the initial readout string painted over the rect.
+    /// Maps 1:1 to DesignFrameElement::text.
+    std::string text;
+    /// value_label only: left-align the readout (for a "LABEL <value>" overlay
+    /// whose value grows rightward). Maps 1:1 to DesignFrameElement::value_left_align.
+    bool value_left_align = false;
+    /// xy_pad only: initial normalized Y (0=top, 1=bottom). The X axis reuses
+    /// `default_value`. Maps to DesignFrameElement::value_y.
+    float default_value_y = 0.5f;
+
     /// Human-readable name for the control, taken from the design's own caption
     /// text (e.g. the "DEPTH" label under a knob). Empty when the importer found
     /// no confident caption — consumers then fall back to the binding key. This is
     /// the name a host surfaces for the generated parameter (embed ABI v5
-    /// PulpEmbedParamInfo.name); unit/range remain importer follow-ups.
+    /// PulpEmbedParamInfo.name); unit/range are not carried here yet.
     std::string label;
+
+    // ── Import report (resolution provenance) ────────────────────────────
+    // Carried from the importer (where all three signals — geometry/affordance,
+    // name/token, component identity — exist) THROUGH to the host materialize
+    // boundary, so a low-confidence or conflicted control is SEEN ("this might be
+    // wrong") instead of discovered in the DAW. The resolution LOGIC that fills
+    // these lives in the importer; this struct carries it to materialization.
+    /// Which ladder rung resolved this control's interaction. 0 = not run through
+    /// the resolver ladder (legacy/unset); 1 = explicit identity (component/Code-Connect);
+    /// 2 = Tier-1 affordance-inferred primitive; 3 = name/token (whole-word);
+    /// 4 = registered custom factory; 5 = inert render + diagnostic (the warn).
+    int resolution_rung = 0;
+    /// Confidence the resolved kind is correct, 0..1. 1.0 = unset/legacy path.
+    float confidence_score = 1.0f;
+    /// Cross-signal conflicts detected at import (e.g. "name=knob but geometry is
+    /// a wide track+thumb"). Empty = no conflict. A non-empty list means the
+    /// control still materializes with the best candidate but is flagged for review.
+    std::vector<std::string> conflict_signals;
+    /// Whether render-level verification (overlay covers its node region, type
+    /// doesn't visually contradict the skin) passed. true = passed/unchecked.
+    bool verification_pass = true;
+
+    // ── custom (registered control) ──────────────────────────────────────
+    /// kind==custom only: the id the native overlay factory is registered under
+    /// (register_design_control_factory). Maps 1:1 to DesignFrameElement::factory_id.
+    std::string factory_id;
+    /// kind==custom only: opaque props handed to the factory (typically JSON).
+    /// Maps 1:1 to DesignFrameElement::custom_props.
+    std::string custom_props;
 
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };
@@ -373,12 +451,12 @@ struct IRNode {
     float audio_default = 0.5f;
     // True when the source explicitly carried a min/max range (vs the 0..1
     // defaults). Lets the codegen reconstruct the value/range display stack only
-    // for widgets that actually declared a range. pulp #3192 follow-up.
+    // for widgets that actually declared a range.
     bool has_audio_range = false;
     std::vector<IRNode> children;
     std::unordered_map<std::string, std::string> attributes;  // Extra metadata
 
-    // ── Phase 0a additive identity fields ────────────────────────────────
+    // ── Additive identity fields ─────────────────────────────────────────
     /// Stable anchor for the tweaks layer. Empty until an anchor strategy
     /// has populated it (call assign_anchors() in anchor_strategy.hpp).
     std::optional<std::string> stable_anchor_id;
@@ -400,7 +478,7 @@ struct IRNode {
     /// Optional; adapters may leave empty when the source is binary or large.
     std::optional<std::string> raw_source;
 
-    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    // ── Faithful-vector import ───────────────────────────────────────────
     /// How this node materializes. `faithful_svg` renders `svg_asset_id` via
     /// DesignFrameView and overlays `interactive_elements`; `normal` keeps the
     /// existing widget/sprite path. Per-node so the two lanes coexist.

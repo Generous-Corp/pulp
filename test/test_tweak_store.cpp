@@ -1,6 +1,6 @@
-// Phase 0b PR-A: TweakStore + Inspector.applyTweak/listTweaks/clearTweaks/setBypass.
-// Phase 1: pulp-tweaks.json disk persistence + Inspector.load/save/setAutoSave.
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+// TweakStore + Inspector.applyTweak/listTweaks/clearTweaks/setBypass.
+// pulp-tweaks.json disk persistence + Inspector.load/save/setAutoSave.
+// See planning/2026-05-18-inspector-direct-manipulation-roadmap.md.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -51,7 +51,7 @@ struct Fixture {
     Fixture() { handler.set_tweak_store(&store); }
 };
 
-// Phase 1 helpers ────────────────────────────────────────────────────────
+// Disk persistence helpers ───────────────────────────────────────────────
 //
 // Each disk test gets its own scratch directory under the system temp
 // root so the suite stays parallel-safe. The destructor removes the
@@ -234,7 +234,7 @@ TEST_CASE("TweakStore: bypass=empty vector clears the overlay (per Codex spec)",
     REQUIRE_FALSE(s.bypass_for("anchor:a").has_value());
 }
 
-// ── Phase 2.5: lock overlay ─────────────────────────────────────────────
+// ── Lock overlay ────────────────────────────────────────────────────────
 
 TEST_CASE("TweakStore: set_locked marks an anchor protected",
           "[inspect][tweak-store][lock]") {
@@ -343,7 +343,7 @@ TEST_CASE("TweakStore: from_json preserves existing locked anchors",
 
 TEST_CASE("TweakStore: load_from_disk preserves a locked anchor absent from the file",
           "[inspect][tweak-store][lock][disk][regression]") {
-    // Codex P1 #2432: importing a file that omits a currently-locked
+    // #2432: importing a file that omits a currently-locked
     // anchor must NOT delete that anchor's tweaks or lock state — the
     // lock contract promises protection from re-import. This exercises
     // the real disk path (load_from_disk), not just from_json.
@@ -398,7 +398,7 @@ TEST_CASE("TweakStore: load_from_disk keeps in-memory tweaks for a locked anchor
 
 TEST_CASE("TweakStore: clear preserves multiple locked anchors and drops all unlocked",
           "[inspect][tweak-store][lock][regression]") {
-    // Codex P1 #2432: a global Inspector.clearTweaks routes through
+    // #2432: a global Inspector.clearTweaks routes through
     // clear(). Locked anchors (tweaks + bypass + lock) must survive;
     // every unlocked anchor must be erased.
     TweakStore s;
@@ -611,7 +611,7 @@ TEST_CASE("Inspector.setBypass with non-bool/non-array value errors",
     REQUIRE(resp.is_error);
 }
 
-// ── Phase 2.5: Inspector.setLocked protocol ─────────────────────────────
+// ── Inspector.setLocked protocol ────────────────────────────────────────
 
 TEST_CASE("Inspector.setLocked with value=true locks the anchor",
           "[inspect][protocol][setLocked]") {
@@ -731,7 +731,7 @@ TEST_CASE("Inspector.listTweaks / clearTweaks / setBypass without store error",
         R"({"anchorId":"a","value":true})")).is_error);
 }
 
-// Codex P2 follow-up on #2300: listTweaks must include anchors that
+// Regression #2300: listTweaks must include anchors that
 // have ONLY a bypass (no tweak records). Otherwise setBypass on an
 // anchor with no entries — or one whose entries were later cleared
 // via clearTweaks — silently drops out of the protocol response and
@@ -809,7 +809,7 @@ TEST_CASE("Inspector.getInfo surfaces tweak_count when a store is attached",
     REQUIRE(parsed["tweak_count"].getInt64() == 2);
 }
 
-// ── Phase 1: disk persistence ──────────────────────────────────────────
+// ── Disk persistence ───────────────────────────────────────────────────
 
 TEST_CASE("TweakStore: save -> clear -> load round-trips state",
           "[inspect][tweak-store][disk]") {
@@ -1081,7 +1081,7 @@ TEST_CASE("TweakStore: from_json round-trips without touching disk",
     REQUIRE(t.is_bypassed("a", "p"));
 }
 
-// ── Phase 1: protocol surface ──────────────────────────────────────────
+// ── Protocol surface ───────────────────────────────────────────────────
 
 TEST_CASE("Inspector.saveTweaks writes the file and returns the resolved path",
           "[inspect][protocol][saveTweaks]") {
@@ -1170,7 +1170,7 @@ TEST_CASE("Inspector.load/save/setAutoSave without a store error cleanly",
         R"({"enabled":true})")).is_error);
 }
 
-// ── Phase 2 — drift detection ───────────────────────────────────────────
+// ── Drift detection ────────────────────────────────────────────────────
 //
 // A tweak is keyed by (anchor_id, property_path). After a design
 // re-import a stored anchor may no longer exist in the live tree
@@ -1342,7 +1342,7 @@ TEST_CASE("TweakStore::diff ignores bypass overlay — bypassed tweaks still dri
     REQUIRE(report.orphaned.front().anchor_id == "ghost");
 }
 
-// ── P2: apply_tweaks_batch — atomic multi-key write ─────────────────────────
+// ── apply_tweaks_batch — atomic multi-key write ─────────────────────────────
 //
 // planning/2026-05-21-wysiwyg-direct-manipulation-extension.md, Risk 6:
 // the drag-to-move gesture writes three tweaks (position/left/top); each

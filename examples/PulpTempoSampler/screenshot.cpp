@@ -1,4 +1,4 @@
-// Headless screenshot of the PulpTempoSampler editor (Phase 5 Ink & Signal UX).
+// Headless screenshot capture for the PulpTempoSampler editor.
 // Loads a synthetic multi-onset loop, builds the editor via create_view(), and
 // renders to a PNG with no GPU window and no audio device.
 //

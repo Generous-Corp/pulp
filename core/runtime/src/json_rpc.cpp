@@ -112,8 +112,8 @@ void JsonRpcPeer::handle_message(const Message& msg) {
     std::string_view text(
         reinterpret_cast<const char*>(msg.payload.data()),
         msg.payload.size());
-    // JSON-RPC supports batching (top-level array) but we accept only
-    // single objects for Phase 4. A simple sniff: find first non-space.
+    // JSON-RPC supports batching (top-level array), but this peer accepts
+    // only single objects. A simple sniff finds the first non-space byte.
     std::size_t i = 0;
     while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i]))) ++i;
     if (i >= text.size()) return;

@@ -1,6 +1,6 @@
 ---
 name: import-design
-description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file (pulp #709). Versioned (parser-version / format-version / compat-schema-version) detection lives behind `--detect-only` and `--report-new-format` (pulp #1031).
+description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file. Versioned parser, format, and compatibility-schema detection lives behind `--detect-only` and `--report-new-format`.
 ---
 
 # Import Design
@@ -91,6 +91,71 @@ widgets (a faithful frame needs a JS-bridge primitive that doesn't exist yet),
 and `--validate` still renders the native-materialized output rather than the
 faithful SVG.
 
+**Interactive-overlay kinds the IR carries end-to-end.** The faithful_svg
+`interactive_elements` IR (`InteractiveElementKind` in `design_ir.hpp`) supports
+`knob, fader, toggle, dropdown, text_field, tab_group, stepper, swap, action,
+xy_pad, value_label` — each maps 1:1 in `to_frame_elements()`
+(`design_import_native_common.cpp`) to the `DesignFrameElement::Kind` the runtime
+already backs, and the schema (`figma-plugin-export-v1.json`
+`interactive_element.kind`) accepts exactly that set. The schema segments
+`required` per-kind: `knob` needs `cx/cy/hit_radius`; every other kind needs the
+box `x/y/w/h`. Field map: **fader** translates `svg_patch_d` along the track;
+**toggle** is a click-to-flip rect (a toggle WITH `svg_patch_d` is a switch; with
+`flash` it is a press-flash command button); **swap** carries `target_frame`;
+**action** carries the command id `action`; **xy_pad** adds `default_value_y`
+(Y axis; X reuses `default_value`); **value_label** carries `text` +
+`value_left_align`. When you add a kind, touch the whole chain in one commit —
+schema → `gen-types` (`types.generated.ts`) → producer (`faithful-vector.ts`,
+incl. `detectOverlayControls` if it should auto-detect) → IR enum →
+`design_ir_json.cpp` parse/serialize → `to_frame_elements()` → the
+`design_cpp_codegen.cpp` token switch + field emit — or it silently degrades.
+`detectOverlayControls` auto-emits swap/action/xy_pad/value_label from explicit
+whole-word node names (run AFTER the tuned dropdown/stepper/tab_group/text_field
+detectors so those always win); the richer node-tree signals (prototype reactions
+for swap, value patterns for value_label) land with P2's unified resolver. An
+**unknown** kind string no longer silent-knobs: `interactive_kind_from_id`
+reports it unrecognized and the parser emits a `log_warn` (the full ordered
+resolution ladder + import report is the P7 work).
+
+**Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
+novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
+`custom_props`, typically JSON Pulp doesn't parse). The runtime
+`register_design_control_factory(id, factory)` (`design_frame_view.hpp`) maps an
+id to a `std::function<unique_ptr<View>(const DesignControlContext&)>`;
+`DesignFrameView::build_overlays` looks the factory up for a `Kind::custom`
+element and builds the overlay. **UI-thread-only** (registration at host startup,
+lookup at overlay build) — the registry has no locking by contract. If no factory
+is registered the element renders INERT (the baked SVG still shows) and
+`make_faithful_svg_frame` emits a `native-materialize-custom-factory-unregistered`
+diagnostic — a custom control never blanks or silent-knobs. Schema requires
+`factory_id` for `kind=custom`. This is the piece a shared control PACKAGE (P8)
+registers into. Beyond the usual atomic chain, the two exhaustive
+`DesignFrameElement::Kind` switches in `design_frame_view.cpp`
+(`element_value`/`set_element_value`) need the `custom` case, and the inspector's
+`frame_element_kind_name` switch in `inspect/src/inspector_window.cpp`.
+
+**Import report (P7).** Implementations of the import-report and
+placement-verification passes live in `core/view/src/design_ir_analysis.cpp`
+(extracted from `design_ir_json.cpp`, which is the IR JSON serialization
+*contract* — keep the analysis passes there, not in the serializer).
+`collect_import_report(ir.root)` (`design_import.hpp`)
+walks the IR's interactive elements and surfaces each control's resolution
+provenance — `{source_node_id, kind, resolution_rung, confidence_score,
+conflict_signals, verification_pass}` — plus summary counts (`conflicted` /
+`low_confidence` / `unresolved`) and `ok()`. `pulp import-design` prints the
+human summary (`import_report_to_text`) to STDERR for EVERY output mode (codegen
++ DesignIR-v1), writes the machine-readable JSON (`import_report_to_json`) when
+`--import-report <path>` is given, and `--fail-on-unresolved` makes a conflicted
+or inert control a nonzero (2) exit — the CI gate. So a low-confidence or
+conflicted control is SEEN at import time, never discovered later in the DAW.
+`apply_placement_verification(ir.root, frame_w, frame_h)` runs first (the
+structural half of the render-golden gate): it flags an overlay with no
+renderable extent (zero hit-radius AND zero-area box) or one entirely outside the
+frame region — setting `verification_pass=false` + a conflict so the report/gate
+catch it. Frame size 0 = "unknown" (skips the bounds half, keeps the
+degenerate-extent check). The full PIXEL-level golden diff is the render-path
+follow-up.
+
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The
 Musical Typing Keyboard is TWO frames (typing 187:15 / piano 187:349) AND its
@@ -165,7 +230,7 @@ Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
 3. If Pencil MCP is available (mcp__pencil__*), offer to read the current editor state
-4. If the user mentions Claude Design or hands over a manually-exported HTML file from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — Anthropic has no public API; per pulp #468, manual file export is the supported path; Spectr's editor.html mapping is the precedent)
+4. If the user mentions Claude Design or hands over a manually-exported HTML file from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — Anthropic has no public API; manual file export is the supported path, and Spectr's `editor.html` mapping is the precedent)
 5. If the user provides a file path or URL, use that directly
 6. If none of the above, ask the user for a source and file
 
@@ -196,7 +261,7 @@ pulp_add_plugin(MyPlugin
 )
 ```
 
-Mechanism (issue #2784 stage A):
+Mechanism:
 
 1. `pulp_add_plugin` injects `PULP_PLUGIN_DESIGN_W/H/MIN_W/...` as
    `target_compile_definitions` on `${target}_Core` (PUBLIC, so every
@@ -327,13 +392,100 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
-- **`detect_audio_widget` matches whole WORD TOKENS, not substrings.** It
-  tokenizes the layer name on non-alnum + camelCase (acronym-aware, so
-  `VUMeter`→{vu,meter}) + letter↔digit, then matches whole tokens (simple
-  plural tolerated: `Knobs`→knob). This is deliberate: the old `find()` substring
-  match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter (gap
-  survey). Don't revert to substring matching; add new keywords as tokens + a
-  false-positive regression case in `test_design_import.cpp`.
+- **Name→kind resolution matches whole WORD TOKENS, not substrings — in ALL
+  THREE lanes.** The C++ `detect_audio_widget`, the TS
+  `audioWidgetKindFromName` (`extract-pure.ts`), and the Python
+  `widget_kind_from_name` (`figma_rest_export.py`) all tokenize the layer name on
+  non-alnum + camelCase (acronym-aware, so `VUMeter`→{vu,meter}) + letter↔digit,
+  then match whole tokens (simple plural tolerated: `Knobs`→knob). The TS/Python
+  lanes were substring-based until the P2 resolver unification; all three now
+  share the boundary rule (mirrored, not one function — each has its own
+  vocabulary/return enum). This is deliberate: the old `find()`/`includes()`/`in`
+  substring match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter
+  (gap survey). Don't revert any lane to substring matching; add new keywords as
+  tokens + a false-positive regression case (`test_design_import.cpp`,
+  `audio-widget-name.test.ts`, `test_figma_rest_export.py`). Lockstep is on the
+  VOCABULARY too, not just the boundary rule: the meter/waveform/spectrum aliases
+  (`level`, `oscilloscope`, `analyzer`/`analyser`) must exist in all three lanes —
+  the Python lane silently lagged on these until an adversarial-review follow-up,
+  so when you add a token to one lane, add it to the other two and pin it in each
+  lane's test in the SAME change. The faithful-vector
+  overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
+  whole-word convention for its own (InteractiveElementKind) vocabulary.
+
+### KEY-based recognition + the recognition-resolver merge module
+
+NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
+signal is the Figma component identity — a `component_set_key`. This is a
+SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
+
+- **The merge module is the single source of truth.** `core/view/.../recognition_resolver.{hpp,cpp}`
+  (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
+  into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
+  in precedence order (later wins on key collision):
+  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+     mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
+     against the JSON by a drift-guard test),
+  2. the user's `--recognition-manifest` (flat library-manifest shape),
+  3. installed-package `design_controls` fragments (custom controls) —
+     gathered by `discover_package_design_controls()` (walks up for the project's
+     `packages.lock.json`, then reads the registry at `tools/packages/registry.json`
+     — the canonical CLI layout from `find_registry_path`, NOT a lockfile sibling;
+     a wrong path silently merges zero packages — builds ONE `RecognitionSource`
+     per installed package that declares any `design_controls`, named by package id)
+     and added via `add_source(...)` ONCE, in the same resolver-build block, NOT
+     by threading a third lookup through the importer lanes. **Do not scatter the
+     merge.** Any new recognition source becomes one more `add_source` call.
+     A package fragment carries `factory_id` (no built-in `kind`), so a match
+     routes to the custom-control materialize path below. With no custom-control
+     package installed this contributes zero sources, so behavior is unchanged.
+- **`--recognition-manifest <path>`** lets a designer map their OWN component-set
+  keys / name prefixes to Pulp kinds. Shape (mirrors `library-manifest.json`):
+  `{ "widgets": { "<name>": { "kind"?, "component_set_key", "name_prefix"?, "factory_id"? } } }`.
+  `kind` defaults to the widget's map key. `factory_id` (no `kind`) is the
+  custom-control path: a match resolves to a registered native overlay instead
+  of a built-in widget (same shape installed-package `design_controls` use).
+  Harvest keys from the Figma MCP `search_design_system`.
+- **Which lane is wired (authoritative): the C++ CLI figma-plugin lane.** The
+  plugin envelope carries each instance's `figma.component_key` /
+  `main_component_name` EVEN when the in-Figma TS plugin did not recognize it
+  (a third-party component) — `parse_ir_node` stamps these into
+  `attributes.figmaComponentKey` / `figmaMainComponentName`. After parse, the
+  CLI (`pulp_import_design.cpp`, figma / figma-plugin sources only) builds the
+  resolver (built-in + optional user manifest) and calls
+  `apply_recognition_resolver(ir.root, ...)`, which stamps `audio_widget` on any
+  instance that matched but was not already recognized. This is the lane that
+  turns a pixel-faithful-but-0-controls third-party design (the live Ink &
+  Signal "NumberBox" case) into a wired one.
+- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) and the Python REST
+  lane (`figma_rest_export.py`) bake recognition at CAPTURE time** for the
+  built-in library only. They are NOT yet wired to a user manifest (the TS lane
+  runs in the Figma sandbox; feeding it a user manifest needs plumbing through
+  the plugin UI). **Follow-up:** accept the user manifest in those two lanes too.
+  Until then, the C++ CLI lane is the single source for user-manifest recognition.
+- **Never-silent-knob (P7) holds.** A component instance present in the design
+  but matched by NO source is NEVER guessed into a kind — `apply_recognition_resolver`
+  collects it into `UnmatchedComponent[]`, which the CLI surfaces as an
+  `unmapped-component` import diagnostic. Additive guarantee: no manifest + no
+  resolvable third-party key ⇒ behavior unchanged; an already-stamped
+  `audio_widget` is never overridden.
+- **Custom-control materialize half (the package lane's runtime side).** A
+  custom-factory match has no built-in `audio_widget` to stamp — instead the
+  resolver records the `recognitionFactoryId` node attribute. The CLI then runs
+  `materialize_recognized_custom_controls(ir.root)` (same module), which converts
+  every such node into a `kind=custom` `IRInteractiveElement` carrying that
+  `factory_id` + the node's geometry. The native materializer
+  (`make_faithful_svg_frame` → `to_frame_elements`) builds the overlay via the
+  factory the package registered with `register_design_control_factory`. An
+  unregistered factory renders inert (the baked SVG still shows) AND emits the
+  `native-materialize-custom-factory-unregistered` diagnostic — never a silent
+  knob. The conversion is idempotent and additive (a node with no
+  `recognitionFactoryId` is untouched).
+- **Merge ordering is deterministic and pinned.** Package sources are gathered
+  in lockfile order; the resolver merges later sources OVER earlier ones, so on
+  a `component_set_key` (or `name_prefix`) collision the LAST-added package wins.
+  Tests pin this so a re-order is a visible change, not a silent one.
+
 - **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →
   `pulpBindingModule="filter"`, `pulpBindingParam="cutoff_hz"`,
   `pulpParamKey="filter.cutoff_hz"`. No dot → empty module, whole string is the
@@ -352,7 +504,7 @@ mind when touching this:
 - **This is a generalizable importer rule**, not a per-fixture patch: it reads
   the figma-plugin data and produces the contract for ANY recognized widget.
 
-### Skinned fader/meter WIDTH derivation (pulp #3191)
+### Skinned fader/meter width derivation
 
 Recognized faders/meters must render their track/fill/bar at the captured art's
 NARROW inset width, not the full node box. The sampler in
@@ -389,7 +541,7 @@ Gotchas learned wiring this:
   hardcoded pixel constants (repo rule: every visual importer fix must be a
   generalizable rule reading the design data).
 
-### Native codegen fidelity gaps (pulp #3192)
+### Native codegen fidelity gaps
 
 The render uses `generate_native_node` in `core/view/src/design_codegen.cpp`
 (createCol/createRow/createLabel/createKnob/setFlex…), NOT the `generate_node`
@@ -1321,7 +1473,7 @@ NOT a 0-area-paint drop (that red herring cost time — flooring the flex dim di
 nothing because the node is already a 1px frame, not an image); it was an
 unparsed rgba fill. Test: `[color]` in the native materializer suite.
 
-### `IRStyle::box_shadow` is parsed layers, not a string (pulp #41)
+### `IRStyle::box_shadow` is parsed layers, not a string
 
 `IRStyle::box_shadow` is a `std::vector<IRBoxShadow>`, **not** an
 `optional<string>`. CSS `box-shadow` is a comma-separated layer list; the old
@@ -1342,8 +1494,12 @@ preserves them all.
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
-- **Source**: figma, stitch, v0, pencil, rn, claude, or designmd
-- **Input**: file path, URL, or MCP live data (manual file only for claude; static file only for designmd)
+- **CLI source**: figma, figma-plugin, stitch, v0, pencil, claude, designmd, or jsx.
+  The runtime/source-contract lane also covers rn.
+- **Input**: file path, URL, or an exported/generated artifact. MCP tools are
+  acquisition helpers; do not pass raw provider MCP JSON to the CLI unless that
+  source contract explicitly documents the shape. Claude is manual-file only;
+  designmd is static-file only.
 
 ### Step 2: Read the design data
 
@@ -1379,7 +1535,7 @@ Token resolves from `--token`, then `$FIGMA_TOKEN`, then `~/.config/pulp/figma-t
 REST-port capture rules that mirror the plugin's `extract.ts` — keep them in sync when the P2/P3 shared extractor lands:
 - **Audio-widget recognition by name** (`widget_kind_from_name`): knob/fader/meter/dial/slider/xy-pad/waveform/spectrum nodes are emitted as leaf `audio_widget` nodes so the importer renders them NATIVELY (silver knob etc., at the node's own size) — NOT captured as raw image sprites from their internal component-instance vectors (compound `I…;…` ids), which renders misplaced fragments. This is what makes non-library designs (ELYSIUM) get real knobs.
 - **`REGULAR_POLYGON` is a vector leaf type.** Figma REST reports polygons as `REGULAR_POLYGON` (the plugin SceneNode API says `POLYGON`). Omitting it makes polygon-based illustrations (ELYSIUM's Pentagon/RANGE shape) fail the pure-vector-illustration test → recurse into partial captures instead of rasterizing whole. Include both spellings.
-- **`font_family_assets` capture** (`_record_font`): walk TEXT nodes, collect `{family, style, weight, italic?}` deduped, emit at the envelope root (mirrors plugin #43a). REST can't fetch an uploaded font's `.ttf` binary, so `asset_id` is omitted — the #43b consumer then keeps the family NAME (system fallback) rather than registering a bundled file. Capturing the metadata keeps the REST envelope shape-conformant with the plugin (B's `diff_envelopes.py` gap).
+- **`font_family_assets` capture** (`_record_font`): walk TEXT nodes, collect `{family, style, weight, italic?}` deduped, emit at the envelope root. REST can't fetch an uploaded font's `.ttf` binary, so `asset_id` is omitted and the consumer keeps the family NAME (system fallback) rather than registering a bundled file. Capturing the metadata keeps the REST envelope shape-conformant with the plugin.
 - **sha256 `content_hash`** for captured PNGs: name + content-address each asset by `sha256(bytes)` (matches the plugin's `AssetCache`), not a node-id placeholder — dedupes identical captures and lets the importer verify bytes.
 Detection uses ZIP magic (`PK\x03\x04`), not the file extension — `.zip` renames still get unpacked. The temp dir is auto-cleaned at process exit. Older CLI builds read input via `std::ifstream` text mode and silently truncated at the first NUL byte in the ZIP header; the symptom was `parser threw an unknown exception` on any `.pulp.zip`. If you see that error, the CLI predates the auto-unpack support — rebuild from current `main`.
 
@@ -1469,15 +1625,15 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - C-5 deliberately rejects Tailwind `className`, unresolved `--pencil-*` token references, MCP JSON envelopes, `.pen`/`.fig` binary references, external CSS imports, Next.js wrappers or `"use client"`, Radix/shadcn components, React Native imports, custom JSX components, non-range inputs, and network/storage/worker APIs.
 - Representative fixtures live under `planning/fixtures/pencil/`; the primary one is `gain-stage-card.tsx` (gain slider + canvas level meter + bypass). Run `tools/import-validation/pencil-roundtrip.sh --parser-only` for the parser/dispatch gate, `tools/import-validation/pencil-roundtrip.sh` for parser-emitted screenshot diff, and `tools/import-validation/pencil-roundtrip.sh --coverage` before pushing parser PRs.
 
-**Claude Design (manual HTML export — pulp #468)**:
+**Claude Design (manual HTML export)**:
 - Anthropic Labs has no MCP / public API. The user runs Claude Design, exports the canvas as Standalone HTML (or "Send to Local Coding Agent"), and hands you the resulting file.
 - Run `pulp import-design --from claude --file <path>` — the parser delegates to the Stitch HTML pipeline and tags the IR as Claude. **This is the static path** — it sees only the loader-shell HTML wrapping the bundled React app (~9 elements: title, bundler placeholders, inline styles, the `<script>` blob).
 - Add `--execute-bundle` to invoke the **native-runtime path**: Pulp parses the JSON envelope, decodes the gzip+base64 asset map, evaluates the React + React-DOM + app payloads in a headless `ScriptEngine`, then walks the materialized DOM into the `DesignIR`. Falls back to the static path on any harness failure (engine error, walker output below the 9-node loader-shell floor, JS payload too large). Use this when the user's Claude export is a real bundled-React app and they need the actual editor tree, not just the shell.
 - The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (override path with `--bridge-output`, skip with `--no-bridge-scaffold`). The scaffold demonstrates registering `pulp::view::EditorBridge` handlers and attaching to a `WebViewPanel` (or future `JsRuntime`).
 
-**Inline `<script>` evaluation in `--execute-bundle` (pulp #758)**: The harness now evaluates inline `<script type="text/javascript">` (and untyped `<script>`) blocks AFTER the src-loaded payloads, then compiles + evaluates inline `<script type="text/babel">` (and `text/jsx`) blocks via the bundle's own Babel-standalone (looked up as `globalThis.Babel.transform`). After both, the harness dispatches a `readystatechange` → `DOMContentLoaded` → `readystatechange(complete)` → `window.load` sequence and pumps four message-loop / frame-callback cycles for async settling. This is what makes a real Spectr-style Claude bundle (where the actual React app lives in inline `text/babel` blocks, not src-loaded payloads) materialize beyond the 9-element shell. Per-script soft-fail matches the existing src-loaded payload pattern. Inline `application/json` (and other `*/json`) blocks are intentionally skipped — they're config blobs, not executable code.
+**Inline `<script>` evaluation in `--execute-bundle`**: The harness evaluates inline `<script type="text/javascript">` (and untyped `<script>`) blocks AFTER the src-loaded payloads, then compiles + evaluates inline `<script type="text/babel">` (and `text/jsx`) blocks via the bundle's own Babel-standalone (looked up as `globalThis.Babel.transform`). After both, the harness dispatches a `readystatechange` → `DOMContentLoaded` → `readystatechange(complete)` → `window.load` sequence and pumps four message-loop / frame-callback cycles for async settling. This is what makes a real Spectr-style Claude bundle (where the actual React app lives in inline `text/babel` blocks, not src-loaded payloads) materialize beyond the 9-element shell. Per-script soft-fail matches the existing src-loaded payload pattern. Inline `application/json` (and other `*/json`) blocks are intentionally skipped — they're config blobs, not executable code.
 
-**Gotchas that bit pulp #758 implementation:**
+**Inline-bundle implementation gotchas:**
 - `core/view/js/web-compat.js`'s `document` is a plain object literal (not an `Element`), so it ships **without** `addEventListener` / `dispatchEvent`. The Step 3 dispatcher constructs events defensively — uses `new Event(t)` when available, falls back to `{type, target, bubbles:false, preventDefault, stop*}` literal otherwise — but bundles that call `document.addEventListener('DOMContentLoaded', ...)` only fire if the bundle (or some library it loads) installs `addEventListener`/`dispatchEvent` on `document`/`window` first. Real React-DOM does not do this — it attaches to the `root` element it controls — so the DCL dispatch is a best-effort safety net, not a guarantee. See test `DOMContentLoaded dispatch runs the queued handler when document supports it` in `test/test_design_import_inline_babel.cpp` for the exact shim shape that satisfies the contract.
 - The harness's `error_out` is the **fallback reason** (or empty on success). Don't piggyback diagnostic warnings on it from inside the harness; on success the harness clears the slot. If you need to surface a warning that survives a successful run, push it through a different channel (e.g. add a `warnings` vector to `ClaudeRuntimeOptions`).
 - Empty `<span>` (and other text-mapped tags: `p`, `label`, `h1`-`h6`, `a`, `strong`, `em`, `small`, `code`) get filtered out by the text-empty pruning in `json_to_ir_node`. If a fixture or test relies on observing an empty `<span>` with attributes round-tripping through the IR, use a `<div>` instead — divs map to `frame` and survive the prune.
@@ -1487,7 +1643,7 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 
 **Spectr's `<svg><path>` doesn't auto-route to `<SvgPath>`:** Pulp v0.69.2+ ships an `<SvgPath>` JSX intrinsic that maps to the C++ `SvgPathWidget` shipped in v0.61.0 (#965/#991). However, plugin bundles emitted from Claude-Design exports (and similar) ship raw `<svg><path/></svg>` markup, not `<SvgPath>`. There's no automatic shim — the dom-adapter (or a future `pulp import-design` post-process) must rewrite `<svg>` → `<SvgPath>` for inline-icon use cases. Track plugin-side adoption when bumping SDK pin past v0.69.2. <!-- docs-noise-lint: skip — retained version provenance for SvgPath rollout -->
 
-**v0.69.0 closes 4 v0.68.0 audit symptoms automatically:** segmented-control vertical stacking (was the most-visible Spectr UX gap) is closed by `display:flex` defaulting to `flex-direction:row` (#1167); FilterBank canvas was already auto-resolved at v0.68.1+; App-root layout-bottom-strip is closed by the same flex-direction default; click-bubble dispatch fully closed in v0.68.0 (#1008/#1073). When auditing a freshly-imported plugin against an older SDK reference, run the WebView↔Native side-by-side at idle FIRST — many "broken" rows resolve via SDK upgrade alone with zero plugin-side work. Pattern documented in `spectr/planning/audit-2026-05-03-webview-vs-native-v0.69.1.md`.
+**SDK-version drift can close audit symptoms automatically:** segmented-control vertical stacking is closed by `display:flex` defaulting to `flex-direction:row`; FilterBank canvas is auto-resolved in current SDKs; App-root layout-bottom-strip is closed by the same flex-direction default; click-bubble dispatch is also handled in current SDKs. When auditing a freshly-imported plugin against an older SDK reference, run the WebView↔Native side-by-side at idle FIRST — many "broken" rows resolve via SDK upgrade alone with zero plugin-side work. Pattern documented in `spectr/planning/audit-2026-05-03-webview-vs-native-v0.69.1.md`.
 
 **JS string-literal escaping for emitted user text:** when `core/view/src/design_import.cpp` emits user-supplied text into single-quoted JS literals (`createLabel('...')`, `var.textContent = '...'`), the text MUST go through `js_single_quote_escape()` — newlines, single quotes, and backslashes leak through otherwise and `pulp-screenshot` crashes with "unexpected end of string" at JS eval time. The helper sits next to the existing `v0_html_attr_escape()` and covers the six emission sites that take arbitrary text: four `createLabel(text)` calls in the audio-widget column path, the generic text-node `createLabel(text_content)`, and the web-compat `var.textContent = '...'` line. Pinned by `[issue-81]` in `test/test_design_import.cpp`, which asserts both the absence of unescaped patterns AND the parity of unescaped single-quote counts on every emitted `createLabel` line. If you add a new emission site that takes user-supplied text, route it through `js_single_quote_escape()` AND extend the test.
 
@@ -1572,8 +1728,8 @@ There are two unrelated things called "source-contract" under
    (`route_rows`/`row_node_id`/`route_counts`/`primitive_counts`) and
    `tools/scripts/frontend_ir_sources.py` (`count_map`/`source_spans`).
 
-For (2), pulp #3116 added one shared serialized shape so importer and audit
-output can be validated against a single definition in tests:
+For (2), importer and audit output share one serialized shape that can be
+validated against a single definition in tests:
 
 - Schema: `tools/import-validation/schemas/source-contract-v0.schema.json`
   (`pulp-source-contract-v0`, draft-2020-12). Lives in the public repo (not
@@ -1758,7 +1914,6 @@ setAnchor call (unconditional) for the runtime. The bridge side
 (`WidgetBridge::setAnchor`) is a silent no-op on unknown widget IDs,
 matching the rest of the bridge's tolerance for unmounted ids.
 
-<!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
 **Codex P1 follow-up (#2303):** The first argument to `setAnchor` <!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
 MUST be the element's internal `_id` (the auto-generated `__el_N__`
 that `document.createElement` assigns in `core/view/js/web-compat.js`),
@@ -2064,7 +2219,7 @@ Spec + design:
 
 ### Freshness check (MUST run first)
 
-Before running any roundtrip harness against the framework, **verify your checkout is current with `origin/main`**. Lesson from pulp #2087: a roundtrip ran from a 175-commit-behind feature branch and produced "wrong UI variant" diff scores that reflected stale framework code, not main. We spent 15+ minutes drawing parser conclusions before noticing.
+Before running any roundtrip harness against the framework, **verify your checkout is current with `origin/main`**. A stale feature branch can produce "wrong UI variant" diff scores that reflect old framework code, not parser behavior.
 
 The `tools/import-validation/*-roundtrip.sh` scripts now refuse to run on a stale checkout. Bypass only when you specifically want to validate a feature branch:
 
@@ -2161,7 +2316,7 @@ into the generated JS. Default-on with a planned `--no-import-shortcuts` opt-out
 - Use `createCol`/`createRow` for containers (NOT `createPanel` which adds glass overlay)
 - Row height = max child height; Column height = sum of child heights + gaps
 
-### Proportional resize for fixed-design native-react imports (pulp #59/#63/#64/#65)
+### Proportional resize for fixed-design native-react imports
 
 When you import a design that was authored at a known fixed size (Spectr's
 editor.js at 1320×860, a Figma frame at 1440×900, etc.) and want the live
@@ -2339,11 +2494,11 @@ For `--from claude`, the CLI emits a starter C++ file demonstrating how to wire 
 - Replace the `MyPluginEditor` placeholder with the editor class that owns the `WebViewPanel`.
 - Register one `bridge_.add_handler("type", ...)` per message type your editor emits. Use `EditorBridge::get_float / get_uint / get_string` for safe payload reads, and `EditorBridge::ok_response() / ok_response(extras) / err_response(msg)` for replies.
 - Call `bridge_.attach_webview(*panel_)` to route WebView messages through the dispatcher.
-- For pulp #468's native-JS-runtime path, swap `attach_webview(...)` for `bridge_.attach_native_runtime(runtime, "<handler_name>")` once the runtime exposes its postMessage primitive.
+- For the native-JS-runtime path, swap `attach_webview(...)` for `bridge_.attach_native_runtime(runtime, "<handler_name>")` once the runtime exposes its postMessage primitive.
 
 See `docs/reference/editor-bridge.md` for the full API and the standard envelope-level error vocabulary (`malformed_json`, `unknown_type`, `missing_field`, `wrong_type`, `internal_error`).
 
-## Classnames Artifact (Claude Design only — pulp #1035)
+## Classnames Artifact (Claude Design only)
 
 For `--from claude`, the CLI also emits `classnames.json` mapping
 `classname → { cssProp(camelCase): cssValue, ... }` for every plain-classname `<style>` rule it finds in the export. Mirrors the output of Spectr's `tools/extract-html-bundle/extract.mjs` so downstream consumers (`@pulp/css-adapt`, `dom-adapter`) can merge class-based styles into inline before forwarding to bridge calls — no separate Node-side extraction script needed.
@@ -2364,7 +2519,7 @@ What it skips:
 
 This skill must stay aligned with the `view-bridge` skill — `view-bridge` covers editor lifecycle (create_view, open/notify_attached/resize/close), this skill covers message dispatch over that lifecycle.
 
-## Versioned Detection (pulp #1031)
+## Versioned Detection
 
 `pulp import-design` ships a three-layer version model so the CLI surface stays stable as external tools evolve their export formats:
 
@@ -2414,7 +2569,7 @@ The detector module lives at `tools/import-design/import_detect.{hpp,cpp}` and i
 
 ## Canvas2D Bridge Gotchas (importer + shim authors MUST follow)
 
-When translating browser `<canvas>` + Canvas2D code to Pulp's native bridge (`canvas*` globals), several spec-conforming browser idioms silently break against the bridge contract because the bridge surface is more limited and more direct than the HTML5 spec. The following rules were paid for in production debugging cycles on Spectr's analyzer port (pulp #1346/#1348/#1368/#1372 + Spectr `canvas2d-shim.ts`); the importer must emit code that respects them.
+When translating browser `<canvas>` + Canvas2D code to Pulp's native bridge (`canvas*` globals), several spec-conforming browser idioms silently break against the bridge contract because the bridge surface is more limited and more direct than the HTML5 spec. These rules came from production debugging cycles on Spectr's analyzer port and its `canvas2d-shim.ts`; the importer must emit code that respects them.
 
 ### 1. `ctx.arc()` does NOT add to a path on its own — synthesize as line segments
 
@@ -2476,11 +2631,11 @@ canvasSetLinearGradient(id, x0, y0, x1, y1, ...stopArgs);
 
 | Capability | Min SDK |
 |------------|---------|
-| `canvasSetLinearGradient` / `canvasSetRadialGradient` | v0.72.4 (pulp #1348) |
-| Gradient stops actually applied to fills | v0.72.5 (pulp #1353) |
-| `set_blend_mode` on Skia (GPU) honored | already wired; CG/CPU is silent no-op (pulp #1371) |
-| Per-canvas `save_layer` isolation (no sibling clearRect erase) | v0.74.1 (pulp #1372) |
-| Canvas paint instrumentation (`PULP_LOG_CANVAS_PAINT=1`) | v0.75.0 (pulp #1370) |
+| `canvasSetLinearGradient` / `canvasSetRadialGradient` | v0.72.4 |
+| Gradient stops actually applied to fills | v0.72.5 |
+| `set_blend_mode` on Skia (GPU) honored | already wired; CG/CPU is silent no-op |
+| Per-canvas `save_layer` isolation (no sibling clearRect erase) | v0.74.1 |
+| Canvas paint instrumentation (`PULP_LOG_CANVAS_PAINT=1`) | v0.75.0 |
 
 Reject importer output that targets earlier SDK versions for canvas-heavy designs — the visual gaps will be silent and look like Pulp bugs.
 
@@ -2494,7 +2649,7 @@ Always pixel-sample after rendering — visual inspection misses uniform-fallbac
 
 **Bridge reality:** Pulp gates pointer dispatch behind an explicit `registerPointer(id)` call (parallel to `registerClick(id)` and `registerHover(id)`). `@pulp/react`'s prop-applier currently only wires `registerHover` for `mouseenter/leave`, so `onPointerDown/Move/Up` listeners are installed in the JS dispatch table but never fired by the native View — the JS handler appears registered (`on(id, 'pointerdown', fn)`) yet clicks never invoke it. Additionally, **pulp dispatches pointer events to the hit-test target only — there is no synthetic-event bubbling.** A handler on a parent `<div>` will not fire when the click lands on a child `<canvas>` that visually overlays it.
 
-This was the root cause of Spectr's "FilterBank renders rainbow but band drag is dead" symptom (spectr #32 / commit `b7ba2b8`). Confirmed by `__spectrLog` probe at the top of `onPointerDown`: handler does NOT fire on `cliclick c:600,400` even though `on(pr_3, pointerdown, ...)` is registered.
+This was the root cause of Spectr's "FilterBank renders rainbow but band drag is dead" symptom. Confirmed by `__spectrLog` probe at the top of `onPointerDown`: handler does NOT fire on `cliclick c:600,400` even though `on(pr_3, pointerdown, ...)` is registered.
 
 **Importer rule:**
 
@@ -2547,9 +2702,9 @@ When you re-import Spectr's `editor.html` via Claude Design + the runtime path, 
 Promoted N interactive frame(s) to button widgets.
 ```
 
-in the stdout summary. If you see `0 widgets` and no promotion line on a fixture you *know* contains `<div onClick>`, you're either (a) on a non-runtime parser path (#1823 territory) or (b) the React tree didn't mount during the harness eval and `attributes` is empty as a result.
+in the stdout summary. If you see `0 widgets` and no promotion line on a fixture you *know* contains `<div onClick>`, you're either on a non-runtime parser path or the React tree didn't mount during the harness eval and `attributes` is empty as a result.
 
-## Live-host pump contract (pulp-internal #71)
+## Live-host pump contract
 
 Every live-host main loop that drives a `WidgetBridge` for a runtime-imported app **must call BOTH halves of the idle pump on every tick**:
 
@@ -2588,7 +2743,7 @@ If you add a new shortcut shape detector to the extractor, mirror it in:
 
 Test coverage lives in `test/test_design_import.cpp` (E2E roundtrip — codegen → WidgetBridge → React-style handler). The roundtrip exercises both the registerShortcut emission and the synthetic-keydown re-dispatch; failing either half is a hard test failure.
 
-## Default shortcuts (Phase A — source-matched, #2128)
+## Default shortcuts (source-matched)
 
 On top of the V2 extractor, the import pass auto-binds platform-convention chords (`Cmd+,` Settings, `Cmd+?` Help, bare `?` cheatsheet, `Cmd+N/O/S/F`, plus Win/Linux `Ctrl`/`F1` variants) when the dev's React source has a recognizable component. Lives in `core/view/src/design_import.cpp::detect_default_shortcuts(...)` + `apply_default_shortcuts(...)`. Accepted defaults are lowered into `DetectedShortcut` form and ride the V2 codegen path with no fork.
 
@@ -2764,7 +2919,7 @@ When importing a new Figma file, run these checks proactively:
 4. **For every frame with a downward `box_shadow`**: confirm the next absolute-positioned sibling sits within the shadow's effective bottom (`top + oy + blur/2`). (Pattern #7.)
 5. **For every image node with `width < 0.5` or `height < 0.5`**: confirm `border_width >= 0.5` got promoted to a visible-axis rect. Greppr generated JS for `createImage` with degenerate `setFlex('width', tiny)` — that's a bug surface. (Pattern #5.)
 6. **For every container with `setCornerRadius('All', N)`**: pixel-sample a corner; ensure the bridge actually applied the radius. (Pattern #1.)
-7. **For every captured asset PNG**: compare pixel size to layout box. If ratio ≥ 1.5×, the asset has bleed and needs natural-size rendering (`setObjectFit('none')` for ImageView, sprite-strip natural-size for Knob). (Pattern #10.)
+7. **For every captured asset PNG**: compare pixel size to layout box. If ratio ≥ 1.5×, the asset has bleed and needs natural-size rendering (`setObjectFit('none')` for ImageView, sprite-strip natural-size for Knob).
 
 ### Tooling that should run on every Figma import
 
@@ -2784,7 +2939,7 @@ These three pieces, all checked in this branch, are the standard inner-loop for 
 
 **Scope today (knob `@sprite`/`@silver` only)**: the per-node `@sprite` / `@silver` name-suffix convention is honoured only on Knob nodes (sprite-strip rendering is knob-only). Naming `Fader/Hero@sprite` won't break anything but won't have a visible effect. XYPad / Waveform / Spectrum sprite-strip support is still a follow-up.
 
-### Fader + Meter hybrid skin — DERIVED, value-driven, default ON (pulp #3191)
+### Fader + Meter hybrid skin — DERIVED, value-driven, default ON
 
 Recognised **fader** and **meter** widgets are skinned to match the captured Figma appearance by default, while staying native + bound + value-driven. This generalises the knob's skinning idea but takes a different route than the knob sprite-strip, because a fader/meter PNG bakes the control AT its captured value — skinning with the flat image verbatim would FREEZE the thumb / fill.
 

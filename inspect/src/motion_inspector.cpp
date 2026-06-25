@@ -51,10 +51,10 @@ GeometrySpace parse_geometry_space(std::string_view s) {
     return GeometrySpace::Window;
 }
 
-// Phase 11c — camelCase property names mirror what TraceBuilder emits
-// into fixtures, so callers can pass the same names back through the
-// wire. Unknown names fall back to ContentOffsetX silently (defensive;
-// the inspector should not crash on a typo).
+// CamelCase property names mirror what TraceBuilder emits into fixtures,
+// so callers can pass the same names back through the wire. Unknown names
+// fall back to ContentOffsetX silently (defensive; the inspector should
+// not crash on a typo).
 pulp::view::motion::ScrollProperty parse_scroll_property(std::string_view s) {
     using SP = pulp::view::motion::ScrollProperty;
     if (s == "contentOffsetX")   return SP::ContentOffsetX;
@@ -231,10 +231,10 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
                                     : GeometrySource::Layout;
             builder.geometry(name, *target, std::move(props), space, source);
         } else if (kind == "scroll-geometry" || kind == "scrollGeometry") {
-            // Phase 11c — scroll geometry tracing over a ScrollView.
-            // Accept both "scroll-geometry" (kebab-case, matches our
-            // other inspector spellings) and the camelCase form Swift
-            // / Kotlin facades pass through verbatim.
+            // Scroll geometry tracing over a ScrollView. Accept both
+            // "scroll-geometry" (kebab-case, matches our other
+            // inspector spellings) and the camelCase form Swift /
+            // Kotlin facades pass through verbatim.
             if (!m.hasObjectMember("node_id")) {
                 return make_error(req.id,
                     "Motion.startTrace: scroll-geometry requires 'node_id'");
@@ -372,13 +372,13 @@ void MotionInspector::broadcast_event(const SampleEvent& e) {
     params.addMember("kind", choc::value::createString(sample_kind_to_string(e.kind)));
     params.addMember("t", wire_number(e.t_seconds));
     params.addMember("frame", choc::value::createInt64(static_cast<int64_t>(e.frame)));
-    // Phase 7 stable identifiers — let clients align bursts on the
-    // wire the same way the fixture format aligns them.
+    // Stable identifiers let clients align bursts on the wire the same
+    // way the fixture format aligns them.
     params.addMember("trace_id", choc::value::createInt64(e.trace_id));
     params.addMember("metric_id", choc::value::createInt64(e.metric_id));
     params.addMember("burst_id", choc::value::createInt64(e.burst_id));
-    // Phase 10 Input events carry input_kind + view_id; without these
-    // the wire form loses the entire payload of the event.
+    // Input events carry input_kind + view_id; without these the wire
+    // form loses the entire payload of the event.
     if (e.kind == SampleEvent::Kind::Input) {
         params.addMember("input_kind", choc::value::createString(e.input_kind));
         params.addMember("view_id",    choc::value::createString(e.view_id));

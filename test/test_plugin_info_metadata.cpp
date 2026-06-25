@@ -1,7 +1,6 @@
-// Verifies the richer PluginInfo metadata shape (workstream 03 slice 3.7).
-// Format-level extraction (CLAP features → category) has unit-test
-// coverage here; per-format scanner-path validation lives with the
-// scanner tests.
+// Verifies the richer PluginInfo metadata shape. Format-level extraction
+// (CLAP features → category) has unit-test coverage here; per-format
+// scanner-path validation lives with the scanner tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/scan_blacklist.hpp>

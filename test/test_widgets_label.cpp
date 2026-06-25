@@ -1,6 +1,3 @@
-// test_widgets_label.cpp — extracted from test_widgets.cpp in the
-// 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
 // Label widget coverage (the largest single-widget cluster in
 // test_widgets.cpp). Covers text rendering / intrinsic_width /
 // intrinsic_height / line-height multiplier (#76) / line_clamp /
@@ -14,6 +11,10 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/text_shaper.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
+
+#include <string>
 
 #include <cmath>
 #include <cstdint>
@@ -254,7 +255,7 @@ TEST_CASE("Label intrinsic_height counts explicit newlines on multi_line labels"
 
 TEST_CASE("Label intrinsic_height ignores a trailing newline (no phantom line)",
           "[view][widget][internal-74][issue-1969]") {
-    // PR #1969 Codex P2 — a string ending with `\n` used to count an
+    // A string ending with `\n` used to count an
     // extra line in the `\n`-count loop ("Title\n" → 2). But
     // Label::paint()'s split-and-emit loop stops once `pos ==
     // display_text.size()`, so it draws exactly one line. Yoga was
@@ -487,8 +488,8 @@ TEST_CASE("Label intrinsic_width matches text after rebuild / re-measure",
 
 TEST_CASE("Label intrinsic_width handles vertical text direction",
           "[view][widget][issue-945][issue-943]") {
-    // pulp #943 P2 (#935 finding 1): when text_direction_ is vertical,
-    // paint() rotates the canvas 90° so the horizontal footprint is the
+    // pulp #943: when text_direction_ is vertical, paint() rotates the canvas
+    // 90° so the horizontal footprint is the
     // line height, not the shaped string advance. Reporting the advance
     // here would make Yoga reserve enormous width for a vertical label
     // and starve sibling columns.
@@ -517,10 +518,9 @@ TEST_CASE("Label intrinsic_width handles vertical text direction",
 
 TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
           "[view][widget][issue-945][issue-943]") {
-    // pulp #943 P2 (#935 finding 2): letter_spacing was multiplied by
-    // (display_text.size() - 1), counting raw UTF-8 bytes instead of
-    // code points. A 4-character CJK string takes 12 bytes in UTF-8,
-    // so spacing was over-applied 3x and the label inflated.
+    // pulp #943: letter_spacing must count code points, not raw UTF-8 bytes.
+    // A 4-character CJK string takes 12 bytes in UTF-8, so byte-counted spacing
+    // would be over-applied 3x and inflate the label.
     //
     // ASCII baseline — both strings are 4 ASCII chars, so byte count
     // and glyph count match. This anchors the comparison.
@@ -621,4 +621,150 @@ TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][wid
     REQUIRE(canvas.count(DrawCommand::Type::rotate) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
     REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).front().text == "Gain");
+}
+
+namespace {
+
+// Serialize the painted fill_text stream (per-line text + x/y baseline) so two
+// paints can be compared for byte-identical rendering output.
+std::string fill_text_signature(const RecordingCanvas& canvas) {
+    std::string sig;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::fill_text) {
+            sig += command.text;
+            sig += '@';
+            sig += std::to_string(command.f[0]);
+            sig += ',';
+            sig += std::to_string(command.f[1]);
+            sig += ';';
+        }
+    }
+    return sig;
+}
+
+// A multi-line, bounded-width Label that routes through the shaper soft-wrap
+// path (the one the cache covers). The text wraps to several lines at width 120.
+std::unique_ptr<Label> make_wrapped_label() {
+    auto label = std::make_unique<Label>(
+        "The quick brown fox jumps over the lazy dog near the river bank.");
+    label->set_multi_line(true);
+    label->set_font_size(13.0f);
+    label->set_bounds({0, 0, 120, 200});
+    return label;
+}
+
+}  // namespace
+
+TEST_CASE("Label reuses the cached shaped layout across identical paints",
+          "[view][widget][label-cache]") {
+    auto label = make_wrapped_label();
+
+    // First paint computes and caches the shaped layout (one prepare()).
+    const uint64_t before = text_shaper_prepare_call_count();
+    RecordingCanvas first;
+    label->paint(first);
+    const uint64_t after_first = text_shaper_prepare_call_count();
+    REQUIRE(after_first - before == 1);
+
+    // Sanity: it actually wrapped (multiple lines emitted via the shaper path).
+    REQUIRE(commands_of(first, DrawCommand::Type::fill_text).size() >= 2);
+
+    // Second identical paint must hit the cache: no further prepare().
+    RecordingCanvas second;
+    label->paint(second);
+    REQUIRE(text_shaper_prepare_call_count() - after_first == 0);
+
+    // And the rendered output must be byte-identical (behavior preserved).
+    REQUIRE(fill_text_signature(first) == fill_text_signature(second));
+}
+
+TEST_CASE("Label re-shapes when text changes", "[view][widget][label-cache]") {
+    auto label = make_wrapped_label();
+
+    RecordingCanvas warm;
+    label->paint(warm);  // populate cache
+    const uint64_t after_warm = text_shaper_prepare_call_count();
+
+    label->set_text("A completely different sentence that also needs to wrap here.");
+    RecordingCanvas after;
+    label->paint(after);
+
+    // Text change invalidates the key → exactly one fresh prepare().
+    REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
+}
+
+TEST_CASE("Label re-shapes when wrap width changes", "[view][widget][label-cache]") {
+    auto label = make_wrapped_label();
+
+    RecordingCanvas warm;
+    label->paint(warm);
+    const uint64_t after_warm = text_shaper_prepare_call_count();
+
+    // A resize changes bounds().width, which is part of the cache key.
+    label->set_bounds({0, 0, 80, 200});
+    RecordingCanvas resized;
+    label->paint(resized);
+    REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
+
+    // Painting again at the new width hits the cache (no further prepare()).
+    const uint64_t after_resize = text_shaper_prepare_call_count();
+    RecordingCanvas again;
+    label->paint(again);
+    REQUIRE(text_shaper_prepare_call_count() - after_resize == 0);
+}
+
+TEST_CASE("Label re-shapes when font size or line height changes",
+          "[view][widget][label-cache]") {
+    auto label = make_wrapped_label();
+
+    RecordingCanvas warm;
+    label->paint(warm);
+    uint64_t mark = text_shaper_prepare_call_count();
+
+    label->set_font_size(18.0f);
+    RecordingCanvas after_fs;
+    label->paint(after_fs);
+    REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+    mark = text_shaper_prepare_call_count();
+
+    label->set_line_height(40.0f);
+    RecordingCanvas after_lh;
+    label->paint(after_lh);
+    REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+}
+
+TEST_CASE("Label re-shapes when a font registration bumps the generation",
+          "[view][widget][label-cache]") {
+    // measure_segment() resamples the resolved typeface (and thus glyph
+    // advances / wrap points) whenever font_registration_generation() changes —
+    // e.g. an async register_font_url() completing after the first paint. The
+    // cache key snapshots that generation so a late registration invalidates the
+    // cached wrap instead of serving the fallback-measured layout forever.
+    auto label = make_wrapped_label();
+
+    RecordingCanvas warm;
+    label->paint(warm);  // shapes once against the current font set
+    const uint64_t after_warm = text_shaper_prepare_call_count();
+
+    // Simulate a process-global font-state mutation (what async font
+    // registration triggers) WITHOUT touching text / width / size / lh / break.
+    pulp::canvas::bump_font_registration_generation();
+
+    RecordingCanvas after;
+    label->paint(after);
+
+    // The generation bump alone must invalidate the cache → exactly one
+    // fresh prepare(). (Before the font_gen key field, this was 0 — stale.)
+    //
+    // This guarantee only holds when a real shaping backend is present. In a
+    // no-Skia / no-GPU build (uses_real_shaping() == false) the wrapped label
+    // measures via the character-width fallback, which never populates the
+    // soft-wrap shaped-layout cache — so a font-registration generation bump
+    // has no cached layout to invalidate and prepare() is not re-invoked. The
+    // fill_text assertion below still verifies the label re-paints in every
+    // build configuration.
+    if (pulp::canvas::global_text_shaper().uses_real_shaping()) {
+        REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
+    }
+    REQUIRE(commands_of(after, DrawCommand::Type::fill_text).size() >= 2);
 }

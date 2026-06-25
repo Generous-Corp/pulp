@@ -1,9 +1,9 @@
 // version_diag.hpp — Version diagnostics for `pulp doctor --versions`
 //
-// Issue #499 (Slice 1): Surface CLI/SDK/Plugin versions + detect skew
-// between the installed CLI and a project's `cli_min_version`. Pure
-// logic behind a thin I/O-free core plus render helpers — the core is
-// unit-testable without shelling out.
+// Surface CLI/SDK/Plugin versions + detect skew between the installed
+// CLI and a project's `cli_min_version`. Pure logic behind a thin
+// I/O-free core plus render helpers — the core is unit-testable without
+// shelling out.
 //
 // This header deliberately has no dependency on cli_common.hpp so the
 // unit-test binary (test_cli_version_diag) can compile just
@@ -46,7 +46,7 @@ Semver read_plugin_version(const fs::path& plugin_json_path);
 
 // Parse ".claude-plugin/plugin.json" -> min_cli_version field. Returns
 // empty Semver if the field is absent — older plugin builds shipped
-// without it, so this is forward-compatible by design (Slice 6, #551).
+// without it, so this is forward-compatible by design (#551).
 Semver read_plugin_min_cli_version(const fs::path& plugin_json_path);
 
 // Locate the plugin.json the diagnostic should report on, in order:
@@ -90,7 +90,7 @@ ExecutionPreflight analyze_execution_preflight(const Semver& cli,
 // skew lines in `pulp doctor --versions`. Populated by cmd_doctor from
 // `~/.pulp/projects.json` (or the `--scan-parents` ancestor walk) and
 // fed into VersionReport::analyze() so each project contributes its
-// own skew findings. See issue #552 (Slice 1b).
+// own skew findings (#552).
 struct ProjectEntry {
     fs::path path;               // canonical project root
     std::string name;            // display name (directory basename or custom)
@@ -106,7 +106,7 @@ struct ProjectEntry {
 struct VersionReport {
     Semver cli;                  // PULP_SDK_VERSION of the running binary
     Semver plugin;               // .claude-plugin/plugin.json "version"
-    Semver plugin_min_cli;       // .claude-plugin/plugin.json "min_cli_version" (Slice 6, #551)
+    Semver plugin_min_cli;       // .claude-plugin/plugin.json "min_cli_version" (#551)
     Semver project_sdk;          // project's own CMake/pulp.toml sdk_version
     Semver project_cli_min;      // project's pulp.toml cli_min_version
     fs::path project_root;       // for report lines
@@ -116,7 +116,7 @@ struct VersionReport {
     // ancestor projects surfaced by `--scan-parents`. See issue #552.
     std::vector<ProjectEntry> projects;
 
-    // Analyse and return user-visible findings. Rules (Slice 1 + 1b + 6):
+    // Analyse and return user-visible findings. Rules:
     //   - project_cli_min set AND project_cli_min > cli  -> Warn "upgrade CLI"
     //   - project_sdk set AND project_sdk > cli          -> Warn "CLI behind project SDK"
     //   - plugin_min_cli set AND plugin_min_cli > cli    -> Warn "upgrade CLI for plugin"

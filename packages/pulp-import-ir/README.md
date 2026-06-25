@@ -25,7 +25,7 @@ src/
 ├── lower-via-prop-applier.ts — IR → JSX-equivalent tree (consumed by @pulp/react)
 ├── adapters/
 │   └── claude-design-html/
-│       └── lower.ts         — first-spike adapter
+│       └── lower.ts         — Claude Design HTML adapter
 └── index.ts                 — public API
 ```
 
@@ -43,4 +43,4 @@ See `docs/guides/import-ir.md` for the full guide.
 
 ## License
 
-MIT — pulp #1486 spike.
+MIT.

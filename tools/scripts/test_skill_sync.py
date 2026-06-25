@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Fixture tests for skill_sync_check.py.
 
-The SKILL.md-sync gate that pairs the version-bump gate. Split out of
-`test_gates.py` (P9-NEW refactor, 2026-05) so it sits next to the
-version_bump cluster test modules; test bodies are byte-identical to
-their previous definitions.
+The SKILL.md-sync gate pairs with the version-bump gate and sits next to
+the version_bump cluster test modules.
 
 Runs standalone (`python3 tools/scripts/test_skill_sync.py`) or as part
 of the aggregate suite via `test_gates.py`.
@@ -49,11 +47,11 @@ class SkillSyncTests(GateFixtureTestCase):
         self.assertEqual(code, 0, msg=out)
         self.assertIn("bypassed", out)
 
-    # ── Regression tests for Codex P1/P2 review on the first merge ─────
+    # ── Regression tests for skill update matching ─────────────────────
 
     def test_skill_side_file_does_not_satisfy_md_requirement(self) -> None:
-        """Side files under the skill dir used to count as SKILL.md
-        updates (Codex P2). Now only SKILL.md counts."""
+        """Side files under the skill dir must not count as SKILL.md
+        updates. Only SKILL.md counts."""
         self.f.write("tools/cli/cmd_foo.cpp", "// added\nint x();\n")
         self.f.write(".agents/skills/cli-maintenance/notes.md",
                      "# scratch — not SKILL.md\n")

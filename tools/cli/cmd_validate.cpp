@@ -14,20 +14,18 @@
 #include <pulp/format/editor_ui.hpp>
 
 int cmd_validate(const std::vector<std::string>& args) {
-    // Parse flags first so invalid flags fail loud before we do any
-    // project-root / build-dir work. Codex P2 on PR #381 flagged that
-    // the shellout test couldn't actually distinguish `--strict` from
-    // any other unknown flag because flag parsing ran after the
-    // project-root check bail-out.
+    // Parse flags first so invalid flags fail loud before any project-root /
+    // build-dir work. The shellout test must distinguish `--strict` from any
+    // other unknown flag before the project-root check can bail out.
     bool run_all = false;
     bool json_output = false;
     bool screenshot = false;
     bool strict = false;   // #51: skipped-because-missing-tool ⇒ fail
     std::string report_path;
-    // Phase 5 (chainer plan, planning/2026-05-24-…): `--target` selects
-    // the macOS runtime validator(s) to run against a passed bundle.
-    // When set, we bypass the build-dir-walking format flow and run
-    // the targeted validators on the explicit bundle argument(s).
+    // `--target` selects the macOS runtime validator(s) to run against
+    // a passed bundle. When set, we bypass the build-dir-walking format
+    // flow and run the targeted validators on the explicit bundle
+    // argument(s).
     std::string target_name;
     std::vector<std::string> positional;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -63,7 +61,7 @@ int cmd_validate(const std::vector<std::string>& args) {
         }
     }
 
-    // ── --target dispatch (Phase 5 macOS runtime validators) ───────────
+    // ── --target dispatch ─────────────────────────────────────────────
     //
     // When --target is set, we run the requested validator(s) on the
     // bundle path(s) supplied as positional args and exit. We do NOT
@@ -261,7 +259,7 @@ int cmd_validate(const std::vector<std::string>& args) {
         }
     };
 
-    // ── CLAP validation ──���──────────────────────────────────────────────
+    // CLAP validation
 
     auto clap_dir = build_dir / "CLAP";
     if (fs::exists(clap_dir)) {
@@ -540,7 +538,7 @@ int cmd_validate(const std::vector<std::string>& args) {
 
     const bool strict_fail = strict && skipped_missing_tool > 0;
 
-    // ── JSON report output ───────��────────────────────────────��─────────
+    // JSON report output
 
     if (json_output || !report_path.empty()) {
         auto git_ref = exec_output("git -C \"" + root.string() + "\" rev-parse --short HEAD 2>/dev/null");

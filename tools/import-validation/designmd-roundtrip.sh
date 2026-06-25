@@ -10,7 +10,7 @@ set -euo pipefail
 
 PULP_DIR="${PULP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# pulp #2087 lesson — refuse to run on a stale checkout. Bypass with
+# Refuse to run on a stale checkout. Bypass with
 # PULP_FRESHNESS_BYPASS=1 to validate a feature branch's code instead.
 if ! ( cd "$PULP_DIR" && "$PULP_DIR/tools/scripts/check_workspace_freshness.sh" ); then
   echo "ERROR: refusing to run validation against stale checkout" >&2
@@ -86,10 +86,7 @@ TEST_BIN="$(find_test_exe pulp-test-design-import-designmd)"
 "$TEST_BIN" '[designmd]'
 green "DESIGN.md parser tests passed"
 
-# DESIGN.md has no screen output, so there is no screenshot-diff phase.
-# Phase 3 (post #1307) will add a round-trip emitter test that compares
-# the output of `export_designmd(parse_designmd(file).ir.tokens)` to a
-# canonical golden DESIGN.md — wire that here when it lands.
+# DESIGN.md has no screen output, so this harness runs parser checks only.
 
 if [[ $PARSER_ONLY -eq 1 ]]; then
   exit 0

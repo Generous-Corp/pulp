@@ -127,8 +127,8 @@ class ExpectedLibraryPath(unittest.TestCase):
         )
 
     def test_ios_device_arm64_keeps_arch_subdir(self):
-        # Phase iOS-D: device + simulator zips share build/ios-gpu/, so
-        # the arch subdir under Release/ must be preserved (not flattened).
+        # Device + simulator zips share build/ios-gpu/, so the arch subdir
+        # under Release/ must be preserved (not flattened).
         p = fetch_skia.expected_library_path("ios-device-arm64")
         self.assertEqual(
             str(p),
@@ -146,7 +146,7 @@ class ExpectedLibraryPath(unittest.TestCase):
 
 
 class IosMatrixRegistration(unittest.TestCase):
-    """Phase iOS-D: iOS matrix slices must be wired and arch-preserving."""
+    """iOS matrix slices must be wired and arch-preserving."""
 
     def test_ios_keys_present_in_matrix_map(self):
         self.assertIn("ios-device-arm64", fetch_skia.MATRIX_TO_MANIFEST)
@@ -518,7 +518,7 @@ class Sha256MismatchFails(unittest.TestCase):
 
 
 class IdempotencyStamp(unittest.TestCase):
-    """The `.skia-asset-sha256` stamp (pulp #2458 follow-up).
+    """The `.skia-asset-sha256` stamp prevents stale cached Skia.
 
     A self-hosted CI runner checks out `clean: false`, so a prior fetch's
     `external/skia-build/` persists. The fetch must be skipped when the

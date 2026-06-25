@@ -6,8 +6,7 @@
 // open a `ViewBridge` against the same Processor / StateStore the audio
 // render block runs against, and attach a `PluginViewHost` to the platform
 // view. `set_design_viewport` + `set_fixed_aspect_ratio` deliver the same
-// proportional / aspect-locked resize behavior Phase 3 added for standalone,
-// VST3, and CLAP.
+// proportional / aspect-locked resize behavior as standalone, VST3, and CLAP.
 
 #if defined(__APPLE__)
 #import <TargetConditionals.h>
@@ -345,9 +344,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         if (_viewHost) {
             pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
             _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
-            // Phase iOS-D.3b Slice 1: hand the host's live GpuSurface to the
-            // scripted-UI session so JS navigator.gpu / canvas.getContext(
-            // 'webgpu') routes through Pulp's Dawn instance instead of mocks.
+            // Hand the host's live GpuSurface to the scripted-UI session so
+            // JS navigator.gpu / canvas.getContext('webgpu') routes through
+            // Pulp's Dawn instance instead of mocks.
             if (auto* scripted = _bridge->scripted_ui()) {
                 scripted->attach_gpu_surface(_viewHost->gpu_surface());
                 if (_viewHost->gpu_surface()) {
@@ -367,7 +366,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         return;
     }
 
-    // Phase 3 viewport pin + aspect lock: paint the design at the host size.
+    // Viewport pin + aspect lock: paint the design at the host size.
     if (w > 0 && h > 0) {
         _viewHost->set_design_viewport(w, h);
         _viewHost->set_fixed_aspect_ratio(static_cast<float>(w) /
@@ -407,8 +406,8 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Settle driver / fallback for hosts that size us late: builds the deferred
     // GPU host once the view's bounds settle (or, on the final attempt, at
     // whatever size we have). We let the host own the window — no forced
-    // window resize here (Codex: forcing Logic's window fights its restore
-    // behavior). Once the host exists, just re-fit the design viewport.
+    // window resize here; forcing Logic's window fights its restore behavior.
+    // Once the host exists, just re-fit the design viewport.
     [self createViewHostIfReady];
     if (_viewHost) {
         [self resizeEditorToViewBounds];

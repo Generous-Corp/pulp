@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for compat_sync_check.py (#1029).
+"""Tests for compat_sync_check.py.
 
 Two layers:
     1. Unit-style — pure-Python evaluation of compute_findings,
@@ -477,8 +477,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_empty_section_tolerance_smoke(self) -> None:
-        """Critical: an empty compat.json section must NOT false-
-        positive while #1027 is still open."""
+        """Critical: an empty compat.json section must NOT false-positive."""
         # Touch widget_bridge.cpp (wildcard prefix → expands to all
         # KNOWN_PREFIXES). The compat-json requirement should pass
         # for every prefix because all sections are empty stubs. The
@@ -541,10 +540,10 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
     def test_unknown_kind_in_map_raises_at_load(self) -> None:
-        # pulp #1171 (Codex P2 on #1068) — a typo'd `kind` like "tests"
-        # used to be silently dropped, leaving CI green while a required
-        # compat-artifact gate was effectively disabled. The fix raises
-        # at config-load time so the misconfiguration fails loudly.
+        # A typo'd `kind` like "tests" used to be silently dropped, leaving
+        # CI green while a required compat-artifact gate was effectively
+        # disabled. The fix raises at config-load time so the
+        # misconfiguration fails loudly.
         cfg = self.tmp / "tools/scripts/compat_path_map.json"
         data = json.loads(cfg.read_text())
         data["paths"].setdefault("core/view/src/scroll_view.cpp", []).append(

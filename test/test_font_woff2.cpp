@@ -1,4 +1,4 @@
-// test_font_woff2.cpp — Pulp #2163, font v2 Slice 3.5.
+// test_font_woff2.cpp — WOFF2 structural rejection and decoder probing.
 //
 // Exercises the structural-rejection contract of
 // `pulp::canvas::register_font_woff2(...)` and the
@@ -9,7 +9,7 @@
 //
 // Building a real .woff2 fixture would require an actual encoder,
 // which Pulp does not ship. We test the structural surface only —
-// that's the point of Slice 3.5: even when full decompression is
+// that's the point of this contract: even when full decompression is
 // unavailable, callers can still reliably distinguish "this isn't a
 // WOFF2 file" from "this is a WOFF2 file but the build can't process
 // it" through `woff2_decoder_available()`.

@@ -1,14 +1,15 @@
 // Signal Graph implementation.
 //
-// Phase 0B: audio-thread reads happen against a CompiledGraph snapshot,
-// published via an atomic raw pointer. UI-thread topology mutations (add_*,
-// connect*, disconnect, remove_node) invalidate the snapshot; prepare()
-// rebuilds and publishes a fresh snapshot. Control-thread shared_ptr owners
-// keep retired snapshots alive until active process readers drain, avoiding
-// libstdc++'s lock-taking atomic shared_ptr path in process().
+// Audio-thread reads happen against a CompiledGraph snapshot published via an
+// atomic raw pointer. UI-thread topology mutations (add_*, connect*,
+// disconnect, remove_node) invalidate the snapshot; prepare() rebuilds and
+// publishes a fresh snapshot. Control-thread shared_ptr owners keep retired
+// snapshots alive until active process readers drain, avoiding libstdc++'s
+// lock-taking atomic shared_ptr path in process().
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
 #include <algorithm>
 #include <array>
@@ -180,9 +181,9 @@ std::string custom_node_key(std::string_view type_id, int version) {
     return key;
 }
 
-// Phase 5 — make a per-node opaque instance owned via shared_ptr, with the
-// type's destroy callback as the deleter (RAII). Returns nullptr for stateless
-// types (no `create`).
+// Make a per-node opaque instance owned via shared_ptr, with the type's destroy
+// callback as the deleter (RAII). Returns nullptr for stateless types (no
+// `create`).
 std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
     if (!type.create) return nullptr;
     void* raw = type.create();
@@ -787,6 +788,55 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
     };
 }
 
+int SignalGraph::prepared_max_block_size() const noexcept {
+    return live_ ? live_->max_block_size : 0;
+}
+
+std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->runtime.find(id);
+    if (it == live_->runtime.end()) return nullptr;
+    return it->second.gain.get();
+}
+
+PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->plugins.find(id);
+    if (it == live_->plugins.end()) return nullptr;
+    return it->second.get();
+}
+
+std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
+    return live_;  // aliases the live CompiledGraph as an opaque keepalive
+}
+
+std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
+    // Control/UI-thread read of the persistent per-node measurers. node_load_
+    // is only mutated on the control thread (compile_), so this is race-free
+    // against topology recompiles; the audio thread writes only the measurer
+    // objects' relaxed atomics, which snapshot() reads coherently.
+    // Filter to currently-present nodes so removed nodes' lingering measurers
+    // don't surface as phantom reports. The measurers are intentionally NOT
+    // erased from node_load_ (it is insert-only — see compile_): a
+    // retired-but-not-yet-drained snapshot may still hold raw
+    // NodeRuntime::load pointers into them, so erasing here would risk a
+    // use-after-free on the draining audio thread. Residual map growth is
+    // bounded by the number of distinct NodeIds the graph has ever held.
+    std::unordered_set<NodeId> live_ids;
+    live_ids.reserve(nodes_.size());
+    for (const auto& n : nodes_) live_ids.insert(n.id);
+
+    std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+    std::vector<NodeLoadReport> reports;
+    reports.reserve(node_load_.size());
+    for (const auto& [id, measurer] : node_load_) {
+        if (measurer && live_ids.count(id) != 0) {
+            reports.push_back(NodeLoadReport{id, measurer->snapshot()});
+        }
+    }
+    return reports;
+}
+
 SignalGraph::RuntimeBudgetReport
 SignalGraph::evaluate_optional_runtime_budget(
     runtime::RuntimeBudgetFrame& frame,
@@ -825,7 +875,7 @@ void SignalGraph::invalidate_live_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
-    live_raw_.store(nullptr, std::memory_order_release);
+    live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
@@ -888,13 +938,15 @@ void SignalGraph::retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot) {
 }
 
 void SignalGraph::prune_retired_snapshots_() {
-    if (active_process_readers_.load(std::memory_order_acquire) == 0) {
+    // Seq-cst pairs with ProcessReadGuard and live_raw_ publication so a
+    // writer cannot miss a reader that is about to load the retired snapshot.
+    if (active_process_readers_.load(std::memory_order_seq_cst) == 0) {
         retired_snapshots_.clear();
     }
 }
 
 void SignalGraph::wait_for_retired_snapshots_() {
-    while (active_process_readers_.load(std::memory_order_acquire) != 0) {
+    while (active_process_readers_.load(std::memory_order_seq_cst) != 0) {
         std::this_thread::yield();
     }
     retired_snapshots_.clear();
@@ -970,6 +1022,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
 
     for (auto& n : nodes_) {
         NodeRuntime rt;
+        // Resolve (or lazily create) this node's persistent load measurer.
+        // node_load_ only grows here, so the raw measurer pointer handed to the
+        // audio thread via NodeRuntime::load stays valid across snapshot swaps.
+        // Locked against a concurrent node_loads() poll on the UI thread.
+        {
+            std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+            auto& load_slot = node_load_[n.id];
+            if (!load_slot) {
+                load_slot = std::make_unique<audio::AudioProcessLoadMeasurer>();
+            }
+            rt.load = load_slot.get();
+        }
         const int out_ch = std::max(0, n.num_output_ports);
         const int in_ch  = std::max(0, n.num_input_ports);
         rt.output_data.assign(static_cast<size_t>(out_ch) * max_block_size, 0.f);
@@ -1017,11 +1081,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
                 if (n.custom_instance && type->process_instance) {
-                    // Phase 5 — bind the stateful processor. The lambda captures
-                    // the instance shared_ptr BY VALUE, so this snapshot keeps
-                    // the instance alive for its whole audio-thread lifetime
-                    // (same guarantee as cg->plugins[...] for plugin nodes). No
-                    // raw pointer into GraphNode is stored.
+                    // Bind the stateful processor. The lambda captures the
+                    // instance shared_ptr BY VALUE, so this snapshot keeps the
+                    // instance alive for its whole audio-thread lifetime (same
+                    // guarantee as cg->plugins[...] for plugin nodes). No raw
+                    // pointer into GraphNode is stored.
                     auto inst = n.custom_instance;
                     auto fn = type->process_instance;
                     cg->custom_processors[n.id] =
@@ -1085,11 +1149,64 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     }
 
     compute_latencies_for_(*cg, connections_);
+
+    // Build the canonical-executor routing for this snapshot when the topology
+    // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
+    // (valid for cg's whole lifetime), so the embedded snapshot needs no
+    // keepalive. Ineligible graphs leave routing_valid false and use the walk.
+    {
+        CompiledGraph& cgr = *cg;
+        cg->routing_valid = build_executor_snapshot(
+            nodes_, connections_,
+            [&cgr](NodeId id) -> std::atomic<float>* {
+                auto it = cgr.runtime.find(id);
+                return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
+            },
+            [&cgr](NodeId id) -> PluginSlot* {
+                auto it = cgr.plugins.find(id);
+                return it == cgr.plugins.end() ? nullptr : it->second.get();
+            },
+            cg->routing_plugin_ctx, cg->routing_plugin_scratch,
+            cg->routing_snapshot);
+        // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
+        // snapshot via RCU — never resized under an in-flight reader).
+        if (cg->routing_valid && max_block_size > 0) {
+            cg->routing_valid = cg->exec_pool.reset(
+                cg->routing_snapshot.buffer_slot_count(),
+                static_cast<std::uint32_t>(max_block_size),
+                cg->routing_snapshot.buffer_assignment().connection_delay_samples);
+        }
+        // Per-snapshot MIDI scratch + the MidiInput/MidiOutput node index lists
+        // the routed dispatch bridges to the mailboxes. Built only when the
+        // routed plan carries MIDI nodes, so audio-only graphs allocate none.
+        cg->routing_midi_inputs.clear();
+        cg->routing_midi_outputs.clear();
+        if (cg->routing_valid) {
+            const auto& plan = cg->routing_snapshot.plan();
+            bool plan_has_midi = false;
+            for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+                const auto kind = plan.nodes[i].kind;
+                if (kind == graph::GraphRuntimeNodeKind::MidiInput) {
+                    cg->routing_midi_inputs.push_back({i, plan.nodes[i].id});
+                    plan_has_midi = true;
+                } else if (kind == graph::GraphRuntimeNodeKind::MidiOutput) {
+                    cg->routing_midi_outputs.push_back({i, plan.nodes[i].id});
+                    plan_has_midi = true;
+                } else if (plan.nodes[i].event_input_ports > 0 ||
+                           plan.nodes[i].event_output_ports > 0) {
+                    plan_has_midi = true;  // a plugin carrying MIDI edges
+                }
+            }
+            if (plan_has_midi) {
+                cg->routing_valid = cg->routing_midi.reset(plan.node_count());
+            }
+        }
+    }
     return cg;
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
-    live_raw_.store(nullptr, std::memory_order_release);
+    live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
@@ -1175,9 +1292,9 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
         }
     }
 
-    // Phase 5 — create/prepare stateful custom-node instances on this (UI)
-    // thread before the snapshot is published, mirroring the plugin step above.
-    // A freshly-loaded state blob is applied exactly once via load_state.
+    // Create/prepare stateful custom-node instances on this UI thread before
+    // the snapshot is published, mirroring the plugin step above. A
+    // freshly-loaded state blob is applied exactly once via load_state.
     for (auto& n : nodes_) {
         if (n.type != NodeType::Custom) continue;
         const CustomNodeType* type =
@@ -1204,7 +1321,7 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     publish_prepared_stats_(*cg);
     live_ = std::move(cg);
-    live_raw_.store(live_.get(), std::memory_order_release);
+    live_raw_.store(live_.get(), std::memory_order_seq_cst);
     prune_retired_snapshots_();
     return true;
 }
@@ -1304,14 +1421,14 @@ SignalGraph::validate_generated_graph(int max_block_size) const {
 }
 
 void SignalGraph::release() {
-    live_raw_.store(nullptr, std::memory_order_release);
+    live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     wait_for_retired_snapshots_();
 
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
-    // Phase 5 — release stateful custom instances (UI thread), mirroring the
-    // plugin release above. The instance object stays alive until its snapshots
-    // also drop; release() just lets the type free scratch.
+    // Release stateful custom instances on the UI thread, mirroring the plugin
+    // release above. The instance object stays alive until its snapshots also
+    // drop; release() just lets the type free scratch.
     for (auto& n : nodes_) {
         if (n.type != NodeType::Custom || !n.custom_instance) continue;
         if (const auto* type =
@@ -1363,15 +1480,17 @@ void SignalGraph::process(audio::BufferView<float>& output,
                           int num_samples) {
     struct ProcessReadGuard {
         explicit ProcessReadGuard(SignalGraph& owner) noexcept : owner_(owner) {
-            owner_.active_process_readers_.fetch_add(1, std::memory_order_acq_rel);
+            // See prune_retired_snapshots_(): this reader count and the raw
+            // snapshot pointer form one RCU-style lifetime handshake.
+            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
         }
         ~ProcessReadGuard() noexcept {
-            owner_.active_process_readers_.fetch_sub(1, std::memory_order_acq_rel);
+            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
         }
         SignalGraph& owner_;
     } read_guard{*this};
 
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0) return;
@@ -1380,6 +1499,88 @@ void SignalGraph::process(audio::BufferView<float>& output,
             std::memset(output.channel_ptr(c), 0,
                         sizeof(float) * static_cast<size_t>(num_samples));
         return;
+    }
+
+    // Canonical-executor path (opt-in): for an eligible snapshot, route the
+    // block through GraphRuntimeExecutor instead of the legacy walk. The
+    // executor zeroes the output bus and accumulates AudioOutput itself, so this
+    // returns before the legacy zero+walk below. The dispatch stays inside the
+    // ProcessReadGuard, so `cg` (and its routing snapshot + gain atomics) is
+    // pinned for the whole routed call.
+    if (canonical_executor_routing_enabled_.load(std::memory_order_relaxed) &&
+        cg->routing_valid &&
+        cg->exec_pool.fits(cg->routing_snapshot, static_cast<std::uint32_t>(num_samples))) {
+        pulp::format::BusBufferSet buses;
+        if (buses.add_input("main", input, pulp::format::BusRole::Main) &&
+            buses.add_output("main", output, pulp::format::BusRole::Main)) {
+            pulp::format::ProcessBlock block;
+            block.sample_rate = cg->sample_rate;
+            block.frame_count = static_cast<std::uint32_t>(num_samples);
+            block.buses = &buses;
+
+            const bool has_midi = cg->routing_midi.node_count() > 0;
+            // Bridge MIDI ingress: copy each MidiInput node's freshly-injected
+            // mailbox snapshot into its routed MIDI-output buffer (the same
+            // unseen-sequence dedup the legacy walk applies), so the executor's
+            // MIDI gather sees it. The executor never touches a node's MIDI
+            // output, so this pre-fill survives the walk. The consumed sequence
+            // is captured in `pending_seq` and committed to
+            // midi_input_sequence_seen only after the dispatch succeeds — a
+            // fallback to the legacy walk must re-consume the same block.
+            if (has_midi) {
+                for (auto& mi : cg->routing_midi_inputs) {
+                    mi.pending_seq = 0;
+                    midi::MidiBuffer* out_buf = cg->routing_midi.out(mi.plan_index);
+                    if (out_buf == nullptr) continue;
+                    clear_midi_block(*out_buf);
+                    cg->routing_midi.set_out_incomplete(mi.plan_index, false);
+                    auto rt_it = cg->runtime.find(mi.id);
+                    if (rt_it == cg->runtime.end() || !rt_it->second.midi_input_mailbox) {
+                        continue;
+                    }
+                    const auto& injected = rt_it->second.midi_input_mailbox->published.read();
+                    if (injected.sequence != 0 &&
+                        injected.sequence != rt_it->second.midi_input_sequence_seen) {
+                        cg->routing_midi.set_out_incomplete(
+                            mi.plan_index, !injected.copy_to_midi(*out_buf));
+                        mi.pending_seq = injected.sequence;
+                    }
+                }
+            }
+
+            if (block.validate() &&
+                executor_.process_routed(
+                    block, cg->routing_snapshot, cg->exec_pool,
+                    has_midi ? &cg->routing_midi : nullptr).ok()) {
+                if (has_midi) {
+                    // Commit the consumed mailbox sequences now that routing
+                    // succeeded.
+                    for (const auto& mi : cg->routing_midi_inputs) {
+                        if (mi.pending_seq == 0) continue;
+                        auto rt_it = cg->runtime.find(mi.id);
+                        if (rt_it != cg->runtime.end()) {
+                            rt_it->second.midi_input_sequence_seen = mi.pending_seq;
+                        }
+                    }
+                    // Bridge MIDI egress: publish each MidiOutput node's gathered
+                    // routed MIDI-input buffer to its mailbox for extract_midi(),
+                    // carrying the same incompleteness the legacy walk reports.
+                    for (const auto& mo : cg->routing_midi_outputs) {
+                        midi::MidiBuffer* in_buf = cg->routing_midi.in(mo.plan_index);
+                        auto rt_it = cg->runtime.find(mo.id);
+                        if (in_buf == nullptr || rt_it == cg->runtime.end() ||
+                            !rt_it->second.midi_output_mailbox) {
+                            continue;
+                        }
+                        cg->midi_publish_scratch.set_from_midi(
+                            *in_buf, 0, cg->routing_midi.in_incomplete(mo.plan_index));
+                        rt_it->second.midi_output_mailbox->write(cg->midi_publish_scratch);
+                    }
+                }
+                return;
+            }
+        }
+        // Any setup failure falls through to the legacy walk (safe).
     }
 
     // Clear the final destination; AudioOutput nodes accumulate into it.
@@ -1472,7 +1673,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
             }
         }
 
-        // 3. Produce output based on node type.
+        // 3. Produce output based on node type. Wrap the node's work in its
+        // persistent load measurer (relaxed-atomic begin()/end(); RT-safe) so
+        // per-node CPU load is attributable via node_loads().
+        if (rt.load) rt.load->begin(num_samples, static_cast<float>(cg->sample_rate));
         switch (shape.type) {
             case NodeType::AudioInput: {
                 const int chs = std::min(
@@ -1491,12 +1695,12 @@ void SignalGraph::process(audio::BufferView<float>& output,
             case NodeType::Plugin: {
                 auto pit = cg->plugins.find(id);
                 if (pit == cg->plugins.end() || !pit->second) {
-                    // Issue #491 P2 bonus: graph_serializer rehydration
-                    // creates a "placeholder" Plugin node when the saved
-                    // plugin can't be resolved (missing / moved / wrong
-                    // format). Without an explicit branch here, output
-                    // scratch keeps whatever stale data it carried —
-                    // audible artifacts on the next AudioOutput gather.
+                    // GraphSerializer rehydration creates a placeholder Plugin
+                    // node when the saved plugin can't be resolved (missing,
+                    // moved, or wrong format). Without an explicit branch
+                    // here, output scratch keeps whatever stale data it
+                    // carried, causing audible artifacts on the next
+                    // AudioOutput gather.
                     // Deterministic fallback: pass input → output when
                     // channel counts match, zero-fill when they don't.
                     pass_through_or_zero(rt);
@@ -1557,12 +1761,12 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         float mN = c.automation_range_lo
                             + sN * (c.automation_range_hi - c.automation_range_lo);
 
-                        // Item 4.6 — per-source linear slew. The user
-                        // declares automation_smoothing_ms; we limit how
-                        // far the delivered value can move per sample at
-                        // that ramp speed. State (last_value/primed)
-                        // lives on the parallel ConnectionDelay so it
-                        // survives the next block.
+                        // Per-source linear slew. The user declares
+                        // automation_smoothing_ms; we limit how far the
+                        // delivered value can move per sample at that ramp
+                        // speed. State (last_value/primed) lives on the
+                        // parallel ConnectionDelay so it survives the next
+                        // block.
                         if (c.automation_smoothing_ms > 0.0f
                             && cg->sample_rate > 0.0
                             && ci < cg->connection_delays.size()) {
@@ -1749,9 +1953,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
                     {
                         .info = {
-                            .name = "Graph Plugin In",
+                            .name = "Plugin Node In",
                             .index = 0,
                             .direction = format::BusDirection::Input,
+                            // bus label for a plugin node's main I/O inside a SignalGraph
                             .role = format::BusRole::Main,
                             .declared_channels =
                                 static_cast<int>(in_c.num_channels()),
@@ -1764,7 +1969,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
                     {
                         .info = {
-                            .name = "Graph Plugin Out",
+                            .name = "Plugin Node Out",
                             .index = 0,
                             .direction = format::BusDirection::Output,
                             .role = format::BusRole::Main,
@@ -1838,6 +2043,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 }
                 break;
         }
+        if (rt.load) rt.load->end();
     }
 
     // Capture each feedback source's current block for the *next* block.
@@ -1896,7 +2102,7 @@ float SignalGraph::node_gain(NodeId id) const {
     return n->gain;
 }
 
-// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+// Drag-add helper.
 NodeId add_plugin_node_from_drop(SignalGraph& graph,
                                  const PluginInfo& info,
                                  bool* loaded_out)

@@ -1,7 +1,7 @@
-// Tests for the Pulp → Linux AT-SPI2 mapping table
-// (workstream 04 slice L7a-2). Pure-constant checks — the actual AT-SPI
-// provider lives in core/view/platform/linux/accessibility_linux.cpp and
-// is validated per platform (real AT stack) by VM integration tests.
+// Tests for the Pulp → Linux AT-SPI2 mapping table.
+// Pure-constant checks; the actual AT-SPI provider lives in
+// core/view/platform/linux/accessibility_linux.cpp and is validated per platform
+// (real AT stack) by VM integration tests.
 //
 // These lock the AtspiRole NUMBERS so a future edit can't silently regress
 // to the legacy ATK AtkRole values the pre-L7 stub hard-coded (AtkRole and

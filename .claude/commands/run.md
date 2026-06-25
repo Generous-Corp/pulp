@@ -15,7 +15,8 @@ Examples:
 ```bash
 pulp run                          # launch default standalone
 pulp run PulpGain                 # launch specific plugin standalone
-pulp run -- --screenshot /tmp/out.png  # capture screenshot instead
+pulp run --headless --screenshot /tmp/out.png  # capture screenshot instead
+pulp run PulpGain -- --debug-port=9222         # pass args to launched binary
 ```
 
 If the binary doesn't exist, build first with `/build`.

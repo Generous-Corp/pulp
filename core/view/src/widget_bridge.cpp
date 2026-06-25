@@ -67,16 +67,13 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 
 } // namespace
 
-// pulp #1006 — `on(id, eventName, fn)` is the JS-side hook that callers
-// (notably @pulp/react's prop-applier turning JSX `onClick={fn}` into a
-// bridge subscription) use to register event callbacks. Storing the fn
-// in __callbacks__ is necessary but not sufficient: events that the
-// native side fires through View::on_click / on_hover_enter /
-// on_pointer_event require an explicit `registerClick(id)` /
-// `registerHover(id)` / `registerPointer(id)` to wire the View
-// callback. Without that wiring real NSEvent / Win32 / X11 clicks
-// reach View::on_mouse_down/up but never trigger __dispatch__('click'),
-// so the JS handler never runs.
+// `on(id, eventName, fn)` is the JS-side hook callers use to register event
+// callbacks. Storing the function in __callbacks__ is necessary but not
+// sufficient: events fired through View::on_click, on_hover_enter, or
+// on_pointer_event require an explicit `registerClick(id)`, `registerHover(id)`,
+// or `registerPointer(id)` to wire the native View callback. Without that
+// wiring, real platform clicks reach View::on_mouse_down/up but never trigger
+// __dispatch__('click'), so the JS handler never runs.
 //
 // The fix: when JS subscribes to a known event name, transparently
 // invoke the matching native registrar (idempotent per (id, group)
@@ -87,17 +84,8 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 static const char* kJSPreamble = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
-// pulp #1XXX — __dispatch__ used to let any exception thrown from a
-// React handler propagate out of the JS engine's evaluate(), which
-// then unwound the C++ caller and (most damagingly) killed the
-// requestAnimationFrame self-rescheduling chain. Symptom: any tiny
-// throw from a rAF tick (a stale ref, a missing prop) and the whole
-// animation loop went dead, only restarting when an unrelated event
-// (e.g. mouse-move) ran the loop again. Wrap every handler in
-// try/catch and surface the error via __dispatchError__ if defined,
-// so handlers can throw without halting the world.
 //
-// Also fan out events targeting the synthetic '__global__' id into
+// Fan out events targeting the synthetic '__global__' id into
 // window._listeners[eventName] — `window.addEventListener('keydown',
 // fn)` is the standard DOM API, but without this fan-out the native
 // keydown only fed __callbacks__['__global__:keydown'] (a per-id
@@ -108,6 +96,11 @@ function __dispatch__(id, eventName) {
     var key = id + ':' + eventName;
     var cb = __callbacks__[key];
     if (cb) {
+        // Keep handler exceptions inside the JS dispatch boundary. If a React
+        // handler throws out of evaluate(), it can unwind the C++ caller and
+        // kill requestAnimationFrame's self-rescheduling chain. Surface the
+        // error via __dispatchError__ if defined so handlers can throw without
+        // halting the frame loop.
         try { cb.apply(null, args); }
         catch (e) {
             if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
@@ -130,12 +123,11 @@ function __dispatch__(id, eventName) {
             }
         }
     }
-    // pulp #2128 follow-up — fan to document-level listeners. React
-    // click-outside patterns (`document.addEventListener('mousedown',
-    // onDoc)`) are the common close-the-popover idiom; the framework
-    // fires synthetic outside-click events on Esc / overlay dismiss
-    // through this path, so any React popover using the pattern closes
-    // without needing per-app wiring.
+    // Fan out to document-level listeners. React click-outside patterns
+    // (`document.addEventListener('mousedown', onDoc)`) are the common
+    // close-the-popover idiom; the framework fires synthetic outside-click
+    // events on Esc / overlay dismiss through this path, so any React popover
+    // using the pattern closes without per-app wiring.
     if (id === 'document' && typeof document !== 'undefined' && document.dispatchEvent) {
         var devt = args && args.length ? args[0] : {};
         if (devt && typeof devt === 'object') {
@@ -143,16 +135,12 @@ function __dispatch__(id, eventName) {
             document.dispatchEvent(devt);
         }
     }
-    // pulp jsx-instrument-import 2026-05-17 — for pointer/mouse/click
-    // events, ALSO call dispatchEvent on the JS Element for `id`. This
-    // bypasses the single-slot __callbacks__[id:event] table that
-    // _registerNativeEvent clobbers when React-DOM calls
-    // element.addEventListener(...). Without this, native NSEvent →
-    // bridge dispatch fires the on() callback (which may be overwritten)
-    // but never re-enters the DOM bubble walk where React-DOM's
-    // delegated root listener actually lives. Per Codex high-reasoning
-    // consult: "separate native DOM event dispatch from the low-level
-    // on() callback table."
+    // For pointer/mouse/click events, also call dispatchEvent on the JS Element
+    // for `id`. This bypasses the single-slot __callbacks__[id:event] table
+    // that _registerNativeEvent can clobber when React-DOM calls
+    // element.addEventListener(...). Without this, native platform events fire
+    // the low-level on() callback but never re-enter the DOM bubble walk where
+    // React-DOM's delegated root listener lives.
     if (typeof __nativeElements__ !== 'undefined') {
         var el = __nativeElements__[id];
         if (typeof globalThis.__pulpDispatchHits__ === 'undefined') globalThis.__pulpDispatchHits__ = { byType: {}, missingElement: 0, dispatched: 0, rootListenersFired: 0, lastErr: null, total: 0 };
@@ -187,7 +175,7 @@ function __dispatch__(id, eventName) {
                 stats.lastPathLen = pathLen;
                 stats.lastRootInPath = rootInPath;
                 stats.lastRootListeners = rootListeners;
-                // Verbose log gated on PULP_DEBUG_DISP — eats stderr fast on heavy drags
+                // Verbose dispatch log is gated on __spectrLog being present.
                 if (eventName === 'pointerdown' || eventName === 'mousedown' || eventName === 'click') {
                     if (typeof __spectrLog === 'function') {
                         __spectrLog('[disp] ' + eventName + ' id=' + id + ' pathLen=' + pathLen + ' rootInPath=' + rootInPath + ' rootListeners=' + rootListeners);
@@ -263,24 +251,22 @@ function on(id, eventName, fn) {
                eventName === 'gestureend') {
         __ensureNativeRegistered__(id, 'gesture');
     } else if (eventName === 'wheel') {
-        // pulp #1XXX — Spectr's trackpad-zoom handler binds via
-        // addEventListener('wheel', fn) which routes through on(id,
-        // 'wheel', fn). Without this case the JS callback is stored
-        // but the C++ registerWheel(id) is never invoked, so wheel
-        // events never reach the JS handler. Critical for trackpad
-        // zoom on any wrap-div that subscribes via 'wheel'.
+        // Wheel subscriptions route through on(id, 'wheel', fn). Without this
+        // case the JS callback is stored but registerWheel(id) is never
+        // invoked, so wheel events never reach the JS handler. This is
+        // critical for trackpad zoom on any wrapper div that subscribes via
+        // 'wheel'.
         __ensureNativeRegistered__(id, 'wheel');
     }
 }
 )";
 
-// pulp #1XXX — Window event-listener shim installed AFTER the
-// web-compat-document.js prelude (which re-declares `var window = {...}`
-// and would clobber any addEventListener we installed earlier). This
-// shim is the minimal install needed for `__dispatch__('__global__',
-// 'keydown', ...)` fan-out to reach `window.addEventListener('keydown',
-// fn)` listeners. Spectr's `e.key === 'Escape'` flow depends on this.
-// Idempotent via the `__pulpListenerShim__` marker — re-eval safe.
+// Window event-listener shim installed after the web-compat-document.js prelude
+// because that prelude re-declares `var window = {...}` and would clobber any
+// listener hooks installed earlier. This is the minimal install needed for
+// `__dispatch__('__global__', 'keydown', ...)` fan-out to reach
+// `window.addEventListener('keydown', fn)` listeners. Idempotent via the
+// `__pulpListenerShim__` marker, so re-eval is safe.
 static const char* kWindowListenerShim = R"(
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 if (!globalThis.window.__pulpListenerShim__) {
@@ -309,12 +295,9 @@ if (!globalThis.window.__pulpListenerShim__) {
 }
 )";
 
-// pulp #745: kDomOpsInit lived here as an inline C-string copy of
-// core/view/js/web-compat-dom-ops.js. Both sources had drifted (the
-// inline copy carried DocumentFragment flatten paths the standalone
-// file lacked); only the inline copy was actually evaluated. The JS
-// file is now the single source of truth and gets evaluated by the
-// constructor along with the rest of the prelude chain.
+// DOM mutation methods live in core/view/js/web-compat-dom-ops.js. That JS file
+// is the single source of truth and gets evaluated by the constructor along
+// with the rest of the prelude chain.
 
 static void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context) {
     try {
@@ -322,7 +305,7 @@ static void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, cons
         // Pump microtasks so React setState commits (and any queueMicrotask /
         // Promise.then continuations scheduled by the handler) before the next
         // event arrives. Without this, drag-style interactions see stale state
-        // on the immediately-following pointermove and silently bail; see #1923.
+        // on the immediately-following pointermove and silently bail.
         engine.pump_message_loop();
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
@@ -342,7 +325,7 @@ static void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
         // Pump microtasks so React setState commits (and any queueMicrotask /
         // Promise.then continuations scheduled by the handler) before the next
         // event arrives. Without this, drag-style interactions see stale state
-        // on the immediately-following pointermove and silently bail; see #1923.
+        // on the immediately-following pointermove and silently bail.
         engine->pump_message_loop();
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
@@ -370,15 +353,12 @@ static void eval_or_throw(ScriptEngine& engine, const char* name, const std::str
 // deliver key events and document-level events without each app needing
 // to wire its own `View::on_global_key` lambda.
 //
-// recursive_mutex (not plain mutex): the `dispatch_*` helpers below
-// hold the lock for the full fan-out — including the call into each
-// bridge's `forward_key_event` / JS evaluation — to address Codex P1
-// (PR #2137 / #2139) that a snapshot-then-unlock pattern UAFs if a
-// bridge is destroyed on another thread mid-iteration. Holding during
-// dispatch is safe: Pulp's standard bridge ctor/dtor lifecycle is
-// strictly host-driven (never invoked from JS), and recursive_mutex
-// defensively tolerates a future JS-callback path that might create
-// or destroy a bridge on the same thread without deadlocking.
+// recursive_mutex (not plain mutex): the `dispatch_*` helpers below hold the
+// lock for the full fan-out, including the call into each bridge's
+// `forward_key_event` / JS evaluation. A snapshot-then-unlock pattern can UAF if
+// a bridge is destroyed on another thread mid-iteration. Holding during dispatch
+// is safe: the standard bridge ctor/dtor lifecycle is host-driven, and
+// recursive_mutex defensively tolerates same-thread reentry.
 namespace {
 std::recursive_mutex& all_bridges_mutex() {
     static std::recursive_mutex m;
@@ -405,7 +385,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // schedule a second paint, because the only way out of `request_repaint()`
     // is `repaint_callback_`. Hosts that need a custom invalidator (the
     // standalone window's top-level editor) replace this via
-    // `set_repaint_callback`. See pulp #899.
+    // `set_repaint_callback`.
     //
     // Capture-by-reference is sound: the bridge already holds `View& root_`
     // as a member and cannot outlive `root` without UB. The lambda lives at
@@ -416,76 +396,58 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);
-    // P5-7 follow-up — Events + Pointer-capture (P2b) extracted from
-    // web-compat-element.js. Must eval AFTER the parent so the Element
-    // constructor + prototype are already defined when the extracted
-    // prototype overrides install.
+    // Events + pointer-capture helpers must eval after web_compat_element so
+    // the Element constructor and prototype exist before overrides install.
     eval_or_throw(engine_, "web_compat_element_events", preludes::web_compat_element_events);
     eval_or_throw(engine_, "web_compat_canvas", preludes::web_compat_canvas);
-    // P5-6 first cut — native GPU canvas helpers extracted from
-    // web-compat-canvas.js. Must eval AFTER the canvas core so
-    // CanvasRenderingContext2D + window.pulp.gpu are in scope when
+    // Native GPU canvas helpers must eval after the canvas core so
+    // CanvasRenderingContext2D and window.pulp.gpu are in scope when
     // __ensurePulpGpuHelpers / getContext("webgpu") run.
     eval_or_throw(engine_, "web_compat_canvas_gpu", preludes::web_compat_canvas_gpu);
-    // P5-6 follow-up — _PulpCanvasMatrix DOMMatrix-compat helper +
-    // Canvas2D API gap closures (measureText / drawImage /
-    // setLineDash / getLineDash / getImageData / putImageData).
-    // Must eval AFTER web_compat_canvas so the
-    // CanvasRenderingContext2D constructor + prototype are in scope.
+    // _PulpCanvasMatrix DOMMatrix-compat helper plus Canvas2D API closures
+    // must eval after web_compat_canvas so the CanvasRenderingContext2D
+    // constructor and prototype are in scope.
     eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
     eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
-    // P5-5 — per-domain `_applyProperty` handler modules. The former
-    // monolithic per-CSS-property switch is split into layout / paint /
-    // typography / transform / misc handlers; web-compat-style-decl.js's
-    // `_applyProperty` is now a thin dispatcher that calls each handler
-    // (`_applyLayoutProp` etc.) in turn. The handlers are plain function
-    // declarations the dispatcher resolves at call time, so they MUST
-    // eval AFTER style_decl and before any consumer triggers a style
-    // apply (the helpers IIFE only installs setters; it does not call
-    // `_applyProperty` at install time, so the order vs. helpers below
-    // is not load-bearing — but keeping them adjacent is clearer).
+    // Per-domain `_applyProperty` handler modules. The property switch is split
+    // into layout / paint / typography / transform / misc handlers;
+    // web-compat-style-decl.js's `_applyProperty` is a thin dispatcher that
+    // resolves those function declarations at call time. Evaluate handlers
+    // after style_decl and before any consumer can trigger a style apply.
     eval_or_throw(engine_, "web_compat_style_decl_layout", preludes::web_compat_style_decl_layout);
     eval_or_throw(engine_, "web_compat_style_decl_paint", preludes::web_compat_style_decl_paint);
     eval_or_throw(engine_, "web_compat_style_decl_typography", preludes::web_compat_style_decl_typography);
     eval_or_throw(engine_, "web_compat_style_decl_transform", preludes::web_compat_style_decl_transform);
     eval_or_throw(engine_, "web_compat_style_decl_misc", preludes::web_compat_style_decl_misc);
-    // P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
-    // setProperty/getPropertyValue/removeProperty extracted out of
-    // web-compat-style-decl.js. Must eval AFTER style_decl so the
-    // CSSStyleDeclaration constructor + _applyProperty prototype
-    // method are in scope when the IIFE walks __cssProperties__ and
-    // installs the per-property reflection.
+    // CSSStyleDeclaration helper installation must eval after style_decl so the
+    // constructor and _applyProperty prototype method exist when the IIFE walks
+    // __cssProperties__ and installs per-property reflection.
     eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
-    // P5-7 first cut — CSS selector engine extracted from
-    // web-compat-document.js. Must eval AFTER document + Element so
-    // the underscore-prefixed selector helpers (_parseSelector,
-    // _matchesSelector, _querySelector, _findMatch, etc.) are
-    // resolvable when document.querySelector / .querySelectorAll
-    // dispatch into them.
+    // CSS selector engine must eval after document and Element so the
+    // selector helpers are resolvable when document.querySelector /
+    // .querySelectorAll dispatch into them.
     eval_or_throw(engine_, "web_compat_document_selectors", preludes::web_compat_document_selectors);
-    // P5-7 follow-up — WebGPU mock factories. Must eval AFTER
-    // document so GPU* usage constants (GPUTextureUsage etc.) are in
-    // scope when the factory bodies resolve them lazily at call time.
+    // WebGPU mock factories must eval after document so GPU* usage constants
+    // are in scope when factory bodies resolve them lazily at call time.
     eval_or_throw(engine_, "web_compat_document_gpu_mock", preludes::web_compat_document_gpu_mock);
     eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
-    // pulp #745 — DOM mutation methods (appendChild / removeChild / etc.).
-    // Single source of truth lives in core/view/js/web-compat-dom-ops.js.
+    // DOM mutation methods (appendChild / removeChild / etc.). Single source
+    // of truth lives in core/view/js/web-compat-dom-ops.js.
     // The JS file's idempotency guard (`__pulp_dom_ops__` marker on the
     // prototype methods) makes a re-eval a no-op, which matters because
     // load_script callers used to re-trigger this initialization manually
-    // before the consolidation. See pulp #745.
+    // before the consolidation.
     eval_or_throw(engine_, "web_compat_dom_ops", preludes::web_compat_dom_ops);
-    // pulp #468 — observer no-ops + scheduler shims so React 18 (and any
-    // other framework that feature-detects MutationObserver / MessageChannel
-    // / queueMicrotask) finds the constructors it expects on the global.
+    // Observer no-ops and scheduler shims so React 18, and any other framework
+    // that feature-detects MutationObserver / MessageChannel / queueMicrotask,
+    // finds the constructors it expects on the global.
     eval_or_throw(engine_, "web_compat_observers", preludes::web_compat_observers);
     eval_or_throw(engine_, "web_compat_scheduler", preludes::web_compat_scheduler);
-    // pulp #468 — DOM construction + walker for the Claude Design
-    // `--execute-bundle` import lane. Hides itself behind
-    // `globalThis.__pulpImportRuntime__` so non-import scripts don't
-    // see new globals.
+    // DOM construction and walker for the Claude Design `--execute-bundle`
+    // import lane. Hides itself behind `globalThis.__pulpImportRuntime__` so
+    // non-import scripts do not see new globals.
     eval_or_throw(engine_, "import_runtime", preludes::import_runtime);
     // Install the window event-listener shim LAST so it survives any
     // `var window = {...}` reassignment performed by the preludes above
@@ -502,10 +464,9 @@ WidgetBridge::~WidgetBridge() {
     root_.on_global_click = {};
 }
 
-// Phase iOS-D.3b Slice 1 — late-attach of the GpuSurface for the common
-// case where ScriptedUiSession / ViewBridge is constructed BEFORE the
-// PluginViewHost (and therefore before the surface exists). Mirrors the
-// 4th constructor argument; idempotent.
+// Late-attach of the GpuSurface for the common case where ScriptedUiSession /
+// ViewBridge is constructed before the PluginViewHost and therefore before the
+// surface exists. Mirrors the fourth constructor argument and is idempotent.
 void WidgetBridge::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     if (gpu_surface_ == gpu_surface) return;
     gpu_surface_ = gpu_surface;
@@ -533,11 +494,10 @@ bool WidgetBridge::has_native_gpu_bridge() const noexcept {
 }
 
 void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is_down) {
-    // Codex P1 (PR #2137): hold the registry lock for the entire
-    // fan-out. Earlier draft copied raw pointers under-lock then
-    // iterated unlocked, which UAFs if a bridge is destroyed on
-    // another thread (window teardown / hot reload) between snapshot
-    // and dispatch. recursive_mutex tolerates same-thread reentry.
+    // Hold the registry lock for the entire fan-out. Copying raw pointers
+    // under lock and then iterating unlocked can UAF if a bridge is destroyed
+    // on another thread between snapshot and dispatch. recursive_mutex
+    // tolerates same-thread reentry.
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
     for (auto* b : all_bridges_set()) {
         b->forward_key_event(key_code, modifiers, is_down);
@@ -554,8 +514,8 @@ void WidgetBridge::dispatch_document_event(const std::string& event_type,
     // target:null}". If a future call site needs runtime values,
     // build the JSON via a serializer and re-validate this contract.
     //
-    // Codex P1 (PR #2139): same lifetime-safety rationale as
-    // dispatch_global_key above — hold the lock through iteration.
+    // Same lifetime-safety rationale as dispatch_global_key above: hold the
+    // lock through iteration.
     const std::string js =
         "__dispatch__('document', '" + event_type + "', " + event_json_literal + ")";
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
@@ -627,11 +587,10 @@ CanvasWidget::NativeGpuTextureFrame WidgetBridge::describe_native_texture_frame(
 }
 
 void WidgetBridge::load_script(const std::string& code) {
-    // pulp #745: the DOM mutation methods are now installed by the
-    // constructor's prelude chain (`web_compat_dom_ops` slot). The
-    // JS-side idempotency guard makes a re-eval a no-op, so callers
-    // that load multiple scripts no longer need the bridge to track
-    // a "first time" flag.
+    // DOM mutation methods are installed by the constructor's prelude chain
+    // (`web_compat_dom_ops`). The JS-side idempotency guard makes re-eval a
+    // no-op, so callers that load multiple scripts do not need bridge-local
+    // "first time" state.
     //
     // Append ";void 0" so the eval result is undefined, not the last
     // expression value. Elements have circular references (_parentElement
@@ -643,10 +602,9 @@ void WidgetBridge::load_script(const std::string& code) {
 
 void WidgetBridge::load_script(const std::string& code,
                                const std::string& script_id) {
-    // Phase 9: record the script identity BEFORE eval so any
-    // requestAnimationFrame calls made during eval already see the new
-    // active script. Cleared by the caller (or by a subsequent
-    // load_script call) when the script's surface goes away.
+    // Record script identity before eval so requestAnimationFrame calls made
+    // during eval already see the new active script. Cleared by the caller, or
+    // by a subsequent load_script call, when the script's surface goes away.
     active_script_id_ = script_id;
     load_script(code);
 }
@@ -730,27 +688,26 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'toggle', " + std::string(v?"1":"0") + ")", "toggle");
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
-        // pulp issue-966 — HTML <input type="range"> change event. The
-        // payload is the post-quantisation value (not normalised) so JS
-        // callers see the same number they handed us via setValue/setMin
-        // /setMax/setStep.
+        // HTML <input type="range"> change event. The payload is the
+        // post-quantisation value, not normalized, so JS callers see the same
+        // number they handed us via setValue/setMin/setMax/setStep.
         r->on_change = [alive, engine, id](float v) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "range slider change");
         };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
-        // pulp 2026-06-08 (routing-parity sweep) — mirror createCombo's inline
-        // wiring so a `<combo>`/`<select>` tag routed through __domAppend
-        // dispatches the same `select` event as the factory path.
+        // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag
+        // routed through __domAppend dispatches the same `select` event as the
+        // factory path.
         c->on_change = [alive, engine, id](int idx) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "combo select");
         };
     } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
-        // pulp 2026-06-08 — mirror createCheckbox's inline `change` wiring.
+        // Mirror createCheckbox's inline `change` wiring.
         cb->on_change = [alive, engine, id](bool v) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::string(v?"1":"0") + ")", "checkbox change");
         };
     } else if (auto* lb = dynamic_cast<ListBox*>(w)) {
-        // pulp 2026-06-08 — mirror createListBox's inline select/activate wiring.
+        // Mirror createListBox's inline select/activate wiring.
         lb->on_select = [alive, engine, id](int idx) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "list select");
         };
@@ -897,8 +854,8 @@ void WidgetBridge::poll_async_results() {
 
 void WidgetBridge::service_frame_callbacks() {
     engine_.pump_message_loop();
-    // pulp #915 — drain any expired native-tracked setTimeout/setInterval
-    // timers so consumers don't need a JS shim wrapping our frame loop.
+    // Drain any expired native-tracked setTimeout/setInterval timers so
+    // consumers do not need a JS shim around the frame loop.
     if (!pending_timers_.empty()) {
         engine_.evaluate("if (typeof __flushTimers__ === 'function') __flushTimers__();void 0");
         engine_.pump_message_loop();
@@ -1145,13 +1102,12 @@ void WidgetBridge::register_api() {
 
     register_widget_style_blend_api();
 
-    // pulp #1434 A4 Bundles 5–7 closure — storage-only setters for the
-    // remaining css NOT-IMPL entries. Each handler records the value on
-    // the View's catalog slot so harness round-trip tests can verify
-    // the bridge accepts the keyword. Catalog status documents the
-    // implementation depth (`partial` for storage-only with deferred
-    // paint, `noop` for accept-and-ignore, `wontfix` for architectural
-    // out-of-scope).
+    // Storage-only setters for remaining CSS compatibility entries. Each
+    // handler records the value on the View's catalog slot so harness
+    // round-trip tests can verify the bridge accepts the keyword. Catalog
+    // status documents implementation depth: `partial` for storage-only with
+    // deferred paint, `noop` for accept-and-ignore, and `wontfix` for
+    // architectural out-of-scope.
 
     register_widget_typography_extended_api();
 

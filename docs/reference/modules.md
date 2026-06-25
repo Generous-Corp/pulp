@@ -100,13 +100,16 @@ auto decrypted = aes_decrypt(encrypted->data(), encrypted->size(), key32, iv16);
 
 ### Licensing — Plugin copy protection
 
-RSA-signed license keys with online activation. The public key lives in your plugin; the private key stays on your server.
+Current license keys are v2 AES-256-GCM payloads validated with a 32-byte
+shared secret. Legacy v1 RSA-signed keys remain supported for migration and
+compatibility. Online activation returns the license key string that your
+plugin then validates locally.
 
 ```cpp
 #include <pulp/runtime/license.hpp>
 
 LicenseValidator validator;
-validator.set_public_key(my_rsa_public_key_pem);
+validator.set_shared_secret(shared_secret_32, 32);
 
 auto status = validator.validate(license_key_string);
 if (status == LicenseStatus::Valid) { /* unlocked */ }
@@ -114,6 +117,9 @@ if (status == LicenseStatus::Expired) { /* show renewal dialog */ }
 
 auto info = validator.validate_and_parse(key);
 // info->product_id, info->user_email, info->edition
+
+// Legacy v1 keys can still be validated with the RSA public key.
+validator.set_public_key(my_rsa_public_key_pem);
 ```
 
 ### i18n — String translation
@@ -147,7 +153,7 @@ eval.evaluate("x * 100 + 10");  // 60.0
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log("preset_load", {{"name", "Init"}})` |
+| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log_event("preset_load", {{"name", "Init"}})` |
 | Base64 | `base64.hpp` | `base64_encode(data)` / `base64_decode(text)` |
 | BigInteger | `big_integer.hpp` | Arbitrary-precision math for RSA — `a.mod_pow(exp, modulus)` |
 | Child Process | `child_process.hpp` | `run_process("/usr/bin/auval", {"-a"})` with stdout capture |
@@ -213,8 +219,8 @@ worker->on_message = [](std::string_view result) { update_list(result); };
 | Action Broadcaster | `async_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
 | Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
 | Event Loop | `event_loop.hpp` | `EventLoop loop; loop.dispatch([]{...}); loop.dispatch_after(100ms, []{...})` |
-| Service Discovery | `volume_detector.hpp` | mDNS/Bonjour API surface (experimental — requires host-supplied backend via `install_backend`; no built-in backend yet, see #302) |
-| Timer | `timer.hpp` | `Timer t; t.start(100ms, []{...})` — periodic or one-shot |
+| Service Discovery | `service_discovery.hpp` | `ServicePublisher` / `ServiceBrowser` use a platform default backend when available; use `NetworkServiceDiscovery::install_backend()` for custom or test backends |
+| Timer | `timer.hpp` | `Timer timer(loop, 100ms, []{...}); timer.start();` — periodic or one-shot |
 | Volume Detector | `volume_detector.hpp` | Poll for USB drive mount/unmount events |
 
 ---
@@ -430,7 +436,7 @@ mixer.mix_wet(output_channels, 2, num_frames);
 #include <pulp/signal/convolver.hpp>
 
 PartitionedConvolver conv;
-conv.init(impulse_response.data(), ir_length, block_size);
+conv.load_ir(impulse_response.data(), ir_length, block_size);
 
 // In your process callback:
 conv.process(input, output, block_size);
@@ -527,16 +533,21 @@ Parameters, state trees, presets, and settings.
 #include <pulp/state/store.hpp>
 
 StateStore store;
-auto gain_id = store.add_param({.name = "Gain", .min = -60, .max = 12, .default_val = 0});
-auto mix_id = store.add_param({.name = "Mix", .min = 0, .max = 1, .default_val = 1});
+constexpr ParamID kGainId = 1;
+constexpr ParamID kMixId = 2;
+
+store.add_parameter({.id = kGainId, .name = "Gain", .unit = "dB",
+                     .range = {-60.0f, 12.0f, 0.0f}});
+store.add_parameter({.id = kMixId, .name = "Mix",
+                     .range = {0.0f, 1.0f, 1.0f}});
 
 // Audio thread reads atomically (no locks)
-float gain = store.get(gain_id);
+float gain = store.get_value(kGainId);
 
 // UI thread writes with gesture grouping for undo
-store.begin_gesture(gain_id);
-store.set(gain_id, -6.0f);
-store.end_gesture(gain_id);
+store.begin_gesture(kGainId);
+store.set_value(kGainId, -6.0f);
+store.end_gesture(kGainId);
 ```
 
 ### StateTree — reactive hierarchical state
@@ -607,11 +618,18 @@ Plugin format adapters — write your plugin once, deploy to 9 formats.
 class MyPlugin : public Processor {
 public:
     PluginDescriptor descriptor() const override {
-        return {.name = "MyGain", .vendor = "MyCompany", .uid = "com.myco.gain"};
+        return {
+            .name = "MyGain",
+            .manufacturer = "MyCompany",
+            .bundle_id = "com.myco.gain",
+            .version = "1.0.0",
+            .category = PluginCategory::Effect,
+        };
     }
     
     void define_parameters(state::StateStore& store) override {
-        gain_id_ = store.add_param({.name = "Gain", .min = -60, .max = 12});
+        store.add_parameter({.id = gain_id_, .name = "Gain", .unit = "dB",
+                             .range = {-60.0f, 12.0f, 0.0f}});
     }
     
     void prepare(const PrepareContext& context) override {}
@@ -620,11 +638,20 @@ public:
                  const audio::BufferView<const float>& audio_input,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const ProcessContext& ctx) override {
-        float gain = db_to_linear(store().get(gain_id_));
-        for (int ch = 0; ch < audio_output.num_channels(); ++ch)
-            for (int i = 0; i < audio_output.num_frames(); ++i)
-                audio_output[ch][i] = audio_input[ch][i] * gain;
+        float gain = db_to_linear(state().get_value(gain_id_));
+        for (std::size_t ch = 0;
+             ch < audio_output.num_channels() && ch < audio_input.num_channels();
+             ++ch) {
+            auto in = audio_input.channel(ch);
+            auto out = audio_output.channel(ch);
+            for (std::size_t i = 0; i < out.size(); ++i) {
+                out[i] = in[i] * gain;
+            }
+        }
     }
+
+private:
+    state::ParamID gain_id_ = 1;
 };
 ```
 
@@ -696,16 +723,18 @@ configure time (for example, AU on Linux), the matching case in
 ```cpp
 void MyWidget::paint(Canvas& canvas) {
     // Background
-    canvas.set_fill_color(Color::rgba(30, 30, 40));
+    canvas.set_fill_color(Color::rgba8(30, 30, 40));
     canvas.fill_rounded_rect(0, 0, width, height, 8);
     
     // Gradient fill
-    canvas.set_fill_gradient(LinearGradient{0, 0, 0, height, 
-        Color::rgba(80, 120, 255), Color::rgba(40, 60, 180)});
+    const Color colors[] = {Color::rgba8(80, 120, 255), Color::rgba8(40, 60, 180)};
+    const float positions[] = {0.0f, 1.0f};
+    canvas.set_fill_gradient_linear(0, 0, 0, height, colors, positions, 2);
     canvas.fill_rect(10, 10, width - 20, 4);
+    canvas.clear_fill_gradient();
     
     // Text
-    canvas.set_fill_color(Color::rgba(220, 220, 230));
+    canvas.set_fill_color(Color::rgba8(220, 220, 230));
     canvas.set_font("Inter", 14);
     canvas.fill_text("Hello Pulp", 10, 30);
     
@@ -749,7 +778,7 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | PSDF text | `psdf_atlas.hpp` | Pseudo-SDF variant with vector-fallback helper for extreme zoom. |
 | SDF effects | `sdf_effects.hpp` | Design-token presets for outline / shadow / glow / bevel over any SDF atlas (SkSL effect module). |
 | SDF atlas cache | `sdf_atlas_cache.hpp` | Frame-based LRU glyph sharing across `fill_text_sdf` call-sites with dirty-rect upload hints. |
-| Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes (Phase 5). |
+| Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes. |
 
 ---
 
@@ -776,7 +805,7 @@ root->set_background_token("bg.surface");
 auto knob = std::make_unique<Knob>();
 knob->set_label("Gain");
 knob->set_value(0.5f);
-knob->on_change = [&](float v) { store.set(gain_id, v); };
+knob->on_change = [&](float v) { store.set_value(gain_id, v); };
 root->add_child(std::move(knob));
 
 auto meter = std::make_unique<Meter>();
@@ -906,9 +935,9 @@ meter->style().set_height_percent(100);
 
 ```cpp
 Theme theme;
-theme.set("bg.surface", Color::rgba(25, 25, 35));
-theme.set("control.accent", Color::rgba(80, 130, 255));
-theme.set("text.primary", Color::rgba(220, 220, 230));
+theme.colors["bg.surface"] = Color::rgba8(25, 25, 35);
+theme.colors["control.accent"] = Color::rgba8(80, 130, 255);
+theme.colors["text.primary"] = Color::rgba8(220, 220, 230);
 
 // Widgets resolve tokens automatically:
 canvas.set_fill_color(resolve_color("bg.surface"));
@@ -925,7 +954,9 @@ frontmatter parse. See [`reference/imports/designmd.md`](imports/designmd.md).
 
 ### JS-scripted UI
 
-Write your entire plugin UI in JavaScript with hot-reload during development:
+Write your plugin UI in JavaScript. Live hot reload is validated in the macOS
+standalone development host; plugin targets can load the same `UI_SCRIPT`, but
+live reload is not yet guaranteed across hosts:
 
 ```javascript
 // plugin-ui.js
@@ -956,23 +987,28 @@ Open Sound Control messaging for networked audio control.
 
 ```cpp
 #include <pulp/osc/osc.hpp>
+#include <pulp/osc/bundle.hpp>
 
 // Send
-Sender sender;
+pulp::osc::Sender sender;
 sender.connect("192.168.1.100", 9000);
-sender.send("/synth/freq", 440.0f);
-sender.send("/synth/gate", 1);
+sender.send(pulp::osc::Message("/synth/freq").add(440.0f));
+sender.send(pulp::osc::Message("/synth/gate").add(1));
 
 // Receive
-Receiver receiver;
-receiver.bind(9000);
-receiver.on_message = [](const Message& msg) {
+pulp::osc::Receiver receiver;
+receiver.listen(9000, [](const pulp::osc::Message& msg) {
     if (msg.address == "/synth/freq")
-        set_frequency(msg.args[0].as_float());
-};
+        set_frequency(msg.get_float(0, 440.0f));
+});
+
+// Bundle
+pulp::osc::Bundle bundle;
+bundle.add(pulp::osc::Message("/synth/freq").add(880.0f));
+sender.send(bundle);
 ```
 
-Supports bundles with timetags and address pattern matching (`*`, `?`, `[...]`, `{a,b}`).
+Supports bundles with timetags, the optional OSC RGBA colour tag (`r`), raw datagram sends, and address pattern matching (`*`, `?`, `[...]`, `{a,b}`) through receiver routes.
 
 ---
 

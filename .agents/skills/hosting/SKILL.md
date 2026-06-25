@@ -35,7 +35,10 @@ Everything else — tests, scanner, graph wiring — is format-agnostic.
 
 ## CLAP reference backend
 
-`plugin_slot_clap.cpp` is the one real backend today. Patterns to mirror:
+`plugin_slot_clap.cpp` is the simplest backend to study for dlopen,
+factory lifetime, parameter metadata, automation, MIDI, and state patterns.
+VST3 / AU / LV2 also have real loaders, so treat CLAP as a reference for
+its ABI shape rather than as the only implemented backend. Patterns to mirror:
 
 - `dlopen(RTLD_LAZY | RTLD_LOCAL)`; on macOS resolve
   `<bundle>.clap/Contents/MacOS/<name>` before `dlopen`.
@@ -51,12 +54,12 @@ Everything else — tests, scanner, graph wiring — is format-agnostic.
   parameter edits in the slot. Otherwise `get_parameter()` can report a
   stale host-side value even though the plug-in restored its own state.
 
-### Defensive boundary for entry / factory calls (#812)
+### Defensive boundary for entry / factory calls
 
-`scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()`
-in `try/catch` (commit `70e3545d`). Throws across the dlopen boundary
-abort the whole scan otherwise — observed in production with bundles
-whose static-init throws C++ exceptions during `dlopen`. The fallback
+`scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
+`try/catch`. Throws across the dlopen boundary abort the whole scan
+otherwise — observed in production with bundles whose static-init throws
+C++ exceptions during `dlopen`. The fallback
 emits a synthesized `PluginInfo` (filename-derived name, no metadata)
 so the scan still surfaces the bundle. Static-init throws that fire
 *before* `dlsym` returns can't be caught at this layer; that's the
@@ -64,7 +67,7 @@ case `pulp scan --no-load` exists for. When adding new entry-point
 calls, wrap them too — the goal is "one bad bundle never crashes a
 scan."
 
-### dlerror() must be cached (ASan-only SEGV — pulp #1862 / #1873)
+### dlerror() must be cached
 
 **Never** call `dlerror()` more than once per failure log line. POSIX
 clears dlerror's internal buffer after every call, so a ternary like:
@@ -93,9 +96,8 @@ runtime::log_warn("dlopen failed: {}", err ? err : "unknown");
 
 The other format backends (`plugin_slot_vst3.cpp`, `plugin_slot_lv2.cpp`,
 `plugin_slot_clap.cpp`, `core/runtime/src/dynamic_library.cpp`) all
-already cache via a local — the only offender was the defensive #812
-fallback path at `scanner_clap.cpp:90`. When adding a new format
-backend that calls `dlopen`, mirror the cache-into-local pattern.
+already cache via a local. When adding a new format backend that calls
+`dlopen`, mirror the cache-into-local pattern.
 
 ## Testing against a real plug-in
 
@@ -135,12 +137,43 @@ predictable output, no MIDI.
   empty audio views for MIDI-only slots. Override the `ProcessBuffers` overload
   when a hosted format or fixture needs direct bus metadata for sidechains,
   auxes, surround, or multi-output products.
+- **Canonical-executor routing (opt-in, default OFF).** An eligible graph —
+  nodes only AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
+  carry a LIVE slot) / MidiInput / MidiOutput, connections audio (feedforward,
+  one-block feedback, or sidechain — a sidechain edge routes as plain audio into
+  a higher input port of the destination plugin) or MIDI (connect_midi event
+  edges; no automation / audio-rate-mod) — can be driven
+  through the canonical `GraphRuntimeExecutor` instead of the legacy walk via
+  `set_canonical_executor_routing_enabled(true)`. Output is bit-identical to the
+  legacy walk (`signal_graph_executor_routing.{hpp,cpp}` translates the graph;
+  `test_signal_graph_executor_parity` is the guard). Plugin output slots are
+  pinned *persistent* in the buffer assignment (the `persistent_output` spec
+  flag), so a plugin that does not fully overwrite its output carries the same
+  stale tail across blocks that SignalGraph's per-node buffer does — the reason a
+  Plugin node needs a live slot to be eligible (a null-slot placeholder would
+  take the legacy pass-through-or-zero branch, which the executor does not
+  reproduce). A latency-reporting plugin IS eligible: the routed gather applies
+  the same per-connection plug-in delay compensation as the legacy walk
+  (per-node latency is propagated through the topology in the buffer assignment,
+  and each feedforward connection that needs it gets a delay ring sized in the
+  `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
+  identically. MIDI edges route through per-node MIDI scratch buffers owned by
+  the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
+  mailboxes (inject_midi / extract_midi) around the routed call. Automation /
+  audio-rate-mod graphs stay on the legacy walk.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
   thread, don't recompute per block.
 - Removing a node invalidates its `NodeId`. Connections referencing a
   removed node are pruned automatically.
+- Per-node CPU load: `process()` wraps each node's work in a persistent
+  per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
+  `node_load_`), read via `node_loads()`. The measurers live on the
+  SignalGraph (not the snapshot) and `compile_()` only ever ADDS to the map —
+  never erase while a snapshot may be live, or the audio thread's raw
+  `NodeRuntime::load` pointer dangles. `begin()/end()` are relaxed-atomic and
+  RT-safe (proven under the no-alloc trap in test_signal_graph_rt_safety).
 - `.pulpgraph` schema changes must go through the graph serializer migration
   path. Bump the graph format version, add a deterministic migrator for older
   fixtures, and keep future-version loads fail-closed instead of silently
@@ -173,7 +206,7 @@ predictable output, no MIDI.
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
-- **Stateful custom nodes (native-components Phase 5).** `CustomNodeType` has an
+- **Stateful custom nodes.** `CustomNodeType` has an
   optional lifecycle: set `create` and the graph owns one opaque instance per
   node (RAII via `destroy`); `process_instance` runs instead of the stateless
   `process`, and `prepare`/`release`/`reset`/`save_state`/`load_state` operate on
@@ -187,9 +220,9 @@ predictable output, no MIDI.
   is `std::vector<uint8_t>` via `SignalGraph::custom_node_state` /
   `set_custom_node_state`; `GraphSerializer` persists it as `state_b64` and keeps
   the blob even for **unresolved** nodes (save → load-missing-type → save keeps
-  state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType` —
-  that's the `pulp_node_v1` (Phase 6).
-- **Signed node-pack loader (Phase 7, `core/host/node_pack.{hpp,cpp}`).**
+  state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType`;
+  that belongs to the `pulp_node_v1` ABI.
+- **Signed node-pack loader (`core/host/node_pack.{hpp,cpp}`).**
   `load_node_pack(dir, manifest, trust)` loads a precompiled `pulp_node_v1` node
   pack (a `.dylib`/`.so`/`.dll` exporting `pulp_node_v1_entry` + a JSON manifest).
   It verifies trust BEFORE any `dlopen`: the signer key must be in the
@@ -205,6 +238,32 @@ predictable output, no MIDI.
   the manifest signature. Registry/package discovery metadata still needs its
   own signed canonical manifest; do not treat screenshots, validation reports,
   licenses, or provenance as covered by the node-pack loader signature.
+- **Routing a `SignalGraph` through the canonical executor
+  (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** A prepared graph in
+  the eligible subset — nodes only `AudioInput`/`AudioOutput`/`Gain`, connections
+  only plain audio (feedforward or feedback; no MIDI/automation/audio-rate-mod/
+  sidechain) — can be translated by `build_signal_graph_executor_routing()` into a
+  `format::GraphRuntimeSnapshot` + pre-sized `GraphRuntimeBufferPool` and driven
+  via `GraphRuntimeExecutor::process_routed()`, producing output bit-identical to
+  `SignalGraph::process()`'s own walk. Gotchas: gate with
+  `signal_graph_executor_eligible()` first (Plugin/Custom/MIDI/PDC/sidechain/
+  automation stay on the legacy walk); the routing holds the live compiled
+  snapshot alive via `SignalGraph::live_snapshot_handle()` and the Gain bindings
+  read the live `live_gain_atomic()`, so **rebuild the routing after any
+  re-prepare** (the atomics belong to the snapshot it was built from). Eligibility
+  depends on the node-type restriction guaranteeing zero latency — only Plugin
+  nodes add latency, so the executor (which has no per-connection delay
+  compensation yet) stays correct for the subset.
+  `SignalGraph::set_canonical_executor_routing_enabled(true)` requests that the
+  live `process()` callback use this path for eligible graphs (default OFF →
+  legacy walk; ineligible graphs always fall back). The routing snapshot AND its
+  scratch pool are built in
+  `compile_()` and embedded per-snapshot in the published `CompiledGraph` (NOT a
+  shared `SignalGraph` member), so a re-prepare builds them on a fresh snapshot
+  and never resizes a buffer an in-flight audio reader holds — the same
+  RCU/retire discipline the legacy per-node scratch relies on. The long-lived
+  `GraphRuntimeExecutor` is a `SignalGraph` member (prepare never mutates it; the
+  single audio thread is its only writer).
 
 ## Common tripwires
 
@@ -226,11 +285,35 @@ predictable output, no MIDI.
   Keep the loader's magic-byte preflight before `dlopen` / `LoadLibrary` so
   invalid modules fail quickly and consistently on Windows instead of waiting
   on the platform loader.
+- A slot's per-block scratch must be reserved in `prepare()`, not grown in
+  `process()`. The CLAP slot fills `in_ptrs_`/`out_ptrs_` and emplaces into
+  `in_event_storage_` each block; on a default-constructed vector the first
+  `resize`/`emplace_back` allocates on the audio thread. Reserve the channel
+  vectors from `PluginInfo::num_inputs/num_outputs` (the graph sizes node
+  buffers from these, floored at stereo) and the event scratch for
+  `params_.size() + ParameterEventQueue::kCapacity +` the realtime MIDI cap.
+  Guard with a `PULP_DBG_ASSERT(capacity >= needed)` tripwire (debug-only).
+  This holds for the graph-driven path; a direct caller passing more channels
+  or an un-capacity-limited `MidiBuffer` is outside the contract. No-alloc
+  coverage lives in `test_host.cpp` ("ClapSlot::process is allocation-free
+  after prepare() reserves"), gated on `PULP_TEST_CLAP_PATH`.
+- The VST3 slot has the same channel-vector issue *plus* extra per-block
+  allocation inside the Steinberg helper containers it builds each block
+  (`Vst::ParameterChanges` / `EventList` from `public.sdk/.../hosting`), so
+  reserving `in_ptrs_`/`out_ptrs_` alone does NOT make `Vst3Slot::process`
+  allocation-free — a `PULP_TEST_VST3_PATH` no-alloc test against
+  `PulpGain.vst3` still trips. Making the VST3 slot RT-safe needs those SDK
+  containers pre-sized too; tracked as a follow-up, not yet done.
+- Fixture wiring (`PULP_TEST_CLAP_PATH`, future `PULP_TEST_VST3_PATH`) lives in
+  the ROOT `CMakeLists.txt` block *after* `add_subdirectory(examples)` — NOT in
+  `test/CMakeLists.txt`, which is registered before `examples/` so it cannot
+  see the `PulpGain_*` targets at configure time. A guard placed in `test/`
+  silently never runs (its define just appears stale in an incremental build).
 
-## Phase 0 contracts (PR #153)
+## Audio-thread snapshot contracts
 
-The host exposes an immutable audio-thread snapshot now, not direct
-member reads. Anything you write that touches the audio thread (a
+The host exposes an immutable audio-thread snapshot, not direct member
+reads. Anything you write that touches the audio thread (a
 graph editor, an MCP bridge, a preset loader) must account for these
 rules:
 
@@ -256,14 +339,14 @@ rules:
   normalization is hidden behind the loader.
 - **Parameter flags.** Consumers must honor
   `HostParamInfo::flags.{automatable, read_only, stepped, is_bypass}`
-  before writing. Automation routing (Phase 1E) refuses
-  non-automatable edges.
+  before writing. Automation routing refuses non-automatable edges.
 - **ParameterEventQueue.** `PluginSlot::process()` takes a
   `const ParameterEventQueue&`. The queue type now lives in
   `pulp::state` and `pulp::host` re-exports it for compatibility, so
   format and graph code can share the event ABI without depending on
-  `core/host`. Phase 1 loaders consume it; Phase 0 loaders accept and
-  ignore. Use it — not `set_parameter` — for per-block automation.
+  `core/host`. Current loaders consume it for per-block automation where
+  the format supports sample offsets. Use it — not `set_parameter` — for
+  per-block automation.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,
@@ -273,10 +356,10 @@ rules:
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
 
-## Phase 1 per-format depth (PR #156-ish)
+## Per-format depth
 
-Each format loader gained real parameter / state / automation handling
-on top of Phase 0 contracts:
+Each format loader has parameter / state / automation handling on top of the
+audio-thread snapshot contracts:
 
 - **CLAP**: real `clap_input_events_t` (param_value + midi events
   sorted by time), `clap_output_events_t` harvests MIDI to
@@ -311,9 +394,9 @@ sample-at-block-start so the offset-(N-1) value wins.
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
 
-## Phase 1 P1 follow-ups (PR #159)
+## Review-found host graph invariants
 
-Four bugs caught in Codex review of the Phase 0/1 series:
+Keep these host graph invariants covered by tests:
 
 - `connect_automation` rejects cycles via `would_create_cycle` (automation
   edges contribute to topo order so back-edges are invalid).
@@ -324,7 +407,7 @@ Four bugs caught in Codex review of the Phase 0/1 series:
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
 
-## PluginManagerPanel (issue #494)
+## PluginManagerPanel
 
 `pulp::view::PluginManagerPanel` sits on top of the scanner backend and
 gives host apps a ready-made "manage plugins" UI. The widget is
@@ -351,9 +434,9 @@ and drives everything through `PluginManagerModel`:
 
 When adding new context-menu items or bucket semantics, remember to
 extend `test_plugin_manager_panel.cpp` in the same commit — the
-`[issue-494]` tag on those cases is the canary for regression.
+`[issue-494]` Catch2 tag on those cases is the canary for regression.
 
-## Phase 3 — `.pulpgraph` save/load
+## `.pulpgraph` save/load
 
 `pulp::host::GraphSerializer::to_json(graph, layout)` /
 `from_json(graph, json)` round-trips topology + per-node plugin state
@@ -370,7 +453,7 @@ created with null slots so connection ids stay stable. `GraphNode`
 gained a `plugin_info` member that survives a failed slot load so
 re-saving an unresolved-plugin node preserves its identity.
 
-## Crash-isolated scanning (`IsolatedPluginScanner`, item 4.1)
+## Crash-isolated scanning
 
 `pulp::host::IsolatedPluginScanner` (in
 `core/host/include/pulp/host/isolated_scanner.hpp`) is the high-level
@@ -412,15 +495,15 @@ Gotchas:
   reusable for any future ChildProcess-based isolation work — give
   the helper a mode argv and exec it from the parent.
 
-## PluginManagerPanel drag-add (PR #2929, item 4.3)
+## PluginManagerPanel drag-add
 
-Users now drag a row out of `PluginManagerPanel` and drop it onto a
+Users can drag a row out of `PluginManagerPanel` and drop it onto a
 graph editor surface to add a plugin node. The panel itself stays
 surface-agnostic — it emits `on_row_drag_start` / `on_row_drag_end`
 callbacks with the row payload, and hosts wire the drop into whichever
 graph the cursor landed on.
 
-What changed in the panel:
+Panel contract:
 
 - `PluginManagerRow` gained the identity fields needed to round-trip
   into a `PluginInfo` (`manufacturer`, `version`, `unique_id`,
@@ -441,10 +524,10 @@ helper and call `add_plugin_node` directly; the unresolved-fallback
 path is what keeps `.pulpgraph` round-trips honest when a plugin
 binary disappears between sessions.
 
-## ExtensionsVisitor — typed access to format-specific extensions (PR #2892, items 4.5/4.6/4.7)
+## ExtensionsVisitor — typed access to format-specific extensions
 
 Hosts that need to reach a format-specific extension (CLAP note ports,
-VST3 IMidiMapping, AU AudioUnit property, LV2 instance) now subclass
+VST3 IMidiMapping, AU AudioUnit property, LV2 instance) subclass
 `ExtensionsVisitor`, override the `visit_*` methods they care about,
 and call `slot.accept(visitor)`. Default `visit_*` fall through to
 `visit_unknown` so a visitor that only cares about one format ignores
@@ -459,12 +542,11 @@ Format-specific `*Extension` structs deliberately expose handles as
 `pulp-test-extensions-visitor` pin the visit dispatch + the
 `ExtensionFormat` enumerator values (the latter is a reorder-detector).
 
-## Scanner identity rules (issue #491 P2)
+## Scanner identity rules
 
 `PluginScanner` produces `PluginInfo::unique_id` values that
-`graph_serializer.cpp` keys against on rehydration. Two plugins with
-the same *display name* used to collide silently — the identity
-contract now is:
+`graph_serializer.cpp` keys against on rehydration. The identity
+contract is:
 
 - **VST3**: the first audio-effect class's CID from
   `Contents/Resources/moduleinfo.json`, normalized to a 32-char

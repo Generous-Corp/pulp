@@ -1,4 +1,4 @@
-// ViewSize::aspect_ratio field tests (workstream 07 slice 7.5b).
+// ViewSize::aspect_ratio field tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>

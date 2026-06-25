@@ -1,4 +1,4 @@
-// migration_index.hpp — Release-discovery Slice 3 (#548 / parent #499).
+// migration_index.hpp — embedded migration-note catalogue.
 //
 // Embedded catalogue of per-release migration notes. The generated
 // translation unit `migration_index.cpp` is produced at CMake configure
@@ -12,7 +12,7 @@
 //
 // Deliberately decoupled from `cli_common.hpp` so the unit tests can
 // link this TU standalone — same pattern as `version_diag.hpp` and
-// `update_check.hpp` (see #499 Slice 1 and Slice 2).
+// `update_check.hpp`.
 
 #pragma once
 
@@ -93,7 +93,7 @@ std::string render_notes_text(const std::vector<const MigrationEntry*>& entries,
                               const std::string& from,
                               const std::string& to);
 
-// Render as JSON. Stable-shape output for agent consumption — Slice 4's
+// Render as JSON. Stable-shape output for agent consumption: the
 // `/upgrade` Claude Code skill depends on the keys listed here. Do NOT
 // rename them without bumping the skill.
 //

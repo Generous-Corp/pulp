@@ -70,7 +70,7 @@ These three failures all present as "demo says `status: 'ready'` but the canvas 
 
 4. **Geometry arrives all-zero → the mesh collapses to a degenerate point.** Three.js's WebGPUBackend uploads vertex/index buffers with `createBuffer({mappedAtCreation:true})` → `new T(buf.getMappedRange()).set(array)` → `buf.unmap()`. The mock `__createMockGPUBuffer` in `web-compat-document-gpu-mock.js` previously returned `_bytes.buffer.slice(...)` from `getMappedRange()` (an independent COPY) with a no-op `unmap()`, so every mapped write was silently dropped — `buffer._bytes` stayed zero. The buffered-draw serializer ships `buffer._bytes` to native (`web-compat-canvas-gpu.js`), so the native draw received all-zero positions+indices and rasterized nothing while the render-pass clear still showed. Uniforms survived only because they use `queue.writeBuffer`, which writes `_bytes` directly. Fix: `getMappedRange()` hands back a standalone ArrayBuffer seeded from `_bytes`, records it, and `unmap()` copies each recorded range back into `_bytes`. Regression test: `[webcompat][gpu][mock][issue-3217]` round-trips a `mappedAtCreation` write through `_bytes`. **Tell-tale:** a render-pass clear color is visible but geometry is not, and a per-draw dump of the vertex/index buffer head bytes is all `00`.
 
-5. **JS-guessed bind-group layout silently mismatches Three's `layout:"auto"` pipeline → the vertex stage reads zeroed uniforms (#3217).** The buffered path (`__gpuQueueDrawBufferedImpl`) used to build an EXPLICIT `BindGroupLayout` from visibility/types guessed in JS (`web-compat-gpu-buffered.js inferVisibilityFromShaders` regex-scans the WGSL), then create the pipeline with an explicit pipeline layout. Under the iOS-Sim `skip_validation` toggle, a layout mismatch does NOT raise an error — it just leaves bindings unfulfilled, so the vertex shader reads zero matrices and the cube degenerates even though every uniform byte uploaded correctly. Fix (mirrors the immediate `__gpuQueueDrawImpl` path): create the pipeline with `layout = nullptr` (auto), then build each bind group from `pipeline.GetBindGroupLayout(group_index)`. This makes the layout come from the real shader interface. The same fix repaired Three's sRGB output-conversion/composite pass, which has the same bind-group shape (sampler + sampled `texture_2d`). **Whenever you replay a serialized WebGPU pipeline, prefer auto layout + `GetBindGroupLayout()` over reconstructing the layout from a JS guess.**
+5. **JS-guessed bind-group layout silently mismatches Three's `layout:"auto"` pipeline → the vertex stage reads zeroed uniforms.** The buffered path (`__gpuQueueDrawBufferedImpl`) used to build an EXPLICIT `BindGroupLayout` from visibility/types guessed in JS (`web-compat-gpu-buffered.js inferVisibilityFromShaders` regex-scans the WGSL), then create the pipeline with an explicit pipeline layout. Under the iOS-Sim `skip_validation` toggle, a layout mismatch does NOT raise an error — it just leaves bindings unfulfilled, so the vertex shader reads zero matrices and the cube degenerates even though every uniform byte uploaded correctly. Fix (mirrors the immediate `__gpuQueueDrawImpl` path): create the pipeline with `layout = nullptr` (auto), then build each bind group from `pipeline.GetBindGroupLayout(group_index)`. This makes the layout come from the real shader interface. The same fix repaired Three's sRGB output-conversion/composite pass, which has the same bind-group shape (sampler + sampled `texture_2d`). **Whenever you replay a serialized WebGPU pipeline, prefer auto layout + `GetBindGroupLayout()` over reconstructing the layout from a JS guess.**
 
 ### iOS AUv3 live-present gotchas
 
@@ -224,7 +224,7 @@ Keep these in sync when the workflow meaningfully changes:
 If the workflow grows stable enough for broader reuse, keep this skill aligned
 with the actual shipped demo modes and focused validation commands.
 
-## Benchmark Mode (Slice 0.5 of #516)
+## Benchmark Mode
 
 When `PULP_BENCHMARK=ON`, `pulp-threejs-native-demo` exposes a
 headless benchmark that drives the JS→GPU upload path without a
@@ -262,28 +262,27 @@ Gotchas:
   paper over it in the harness.
 - **`base64_decode_us` will be zero for the particle benchmark** —
   that counter only fires on the `__gpuComputeDispatchImpl`
-  `bufferDataBase64` lane (#535), not the vertex-buffer lane. Don't
+  `bufferDataBase64` lane, not the vertex-buffer lane. Don't
   read a zero there as a bug.
 
-## Decision 1 status (#516)
+## Zero-Copy Decision Status
 
-The zero-copy JS↔GPU initiative (#516) ran Decision 1 twice:
+The zero-copy JS↔GPU decision was evaluated twice:
 
-1. Slice 0 (PRs #518, #526) measured `ui-preview`'s oscilloscope +
-   spectrogram — wrong workload, C++-driven, never exercises the
-   upload path.
-2. Slice 0.5 measured this benchmark on Three.js particles — honest
+1. The first pass measured `ui-preview`'s oscilloscope + spectrogram —
+   wrong workload, C++-driven, never exercises the upload path.
+2. The follow-up benchmark measured Three.js particles — honest
    workload, 0.036% → 0.26% of frame budget at 1K → 100K points.
 
-Both landed NO-GO; Slice 0.5 supersedes Slice 0's verdict. See
+Both landed NO-GO; the particle benchmark supersedes the earlier verdict. See
 `planning/zero-copy-decision-1-re-evaluation-2026-04-20.md`. The
 new `PerfCounters` fields (`base64_decode_total_us`,
 `gpu_buffer_upload_count`, `gpu_buffer_bytes_resident_peak`) stay
 merged for future workload-specific re-evaluations.
 
-## JSC iOS lane (iOS-D.3b program, 2026-05-29)
+## JSC iOS lane
 
-Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no V8 build). The full bring-up is in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` (6 slices, all merged to main).
+Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no V8 build). The full bring-up is in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`.
 
 **Path summary:**
 - JSC runs `three.webgpu.js` as a Rollup-bundled IIFE (NOT ESM — JSC's ESM module-loader API is private on iOS, App Store rejection risk).
@@ -293,13 +292,13 @@ Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no
 - WidgetBridge's `__gpu*Impl` family is engine-agnostic by construction — all 11 functions register through `engine_.register_function(...)` which works for V8 or JSC.
 
 **Perf delta vs V8 macOS:**
-- iOS-D.3a measured JSC interpreter at 230 FPS @ 2000 cubes on iPad Pro 11" 3rd-gen (scene-graph math only, no GPU). That's 80× the user's 30-FPS threshold with 14ms GPU budget remaining.
+- JSC interpreter measured at 230 FPS @ 2000 cubes on iPad Pro 11" 3rd-gen (scene-graph math only, no GPU). That's 80× the user's 30-FPS threshold with 14ms GPU budget remaining.
 - JSC interpreter is 3-10× slower than JIT V8 on hot loops, but the iPad GPU runs Metal at full speed regardless of jitless JS.
-- Three.js's tight `Object3D.updateMatrixWorld` traversal is actually MORE JIT-friendly than naive hand-rolled JS — Three.js r149 outperformed the iOS-D.3a hand-rolled cube bench at every scene size.
+- Three.js's tight `Object3D.updateMatrixWorld` traversal is actually MORE JIT-friendly than naive hand-rolled JS — Three.js r149 outperformed the earlier hand-rolled cube bench at every scene size.
 
 **Don't reach for V8 on iOS unless a measurable feature gap surfaces** — the build is 3-5h, needs Chromium depot_tools + 50GB workspace, and JSC's jitless interpreter already clears the bar.
 
-**The `presentable` flag** (slice 4) is the load-bearing signal that distinguishes a real swapchain-backed canvas from a silent offscreen texture. Both `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` surface it. If a JSC-backed Three.js demo shows a black editor pane, grep the log for `presentable=false` before debugging anything else.
+**The `presentable` flag** is the load-bearing signal that distinguishes a real swapchain-backed canvas from a silent offscreen texture. Both `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` surface it. If a JSC-backed Three.js demo shows a black editor pane, grep the log for `presentable=false` before debugging anything else.
 
 ### OrbitControls on the iOS JSC lane (touch orbit/pinch)
 

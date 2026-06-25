@@ -406,3 +406,59 @@ TEST_CASE("TreeView left key on collapsed parent is handled without toggling",
     REQUIRE_FALSE(group.expanded);
     REQUIRE(toggles == 0);
 }
+
+// ── Accent selection style + leaf icons (Ink & Signal nav) ──────────────────
+
+namespace {
+bool has_fill_rect_w(const RecordingCanvas& canvas, float w) {
+    return std::any_of(canvas.commands().begin(), canvas.commands().end(),
+                       [&](const DrawCommand& c) {
+                           return c.type == DrawCommand::Type::fill_rect &&
+                                  c.f[2] == w;
+                       });
+}
+}  // namespace
+
+TEST_CASE("TreeView defaults to the standard selection style", "[view][tree]") {
+    TreeView tree;
+    REQUIRE(tree.selection_style() == TreeView::SelectionStyle::standard);
+}
+
+TEST_CASE("TreeView accent selection draws a 3px teal left bar", "[view][tree]") {
+    TreeView tree;
+    auto& factory = tree.root().add_child("Factory");
+    factory.expanded = true;
+    auto& reverb = factory.add_child("Reverb");
+    tree.set_selection_style(TreeView::SelectionStyle::accent);
+    tree.set_selected_node(&reverb);
+    tree.set_bounds({0, 0, 200, 200});
+
+    RecordingCanvas canvas;
+    tree.paint(canvas);
+    REQUIRE(has_fill_rect_w(canvas, 3.0f));     // accent left-edge bar
+    REQUIRE(has_fill_rect_w(canvas, 200.0f));   // translucent full-width tint
+}
+
+TEST_CASE("TreeView standard selection has no 3px accent bar", "[view][tree]") {
+    TreeView tree;
+    auto& factory = tree.root().add_child("Factory");
+    tree.set_selected_node(&factory);          // standard style (default)
+    tree.set_bounds({0, 0, 200, 200});
+
+    RecordingCanvas canvas;
+    tree.paint(canvas);
+    REQUIRE_FALSE(has_fill_rect_w(canvas, 3.0f));
+    REQUIRE(has_fill_rect_w(canvas, 200.0f));   // full-width opaque fill
+}
+
+TEST_CASE("TreeView paints a node's leading icon glyph", "[view][tree]") {
+    TreeView tree;
+    auto& preset = tree.root().add_child("Concert Hall");
+    preset.icon = "\xe2\x99\xaa";               // ♪
+    tree.set_bounds({0, 0, 200, 200});
+
+    RecordingCanvas canvas;
+    tree.paint(canvas);
+    REQUIRE(has_text(canvas, "\xe2\x99\xaa"));
+    REQUIRE(has_text(canvas, "Concert Hall"));
+}

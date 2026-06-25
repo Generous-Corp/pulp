@@ -338,7 +338,7 @@ retry_git() {
 # retry_git around `git clone URL DEST` fails on attempt 2+ with
 # "destination path already exists" instead of actually retrying
 # the network fetch. Wrap clone with a clean-target-between-attempts
-# shim. See #438 P1 Codex review on #425.
+# shim so every retry starts from an empty destination.
 retry_git_clone() {
     local label="$1"
     local target="${@: -1}"   # last positional arg is the destination

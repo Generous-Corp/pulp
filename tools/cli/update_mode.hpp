@@ -1,4 +1,4 @@
-// update_mode.hpp — Release-discovery Slice 5 (#550 / parent #499).
+// update_mode.hpp — update-mode state machine.
 //
 // Pure-logic core for the auto/prompt/manual/off mode enforcement
 // state machine. The invocation-path hook in pulp_cli.cpp consumes
@@ -51,10 +51,10 @@ const char* mode_name(Mode m);
 // ── Snooze (prompt-mode) ────────────────────────────────────────────────────
 //
 // `prompt` mode prints one-shot informational banners per version via
-// banner_shown_for_version (in update-cache.json, owned by Slice 2). On
-// top of that, Slice 5 adds a time-based snooze so a user who sees the
-// banner today but isn't ready to upgrade can suppress re-prompts for
-// 24h regardless of which version is current.
+// banner_shown_for_version (in update-cache.json). On top of that, a
+// time-based snooze lets a user who sees the banner today but isn't
+// ready to upgrade suppress re-prompts for 24h regardless of which
+// version is current.
 //
 // File: ~/.pulp/update-snooze (single line: epoch-seconds-of-expiry).
 // Missing file / malformed content => not snoozed.
@@ -153,10 +153,8 @@ bool cleanup_tombstone(const fs::path& executable);
 
 // ── Banner composition (mode-specific) ──────────────────────────────────────
 //
-// Slice 2 locked the `prompt` banner shape. Slice 5 adds the `manual`
-// and post-swap `auto` banners. These strings are tested verbatim so
-// any change to them must also update test_cli_update_mode.cpp in the
-// same PR.
+// These strings are tested verbatim so any change to them must also
+// update test_cli_update_mode.cpp in the same PR.
 
 // Manual mode — print once per version, then stay quiet. Shape:
 //   "Pulp vX.Y.Z available (you have vA.B.C). Run `pulp upgrade` when
@@ -185,16 +183,16 @@ struct PromptDecision {
     // True if the banner should be printed this invocation. False means
     // "stay quiet" — either snooze is active, or the version was
     // already notified this cycle (banner_shown_for_version tracks
-    // that — see Slice 2).
+    // that).
     bool show_banner = false;
 
     // True if the caller should write a new snooze file. Only set when
     // the user has already seen the banner for this version and the
     // snooze file is absent. The banner hook is intentionally
-    // non-interactive in Slice 5 (we print a one-line nag + respect a
-    // 24h snooze rather than blocking on stdin) — stdin prompts would
-    // break pipes and CI. The Claude Code `/upgrade` skill provides
-    // the interactive experience.
+    // non-interactive (we print a one-line nag + respect a 24h snooze
+    // rather than blocking on stdin) — stdin prompts would break pipes
+    // and CI. The Claude Code `/upgrade` skill provides the interactive
+    // experience.
     bool write_snooze = false;
 };
 

@@ -436,9 +436,8 @@ TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
     REQUIRE(drained == 32);
 }
 
-// ── Phase 6.2 — atlas introspection accessors ───────────────────────────────
+// ── Atlas introspection accessors ───────────────────────────────────────────
 //
-// Spec: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.2.
 // The inspector's texture-atlas viewer reads per-atlas dimensions and a
 // shelf-packer occupancy estimate. These tests pin the read-only accessors
 // added to AtlasPacker / ImageAtlas / GlyphAtlas / GradientAtlas / PathAtlas.
@@ -538,7 +537,7 @@ TEST_CASE("GradientAtlas exposes row capacity and occupancy - phase6.2",
     REQUIRE(ga.occupancy() == Catch::Approx(0.5f));  // 256 / 512.
 }
 
-// ── Phase 6.2 — AtlasInventory aggregator ───────────────────────────────────
+// ── AtlasInventory aggregator ───────────────────────────────────────────────
 
 TEST_CASE("AtlasInventory starts empty - phase6.2",
           "[render][atlas][phase6.2]") {

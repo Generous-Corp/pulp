@@ -96,38 +96,29 @@ static_assert(count_quirk_fields() == 37,
 
 namespace {
 
-// Per-host quirk-population helpers. Extracted per-host modules under
-// `core/format/include/pulp/format/host_quirks/<host>.hpp` expose an
-// inline `host_quirks::apply_<host>(HostQuirks&, HostVersion)` that
-// the dispatch table below routes to. Hosts without a dedicated header
-// still live here as private helpers until the next batch extracts
-// them. License-hygiene: every flag flipped here (or in a per-host
-// header) must be backed by a host vendor doc + a reproducer Pulp
-// issue. See the catalog at
-// `planning/2026-05-24-daw-host-quirks-inheritance.md`.
+// Per-host quirk-population helpers. Hosts without a dedicated header
+// live here as private helpers until they are extracted. License-hygiene:
+// every flag flipped here (or in a per-host header) must be backed by a
+// host vendor doc + a reproducer Pulp issue. See the catalog at
+// `core/format/host-quirks.json`.
 
 void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
-    // Main 6 REAPER rows (15 + R1-R4 + R6) — extracted to the per-host
-    // header so REAPER-specific lessons live in one place. Adapter
-    // surface unchanged; this is a pure header refactor for item 5.8.
+    // Main 6 REAPER rows (15 + R1-R4 + R6).
     host_quirks::apply_reaper(q, v);
-    // Layer the iPlug2-audit keyboard-only-space lesson on top via the
-    // separate factory so its LessonOnly tier can evolve independently
-    // of the rest of the REAPER dispatch (Speculative).
+    // Layer the keyboard-only-space lesson on top so its LessonOnly
+    // tier can evolve independently of the rest of the REAPER dispatch.
     host_quirks::apply_reaper_keyboard(q, v);
-    // 2026-05-26 iPlug2-audit batch (Pulp #3044): REAPER hosts AU v3
-    // in-process and needs preferredContentSize set synchronously
-    // during audioUnitInitialized. Layered via a separate factory so
-    // the LessonOnly tier can evolve independently of the rest of the
-    // REAPER dispatch.
+    // Pulp #3044: REAPER hosts AU v3 in-process and needs
+    // preferredContentSize set synchronously during audioUnitInitialized.
+    // Layered separately so the LessonOnly tier can evolve independently
+    // of the rest of the REAPER dispatch.
     host_quirks::apply_reaper_auv3_in_process(q, v);
 }
 
 void apply_pro_tools_quirks(HostQuirks& q, HostVersion v) {
-    // Main 3 AAX rows (16-18) — extracted to the per-host header for
-    // item 5.9 (opt-in lane gated on Avid SDK at the adapter level;
-    // the quirk dispatch itself is unconditional so filtering behaves
-    // identically across builds).
+    // Main 3 AAX rows (16-18). Adapter use is gated on the
+    // developer-supplied Avid SDK; the quirk dispatch itself is
+    // unconditional so filtering behaves identically across builds.
     host_quirks::apply_pro_tools(q, v);
     // Pro Tools' AAX wrapper does not surface a reliable vendor version
     // through the AAX spec, so version-gated decisions for this host
@@ -184,7 +175,7 @@ constexpr QuirkFilter default_policy_filter() noexcept {
 #endif
 }
 
-// ── Runtime policy layer (P2) ─────────────────────────────────────────
+// ── Runtime policy layer ──────────────────────────────────────────────
 //
 // Layered on TOP of the compile-time default above. Precedence (highest
 // first): per-quirk override > set_host_quirk_policy() (API) >

@@ -1,13 +1,13 @@
 //! `pulp-rs dev` — unified development loop.
 //!
-//! # What's ported in Phase 6d
+//! # Runtime shape
 //!
 //! This is a **watch-stubbed** port. The C++ `cmd_dev` command drives
 //! a cross-platform FS-watcher (`fsevents` on macOS, `ReadDirectoryChangesW`
 //! on Windows, `inotify` on Linux) that rebuilds + reruns tests + relaunches
 //! the target on every source-file change. Reimplementing the watcher
-//! costs us a new crate dependency (`notify`) plus ~300 LOC of glue,
-//! so Phase 6d takes a shortcut:
+//! costs us a new crate dependency (`notify`) plus ~300 LOC of glue.
+//! The Rust-native fallback is intentionally one-shot:
 //!
 //! - Parse the full flag surface (`--test`, `--test-filter=`, `--validate`,
 //!   `--run`, `--design`, `--target`, `-- tail`) — so users see the exact
@@ -15,14 +15,13 @@
 //! - Do **one** configure-if-needed + build pass (same as `pulp build`).
 //! - If `--test` is set, run `ctest --output-on-failure [-R filter]`.
 //! - If `--run TARGET` is set, exec the target once (no relaunch loop).
-//! - Print a one-line notice that the watch loop isn't yet available
-//!   in `pulp-rs`, pointing at the C++ binary for live-reload workflows.
+//! - Delegate to `pulp-cpp` when it is available so live-reload
+//!   workflows keep the full watch behavior.
 //!
-//! # Future work
+//! # Native watch support
 //!
 //! A full port would add `notify` crate integration and a debounced
-//! rebuild loop (see `cmd_dev.cpp` for the reference). That's a
-//! separate slice tracked in `UPSTREAM_SYNC.md`'s deferred list.
+//! rebuild loop (see `cmd_dev.cpp` for the reference).
 
 use std::io::Write;
 use std::path::Path;
@@ -149,13 +148,11 @@ pub fn run<S: Spawner>(
         return Ok(0);
     }
 
-    // Phase 7: `pulp dev` is intrinsically a watch-loop command.
-    // The Rust port runs a single build+test+launch pass; the real
-    // watch semantics live on the C++ side. Delegate the whole
-    // invocation to pulp-cpp when it's on PATH so users get the
-    // real experience. Fall back to the Rust one-shot when the
-    // legacy binary is unavailable (unit tests land here because
-    // pulp-cpp isn't installed in the CI sandbox).
+    // `pulp dev` is intrinsically a watch-loop command. Delegate the
+    // whole invocation to pulp-cpp when it's on PATH so users get the
+    // real experience. Fall back to the Rust one-shot when the C++
+    // binary is unavailable (unit tests land here because pulp-cpp
+    // isn't installed in the CI sandbox).
     let cpp_argv = crate::fallthrough::current_argv_tail();
     if let crate::fallthrough::Outcome::Delegated(rc) = crate::fallthrough::delegate(&cpp_argv)? {
         return Ok(rc);
@@ -302,7 +299,7 @@ mod tests {
         assert!(err.to_string().contains("not in a Pulp project"));
     }
 
-    // ── parse_args edge cases (#45 coverage uplift) ─────────────────────
+    // ── parse_args edge cases ───────────────────────────────────────────
 
     #[test]
     fn parse_handles_short_help_flag() {
@@ -339,7 +336,7 @@ mod tests {
         assert!(p.launch_target.is_none());
     }
 
-    // ── run() integration paths (#45 coverage uplift) ───────────────────
+    // ── run() integration paths ─────────────────────────────────────────
     //
     // These need a fixture so `project::resolve(cwd)` returns Some.
     // A standalone `pulp.toml` is the cheapest fixture; the build path

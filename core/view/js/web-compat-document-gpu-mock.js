@@ -1,18 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// WebGPU mock factories (P5-7 follow-up — extracted from web-compat-document.js)
+// WebGPU mock factories
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // The entire WebGPU mock surface used by the headless test harness +
-// fallback adapter path. Originally lived inline in
-// web-compat-document.js, but at 563 lines it was the biggest
-// self-contained sub-system in that file. Extracted to keep the
-// document TU around the 1k-line maintainability target.
+// fallback adapter path. This is the largest self-contained document
+// prelude subsystem, so it stays isolated from the style / selector surface.
 //
 // Embed order: loaded AFTER web-compat-document.js because
 //   * GPUTextureUsage / GPUBufferUsage / GPUShaderStage / GPUColorWrite
-//     / GPUMapMode are installed at the top of web-compat-document.js
-//     (lines 522-560), and the mock factory bodies reference those
-//     constants;
+//     / GPUMapMode are installed by the `__installGlobalIfMissing` calls
+//     in web-compat-document.js, and the mock factory bodies reference
+//     those constants;
 //   * `window.pulp.gpu` (which uses `__mockGpuInfo` /
 //     `__createMockGPUAdapter` / `__createMockGPUDevice` /
 //     `__createGPUAdapter`) is defined further down in
@@ -148,9 +146,9 @@ function __createMockGPUBuffer(init) {
     // silently dropped. Three.js's WebGPUBackend uploads geometry through exactly this
     // path (`createBuffer({mappedAtCreation:true})` → `new T(getMappedRange())
     // .set(attr.array)` → `unmap()`), so vertex/index buffers arrived all-zero
-    // at the native bridge and the cube collapsed to a degenerate point
-    // (#3217). Uniforms survived only because they use queue.writeBuffer, which
-    // writes _bytes directly. Fix: hand back a standalone range seeded from the
+    // at the native bridge and the cube collapsed to a degenerate point.
+    // Uniforms survived only because they use queue.writeBuffer, which writes
+    // _bytes directly. Fix: hand back a standalone range seeded from the
     // current backing bytes, record it, and copy each recorded range back into
     // _bytes on unmap().
     buffer.getMappedRange = function(offset, size) {
@@ -189,13 +187,12 @@ function __createMockGPUTextureView(init) {
         dimension: init.dimension || "2d",
         aspect: init.aspect || "all",
         texture: init.texture || null,
-        // iOS-D.3c (#3217): propagate native-bridge identity from the
-        // owning texture so encoder.draw's createBufferedDrawPayload check
-        // (web-compat-gpu-buffered.js:194) sees attachmentView._nativeBridge
-        // and routes the draw through the native bridge instead of the mock
-        // no-op. Without this, Three.js's WebGPURenderer renders to a JS-
-        // side mock that drops every command, and the offscreen wgpu::Texture
-        // we hand Skia stays blank → invisible cube.
+        // Propagate native-bridge identity from the owning texture so
+        // encoder.draw's createBufferedDrawPayload check sees
+        // attachmentView._nativeBridge and routes the draw through the native
+        // bridge instead of the mock no-op. Without this, Three.js's
+        // WebGPURenderer renders to a JS-side mock that drops every command,
+        // and the offscreen wgpu::Texture we hand Skia stays blank.
         _nativeBridge: !!init._nativeBridge,
         _nativeCanvasId: init._nativeCanvasId || "",
         _nativeTextureId: init._nativeTextureId || ""
@@ -226,8 +223,8 @@ function __createMockGPUTexture(init) {
             dimension: descriptor.dimension || texture.dimension,
             aspect: descriptor.aspect || "all",
             texture: texture,
-            // iOS-D.3c (#3217): forward the texture's native-bridge ids so
-            // the resulting view can route encoder.draw through the native
+            // Forward the texture's native-bridge ids so the resulting
+            // view can route encoder.draw through the native
             // bridge path (see __createMockGPUTextureView above).
             _nativeBridge: !!texture._nativeBridge,
             _nativeCanvasId: texture._nativeCanvasId || "",
@@ -308,15 +305,16 @@ function __createMockGPUComputePassEncoder(init) {
 function __createMockGPUCommandEncoder(init) {
     init = init || {};
     var computePasses = [];
-    // iOS-D.3c (#3217): collect render-pass commands here so they survive
-    // into the command buffer's `_commands` array. Without this, the
+    // Collect render-pass commands here so they survive into the command
+    // buffer's `_commands` array. Without this, the
     // canvas-gpu / buffered shims would push commands into a per-encoder
-    // `passCommands` and `encoder.end` would have nowhere to forward them
-    // (init.onEnd was never wired), and queue.submit would see
+    // `passCommands` and the wrapped render-pass end() would have nowhere
+    // to forward them; queue.submit would see
     // `commandBuffer._commands.length === 0` even though Three.js had
-    // issued draws. Wiring onEnd → renderCommands.push lets the native
-    // queue.submit dispatcher route each draw through
-    // __gpuQueueDrawBufferedImpl / __gpuQueueDrawImpl.
+    // issued draws. Passing onEnd through lets the buffered shim forward
+    // captured draws into renderCommands, which the native queue.submit
+    // dispatcher routes through __gpuQueueDrawBufferedImpl /
+    // __gpuQueueDrawImpl.
     var renderCommands = [];
     var collectRenderCommand = function(cmd) {
         if (cmd) renderCommands.push(cmd);
@@ -344,8 +342,8 @@ function __createMockGPUCommandEncoder(init) {
             var cmdBuf = __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
             // Attach compute pass commands to the command buffer for native dispatch
             cmdBuf._computePasses = computePasses;
-            // iOS-D.3c (#3217): hand the captured render-pass commands to
-            // the command buffer so queue.submit can iterate them and call
+            // Hand the captured render-pass commands to the command buffer
+            // so queue.submit can iterate them and call
             // the per-command native dispatcher.
             cmdBuf._commands = renderCommands.slice();
             return cmdBuf;
@@ -423,7 +421,7 @@ function __createMockGPUQueue(init) {
     var queue = {
         _objectName: "GPUQueue",
         label: init.label || "",
-        // pulp #2101 — bridge flag the buffered-draw augmentation
+        // bridge flag the buffered-draw augmentation
         // (web-compat-gpu-buffered.js) reads to decide whether to forward
         // command buffers to Dawn. That file wraps queue.submit with the
         // actual __gpuQueueSubmitImpl / __gpuQueueDrawBufferedImpl
@@ -438,8 +436,8 @@ function __createMockGPUQueue(init) {
         if (!buffer || buffer._objectName !== "GPUBuffer") return;
         var source = __toUint8Array(data);
         var begin = bufferOffset || 0;
-        // iOS-D.3c (#3217): WebGPU spec — when `data` is a TypedArray,
-        // `dataOffset` and `size` are measured in ELEMENTS of that array,
+        // WebGPU spec: when `data` is a TypedArray, `dataOffset` and
+        // `size` are measured in ELEMENTS of that array,
         // not bytes (only ArrayBuffer/DataView use byte units). The old
         // code treated both as bytes, so Three.js's
         // `writeBuffer(buf, dst, Float32Array(16), 0, 16)` — meaning 16
@@ -528,7 +526,7 @@ function __pickDeviceFeatures(adapter, descriptor) {
 }
 
 function __createMockGPUDevice(adapter, descriptor, init) {
-    // pulp #2101 — third `init` arg carries the bridge descriptor returned by
+    // third `init` arg carries the bridge descriptor returned by
     // `__describeNativeDeviceImpl`. When `init.nativeBridge` is true, the
     // device is wired so `createTexture` mints a native Dawn texture handle
     // (via `__gpuCreateTextureImpl`) instead of a pure mock. Without this
@@ -606,7 +604,7 @@ function __createMockGPUDevice(adapter, descriptor, init) {
     };
     device.createCommandEncoder = function(commandDescriptor) { return __createMockGPUCommandEncoder(commandDescriptor || {}); };
     device.destroy = function() { device._destroyed = true; };
-    // pulp #2101 — Three.js WebGPUPipelineUtils calls pushErrorScope/popErrorScope
+    // Three.js WebGPUPipelineUtils calls pushErrorScope/popErrorScope
     // around every pipeline create. The async-executor pattern swallows throws
     // when these are missing, so a `TypeError: device.pushErrorScope is not a
     // function` becomes a silently-empty mock canvas. Provide no-op error scopes
@@ -618,7 +616,7 @@ function __createMockGPUDevice(adapter, descriptor, init) {
     return device;
 }
 
-// pulp #2101 — bridge-aware adapter factory. When `init.nativeBridge` is true,
+// bridge-aware adapter factory. When `init.nativeBridge` is true,
 // `requestDevice` asks the host for a device descriptor (`__describeNativeDeviceImpl`)
 // and forwards `init.nativeBridge` into `__createMockGPUDevice` so the device's
 // `createTexture` mints real Dawn handles. The legacy `__createMockGPUAdapter`

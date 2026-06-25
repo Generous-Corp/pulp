@@ -282,7 +282,7 @@ inline ResolvedFixture resolve_fixture(const PluginEntry& e,
     // Shape check: refuse empty placeholders (`touch …/Vital.vst3`) or empty
     // directories. Without this, `PluginSlot::load` runs against the bogus
     // bundle and the integration test hard-fails instead of cleanly
-    // SKIPping with actionable guidance (Codex PR #3015 P2). Mirrors the
+    // SKIPping with actionable guidance (PR #3015). Mirrors the
     // checks used by `fetch_real_plugins.py --validate-cache`.
     std::error_code ec;
     if (fs::is_regular_file(bundle, ec)) {

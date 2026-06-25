@@ -112,9 +112,9 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_PulpActivity_nativeOnForeground(JNIEnv* env, jobject thiz) {
     try {
         PULP_LOGI("nativeOnForeground");
-        // Publish to the unified environment notifier (#342). Callers
-        // subscribed via Environment::subscribe receive the new lifecycle
-        // state and can resume rendering / restore GPU caches.
+        // Publish to the unified environment notifier. Callers
+        // subscribed via Environment::subscribe receive the new
+        // lifecycle state and can resume rendering / restore GPU caches.
         auto s = pulp::platform::Environment::instance().snapshot();
         s.lifecycle = pulp::platform::LifecycleState::foreground;
         pulp::platform::Environment::instance().publish(s);
@@ -130,8 +130,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_PulpActivity_nativeOnBackground(JNIEnv* env, jobject thiz) {
     try {
         PULP_LOGI("nativeOnBackground");
-        // Publish via the unified environment notifier (#342). Callers
-        // reduce rendering / drop optional caches in response.
+        // Publish via the unified environment notifier. Callers reduce
+        // rendering / drop optional caches in response.
         auto s = pulp::platform::Environment::instance().snapshot();
         s.lifecycle = pulp::platform::LifecycleState::background;
         pulp::platform::Environment::instance().publish(s);
@@ -195,8 +195,8 @@ Java_com_pulp_PulpActivity_nativeOnDisplayChanged(
     try {
         PULP_LOGI("nativeOnDisplayChanged: %dx%d density=%.1f dark=%d",
                   width, height, density, darkMode);
-        // Publish display + color scheme together (#342). width/height
-        // from the Kotlin side arrive as CSS-pixel equivalents: Android
+        // Publish display + color scheme together. width/height from
+        // the Kotlin side arrive as CSS-pixel equivalents: Android
         // reports physical pixels, so we divide by density for the
         // logical size and keep physical_* for the raw resolution.
         namespace pp = pulp::platform;
@@ -271,9 +271,9 @@ Java_com_pulp_PulpActivity_nativeOnKeyboardChanged(
         auto s = pp::Environment::instance().snapshot();
         s.keyboard.bottom = static_cast<float>(bottom);
         // Android's basic WindowInsetsCompat doesn't surface animation
-        // duration here — that lives on WindowInsetsAnimationCompat,
-        // which is a frame-by-frame callback API. Leave 0 until the
-        // animation plumbing is added in a follow-up PR.
+        // duration here; that lives on WindowInsetsAnimationCompat,
+        // which is a frame-by-frame callback API. Report 0 until this
+        // JNI path receives per-frame keyboard animation timing.
         s.keyboard.animation_duration = 0.0f;
         pp::Environment::instance().publish(s);
     } catch (const std::exception& e) {
@@ -286,10 +286,11 @@ Java_com_pulp_PulpActivity_nativeOnKeyboardChanged(
 
 // ── Audio Focus JNI Callbacks ─────────────────────────────────────────────
 
-// #334: forward AudioManager.OnAudioFocusChangeListener events into the
-// cross-platform AudioFocusRegistry. Subscribers (OboeDevice, standalone
-// adapter, tooling) react without caring whether the signal came from JNI,
-// AVAudioSession, or a desktop stub — same observer pattern as Environment.
+// Forward AudioManager.OnAudioFocusChangeListener events into the
+// cross-platform AudioFocusRegistry. Subscribers (OboeDevice,
+// standalone adapter, tooling) react without caring whether the signal
+// came from JNI, AVAudioSession, or a desktop stub — same observer
+// pattern as Environment.
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLost(JNIEnv*, jobject) {
@@ -298,11 +299,9 @@ Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLost(JNIEnv*, jobject) {
         pulp::audio::AudioFocusState::lost);
 }
 
-// #500: previously AUDIOFOCUS_LOSS_TRANSIENT in Kotlin collapsed into
-// nativeOnAudioFocusDuck, so AudioFocusState::lost_transient was
-// unreachable from the Android path. Dedicated entry point now routes
-// it correctly so subscribers can differentiate pause-transiently (we
-// WILL get focus back shortly) from duck (attenuate but keep playing).
+// AUDIOFOCUS_LOSS_TRANSIENT has its own entry point so subscribers can
+// differentiate pause-transiently (we WILL get focus back shortly) from
+// duck (attenuate but keep playing).
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLostTransient(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus lost transiently");

@@ -36,18 +36,20 @@ python3 -m http.server 8080
 brew install emscripten
 
 # Or manual install
-git clone https://github.com/niclamusic/niclamusic.github.io emsdk
+git clone https://github.com/emscripten-core/emsdk.git
 cd emsdk && ./emsdk install latest && ./emsdk activate latest
 source emsdk_env.sh
 ```
 
-### WASI SDK (alternative, for WebCLAP)
+### WASI SDK (experimental, for project-specific WebCLAP builds)
 
 ```bash
 # Download from https://github.com/WebAssembly/wasi-sdk/releases
 export WASI_SDK_PREFIX=/opt/wasi-sdk
 
-# Build with WASI toolchain
+# Build a project that includes tools/cmake/PulpWclap.cmake and calls
+# pulp_add_wclap(...). The checked-in web demos currently ship WAMv2
+# Emscripten targets, not a ready-made WebCLAP target.
 cmake -S ../.. -B build-wclap \
   -DCMAKE_TOOLCHAIN_FILE=../../tools/cmake/wasi-toolchain.cmake \
   -DPULP_BUILD_WCLAP=ON
@@ -106,7 +108,7 @@ The same Pulp Processor runs as:
 | AU v2 | macOS | CMake (native) |
 | CLAP | macOS, Windows, Linux | CMake (native) |
 | **WAMv2** | **Browser** | **Emscripten** |
-| **WebCLAP** | **Native + Browser** | **WASI SDK** |
+| **WebCLAP** | **Native + Browser** | **WASI SDK helper; no checked-in demo target yet** |
 
 ## Acknowledgments
 

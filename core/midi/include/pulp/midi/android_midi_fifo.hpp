@@ -8,9 +8,8 @@
 // block, converting the monotonic nanosecond timestamp into a sample
 // offset within the current block.
 //
-// This is an INTERNAL Phase-1 API. External consumers should use
-// `pulp::midi::android::drain_into(MidiBuffer&, ...)` from the audio
-// thread.
+// This is an internal bridge API. External consumers should use
+// `pulp::midi::android::drain_into(MidiBuffer&, ...)` from the audio thread.
 
 #if defined(__ANDROID__)
 

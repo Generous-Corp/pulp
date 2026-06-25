@@ -1,8 +1,8 @@
 // command_registry.cpp — Pulp-native command dispatch + shortcut routing.
 //
 // See `core/view/include/pulp/view/command_registry.hpp` for the contract.
-// Pulp-native names per planning/2026-05-24-macos-plugin-authoring-plan.md
-// section 6.4 (license-lineage note).
+// Names stay aligned with Pulp's command model rather than reference
+// framework class names.
 
 #include <pulp/view/command_registry.hpp>
 #include <pulp/state/properties_file.hpp>

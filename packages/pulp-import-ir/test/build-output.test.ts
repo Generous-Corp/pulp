@@ -1,12 +1,8 @@
-// pulp #1499 follow-up — Codex P2: the package's `exports` map points
-// `import` to `./dist/index.mjs`, but the original `build` script only
-// ran `tsc` (which emits `.js`, not `.mjs`). Consumers importing
-// @pulp/import-ir through package exports failed at runtime with a
-// missing-module error.
+// The package's `exports` map points `import` to `./dist/index.mjs`, so
+// the build must emit an ESM bundle alongside tsc's CommonJS-shaped output.
 //
-// The fix extends the build script to also produce dist/index.mjs via
-// esbuild. This test guards against the build script regressing — if
-// dist/index.mjs disappears, downstream ESM consumers break silently
+// This test guards against the build script regressing — if
+// dist/index.mjs disappears, ESM consumers break silently
 // at runtime.
 //
 // The test runs after `pnpm build`. CI invokes `pnpm build && pnpm
@@ -21,7 +17,7 @@ const distMjs = resolve(__dirname, '..', 'dist', 'index.mjs');
 const distJs = resolve(__dirname, '..', 'dist', 'index.js');
 const distDts = resolve(__dirname, '..', 'dist', 'index.d.ts');
 
-describe('@pulp/import-ir build output (#1499 follow-up)', () => {
+describe('@pulp/import-ir build output', () => {
     it('emits dist/index.mjs that the package exports map references', () => {
         expect(existsSync(distMjs)).toBe(true);
         const st = statSync(distMjs);

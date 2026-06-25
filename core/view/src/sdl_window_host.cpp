@@ -7,6 +7,7 @@
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <SDL3/SDL.h>
+#include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
 #include <string>
 #include <vector>
 #include <deque>
@@ -183,6 +184,25 @@ public:
     }
 
     // ── Platform feature overrides (SDL3, Linux/Windows) ──────────────
+
+    // Native window handle for outbound file drag (View::start_file_drag's free
+    // begin_file_drag backend). HWND on Windows — the OLE DoDragDrop backend
+    // ignores its value, but the cross-platform call site guards on non-null;
+    // the X11 Window id on Linux (the XDND source backend opens its own Display
+    // from it). Wayland / unsupported → nullptr, so the drag degrades to false.
+    void* native_content_view_handle() const override {
+        if (!window_) return nullptr;
+        SDL_PropertiesID props = SDL_GetWindowProperties(window_);
+#if defined(_WIN32)
+        return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+                                      nullptr);
+#elif defined(__linux__)
+        return reinterpret_cast<void*>(static_cast<uintptr_t>(
+            SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0)));
+#else
+        return nullptr;
+#endif
+    }
 
     void set_mouse_relative_mode(bool enabled) {
         if (window_) SDL_SetWindowRelativeMouseMode(window_, enabled);

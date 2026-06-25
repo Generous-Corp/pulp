@@ -1,9 +1,7 @@
 #pragma once
 
 // FileSearchPath — ordered list of directories to scan when resolving a
-// file by relative name. Mirrors the JUCE class of the same name; see the
-// [Reference Framework Gap Analysis](planning/2026-05-24-reference-framework-gap-analysis.md)
-// row for FileSearchPath.
+// file by relative name. Mirrors the JUCE class of the same name.
 //
 // Typical use: a plugin needs to locate a "preset.xml" or a font file that
 // might live in any of several user-/installer-/bundle-supplied roots, and

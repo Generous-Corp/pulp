@@ -1,4 +1,4 @@
-// test_font_variable_axes.cpp — Pulp #2163, font v2 Slice 2.3.
+// test_font_variable_axes.cpp — variable-font axis resolution.
 //
 // Verifies that FontOptions.variation_axes flows through the
 // FontResolver into SkTypeface::makeClone(SkFontArguments). Bundled

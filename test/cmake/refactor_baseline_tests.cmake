@@ -34,7 +34,7 @@ add_test(NAME refactor-downstream-consumers-manifest
         "${PULP_DOWNSTREAM_CONSUMERS_FIXTURE}")
 set_tests_properties(refactor-downstream-consumers-manifest PROPERTIES
     PASS_REGULAR_EXPRESSION
-        "downstream_validation_manifest_verified=true consumers=5 commands=13")
+        "downstream_validation_manifest_verified=true consumers=3 commands=9")
 
 add_test(NAME refactor-downstream-consumers-negative-contract
     COMMAND ${Python3_EXECUTABLE}
@@ -46,6 +46,6 @@ add_test(NAME refactor-downstream-consumers-negative-contract
 set_tests_properties(refactor-downstream-consumers-negative-contract
     PROPERTIES
     PASS_REGULAR_EXPRESSION
-        "downstream_manifest_contract_case=valid-current.*downstream_manifest_contract_case=missing-root-key.*downstream_manifest_contract_case=invalid-sdk-recipe.*downstream_manifest_contract_case=duplicate-consumer.*downstream_manifest_contract_case=invalid-sha.*downstream_manifest_contract_case=missing-command.*downstream_manifest_contract_case=missing-expected.*downstream_manifest_contract_case=project-design-merge.*downstream_manifest_contract_case=project-importer-claims-design-ir.*downstream_manifest_contract_case=adapter-without-sdk.*downstream_manifest_contract_verified=true")
+        "downstream_manifest_contract_case=valid-current.*downstream_manifest_contract_case=missing-root-key.*downstream_manifest_contract_case=invalid-sdk-recipe.*downstream_manifest_contract_case=duplicate-consumer.*downstream_manifest_contract_case=invalid-sha.*downstream_manifest_contract_case=missing-command.*downstream_manifest_contract_case=missing-expected.*downstream_manifest_contract_case=project-design-merge.*downstream_manifest_contract_case=adapter-without-sdk.*downstream_manifest_contract_verified=true")
 
 unset(PULP_DOWNSTREAM_CONSUMERS_FIXTURE)

@@ -1,12 +1,14 @@
 // gpu_surface_android_jni.cpp — JNI `extern "C"` bridge for the Android
 // GPU surface.
 //
-// Relocated from gpu_surface_android.cpp in the P8-1 refactor. Every
-// JNIEXPORT below is a thin forwarder onto the `android_*` entry points
-// declared in gpu_surface_android_internal.hpp (defined in
-// gpu_surface_android.cpp). The exports stay welded together in their own
-// TU because they share the Kotlin-facing `Java_com_pulp_render_*` symbol
-// surface and the same exception-bridging contract.
+// Owns the Kotlin-facing `Java_com_pulp_render_*` symbol surface for the GPU
+// host. Simple setters and touch down/move/up events forward directly to the
+// `android_*` entry points declared in gpu_surface_android_internal.hpp;
+// nativeOnTouchCancel clears capture state directly. Surface creation,
+// destruction, and file drops also manage JNI references, drag backend state,
+// and Java-array marshalling at this boundary. Lifecycle exports bridge C++
+// exceptions to Java; nativeOnDrop logs instead of throwing, and trivial
+// setters/touch forwarders rely on their callees to stay non-throwing.
 
 #if defined(__ANDROID__)
 

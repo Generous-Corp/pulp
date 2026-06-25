@@ -26,7 +26,7 @@ enum class ViewRole {
 /// (`on_view_opened`, `on_view_closed`, `on_view_resized`) to the
 /// processor.
 ///
-/// One processor can have multiple ViewBridges (Phase 2: multi-view):
+/// One processor can have multiple ViewBridges (multi-view):
 /// each host editor window, the inspector, and any remote views each
 /// own their own primary View instance. Parameter binding is shared
 /// through the processor's `StateStore`, so all attached views stay in

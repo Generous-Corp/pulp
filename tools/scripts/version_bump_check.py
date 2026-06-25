@@ -50,11 +50,11 @@ Heuristics (per surface, deliberately conservative):
 
 Uses JSON configs (zero-dep).
 
-Module layout (P9-NEW refactor, 2026-05): the Surface / heuristics /
-apply / render clusters live in focused sibling modules and are
-re-exported here so this file stays the byte-identical CLI entrypoint.
-External importers (`skill_sync_check.py` and the test suite) keep
-using `from version_bump_check import ...` unchanged.
+Module layout: the Surface / heuristics / apply / render clusters live
+in focused sibling modules and are re-exported here so this file remains
+the stable CLI and import entrypoint. External importers
+(`skill_sync_check.py` and the test suite) keep using
+`from version_bump_check import ...` unchanged.
 
     version_bump_surfaces.py    Surface domain model, config loading,
                                 version-file I/O
@@ -73,9 +73,9 @@ import subprocess  # noqa: F401  (re-exported for external importers)
 import sys
 from pathlib import Path
 
-# Shared substrate (2026-05 refactor batch). `_strip_meta` is the
-# version-bump-specific alias for `strip_meta`; we keep the public alias
-# so other callers in this file (and any external imports) don't break.
+# Shared gate helpers. `_strip_meta` is the version-bump-specific alias
+# for `strip_meta`; keep the public alias so callers in this file and any
+# external imports don't break.
 from gate_common import (
     repo_root,
     git_diff_names,
@@ -87,12 +87,10 @@ from gate_common import (
     strip_meta as _strip_meta,
 )
 
-# ── Re-exported cluster symbols (P9-NEW split) ──────────────────────────
-# These modules carry the byte-identical bodies of the functions/classes
-# that previously lived inline in this file. Keep every public name
-# re-exported so `from version_bump_check import X` keeps working for
-# skill_sync_check.py, test_gates.py, test_version_bump_check_extra.py
-# and any external caller.
+# ── Re-exported cluster symbols ─────────────────────────────────────────
+# Keep every public name re-exported so `from version_bump_check import X`
+# keeps working for skill_sync_check.py, test_gates.py,
+# test_version_bump_check_extra.py and any external caller.
 
 from version_bump_surfaces import (
     LEVELS,
@@ -149,6 +147,111 @@ BUMP_COMMIT_SUBJECT_PREFIXES = (
 
 def _is_fix_or_feat_title(title: str) -> bool:
     return bool(_FIX_FEAT_TITLE_RE.match(title.strip()))
+
+
+def _fix_feat_min_level(title: str) -> str | None:
+    """Minimum bump level a `fix:` / `feat:` title demands, or None.
+
+    `feat:` (a new user-facing capability) is a semver-minor; `fix:`
+    (and the `fix!:` / `feat!:` breaking variants, which we still treat
+    as their base type here — the title alone doesn't carry the target
+    surface) is a semver-patch. This mirrors `classify_conventional`'s
+    subject mapping but reads the PR *title* rather than a commit subject,
+    so the force-bump in `--mode=apply` agrees with the conv-commit
+    ceiling the per-surface pipeline would have applied had the diff been
+    meaningful.
+    """
+    s = title.strip()
+    m = _FIX_FEAT_TITLE_RE.match(s)
+    if not m:
+        return None
+    return "minor" if m.group(1) == "feat" else "patch"
+
+
+def force_fix_feat_bump(
+    pr_title: str,
+    verdicts: list,
+    changed: list[str],
+    base: str,
+    repo: Path,
+) -> tuple[list[str], str]:
+    """Reconcile `--mode=apply` with `--require-bump-for-fix-feat`.
+
+    Called only in apply mode after the normal `apply_bumps` pass when the
+    PR title is a `fix:` / `feat:` and that first pass edited nothing. A
+    branch cut from a recent merge inherits a version EQUAL to its
+    merge-base; for such a branch the per-surface heuristic finds no delta
+    → `final_level == "none"` → `apply_bumps` writes nothing. But CI's
+    `--require-bump-for-fix-feat` still hard-fails the `fix:` / `feat:` PR
+    for lacking a `chore: bump versions` commit. The two halves disagree
+    and a human has to hand-bump (issue #4679).
+
+    Resolution: when the title is `fix:` / `feat:` AND the diff touched a
+    versioned surface's `trigger_paths`, FORCE the title's minimum level
+    (patch for `fix:`, minor for `feat:`) onto every touched surface and
+    write the version files — the same files `apply_bumps` would have
+    written. The caller still appends the `chore: bump versions` commit,
+    so the report then passes with no manual step.
+
+    Returns `(edited, message)`:
+      - `edited` is the list of version-file paths rewritten (possibly
+        empty when every touched surface is already bumped).
+      - `message` is an advisory line for non-edit outcomes: when NO
+        versioned surface was touched at all, it is an actionable
+        reclassify-or-skip message (the caller surfaces it and the
+        downstream `--require-bump-for-fix-feat` check still fails, so
+        this never silently no-ops). Empty string when surfaces were
+        forced.
+    """
+    min_level = _fix_feat_min_level(pr_title)
+    if min_level is None:  # pragma: no cover - guarded by caller
+        return [], ""
+
+    touched_verdicts = []
+    for v in verdicts:
+        if any(_matches_any(p, v.surface.trigger_paths) for p in changed):
+            touched_verdicts.append(v)
+
+    if not touched_verdicts:
+        # No versioned surface touched — a `fix:` / `feat:` title on a
+        # diff that only changes build/CI/docs/test paths (the P5
+        # `build:`-class case). We refuse to silently no-op: emit an
+        # actionable message and let `--require-bump-for-fix-feat` fail
+        # so the author either reclassifies the title or records a skip.
+        return [], (
+            "fix/feat-needs-bump: PR title "
+            f"{pr_title!r} is a user-facing `fix:` / `feat:` change but "
+            "the diff touches NO versioned surface's trigger paths, so "
+            "there is nothing to bump. This usually means the title is "
+            "mislabeled (a `build:` / `ci:` / `docs:` / `test:` /\n"
+            "`refactor:` change wearing a `fix:` / `feat:` hat).\n"
+            "\n"
+            "Resolution — pick one:\n"
+            "  • Re-title the PR with the accurate Conventional Commits "
+            "type (`build:` / `ci:` / `docs:` / `chore:` / `refactor:` / "
+            "`test:`) — those are not release events and need no bump.\n"
+            "  • If it genuinely IS user-facing but lives outside the "
+            "configured surfaces, add a top-level trailer to the tip "
+            "commit:\n"
+            '      Version-Bump: skip reason="<why this doesn\'t need a release>"\n'
+        )
+
+    # Force the title's minimum level onto every touched surface, then
+    # re-run apply_bumps. `apply_bumps` already short-circuits surfaces
+    # whose version files are all at the target (idempotent re-apply) and
+    # computes the new version from the BASE version, so forcing here is
+    # safe even on a partially-bumped branch.
+    forced = []
+    for v in touched_verdicts:
+        forced.append(Verdict(
+            surface=v.surface,
+            heuristic=v.heuristic,
+            trailer_override=v.trailer_override,
+            current_version=v.current_version,
+            final_level=min_level,
+        ))
+    edited = apply_bumps(forced, base, repo)
+    return edited, ""
 
 
 def _range_has_bump_commit(base: str, head: str) -> bool:
@@ -265,12 +368,12 @@ def check_fix_feat_requires_bump(
 
 
 def main(argv: list[str]) -> int:
-    # B1 (2026-05): if invoked as `version_bump_check.py classify-subject
-    # <subject>`, exit 0 when the subject matches the fix/feat regex and
-    # 1 otherwise. This lets .github/workflows/auto-release.yml's
-    # stranded-fix detector call the script for classification instead
-    # of duplicating `_FIX_FEAT_TITLE_RE` inline (the duplication was a
-    # documented lock-step drift risk).
+    # If invoked as `version_bump_check.py classify-subject <subject>`,
+    # exit 0 when the subject matches the fix/feat regex and 1 otherwise.
+    # This lets .github/workflows/auto-release.yml's stranded-fix detector
+    # call the script for classification instead of duplicating
+    # `_FIX_FEAT_TITLE_RE` inline (the duplication was a documented
+    # lock-step drift risk).
     if len(argv) >= 2 and argv[0] == "classify-subject":
         return 0 if _is_fix_or_feat_title(argv[1]) else 1
 
@@ -333,6 +436,39 @@ def main(argv: list[str]) -> int:
 
     if args.mode == "apply":
         edited = apply_bumps(verdicts, args.base, root)
+
+        # Reconcile apply with `--require-bump-for-fix-feat` (issue #4679).
+        # A branch cut from a recent merge inherits a version EQUAL to its
+        # merge-base; the per-surface heuristic then finds no delta →
+        # `apply_bumps` writes nothing → CI's fix/feat gate hard-fails the
+        # `fix:` / `feat:` PR for lacking a `chore: bump versions` commit.
+        # When the title IS `fix:` / `feat:` and the first pass edited
+        # nothing AND the range carries no bump commit / skip trailer
+        # already, FORCE the title's minimum bump on every touched surface
+        # so the gate passes without a manual hand-bump.
+        forced_no_surface_msg = ""
+        forced_this_run = False
+        pr_title = (
+            args.pr_title if args.pr_title is not None
+            else os.environ.get("GITHUB_PR_TITLE", "")
+        )
+        # Only force when the fix/feat gate would otherwise FAIL — i.e.
+        # the title is `fix:` / `feat:` and the range carries neither a
+        # bump commit nor a `Version-Bump: skip` trailer.
+        # `check_fix_feat_requires_bump` is the single source of truth for
+        # that verdict (it also short-circuits non-fix/feat titles and the
+        # no-title case), so reusing it keeps `main()` and the CI gate in
+        # lock-step and avoids re-deriving the conditions here.
+        ff_would_pass, _ff_pre_msg = check_fix_feat_requires_bump(
+            pr_title, args.base, args.head,
+        )
+        if not edited and pr_title and not ff_would_pass:
+            forced, forced_no_surface_msg = force_fix_feat_bump(
+                pr_title, verdicts, changed, args.base, root,
+            )
+            edited = forced
+            forced_this_run = bool(forced)
+
         # Re-assess after editing: re-read current versions and re-check.
         verdicts_after = assess_surfaces(cfg, changed, args.base, args.head, root)
         text, code = render_report(
@@ -345,21 +481,43 @@ def main(argv: list[str]) -> int:
                 print(f"  {e}")
         if text:
             print(text)
+        if forced_no_surface_msg:
+            # No versioned surface was touched — print the actionable
+            # reclassify/skip message so the caller (and shipyard pr) sees
+            # *why* nothing bumped instead of a silent no-op. Force a
+            # non-zero exit even without `--require-bump-for-fix-feat`:
+            # apply mode must not silently succeed on a `fix:` / `feat:`
+            # title it could not reconcile (issue #4679 acceptance (b)).
+            sys.stderr.write(forced_no_surface_msg + "\n")
+            if code == 0:
+                code = 1
         # `--require-bump-for-fix-feat` is meaningful in apply mode too:
-        # if `pulp pr` ran apply and didn't actually edit anything (no
-        # surface needed a bump), but the PR title is `fix:` / `feat:`,
-        # the check should still flag it — that means the heuristic
-        # found nothing actionable *and* the author didn't record a
-        # skip trailer. Better to fail here than at the CI gate.
+        # if `pulp pr` ran apply and STILL couldn't produce a bump (no
+        # surface touched, or the author opted out without a trailer),
+        # the check should still flag it. After the force-bump above the
+        # common branch==base case now passes here instead of failing at
+        # the CI gate.
         if args.require_bump_for_fix_feat:
-            ff_passed, ff_msg = check_fix_feat_requires_bump(
-                args.pr_title if args.pr_title is not None
-                else os.environ.get("GITHUB_PR_TITLE", ""),
-                args.base, args.head,
-            )
-            print(ff_msg)
-            if not ff_passed:
-                return 1
+            if forced_this_run:
+                # We just wrote the version files this run; the caller
+                # (shipyard pr) appends the `chore: bump versions` commit
+                # AFTER apply, so the bump commit isn't in the range yet.
+                # Don't hard-fail on the marker we are in the middle of
+                # creating — the downstream CI report (which runs after
+                # the commit lands) is the authoritative gate.
+                print(
+                    "fix/feat-needs-bump: forced the minimum bump for "
+                    f"{pr_title!r}; the caller will append the "
+                    "`chore: bump versions` commit — OK."
+                )
+            else:
+                ff_passed, ff_msg = check_fix_feat_requires_bump(
+                    pr_title,
+                    args.base, args.head,
+                )
+                print(ff_msg)
+                if not ff_passed:
+                    return 1
         return code
 
     text, code = render_report(

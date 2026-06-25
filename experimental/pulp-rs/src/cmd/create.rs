@@ -1,6 +1,6 @@
 //! `pulp-rs create <name>` — scaffold a new plugin project.
 //!
-//! # Phase 6d scope
+//! # Rust-native scaffold scope
 //!
 //! Full `--ci / --no-interactive` path is ported:
 //!
@@ -27,10 +27,10 @@
 //! | Android template tree copy                      | Ported      |
 //! | `~/.pulp/projects.json` registry add            | **Skipped** |
 //!
-//! Anything marked **Skipped** stays on the C++ binary — those paths
-//! require external network / subprocess machinery whose port is
-//! deferred. The Rust port writes a `--no-build` notice and exits 0
-//! after the scaffold succeeds so CI jobs see stable output.
+//! Anything marked **Skipped** stays on the C++ binary because those
+//! paths require external network / subprocess machinery. The Rust
+//! path writes a `--no-build` notice and exits 0 after the scaffold
+//! succeeds so CI jobs see stable output.
 
 // The scaffolder mirrors the C++ reference closely, which means lots
 // of flag-flipping per-file and one big linear `scaffold()` body. The
@@ -70,9 +70,11 @@ pub struct CreateArgs {
     pub mpe: bool,
     /// `--in-tree` / `--example`.
     pub in_tree: bool,
-    /// `--no-build`. Phase 6d always behaves as if this is set (no build).
+    /// `--no-build`. The Rust-native scaffold always behaves as if
+    /// this is set.
     pub no_build: bool,
-    /// `--no-interactive` / `--ci`. Required in Phase 6d; absence errors.
+    /// `--no-interactive` / `--ci`. Required for the Rust-native
+    /// scaffold path; otherwise the command delegates to `pulp-cpp`.
     pub ci_mode: bool,
     /// `--help` / `-h`.
     pub wants_help: bool,
@@ -786,9 +788,9 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
         ));
     }
     if !args.ci_mode {
-        // Phase 7: interactive wizard needs a TUI (dialoguer or
-        // similar). Delegate to pulp-cpp when available; fall back
-        // to the "use --ci" stub when not.
+        // The interactive wizard needs a TUI (dialoguer or similar).
+        // Delegate to pulp-cpp when available; fall back to the
+        // "use --ci" stub when not.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         match crate::fallthrough::delegate(&cpp_argv)? {
             crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
@@ -1099,7 +1101,7 @@ mod tests {
         assert!(err.to_string().contains("--ci"));
     }
 
-    // ── #45 coverage uplift slice 14 — create.rs cushion ───────────
+    // ── create.rs coverage cushion ────────────────────────────────
 
     #[test]
     fn parse_help_no_args_does_not_set_help() {

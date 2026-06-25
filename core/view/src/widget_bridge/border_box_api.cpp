@@ -61,9 +61,9 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
         return choc::value::Value();
     });
 
-    // pulp #1026 — Standalone border setters (RN parity). The shorthand
-    // setBorder(id, color, width, radius) is convenient for atomic style
-    // application but @pulp/react's prop-applier needs per-attribute
+    // Standalone border setters for RN parity. The shorthand setBorder(id,
+    // color, width, radius) is convenient for atomic style application, but
+    // @pulp/react's prop-applier needs per-attribute
     // setters so individual JSX style props (`borderColor`, `borderWidth`,
     // `borderRadius`) can update without recomputing the others.
     //
@@ -85,12 +85,11 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
         return choc::value::Value();
     });
 
-    // setBorderStyle(id, "solid"|"dashed"|"dotted"|...) — pulp #1434
-    // Triage #10. Maps the CSS border-style keyword to View::BorderStyle.
+    // setBorderStyle(id, "solid"|"dashed"|"dotted"|...) maps the CSS
+    // border-style keyword to View::BorderStyle.
     // Skia paint installs the dashed / dotted SkDashPathEffect at stroke
-    // time; double / groove / ridge / inset / outset currently degrade
-    // to solid (paint-side gap, tracked for follow-up). none / hidden
-    // short-circuit the stroke entirely.
+    // time; double / groove / ridge / inset / outset currently degrade to
+    // solid. none / hidden short-circuit the stroke entirely.
     register_bridge_function(api, "setBorderStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");

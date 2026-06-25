@@ -98,6 +98,13 @@ When `options.auto_read = true` the reader and writer run on
 starve queued writes. Do not re-introduce a single worker loop
 without understanding this — request/response flows break otherwise.
 
+### 7. Callback state must outlive the stream and executor
+
+When callbacks capture mutexes, condition variables, or other local state,
+declare that state before the `AsyncStream` and before any executor loop
+that may run queued callbacks. `stop()` / destruction can dispatch `on_close`;
+do not let callback captures die before the stream and loop have drained.
+
 ## Extending with a new transport
 
 To add WebSocket, S3, or any other transport:
@@ -109,7 +116,7 @@ To add WebSocket, S3, or any other transport:
    document it so callers know to always wrap in `AsyncStream` with
    `auto_read = true`.
 
-## Message channels (Phase 4)
+## Message channels
 
 `MessageChannel` is the structured-message layer: one `send()` = one
 delivered message. Use it when the peer protocol doesn't tolerate
@@ -139,4 +146,4 @@ Patterns that are easy to get wrong:
 - Example: `examples/stream-demo/main.cpp`
 - Tests: `test/test_{stream,async_stream,network_stream,websocket_channel,osc_channel,json_rpc}.cpp` — copy these
   patterns for new transport tests
-- Feature plan: `planning/next-features-plan.md` § Feature 3 (Phase 1–4 landed)
+- Feature plan: `planning/next-features-plan.md` stream feature background

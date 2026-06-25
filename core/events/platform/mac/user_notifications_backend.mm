@@ -1,7 +1,8 @@
 // macOS / iOS PushNotifications backend.
 //
 // Wraps `UNUserNotificationCenter` from `UserNotifications.framework`.
-// Local-only in this slice — remote push (APNs registration tokens,
+// Current backend scope is local notifications only; remote push
+// (APNs registration tokens,
 // `application:didRegisterForRemoteNotificationsWithDeviceToken:`,
 // silent push) is deferred until a real APNs integration ships.
 //
@@ -10,7 +11,7 @@
 // up the macOS path without per-call wiring. Plugin sandboxes that
 // cannot use UserNotifications (older AU hosts) still work because
 // the framework calls themselves no-op when the host process is not
-// authorized; the gap-doc row stays "local-only" until remote shipping.
+// authorized.
 
 #include <pulp/events/push_notifications.hpp>
 

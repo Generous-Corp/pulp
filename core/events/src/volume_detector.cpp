@@ -77,25 +77,22 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
 
 // ── NetworkServiceDiscovery ─────────────────────────────────────────────
 //
-// #302: the core is a dispatcher that delegates to an installed
-// Backend. Without a backend, every op is an honest no-op — browse()
-// does NOT set running_=true (that was the pre-#302 stub's silent-
-// success bug), register_service() returns false. A future follow-up
-// ships concrete backends (dns-sd on mac, Avahi on linux, etc.).
+// The core is a dispatcher that delegates to an installed Backend.
+// Without a backend, every operation is an honest no-op: browse()
+// does not set running_=true, and register_service() returns false.
+// Concrete platform backends are installed by platform-specific code.
 
 NetworkServiceDiscovery::~NetworkServiceDiscovery() { stop(); }
 
 void NetworkServiceDiscovery::install_backend(std::unique_ptr<Backend> backend) {
-    // Codex P2 on #310: swapping backends clears the cached
-    // discoveries so stale services from the previous backend don't
-    // leak into queries against the new one.
+    // Swapping backends clears the cached discoveries so stale services
+    // from the previous backend don't leak into queries against the new one.
     //
-    // Codex P2 follow-up on #314: assign backend_ BEFORE emitting
-    // on_service_lost, not after. If a subscriber's on_service_lost
-    // handler re-enters the NSD API (has_backend(), register_service(),
-    // etc.) while we're evicting, it must see the NEW backend state,
-    // not the old one we just tore down via stop(). Swap first, then
-    // drain lost-callbacks.
+    // Assign backend_ before emitting on_service_lost, not after. If a
+    // subscriber's on_service_lost handler re-enters the NSD API
+    // (has_backend(), register_service(), etc.) while we're evicting, it
+    // must see the new backend state, not the old one we just tore down via
+    // stop(). Swap first, then drain lost-callbacks.
     stop();
     backend_ = std::move(backend);
     if (!services_.empty()) {
@@ -148,12 +145,11 @@ void NetworkServiceDiscovery::unregister_service() {
 }
 
 void NetworkServiceDiscovery::notify_service_found(const Service& svc) {
-    // Codex P2 on #310: re-announces from the same backend must
-    // refresh the cached entry (hostname/address/port can change
-    // when a service restarts on a new port or moves to a new IP)
-    // instead of silently dropping. Match by (name, type); replace
-    // the entry if anything else differs and fire on_service_found
-    // so subscribers learn about the change.
+    // Re-announces from the same backend refresh the cached entry:
+    // hostname/address/port can change when a service restarts on a new
+    // port or moves to a new IP. Match by (name, type); replace the entry
+    // if anything else differs and fire on_service_found so subscribers
+    // learn about the change.
     for (auto& existing : services_) {
         if (existing.name == svc.name && existing.type == svc.type) {
             const bool changed =

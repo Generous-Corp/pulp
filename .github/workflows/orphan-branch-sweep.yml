@@ -226,8 +226,7 @@ jobs:
           # can reopen an existing tracker when orphans reappear after a
           # clean run. We capture the state alongside the number because
           # the zero-orphan close-path below needs to avoid re-commenting
-          # and re-closing an already-closed tracker (Codex finding on
-          # #475).
+          # and re-closing an already-closed tracker (#475).
           existing_json=$(
               gh issue list \
                   --repo "$repo" \

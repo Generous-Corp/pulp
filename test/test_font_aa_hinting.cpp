@@ -1,4 +1,4 @@
-// test_font_aa_hinting.cpp — Pulp #2163, font v2 Slice 3.2.
+// test_font_aa_hinting.cpp — anti-aliasing and hinting mode propagation.
 //
 // Verifies that FontOptions.aa_mode / .hinting_mode are propagated by
 // FontResolver onto the returned ResolvedFont, and that the helper
@@ -24,11 +24,9 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 
-// pulp #2163 — review-sweep update: `Default` / `PlatformDefault`
-// no longer hard-map to a specific Skia enum (Codex P2 review on
-// PR #2186). They resolve to `std::nullopt`, signalling "caller
-// preserves the existing per-context heuristic". Explicit modes
-// still resolve to the fixed enum.
+// Regression note from PR #2186: `Default` / `PlatformDefault` resolve
+// to `std::nullopt`, signalling "caller preserves the existing
+// per-context heuristic". Explicit modes still resolve to the fixed enum.
 
 TEST_CASE("AA mode: Default returns nullopt (caller decides)", "[font][aa][issue-2163]") {
     REQUIRE(sk_edging_for(AntiAliasMode::Default) == std::nullopt);

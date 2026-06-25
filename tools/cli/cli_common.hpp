@@ -146,12 +146,12 @@ bool is_floating_sdk(const fs::path& project_root);
 // Return the newest installed SDK version under ~/.pulp/sdk/ — i.e.
 // the version `"latest"` resolves to. Empty if no SDKs are installed.
 std::string newest_installed_sdk();
-// Pulp #2087 follow-up (#22): cached query of "what's the newest SDK
-// available on GitHub Releases?". Returns the version string (without
-// the leading `v`) or empty if the cache is missing/stale and a fresh
-// query failed. Cached at ~/.pulp/cache/latest_release.txt with a 24h
-// TTL; refreshes opportunistically when called and the cache is
-// stale, but never blocks the caller for more than ~2s (curl timeout).
+// Cached query of "what's the newest SDK available on GitHub Releases?".
+// Returns the version string (without the leading `v`) or empty if the cache is
+// missing/stale and a fresh query failed. Cached at
+// ~/.pulp/cache/latest_release.txt with a 24h TTL; refreshes opportunistically
+// when called and the cache is stale, but never blocks the caller for more than
+// ~2s (curl timeout).
 std::string latest_available_sdk_version();
 // Print a one-line banner to stdout if `latest_available_sdk_version()`
 // returns a version newer than `installed`. No-op when the cache
@@ -207,8 +207,8 @@ std::string capture_shipyard_version(const std::string& shipyard_bin);
 
 // Write/update `key = "value"` under `[section]` in ~/.pulp/config.toml.
 // Creates the file if missing. Preserves all other content verbatim.
-// Release-discovery Slice 2 (#547) surface — used by `pulp config set`
-// and by the banner-suppression bookkeeping inside cmd_upgrade.
+// Used by `pulp config set` and by the banner-suppression bookkeeping
+// inside cmd_upgrade.
 bool write_user_config_value(const std::string& section,
                              const std::string& key,
                              const std::string& value);
@@ -251,15 +251,14 @@ struct DoctorCheck {
     // Optional checks report remediation advice but don't contribute
     // to the overall doctor exit code when they fail. Used for e.g.
     // the Google Android CLI accelerator (#355) which is a speedup,
-    // not a requirement. See #438 P1 for #389.
+    // not a requirement.
     bool optional = false;
 };
 
-// `only_filter` (R2-8 P2 follow-up): case-insensitive substring. When
-// non-empty, individual probes whose name doesn't match are SKIPPED —
-// no process spawn, no file IO — so `pulp doctor --only git` actually
-// runs only git probes instead of running everything and filtering the
-// output (the original R2-8 shape, which Codex flagged on PR #2145).
+// `only_filter`: case-insensitive substring. When non-empty,
+// individual probes whose name doesn't match are SKIPPED — no process
+// spawn, no file IO — so `pulp doctor --only git` runs only git probes
+// instead of running everything and filtering the output.
 std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode,
                                            const std::string& only_filter = {});
 

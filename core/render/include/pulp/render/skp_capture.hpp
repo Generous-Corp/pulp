@@ -2,15 +2,12 @@
 
 // skp_capture.hpp — Skia `.skp` (SkPicture) frame capture.
 //
-// Phase 6.4 of the inspector GPU-perf roadmap
-// (planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.4).
-//
 // The capture writes a rendered frame as a Skia `.skp` artifact that
 // Skia's own `skiadebugger` can replay op-by-op. This is the bridge
 // from "a frame looked weird in Pulp" to the best-in-class external
 // frame-debugging tool — for free, because Skia ships the format.
 //
-// Design (from the Phase 6.4 spike, which de-risked this in PR #2506):
+// Design:
 //
 //   * `.skp` is the legacy `SkPicture` serialization format. It is
 //     fully backend-independent — an `SkPictureRecorder` records draw

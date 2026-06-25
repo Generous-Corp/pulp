@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
-// threejs_resources_apple.mm — iOS-D.3b Slice 2.
+// threejs_resources_apple.mm — iOS Three.js IIFE resource lookup.
 //
-// Apple-platform implementation of `pulp::view::threejs_iife_source()`.
+// iOS/simulator implementation of `pulp::view::threejs_iife_source()`.
 // On iOS we load `threejs/three.iife.js` from inside the AUv3 `.appex`
 // via `NSBundle`. iOS bundles are flat — `[NSBundle resourcePath]` IS
 // the bundle root, so the loader resolves

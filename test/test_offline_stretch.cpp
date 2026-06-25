@@ -1,12 +1,12 @@
-// OfflineStretch — Phase 0 scaffold tests.
+// OfflineStretch tests.
 //
-// At this phase the engine is a length-correct pass-through: exact identity at
-// time_ratio == 1, and an honest placeholder (copy + zero-pad) otherwise. These
-// tests pin the parts of the contract that must hold for EVERY future phase:
+// These tests pin the contract and quality bands for the implemented engine:
 //   - exact output length = round(in_frames * time_ratio) (loop grid-lock);
 //   - R=1, pitch 0 is a perfect null against the input;
-//   - the process() contract rejects misuse (unprepared, wrong out length).
-// The stretch-quality assertions arrive with the real engine in Phase 1+.
+//   - deterministic renders for independent runs;
+//   - tempo/pitch/repitch quality bounds;
+//   - the process() contract rejects misuse before writing output.
+// Output quality is not yet compared against an external reference renderer.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -85,7 +85,7 @@ TEST_CASE("process writes exactly the contracted output length", "[offline-stret
 
     std::string err;
     REQUIRE(s.process(inp, n, outp, expected, opts, &err));
-    // Placeholder body must have written every output sample (no stale fill).
+    // The render must have written every output sample (no stale fill).
     bool any_stale = false;
     for (float v : out) if (v == 1234.0f) { any_stale = true; break; }
     CHECK_FALSE(any_stale);
@@ -202,8 +202,8 @@ TEST_CASE("repitch_linked: exact length, R=1 identity, sine tracks i/ratio", "[o
             e += d * d; ++cnt;
         }
         // sinc6 is a 6-tap windowed sinc: ~-48 dB passband accuracy on a 1 kHz
-        // tone. Confirms repitch reads the correct positions; a Kaiser-sinc
-        // (Resampler, 96 dB) upgrade for repitch is a P6 quality item.
+        // tone. Confirms repitch reads the correct positions; upgrading repitch
+        // to the 96 dB Kaiser-sinc Resampler remains a quality improvement.
         CHECK(std::sqrt(e / cnt) < 2.5e-3);
     }
 }
@@ -444,46 +444,208 @@ TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[of
     CHECK(fr < 1120.0);
 }
 
-// recommend_window picks the material-adaptive STFT geometry the sampler now
-// wires: a percussive (high-crest) signal -> 1024/128 (sharp attacks, the
-// "drum_pl" reference), a bass-heavy signal -> 8192/512 (resolve low partials),
-// tonal/mid -> {0,0} (engine default 4096/512). Regression for the sampler having
-// rendered every loop at the fixed default window (smeared drums).
-TEST_CASE("recommend_window adapts to material", "[offline-stretch][window]") {
+// ── Adaptive STFT window selection (material-aware) ───────────────────────────
+// The phase core is fixed at FFT 4096/512; that window is too small to resolve
+// closely-spaced low partials (bass wobbles) and too large for percussive time
+// resolution (drum attacks soften). recommend_window() picks geometry from the
+// input, and prepare() honors an explicit override. These pin the ear-validated
+// selection so a future refactor can't silently regress it.
+namespace {
+constexpr double kPi2 = 6.28318530717958647692;
+std::vector<float> sine(long n, double sr, double hz, float amp = 0.7f) {
+    std::vector<float> v(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        v[static_cast<size_t>(i)] = amp * static_cast<float>(std::sin(kPi2 * hz * static_cast<double>(i) / sr));
+    return v;
+}
+} // namespace
+
+TEST_CASE("recommend_window picks material-adaptive STFT geometry", "[offline-stretch]") {
     const double sr = 48000.0;
     const long n = static_cast<long>(sr); // 1 s
 
-    SECTION("percussive (high crest) -> 1024/128") {
-        std::vector<float> x(static_cast<size_t>(n), 0.0f);
-        // sparse sharp hits: a fast-decaying burst every 0.25 s
-        unsigned seed = 12345u;
-        auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return (static_cast<float>(seed >> 9) / 8388608.0f) - 1.0f; };
-        for (int hit = 0; hit < 4; ++hit) {
-            const long p = static_cast<long>(hit * 0.25 * sr);
-            for (long j = 0; j < static_cast<long>(0.1 * sr) && p + j < n; ++j)
-                x[static_cast<size_t>(p + j)] = std::exp(-static_cast<float>(j) / (0.01f * static_cast<float>(sr))) * rnd() * 0.7f;
-        }
-        const float* ch[1] = {x.data()};
-        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+    SECTION("percussive (high crest) -> 1024: time resolution (matches Python ref)") {
+        std::vector<float> perc(static_cast<size_t>(n), 0.0f);
+        for (long i = 0; i < n; i += 12000) perc[static_cast<size_t>(i)] = 1.0f; // sparse clicks
+        const float* p[1] = {perc.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
         CHECK(w.fft_size == 1024);
         CHECK(w.analysis_hop == 128);
     }
-    SECTION("bass-heavy (low-band) -> 8192/512") {
-        std::vector<float> x(static_cast<size_t>(n));
-        for (long i = 0; i < n; ++i)   // steady 60 Hz sine = low-fundamental, low crest
-            x[static_cast<size_t>(i)] = 0.5f * std::sin(2.0f * 3.14159265f * 60.0f * static_cast<float>(i) / static_cast<float>(sr));
-        const float* ch[1] = {x.data()};
-        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+    SECTION("bass / low-fundamental -> large window + 16x overlap") {
+        const auto b = sine(n, sr, 60.0, 0.8f);
+        const float* p[1] = {b.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
         CHECK(w.fft_size == 8192);
         CHECK(w.analysis_hop == 512);
     }
-    SECTION("tonal mid (neither) -> default {0,0}") {
-        std::vector<float> x(static_cast<size_t>(n));
-        for (long i = 0; i < n; ++i)   // steady 1 kHz sine = mid, low crest, low lo-band
-            x[static_cast<size_t>(i)] = 0.5f * std::sin(2.0f * 3.14159265f * 1000.0f * static_cast<float>(i) / static_cast<float>(sr));
-        const float* ch[1] = {x.data()};
-        const auto w = OfflineStretch::recommend_window(ch, n, 1, sr);
+    SECTION("mid sustained tone -> engine default (no override)") {
+        const auto m = sine(n, sr, 2000.0, 0.5f);
+        const float* p[1] = {m.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
         CHECK(w.fft_size == 0);
         CHECK(w.analysis_hop == 0);
     }
+    SECTION("degenerate input -> default, never crashes") {
+        const auto w = OfflineStretch::recommend_window(nullptr, 0, 1, sr);
+        CHECK(w.fft_size == 0);
+        CHECK(w.analysis_hop == 0);
+    }
+}
+
+TEST_CASE("prepare honors an explicit fft_size override and still renders", "[offline-stretch]") {
+    const double sr = 48000.0;
+    OfflineStretch s;
+    OfflineStretchOptions sizing;
+    sizing.fft_size = 8192;      // force the bass window
+    sizing.analysis_hop = 512;
+    s.prepare(sr, 1, sizing);
+    CHECK(s.fft_size() == 8192);
+
+    const long n = 24000;
+    const auto in = sine(n, sr, 80.0, 0.6f);
+    const float* inp[1] = {in.data()};
+    OfflineStretchOptions o; o.time_ratio = 2.0;
+    const long m = offline_stretch_output_frames(n, o.time_ratio);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* outp[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+    for (float v : out) REQUIRE(std::isfinite(v));
+    // exact length contract holds at the larger window too
+    REQUIRE(static_cast<long>(out.size()) == offline_stretch_output_frames(n, o.time_ratio));
+}
+
+TEST_CASE("invalid fft override is ignored (falls back to default geometry)", "[offline-stretch]") {
+    OfflineStretch s;
+    OfflineStretchOptions sizing;
+    sizing.fft_size = 3000;       // not a power of two -> must be ignored
+    sizing.analysis_hop = 500;
+    s.prepare(48000.0, 1, sizing);
+    // fft_size() reflects the requested override value; the engine internally
+    // rejects the invalid geometry and uses its 4096 default — the render must
+    // still succeed and stay finite.
+    const long n = 8000;
+    const auto in = sine(n, 48000.0, 200.0, 0.5f);
+    const float* inp[1] = {in.data()};
+    OfflineStretchOptions o; o.time_ratio = 1.5;
+    const long m = offline_stretch_output_frames(n, o.time_ratio);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* outp[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+    for (float v : out) REQUIRE(std::isfinite(v));
+}
+
+// ── Character modes (StretchCharacter) ────────────────────────────────────────
+// clean (default) = spectral peak-lock; varispeed = pitch+time-linked resample +
+// speed-scaled tape head EQ; phase_vocoder/granular are reserved modes that
+// currently render as clean. These pin the API contract + the varispeed tape
+// behaviour.
+TEST_CASE("varispeed: identity at ratio 1, exact length, tape EQ direction", "[offline-stretch]") {
+    using pulp::signal::StretchCharacter;
+    const double sr = 48000.0;
+    const long n = 24000;
+    const auto in = sine(n, sr, 220.0, 0.6f);
+    const float* inp[1] = {in.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+
+    SECTION("ratio 1.0 is a (near) identity — head EQ bypasses at unity") {
+        OfflineStretchOptions o; o.character = StretchCharacter::varispeed; o.time_ratio = 1.0;
+        std::vector<float> out(static_cast<size_t>(n)); float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(inp, n, op, n, o, &e));
+        double maxd = 0.0;
+        for (long i = 0; i < n; ++i) maxd = std::max(maxd, std::abs((double)out[(size_t)i]-(double)in[(size_t)i]));
+        CHECK(maxd < 1e-3); // pure resample at integer positions
+    }
+    SECTION("ratio != 1: exact length, finite, and slow=darker than fast") {
+        // HF brightness proxy: mean |first difference| / mean |sample|. Brighter
+        // (more HF) -> higher slew. Robust and FFT-free.
+        auto brightness = [&](const std::vector<float>& y) {
+            double slew=0, amp=0;
+            for (size_t i=1;i<y.size();++i){ slew+=std::abs((double)y[i]-(double)y[i-1]); amp+=std::abs((double)y[i]); }
+            return amp>0 ? slew/amp : 0.0;
+        };
+        OfflineStretchOptions slow; slow.character=StretchCharacter::varispeed; slow.time_ratio=2.0;
+        const long ms = offline_stretch_output_frames(n, 2.0);
+        std::vector<float> os(static_cast<size_t>(ms)); float* sp[1]={os.data()};
+        std::string e; REQUIRE(s.process(inp, n, sp, ms, slow, &e));
+        REQUIRE(static_cast<long>(os.size()) == ms);
+        for (float v: os) REQUIRE(std::isfinite(v));
+
+        OfflineStretchOptions fast; fast.character=StretchCharacter::varispeed; fast.time_ratio=0.5;
+        const long mf = offline_stretch_output_frames(n, 0.5);
+        std::vector<float> of(static_cast<size_t>(mf)); float* fp[1]={of.data()};
+        REQUIRE(s.process(inp, n, fp, mf, fast, &e));
+        // tape slow is duller than tape fast (head-gap HF loss scales with speed)
+        CHECK(brightness(os) < brightness(of));
+    }
+}
+
+TEST_CASE("scaffold characters render valid output (clean fallback)", "[offline-stretch]") {
+    using pulp::signal::StretchCharacter;
+    const double sr = 48000.0; const long n = 12000;
+    const auto in = sine(n, sr, 440.0, 0.5f);
+    const float* inp[1] = {in.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+    for (auto ch : {StretchCharacter::phase_vocoder, StretchCharacter::granular}) {
+        OfflineStretchOptions o; o.character = ch; o.time_ratio = 1.5; o.relocate_transients = true;
+        const long m = offline_stretch_output_frames(n, 1.5);
+        std::vector<float> out(static_cast<size_t>(m)); float* op[1]={out.data()};
+        std::string e; REQUIRE(s.process(inp, n, op, m, o, &e));
+        REQUIRE(static_cast<long>(out.size()) == m);
+        for (float v: out) REQUIRE(std::isfinite(v));
+    }
+}
+
+// ── Fine-tune preset layer (StretchPreset) ────────────────────────────────────
+#include <pulp/signal/stretch_preset.hpp>
+using pulp::signal::StretchPreset;
+using pulp::signal::StretchCharacter;
+
+TEST_CASE("StretchPreset round-trips through text", "[offline-stretch][preset]") {
+    StretchPreset p;
+    p.name = "My Tape";
+    p.character = StretchCharacter::varispeed;
+    p.fft_size = 8192; p.analysis_hop = 512;
+    p.transient_sensitivity = 1.8f;
+    p.route_noise_stn = true;
+    p.relocate_transients = true;
+    const std::string txt = pulp::signal::preset_to_text(p);
+    StretchPreset q; std::string err;
+    REQUIRE(pulp::signal::preset_from_text(txt, q, &err));
+    CHECK(q.name == "My Tape");
+    CHECK(q.character == StretchCharacter::varispeed);
+    CHECK(q.fft_size == 8192);
+    CHECK(q.analysis_hop == 512);
+    CHECK(q.transient_sensitivity == 1.8f);
+    CHECK(q.route_noise_stn == true);
+    CHECK(q.relocate_transients == true);
+}
+
+TEST_CASE("StretchPreset applies to options and captures back", "[offline-stretch][preset]") {
+    StretchPreset p; p.character = StretchCharacter::varispeed; p.fft_size = 1024; p.transient_sensitivity = 2.0f;
+    OfflineStretchOptions o; o.time_ratio = 2.0; // caller's ratio is NOT a preset field
+    pulp::signal::apply_preset(o, p);
+    CHECK(o.character == StretchCharacter::varispeed);
+    CHECK(o.fft_size == 1024);
+    CHECK(o.transient_sensitivity == 2.0f);
+    CHECK(o.time_ratio == 2.0); // untouched by the preset
+    const StretchPreset back = pulp::signal::capture_preset(o, "roundtrip");
+    CHECK(back.character == StretchCharacter::varispeed);
+    CHECK(back.fft_size == 1024);
+}
+
+TEST_CASE("StretchPreset parsing is tolerant", "[offline-stretch][preset]") {
+    StretchPreset p; std::string err;
+    const std::string txt =
+        "# a comment\n\n  character = varispeed  \n"
+        "future_key = whatever\n"   // unknown key ignored
+        "route_noise_stn = yes\n";
+    REQUIRE(pulp::signal::preset_from_text(txt, p, &err));
+    CHECK(p.character == StretchCharacter::varispeed);
+    CHECK(p.route_noise_stn == true);
+    // malformed character value is a hard error
+    StretchPreset bad;
+    CHECK_FALSE(pulp::signal::preset_from_text("character = bogus\n", bad, &err));
 }

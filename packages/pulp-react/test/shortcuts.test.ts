@@ -1,4 +1,4 @@
-// pulp #135 Phase B — runtime keyboard shortcut injection tests.
+// Runtime keyboard shortcut injection tests.
 //
 // Pins the parser, the C++-bridge call shape, and the clash-detection
 // contract. The hook itself is tested by mounting a real React tree
@@ -31,7 +31,7 @@ describe('parseShortcut', () => {
         expect(r.canonical).toBe('s');
     });
 
-    it('parses cmd+, (Spectr settings chord)', () => {
+    it('parses cmd+, (settings chord)', () => {
         const r = parseShortcut('cmd+,');
         expect(r.keyCode).toBe(','.charCodeAt(0));
         expect(r.modMask).toBe(MOD_CMD);

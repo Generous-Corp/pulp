@@ -7,11 +7,11 @@
 // where single-channel SDF rounds them off.
 //
 // This is *not* Chlumsky's shape-decomposition algorithm (which emits
-// provably-orthogonal channels per edge); a follow-up pass that vendors
-// the `msdfgen` library (MIT) will replace `generate_msdf_tile()` with
-// its output. The current generator is strong enough to exercise the
-// MSDF sampler shader, demonstrate sharper corners than plain SDF on
-// simple primitives, and validate the atlas packing + test pipeline.
+// provably-orthogonal channels per edge). An msdfgen-backed implementation
+// can replace `generate_msdf_tile()` with true per-edge channel output; the
+// current generator is strong enough to exercise the MSDF sampler shader,
+// demonstrate sharper corners than plain SDF on simple primitives, and
+// validate the atlas packing + test pipeline.
 
 #include <pulp/canvas/msdf_atlas.hpp>
 

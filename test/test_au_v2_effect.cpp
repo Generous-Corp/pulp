@@ -170,8 +170,8 @@ TEST_CASE("AU v2 effect: System message status byte reassembles SDK split",
     // The previous fixture passed `inStatus=0xF8` directly (the wire-
     // format byte, NOT the post-split top nibble), so the buggy "is_system
     // → return inStatus unchanged" branch ALSO returned 0xF8 and the
-    // test passed by coincidence. Codex review on PR #638 caught that the
-    // fixture didn't model the SDK contract; this version does.
+    // test passed by coincidence. PR #638 review caught that the fixture
+    // didn't model the SDK contract; this version does.
     SECTION("0xF8 — timing clock") {
         const auto ev = decode_midi_event(/*inStatus=*/0xF0,
                                           /*inChannel=*/0x08,

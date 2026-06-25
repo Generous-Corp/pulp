@@ -1,6 +1,6 @@
 #pragma once
 
-// Linux ATK / AT-SPI mapping for Pulp AccessRole (workstream 04 slice 4.2a).
+// Linux ATK / AT-SPI mapping for Pulp AccessRole.
 //
 // Pure-constant header — no atk/atk.h dependency — so the mapping
 // compiles and can be unit-tested on every platform. The Linux

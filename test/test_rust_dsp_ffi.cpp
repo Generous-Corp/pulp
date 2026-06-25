@@ -119,7 +119,7 @@ TEST_CASE("C++ allocation inside a no-alloc scope also traps (death test)",
 
 TEST_CASE("parity-harness skeleton exposes the reference matrix",
           "[rust-dsp][parity]") {
-    // Phase 1 only declares the matrix; Phase 3 wires per-format execution.
+    // This only declares the matrix; per-format execution is wired separately.
     REQUIRE(std::size(test::kReferenceProcessors) == 3);
     REQUIRE(test::kReferenceProcessors[0].primary_case == test::EventCase::Effect);
 }

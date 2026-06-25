@@ -126,7 +126,8 @@ jobs:
           python3 tools/scripts/hotspot_size_guard.py \
               --base "${{ steps.base.outputs.ref }}" \
               --config tools/scripts/hotspot_size_guard.json \
-              --mode=report
+              --mode=report \
+              --require-ceiling-reduction
 
       - name: Source-contract registry check
         # Lightweight import-provider contract gate. The registry linter is

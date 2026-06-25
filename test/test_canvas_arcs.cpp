@@ -1,6 +1,3 @@
-// test_canvas_arcs.cpp — extracted from test_canvas.cpp in the
-// 2026-05 Phase 5 (P5-2 follow-up) refactor.
-//
 // pulp #1521 — native arc / arcTo / ellipse / roundRect cluster.
 //
 // Two contiguous sub-clusters under the same arc/path-primitive
@@ -313,7 +310,7 @@ TEST_CASE("SkiaCanvas::round_rect renders 4 distinct corner radii",
     REQUIRE(sample(pixels_top_left_big, 187, 87) < 200);
 }
 
-// Codex #1616 P1 — rotated ellipse() previously used kAppend_AddPathMode
+// #1616 — rotated ellipse() previously used kAppend_AddPathMode
 // when grafting the rotated arc onto the live path builder, replacing the
 // implicit lineTo (CSS Canvas2D semantics) with a moveTo. Fills with a
 // preceding moveTo + a rotated arc would render with a visible gap

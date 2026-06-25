@@ -1,10 +1,9 @@
 // wav_metadata.hpp — read + write WAV ancillary metadata chunks.
 //
-// Implements item 6.11 of the 2026-05-24 macOS plugin authoring plan
-// (BWAV / iXML / ASWG / ACID). Reads metadata from any RIFF-WAVE or
-// RF64-extended WAV file, lets you mutate it in-memory, then writes it
-// back without rewriting the audio payload (the original `fmt ` and
-// `data` chunks are preserved verbatim).
+// Handles BWAV / iXML / ASWG / ACID metadata in RIFF-WAVE and RF64-
+// extended WAV files. Metadata can be mutated in-memory and written back
+// without rewriting the audio payload; the original `fmt ` and `data`
+// chunks are preserved verbatim.
 //
 // Why a hand-rolled chunk codec on top of CHOC: CHOC's WAV reader
 // gives us PCM samples but only surfaces a small subset of metadata

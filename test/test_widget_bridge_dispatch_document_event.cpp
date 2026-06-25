@@ -1,13 +1,13 @@
-// pulp #2128 follow-up — pin WidgetBridge::dispatch_document_event +
-// document.addEventListener fan-out.
+// Pin WidgetBridge::dispatch_document_event plus document.addEventListener
+// fan-out.
 //
 // Architecture in brief:
 //
 //   React popovers commonly close via the `document.addEventListener
-//   ('mousedown', onDoc)` click-outside idiom. Pre-fix, Pulp's JS
-//   `document.addEventListener` was a NO-OP (pulp #2101, kept that way
-//   to silence Three.js OrbitControls cleanup). With the no-op, every
-//   React popover using click-outside was silently dead.
+//   ('mousedown', onDoc)` click-outside idiom. Pulp's JS
+//   `document.addEventListener` must be a real registration surface. A no-op
+//   may silence OrbitControls cleanup, but it leaves every React popover using
+//   click-outside silently dead.
 //
 //   This test pins two contracts:
 //   1. `document.addEventListener('mousedown', fn)` actually registers

@@ -3,6 +3,10 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/midi/buffer.hpp>
+#include "harness/rt_allocation_probe.hpp"
+#include <array>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -57,13 +61,13 @@ TEST_CASE("PluginScanner bundle detection", "[host][scanner]") {
 
 TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavour",
           "[host][scanner][issue-500]") {
-    // Regression for the Codex P2 finding on PR #531 / #500: `pulp scan`
-    // advertised `--format au` and `--format auv3` as mutually-exclusive
-    // filters, but both values set the same ScanOptions::scan_au flag,
-    // and PluginScanner::scan_audio_units() returns mixed AU + AUv3
-    // entries. The CLI now runs a post-scan narrowing step — this test
-    // models that step on a synthetic mixed slice so the narrowing
-    // logic is covered independently of any installed AudioComponents.
+    // Regression for PR #531 / #500: `pulp scan` advertised `--format au`
+    // and `--format auv3` as mutually-exclusive filters, but both values
+    // set the same ScanOptions::scan_au flag, and PluginScanner::
+    // scan_audio_units() returns mixed AU + AUv3 entries. The CLI now runs
+    // a post-scan narrowing step — this test models that step on a
+    // synthetic mixed slice so the narrowing logic is covered independently
+    // of any installed AudioComponents.
     std::vector<PluginInfo> mixed;
     PluginInfo v2;  v2.format = PluginFormat::AudioUnit;    v2.name = "EffectV2";
     PluginInfo v3;  v3.format = PluginFormat::AudioUnitV3;  v3.name = "EffectV3";
@@ -103,20 +107,6 @@ TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {
     REQUIRE(plugins.size() >= 0);
 }
 
-// Regression test for the scanner_clap.cpp `dlerror()` double-call SEGV
-// caught by ASan on PR #1862's macOS ARM64 lane (2026-05-12). The
-// defensive #812 fallback path in `scan_clap_bundle_descriptors` logs
-// the dlerror() string when dlopen fails, but the original code called
-// `dlerror()` TWICE in a `cond ? dlerror() : "..."` ternary. POSIX
-// dlerror() clears its internal buffer after each call, so the second
-// invocation returns nullptr — which `std::format`'s
-// `string_view(char const*)` ctor then passes to `strlen(nullptr)`,
-// crashing under ASan with a SEGV on libsystem_platform's
-// _platform_strlen.
-//
-// Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
-// and (b) the filename-fallback path produces a single PluginInfo so
-// users see SOMETHING in the catalog instead of a silent drop.
 TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
           "[host][scanner][issue-2703]") {
     using pulp::host::cap_clap_plugin_count;
@@ -132,6 +122,20 @@ TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
     REQUIRE(cap_clap_plugin_count(0xFFFFFFFFu) == 1024);
 }
 
+// Regression test for #1862: scanner_clap.cpp hit a `dlerror()`
+// double-call SEGV under ASan. The defensive #812 fallback path in
+// `scan_clap_bundle_descriptors` logs the dlerror() string when dlopen
+// fails, but the original code called `dlerror()` TWICE in a
+// `cond ? dlerror() : "..."` ternary. POSIX
+// dlerror() clears its internal buffer after each call, so the second
+// invocation returns nullptr — which `std::format`'s
+// `string_view(char const*)` ctor then passes to `strlen(nullptr)`,
+// crashing under ASan with a SEGV on libsystem_platform's
+// _platform_strlen.
+//
+// Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
+// and (b) the filename-fallback path produces a single PluginInfo so
+// users see SOMETHING in the catalog instead of a silent drop.
 TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail path)",
           "[host][scanner][issue-1862][coverage]") {
     namespace fs = std::filesystem;
@@ -165,8 +169,7 @@ TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail p
     // the malformed bundle is discovered through the normal scan path
     // and we exercise the dlopen-fail branch deterministically without
     // requiring a system CLAP folder. `only_extra_paths = true` keeps
-    // the test from walking the dev's installed CLAP collection (per
-    // Codex 2026-04-21 review on #545).
+    // the test from walking the dev's installed CLAP collection (#545).
     PluginScanner scanner;
     ScanOptions opts;
     opts.scan_vst3 = false;
@@ -412,6 +415,71 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
         REQUIRE_THAT(after, WithinAbs(before, 1e-6f));
     }
 }
+
+#ifdef PULP_TEST_CLAP_PATH
+// PulpGain.clap is Pulp's own alloc-free gain effect, so any heap allocation
+// during slot->process() is attributable to the host-side ClapSlot wrapper —
+// exactly the in_ptrs_/out_ptrs_/in_event_storage_ vectors that prepare() now
+// reserves. Asserts a steady-state block allocates zero times.
+TEST_CASE("ClapSlot::process is allocation-free after prepare() reserves",
+          "[host][slot][clap][rt-safety][no-alloc]") {
+    namespace fs = std::filesystem;
+    if (!fs::exists(PULP_TEST_CLAP_PATH)) {
+        SUCCEED("PulpGain.clap not built — skipping ClapSlot process no-alloc test");
+        return;
+    }
+
+    PluginInfo info;
+    info.name = "PulpGain";
+    info.path = PULP_TEST_CLAP_PATH;
+    info.format = PluginFormat::CLAP;
+
+    auto slot = PluginSlot::load(info);
+    if (!slot) {
+        SUCCEED("PulpGain.clap not loadable in this environment");
+        return;
+    }
+
+    constexpr int kFrames = 128;
+    REQUIRE(slot->prepare(48000.0, kFrames));
+
+    std::vector<float> l_in(kFrames, 0.25f), r_in(kFrames, 0.25f);
+    std::vector<float> l_out(kFrames, 0.0f), r_out(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l_in.data(), r_in.data()};
+    std::array<float*, 2> out_ch{l_out.data(), r_out.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    // Populate parameter + MIDI events so the first block also exercises the
+    // in_event_storage_ emplace path, not just the channel-pointer vectors.
+    ParameterEventQueue param_events;
+    const auto params = slot->parameters();
+    if (!params.empty()) {
+        param_events.push(pulp::state::ParameterEvent{
+            .param_id = params.front().id, .sample_offset = 0, .value = 0.5f});
+    }
+    pulp::midi::MidiBuffer midi_in;
+    midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    midi_in.add(pulp::midi::MidiEvent::cc(0, 1, 64));
+    pulp::midi::MidiBuffer midi_out;
+
+    // Measure the FIRST block after prepare(), deliberately with no warm-up:
+    // that is exactly where the prepare()-time reserve pays off. Without it,
+    // the first in_ptrs_/out_ptrs_ resize (from capacity 0) and the first
+    // in_event_storage_ emplace would each grow-and-allocate; a warmed-up
+    // block would hide that because the vectors would already hold capacity.
+    // PulpGain's gain process() is itself allocation-free, so any allocation
+    // here is attributable to the host-side ClapSlot wrapper.
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        slot->process(out_view, in_view, midi_in, midi_out, param_events, kFrames);
+        allocation_count = probe.allocation_count();
+    }
+
+    REQUIRE(allocation_count == 0);
+}
+#endif  // PULP_TEST_CLAP_PATH
 
 // #297 regression: VST3 set_parameter must mirror to the controller AND
 // queue an edit for processor delivery in the next block. The processor

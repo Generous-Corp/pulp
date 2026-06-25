@@ -11,13 +11,12 @@
 // `gpu_surface_->member()` call outside the gate becomes a compile error
 // ("member access into incomplete type 'render::GpuSurface'").
 //
-// The iOS-D.3b Slice 4 PR (#3157) shipped two such ungated calls
-// (gpu_surface_->has_surface() at the top of __gpuCanvasConfigureImpl and
-// __gpuCanvasDescribeCurrentTextureImpl) which broke the iOS Simulator AUv3
-// configure end-to-end. The macOS required build lane defaults to GPU=ON, so
-// it never compiled the no-GPU TU; the sanitizer matrix that DOES set
-// PULP_ENABLE_GPU=OFF is advisory + path-filtered and the slow
-// `cmake-ios-auv3-configure` end-to-end test is excluded from PR runs.
+// Ungated calls to gpu_surface_->has_surface() in __gpuCanvasConfigureImpl and
+// __gpuCanvasDescribeCurrentTextureImpl broke iOS Simulator AUv3 configure
+// end-to-end. The macOS required build lane defaults to GPU=ON, so it never
+// compiled the no-GPU TU; the sanitizer matrix that DOES set PULP_ENABLE_GPU=OFF
+// is advisory + path-filtered and the slow `cmake-ios-auv3-configure`
+// end-to-end test is excluded from PR runs.
 //
 // This test is a fast, deterministic static check: it scans widget_bridge.cpp
 // line by line, tracks the preprocessor gate state, and asserts that every

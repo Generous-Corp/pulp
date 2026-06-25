@@ -66,13 +66,11 @@ struct MeterData {
 pulp::runtime::TripleBuffer<MeterData> meters;
 
 // Audio thread (writer):
-meters.publish({0.8f, 0.7f, 0.5f, 0.4f});
+meters.write({0.8f, 0.7f, 0.5f, 0.4f});
 
 // UI thread (reader):
-if (meters.has_new()) {
-    auto data = meters.read();
-    update_meter_display(data);
-}
+const auto& data = meters.read();
+update_meter_display(data);
 ```
 
 Use TripleBuffer for:
@@ -199,9 +197,9 @@ auto guard = pulp::runtime::make_scope_guard([&] {
 ```cpp
 #include <pulp/runtime/log.hpp>
 
-PULP_LOG_INFO("Plugin loaded: {}", name);
-PULP_LOG_WARN("Buffer underrun at sample {}", position);
-PULP_LOG_ERROR("Failed to open device: {}", device_name);
+pulp::runtime::log_info("Plugin loaded: {}", name);
+pulp::runtime::log_warn("Buffer underrun at sample {}", position);
+pulp::runtime::log_error("Failed to open device: {}", device_name);
 ```
 
 Logging is safe to call from any thread. Output goes to stderr.
@@ -211,8 +209,9 @@ Logging is safe to call from any thread. Output goes to stderr.
 ```cpp
 #include <pulp/runtime/assert.hpp>
 
-PULP_ASSERT(buffer.num_channels() > 0);
-PULP_ASSERT_MSG(sample_rate > 0, "Sample rate must be positive");
+PULP_ASSERT(buffer.num_channels() > 0, "Buffer must have channels");
+PULP_DBG_ASSERT(sample_rate > 0, "Sample rate must be positive");
 ```
 
-Assertions are active in debug builds and removed in release builds.
+`PULP_ASSERT` is active in all builds. `PULP_DBG_ASSERT` is active in
+debug builds and compiles away in release builds.

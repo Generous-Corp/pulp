@@ -33,9 +33,8 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
 
-            // Resolve host accommodations once (host-quirks plan, P3) so
-            // GetLatency() can clamp via reported_latency_samples like the
-            // effect adapter (Codex review on #3226 — instrument was missed).
+            // Resolve host accommodations once so GetLatency() can apply
+            // the same policy-gated clamp as the effect adapter.
             const auto host_info = detect_host_info();
             host_quirks_ = resolved_quirks(host_info.type, host_info.version);
 
@@ -427,10 +426,9 @@ Float64 PulpAUInstrument::GetTailTime()
 Float64 PulpAUInstrument::GetLatency()
 {
     if (!processor_) return 0.0;
-    // clamp_latency_to_nonneg (host-quirks): report the processor's latency
-    // (e.g. lookahead) for host PDC, clamped non-negative unless the quirk
-    // is filtered out. Previously hardcoded 0.0, so instruments with
-    // latency got no delay compensation (Codex review on #3226).
+    // Report the processor's latency for host PDC, clamped non-negative
+    // unless the host quirk is filtered out. Instruments with lookahead
+    // should get the same delay compensation as effects.
     // MusicDeviceBase has no GetSampleRate(); read it from the output
     // stream format like the render path, guarded for pre-config queries.
     int latency = reported_latency_samples(processor_->latency_samples(), host_quirks_);

@@ -3,14 +3,10 @@
 // package_commands_internal.hpp — PRIVATE internal header for the
 // `pulp` package-management CLI surface.
 //
-// Extracted from package_commands.cpp in the 2026-05 roadmap item
-// P11-2 mechanical file-split, following the R2-4 (cli_sdk.cpp)
-// extraction pattern.
-//
 // package_commands.cpp historically held every package sub-command
 // (search / list / suggest / target / add / remove / update / audit)
-// plus the file-local helpers they share. P11-2 splits the
-// sub-command clusters into sibling translation units:
+// plus the file-local helpers they share. The sub-command clusters now
+// live in sibling translation units:
 //
 //   package_commands_util.cpp    — shared print/file/path helpers,
 //                                  CMake-block generation, metadata

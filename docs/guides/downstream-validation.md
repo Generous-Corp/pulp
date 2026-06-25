@@ -74,6 +74,9 @@ private or optional sibling repos on disk.
 embed ABI, host lifecycle, parameter bridge behavior, and installed SDK
 consumption.
 
-`pulp-import-iplug` and `pulp-import-juce` validate ProjectIR importer behavior.
-ProjectIR is separate from Pulp DesignIR. DesignIR governance can inform
-ProjectIR governance, but tests for one schema do not prove the other.
+ProjectIR is separate from Pulp DesignIR: DesignIR governance can inform
+ProjectIR governance, but tests for one schema do not prove the other. The
+ProjectIR project-importer consumers live in private sibling repos and are
+intentionally not tracked in this public manifest; the `project_importer`
+category and ProjectIR/DesignIR boundary checks remain in the validators so a
+future public importer is governed correctly.

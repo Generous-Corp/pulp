@@ -9,6 +9,13 @@
 #ifdef __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
 #include <ImageIO/ImageIO.h>
+#elif defined(PULP_HAS_SKIA)
+#include "include/codec/SkPngDecoder.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkData.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/encode/SkPngEncoder.h"
 #endif
 
 namespace pulp::view {
@@ -74,6 +81,38 @@ static RawImage decode_png(const std::vector<uint8_t>& png_data) {
     CGImageRelease(cgImage);
     return img;
 }
+#elif defined(PULP_HAS_SKIA)
+static RawImage decode_png(const std::vector<uint8_t>& png_data) {
+    RawImage img;
+    if (png_data.empty()) return img;
+
+    SkCodec::Result decode_result = SkCodec::kInvalidInput;
+    auto codec = SkPngDecoder::Decode(SkData::MakeWithCopy(png_data.data(), png_data.size()),
+                                      &decode_result);
+    if (!codec || decode_result != SkCodec::kSuccess) return img;
+
+    const auto encoded_info = codec->getInfo();
+    const auto width = encoded_info.width();
+    const auto height = encoded_info.height();
+    const auto pixel_count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+    if (width <= 0 || height <= 0 || pixel_count > kMaxDecodedPixels ||
+        pixel_count > (std::numeric_limits<size_t>::max() / 4u)) {
+        return img;
+    }
+
+    img.width = static_cast<uint32_t>(width);
+    img.height = static_cast<uint32_t>(height);
+    img.pixels.resize(static_cast<size_t>(pixel_count) * 4u);
+
+    SkImageInfo info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    SkPixmap pixmap(info, img.pixels.data(), static_cast<size_t>(img.width) * 4u);
+    if (codec->getPixels(pixmap) != SkCodec::kSuccess) {
+        img = {};
+    }
+    return img;
+}
 #else
 static RawImage decode_png(const std::vector<uint8_t>&) {
     return {};  // PNG decoding not available on this platform
@@ -119,6 +158,22 @@ static std::vector<uint8_t> encode_png_rgba(const uint8_t* pixels, uint32_t widt
     std::memcpy(result.data(), CFDataGetBytePtr(cf_data), len);
     CFRelease(cf_data);
     return result;
+}
+#elif defined(PULP_HAS_SKIA)
+static std::vector<uint8_t> encode_png_rgba(const uint8_t* pixels, uint32_t width, uint32_t height) {
+    if (!pixels || width == 0 || height == 0) return {};
+
+    SkImageInfo info = SkImageInfo::Make(static_cast<int>(width),
+                                         static_cast<int>(height),
+                                         kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    SkPixmap pixmap(info, pixels, static_cast<size_t>(width) * 4u);
+    sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
+    if (!png || png->isEmpty()) return {};
+
+    const auto* bytes = static_cast<const uint8_t*>(png->data());
+    return std::vector<uint8_t>(bytes, bytes + png->size());
 }
 #endif
 
@@ -277,8 +332,8 @@ std::vector<uint8_t> generate_diff_image(
         }
     }
 
-    // Encode diff to PNG using CoreGraphics C API
-#ifdef __APPLE__
+    // Encode diff to PNG using the platform decoder's matching encoder.
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
     return encode_png_rgba(diff.data(), out_w, out_h);
 #else
     return {};
@@ -308,7 +363,7 @@ std::vector<uint8_t> crop_png(
         std::memcpy(dst, src, static_cast<size_t>(crop_w) * 4);
     }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
     return encode_png_rgba(cropped.data(), crop_w, crop_h);
 #else
     return {};

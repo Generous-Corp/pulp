@@ -3,8 +3,7 @@
 /// @file file_chooser.hpp
 /// @brief Pulp-shaped builder for native open/save/folder dialogs.
 ///
-/// macOS plan item 6.2 (planning/2026-05-24-macos-plugin-authoring-plan.md):
-/// wraps `pulp::platform::FileDialog::open_file / open_files / save_file /
+/// Wraps `pulp::platform::FileDialog::open_file / open_files / save_file /
 /// choose_folder` in a builder-style API that returns selected paths through
 /// a `std::function` callback. The underlying native call is synchronous on
 /// macOS (NSOpenPanel runs modally on the main thread); the callback surface

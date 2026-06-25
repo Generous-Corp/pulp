@@ -56,11 +56,24 @@ struct TreeNode {
 /// @endcode
 class TreeView : public View {
 public:
+    /// Selection treatment. `standard` (default) fills the selected row with
+    /// `tree_selected_bg` and keeps the normal text colour — the historic look,
+    /// unchanged for every existing consumer. `accent` is the Ink & Signal
+    /// navigation treatment (Figma 227:4196): the selected row is filled with a
+    /// translucent accent tint (`nav.selected.bg`) and its label is drawn in the
+    /// accent colour (`nav.selected.text`). Opt-in via set_selection_style().
+    enum class SelectionStyle { standard, accent };
+
     TreeView() { set_focusable(true); }
 
     /// The invisible root node (its children are the top-level items).
     TreeNode& root() { return root_; }
     const TreeNode& root() const { return root_; }
+
+    /// Select the selection treatment (see SelectionStyle). Opt-in; defaults to
+    /// `standard` so existing trees render identically.
+    void set_selection_style(SelectionStyle s) { selection_style_ = s; }
+    SelectionStyle selection_style() const { return selection_style_; }
 
     /// Called when a node is selected (clicked).
     std::function<void(TreeNode& node)> on_select;
@@ -185,6 +198,7 @@ public:
 private:
     TreeNode root_;
     TreeNode* selected_ = nullptr;
+    SelectionStyle selection_style_ = SelectionStyle::standard;
     float row_height_ = 22.0f;
     float indent_ = 18.0f;
     float scroll_offset_ = 0.0f;
@@ -194,6 +208,9 @@ private:
     /// gap (the triangle is drawn at indent_x + 2 in a ~9px font, ending
     /// near indent_x + 9; the label begins at indent_x + kTriangleWidth).
     static constexpr float kTriangleWidth = 18.0f;
+    /// Width of the optional leading-icon column (only consumed when a node
+    /// sets TreeNode::icon). Keeps the label clear of the glyph.
+    static constexpr float kIconWidth = 18.0f;
     /// Explicit small font size for the disclosure glyph so it never
     /// inherits a stale/oversized font from a prior canvas call.
     static constexpr float kTriangleFontSize = 9.0f;
@@ -203,11 +220,25 @@ private:
         if (depth >= 0) { // Don't paint the invisible root
             float indent_x = x + static_cast<float>(depth) * indent_;
 
-            // Selection highlight
-            if (&node == selected_) {
-                canvas.set_fill_color(resolve_color("tree_selected_bg",
-                    canvas::Color::hex(0x0f3460)));
-                canvas.fill_rect(x, y, width, row_height_);
+            const bool is_sel = (&node == selected_);
+            const bool accent = (selection_style_ == SelectionStyle::accent);
+
+            // Selection highlight. `accent` paints a translucent accent tint
+            // plus a teal left-edge bar (Ink & Signal); `standard` keeps the
+            // historic opaque fill.
+            if (is_sel) {
+                if (accent) {
+                    canvas.set_fill_color(resolve_color("nav.selected.bg",
+                        canvas::Color::rgba8(20, 184, 166, 38)));
+                    canvas.fill_rect(x, y, width, row_height_);
+                    canvas.set_fill_color(resolve_color("nav.selected.text",
+                        canvas::Color::hex(0x14b8a6)));
+                    canvas.fill_rect(x, y, 3.0f, row_height_);
+                } else {
+                    canvas.set_fill_color(resolve_color("tree_selected_bg",
+                        canvas::Color::hex(0x0f3460)));
+                    canvas.fill_rect(x, y, width, row_height_);
+                }
             }
 
             // Row vertical midline — both the disclosure triangle and the
@@ -238,9 +269,28 @@ private:
             // sits cleanly before the text with a visible gap, and anchored
             // on the same row midline as the triangle.
             float label_x = indent_x + kTriangleWidth;
+
+            // Optional leading icon (folder / file glyph). Drawn in its own
+            // column before the label when TreeNode::icon is set; nodes with no
+            // icon render exactly as before (label flush at label_x). Uses
+            // baseline placement (not GlyphCenter): compact geometric glyphs
+            // (◆ ▤ ⚙) sit too low under glyph-bbox centring, whereas a baseline
+            // at ~0.68 row-height aligns them with the label — matching the
+            // proven ListBox icon path.
+            if (!node.icon.empty()) {
+                canvas.set_font("system", 13);
+                canvas.set_fill_color(resolve_color("text_muted",
+                    canvas::Color::hex(0x808090)));
+                canvas.set_text_align(canvas::TextAlign::left);
+                canvas.fill_text(node.icon, label_x, y + row_height_ * 0.68f);
+                label_x += kIconWidth;
+            }
+
             canvas.set_font("system", 13);
-            canvas.set_fill_color(resolve_color("text",
-                canvas::Color::hex(0xe0e0e0)));
+            canvas.set_fill_color(
+                (is_sel && accent)
+                    ? resolve_color("nav.selected.text", canvas::Color::hex(0x14b8a6))
+                    : resolve_color("text", canvas::Color::hex(0xe0e0e0)));
             canvas.set_text_align(canvas::TextAlign::left);
             canvas.fill_text_anchored(node.label, label_x, row_mid,
                 canvas::Canvas::TextAnchor::GlyphCenter);

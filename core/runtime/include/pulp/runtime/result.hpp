@@ -3,12 +3,10 @@
 /// @file result.hpp
 /// `Result<T, E>` — success / failure union for fallible operations.
 ///
-/// Closes the gap-doc Runtime row "Result" (currently `std::optional`
-/// throughout — drops the error context). This header is a
-/// dependency-free placeholder until `std::expected` (C++23) is
-/// available across all target toolchains. The shape is intentionally
-/// API-compatible with `std::expected` so callers can migrate
-/// mechanically (`Ok` / `Err` map to `T` / `unexpected<E>`).
+/// Dependency-free placeholder until `std::expected` (C++23) is available
+/// across all target toolchains. The shape is intentionally API-compatible
+/// with `std::expected` so callers can migrate mechanically (`Ok` / `Err`
+/// map to `T` / `unexpected<E>`).
 ///
 /// Why not just adopt `std::expected` today? Pulp's stable toolchain
 /// matrix still includes platforms whose stdlib lacks `<expected>` (or
@@ -115,8 +113,6 @@ public:
     // Strong exception guarantee. If T's or E's copy/move ctor throws,
     // the destination is left holding its previous value — the old
     // member is only destroyed AFTER the new one is fully constructed.
-    // Pinned by the Codex P2 review comment "Preserve Result object
-    // when assignment construction throws".
     Result& operator=(const Result& other) {
         if (this != &other) {
             if (other.has_value_) {

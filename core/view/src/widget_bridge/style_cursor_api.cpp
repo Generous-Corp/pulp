@@ -16,16 +16,14 @@ void WidgetBridge::register_widget_style_cursor_direction_api() {
         auto c = args.get<std::string>(1, "default");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        // pulp #1434 Triage #7 - cursor enum fan-out. Map the full CSS
-        // cursor keyword set to the View::CursorStyle slots that exist
+        // Map the CSS cursor keyword set to the View::CursorStyle slots that exist
         // today (4 base + 7 resize + invisible + multi-directional = 12
         // distinct visuals). Where multiple CSS keywords map to the
         // same visual (n/s/e/w-resize all map to the axis-aligned
         // resize cursor), we collapse to the closest existing slot.
         //
-        // pulp #1550 Tier-4 macOS partial 2026-05-12 - added dedicated
-        // slots for `alias` / `copy` / `zoom-in` / `zoom-out` /
-        // `context-menu` (5 keywords with real NSCursor backings on
+        // Dedicated slots for `alias` / `copy` / `zoom-in` / `zoom-out` /
+        // `context-menu` use real NSCursor backings on
         // macOS - see core/view/platform/mac/window_host_mac.mm).
         // `wait` / `help` / `progress` / `cell` stay routed to default
         // because macOS has no native cursor for them - listed in
@@ -57,7 +55,7 @@ void WidgetBridge::register_widget_style_cursor_direction_api() {
         else if (c == "move" || c == "all-scroll") {
             v->set_cursor(CS::multi_directional_resize);
         }
-        // pulp #1550 - 5 CSS cursor keywords with macOS NSCursor backings.
+        // CSS cursor keywords with macOS NSCursor backings.
         else if (c == "alias")           v->set_cursor(CS::alias);
         else if (c == "copy")            v->set_cursor(CS::copy);
         else if (c == "zoom-in")         v->set_cursor(CS::zoom_in);
@@ -67,13 +65,12 @@ void WidgetBridge::register_widget_style_cursor_direction_api() {
         return choc::value::Value();
     });
 
-    // pulp #1434 Phase A2-3 - writing direction. Maps the CSS keyword
-    // to View::WritingDirection. Yoga's flow honors direction for
+    // setDirection(id, "ltr"|"rtl"|"auto") maps the CSS keyword to
+    // View::WritingDirection. Yoga's flow honors direction for
     // flexDirection 'row' (which visually reverses under RTL); Skia's
     // paragraph_style.setTextDirection picks up the same value at
     // shape time. Logical-edge mapping in the @pulp/react prop-applier
-    // currently stays LTR-only (per #1497 fast-path note); a future
-    // slice will make it direction-aware via a shared resolver.
+    // currently stays LTR-only.
     register_bridge_function(api, "setDirection", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto d = args.get<std::string>(1, "ltr");

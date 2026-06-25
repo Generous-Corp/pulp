@@ -4,12 +4,11 @@
 //
 // Backends:
 //   - vdsp     : Apple Accelerate.framework (always available on Apple)
-//   - kissfft  : built-in radix-2 fallback (always available, header-only)
-//                pulp-doc: "kissfft" is the historical name in the gap-doc
-//                multi-engine FFT row; our shipping fallback is the hand-rolled
-//                radix-2 Cooley-Tukey in pulp::signal::Fft, exposed under this
-//                stable alias so callers don't have to track implementation
-//                changes.
+//   - kissfft  : built-in radix-2 fallback (always available, header-only).
+//                The public backend name stays stable even though the shipping
+//                implementation is the hand-rolled radix-2 Cooley-Tukey in
+//                pulp::signal::Fft, so callers do not have to track
+//                implementation changes.
 //   - fftw3   : libfftw3f loaded via dlopen at runtime (optional)
 //   - mkl     : Intel MKL libmkl_rt loaded via dlopen at runtime (optional)
 //

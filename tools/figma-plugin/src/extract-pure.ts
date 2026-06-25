@@ -1,22 +1,17 @@
-// Pure, host-neutral helpers split out of `extract.ts` (P2 — see
-// planning/figma-import-coordination-log.md 22:50Z roadmap).
+// Pure, host-neutral helpers shared by the UI plugin and headless extractor.
 //
 // Every function here operates on types only (SceneNode shape, RGBA,
 // Paint, GradientPaint, FrameNode axis enums) — no `await
 // figma.X.Async()`, no `getBytesAsync`, no `exportAsync`. Anything
 // pulling bytes through the Figma Plugin API stays in `extract.ts`.
 //
-// **Why split this out:** the extractor has two real consumers — the
-// UI plugin (`code.ts`) and the headless bundle (`headless.ts`) — and
-// a structural neighbour, Agent A's Python REST port at
-// `tools/import-design/figma_rest_export.py`, which mirrors these
-// helpers field-for-field. Co-locating the pure logic makes drift
-// between the two language ports visible in one file and reduces the
-// surface area future provider abstractions (`NodeProvider`,
-// `AssetProvider`, etc.) have to thread through.
-//
-// **No behaviour change.** Functions kept verbatim; only `export`
-// added so `extract.ts` can re-import them.
+// The extractor has two real consumers — the UI plugin (`code.ts`) and the
+// headless bundle (`headless.ts`) — plus a structural neighbour, the Python REST
+// port at `tools/import-design/figma_rest_export.py`, which mirrors these
+// helpers field-for-field. Co-locating the pure logic makes drift between the
+// language ports visible in one file and reduces the surface area future
+// provider abstractions (`NodeProvider`, `AssetProvider`, etc.) have to thread
+// through.
 
 import type { ExtractedFigmaNode, ExtractedLayout } from "./extract-model";
 import type { AudioWidgetKind } from "./extract-model";
@@ -75,7 +70,7 @@ export function mapNodeType(n: SceneNode): string {
       return "frame";
     case "COMPONENT":
     case "COMPONENT_SET":
-      return "frame"; // Phase 3 will promote recognized instances to widget kinds
+      return "frame"; // recognized instances are promoted to widget kinds later
     case "INSTANCE":
       return "frame"; // ditto
     case "TEXT":
@@ -131,14 +126,48 @@ export function mapAxisSize(v: FrameNode["layoutSizingHorizontal"]): ExtractedLa
 // components, or designs that use the audio widget visual without
 // installing the published library).
 
+// Whole-word tokenizer mirroring the C++ tokenize_name (design_import.cpp): split
+// on non-alphanumerics AND camelCase / acronym / digit boundaries, lowercased.
+// "VUMeter" -> [vu, meter]; "Knob_1" -> [knob, 1]; "Dialog" -> [dialog].
+export function tokenizeName(name: string): string[] {
+  const tokens: string[] = [];
+  let cur = "";
+  const flush = () => { if (cur) { tokens.push(cur); cur = ""; } };
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charAt(i);
+    if (!/[a-z0-9]/i.test(c)) { flush(); continue; }
+    if (cur) {
+      const p = name.charAt(i - 1);
+      const next = i + 1 < name.length ? name.charAt(i + 1) : "";
+      let boundary = false;
+      if (/[a-z]/.test(p) && /[A-Z]/.test(c)) boundary = true;                            // aB -> a|B
+      else if (/[A-Z]/.test(p) && /[A-Z]/.test(c) && /[a-z]/.test(next)) boundary = true; // ABc -> A|Bc
+      else if (/[0-9]/.test(p) !== /[0-9]/.test(c)) boundary = true;                      // a1 / 1a
+      if (boundary) flush();
+    }
+    cur += c.toLowerCase();
+  }
+  flush();
+  return tokens;
+}
+
+// Recognize an audio widget by WHOLE-WORD name tokens (not substrings), mirroring
+// the C++ detect_audio_widget. The old substring match promoted any name
+// *containing* "dial"/"meter"/… — so "Dialog"/"Radial" became knobs and
+// "Parameter"/"Diameter" became meters. Token matching (tolerant of a simple
+// English plural, as the C++ `has` is) fixes those while keeping "xy_pad"/"XYPad"
+// and acronym names like "VUMeter".
 export function audioWidgetKindFromName(name: string): AudioWidgetKind | undefined {
-  const lower = name.toLowerCase();
-  if (lower.includes("knob") || lower.includes("dial")) return "knob";
-  if (lower.includes("fader") || lower.includes("slider")) return "fader";
-  if (lower.includes("meter") || lower.includes("level") || lower.includes("vu")) return "meter";
-  if (lower.includes("xypad") || lower.includes("xy_pad") || lower.includes("xy-pad")) return "xy_pad";
-  if (lower.includes("waveform")) return "waveform";
-  if (lower.includes("spectrum")) return "spectrum";
+  const toks: { [t: string]: true } = {};
+  const list = tokenizeName(name);
+  for (let i = 0; i < list.length; i++) toks[list[i]] = true;
+  const has = (w: string) => toks[w] === true || toks[w + "s"] === true;
+  if (has("knob") || has("dial")) return "knob";
+  if (has("fader") || has("slider")) return "fader";
+  if (has("meter") || has("level") || has("vu")) return "meter";
+  if (has("xypad") || (has("xy") && has("pad"))) return "xy_pad";
+  if (has("waveform") || has("oscilloscope")) return "waveform";
+  if (has("spectrum") || has("analyzer") || has("analyser")) return "spectrum";
   return undefined;
 }
 
@@ -179,8 +208,7 @@ export function isPureVectorIllustration(node: SceneNode): boolean {
 // ──────────────────────────────────────────────────────────────────────────
 // Font catalogue — walks the post-extraction IR (not the Figma scene),
 // so it's already host-neutral and operates only on ExtractedFigmaNode
-// trees. Emitted as the envelope's top-level `font_family_assets` per
-// #43a-rev.
+// trees. Emitted as the envelope's top-level `font_family_assets`.
 
 export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamilyAsset[] {
   const seen = new Map<string, FontFamilyAsset>();

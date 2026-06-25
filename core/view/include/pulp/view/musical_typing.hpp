@@ -12,7 +12,7 @@
 ///   k=C(+12) o=C# l=D  p=D#
 /// `z` / `x` shift the base octave down / up.
 ///
-/// Design notes (aligned with a Codex review + JUCE/PlunderTube study):
+/// Design notes (JUCE/PlunderTube study):
 ///   - Rejects Cmd/Ctrl/Alt/Meta chords so host menu shortcuts (Cmd+S …) still
 ///     work — `handle_key` returns false for them and for unmapped keys, so the
 ///     caller falls through to the host.

@@ -20,8 +20,6 @@
 //   * Embedding Babel-standalone (~3 MB) inside QuickJS for offline import
 //     puts parser-stack risk on the runtime-import lane, which already has
 //     JS-size caps.
-//   * Aligns with Codex's recommendation (2026-05-17 consult).
-//
 // Follow-up: replace this with embedded esbuild-wasm or sucrase when the
 // dependency story matters for production.
 
@@ -67,7 +65,7 @@ function parseArgs(argv) {
 // `navigator.userAgent.indexOf(...)` during its DevTools sniff at
 // module-load time. Mirrors what
 // `run_claude_bundle_payload_pipeline` installs before evaluating a
-// Claude bundle (core/view/src/design_import.cpp:1494).
+// Claude bundle.
 const PRE_SHIMS = `
 (function () {
     var g = (typeof globalThis !== 'undefined') ? globalThis : window;
@@ -221,12 +219,11 @@ async function main() {
     const componentName = detectComponentName(jsxSource, inPath);
     if (args.verbose) console.error(`[pulp-jsx-transform] detected component: ${componentName}`);
 
-    // Pick esbuild loader from the file extension. TypeScript inputs
-    // route through esbuild's type-stripping loader (per Codex consult,
-    // 2026-05-17): React `.tsx` is the dominant React file shape today,
-    // and esbuild's tsx loader handles the type erasure (annotations,
-    // generics, `as` casts, `type`/`interface` declarations, etc.) at
-    // bundle time. No separate tsc step required.
+    // Pick esbuild loader from the file extension. TypeScript inputs route
+    // through esbuild's type-stripping loader: React `.tsx` is the dominant
+    // React file shape today, and esbuild's tsx loader handles the type erasure
+    // (annotations, generics, `as` casts, `type`/`interface` declarations,
+    // etc.) at bundle time. No separate tsc step required.
     const ext = extname(inPath).toLowerCase();
     const isTypeScript = (ext === '.tsx' || ext === '.ts');
     const entryLoader = isTypeScript ? 'tsx' : 'jsx';
@@ -251,15 +248,12 @@ async function main() {
             platform: 'browser',
             globalName: 'PulpJsxApp',
             write: false,
-            // Phase 5.1 (inspector source-jump) — emit an inline source
-            // map when PULP_JSX_SOURCEMAP=1 so the inspector / debuggers
-            // can map the bundled IIFE back to authored JSX. Off by
-            // default to keep production bundles lean (source maps add
-            // ~10-30%); dev builds opt in per-shell. The reconciler's
+            // Emit an inline source map when PULP_JSX_SOURCEMAP=1 so the
+            // inspector / debuggers can map the bundled IIFE back to authored
+            // JSX. Off by default to keep production bundles lean (source maps
+            // add ~10-30%); dev builds opt in per-shell. The reconciler's
             // `__source`-prop forwarding (host-config bindSourceLocation)
-            // is the other half of source-jump and is independent of
-            // this map — see the spike doc for the automatic-runtime
-            // `__source` follow-up.
+            // is the other half of source-jump and is independent of this map.
             sourcemap: process.env.PULP_JSX_SOURCEMAP === '1' ? 'inline' : false,
             minify: false,
             jsx: 'transform',
@@ -276,22 +270,20 @@ async function main() {
             // tree.
             nodePaths: [
                 resolve(__dirname, 'node_modules'),
-                // pulp jsx-instrument-import 2026-05-17 — @pulp/react
-                // externalizes react/react-reconciler/scheduler at its
-                // own build time. When we re-bundle @pulp/react into the
-                // user's JSX import, esbuild needs to resolve those —
-                // they live in @pulp/react's node_modules.
+                // @pulp/react externalizes react/react-reconciler/scheduler at
+                // its own build time. When we re-bundle @pulp/react into the
+                // user's JSX import, esbuild needs to resolve those — they live
+                // in @pulp/react's node_modules.
                 resolve(__dirname, '..', '..', '..', 'packages', 'pulp-react', 'node_modules'),
             ],
-            // pulp jsx-instrument-import 2026-05-17 — route the bundle's
-            // ReactDOM imports through pulp-react-dom-shim.mjs, which
-            // delegates to @pulp/react's reconciler. React-dedup is
-            // critical: the FULL alias map below points every reachable
-            // copy of react / react-reconciler / scheduler at ONE on-disk
-            // location (jsx-runtime/node_modules/...). Without this,
-            // esbuild ships a second React instance for @pulp/react's
-            // bridge and the user's `useState` from `react` returns null
-            // (ReactCurrentDispatcher.current desync).
+            // Route the bundle's ReactDOM imports through
+            // pulp-react-dom-shim.mjs, which delegates to @pulp/react's
+            // reconciler. React-dedup is critical: the FULL alias map below
+            // points every reachable copy of react / react-reconciler /
+            // scheduler at ONE on-disk location (jsx-runtime/node_modules/...).
+            // Without this, esbuild ships a second React instance for
+            // @pulp/react's bridge and the user's `useState` from `react`
+            // returns null (ReactCurrentDispatcher.current desync).
             //
             // Architecturally aligned with react-konva / react-three-fiber /
             // React Native Fabric: onClick attaches to the native node at

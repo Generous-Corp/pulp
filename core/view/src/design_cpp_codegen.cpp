@@ -1193,11 +1193,18 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 // and the runtime materializer lower the same overlay set.
 const char* frame_element_kind_token(InteractiveElementKind kind) {
     switch (kind) {
-        case InteractiveElementKind::knob:       return "knob";
-        case InteractiveElementKind::dropdown:   return "dropdown";
-        case InteractiveElementKind::text_field: return "text_field";
-        case InteractiveElementKind::tab_group:  return "tab_group";
-        case InteractiveElementKind::stepper:    return "stepper";
+        case InteractiveElementKind::knob:        return "knob";
+        case InteractiveElementKind::fader:       return "fader";
+        case InteractiveElementKind::toggle:      return "toggle";
+        case InteractiveElementKind::dropdown:    return "dropdown";
+        case InteractiveElementKind::text_field:  return "text_field";
+        case InteractiveElementKind::tab_group:   return "tab_group";
+        case InteractiveElementKind::stepper:     return "stepper";
+        case InteractiveElementKind::swap:        return "swap";
+        case InteractiveElementKind::action:      return "action";
+        case InteractiveElementKind::xy_pad:      return "xy_pad";
+        case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::custom:      return "custom";
     }
     return "knob";
 }
@@ -1294,6 +1301,29 @@ bool emit_faithful_frame(std::ostringstream& out,
         if (!e.bg_color.empty())
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.bg_color = " + cpp_string_literal(e.bg_color) + ";");
+        if (e.flash)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces, "el.flash = true;");
+        // swap / action / xy_pad / value_label fields.
+        if (e.target_frame != -1)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.target_frame = " + std::to_string(e.target_frame) + ";");
+        if (!e.action.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.action = " + cpp_string_literal(e.action) + ";");
+        if (!e.text.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.text = " + cpp_string_literal(e.text) + ";");
+        if (e.value_left_align)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces, "el.value_left_align = true;");
+        if (e.kind == InteractiveElementKind::xy_pad)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.value_y = " + format_float(e.default_value_y) + ";");
+        if (!e.factory_id.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.factory_id = " + cpp_string_literal(e.factory_id) + ";");
+        if (!e.custom_props.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.custom_props = " + cpp_string_literal(e.custom_props) + ";");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
                   var + "_els.push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");

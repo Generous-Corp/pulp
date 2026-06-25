@@ -139,7 +139,7 @@ class AuditTopLevelTests(unittest.TestCase):
         joined = "\n".join(errors)
         self.assertIn("other/pro_tools.hpp", joined)
 
-    # Regression: #2939 / Codex comment 3302833422 — vendor-name allowlist
+    # Regression: #2939 — vendor-name allowlist
     # must not follow symlinks. The defensive `is_symlink()` rejection in
     # is_allowed_vendor_name_source() prevents any future regression to
     # `Path.resolve()` (which follows symlinks) from re-introducing the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# format_baseline_capture.sh — companion-track U-3.
+# format_baseline_capture.sh — capture plugin-format validation baselines.
 #
 # Capture golden output from auval (Audio Unit), pluginval (VST3), and
 # clap-validator (CLAP) on a representative Pulp plugin. Normalize the
@@ -8,8 +8,8 @@
 # format_baseline_diff.py in CI whenever a PR touches core/format/ or
 # core/host/plugin_slot_*.
 #
-# Why this exists: format-adapter bugs that compile clean often slip
-# through PR review until they manifest in a real DAW. The validators
+# Why this exists: format-adapter bugs that compile clean can still
+# manifest only in a real DAW. The validators
 # (auval/pluginval/clap-validator) catch a meaningful subset of these,
 # but their output isn't currently captured or diffed. This script makes
 # the validator output a first-class fixture so silent regressions get

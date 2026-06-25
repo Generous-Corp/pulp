@@ -89,8 +89,8 @@ the full story.
 ### Bus arrangement negotiation
 
 `setBusArrangements(inputs, numIns, outputs, numOuts)` is **not** a
-pass-through to the base class. As of PR #2934 (item 3.7) the adapter
-delegates the accept/reject decision to
+pass-through to the base class. The adapter delegates the accept/reject
+decision to
 `Processor::is_bus_layout_supported(BusesLayout)` — the cross-adapter
 virtual hook that lets a plugin enforce tighter layout contracts
 (linked sidechain, surround, instrument-only output, etc.) without
@@ -108,9 +108,8 @@ the same hook for the day they grow dynamic layout negotiation.
 Why: hosts swap project channel layouts (load a stereo session over a
 mono plugin slot) and expect the plugin's `descriptor()` view to
 follow. Without the in-place update, the Pulp Processor's channel
-counts diverge from the VST3 bus state. See commit
-`b9cda370 vst3: dynamic bus arrangements — honor setBusArrangements
-(#240)`.
+counts diverge from the VST3 bus state. The dynamic-bus-arrangement tests
+cover this contract.
 
 ### `setupProcessing` / `setActive` sequence
 
@@ -142,8 +141,7 @@ Parameters flow both ways:
   pushes an SPSC event for `ListenerThread::Main` listeners. The editor
   drains via `store.pump_listeners()` on its UI tick. The generic
   `set_normalized()` path would dispatch a heap-allocated lambda through
-  the EventLoop — fatal on the audio thread. See Slice 2 in
-  `planning/2026-05-18-rt-safety-and-debug-dx.md`. Before
+  the EventLoop — fatal on the audio thread. Before
   `Processor::process()`, `param_events_` is attached through
   `processor_->set_param_events(&param_events_)` so processors that opt
   into `Processor::param_events()` see the same sorted event stream.
@@ -162,7 +160,7 @@ Parameters flow both ways:
 is `[0,1]` with `step >= 1` — Steinberg requires exactly one bypass
 parameter per plugin for the host bypass control to work.
 
-### Bypass routing — cached ParamID + render short-circuit (PR #2937)
+### Bypass routing — cached ParamID + render short-circuit
 
 `initialize()` caches the `ParamID` of the kIsBypass-tagged parameter
 in `bypass_param_id_`; the value is exposed via
@@ -179,7 +177,7 @@ block is a non-trivial cost. The cache is set once at `initialize()`
 and never mutated. When a plugin has no Bypass parameter the adapter
 falls back to "always render" — no synthetic atomic.
 
-### Latency / tail change notifications (PR #2934, item 3.11)
+### Latency / tail change notifications
 
 A Processor can flag a mid-render latency or tail change from the
 audio thread via `flag_latency_changed()` / `flag_tail_changed()`
@@ -202,7 +200,7 @@ VST3 delivers note-on / note-off through `IEventList`:
 ```
 Event::kNoteOnEvent  → MidiEvent::note_on
 Event::kNoteOffEvent → MidiEvent::note_off
-Event::kDataEvent (type=kMidiSysEx) → midi_in.add_sysex(bytes, sampleOffset, 0.0)
+Event::kDataEvent (type=kMidiSysEx) → midi_in_.add_sysex_copy(bytes, size, sampleOffset, 0.0)
 ```
 
 Non-note short MIDI (CC, pitch bend, aftertouch) is **not** delivered
@@ -211,7 +209,23 @@ automation using `kIsMidiCC`-tagged parameters. If you need them, model
 them as Pulp parameters, not MIDI. See `docs/guides/formats.md`.
 
 MIDI output mirrors the inverse: note_on / note_off in
-`midi_out` are written back into `data.outputEvents`.
+`midi_out_` are written back into `data.outputEvents`.
+
+**Real-time-safe MIDI buffers (no per-block allocation).** `midi_in_` /
+`midi_out_` are reused `MidiBuffer` *members*, not block-local: `setupProcessing()`
+calls `reserve(events, sysex, sysexPayloadBytes)` + `set_realtime_capacity_limit(true)`
+so `add()` / `add_sysex_copy()` reuse reserved capacity and *drop* past the
+worst-case instead of growing on the audio thread. Two footguns:
+- **Reset BOTH stores every block.** `MidiBuffer::clear()` empties only the
+  short-event store; the SysEx sidecar needs `clear_sysex()` as well. Calling
+  only `clear()` leaks a block's SysEx payload into later blocks. `process()`
+  calls both at the top of the block.
+- **SysEx: use `add_sysex_copy(ptr, size, …)`, not `add_sysex(std::vector(…))`** —
+  the latter heap-allocates a fresh payload per event; the former copies into the
+  buffer's reserved payload pool (alloc-free in realtime mode).
+Prove no-alloc with the `RtAllocationProbe` harness (see
+`test_vst3_plugin_state.cpp` `[vst3][realtime][perf]`). Note: a pooled-SysEx
+residual allocation inside `MidiBuffer` itself is a known `core/midi` follow-up.
 
 ### Audio buses (incl. sidechain)
 
@@ -227,13 +241,12 @@ if (data.numInputs > 1 &&
 }
 ```
 
-(See commit `c0f49a63 Workstream 01 slice 1.2: VST3 multi-bus +
-sidechain routing` and the `#178` review.) Secondary **output** buses
-are zero-filled every block — identical rationale to CLAP.
+Secondary **output** buses are zero-filled every block — identical rationale
+to CLAP.
 
-The process callback now builds a stack-owned `ProcessBuffers` block
-for the active main input, optional sidechain input, and main output,
-then dispatches through `Processor::process(ProcessBuffers&, ...)`.
+The process callback builds a stack-owned `ProcessBuffers` block for
+the active main input, optional sidechain input, and main output, then
+dispatches through `Processor::process(ProcessBuffers&, ...)`.
 Processors that only override the legacy main-in/main-out callback
 still run through the base projection; processors that override the
 richer surface can inspect the VST3 bus set directly.
@@ -344,14 +357,12 @@ already in the scan database — even from a `.vst3` no longer on disk —
 Reaper marks the new bundle as **"Plug-ins that failed to scan"** with
 no console output and no crash log. The default Reaper preference
 "Allow multiple plug-ins with the same VST3 UID" is OFF, so two builds
-of the same plugin under different paths (e.g. `ChainerSynth.vst3` and
-`ChainerSynth-m149.vst3`) cannot coexist.
+of the same plugin under different paths cannot coexist.
 
-This bit us during the Skia m144 → m149 swap when we installed a
-side-by-side `ChainerSynth-m149.vst3`: Reaper's scan DB still had a
-stale `ChainerSynth.vst3=...` entry from a previous build (file gone,
-entry orphaned), and the new VST3's UID collision triggered the silent
-reject.
+A side-by-side build under a second bundle path can hit this even when the
+older bundle has been deleted: Reaper's scan DB may still hold an orphaned
+entry from the previous path, and the new VST3's UID collision triggers the
+silent reject.
 
 **Diagnostics (no log, no crash):**
 
@@ -402,9 +413,9 @@ even when IDE auto-formatting wants to reorder.
 A VST3 bus can be active per its channel count but have
 `channelBuffers32 == nullptr` or `channelBuffers32[0] == nullptr` when
 the host hasn't actually activated the bus. The main-input branch
-doesn't guard against this today — only the sidechain branch does
-(per #178 review). If you ever hit a null-deref on bus 0, the same
-guard needs to apply there. See CLAP's #277 for the parallel fix.
+doesn't guard against this today — only the sidechain branch does. If you
+ever hit a null-deref on bus 0, the same guard needs to apply there. See
+CLAP's sidechain guard for the parallel fix.
 
 ### `setupProcessing` reuses the same `ProcessSetup` across re-activation
 
@@ -495,17 +506,17 @@ Do not remove this environment just because `pluginval` also has
 - `.agents/skills/ara/SKILL.md` — IHostApplication-based factory
   negotiation (`kVst3AraFactoryContextKey`).
 - `.agents/skills/mpe/SKILL.md` — MPE sidecar (VST3 hosts deliver MPE
-  as channel-per-note short MIDI; the adapter routes it through the
-  same `MpeVoiceTracker` path CLAP uses).
+  as channel-per-note short MIDI, but the adapter forwards plain MIDI
+  only; processors that need per-note state must extract it from
+  `MidiBuffer` until VST3 grows adapter-side `MpeBuffer` wiring).
 - `.agents/skills/clap/SKILL.md` and `.agents/skills/auv3/SKILL.md` —
   cross-format parity for host-specific regressions.
 - `docs/guides/formats.md` — user-facing format overview.
 - `docs/guides/host-matrix.md` — per-host VST3 + ARA compatibility.
-- Memory note: "Tests ship with fixes" — every VST3 process-path
-  behaviour change needs a Catch2 fixture (the #290 coverage lane
-  explicitly names `format` as under active hardening).
+- Memory note: "Tests ship with fixes" — every VST3 process-path behavior
+  change needs a Catch2 fixture.
 
-## Host-quirks consumption (P3a, 2026-05-30)
+## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
 `resolved_quirks(detect_host_info().type, version)` once (the runtime
@@ -519,9 +530,9 @@ through the pure helper `pulp::format::reported_latency_samples(raw, quirks)`
 quirk is enforced, and passes through raw (wrapping the unsigned host field)
 when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
 
-## silence_unsupported_bus_arrangements (host-quirks P3c, 2026-05-30)
+## silence_unsupported_bus_arrangements
 
-`setBusArrangements` now gates its rejection of unsupported layouts on the
+`setBusArrangements` gates its rejection of unsupported layouts on the
 `silence_unsupported_bus_arrangements` quirk (cached in `quirks_` at init):
 
 - Bus-COUNT mismatch still hard-rejects (structural, not an arrangement issue).
@@ -540,7 +551,7 @@ extra channels emit silence instead of uninitialised memory. Empirical proof:
 `pulp-test-vst3-plugin-state` `[bus-arrangement]` drives a 5.1 output through
 a stereo processor and asserts channels 2–5 are silent + the processor saw 2.
 
-## synthesize_bypass_parameter (host-quirks P3b, 2026-05-30)
+## synthesize_bypass_parameter
 
 When the plugin declares no Bypass parameter and the quirk is enforced,
 the adapter calls `pulp::format::maybe_synthesize_bypass(store, quirks)`
@@ -554,24 +565,24 @@ must set `kQuirkFilterOff` to keep that premise. (CLAP + AU v2 are NOT
 wired — they have no bypass process path; injecting a param there would
 appear-but-do-nothing, so they're a separate follow-up.)
 
-## Bypass pass-through null-guard (self-sweep, 2026-05-30)
+## Bypass pass-through null-guard
 
 The `processBlockBypassed` short-circuit in `process()` MUST null-check
 `output_ptrs_[ch]` before the memcpy/memset — a VST3 bus can report
-`numChannels > 0` while an individual `channelBuffers32[ch]` is null (#178).
-This was a latent RT-thread null-deref that synthesize_bypass_parameter (P3b)
-widened, since the short-circuit is now reachable for plugins that never
-declared a Bypass. Regression: `pulp-test-vst3-plugin-state`
+`numChannels > 0` while an individual `channelBuffers32[ch]` is null.
+This is reachable for plugins that never declared a Bypass because the
+synthesized-bypass quirk can still enter the short-circuit. Regression:
+`pulp-test-vst3-plugin-state`
 `[vst3][bypass][regression]` runs the bypass path with a null channel-1
 output pointer and asserts no crash + the live channel still passes through.
 
-## silence_unsupported_bus_arrangements — honor processor vetoes (Codex #3235)
+## silence_unsupported_bus_arrangements — honor processor vetoes
 
 The silence accommodation applies ONLY to non-mono/stereo (exotic, e.g. 5.1)
 arrangements — there it accepts + silences the extra channels. A mono/stereo
 layout the processor vetoes via `is_bus_layout_supported()` is a real
 contract (linked main/sidechain counts, stereo-only) with no extra channels
 to silence, so `setBusArrangements` HONORS the veto (returns kResultFalse)
-even with the quirk on — matching pre-P3c behavior. Regression:
+even with the quirk on — matching the baseline behavior. Regression:
 `pulp-test-vst3-plugin-state` `veto_bus_layout` config + the
 "honors a processor mono/stereo bus-layout veto" case.

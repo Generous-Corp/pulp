@@ -1,8 +1,9 @@
 #pragma once
 
 // Small, platform-independent helpers for handling partial-read input
-// buffers in the audio callback. Extracted from the Android Oboe device
-// (#244) so the fill math is unit-testable without pulling in Oboe.
+// buffers in the audio callback. Keeping the fill math independent of
+// platform audio backends makes it unit-testable without pulling in Oboe
+// or other device APIs.
 
 #include <cstddef>
 #include <cstring>

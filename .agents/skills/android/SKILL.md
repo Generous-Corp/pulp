@@ -1,6 +1,6 @@
 ---
 name: android
-description: Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, end-to-end smoke validation (#337). Covers build, deploy, debug, and the gotchas discovered during bringup.
+description: Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. Covers build, deploy, debug, and the gotchas discovered during bringup.
 requires:
   scripts:
     - tools/cmake/PulpAndroid.cmake
@@ -53,7 +53,7 @@ Kotlin (Android UI)          C++ (Pulp core)
 | `android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt` | SurfaceView + touch dispatch |
 | `android/app/src/main/kotlin/com/pulp/PulpApplication.kt` | JNI load, lifecycle |
 | `core/platform/src/android/jni_bridge.cpp` | JNI_OnLoad, class caching, exception guards |
-| `android/build-skia-android.sh` | Skia m144 Graphite + Dawn arm64 build script |
+| `tools/build-skia-android.sh` | Skia Graphite + Dawn arm64 build script |
 
 ### Branch & Worktree
 
@@ -77,14 +77,14 @@ verifier. It checks:
 - NDK install + version listing.
 - `adb` (platform-tools) on PATH or under the SDK.
 - `emulator` + at least one configured AVD.
-- **Optional accelerator** — Google's Android CLI (#355) for faster
+- **Optional accelerator** — Google's Android CLI for faster
   agent-driven iteration. See § "Android CLI accelerator" below for
   when to reach for it and which platforms ship a binary.
 
 Each missing piece comes with a per-host install hint
 (brew / apt / winget / sdkmanager).
 
-## Android CLI (#355) — what it actually is, when to reach for it
+## Android CLI — what it actually is, when to reach for it
 
 Google's "Android CLI" (the `android` binary at
 `~/.android-cli/bin/android` after install) is **not** a Gradle
@@ -418,7 +418,7 @@ adb logcat -s PulpAudio PulpRender Pulp
 adb logcat -c && adb logcat -s Pulp
 ```
 
-## End-to-end smoke (#337)
+## End-to-end smoke
 
 `tools/scripts/android_smoke.sh` is the single-invocation validator for
 the full generator → build → install → launch → render → audio →
@@ -488,8 +488,9 @@ uses `Pulp`. Pass both tags (space-separated) when grepping audio.
 `.github/workflows/android.yml` has an `android-emulator-test` job
 gated on `vars.PULP_ANDROID_EMULATOR_ENABLED`. On `macos-latest` (Apple
 Silicon) the arm64-v8a emulator hits `HV_UNSUPPORTED` — keep the gate
-OFF until Linux arm64 + KVM or x86\_64 APK lanes land (see #487).
-Run the smoke locally in the meantime.
+OFF until a runner lane can provide hardware virtualization for the emulator
+or the workflow grows an x86_64 APK/emulator path. Run the smoke locally in the
+meantime.
 
 The same workflow now also has an `android-kotlin-coverage` job on
 `macos-latest`. It runs `./gradlew :app:testDebugUnitTest
@@ -946,23 +947,27 @@ auto* knob = dynamic_cast<Knob*>(bridge->widget("osc-0"));
 
 Falls back to C++ widget hierarchy if JS fails (any exception → catch → C++ fallback).
 
-### Bridge idle pump must run each vsync (pulp #1402)
+### Bridge idle pump must run each vsync
 
-`android_render_frame()` (in `core/render/platform/android/gpu_surface_android.cpp`) MUST call `g_widget_bridge->poll_async_results()` once per vsync — at the top, before `begin_frame()`. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on Android: the callback gets queued in `pending_frame_ids_`, but nothing drains it because there's no idle callback wired into the AChoreographer loop the way macOS now wires it into CVDisplayLink (PR #1400).
+`android_render_frame()` (in `core/render/platform/android/gpu_surface_android.cpp`) MUST call both `g_widget_bridge->poll_async_results()` and `g_widget_bridge->service_frame_callbacks()` once per vsync at the top, before `begin_frame()`. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on Android: callbacks get queued, but the AChoreographer loop has to drain async results and pump the engine message loop explicitly.
 
 Symptoms when missing:
 - `requestAnimationFrame(loop)` chain queues forever, never animates
 - `setTimeout(cb, 100)` never fires
 - Animations only advance during touch events (because touch handlers happen to call `request_repaint`, but that doesn't drain `pending_frame_ids_`)
 
-The fix is one call at the top of `android_render_frame`:
+The fix is the bridge pump at the top of `android_render_frame`:
 ```cpp
 if (g_widget_bridge) {
     g_widget_bridge->poll_async_results();
+    g_widget_bridge->service_frame_callbacks();
 }
 ```
 
-Hard to unit-test on Android (no emulator path → integration tests gated). The contract being asserted is already covered by `test_widget_bridge.cpp`'s `[issue-921]` tag (rAF→repaint chain via `poll_async_results`); the Android wiring is structural connection, not behavioral.
+Hard to unit-test on Android while emulator integration is gated. The contract
+being asserted is already covered by widget-bridge rAF/repaint tests; the
+Android requirement is the structural connection from the frame loop to that
+shared bridge pump.
 
 ## Motion observability bridge (`com.pulp.motion`)
 
@@ -1034,8 +1039,6 @@ Path G / Path H sections.
 (JSON UI hierarchy), `screen capture --annotate` + `screen
 resolve` (label-based tap coords), `describe` (JSON project
 metadata). New CLI commands, install-URL changes, and
-known-issue resolutions are tracked by the planned
-`android-cli-monitor` workflow (#390) which polls Google's docs
-twice a month and files an issue when the surface drifts. Until
-that lands, refresh by hand if it's been > 1 month since the
-verification date above.*
+known-issue resolutions should be checked against Google's docs before relying
+on this note for long-running Android work. Until that monitoring is automated,
+refresh by hand if the CLI version or command surface may have drifted.*

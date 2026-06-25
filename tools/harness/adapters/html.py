@@ -1,4 +1,4 @@
-"""HTML surface adapter — week 1 deliverable (one of five).
+"""HTML surface adapter.
 
 Classifies each `html/*` entry in compat.json against three layers of
 evidence:
@@ -14,15 +14,16 @@ evidence:
    * `core/view/js/web-compat-element.js` — Element.prototype.* methods and
      `Object.defineProperty(Element.prototype, ...)` properties.
    * `core/view/js/web-compat-document.js` — `document = { ... }` members.
-   * `core/view/src/widget_bridge.cpp` — `engine_.register_function("...")`
+   * `core/view/src/widget_bridge.cpp` and `core/view/src/widget_bridge/*.cpp`
+     — `engine_.register_function("...")` / `register_bridge_function(api, "...")`
      calls. We grep for these once at adapter init.
 
 The verdict is PASS / DIVERGE / NO-OP / NOT-IMPL / OOS — see
 `tools/harness/status.py` for the full taxonomy.
 
-Like the yoga adapter, this is a static-evidence classifier. The Week-3+
-upgrade path replaces the oracle table with a `jsdom`-driven trace
-comparator (see `tools/harness/oracles/html/README.md`).
+Like the yoga adapter, this is a static-evidence classifier. A future upgrade
+path replaces the oracle table with a `jsdom`-driven trace comparator (see
+`tools/harness/oracles/html/README.md`).
 """
 
 from __future__ import annotations
@@ -78,20 +79,18 @@ class HtmlAdapter(AdapterBase):
         # second pass after element.js loads), and the legacy
         # web-compat.js bundle (still hosts a few entries). Concatenate
         # them once so the prototype-evidence regex sees the full surface.
-        # P5-7 follow-up (PR #2337) extracted Element.prototype's Event +
+        # web-compat-element-events.js hosts Element.prototype's Event +
         # Pointer-capture methods (addEventListener / removeEventListener /
         # dispatchEvent / setPointerCapture / releasePointerCapture /
-        # hasPointerCapture + the synthetic event payloads) into
-        # web-compat-element-events.js. Without it in the union, the
-        # `html/Element_setPointerCapture` oracle false-classifies as
-        # NOT_IMPL (Codex P2 on PR #2337 — same class as #2253's
-        # canvas2d adapter gap fixed by #2317).
+        # hasPointerCapture + synthetic event payloads). It must stay in the
+        # union or `html/Element_setPointerCapture` and related entries
+        # false-classify as NOT_IMPL.
         #
         # The legacy web-compat.js bundle was further split: the CSS
-        # selector engine moved to web-compat-selector.js and the Phase 9
-        # runtime API shims moved to web-compat-runtime-apis.js. Both
-        # siblings join the union so the prototype/selector evidence
-        # regexes still see the full surface after the split.
+        # selector engine moved to web-compat-selector.js and the runtime API
+        # shims moved to web-compat-runtime-apis.js. Both siblings join the
+        # union so the prototype/selector evidence regexes still see the full
+        # surface after the split.
         self._element_js = "\n".join(
             self._read(p)
             for p in (
@@ -115,7 +114,7 @@ class HtmlAdapter(AdapterBase):
             )
         )
         self._dom_ops_js = self._read("core/view/js/web-compat-dom-ops.js")
-        self._bridge_cpp = self._read("core/view/src/widget_bridge.cpp")
+        self._bridge_cpp = self._read_bridge_sources()
 
     # ── Oracle + source loading ──────────────────────────────────────
 
@@ -136,6 +135,18 @@ class HtmlAdapter(AdapterBase):
         if not p.exists():
             return ""
         return p.read_text(encoding="utf-8", errors="replace")
+
+    def _read_bridge_sources(self) -> str:
+        sources: list[Path] = []
+        monolith = self.repo_root / "core" / "view" / "src" / "widget_bridge.cpp"
+        if monolith.exists():
+            sources.append(monolith)
+        split_dir = self.repo_root / "core" / "view" / "src" / "widget_bridge"
+        if split_dir.exists():
+            sources.extend(sorted(split_dir.glob("*.cpp")))
+        return "\n".join(
+            p.read_text(encoding="utf-8", errors="replace") for p in sources
+        )
 
     # ── Evidence helpers ─────────────────────────────────────────────
 
@@ -174,11 +185,12 @@ class HtmlAdapter(AdapterBase):
         return False
 
     def _bridge_registers(self, fn_name: str) -> bool:
-        """True if widget_bridge.cpp has `engine_.register_function("<fn_name>", ...)`."""
+        """True if a widget bridge source registers `<fn_name>`."""
         if not self._bridge_cpp or not fn_name:
             return False
         pattern = (
-            rf'register_function\(\s*"{re.escape(fn_name)}"'
+            rf'(?:register_function|register_bridge_function)\(\s*'
+            rf'(?:[^,"\n]+,\s*)?"{re.escape(fn_name)}"'
         )
         return bool(re.search(pattern, self._bridge_cpp))
 

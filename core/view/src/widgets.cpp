@@ -199,7 +199,6 @@ KnobModGeom knob_mod_geom(const Rect& b, size_t ring_count) {
 float knob_value_to_angle(float v) {
     return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
 }
-// Pointer position → normalized value along the 270° dial sweep.
 }  // namespace
 
 void Knob::on_mouse_enter() {
@@ -382,8 +381,9 @@ void Toggle::set_on(bool v) {
     on_ = v;
     float dur = resolve_dimension("motion.duration.normal", 0.15f);
     thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);
-    // pulp #73 — programmatic toggle (preset apply, JS bridge setValue) must reach the
-    // screen on its own; user-input toggles also repaint via the host per-event path.
+    // Programmatic toggle changes (preset apply, JS bridge setValue) must reach
+    // the screen on their own; user-input toggles also repaint via the host
+    // per-event path.
     request_repaint();
 }
 
@@ -408,8 +408,7 @@ void Toggle::advance_animations(float dt) {
     hover_opacity_.advance(dt);
 }
 
-// Label moved to core/view/src/widgets/label.cpp
-// in the 2026-05 Phase 2 (R2-6) batch.
+// Label implementation lives in core/view/src/widgets/label.cpp.
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
 
@@ -647,8 +646,8 @@ void Knob::paint(canvas::Canvas& canvas) {
         // 35% inner radius to 95% outer radius — long enough to read,
         // short enough not to dominate.
         //
-        // Named brushed-metal palette (pulp #41 — was inline magic rgba).
-        // Tuned to the ELYSIUM Figma reference: body highlight ~RGB 200, mid
+        // Named brushed-metal palette tuned to the ELYSIUM Figma reference:
+        // body highlight ~RGB 200, mid
         // ~150, shadow side ~95; the rim/bevel/indicator tones frame it.
         const canvas::Color kSilverRim              = canvas::Color::rgba(0.22f, 0.23f, 0.26f, 1.0f);
         const canvas::Color kSilverBodyLight        = canvas::Color::rgba(0.82f, 0.84f, 0.88f, 1.0f);
@@ -906,11 +905,11 @@ void Fader::paint(canvas::Canvas& canvas) {
             : resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         canvas.set_fill_color({track_color.r, track_color.g, track_color.b, track_color.a});
 
-        // Track thickness. When the importer derived the captured track width
-        // (pulp #3191), honour it exactly (clamped to the widget box) so the
-        // track is the narrow line the art shows — not a fraction of the box,
-        // which over-wide widget bounds would balloon. Otherwise fall back to
-        // the previous heuristic (skinned: ~18% of box; default: 4px line).
+        // Track thickness. When the importer derived the captured track width,
+        // honour it exactly (clamped to the widget box) so the track is the
+        // narrow line the art shows — not a fraction of the box, which
+        // over-wide widget bounds would balloon. Otherwise fall back to the
+        // default heuristic (skinned: ~18% of box; default: 4px line).
         float track_thick =
             has_skin_track_width_ ? std::min(skin_track_width_, track_width)
             : skinned             ? std::max(6.0f, std::min(track_width * 0.18f, 12.0f))
@@ -926,11 +925,11 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
         canvas.fill_rounded_rect(track_x, track_y, track_w, track_h, track_radius);
 
-        // Track outline (pulp #3192): the captured empty track has a visible
-        // lighter edge around the dark channel. When the importer derived that
-        // edge colour from the art, stroke the track rect so the empty portion
-        // above the thumb doesn't read as a flat dark slab. Drawn before the
-        // fill/thumb so they sit on top, matching the captured layering.
+        // Track outline. The captured empty track has a visible lighter edge
+        // around the dark channel. When the importer derived that edge colour
+        // from the art, stroke the track rect so the empty portion above the
+        // thumb doesn't read as a flat dark slab. Drawn before the fill/thumb
+        // so they sit on top, matching the captured layering.
         if (has_skin_track_border_) {
             canvas.set_stroke_color({track_border_color_.r, track_border_color_.g,
                                      track_border_color_.b, track_border_color_.a});
@@ -964,9 +963,9 @@ void Fader::paint(canvas::Canvas& canvas) {
             const float scale = hover_thumb_scale_.value();
             // Skinned faders default to a wide rounded slab (matching the
             // captured Figma thumb) when explicit dimensions weren't given.
-            // pulp #3191: when the importer derived a thin track width, it also
-            // sized the widget box to the captured thumb width — so the thumb
-            // fills the box (no 0.62 shrink), and the track is the thin line.
+            // When the importer derived a thin track width, it also sized the
+            // widget box to the captured thumb width — so the thumb fills the
+            // box (no 0.62 shrink), and the track is the thin line.
             const float skin_thumb_frac = has_skin_track_width_ ? 1.0f : 0.62f;
             const float skin_default_w = vert ? std::min(b.width, track_width) * skin_thumb_frac
                                               : std::max(10.0f, track_length * 0.10f);
@@ -1041,9 +1040,6 @@ void Fader::paint(canvas::Canvas& canvas) {
 // HTML <input type="range"> equivalent. Track + handle, no decorative
 // fader chrome. Min/max/step quantisation lives here so the painted
 // position and the value seen by JS callers always agree.
-//
-// pulp issue-966.
-
 void RangeSlider::clamp_and_quantize_() {
     // Defensive: if max < min, treat the range as collapsed at min.
     float lo = min_;
@@ -1712,10 +1708,9 @@ void GroupBox::on_mouse_event(const MouseEvent& event) {
     View::on_mouse_event(event);
 }
 
-// Visualizers (ImageView / Meter / XYPad / WaveformView /
-// SpectrumView / Panel / SpectrogramView / MultiMeter /
-// CorrelationMeter) moved to core/view/src/widgets/visualizers.cpp
-// in the 2026-05 Phase 2 (R2-6) batch.
+// Visualizer implementations (ImageView / Meter / XYPad / WaveformView /
+// SpectrumView / Panel / SpectrogramView / MultiMeter / CorrelationMeter)
+// live in core/view/src/widgets/visualizers.cpp.
 
 // ── WaveformRecorder ─────────────────────────────────────────────────────────
 

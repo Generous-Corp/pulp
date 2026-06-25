@@ -1,7 +1,7 @@
-// pulp #1486 — Drift diff (§7 of the spec).
+// Drift diff.
 //
 // Compares two IR trees produced by the SAME adapter and emits a flat
-// list of Drift entries keyed by stable_anchor_id. Phase 1 supports:
+// list of Drift entries keyed by stable_anchor_id. Supported kinds:
 //   - added / removed / changed / reordered
 //   - orphaned-tweak (carried over from applyTweaks's meta.orphaned_tweaks)
 //
@@ -135,6 +135,6 @@ function shallowEqual(a: unknown, b: unknown): boolean {
     if (a == null || b == null) return false;
     if (typeof a !== typeof b) return false;
     // For arrays / objects we go deep via JSON — values in the IR are
-    // either primitives or POJOs; this is a fine spike-quality check.
+    // either primitives or POJOs.
     return JSON.stringify(a) === JSON.stringify(b);
 }

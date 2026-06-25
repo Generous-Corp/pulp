@@ -9,6 +9,8 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/svg_dom_cache.hpp>
+#include <cstdlib>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
@@ -79,8 +81,8 @@ TEST_CASE("RecordingCanvas text", "[canvas]") {
     REQUIRE(w > 0);
 }
 
-// Regression test for #75: text draws inside nested clip/translate
-// contexts should still emit exactly one fill_text command per call.
+// Text drawn inside nested clip/translate contexts should still emit exactly
+// one fill_text command per call.
 // The Skia path uses SkTextBlob with explicit per-glyph advances
 // instead of SkShaper::shape(), which prevented ghost/double rendering
 // in the widget paint pipeline. This test guards against a regression
@@ -117,13 +119,10 @@ TEST_CASE("Canvas text in nested clip contexts -- no duplication (#75)",
     REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 3);
 }
 
-// pulp #1737 — direct unit tests for the new draw_image_*_rect overrides.
-// The integration test [issue-1737] in test_widget_bridge.cpp exercises
-// draw_image_from_file_rect end-to-end via the JS bridge, but codecov's
-// patch-coverage measurement reported 0% on the new lines anyway (the
-// widget-bridge test goes through too many dispatch layers for the
-// per-line attribution). Direct calls on RecordingCanvas pin the new
-// behavior to specific test cases that codecov measures unambiguously.
+// Direct unit tests for the draw_image_*_rect overrides. The integration test
+// in test_widget_bridge.cpp exercises draw_image_from_file_rect end-to-end via
+// the JS bridge; direct calls on RecordingCanvas pin the source/destination
+// rectangle behavior without the bridge dispatch layers.
 TEST_CASE("RecordingCanvas::draw_image_from_file_rect captures src + dst rect",
           "[canvas][issue-1737][issue-916]") {
     RecordingCanvas canvas;
@@ -899,10 +898,10 @@ TEST_CASE("Canvas base fallbacks delegate through recording backend",
 }
 
 #ifdef PULP_HAS_SKIA
-// Issue-897 P1 follow-up: ctx.setTransform must compose onto the parent
-// View's transform, not overwrite it. Without this, a CanvasWidget at
-// non-zero offset would have its translation wiped the moment JS calls
-// ctx.setTransform(scale, 0, 0, scale, 0, 0) for devicePixelRatio scaling.
+// ctx.setTransform must compose onto the parent View's transform, not overwrite
+// it. Without this, a CanvasWidget at non-zero offset would have its translation
+// wiped the moment JS calls ctx.setTransform(scale, 0, 0, scale, 0, 0) for
+// devicePixelRatio scaling.
 TEST_CASE("SkiaCanvas::set_transform composes onto captured paint baseline",
           "[canvas][skia][issue-897]") {
     SkImageInfo info = SkImageInfo::Make(200, 200, kN32_SkColorType,
@@ -1055,10 +1054,115 @@ TEST_CASE("SkiaCanvas::set_line_dash applies an SkDashPathEffect on stroke",
     REQUIRE(light > 8);
 }
 
+// ── SvgDomCache (issue 4678) ────────────────────────────────────────────────
+// The faithful-vector design-import lane re-renders its SVG per repaint;
+// SkiaCanvas::draw_svg now caches the parsed SkSVGDOM keyed on the document
+// bytes so an unchanged document reuses the DOM. The render-patch path (knob
+// needle rotate, fader thumb translate) mutates the SVG string, so a patched
+// document is a distinct key and rebuilds — keeping a dragged element live. The
+// rasterized output must be byte-identical to the uncached path.
+namespace {
+// Render `svg` into an RGBA8888 raster of px x px via the real SkiaCanvas
+// draw_svg path, so a test can pixel-compare cached vs uncached output.
+std::vector<uint8_t> render_svg_to_rgba(const std::string& svg, int px) {
+    std::vector<uint8_t> pixels(static_cast<std::size_t>(px) * px * 4, 0);
+    SkImageInfo info = SkImageInfo::Make(px, px, kRGBA_8888_SkColorType,
+                                         kUnpremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    if (!surface) return pixels;
+    SkCanvas* sk = surface->getCanvas();
+    sk->clear(SK_ColorTRANSPARENT);
+    {
+        SkiaCanvas canvas(sk);
+        canvas.draw_svg(svg, 0, 0, static_cast<float>(px), static_cast<float>(px));
+    }
+    surface->readPixels(info, pixels.data(),
+                        static_cast<std::size_t>(px) * 4, 0, 0);
+    return pixels;
+}
+
+const char* kKnobSvg =
+    R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)"
+    R"(<rect x="10" y="10" width="80" height="80" rx="4" fill="#cccccc"/>)"
+    R"(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)"
+    R"(<path d="M50 38L50 30" stroke="white" stroke-width="3"/></svg>)";
+
+// The render-patched form: the needle path wrapped in a rotate(), exactly as
+// DesignFrameView::paint emits for a turned knob. A DIFFERENT document.
+const char* kKnobSvgRotated =
+    R"svg(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)svg"
+    R"svg(<rect x="10" y="10" width="80" height="80" rx="4" fill="#cccccc"/>)svg"
+    R"svg(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)svg"
+    R"svg(<g transform="rotate(120.000 50.000 50.000)">)svg"
+    R"svg(<path d="M50 38L50 30" stroke="white" stroke-width="3"/></g></svg>)svg";
+}  // namespace
+
+TEST_CASE("SvgDomCache reuses the parsed DOM for an unchanged document",
+          "[canvas][skia][svg][cache][issue-4678]") {
+    auto& cache = SvgDomCache::instance();
+    cache.clear();
+    cache.set_enabled(true);
+    cache.reset_stats();
+
+    render_svg_to_rgba(kKnobSvg, 64);
+    render_svg_to_rgba(kKnobSvg, 64);  // identical bytes
+    render_svg_to_rgba(kKnobSvg, 32);  // identical bytes, different size
+
+    const auto s = cache.stats();
+    CAPTURE(s.builds, s.hits);
+    REQUIRE(s.builds == 1);  // parsed once
+    REQUIRE(s.hits == 2);    // reused twice — incl. across a size change
+}
+
+TEST_CASE("SvgDomCache rebuilds for a render-patched document (knob stays live)",
+          "[canvas][skia][svg][cache][issue-4678]") {
+    // The correctness gate: a patched SVG (rotated needle) is a different
+    // document, so it MUST miss the cache and rebuild. If it ever hit the
+    // base-document entry, a dragged knob would freeze.
+    auto& cache = SvgDomCache::instance();
+    cache.clear();
+    cache.set_enabled(true);
+    cache.reset_stats();
+
+    const auto base = render_svg_to_rgba(kKnobSvg, 100);
+    const auto rotated = render_svg_to_rgba(kKnobSvgRotated, 100);
+
+    const auto s = cache.stats();
+    CAPTURE(s.builds, s.hits);
+    REQUIRE(s.builds == 2);  // two distinct documents, two parses
+    REQUIRE(s.hits == 0);
+    // ...and the needle actually moved between the two renders.
+    int worst = 0;
+    for (std::size_t i = 0; i < base.size() && i < rotated.size(); ++i)
+        worst = std::max(worst, std::abs(static_cast<int>(base[i]) -
+                                         static_cast<int>(rotated[i])));
+    REQUIRE(worst > 10);
+}
+
+TEST_CASE("SvgDomCache output is byte-identical to the uncached path",
+          "[canvas][skia][svg][cache][issue-4678]") {
+    auto& cache = SvgDomCache::instance();
+
+    cache.clear();
+    cache.set_enabled(false);
+    const auto uncached = render_svg_to_rgba(kKnobSvg, 96);
+
+    cache.clear();
+    cache.set_enabled(true);
+    render_svg_to_rgba(kKnobSvg, 96);                 // prime the cache
+    const auto cached = render_svg_to_rgba(kKnobSvg, 96);  // served from cache
+
+    cache.set_enabled(true);  // leave the cache in its default state
+    REQUIRE(uncached.size() == cached.size());
+    REQUIRE_FALSE(uncached.empty());
+    REQUIRE(uncached == cached);  // the cache only skips the parse, never the render
+}
+
 #endif  // PULP_HAS_SKIA
 
 
-// ── pulp #929 — Canvas::clear_rect default + CoreGraphics override ──────────
+// ── Canvas::clear_rect default + CoreGraphics override ─────────────────────
 
 namespace {
 
@@ -1171,7 +1275,7 @@ TEST_CASE("CoreGraphicsCanvas::clear_rect zeroes destination pixels",
 }
 #endif  // __APPLE__
 
-// ── pulp #1737 — CSS font-variant → SkShaper Feature plumbing ─────────────
+// ── CSS font-variant → SkShaper Feature plumbing ──────────────────────────
 // Regression coverage for the SkShaper 8-arg shape() overload that the
 // fontVariant slice routes through. The legacy 6-arg shape() ignores the
 // caller's feature array entirely (HarfBuzz applies only the on-by-default
@@ -1258,7 +1362,7 @@ TEST_CASE("Canvas::make_font_feature_tag packs OpenType four-char tags",
 }
 #endif // PULP_HAS_SKIA
 
-// ── pulp #1806 — fill_current_path / stroke_current_path preserve the scratch path ──
+// ── fill_current_path / stroke_current_path preserve the scratch path ──────
 // Canvas2D spec: ctx.fill() and ctx.stroke() do NOT consume the path. A
 // subsequent stroke() after fill() must paint the outlined version of
 // the filled shape. Previously path_builder_->detach() emptied the
@@ -1316,13 +1420,12 @@ TEST_CASE("pulp #1806 — begin_path resets between fill+stroke pairs",
 }
 
 #ifdef PULP_HAS_SKIA
-// pulp #1899 (gap #3) — SkiaCanvas tracks every currently-open
-// save_layer whose layer-paint alpha is < 1. Text paint paths
-// (fill_text / stroke_text) consult `inside_non_opaque_layer()` at
-// paint time and select greyscale AA over LCD subpixel AA, so glyphs
-// stay legible inside CSS-opacity layers (browser parity). This test
-// asserts the stack state transitions across the four save_layer
-// entry points + plain save + restore + restore_to_count.
+// SkiaCanvas tracks every currently-open save_layer whose layer-paint alpha is
+// < 1. Text paint paths (fill_text / stroke_text) consult
+// `inside_non_opaque_layer()` at paint time and select greyscale AA over LCD
+// subpixel AA, so glyphs stay legible inside CSS-opacity layers (browser
+// parity). This test asserts the stack state transitions across the four
+// save_layer entry points + plain save + restore + restore_to_count.
 TEST_CASE("SkiaCanvas tracks non-opaque layers for text edging "
           "(pulp #1899 gap #3)", "[canvas][skia][issue-1899]") {
     SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
@@ -1397,13 +1500,13 @@ TEST_CASE("SkiaCanvas tracks non-opaque layers for text edging "
     }
 }
 
-// pulp #1899 (gap #3) — end-to-end: render the same glyph twice into
-// the same surface, once inside save_layer(opacity = 0.5) and once
-// outside, and verify the inside-layer pixels show no LCD subpixel
-// pattern. LCD AA produces unequal R / G / B coverage at glyph edges;
-// greyscale AA writes equal R / G / B. Scanning a few rows where the
-// glyph should have an edge and asserting "max channel difference == 0"
-// for the inside-layer block is the simplest cross-platform probe.
+// End-to-end: render the same glyph twice into the same surface, once inside
+// save_layer(opacity = 0.5) and once outside, and verify the inside-layer
+// pixels show no LCD subpixel pattern. LCD AA produces unequal R / G / B
+// coverage at glyph edges; greyscale AA writes equal R / G / B. Scanning a few
+// rows where the glyph should have an edge and asserting
+// "max channel difference == 0" for the inside-layer block is the simplest
+// cross-platform probe.
 TEST_CASE("SkiaCanvas text inside opacity layer uses greyscale AA "
           "(pulp #1899 gap #3)", "[canvas][skia][issue-1899]") {
     // Two side-by-side surfaces — one painted with an opacity layer,

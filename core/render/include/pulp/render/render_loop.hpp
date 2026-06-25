@@ -17,9 +17,8 @@
 //             same factory seam when available; see render_loop.cpp)
 //   Other   : timer fallback                      (~60 Hz)
 //
-// Slice 16 (planning/2026-05-18-rt-safety-and-debug-dx.md) — the VBlank-
-// locked safe-repaint pattern. The dirty-flag coalescer itself lives in
-// RenderLoopState (render_loop_state.hpp) and is platform-agnostic and
+// The VBlank-locked safe-repaint pattern keeps dirty-frame coalescing in
+// RenderLoopState (render_loop_state.hpp), which is platform-agnostic and
 // unit-tested; each platform subclass only owns the native vsync source.
 
 #include <functional>

@@ -11,9 +11,8 @@
 //                 CoreMIDI driver also exposes paired BLE peripherals as
 //                 regular MIDI endpoints; this surface adds explicit
 //                 scan-and-pair control for unpaired peripherals.
-//   Linux:        BlueZ (org.bluez.GattCharacteristic1 notifications) +
-//                 ALSA virtual port for output. Scaffold only in this
-//                 slice — the BlueZ D-Bus glue lands in a follow-up.
+//   Linux:        BlueZ D-Bus (org.bluez.GattCharacteristic1 notifications) +
+//                 ALSA virtual port for output.
 //   Windows:      WinRT BluetoothLEAdvertisementWatcher scan +
 //                 GATT FromBluetoothAddressAsync connect +
 //                 GattCharacteristic.ValueChanged notify, bridged into the
@@ -32,12 +31,11 @@
 //   Running status, multi-message-per-packet, and split-sysex follow the
 //   Apple spec — backends MUST reassemble before delivering to callbacks.
 //
-// Acceptance for the initial slice: discover BLE MIDI peripherals,
-// connect to one, receive MIDI events (notes) via the standard
-// MidiInputCallback path. Pairing UI is delegated to the platform —
-// the scanner surfaces peripherals and the host app drives the
-// pairing dialog (iOS CABTMIDICentralViewController, macOS
-// equivalent, or a custom widget).
+// Baseline behavior: discover BLE MIDI peripherals, connect to one, and
+// receive MIDI events (notes) via the standard MidiInputCallback path.
+// Pairing UI is delegated to the platform — the scanner surfaces peripherals
+// and the host app drives the pairing dialog (iOS CABTMIDICentralViewController,
+// macOS equivalent, or a custom widget).
 
 #include <pulp/midi/device.hpp>
 

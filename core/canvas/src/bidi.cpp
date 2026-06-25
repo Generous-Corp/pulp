@@ -1,5 +1,3 @@
-// bidi.cpp — Pulp item 6.8 / 2026-05-24 macOS plugin-authoring plan.
-//
 // SheenBidi-backed paragraph bidi analyser. See bidi.hpp for the API
 // contract. The Skia / SkShaper path in text_run_planner.cpp keeps its
 // existing ICU-iterator route; this file provides the canonical
@@ -90,9 +88,9 @@ BidiParagraph BidiAnalyzer::analyze(std::string_view text,
 
     // SBLine applies UBA rules L1-L2 over a paragraph range and returns
     // contiguous runs grouped by embedding level. We treat the entire
-    // paragraph as one line (consistent with the Phase-1 single-line
-    // label paint target for slice 6.8). Multi-line callers can call
-    // analyze() per wrapped line themselves once line breaking is fixed.
+    // paragraph as one line, which matches the current single-line label
+    // paint path. Multi-line callers can call analyze() per wrapped line
+    // themselves once line breaking is fixed.
     SBLineRef line = SBParagraphCreateLine(
         paragraph,
         /*lineOffset=*/0,

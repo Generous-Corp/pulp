@@ -128,7 +128,7 @@ void WidgetBridge::register_platform_services_dialog_api() {
 void WidgetBridge::register_platform_services_clipboard_api() {
     BridgeApiContext api{engine_};
 
-    // P1: Clipboard - read/write text via platform::Clipboard
+    // Clipboard - read/write text via platform::Clipboard
     register_bridge_function(api, "readClipboard", [](choc::javascript::ArgumentList) {
         auto text = platform::Clipboard::get_text();
         return choc::value::createString(text.value_or(""));

@@ -21,11 +21,49 @@ off the audio thread, then keep `process()` bounded and predictable.
    thread sends work to the main thread, it does so via a non-blocking
    queue.
 
-`pulp::runtime::ScopedNoAlloc` (debug builds) tracks rule #1 — Pulp
-wraps `View::paint_all` and every adapter's call to
-`Processor::process()` in one, so opt-in debug-allocator hooks can
-shout when rule #1 is violated. Tooling can read
-`pulp::runtime::is_in_no_alloc_scope()` to detect the protected region.
+`pulp::runtime::ScopedNoAlloc` tracks rule #1 — Pulp wraps
+`View::paint_all` and every adapter's call to `Processor::process()` in
+one, and tooling reads `pulp::runtime::is_in_no_alloc_scope()` to detect
+the protected region. The production guard is a no-op under `NDEBUG`
+(zero release cost); the *enforcement* lives in the test harness (see
+"Verifying the contract in tests" below), where an allocation or a
+blocking lock inside the scope aborts the binary.
+
+## Numeric mode: denormals & determinism
+
+Denormal (subnormal) floats stall the audio thread when they enter
+recursive state — IIR/SVF filter memory, reverb/delay feedback, envelope
+tails decaying toward silence. Pulp addresses this at two levels:
+
+1. **Per-value (opt-in):** `pulp::signal::snap_to_zero` (denormal.hpp)
+   snaps a value or buffer below ~-300 dB FS to exactly zero. Use it at
+   the end of each recursive state update. It is the portable baseline
+   and works regardless of CPU mode.
+2. **Callback-scope (hardware):** `pulp::signal::ScopedFlushDenormals`
+   (scoped_flush_denormals.hpp) sets the CPU flush-to-zero mode — MXCSR
+   FTZ on x86-64, FPCR.FZ on AArch64 — for the lifetime of the
+   scope, then restores the caller's previous mode. It protects *all*
+   DSP in the callback, including code that forgot rule-1's
+   `snap_to_zero`. Wrap the callback body alongside `ScopedNoAlloc`:
+
+   ```cpp
+   pulp::signal::ScopedFlushDenormals flush_denormals;
+   processor.process(...);
+   ```
+
+   On targets without a hardware mode (e.g. MSVC/ARM64) the guard is a
+   correct no-op (`kHardwareFlushSupported == false`); `snap_to_zero`
+   remains the safety net there. The standalone host wraps its process
+   call in this guard; format adapters wrap theirs where supported.
+
+**Determinism contract.** Flush-to-zero changes denormal results to
+zero, so a flushed render is *not bit-identical* to an unflushed one for
+signals that decay into the denormal range — but it is the audibly
+correct, stall-free result, and it is deterministic given a fixed
+numeric mode. Offline/golden renders therefore fix the numeric mode they
+assert against. A future parallel graph mode that reorders summation
+will be documented as *sample-equivalent*, not bit-identical, unless it
+pins a deterministic reduction order.
 
 ## Budget prepare-time resources
 
@@ -226,9 +264,37 @@ audio thread by binding one process callback per dense graph node, then pass the
 active snapshot into each executor call. Do not reset or clear a snapshot while
 any realtime call may still reference it. The executor validates the block,
 drains graph queues without heap allocation, emits bounded command
-accepted/rejected events, and visits nodes in plan order. Snapshot
-publication/lifetime policy, audio-buffer routing, feedback delay storage, and
-`SignalGraph` mutation belong to later graph-runtime migration slices.
+accepted/rejected events, and visits nodes in plan order.
+
+`GraphRuntimeExecutor::process_routed()` adds inter-node audio routing on top of
+that walk for feedforward graphs. The snapshot computes a
+`graph::GraphRuntimeBufferAssignment` off the audio thread (one mono scratch
+slot per node input/output port); the caller pre-allocates a
+`GraphRuntimeBufferPool` of that many slots and reuses it across blocks. Per
+node the executor gathers (zero then sum) each non-feedback inbound connection
+from its upstream output slot, then either copies the main I/O bus (AudioInput /
+AudioOutput nodes) or hands the binding `node_inputs` / `node_outputs` views over
+its scratch slots. The routed path allocates and locks nothing on the RT thread
+(the pool must already `fits()` the snapshot for the block) and matches
+`host::SignalGraph` bit-for-bit. Feedback connections are honored as a one-block
+delay: the assignment appends one persistent previous-block slot per feedback
+edge, gather adds that slot (last block's captured source output), and after the
+walk the source's output is captured into it — mirroring SignalGraph's
+`feedback_prev`, with the pool's zero-init giving the first block silent
+feedback. Per-connection PDC delay lines, sidechain/MIDI/automation edge
+routing, slot reuse, and the `SignalGraph` walk migration belong to later
+graph-runtime slices.
+
+`host::SignalGraph` can request routing its live `process()` callback through
+this executor for eligible graphs (only AudioInput/AudioOutput/Gain nodes, plain
+audio connections including one-block feedback) via
+`set_canonical_executor_routing_enabled(true)` —
+default OFF, with the legacy walk as the fallback for ineligible graphs and the
+parity oracle. The routing snapshot and its scratch pool are built in
+`compile_()` and embedded per-snapshot in the published `CompiledGraph`, so a
+re-prepare builds fresh ones on a fresh snapshot and never resizes a buffer an
+in-flight audio reader is using — the same RCU/retire discipline the legacy
+per-node scratch relies on.
 
 `pulp::format::process_processor_block()` is the additive bridge from
 `ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an
@@ -251,6 +317,16 @@ audio callback even when their low-level copying helpers are allocation-free.
 When adding sampler/looper DSP helpers, add or update a contract row and prefer
 conservative `may_allocate`, `may_lock`, and `may_block` flags unless the
 implementation and its callees have been audited.
+
+The same header's `core_runtime_rt_safety_contracts()` is the sibling registry
+for the core RT runtime — the lock-free primitives (`SeqLock`, `TripleBuffer`,
+`SpscQueue`), `ParameterEventQueue`, `AudioProcessLoadMeasurer`,
+`ScopedFlushDenormals`, `SignalGraph::process`, and `Processor::process`. Both
+tables are drift-checked against the same well-formedness invariants
+(audio-callback-allowed ⇒ no alloc/lock/block; lock ⇒ block; unique rows) in
+`test_sampler_rt_safety_contract.cpp` / `test_core_runtime_rt_safety_contract.cpp`.
+The labels are descriptive; the *enforcement* is the no-alloc/no-lock abort-trap
+(see "Verifying the contract in tests").
 
 `pulp::audio::SampleZoneMap` is the prepared sampler mapping primitive for
 key zones, velocity zones, fixed-pitch triggers, chromatic keytracking,
@@ -313,6 +389,16 @@ process-load snapshot with its xrun counter for UI, Audio Inspector, and
 validation polling. Polling `runtime_telemetry_snapshot()` is expected to stay
 allocation-free; it should aggregate already-published counters, not allocate
 or query the audio backend.
+
+For hosted graphs, `host::SignalGraph::node_loads()` exposes the same
+`AudioProcessLoadSnapshot` *per node*: `process()` wraps each node's work in a
+persistent per-node `AudioProcessLoadMeasurer` (relaxed-atomic begin()/end(),
+RT-safe), and `node_loads()` returns a latest-value snapshot per node from the
+control thread. The measurers persist across `prepare()` recompiles so a node's
+load history survives topology changes, and they are only ever added (never
+erased) while a snapshot is live, so the audio thread's raw measurer pointers
+stay valid across snapshot swaps. This is what lets a host attribute a CPU
+spike to a specific node instead of just the whole callback.
 
 Validation and UI surfaces should classify that snapshot with
 `audio::evaluate_audio_runtime_overload()` instead of inventing local
@@ -412,6 +498,38 @@ Common recipes:
   the job. Publish a prepared sample-map revision atomically; treat cache misses
   as control-thread work, not audio-thread file I/O.
 
+## Verifying the contract in tests
+
+The no-alloc / no-lock contract is *enforced*, not just documented. On
+UNIX test builds, `test/native_components/rt_intercept_test_support.cpp`
+installs a strong `pulp_rt_trap_if_no_alloc_scope` plus global
+`operator new`/`new[]` overrides and `pthread` mutex/rwlock
+interposers. Inside a no-alloc scope, any heap allocation or blocking
+lock writes `[pulp-rt-trap] allocation inside no-alloc scope` and
+`abort()`s — so a violation fails the test by killing the process, not
+by a soft assertion. A Rust `#[global_allocator]` routes the checking
+core's allocations through the same trap. On non-UNIX builds the
+fallback `RtAllocationProbe` *counts* allocations instead.
+
+`test/harness/scoped_rt_process_probe.hpp` exposes the shared
+`pulp::test::ScopedRtProcessProbe`, which enters an always-on
+`RtNoAllocScope` (independent of `NDEBUG`, so the check is live even in
+Release test binaries) together with a `ScopedNoAlloc`. Wrap an RT path
+in it and assert `allocation_count() == 0`:
+
+```cpp
+pulp::test::ScopedRtProcessProbe probe;
+graph.process(out_view, in_view, num_frames);
+REQUIRE(probe.allocation_count() == 0);  // trap build also proves lock-freedom
+```
+
+To opt a test target into the trap, link
+`native_components/rt_intercept_test_support.cpp` on UNIX and define
+`PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1`. Current coverage:
+`StateStore` RT writes and `NativeCoreProcessor::process`
+(`test_rt_safety.cpp`), and the host graph hot path
+`SignalGraph::process()` (`test_signal_graph_rt_safety.cpp`).
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -420,6 +538,8 @@ Common recipes:
 * [`core/audio/include/pulp/audio/load_measurer.hpp`](../../core/audio/include/pulp/audio/load_measurer.hpp)
   — load, peak-load, and overload-count snapshots.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
+* [`core/signal/include/pulp/signal/scoped_flush_denormals.hpp`](../../core/signal/include/pulp/signal/scoped_flush_denormals.hpp)
+  — hardware flush-to-zero guard for the callback boundary.
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
 * [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)

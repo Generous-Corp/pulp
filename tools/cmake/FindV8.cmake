@@ -22,7 +22,7 @@
 # NOTE on rpath: this module deliberately does NOT set INSTALL_RPATH. The
 # in-tree build resolves @rpath/libv8.dylib (and $ORIGIN on Linux) via CMake's
 # default build-tree rpath because IMPORTED_LOCATION's directory is on the link
-# path. Packaging/signing for SHIPPED artifacts is owned by the ship slice
+# path. Packaging/signing for shipped artifacts is owned by packaging helpers
 # (PulpV8ImportedTarget.cmake + a target_copy_v8_binaries helper), mirroring
 # how PulpWebGpuImportedTarget.cmake handles wgpu — see the migration plan.
 

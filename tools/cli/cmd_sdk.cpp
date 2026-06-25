@@ -112,13 +112,12 @@ int cmd_sdk(const std::vector<std::string>& args) {
             std::cout << "  No SDK versions installed.\n";
             std::cout << "  Run: pulp sdk install\n";
         }
-        // Pulp #2087 follow-up (#22): print a one-line banner if a
-        // newer SDK is available on GitHub Releases. Cached at
-        // ~/.pulp/cache/latest_release.txt with a 24h TTL — no
-        // network call in the hot path most of the time.
+        // Print a one-line banner if a newer SDK is available on GitHub
+        // Releases. Cached at ~/.pulp/cache/latest_release.txt with a 24h TTL
+        // — no network call in the hot path most of the time.
         //
-        // Codex P2 on PR #2138: only fire the banner against an
-        // actually-installed SDK version. Falling back to
+        // Only fire the banner against an actually-installed SDK
+        // version. Falling back to
         // PULP_SDK_VERSION (the CLI's compile-time pin) here would
         // print contradictory output on a fresh machine: "No SDK
         // versions installed" followed by "installed: v..." against
@@ -131,12 +130,11 @@ int cmd_sdk(const std::vector<std::string>& args) {
     }
 
     if (sub == "available") {
-        // pulp #2087 follow-up (#23): list SDK versions available on
-        // GitHub Releases. Shells out to `curl` and parses the JSON
-        // response manually (no JSON dep needed — we only want the
-        // `tag_name` values). Network failures degrade to a clear
-        // message; ad-blockers / proxies are the common failure mode
-        // and we don't want to mask them.
+        // List SDK versions available on GitHub Releases. Shells out to `curl`
+        // and parses the JSON response manually (no JSON dep needed — we only
+        // want the `tag_name` values). Network failures degrade to a clear
+        // message; ad-blockers / proxies are the common failure mode and we
+        // don't want to mask them.
         std::string installed_pinned = PULP_SDK_VERSION;
         std::cout << "Pulp SDK — available releases\n";
         std::cout << "==============================\n\n";
@@ -146,8 +144,8 @@ int cmd_sdk(const std::vector<std::string>& args) {
                           + "/releases?per_page=30";
         std::string cmd = "curl -fsSL -H 'Accept: application/vnd.github+json' "
                           + shell_quote(url) + " 2>/dev/null";
-        // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping
-        // used elsewhere in tools/cli/ so this builds on the Windows
+        // Mirror the _WIN32 popen/pclose mapping used elsewhere in
+        // tools/cli/ so this builds on the Windows
         // CLI lane. Other call sites (cmd_overflow.cpp, cmd_macos.cpp,
         // update_check.cpp) carry the same pattern.
 #if defined(_WIN32)

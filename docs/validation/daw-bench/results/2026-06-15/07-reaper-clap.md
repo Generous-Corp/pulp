@@ -24,7 +24,7 @@ events.
 
 This is a scripted smoke: it does not drive real-device playback or the plugin
 GUI, so process-while-bypassed, buffer variability, session reopen, and
-transport edges are recorded as Not Triggered.
+transport-playing edges are not exercised.
 
 ## Capability Evidence
 
@@ -36,12 +36,12 @@ transport edges are recorded as Not Triggered.
 
 ## Result
 
-| Quirk flag | Row | Observed | Notes |
+| Quirk or scenario | Row | Observed | Notes |
 |------------|-----|----------|-------|
-| `reaper_process_while_bypassed` | R1 | Not Triggered | No `process_without_prepare`; no active playback device in the headless smoke. |
+| `reaper_process_while_bypassed` | R1 | Not Triggered | No `process_without_prepare`; REAPER's CLAP host issued no out-of-transport `process()` calls in this smoke. |
 | `reaper_anticipative_fx_buffer_variability` | R4 | Not Triggered | No `process_buffer_overrun` / `process_sample_rate_drift`. |
 | `reaper_midsession_setstate` | R6 | Not Triggered | No `deserialize_plugin_state` (smoke does not reopen a session). |
-| `reaper_clap_transport_edges` | R7 | Not Triggered | No transport-playing edge; headless smoke has no active playback device. |
+| CLAP canary coverage | R7 | Confirmed | Load, parameter/state serialization, sidechain, release, and session-end events were observed; transport-playing edges were not exercised. |
 
 **Log file(s)**: `logs/REAPER-CLAP-20260615T044212Z-pid29054.log`
 **Reaper version**: `7.74/macOS-arm64` — **macOS**: `26.5.1` — **Date**: `2026-06-15`

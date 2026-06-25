@@ -8,10 +8,9 @@
 # phase reached). This script complements the pixel diff with three semantic
 # assertions over artifacts produced by an earlier Spectr launch.
 #
-# This is a codex-required addition to
-# planning/spectr-validated-runtime-import-product-spec.md — pixel diff is
-# necessary but not sufficient. The probes below catch failure modes the
-# diff cannot:
+# This complements
+# planning/spectr-validated-runtime-import-product-spec.md: pixel diff is
+# necessary but not sufficient, and these probes catch failure modes it cannot:
 #
 #   Probe 1 (runtime-import soft error)
 #       __pulpRuntimeImportErr__ is set when the C++ bridge's
@@ -36,7 +35,7 @@
 #       columns) must have non-trivial pixel content above the near-black
 #       threshold. A blank canvas with intact chrome can pass an overall
 #       histogram diff because the chrome dominates the histogram. Probe 3
-#       calls diff_against_reference_regions.py (PR #1871) and inspects
+#       calls diff_against_reference_regions.py and inspects
 #       central_canvas.blank_candidate — fails if the canvas region is
 #       blank.
 #
@@ -61,8 +60,8 @@
 #   --require-trace
 #                 Treat missing __pulpRuntimeTrace__ lines as a hard FAIL
 #                 even when the log file exists. Default is to WARN — the
-#                 trace globals are still being wired into Spectr's bridge
-#                 (see spectr #TBD) so we don't want to block harness
+#                 trace globals are still being wired into Spectr's bridge,
+#                 so we don't want to block harness
 #                 adoption on instrumentation that doesn't ship yet.
 #   --json        Emit a single JSON object summarizing all probes
 #                 (overall_passed + per-probe verdicts). Default is
@@ -193,9 +192,8 @@ run_probe_1() {
 # token. The harness can also accept structured JSON entries with a
 # "phase":"mounted" field.
 #
-# Default behavior is WARN if missing (trace wiring is still landing — see
-# spectr issue tracker for status). Pass --require-trace once the trace
-# globals are uniformly present.
+# Default behavior is WARN if missing while trace wiring is still landing. Pass
+# --require-trace once the trace globals are uniformly present.
 run_probe_2() {
   if [[ ! -f "$LOG_PATH" ]]; then
     record "runtime_import_trace" "skip" "log file not found: $LOG_PATH"
@@ -232,7 +230,7 @@ run_probe_2() {
 
 # ── Probe 3: central canvas region is non-blank ──────────────────────────
 #
-# Uses diff_against_reference_regions.py (PR #1871). Reads its --json
+# Uses diff_against_reference_regions.py. Reads its --json
 # output and asserts central_canvas.blank_candidate == false. We do not
 # require the region to *pass* the per-region threshold here — that's the
 # pixel-diff harness's job. We only require that *something* painted into

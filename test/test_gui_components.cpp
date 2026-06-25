@@ -974,7 +974,7 @@ TEST_CASE("TextButton paint truncates long labels with U+2026 when text-overflow
     REQUIRE(canvas.measure_text(drawn) <= 80.0f - 16.0f);
 }
 
-// pulp #1407 (Codex post-merge sweep) — a TextButton narrower than its
+// A TextButton narrower than its
 // 2 × 8 px horizontal padding budget collapses the available text-box
 // to ≤ 0. Without the non-positive guard inside truncate_to_width, the
 // helper would short-circuit to the full string and visibly leak the
@@ -1095,7 +1095,7 @@ TEST_CASE("ShapeButton reports hover and pressed states to draw callback",
     REQUIRE(saw_hover);
     REQUIRE(saw_pressed);
 
-    // pulp #1171 (Codex P2 on #1069) — verify hover state actually
+    // Verify hover state actually
     // resets after on_mouse_leave(). The previous version pre-set
     // saw_hover=true and only OR'd new values into it, so a regression
     // where leave failed to clear hover would not be caught.

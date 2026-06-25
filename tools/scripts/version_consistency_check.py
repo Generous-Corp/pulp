@@ -6,8 +6,8 @@ and a plugin version in `.claude-plugin/plugin.json` + `marketplace.json`.
 CHANGELOG.md carries the same SDK version in its newest `## [X.Y.Z]` heading
 once the release lands. If a PR's CHANGELOG entry advertises a version that
 isn't reflected in CMakeLists.txt, the next auto-release tag won't fire and
-the entry sits orphaned (which is what triggered Codex P2 on PR #2331:
-CHANGELOG said `[0.138.0]` while CMakeLists was still at `0.137.1`).
+the entry sits orphaned; for example, CHANGELOG `[0.138.0]` with
+CMakeLists VERSION `0.137.1` would never produce the advertised tag.
 
 This script reads all four files and verifies:
   1. CMakeLists.txt's `project(Pulp VERSION X.Y.Z)` line is present.
@@ -41,9 +41,8 @@ def read_plugin_versions() -> tuple[str, str, str]:
     marketplace.json::plugins[0].version). The marketplace top-level
     `version` and the nested `plugins[0].version` BOTH exist in
     Pulp's manifest — the version-bump tooling and cmd_version.cpp
-    each consume one, so they must agree. Codex P2 on PR #2341
-    flagged the gap where this script only read the top-level and
-    a future bump could leave `plugins[0].version` stale."""
+    each consume one, so they must agree. Reading only the top-level
+    value would let a future bump leave `plugins[0].version` stale."""
     plugin = json.loads(
         (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
@@ -101,9 +100,8 @@ def main() -> int:
                 f"CHANGELOG top entry [{changelog_version}] advertises a version"
                 f" higher than CMakeLists VERSION {cmake_version}. auto-release tags"
                 " from CMakeLists VERSION, so the CHANGELOG entry would sit orphaned"
-                " until the next legit bump. This is the drift Codex P2 on #2331"
-                " flagged: a 'chore: bump versions' commit that silently no-op'd on"
-                " CMakeLists and only mutated CHANGELOG."
+                " until the next legitimate bump. This catches a bump commit that"
+                " silently no-ops on CMakeLists and only mutates CHANGELOG."
             )
         # cmake_version > changelog_version is the post-bump pre-regen window;
         # no failure — the auto-release-bot CHANGELOG regen will close it.

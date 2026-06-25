@@ -19,6 +19,8 @@
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/onset_detector.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/signal/stretch_preset.hpp>
+#include <fstream>
 
 #include <algorithm>
 #include <cmath>
@@ -127,6 +129,16 @@ int analyze(const std::string& in) {
     return 0;
 }
 
+pulp::signal::StretchCharacter parse_character(const char* s, bool* ok) {
+    *ok = true;
+    if (std::strcmp(s, "clean") == 0) return pulp::signal::StretchCharacter::clean;
+    if (std::strcmp(s, "varispeed") == 0) return pulp::signal::StretchCharacter::varispeed;
+    if (std::strcmp(s, "phase_vocoder") == 0) return pulp::signal::StretchCharacter::phase_vocoder;
+    if (std::strcmp(s, "granular") == 0) return pulp::signal::StretchCharacter::granular;
+    *ok = false;
+    return pulp::signal::StretchCharacter::clean;
+}
+
 pulp::signal::OfflineFormantMode parse_formant(const char* s, bool* ok) {
     *ok = true;
     if (std::strcmp(s, "follow") == 0) return pulp::signal::OfflineFormantMode::follow_pitch;
@@ -137,7 +149,7 @@ pulp::signal::OfflineFormantMode parse_formant(const char* s, bool* ok) {
 }
 
 int render(const std::string& in, const std::string& out,
-           pulp::signal::OfflineStretchOptions opts, std::optional<double> bpm_to,           bool auto_window = false, float transient = 0.0f) {
+           pulp::signal::OfflineStretchOptions opts, std::optional<double> bpm_to) {
     auto data = FormatRegistry::instance().read(in);
     if (!data || data->empty()) {
         std::fprintf(stderr, "error: cannot read '%s'\n", in.c_str());
@@ -169,21 +181,30 @@ int render(const std::string& in, const std::string& out,
     pulp::signal::OfflineStretchOptions sizing;
     sizing.max_time_ratio = opts.max_time_ratio;
     sizing.max_pitch_semitones = opts.max_pitch_semitones;
-    // Material-adaptive STFT window (the sampler's default render path): analyze
-    // the input and size the FFT to its transient/low-band character instead of
-    // the fixed 4096/512 default.
-    if (auto_window) {
-        auto wp = channel_ptrs(*data);
-        const auto win = pulp::signal::OfflineStretch::recommend_window(
-            wp.data(), in_frames, static_cast<int>(nch),
-            static_cast<double>(data->sample_rate));
-        sizing.fft_size = win.fft_size; sizing.analysis_hop = win.analysis_hop;
-        opts.fft_size = win.fft_size;   opts.analysis_hop = win.analysis_hop;
-        std::fprintf(stderr, "[stretchcli] auto-window: fft=%d hop=%d\n",
-                     win.fft_size, win.analysis_hop);
-    }
+    sizing.route_noise_stn = opts.route_noise_stn; // honor --no-stn at prepare()
 
-    if (transient > 0.0f) { sizing.transient_sensitivity = transient; opts.transient_sensitivity = transient; }
+    // Material-adaptive STFT window/overlap: analyze the actual audio and pick a
+    // window suited to it (large+high-overlap for bass so low partials resolve;
+    // small for percussion so attacks stay sharp). Honor an explicit --fft/--hop
+    // override (0 = auto). Carried through opts too so the spectral paths size
+    // identically.
+    {
+        std::vector<const float*> ap(nch);
+        for (std::uint32_t c = 0; c < nch; ++c) ap[c] = data->channels[c].data();
+        const auto w = pulp::signal::OfflineStretch::recommend_window(
+            ap.data(), in_frames, static_cast<int>(nch),
+            static_cast<double>(data->sample_rate));
+        sizing.fft_size = opts.fft_size > 0 ? opts.fft_size : w.fft_size;
+        sizing.analysis_hop = opts.fft_size > 0 ? opts.analysis_hop : w.analysis_hop;
+        // Transient sensitivity stays at the engine default unless explicitly set
+        // (--transient-sens) — a fine-tune knob, not auto-applied, so the percussive
+        // output keeps matching the validated drum_pl reference.
+        sizing.transient_sensitivity = opts.transient_sensitivity;
+        std::fprintf(stderr, "[stretchcli] adaptive window: fft=%d hop=%d%s\n",
+                     sizing.fft_size ? sizing.fft_size : 4096,
+                     sizing.analysis_hop ? sizing.analysis_hop : 512,
+                     opts.fft_size > 0 ? " (manual)" : " (auto)");
+    }
 
     pulp::signal::OfflineStretch eng;
     eng.prepare(static_cast<double>(data->sample_rate), static_cast<int>(nch), sizing);
@@ -223,8 +244,7 @@ int main(int argc, char** argv) {
     pulp::signal::OfflineStretchOptions opts;
     bool want_analyze = false;
     std::optional<double> bpm_to;
-    bool auto_window = false;
-    float transient = 0.0f;
+    std::string save_preset_path;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -242,12 +262,37 @@ int main(int argc, char** argv) {
         else if (a == "--quality") opts.quality = std::atoi(next("--quality"));
         else if (a == "--max-ratio") opts.max_time_ratio = std::atof(next("--max-ratio"));
         else if (a == "--max-pitch") opts.max_pitch_semitones = std::atof(next("--max-pitch"));
+        else if (a == "--fft") opts.fft_size = std::atoi(next("--fft"));      // manual window override (0=auto)
+        else if (a == "--hop") opts.analysis_hop = std::atoi(next("--hop"));
+        else if (a == "--no-stn") opts.route_noise_stn = false;               // (default) bypass STN noise morph
+        else if (a == "--stn") opts.route_noise_stn = true;                   // opt into STN noise morph
+        else if (a == "--transient-sens") opts.transient_sensitivity = std::atof(next("--transient-sens"));
+        else if (a == "--character") {
+            bool ok = false; opts.character = parse_character(next("--character"), &ok);
+            if (!ok) { std::fprintf(stderr, "error: --character must be clean|varispeed|phase_vocoder|granular\n"); return 2; }
+        }
+        else if (a == "--preset") {
+            const char* path = next("--preset");
+            std::ifstream f(path); std::stringstream ss; ss << f.rdbuf();
+            pulp::signal::StretchPreset p; std::string perr;
+            if (!f || !pulp::signal::preset_from_text(ss.str(), p, &perr)) {
+                std::fprintf(stderr, "error: --preset '%s': %s\n", path, perr.empty() ? "cannot read" : perr.c_str());
+                return 2;
+            }
+            pulp::signal::apply_preset(opts, p); // later flags can still override
+        }
+        else if (a == "--save-preset") save_preset_path = next("--save-preset");
         else if (a == "--bpm-to") bpm_to = std::atof(next("--bpm-to"));
-        else if (a == "--auto-window") auto_window = true;
-        else if (a == "--transient") transient = static_cast<float>(std::atof(next("--transient")));
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown flag %s\n", a.c_str()); usage(); return 2; }
         else pos.push_back(a);
+    }
+
+    if (!save_preset_path.empty()) {
+        std::ofstream f(save_preset_path);
+        if (!f) { std::fprintf(stderr, "error: cannot write preset '%s'\n", save_preset_path.c_str()); return 2; }
+        f << pulp::signal::preset_to_text(pulp::signal::capture_preset(opts, "stretchcli"));
+        std::fprintf(stderr, "[stretchcli] wrote preset %s\n", save_preset_path.c_str());
     }
 
     if (want_analyze) {
@@ -255,5 +300,5 @@ int main(int argc, char** argv) {
         return analyze(pos[0]);
     }
     if (pos.size() != 2) { usage(); return 2; }
-    return render(pos[0], pos[1], opts, bpm_to, auto_window, transient);
+    return render(pos[0], pos[1], opts, bpm_to);
 }

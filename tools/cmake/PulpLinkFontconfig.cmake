@@ -1,7 +1,7 @@
 # PulpLinkFontconfig.cmake — link-order fix for libskia.a → fontconfig
 # on Linux + GNU ld.
 #
-# Pulp #1962 / #1986 root cause: `libskia.a` (pulled in by
+# Root cause: `libskia.a` (pulled in by
 # `pulp::canvas`'s PUBLIC `skia::skia` dep) contains
 # `SkFontMgr_New_FontConfig` which references `FcInit*` / `FcConfig*` /
 # `FcPattern*` / `FcGetVersion` / `FcFontSet*` etc. GNU ld processes
@@ -11,22 +11,21 @@
 # satisfied them. Re-mentioning `fontconfig` here ensures it appears
 # AFTER `libskia.a` in the final link line.
 #
-# `PkgConfig::FONTCONFIG` is already wired PUBLIC on `pulp-canvas` per
-# pulp #1962 follow-up, so the include dirs and -L flags are already
+# `PkgConfig::FONTCONFIG` is already wired PUBLIC on `pulp-canvas`, so
+# the include dirs and -L flags are already
 # correct — this helper just nails the link-line position down for
 # every downstream binary that pulls in pulp::view / pulp::canvas.
 #
 # Originally inlined in tools/cli/CMakeLists.txt (#1986). Extracted
 # here so the same fix can apply to pulp-import-design, pulp-design-debug,
-# pulp-screenshot, and any future Linux+Skia binary without copy-paste
-# drift. Pulp #1986 follow-up — also needed for v0.100.0 release-cli
-# linux-x64 build of pulp-import-design.
+# pulp-screenshot, release-cli linux-x64 builds, and any future Linux+Skia
+# binary without copy-paste drift.
 #
 # Usage (in-tree Pulp build):
 #     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
 #     pulp_link_fontconfig_after_skia(my-target)
 #
-# Usage (consumed from installed SDK via find_package(Pulp) — pulp #2087):
+# Usage (consumed from installed SDK via find_package(Pulp)):
 #     This file ships alongside PulpUtils.cmake at lib/cmake/Pulp/; the
 #     helper functions in PulpUtils.cmake include it via CMAKE_CURRENT_LIST_DIR
 #     so downstream consumers don't need to reference it directly.

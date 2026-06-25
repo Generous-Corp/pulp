@@ -66,8 +66,8 @@ class LinuxArm64ManifestEntry(unittest.TestCase):
     def test_release_asset_absent_or_well_formed(self) -> None:
         assets = _release_assets()
         if "linux-arm64" not in assets:
-            # chrome/m150 reality: the fork does not publish the slice.
-            # Nothing to validate beyond the deliberate absence.
+            # Temporary absence is allowed while a future Skia bump is being
+            # rebaked; nothing else can be validated without an asset entry.
             return
 
         entry = assets["linux-arm64"]
@@ -101,8 +101,8 @@ class FetchScriptWiring(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        # Mapping stays wired even while m150 ships no slice — so a future
-        # republish only needs the manifest URL+sha re-added.
+        # Mapping stays wired even when the manifest temporarily drops the
+        # asset entry, so republishing only needs the URL+sha re-added.
         self.assertEqual(mod.MATRIX_TO_MANIFEST.get("linux-arm64"), "linux-arm64")
         expected = mod.expected_library_path("linux-arm64")
         self.assertEqual(

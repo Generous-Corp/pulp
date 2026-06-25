@@ -6,21 +6,18 @@
 // CanvasRenderingContext2D API: ctx.save() / ctx.translate() /
 // ctx.setTransform() / ctx.createLinearGradient() / ctx.fillStyle =
 // gradient / ctx.fillRect() / ctx.beginPath() / ctx.lineTo() /
-// ctx.stroke() / ctx.fillText() / ctx.restore(). Until this fix, the
-// pulp web-compat layer only exposed a small subset of those methods —
-// the very first call to e.g. ctx.save() threw "TypeError: ctx.save is
-// not a function" in QuickJS / JSC, the React render boundary swallowed
-// the exception, and FilterBank's frame draw aborted before painting
-// anything visible. Earlier commands (clearRect, lineTo) showed up in
-// the bridge dispatch log because they were called BEFORE the throw,
-// but no visible content reached the Skia surface.
+// ctx.stroke() / ctx.fillText() / ctx.restore(). These tests pin the
+// complete web-compat surface needed by that sequence: if a method is
+// missing, QuickJS / JSC throws, the React render boundary swallows the
+// exception, and FilterBank's frame draw aborts before painting anything
+// visible. Commands before an unsupported method can still appear in the
+// bridge dispatch log, but no complete frame reaches the Skia surface
+// when the sequence aborts mid-draw.
 //
 // These tests exercise the full JS → bridge command path for every
 // shim method FilterBank uses, and the [issue-964][skia] case
 // rasterizes the FilterBank sequence onto a Skia raster surface and
-// asserts the resulting pixels match the expected colour. The Skia
-// case fails on origin/main (no shim → render aborts at ctx.save) and
-// passes after this fix.
+// asserts the resulting pixels match the expected colour.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -170,9 +167,8 @@ TEST_CASE("Canvas2D shim setters round-trip state",
 //   ctx.fillStyle = bg;
 //   ctx.fillRect(0, 0, w, h);
 //
-// Pre-fix, createLinearGradient was undefined → bg = undefined →
-// addColorStop throws → render aborts. Post-fix we return a
-// CanvasGradient with addColorStop and the right kind tag.
+// The shim returns a CanvasGradient with addColorStop and the right
+// kind tag so gradient setup does not abort the render.
 TEST_CASE("Canvas2D createLinearGradient returns CanvasGradient with addColorStop",
           "[view][canvas2d][issue-964]") {
     auto result = run_in_bridge(R"(
@@ -205,10 +201,9 @@ TEST_CASE("Canvas2D createRadialGradient returns CanvasGradient",
     REQUIRE(result == "radial|2|60");
 }
 
-// pulp #1524 — createRadialGradient with distinct inner+outer circles
-// flushes via the new two-circle bridge fn (canvasSetRadialGradientTwoCircles)
-// and the resulting CanvasDrawCmd carries BOTH circles. Pre-fix, the JS shim
-// stored only the outer circle and dropped (x0, y0, r0) silently.
+// createRadialGradient with distinct inner+outer circles flushes via the
+// two-circle bridge fn (canvasSetRadialGradientTwoCircles), and the
+// resulting CanvasDrawCmd carries BOTH circles.
 TEST_CASE("Canvas2D createRadialGradient flushes two circles via the new bridge fn",
           "[view][canvas2d][issue-1524]") {
     ScriptedBridge env;
@@ -250,9 +245,9 @@ TEST_CASE("Canvas2D createRadialGradient flushes two circles via the new bridge 
 //
 // JS calls ctx.save(); ctx.translate(); ctx.fillStyle = grad; ctx.fillRect();
 // ctx.beginPath(); ctx.lineTo(); ctx.stroke(); ctx.restore(); — assert that
-// the corresponding canvas* commands queue on the CanvasWidget. Pre-fix,
-// only the prefix up to the missing method recorded; post-fix the full
-// stream lands on commands_.
+// the corresponding canvas* commands queue on the CanvasWidget. The
+// full sequence must land in commands_, not just the prefix before an
+// unsupported method.
 TEST_CASE("Canvas2D shim records full FilterBank-style command sequence",
           "[view][canvas2d][issue-964]") {
     ScriptedBridge env;
@@ -396,20 +391,16 @@ TEST_CASE("Canvas2D fillStyle = string clears prior gradient",
 
 #ifdef PULP_HAS_SKIA
 
-// Pixel + sample_pixel moved to the shared canvas_pixel_probe.hpp in the
-// pulp #2462 fix (was duplicated here and in test_canvas_widget.cpp).
+// Shared pixel-probe helpers used by Canvas2D raster tests.
 #include "canvas_pixel_probe.hpp"
 using pulp::canvas_test::Pixel;
 using pulp::canvas_test::sample_pixel;
 
 // ── End-to-end FilterBank repro: JS → bridge → CanvasWidget → SkiaCanvas ──
 //
-// Pre-fix this test fails because ctx.save() throws inside the JS
-// snippet, the surrounding (function(){ ... })() returns undefined,
-// the CanvasWidget receives at most the clearRect that ran before the
-// throw, and the centre pixel stays the parent's dark navy. Post-fix,
-// the full sequence records and the centre pixel is the gradient
-// fill colour.
+// The full FilterBank-style sequence must record and paint; if the JS
+// snippet aborts on an unsupported Canvas2D method, the centre pixel
+// stays the parent's dark navy instead of the gradient fill colour.
 TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface",
           "[view][canvas2d][skia][issue-964]") {
     SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
@@ -454,8 +445,8 @@ TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface
     cw->paint(canvas);
 
     // Centre pixel: must be opaque red (the gradient — both stops are red,
-    // so colour-interpolation is irrelevant). Pre-fix this samples the
-    // navy parent because the JS render aborts before any fillRect runs.
+    // so colour-interpolation is irrelevant). If the JS render aborts
+    // before fillRect runs, this samples the navy parent instead.
     auto px = sample_pixel(surface.get(), 32, 32);
     INFO("Centre rgba=(" << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
@@ -510,7 +501,7 @@ TEST_CASE("Canvas2D save/restore brackets do not erase fillStyle pixels",
 
 #endif  // PULP_HAS_SKIA
 
-// ── pulp #1434 batch 7: Canvas2D shadow* sticky state ────────────────────────
+// ── Canvas2D shadow* sticky state ────────────────────────────────────────────
 //
 // These tests cover the JS-side shim behaviour and the bridge route; the
 // SkiaCanvas-level pixel verification lives in test_canvas_widget.cpp.
@@ -603,9 +594,8 @@ TEST_CASE("Canvas2D shim ignores invalid shadow* assignments",
         ctx.shadowBlur = 4;
         ctx.shadowOffsetX = 2;
         ctx.shadowOffsetY = -3;
-        // Assign NaN — must not propagate, but Canvas2D getter still
-        // returns the most-recently-assigned raw value (per spec, the
-        // setter coerces to a number; we mirror by storing the raw).
+        // Assign NaN — must not propagate; Canvas2D keeps the previous
+        // valid value for drawing.
         ctx.fillRect(0, 0, 1, 1);  // flush #1 with valid values
         ctx.shadowBlur = NaN;
         ctx.shadowOffsetX = Infinity;
@@ -618,18 +608,16 @@ TEST_CASE("Canvas2D shim ignores invalid shadow* assignments",
     // happened (we'd see undefined / TypeError otherwise).
 }
 
-// ── pulp #1434 bridge-thin gap-fill ─────────────────────────────────────
+// ── Canvas2D bridge-thin gap-fill ───────────────────────────────────────
 //
-// 4 entries flipped from NOT-IMPL → DIVERGE on the canvas2d catalog:
+// Bridge routes for four Canvas2D entries:
 //   * createConicGradient — Skia routes through SkGradientShader::MakeSweep
 //   * miterLimit — SkPaint::setStrokeMiter / CGContextSetMiterLimit
 //   * imageSmoothingEnabled — SkSamplingOptions / CGContextSetInterpolationQuality
 //   * imageSmoothingQuality — same
 //
-// createPattern (the 4th NOT-IMPL the triage flagged as "include if scope
-// allows") is deferred to a follow-up — image-resource handling needs
-// real plumbing, not just a bridge fn. Catalog stays NOT-IMPL with a
-// note pointing at this PR's deferred scope.
+// createPattern needs real image-resource plumbing, not just a bridge fn,
+// so it is covered separately below.
 
 TEST_CASE("Canvas2D createConicGradient returns CanvasGradient with conic kind",
           "[view][canvas2d][issue-1434][bridge-thin]") {
@@ -845,9 +833,8 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
     // (right of centre) and (below centre) differ. With the conic
     // bridge wired, Skia's MakeSweep distributes red→green→blue around
     // the centre — so the right and bottom samples should not match.
-    // Pre-fix createConicGradient returned a degenerate linear, which
-    // Skia draws as a flat first-stop colour — those samples would
-    // match exactly.
+    // A degenerate fallback would draw a flat first-stop colour, making
+    // those samples match exactly.
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
@@ -893,14 +880,11 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
 }
 #endif  // PULP_HAS_SKIA
 
-// ── pulp #1434 — full CSS `font` shorthand parser ──────────────────────────
+// ── Full CSS `font` shorthand parser ────────────────────────────────────────
 //
-// Pre-fix: the shim only parsed `'<size>px <family>'`, so any Figma
-// copy-CSS value of the shape `'italic small-caps bold 14px/1.4 "Inter",
-// sans-serif'` collapsed to size + family, dropping every other token.
-// Post-fix: `_parseFontShorthand` walks the CSS Fonts Module Level 4
-// grammar and dispatches `canvasSetFontFull(id, family, size, weight,
-// slant, letterSpacing)` so Skia's `set_font_full` honours weight + slant.
+// `_parseFontShorthand` walks the CSS Fonts Module Level 4 grammar and
+// dispatches `canvasSetFontFull(id, family, size, weight, slant,
+// letterSpacing)` so Skia's `set_font_full` honours weight + slant.
 //
 // These tests cover both the JS-level parse round-trip and the bridge
 // command stream, asserting on the recorded `set_font_full` cmd's fields.
@@ -1089,10 +1073,9 @@ TEST_CASE("Canvas2D ctx.font setter dispatches canvasSetFontFull with weight + s
 
 TEST_CASE("Canvas2D ctx.font setter: legacy 'Npx Family' still routes",
           "[view][canvas2d][issue-1434]") {
-    // Pre-PR pipeline: the shim only parsed '<size>px <family>' and
-    // dispatched canvasSetFont. Post-PR with no leading tokens we still
-    // expect canvasSetFontFull (preferred when registered) to record
-    // weight=400, slant=0 — i.e. spec-correct defaults.
+    // The legacy '<size>px <family>' shorthand still routes through
+    // canvasSetFontFull when registered, recording the spec defaults
+    // weight=400 and slant=0.
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
@@ -1143,12 +1126,9 @@ TEST_CASE("Canvas2D ctx.font getter round-trips assigned shorthand verbatim",
 
 TEST_CASE("Canvas2D measureText reads the parsed shorthand size + family",
           "[view][canvas2d][issue-1434]") {
-    // Pre-PR `measureText` ran its own ad-hoc regex that only matched
-    // '<size>px <family>' — `'italic 18px Inter'` would parse the size
-    // (18) but `familyMatch` matched the substring after `px ` so it
-    // worked accidentally. With the shared parser the family field is
-    // canonicalised; assert measureText doesn't throw and returns a
-    // numeric width.
+    // `measureText` uses the shared parser so the family field is
+    // canonicalised even when the shorthand includes leading style
+    // tokens; assert it does not throw and returns a numeric width.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         document.body.appendChild(c);
@@ -1160,13 +1140,13 @@ TEST_CASE("Canvas2D measureText reads the parsed shorthand size + family",
     REQUIRE(result == "object|number|true");
 }
 
-// ─── Codex audit fixes (PR #1495) ─────────────────────────────────────────────
+// ─── Font shorthand unit parsing + fill_text replay regressions ───────────────
 
 TEST_CASE("Canvas2D _parseFontShorthand: pt unit converts to px (1pt = 4/3 px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `12pt Inter` must NOT
-    // be treated as `12px Inter`. CSS specifies 1pt = 1/72in and the canvas
-    // shim resolves at the conventional 96dpi root, so 1pt = 4/3 px.
+    // `12pt Inter` must NOT be treated as `12px Inter`. CSS specifies
+    // 1pt = 1/72in; the canvas shim resolves at the conventional
+    // 96dpi root, so 1pt = 4/3 px.
     // 12pt → 16px exactly.
     auto result = run_in_bridge(R"(
         var p = CanvasRenderingContext2D._parseFontShorthand('12pt Inter');
@@ -1177,11 +1157,11 @@ TEST_CASE("Canvas2D _parseFontShorthand: pt unit converts to px (1pt = 4/3 px)",
 
 TEST_CASE("Canvas2D _parseFontShorthand: em unit converts to px (1em = 16px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `1.2em Inter` was
-    // parsed as `1.2px Inter`, producing severely undersized text and
-    // wrong measureText widths. Canvas2D has no DOM cascade, so em
-    // resolves against a fixed 16px root — same default browsers + every
-    // headless Canvas2D shim use. 1.2em → 19.2px.
+    // `1.2em Inter` was parsed as `1.2px Inter`, producing severely
+    // undersized text and wrong measureText widths. Canvas2D has no
+    // DOM cascade, so em resolves against a fixed 16px root — same
+    // default browsers + every headless Canvas2D shim use.
+    // 1.2em → 19.2px.
     auto result = run_in_bridge(R"(
         var p = CanvasRenderingContext2D._parseFontShorthand('1.2em Inter');
         return [p.family, p.size].join('|');
@@ -1191,10 +1171,9 @@ TEST_CASE("Canvas2D _parseFontShorthand: em unit converts to px (1em = 16px)",
 
 TEST_CASE("Canvas2D _parseFontShorthand: rem unit converts to px (1rem = 16px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `1rem Inter` was
-    // parsed as `1px Inter`. rem resolves against the document root,
-    // which canvas2d doesn't have — fall back to the conventional 16px
-    // root font size. 1rem → 16px; 2rem → 32px.
+    // `1rem Inter` was parsed as `1px Inter`. rem resolves against the
+    // document root, which canvas2d doesn't have — fall back to the
+    // conventional 16px root font size. 1rem → 16px; 2rem → 32px.
     auto result = run_in_bridge(R"(
         var a = CanvasRenderingContext2D._parseFontShorthand('1rem Inter');
         var b = CanvasRenderingContext2D._parseFontShorthand('2rem Inter');
@@ -1216,14 +1195,14 @@ TEST_CASE("Canvas2D _parseFontShorthand: pt + bold + family round-trip",
 
 TEST_CASE("Canvas2D fill_text replay preserves rich set_font_full state",
           "[view][canvas2d][issue-1434]") {
-    // Codex P1 audit (PR #1495 comment 3192815903): the legacy fill_text
-    // replay path in CanvasWidget::paint() called canvas.set_font(family,
-    // size) immediately before drawing, which reset weight/slant to
-    // normal/upright (SkiaCanvas::set_font(), canvas.cpp:567-575). That
+    // The legacy fill_text replay path in CanvasWidget::paint() called
+    // canvas.set_font(family, size) immediately before drawing, which
+    // reset weight/slant to normal/upright (SkiaCanvas::set_font(),
+    // canvas.cpp:567-575). That
     // clobbered the rich state captured by the immediately-prior
     // set_font_full cmd, so `ctx.font = "italic bold 18px Inter"`
     // followed by `ctx.fillText(...)` rendered as plain Regular upright
-    // text. Fix: drop the canvas.set_font() call in fill_text replay —
+    // text. The fill_text replay path must not call set_font() again:
     // the JS shim's _syncTextState already pushes a set_font_full
     // (or legacy set_font) cmd ahead of every fill_text.
     //
@@ -1299,7 +1278,7 @@ TEST_CASE("Canvas2D fill_text replay preserves rich set_font_full state",
 
 TEST_CASE("Canvas2D ctx.font with em produces correctly-scaled set_font_full size",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 end-to-end: `ctx.font = "1.5em Inter"` should record a
+    // `ctx.font = "1.5em Inter"` should record a
     // set_font_full with size = 1.5 * 16 = 24, NOT size=1.5.
     ScriptedBridge env;
     env.load(R"(
@@ -1324,7 +1303,7 @@ TEST_CASE("Canvas2D ctx.font with em produces correctly-scaled set_font_full siz
     REQUIRE(size == Catch::Approx(24.0f));
 }
 
-// ── pulp #1434 bridge-thin gap-fill — createPattern (sub-agent #24) ─────
+// ── Canvas2D createPattern ──────────────────────────────────────────────
 //
 // `ctx.createPattern(image, repetition)` returns a CanvasPattern handle
 // the shim assigns to fillStyle / strokeStyle. The shim then flushes
@@ -1558,8 +1537,7 @@ TEST_CASE("Canvas2D pattern strokeStyle flushes via canvasSetStrokePattern",
 #ifdef PULP_HAS_SKIA
 TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
           "[view][canvas2d][issue-1434][bridge-thin][skia]") {
-    // Smoke test mirroring the conic raster guard (#1446 pattern). With
-    // the pattern bridge wired, an unresolvable image source must NOT
+    // With the pattern bridge wired, an unresolvable image source must NOT
     // crash — SkiaCanvas::set_fill_pattern fails the decode and clears
     // the gradient shader so the fill falls back to the previous solid
     // colour. The fillRect MUST still rasterize successfully (no crash,
@@ -1627,4 +1605,3 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     REQUIRE(any_painted);
 }
 #endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
-

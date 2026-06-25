@@ -28,8 +28,6 @@ Modes:
                          (CI workflow use — pass the PR diff file list).
   --mode=root-allowlist  inspect top-level paths on `--rev` (default HEAD)
                          and fail if any are not in ALLOWED_ROOT_PATHS.
-                         Companion-track U-1 — see
-                         planning/2026-05-17-refactor-roadmap-final.md.
 
 Exit codes:
   0  no pollution detected
@@ -45,14 +43,13 @@ import sys
 from pathlib import Path
 
 CLOCK_FIXTURE_SIGNATURE = "project(Clock VERSION 1.0.0"
-# pulp #1763 (Codex P2 followup) — case-insensitive `project(Pulp`
+# Regression guard for #1763: case-insensitive `project(Pulp`
 # matcher. CMake command names are case-insensitive and allow
 # whitespace before `(`, so `PROJECT(Pulp...)` and `project (Pulp...)`
 # are valid. Substring match was too strict; use a regex.
 PULP_PROJECT_PATTERN = re.compile(r"\bproject\s*\(\s*Pulp\b", re.IGNORECASE)
 TEMP_FIXTURE_PATH_HINTS = ("/private/var/folders/", "pulp-shellout-")
 
-# Companion-track U-1 (planning/2026-05-17-refactor-roadmap-final.md):
 # Allowlist of legitimate top-level repo entries. Used by
 # --mode=root-allowlist to fail when an unexpected top-level path
 # appears, which is almost always either a stray temp/test artifact
@@ -102,7 +99,6 @@ ALLOWED_ROOT_PATHS = frozenset({
     "apple",
     # Design-system source assets (vendored token JSON/CSS + fidelity
     # reference renders that core/view theming and import tooling consume).
-    # See planning/Design-System-Import-Plan.md Phase 0.
     "assets",
     "bindings",
     "ci",
@@ -127,7 +123,7 @@ ALLOWED_ROOT_PATHS = frozenset({
 
 # Sentinel returned by _git_diff_files when the diff itself failed.
 # Distinguishes "no changed files" (empty list) from "git diff couldn't
-# run" — the latter must fail closed per Codex P1 finding on #1761.
+# run"; the latter must fail closed for the #1761 pollution-gate regression.
 class _DiffFailure(Exception):
     """Raised when `git diff` cannot resolve the requested ref range.
 
@@ -178,14 +174,13 @@ def _read_blob(rev: str | None, path: str) -> str:
 
 
 def check_root_allowlist(rev: str) -> list[str]:
-    """Companion-track U-1 — return error messages for any top-level path
-    on `rev` that is not in ALLOWED_ROOT_PATHS.
+    """Return errors for top-level paths on `rev` outside ALLOWED_ROOT_PATHS.
 
     Threat model: a new directory or file appears at the repo root
     unexpectedly. The most likely cause is (a) a test fixture that
     leaked out of /tmp, (b) a stray screenshot or coverage profile not
     covered by .gitignore, or (c) a module that should live under a
-    subdirectory but was mis-placed. PR review catches some of this;
+    subdirectory but was mis-placed. Human review catches some of this;
     this check catches the rest.
 
     Adding a legitimate root path requires a same-PR allowlist update.
@@ -198,7 +193,7 @@ def check_root_allowlist(rev: str) -> list[str]:
     )
     if out.returncode != 0:
         # Treat git failure as hard-block (same posture as _git_diff_files
-        # under Codex P1 finding on #1761 — never let the gate silently
+        # for #1761 — never let the gate silently
         # pass when the underlying git invocation fails).
         return [
             f"git ls-tree {rev} exited {out.returncode}: "
@@ -262,7 +257,7 @@ def check(files: list[str], rev: str | None) -> tuple[list[str], list[str]]:
                 continue
             # Positive assertion — first ~10 lines must contain
             # `project(Pulp` (case-insensitive, whitespace before `(` ok
-            # per Codex P2 followup on #1763). Catches any non-Pulp
+            # per #1763). Catches any non-Pulp
             # CMakeLists.txt at the root regardless of the specific
             # fixture, including future examples/foo/CMakeLists.txt
             # accidents.
@@ -306,7 +301,7 @@ def main(argv: list[str]) -> int:
                         help="for --mode=files, explicit file list")
     args = parser.parse_args(argv)
 
-    # Companion-track U-1 — top-level allowlist mode.
+    # Top-level allowlist mode.
     if args.mode == "root-allowlist":
         root_errors = check_root_allowlist(args.rev)
         if root_errors:
@@ -330,7 +325,7 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(f"unknown mode: {args.mode}\n")
             return 2
     except _DiffFailure as e:
-        # Codex P1 finding on #1761 — fail closed when git diff cannot
+        # Regression guard for #1761: fail closed when git diff cannot
         # resolve. The previous behaviour silently bypassed the gate
         # whenever `--base origin/main` was missing (fresh clones,
         # detached worktrees), defeating the hard-block contract.

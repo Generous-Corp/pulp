@@ -1829,8 +1829,8 @@ def _has_track_stroke_above_thumb(crop: "Image.Image", bg: RGB) -> bool:
     a hair darker/equal to the panel interior, with a faint low-sat edge). Both
     are "the dark housing track above the thumb" and both should count, so the
     test accepts a low-saturation pixel that is meaningfully distinct from the
-    panel bg in EITHER luma direction (not just lighter). pulp #3191 follow-up:
-    keying only on "lighter than bg + 12" missed the dark recessed slot that the
+    panel bg in EITHER luma direction (not just lighter): keying only on
+    "lighter than bg + 12" missed the dark recessed slot that the
     captured Pulp fader/meter draws (track ≈ panel interior luma)."""
     crop = crop.convert("RGBA")
     w, h = crop.size

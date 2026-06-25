@@ -12,17 +12,23 @@ The authoritative inventory is `compat.json` (`imports/*` prefix).
 
 ## Generation
 
-Last refresh: **2026-05-04** against `origin/main` at SHA `a5f4f5ac`.
+Generated inventory last refreshed: **2026-05-04** against
+`origin/main` at SHA `a5f4f5ac`. The behavior notes below are
+hand-maintained against the current source.
 
-Wired by PR #1047 (pulp #1031) — versioned import-design detection.
-See `core/dsl/import-design/` and `tools/cli/src/import_design.cpp`.
+Versioned import-design detection lives in
+`tools/import-design/import_detect.*`; the CLI surface that reports
+`source`, `format-version`, and `parser-version` lives in
+`tools/import-design/pulp_import_design.cpp`.
 
 ## Sources
 
 | Key | Parser version | Detected formats |
 |-----|---------------:|-----------------:|
 | `claude` | 2.1 | 1 (Anthropic Labs Claude Design 2024.10) |
+| `designmd` | 0.1 | 1 (Google DESIGN.md alpha) |
 | `figma` | 0.1 | 0 (placeholder) |
+| `figma-plugin` | 0.1.0 | 1 (Design for Pulp plugin v1) |
 | `pencil` | 0.1 | 0 (placeholder) |
 | `stitch` | 1.0 | 1 (Stitch 2025.04) |
 | `v0` | 0.1 | 0 (placeholder) |
@@ -85,8 +91,6 @@ fallback), Figma resize constraints map to flex/position, grid
 containers lower to the native grid bridge, and per-range text styles
 render on BOTH arms — web nested `<span>`s and native `setTextRuns` →
 `canvas::AttributedString` (single-line; multi-line still degrades).
-Seeded from
-`planning/2026-05-31-import-coverage-hardening-plan.md` §3.
 
 ## Adding a new format
 

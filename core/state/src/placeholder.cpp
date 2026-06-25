@@ -1,2 +1,2 @@
-// pulp-state: placeholder — replaced in Phase 2+
+// pulp-state: placeholder translation unit (no symbols yet).
 namespace pulp::state {}

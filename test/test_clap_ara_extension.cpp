@@ -1,8 +1,7 @@
-// End-to-end test for the CLAP → ARA companion-factory path.
-// Workstream 06 slice A2a — exercises the same code path a real CLAP
-// host (Bitwig, REAPER) takes: constructs a PulpClapPlugin, calls
-// clap_adapter::clap_get_extension(kClapAraFactoryExtension), and
-// verifies the result.
+// End-to-end test for the CLAP → ARA companion-factory path. Exercises the
+// same code path a real CLAP host (Bitwig, REAPER) takes: constructs a
+// PulpClapPlugin, calls clap_adapter::clap_get_extension(kClapAraFactoryExtension),
+// and verifies the result.
 //
 // Without PULP_HAS_ARA the factory must be nullptr (no SDK linked in).
 // With PULP_HAS_ARA the factory must be a valid ARA::ARAFactory — the

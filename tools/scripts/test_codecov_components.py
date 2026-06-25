@@ -190,7 +190,7 @@ class CodecovComponentClassification(unittest.TestCase):
         self.assertFalse(msg_parts, "\n\n".join(msg_parts))
 
     def test_no_component_double_matches_a_path_via_overlapping_patterns(self):
-        # The Codex-flagged 3-way matches (`platform,android,android`,
+        # The 3-way matches (`platform,android,android`,
         # `render,android,android`) were caused by ONE component listing
         # overlapping include patterns in its own paths list, e.g.
         # `core/render/platform/android/**` AND `core/**/android/**`

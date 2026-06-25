@@ -2,6 +2,11 @@
   "config_path": "<CONFIG_PATH>",
   "entries": [
     {
+      "key": "pr.workflow",
+      "value": "github",
+      "default": false
+    },
+    {
       "key": "update.mode",
       "value": "auto",
       "default": false
@@ -29,6 +34,11 @@
     {
       "key": "import_design.default_emit",
       "value": "cpp",
+      "default": false
+    },
+    {
+      "key": "claude.send_user_file",
+      "value": "off",
       "default": false
     }
   ]

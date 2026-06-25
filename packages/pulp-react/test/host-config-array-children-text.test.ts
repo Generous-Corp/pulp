@@ -1,11 +1,9 @@
-// pulp #71 — TEXT_BEARING types whose children are mixed string/number
-// arrays (e.g. <button>{count}{" bands ▾"}</button>) must lower to a
-// single setText() call on commitUpdate when the count changes. Pre-fix,
-// asText() returned undefined for arrays, so the setText branch in
-// commitUpdate silently dropped every text update on a button whose
-// label was composed from an interpolated number plus a literal — the
-// Spectr "32 bands" trigger froze on its first-render value no matter
-// which preset the user picked.
+// TEXT_BEARING types whose children are mixed string/number arrays
+// (e.g. <button>{count}{" bands ▾"}</button>) must lower to a single
+// setText() call on commitUpdate when the count changes. Without array
+// text flattening, the setText branch silently drops every text update
+// on a button whose label is composed from an interpolated number plus a
+// literal, leaving the first-render value frozen.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PulpHostConfig } from '../src/host-config.js';
@@ -36,7 +34,7 @@ function makeButton(id: string, children: unknown): PulpInstance {
     };
 }
 
-describe('host-config commitUpdate — array children on TEXT_BEARING (#71)', () => {
+describe('host-config commitUpdate — array children on TEXT_BEARING', () => {
     const commitUpdate = PulpHostConfig.commitUpdate as
         | ((instance: PulpInstance, payload: unknown, type: string,
             oldProps: Record<string, unknown>, newProps: Record<string, unknown>,
@@ -48,7 +46,7 @@ describe('host-config commitUpdate — array children on TEXT_BEARING (#71)', ()
     });
 
     it('emits setText when [number, string] array changes value', () => {
-        // Mirrors Spectr's <button>{bandsCount}{" bands ▾"}</button>.
+        // Mirrors a button that combines a dynamic count and a static label.
         const inst = makeButton('bands_trigger', [32, ' bands ▾']);
         commitUpdate!(
             inst, null, 'button',

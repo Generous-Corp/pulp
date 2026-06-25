@@ -1,17 +1,17 @@
-// Hosted-editor API tests (workstream 03 slice 3.4). Verifies the typed
-// wrapper and the legacy-compat path — existing slots that only override
-// create_editor_view() still produce a valid HostedEditor.
+// Hosted-editor API tests. Verifies the typed wrapper and the legacy-compat
+// path — existing slots that only override create_editor_view() still produce a
+// valid HostedEditor.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/plugin_slot.hpp>
 
 using namespace pulp::host;
 
-// The legacy `void* create_editor_view()` / `destroy_editor_view()` virtuals
-// were marked `[[deprecated]]` in item 4.4 (macOS plan). These tests exercise
-// the back-compat path and exist precisely to pin its behavior until every
-// real slot has been migrated. Suppress the deprecation warnings locally so a
-// `-Werror` build still compiles them.
+// The legacy `void* create_editor_view()` / `destroy_editor_view()` virtuals are
+// `[[deprecated]]`. These tests exercise the back-compat path and exist
+// precisely to pin its behavior until every real slot has been migrated.
+// Suppress the deprecation warnings locally so a `-Werror` build still compiles
+// them.
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wdeprecated-declarations"

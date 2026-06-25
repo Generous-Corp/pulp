@@ -64,10 +64,9 @@ public:
 // SEPARATE CONCERN from DropReceiver above. This is the platform-side
 // registration layer: register_drop_target() tells a native OS view (today only
 // the macOS NSView path in drag_drop_mac.mm) to advertise dragged types. It does
-// NOT route into the Pulp view tree. When macOS NSDraggingDestination delivery
-// is wired, this layer will feed the dispatch_* functions below and converge
-// with DropReceiver (tracked in the drag-drop hardening follow-up). New code
-// should implement DropReceiver, not DropTarget.
+// NOT route into the Pulp view tree. The dispatch_* functions below are the
+// convergence point for native delivery and DropReceiver. New code should
+// implement DropReceiver, not DropTarget.
 class DropTarget {
 public:
     virtual ~DropTarget() = default;
@@ -118,7 +117,8 @@ struct FileDragRequest {
 // Returns true if the platform started a drag session. Returns false when the
 // platform is unsupported, the handle is null, there are no files, or there is
 // no active mouse event to anchor the drag. Implemented per-platform alongside
-// register_drop_target (macOS today; a no-op stub elsewhere).
+// register_drop_target (macOS, Windows, and Linux/X11 today; a no-op stub
+// elsewhere).
 bool begin_file_drag(void* native_view, const FileDragRequest& request);
 
 // Process-global outbound file-drag backend for HOSTLESS platforms — Android,

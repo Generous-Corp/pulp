@@ -1,6 +1,6 @@
 // test_cli_projects_registry.cpp — Unit tests for the projects registry
 //
-// Issue #499 / #552 Slice 1b. Covers:
+// Covers:
 //   - round-trip read/write of ~/.pulp/projects.json
 //   - add_project semantics (dedupe by canonical path, refresh on
 //     second add, name hint preserved)
@@ -402,14 +402,12 @@ TEST_CASE("read_registry skips malformed and mixed-shape JSON entries",
 
 TEST_CASE("read_registry tolerates forward-compatible non-string fields",
           "[projects-registry][codex-563]") {
-    // Codex 2026-04-21 wave 2 P1 on #563: the schema documents
-    // unknown fields as forward-compatible, so a future writer is
-    // allowed to emit non-string values (objects, booleans, arrays).
-    // The previous parser assumed every value was a string and did
-    // not advance past unrecognised values — on a `"meta": {...}`
-    // field the parse position stalled, which in turn corrupted
-    // subsequent project entries or hung `pulp projects list` /
-    // `pulp doctor --versions`.
+    // Issue #563: the schema documents unknown fields as forward-compatible,
+    // so a future writer is allowed to emit non-string values (objects,
+    // booleans, arrays). The previous parser assumed every value was a string
+    // and did not advance past unrecognised values — on a `"meta": {...}`
+    // field the parse position stalled, which in turn corrupted subsequent
+    // project entries or hung `pulp projects list` / `pulp doctor --versions`.
     //
     // This case writes a hand-crafted projects.json carrying both
     // an object-valued field AND a boolean-valued field INSIDE a
@@ -450,12 +448,11 @@ TEST_CASE("read_registry tolerates forward-compatible non-string fields",
 
 TEST_CASE("add_project reports write_registry failure via out_wrote_ok",
           "[projects-registry][codex-563]") {
-    // Codex 2026-04-21 wave 2 P2 on #563: add_project previously
-    // swallowed write_registry() failures — callers saw the
-    // in-memory list as if the write had succeeded, producing
-    // silent data loss on unwritable $PULP_HOME. The new
-    // out-parameter surface lets callers distinguish "registered
-    // and durable" from "registered in-memory only".
+    // Issue #563: add_project previously swallowed write_registry() failures —
+    // callers saw the in-memory list as if the write had succeeded, producing
+    // silent data loss on unwritable $PULP_HOME. The out-parameter surface lets
+    // callers distinguish "registered and durable" from "registered in-memory
+    // only".
     TempDir tmp;
 
     // Happy path: out_wrote_ok should be true when the file is writable.

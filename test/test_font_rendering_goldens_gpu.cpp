@@ -1,4 +1,4 @@
-// test_font_rendering_goldens_gpu.cpp — Font v2 Slice 3.4
+// test_font_rendering_goldens_gpu.cpp — Skia GPU font rendering goldens.
 // (Cross-backend rendering goldens — Skia GPU lane).
 //
 // Sibling of `test_font_rendering_goldens.cpp`. That file pins the
@@ -43,8 +43,8 @@
 //  4. Determinism probe — same GPU surface, two consecutive frames,
 //     byte-exact pixel equality. A failure here means the GPU
 //     rendering pipeline has stateful drift between frames (lazy
-//     glyph-cache warming, residual atlas state, …). STOP and
-//     escalate via codex-consult; do NOT relax tolerances.
+//     glyph-cache warming, residual atlas state, …). Treat it as a
+//     render-pipeline investigation; do NOT relax tolerances.
 //
 //  5. Cross-backend tolerance probe — render "Hello" once on
 //     raster, once on GPU, and assert the two digests are within
@@ -537,7 +537,7 @@ TEST_CASE("font v2 Slice 3.4 — GPU rendering goldens require Skia on macOS",
     //  1. Skia not linked (Namespace macOS overflow runner, Linux/Win CI).
     //  2. Skia linked but not on Apple — Dawn-on-Metal is the only
     //     headless GPU lane wired up today; Vulkan + D3D paths are
-    //     deferred (Slice 3.4 follow-up).
+    //     deferred until those lanes exist.
     SUCCEED("Skia GPU goldens are gated on PULP_HAS_SKIA && APPLE.");
 }
 

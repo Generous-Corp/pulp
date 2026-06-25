@@ -87,7 +87,7 @@ TEST_CASE("BleMidiPacketDecoder rejects undersized packets", "[ble-midi]") {
     REQUIRE_FALSE(dec.decode(bogus, sizeof(bogus)));
 }
 
-// Regression: Codex PR #3017 P2. Running status is scoped to a single
+// Regression: PR #3017. Running status is scoped to a single
 // BLE-MIDI packet per Apple BLE-MIDI 1.0 §3.4. Carrying it across
 // packets would fabricate events from leading data bytes in the next
 // packet. The first packet establishes 0x90 running status; the second

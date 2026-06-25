@@ -66,9 +66,7 @@ TEST_CASE("headless load loop flushes requestAnimationFrame callbacks",
     //      `await renderer.init()`.
     // Use engine.evaluate() directly (not load_script) because load_script
     // itself calls __flushFrames__ as part of its contract, which would
-    // mask the bug we are reproducing. The pre-fix `load_demo` loop only
-    // invoked pump_message_loop() after the initial load_script, and that
-    // is what this test exercises.
+    // mask the missing-frame-service path this test exercises.
     env.engine.evaluate(
         "globalThis.__issue542State = 'starting';"
         "window.requestAnimationFrame(function () {"
@@ -80,8 +78,8 @@ TEST_CASE("headless load loop flushes requestAnimationFrame callbacks",
     REQUIRE(eval_string(env.engine,
                         "String(globalThis.__issue542State)") == "starting");
 
-    // Microtask pumps alone must NOT advance the state — this is what the
-    // pre-fix headless loop did, and is the exact bug we are guarding.
+    // Microtask pumps alone must NOT advance the state; rAF servicing is
+    // required for the post-init frame.
     for (int i = 0; i < 16; ++i) {
         env.engine.pump_message_loop();
     }
@@ -139,14 +137,11 @@ TEST_CASE("headless load loop repeatedly services chained rAF callbacks",
                 .getWithDefault<int32_t>(0) == 4);
 }
 
-// Codex 2026-04-21 review on #553: the post-load microtask drain in
-// `load_demo` previously called `service_frame_callbacks()` in a bounded
-// 64-iter loop. Because a real demo's tick() self-rearms via rAF, that
-// would have rendered 64 full frames of animation before `load_demo`
-// returned, skewing initial capture state. The fix was to restrict the
-// post-ready drain to `pump_message_loop()` only — this test pins that
-// behaviour down so a future refactor cannot silently re-introduce the
-// 64-frame startup burst.
+// The post-load microtask drain in `load_demo` must not call
+// `service_frame_callbacks()` in a bounded startup loop. A real demo's
+// tick() self-rearms via rAF, so doing that would render a burst of full
+// animation frames before `load_demo` returns and skew initial capture
+// state. This test pins the post-ready drain to `pump_message_loop()` only.
 TEST_CASE("post-ready microtask drain must not render rAF frames",
           "[view][widget-bridge][issue-542][codex-553]") {
     Env env;

@@ -19,7 +19,7 @@ public:
     // guaranteed. This currently resolves pool-backed zones only; direct
     // PublishedSampleView zones remain usable through ZoneSelector. Trigger
     // policy only: voice allocation, choke groups, modulation buffers,
-    // streaming, and rendering remain separate runtime slices.
+    // streaming, and rendering remain owned by their dedicated runtime paths.
     static InstrumentTriggerResult trigger(const SampleZoneMap& zone_map,
                                            const SamplePool& sample_pool,
                                            const ZoneSelectionRequest& request) noexcept;

@@ -1,10 +1,9 @@
 // mcp_tools.cpp — MCP tool-call handlers for pulp-mcp.
 //
-// Extracted from tools/mcp/pulp_mcp.cpp in the 2026-05 Phase 6 (B4)
-// refactor. See mcp_tools.hpp for the dispatch surface. Each handler
-// shells out to the `pulp` CLI (build/test/validate) or queries the
-// bundled audio services (model store, excerpt service), then wraps
-// the result via json_tool_payload.
+// See mcp_tools.hpp for the dispatch surface. Each handler shells out
+// to the `pulp` CLI (build/test/validate) or queries the bundled audio
+// services (model store, excerpt service), then wraps the result via
+// json_tool_payload.
 
 #include "mcp_tools.hpp"
 #include "mcp_json.hpp"

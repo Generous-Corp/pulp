@@ -1,4 +1,4 @@
-// JSON-RPC domain-handler + console/audio/state/perf/live-constant tests, split from test_inspector.cpp (P11-5, #2647).
+// JSON-RPC domain-handler plus console/audio/state/perf/live-constant tests.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -383,7 +383,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     rpm.begin_pass(pulp::render::RenderPassType::content);
     rpm.end_pass(4.0f, 11);
     rpm.end_frame();
-    // Follow-up #2611: feed a frame-level whole-recording GPU render time so
+    // Feed a frame-level whole-recording GPU render time so
     // Performance.getMetrics surfaces it.
     rpm.set_gpu_render_time_ms(7.25f, /*valid=*/true);
 
@@ -462,7 +462,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE(perf.params_json.find("total_time_ms") != std::string::npos);
     REQUIRE(perf.params_json.find("draw_calls") != std::string::npos);
     REQUIRE(perf.params_json.find("11") != std::string::npos);
-    // Frame-level whole-recording GPU render time (#2611) is surfaced and gated.
+    // Frame-level whole-recording GPU render time is surfaced and gated.
     REQUIRE(perf.params_json.find("gpu_render_time_ms") != std::string::npos);
     REQUIRE(perf.params_json.find("gpu_render_timing_available") != std::string::npos);
     REQUIRE(perf.params_json.find("7.25") != std::string::npos);
@@ -480,14 +480,14 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     auto bad_set_param = handler.handle(make_request(22, methods::kStateSetParameter, "not json"));
     REQUIRE(bad_set_param.is_error);
 
-    // G1 (#mcp-set-param): an unknown parameter id is a clean error, not a
-    // silent no-op buried in StateStore.
+    // An unknown parameter id is a clean error, not a silent no-op buried in
+    // StateStore.
     auto unknown_id = handler.handle(make_request(51, methods::kStateSetParameter,
                                                   R"({"id":4242,"value":1.0})"));
     REQUIRE(unknown_id.is_error);
     REQUIRE(unknown_id.params_json.find("Unknown parameter id") != std::string::npos);
 
-    // G1: normalized=true maps a 0..1 position onto the param range (-60..12).
+    // normalized=true maps a 0..1 position onto the param range (-60..12).
     auto norm_set = handler.handle(make_request(52, methods::kStateSetParameter,
                                                 R"({"id":9,"value":0.5,"normalized":true})"));
     REQUIRE_FALSE(norm_set.is_error);
@@ -537,7 +537,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE(no_perf.params_json.find("false") != std::string::npos);
 }
 
-// ─── StateInspector ListenerToken migration (Slice 3) ───────────────────────
+// ─── StateInspector ListenerToken lifecycle ─────────────────────────────────
 
 TEST_CASE("StateInspector records parameter changes after subscribing",
           "[inspect][state][listener]") {
@@ -587,7 +587,7 @@ TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
     REQUIRE_THAT(store.get_value(1), Catch::Matchers::WithinAbs(0.75, 0.001));
 }
 
-// ─── Performance.setRepaintFlash (Tier A Slice 6) ───────────────────────────
+// ─── Performance.setRepaintFlash ────────────────────────────────────────────
 
 #include <pulp/render/dirty_tracker.hpp>
 
@@ -639,7 +639,7 @@ TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
     REQUIRE(set_resp.is_error);
 }
 
-// ─── LiveConstant RPC (Tier A Slice 13) ─────────────────────────────────────
+// ─── LiveConstant RPC ───────────────────────────────────────────────────────
 
 #include <pulp/view/live_constant_editor.hpp>
 

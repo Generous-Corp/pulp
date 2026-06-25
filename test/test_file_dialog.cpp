@@ -25,7 +25,7 @@ using pulp::platform::PopupMenu;
 TEST_CASE("FileDialog has_backend reflects native vs host-registered availability",
           "[platform][file-dialog][issue-301][issue-312][issue-316]") {
     // Clean host-registered state — test suite may run in any order.
-    // Post-#312 + #316 (Codex P2s): has_backend() reports true
+    // Post-#312 + #316: has_backend() reports true
     // unconditionally ONLY on macOS, which ships file_dialog_mac.mm.
     // iOS and non-Apple reflect the host-registered state until their
     // native impls land.

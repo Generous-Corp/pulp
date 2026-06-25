@@ -1,6 +1,6 @@
 //! `pulp-rs docs` — local documentation reader.
 //!
-//! # Phase 6d scope
+//! # Supported subcommands
 //!
 //! - `index` — Ported (walks `docs/status/docs-index.yaml`).
 //! - `search <query>` — Ported (recursive grep + fuzzy fallback).
@@ -1070,15 +1070,61 @@ mod tests {
     fn run_build_site_delegates_to_mkdocs() {
         let td = plant_project();
         fs::write(td.path().join("mkdocs.yml"), "site_name: Test\n").unwrap();
-        let rec = RecordingSpawner::ok();
+        let rec = RecordingSpawner::with_codes(vec![7]);
         let mut buf = Vec::new();
         let sub = Sub::BuildSite(vec!["--strict".to_owned()]);
         let rc = run(td.path(), &sub, &rec, &mut buf).unwrap();
-        assert_eq!(rc, 0);
+        assert_eq!(rc, 7);
         let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].program, "mkdocs");
-        assert!(calls[0].args.contains(&"build".to_owned()));
-        assert!(calls[0].args.contains(&"--strict".to_owned()));
+        assert_eq!(
+            calls[0].args,
+            vec![
+                "build".to_owned(),
+                "-f".to_owned(),
+                td.path().join("mkdocs.yml").to_string_lossy().into_owned(),
+                "--strict".to_owned(),
+            ]
+        );
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("pip install -r requirements-docs.txt"));
+    }
+
+    #[test]
+    fn run_build_api_delegates_to_script_and_propagates_exit_code() {
+        let td = plant_project();
+        let tools = td.path().join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        let script = tools.join("build-api-docs.sh");
+        fs::write(&script, "#!/bin/sh\n").unwrap();
+
+        let rec = RecordingSpawner::with_codes(vec![9]);
+        let mut buf = Vec::new();
+        let sub = Sub::BuildApi(vec!["--dry-run".to_owned()]);
+        let rc = run(td.path(), &sub, &rec, &mut buf).unwrap();
+
+        assert_eq!(rc, 9);
+        let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "bash");
+        assert_eq!(
+            calls[0].args,
+            vec![
+                script.to_string_lossy().into_owned(),
+                "--dry-run".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_build_api_requires_script_to_exist() {
+        let td = plant_project();
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let err = run(td.path(), &Sub::BuildApi(vec![]), &rec, &mut buf).unwrap_err();
+        assert!(err.to_string().contains("build script not found"));
+        assert!(err.to_string().contains("build-api-docs.sh"));
     }
 
     #[test]
@@ -1102,7 +1148,7 @@ mod tests {
         assert_eq!(fuzzy_score("render", "zzzz"), 0);
     }
 
-    // ── #45 coverage uplift slice 3 ────────────────────────────────
+    // ── docs.rs coverage cushion ──────────────────────────────────
     //
     // docs.rs was at 58.15% line — 352 missing lines, second-largest
     // gap after pkg.rs. Existing tests cover parse_sub for the simple

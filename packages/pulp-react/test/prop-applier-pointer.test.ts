@@ -1,12 +1,11 @@
-// Test for pulp #1381 — prop-applier must call registerPointer(id) when a
-// pointer-class event handler (onPointerDown / Move / Up / Cancel / Wheel)
-// is set, parallel to the existing registerHover call for hover events.
+// prop-applier must call registerPointer(id) when a pointer-class event handler
+// (onPointerDown / Move / Up / Cancel / Wheel) is set, parallel to the existing
+// registerHover call for hover events.
 //
 // Without registerPointer, the bridge keeps the JS listener in its dispatch
 // table but the View's on_pointer_event callback is never armed by the
-// native side, so clicks never fire the React handler. Spectr's FilterBank
-// band drag was the canonical repro — see spectr #32 + import-design
-// SKILL.md gotcha #8.
+// native side, so clicks never fire the React handler. Canvas band-drag
+// handlers with wheel zoom are the representative regression shape.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -17,7 +16,7 @@ function instance(id: string, type: string, props: Record<string, unknown>): Pul
     return { id, type, props } as PulpInstance;
 }
 
-describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () => {
+describe('@pulp/react prop-applier — pointer registration', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -65,8 +64,7 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
 
     it('calls registerWheel (NOT registerPointer) when onWheel is set', () => {
         // Wheel goes through a separate bridge call because the
-        // registerPointer lambda filters out is_wheel events. See pulp
-        // #1387 gap #4 (Spectr's zoom doesn't fire).
+        // registerPointer lambda filters out is_wheel events.
         applyAllProps(instance('w5', 'View', {
             onWheel: () => {},
         }));
@@ -78,8 +76,8 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
     });
 
     it('calls both registerPointer and registerWheel when both pointer + wheel handlers present', () => {
-        // Spectr FilterBank shape: onPointerDown for band drag + onWheel
-        // for zoom. Both lambdas must be wired since each filters on
+        // Canvas band-drag shape: onPointerDown for drag + onWheel for zoom.
+        // Both lambdas must be wired since each filters on
         // me.is_wheel inversely.
         applyAllProps(instance('canvas2', 'Canvas', {
             onPointerDown: () => {},
@@ -159,7 +157,7 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
         expect(reg.length).toBe(0);
     });
 
-    it('routes style.overflow through setOverflow (pulp #1387 gap #1)', () => {
+    it('routes style.overflow through setOverflow', () => {
         applyAllProps(instance('row1', 'View', {
             overflow: 'hidden',
         }));
@@ -178,7 +176,7 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
     });
 
     it('arms registerPointer + registerHover when both pointer and hover handlers present', () => {
-        // Spectr FilterBank wrap shape: hover-driven cursor + drag-driven gain
+        // Canvas interaction wrapper shape: hover-driven cursor + drag-driven gain
         // edits both attached to the same widget.
         applyAllProps(instance('wrap', 'View', {
             onPointerDown: () => {},

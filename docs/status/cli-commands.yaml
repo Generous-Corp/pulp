@@ -9,6 +9,24 @@ commands:
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
+      - name: --watch
+        kind: flag
+        description: Enter a file-watching loop after the initial build and rebuild on source changes.
+      - name: --test
+        kind: flag
+        description: With `--watch`, run tests after each successful rebuild.
+      - name: --test-filter
+        kind: option
+        description: With `--watch --test`, run only tests matching the filter (`--test-filter=<pattern>`).
+      - name: --validate
+        kind: flag
+        description: With `--watch`, run quick validation after each successful rebuild.
+      - name: --install
+        kind: flag
+        description: "macOS only: after a successful build, run strict plugin validation and copy AU/VST3/CLAP bundles into the user's plug-in folders."
+      - name: --skip-validation
+        kind: flag
+        description: Debug-only escape hatch for `--install`; bypasses validation and is rejected unless paired with `--install`.
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
@@ -86,7 +104,7 @@ commands:
           - name: --key-pass
             required: false
       - name: notarize
-        summary: Submit signed bundles for Apple notarization (macOS)
+        summary: Submit packaged artifacts for Apple notarization (macOS); prefer release or --path with .pkg/.dmg/.zip
         args:
           - name: --path
             required: false
@@ -144,6 +162,40 @@ commands:
           - name: --icon
             required: false
             description: "Linux AppImage: optional .png icon (a placeholder is used when omitted)"
+      - name: release
+        summary: "Run the macOS sign, package, notarize, and staple pipeline in one command"
+        args:
+          - name: --target
+            required: false
+          - name: --identity
+            required: false
+          - name: --installer-identity
+            required: false
+            description: Developer ID Installer identity used to sign the macOS .pkg
+          - name: --apple-id
+            required: false
+          - name: --team-id
+            required: false
+          - name: --password
+            required: false
+          - name: --api-key
+            required: false
+          - name: --api-key-id
+            required: false
+          - name: --api-issuer
+            required: false
+          - name: --version
+            required: false
+          - name: --pkg
+            required: false
+          - name: --dmg
+            required: false
+          - name: --skip-sign
+            required: false
+          - name: --skip-package
+            required: false
+          - name: --skip-notarize
+            required: false
       - name: appcast
         summary: Generate Sparkle-compatible XML update feed
         args:
@@ -158,10 +210,22 @@ commands:
           - name: --sign-key
             required: false
       - name: check
-        summary: Check signing status of built plugins or Android artifacts
+        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts
         args:
           - name: --target
             required: false
+      - name: doctor
+        summary: "Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based .p8 notary key. No build dir required. Run automatically as a best-effort preflight by `ship sign`."
+        args:
+          - name: --check-online
+            required: false
+            description: Also validate the .p8 against Apple (read-only) and refresh the pulp-notary keychain profile
+          - name: --print-env
+            required: false
+            description: Emit resolved identity/keychain/keypath handles (no secret values) for eval by callers
+          - name: --quiet
+            required: false
+            description: Emit only errors and the final status
       - name: share
         summary: "One-shot sign → wrap (.app → DMG) → notarize → staple → Gatekeeper-verify a single artifact for sharing (macOS)"
         args:
@@ -188,6 +252,22 @@ commands:
           - name: --team-id
             required: false
           - name: --password
+            required: false
+          - name: --dry-run
+            required: false
+      - name: auv3-xcodeproj
+        summary: Generate an Xcode project for an AUv3 target (macOS)
+        args:
+          - name: target
+            kind: positional
+            required: true
+            description: Pulp target to generate as an AUv3 Xcode project
+          - name: --sdk
+            required: false
+            description: iphonesimulator, iphoneos, or macosx; defaults to iphonesimulator
+          - name: --output
+            required: false
+          - name: --open
             required: false
           - name: --dry-run
             required: false
@@ -453,12 +533,23 @@ commands:
 
   - name: version
     status: usable
-    summary: Show, bump, or check version consistency across Pulp framework and plugin version surfaces.
+    summary: Show, bump, or check version consistency across Pulp framework, plugin, changelog, and generated metadata surfaces.
     subcommands:
       - name: bump
         summary: Increment the framework version, or plugin version when --plugin is set
+        args:
+          - name: component
+            kind: positional
+            description: Version component to increment: patch, minor, or major.
+          - name: --plugin
+            kind: flag
+            description: Bump the plugin version declared in `pulp_add_plugin(... VERSION ...)` instead of the framework version.
       - name: check
-        summary: Verify version consistency across CMake, generated SDK constants, changelog, and AU metadata
+        summary: Verify version consistency across CMake, generated SDK constants, changelog, AU metadata, plugin metadata, and marketplace metadata.
+        args:
+          - name: --with-bump-check
+            kind: flag
+            description: Also run the PR version-bump gate report.
     docs: reference/cli.md#version
 
   - name: config
@@ -507,6 +598,9 @@ commands:
       - name: --host-quirks
         kind: flag
         description: Print only the host-quirks section — the effective runtime policy (off/validated-only/all) and its source (compile default / PULP_HOST_QUIRKS env / API), the detected DAW + version, and which accommodations are enforced. Also rendered at the bottom of the default doctor view. `pulp doctor quirks` is a synonym. Exits 0. Override the policy with the PULP_HOST_QUIRKS env var.
+      - name: --au-cache
+        kind: flag
+        description: Refresh macOS Audio Unit registration metadata by stopping AudioComponentRegistrar; `--dry-run` prints the command. On non-macOS hosts this is an accepted no-op that exits 0.
     docs: reference/cli.md#doctor
 
   - name: clean
@@ -528,30 +622,6 @@ commands:
         kind: flag
         description: CI-friendly alias for --dry-run.
     docs: reference/cli.md#fmt
-
-  - name: config
-    status: usable
-    summary: Manage global developer configuration (~/.pulp/config.toml).
-    subcommands:
-      - name: init
-        summary: Create config from template (safe — never overwrites)
-        args:
-          - name: --force
-            required: false
-      - name: set
-        summary: Set a config value (e.g., signing.apple.identity)
-        args:
-          - name: key
-            kind: positional
-            required: true
-          - name: value
-            kind: positional
-            required: true
-      - name: show
-        summary: Show current non-comment config values
-      - name: path
-        summary: Print config file path
-    docs: reference/cli.md#config
 
   - name: coverage
     status: experimental
@@ -999,7 +1069,10 @@ commands:
         description: Package slug from tools/packages/registry.json, or an importer id from tools/packages/tool-registry.json
       - name: --license-override
         kind: option
-        description: "Accept a rejected license (value: commercial)"
+        description: "Commercial-license override for packages the registry policy would otherwise block or gate, including restricted/copyleft and rejected/proprietary entries (value: commercial)"
+      - name: --accept-license
+        kind: option
+        description: "Explicitly accept the package's restricted SPDX license after reviewing the CLI warning"
       - name: --platform-guard
         kind: flag
         description: Add with platform guard (skip prompt for unsupported targets)
@@ -1328,7 +1401,10 @@ commands:
         description: Search query string
       - name: --format
         kind: option
-        description: "Output format (text or json)"
+        description: "Output JSON; omit for default text output"
+      - name: --refresh
+        kind: flag
+        description: Force-refresh the remote registry cache while searching
     docs: reference/cli.md#search
 
   - name: update
@@ -1353,9 +1429,12 @@ commands:
       - name: --alternative
         kind: option
         description: Find alternatives to a specific package
+      - name: --include-license-gated
+        kind: flag
+        description: Include packages that require license review or commercial override
       - name: --format
         kind: option
-        description: "Output format (text or json)"
+        description: "Output JSON; omit for default text output"
     docs: reference/cli.md#suggest
 
   - name: target
@@ -1374,16 +1453,16 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis tooling. Manage offline audio models (text-to-audio retrieval), read reproducible excerpt bundles, and run live/offline Audio Scope analysis.
+    summary: Repo-level audio analysis tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, and run live/offline Audio Scope analysis.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
       - name: model status
         summary: Show the configured model, resolved checkpoint, and whether it is loadable
       - name: model activate
-        summary: Select the active model and persist the state file
+        summary: Activate an installed audio model and persist the state file
       - name: excerpt-find
-        summary: Score audio files against a text query and emit an excerpt bundle
+        summary: Rank WAV windows deterministically from a text query and emit an excerpt bundle with backend metadata
         args:
           - name: --text
             required: true
@@ -1563,7 +1642,10 @@ commands:
     args:
       - name: --format
         kind: option
-        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format
+        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
+      - name: --no-load
+        kind: flag
+        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host
@@ -1576,7 +1658,7 @@ commands:
         description: Path to the plug-in bundle (.clap / .vst3 / .component / .lv2)
       - name: --format
         kind: option
-        description: Format selector (clap default, vst3, au, auv3, lv2)
+        description: Format selector (clap default, vst3, au, auv3, lv2). Alias: -f
       - name: --id
         kind: option
         description: Unique id / URI to select a specific descriptor in the bundle (LV2 and multi-plugin CLAP)
@@ -1651,6 +1733,15 @@ commands:
     subcommands:
       - name: list
         summary: Show every registered tool and its install state
+      - name: info
+        summary: Show install/package metadata for one registered tool
+        args:
+          - name: tool-id
+            kind: positional
+            required: true
+          - name: --json
+            kind: flag
+            required: false
       - name: install
         summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
         args:

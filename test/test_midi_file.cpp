@@ -395,3 +395,24 @@ TEST_CASE("write_midi_file rejects directory destinations",
 
     REQUIRE_FALSE(write_midi_file(tmp.path.string(), data));
 }
+
+#if defined(__linux__)
+TEST_CASE("write_midi_file reports deferred flush failures on a full device",
+          "[midi][file][reliability]") {
+    // /dev/full opens and accepts small buffered writes but fails the
+    // flush/close with ENOSPC. Before the explicit close()+good() check,
+    // write_midi_file() returned the still-good() buffered stream state and
+    // reported success even though the bytes never reached the device. Linux-
+    // only mechanism (/dev/full); passes (no-op) where the device is absent.
+    if (!fs::exists("/dev/full")) return;
+
+    MidiFileData data;
+    data.ticks_per_quarter = 480;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    track.events.push_back({0.25, MidiEvent::note_off(0, 60)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE_FALSE(write_midi_file("/dev/full", data));
+}
+#endif

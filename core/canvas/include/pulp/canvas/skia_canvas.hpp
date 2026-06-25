@@ -70,9 +70,9 @@ public:
     void set_line_cap(LineCap cap) override;
     void set_line_join(LineJoin join) override;
 
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit and
-    // ctx.imageSmoothingEnabled / ctx.imageSmoothingQuality. Sticky paint
-    // state honored by subsequent stroke / drawImage calls.
+    // Canvas2D ctx.miterLimit and ctx.imageSmoothingEnabled /
+    // ctx.imageSmoothingQuality. Sticky paint state honored by subsequent
+    // stroke / drawImage calls.
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
@@ -97,16 +97,16 @@ public:
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
                        int weight, int slant, float letter_spacing) override;
-    // pulp #1737 — OpenType feature flags via SkShaper Feature API.
+    // OpenType feature flags via SkShaper Feature API.
     // Captured into font_features_ vector and flushed at shape time.
     void set_font_features(std::vector<FontFeature> features) override;
     void clear_font_features() override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
-    // pulp #2163 / font v2 Slice 1.2.b — typed anchor variant.
+    // Typed text-anchor variant.
     void fill_text_anchored(const std::string& text, float x, float y,
                             TextAnchor anchor) override;
-    // pulp #1525 — Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
+    // Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
     void fill_text_with_max_width(const std::string& text,
                                   float x, float y, float max_width) override;
     void stroke_text(const std::string& text, float x, float y,
@@ -115,9 +115,9 @@ public:
                        const SdfAtlas& atlas) override;
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
-    // WYSIWYG caret math — caret x for a byte boundary within the FULL
-    // shaped run (same make_paragraph(...) fill_text uses), so kerned/
-    // letter-spaced text reports the exact painted advance.
+    // Caret x for a byte boundary within the full shaped run (same
+    // make_paragraph(...) fill_text uses), so kerned / letter-spaced text
+    // reports the exact painted advance.
     float text_x_for_byte(const std::string& text,
                           std::size_t byte_index) override;
 
@@ -128,7 +128,7 @@ public:
                                float x, float y, float w, float h) override;
     bool draw_svg(const std::string& svg_document,
                   float x, float y, float w, float h) override;
-    // pulp #1737 — 9-arg drawImage source-rect form: routes through
+    // 9-arg drawImage source-rect form: routes through
     // SkCanvas::drawImageRect(image, src, dst, sampling) so a sub-rect of
     // the decoded SkImage maps onto the destination rect. Supports
     // sprite-sheet slicing without re-decoding the source bitmap.
@@ -150,7 +150,7 @@ public:
     bool draw_skia_image(const sk_sp<SkImage>& image,
                          float x, float y, float w, float h);
 
-    // ── Line dash / pixel manipulation (issue-916) ─────────────────────
+    // ── Line dash / pixel manipulation ─────────────────────────────────
     void set_line_dash(const float* intervals, int count, float phase) override;
     bool read_pixels(int x, int y, int width, int height, uint8_t* out) override;
     bool write_pixels(const uint8_t* data, int width, int height,
@@ -163,7 +163,7 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
-    /// pulp #1524 — true two-circle radial gradient via SkShaders::TwoPointConicalGradient.
+    /// True two-circle radial gradient via SkShaders::TwoPointConicalGradient.
     void set_fill_gradient_radial_two_circles(
         float x0, float y0, float r0,
         float x1, float y1, float r1,
@@ -172,13 +172,12 @@ public:
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
 
-    // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle = createLinearGradient(...)`
-    // (and radial / two-circle / conic counterparts). Routes through
-    // SkShaders::*Gradient and stores the resulting shader on
-    // `stroke_shader_`, which `apply_stroke_state` already attaches to
-    // every stroke paint. Mirrors the fill-side surface so the bridge
-    // can expose `canvasSetStrokeLinearGradient` etc. without inventing
-    // a separate paint pipeline.
+    // Canvas2D `ctx.strokeStyle = createLinearGradient(...)` (and radial /
+    // two-circle / conic counterparts). Routes through SkShaders::*Gradient and
+    // stores the resulting shader on `stroke_shader_`, which
+    // `apply_stroke_state` attaches to every stroke paint. Mirrors the fill-side
+    // surface so the bridge can expose `canvasSetStrokeLinearGradient` etc.
+    // without inventing a separate paint pipeline.
     void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
                                      const Color* colors, const float* positions, int count) override;
     void set_stroke_gradient_radial(float cx, float cy, float radius,
@@ -191,7 +190,7 @@ public:
                                     const Color* colors, const float* positions, int count) override;
     void clear_stroke_gradient() override;
 
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+    // Canvas2D ctx.createPattern.
     // Routes through SkShader::MakeImage with SkTileMode per axis.
     // Stored on the same gradient_shader_ field used by gradient fills
     // (the field already represents "active non-solid fill paint"), so
@@ -216,7 +215,7 @@ public:
     void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
-    // pulp #1521 — native arc subpaths via SkPath::arcTo / SkRRect.
+    // Native arc subpaths via SkPath::arcTo / SkRRect.
     void arc(float cx, float cy, float radius,
              float start_angle, float end_angle,
              bool anticlockwise) override;
@@ -241,26 +240,24 @@ public:
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
 
-    // Box shadow (issue-925) — uses SkImageFilters::DropShadowOnly for
-    // outset shadows; inset shadows clip to the box and stroke with a
-    // blurred mask.
+    // Box shadow uses SkImageFilters::DropShadowOnly for outset shadows; inset
+    // shadows clip to the box and stroke with a blurred mask.
     void draw_box_shadow(float x, float y, float w, float h,
                          float dx, float dy, float blur, float spread,
                          Color color, bool inset, float corner_radius) override;
 
-    // Canvas2D drop-shadow state (issue-1434 batch 7). Sticky values that
-    // attach an SkImageFilters::DropShadow to the active fill/stroke
-    // paints until cleared (color alpha == 0 or blur == 0 with both
-    // offsets == 0). See current_fill_paint() / current_stroke_paint()
-    // for the wrapping logic.
+    // Canvas2D drop-shadow state. Sticky values attach an
+    // SkImageFilters::DropShadow to the active fill/stroke paints until cleared
+    // (color alpha == 0 or blur == 0 with both offsets == 0). See
+    // current_fill_paint() and apply_shadow_filter() for the wrapping logic.
     void set_shadow_color(Color color) override;
     void set_shadow_blur(float blur) override;
     void set_shadow_offset_x(float dx) override;
     void set_shadow_offset_y(float dy) override;
 
-    // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
-    // Direction selects SkShaper's leftToRight flag (and, future-state,
-    // the HarfBuzz buffer direction for proper bidi mixed-script). The
+    // Canvas2D ctx.direction / ctx.filter sticky state.
+    // Direction selects SkShaper's leftToRight flag (and later the HarfBuzz
+    // buffer direction for proper bidi mixed-script). The
     // filter parses a CSS <filter-function-list> string ("blur(5px)
     // sepia(80%) ...") into an SkImageFilter chain that wraps each
     // subsequent paint via current_fill_paint() / apply_stroke_state.
@@ -282,7 +279,7 @@ public:
                                   float w,
                                   float h);
 
-    // Standalone text measurement (issue-916). Returns full HTML5
+    // Standalone text measurement. Returns full HTML5
     // TextMetrics for `text` rendered with `family` at `size` pixels —
     // no canvas instance required. Used by the JS bridge's
     // canvasMeasureText so JS callers can pre-measure text for layout
@@ -294,20 +291,19 @@ public:
     void set_opacity(float alpha) override;
     void save_layer(float x, float y, float w, float h,
                     float opacity, float blur_radius) override;
-    // pulp #1549 — saveLayer with explicit blend mode (CSS / RN
-    // mix-blend-mode). The Skia backend honors the requested blend
-    // mode on the layer-paint so the subtree composites back with
-    // multiply / screen / overlay / etc.
+    // saveLayer with explicit blend mode (CSS / RN mix-blend-mode). The Skia
+    // backend honors the requested blend mode on the layer-paint so the subtree
+    // composites back with multiply / screen / overlay / etc.
     void save_layer_with_blend(float x, float y, float w, float h,
                                float opacity, float blur_radius,
                                Canvas::BlendMode mode) override;
-    // pulp #1434 Phase A2-4 — full CSS filter chain.
+    // Full CSS filter chain.
     void save_layer_with_filters(float x, float y, float w, float h,
                                   float opacity,
                                   const FilterChainEntry* chain,
                                   int count) override;
 
-    // pulp #1737 / #1515 — CSS mask-image + mask-size paint composite.
+    // CSS mask-image + mask-size paint composite.
     // SkiaCanvas implements the 2-saveLayer pattern with kDstIn:
     //   1. open the content layer (saveLayer with opacity)
     //   2. caller paints the subtree
@@ -316,10 +312,9 @@ public:
     //      saveLayer first, then closes the content layer
     // Pending masks are tracked on `pending_masks_` keyed by Skia's
     // internal save count so the restore-side dispatcher knows which
-    // restore call belongs to which mask layer. The matching restore()
-    // override (declared once at line ~45) handles the deferred mask
-    // composite — it walks pending_masks_ for a matching save count
-    // before delegating to canvas_->restore().
+    // restore call belongs to which mask layer. SkiaCanvas::restore() handles
+    // the deferred mask composite: it walks pending_masks_ for a matching save
+    // count before delegating to canvas_->restore().
     void save_layer_with_mask(float x, float y, float w, float h,
                                float opacity,
                                const std::string& mask_image,
@@ -328,10 +323,10 @@ public:
 private:
     // Build the active fill paint, honoring `gradient_shader_` when set
     // so shape fills (rect / rrect / circle / arc / oval / polygon) render
-    // gradients consistently with `fill_current_path()` (#1350).
+    // gradients consistently with `fill_current_path()`.
     SkPaint current_fill_paint() const;
 
-    // issue-1434 batch 7 — apply the sticky Canvas2D shadow* state to an
+    // Apply the sticky Canvas2D shadow* state to an
     // arbitrary paint (typically a stroke paint built via the free
     // `make_stroke_paint` helper). Members can't be reached from the
     // free helper, so the call sites that build a stroke paint apply
@@ -343,16 +338,14 @@ private:
     // so the gating logic stays in one place.
     bool shadow_is_active() const;
 
-    // pulp #1434 bridge-thin gap-fill — apply sticky stroke join + miter
-    // limit to a freshly-constructed stroke paint. Called from the
-    // stroke_* paths after make_stroke_paint() but before any paint
-    // submit. Centralises the policy so future stroke-state setters
-    // (lineCap and friends) can join here without touching every site.
+    // Apply sticky stroke join + miter limit to a freshly-constructed stroke
+    // paint. Called from the stroke_* paths after make_stroke_paint() but
+    // before any paint submit. Centralises the policy so future stroke-state
+    // setters can join here without touching every site.
     void apply_stroke_state(SkPaint& paint) const;
 
-    // pulp #1434 bridge-thin gap-fill — translate the sticky
-    // imageSmoothingEnabled / imageSmoothingQuality state into an
-    // SkSamplingOptions for drawImageRect. Spec defaults match Skia
+    // Translate the sticky imageSmoothingEnabled / imageSmoothingQuality state
+    // into an SkSamplingOptions for drawImageRect. Spec defaults match Skia
     // defaults so non-set callers keep getting kLinear.
     SkSamplingOptions sampling_options_for_image_smoothing() const;
 
@@ -369,19 +362,19 @@ private:
     float line_width_ = 1.0f;
     LineCap line_cap_ = LineCap::butt;
     LineJoin line_join_ = LineJoin::miter;
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit. Spec
-    // default is 10 (matches Skia's SkPaint default).
+    // Canvas2D ctx.miterLimit. Spec default is 10 (matches Skia's SkPaint
+    // default).
     float miter_limit_ = 10.0f;
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.imageSmoothingEnabled
-    // / ctx.imageSmoothingQuality. Defaults match the spec (`true`,
-    // `"low"`). Honored by draw_image_from_data / draw_image_from_file.
+    // Canvas2D ctx.imageSmoothingEnabled / ctx.imageSmoothingQuality. Defaults
+    // match the spec (`true`, `"low"`). Honored by draw_image_from_data /
+    // draw_image_from_file.
     bool image_smoothing_enabled_ = true;
     ImageSmoothingQuality image_smoothing_quality_ = ImageSmoothingQuality::low;
     std::string font_family_ = "sans-serif";
-    int font_weight_ = 400;             ///< CSS weight 100..900 (pulp #927)
-    int font_slant_ = 0;                ///< 0=upright, 1=italic (pulp #927)
-    float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px (pulp #927)
-    // pulp #1737 — OpenType feature flags (e.g. tnum / smcp / onum /
+    int font_weight_ = 400;             ///< CSS weight 100..900
+    int font_slant_ = 0;                ///< 0=upright, 1=italic
+    float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px
+    // OpenType feature flags (e.g. tnum / smcp / onum /
     // lnum / pnum) for CSS font-variant. Captured by set_font_features
     // / cleared by clear_font_features. Applied via
     // `TextStyle::addFontFeature` in `make_paragraph()` at
@@ -389,7 +382,7 @@ private:
     // OpenType features set.
     std::vector<FontFeature> font_features_;
 
-    // pulp #1737 / #1515 — pending mask state for save_layer_with_mask.
+    // Pending mask state for save_layer_with_mask.
     // Each entry is the deferred mask composite to apply when the
     // matching restore() fires. Tracked by Skia's getSaveCount() so
     // restore() can look up "is the layer I'm about to close a
@@ -403,26 +396,24 @@ private:
     std::vector<PendingMask> pending_masks_;
 
 public:
-    // pulp #1899 (gap #3 — text edging in opacity layers) — returns true
-    // when at least one currently-open save_layer* has alpha < 1 on its
-    // layer-paint. Text paint paths (fill_text, stroke_text) consult
-    // this at paint time and select greyscale AA over LCD subpixel AA
-    // — Skia's LCD subpixel patterns can't antialias correctly into a
-    // partially transparent pixel, so glyphs render faint inside
-    // CSS-opacity layers without this flip. Browsers (Blink / WebKit)
-    // do the same. Exposed publicly so tests can assert the stack-
-    // tracking around nested save_layer / restore / restore_to_count.
+    // Returns true when at least one currently-open save_layer* has alpha < 1
+    // on its layer-paint. Text paint paths (fill_text, stroke_text) consult this
+    // at paint time and select greyscale AA over LCD subpixel AA: Skia's LCD
+    // subpixel patterns can't antialias correctly into a partially transparent
+    // pixel, so glyphs render faint inside CSS-opacity layers without this flip.
+    // Browsers (Blink / WebKit) do the same. Exposed publicly so tests can
+    // assert the stack-tracking around nested save_layer / restore /
+    // restore_to_count.
     bool inside_non_opaque_layer() const {
         return !non_opaque_layer_stack_.empty();
     }
 
 private:
-    // pulp #1899 (gap #3) — each entry is Skia's getSaveCount() AFTER
-    // the layer was opened. restore() pops the top entry if its save
-    // count matches the canvas's current save count; restore_to_count()
-    // pops any entries strictly above the target (mirrors
-    // SkCanvas::restoreToCount). Plain save() / save_layer with
-    // opacity == 1 do not push.
+    // Each entry is Skia's getSaveCount() after the layer was opened.
+    // restore() pops the top entry if its save count matches the canvas's
+    // current save count; restore_to_count() pops any entries strictly above
+    // the target (mirrors SkCanvas::restoreToCount). Plain save() / save_layer
+    // with opacity == 1 do not push.
     std::vector<int> non_opaque_layer_stack_;
 
     TextAlign text_align_ = TextAlign::left;
@@ -431,10 +422,9 @@ private:
     bool has_gradient_ = false;
     sk_sp<SkShader> gradient_shader_;
 
-    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern stroke
-    // shader (rare: most plugins set patterns on fillStyle, not strokeStyle).
-    // Lives separately from gradient_shader_ so stroke paths can opt in
-    // via apply_stroke_state without disturbing fill state.
+    // Canvas2D ctx.createPattern stroke shader. Lives separately from
+    // gradient_shader_ so stroke paths can opt in via apply_stroke_state without
+    // disturbing fill state.
     sk_sp<SkShader> stroke_shader_;
 
     // Path building state
@@ -450,13 +440,13 @@ private:
     // CanvasWidget — there setTransform behaves per the HTML spec literally.
     SkMatrix paint_baseline_ = SkMatrix::I();
 
-    // Line-dash pattern (issue-916). Empty == solid stroke (no dashing).
+    // Line-dash pattern. Empty == solid stroke (no dashing).
     // Held as floats so the stroke-paint helper can rebuild the SkDashPathEffect
     // each time stroke_color/line_width change.
     std::vector<float> line_dash_;
     float line_dash_phase_ = 0.0f;
 
-    // Canvas2D drop-shadow state (issue-1434 batch 7). Sticky — every
+    // Canvas2D drop-shadow state. Sticky: every
     // draw helper queries `make_shadow_filter()` and, when a shadow is
     // active, wraps its paint via `SkPaint::setImageFilter`. The shadow
     // is gated on color.a > 0 AND (blur > 0 OR dx != 0 OR dy != 0) to
@@ -468,13 +458,12 @@ private:
     float shadow_offset_x_ = 0.0f;
     float shadow_offset_y_ = 0.0f;
 
-    // pulp #1520 — Canvas2D ctx.direction sticky state. Defaults to ltr
-    // (matches the previous hard-coded SkShaper leftToRight=true). rtl
-    // flips the shaper flag; inherit currently behaves as ltr until a
-    // per-View writing-direction lookup lands (#1506).
+    // Canvas2D ctx.direction sticky state. Defaults to ltr, rtl flips the
+    // shaper flag, and inherit currently behaves as ltr until a per-View
+    // writing-direction lookup lands.
     TextDirection direction_ = TextDirection::ltr;
 
-    // pulp #1520 — Canvas2D ctx.filter sticky state. Stored as the raw
+    // Canvas2D ctx.filter sticky state. Stored as the raw
     // CSS string for round-trip diagnostics; the parsed SkImageFilter
     // chain caches alongside so we don't re-parse on every draw. Both
     // are reset together by set_filter(). When `filter_image_filter_`
@@ -483,13 +472,13 @@ private:
     sk_sp<SkImageFilter> filter_image_filter_;
 
 public:
-    // pulp #1520 — wrap an arbitrary paint with the active ctx.filter
+    // Wrap an arbitrary paint with the active ctx.filter
     // SkImageFilter chain (no-op when filter is "none" or unparsable).
     // Centralised so fill / stroke / text / image draws can opt in
     // without touching every call site.
-    // Public for test_canvas.cpp filter-pipeline tests added in #1791;
-    // the implementation is a pure paint-state mutation, no class
-    // invariant gets violated by external callers.
+    // Public for test_canvas.cpp filter-pipeline tests; the implementation is a
+    // pure paint-state mutation, no class invariant gets violated by external
+    // callers.
     void apply_filter(SkPaint& paint) const;
 };
 

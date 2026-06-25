@@ -1,9 +1,8 @@
 // cmd_project_common.cpp — shared helpers for the `pulp project`
-// sub-command translation units (roadmap item P11-1).
+// sub-command translation units.
 //
-// Extracted byte-identical from the original cmd_project.cpp: option
-// parsing, help text, and the pin-file / project-root helpers that
-// `do_bump`, `do_undo`, and `do_unpin` all depend on.
+// Owns option parsing, help text, and the pin-file / project-root
+// helpers that `do_bump`, `do_undo`, and `do_unpin` all depend on.
 
 #include "cmd_project_internal.hpp"
 
@@ -135,7 +134,7 @@ void print_bump_help() {
         "versioned find_package(Pulp ...) line. `project(... VERSION ...)`\n"
         "remains the plugin/app version and is not treated as the SDK pin.\n\n"
         "Every successful pin writes ~/.pulp/bump-undo-<timestamp>.json so\n"
-        "`pulp project undo` can revert. Migration notes from Slice 3 (#548)\n"
+        "`pulp project undo` can revert. Migration notes\n"
         "print after the report.\n"
         "\n"
         "To go BACK to floating-SDK mode (track latest installed), run\n"

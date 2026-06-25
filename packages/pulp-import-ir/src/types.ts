@@ -1,16 +1,12 @@
-// pulp #1486 — Pulp design-import IR (Phase 1 spike).
+// Pulp design-import IR.
 //
 // IRNode is the typed intermediate representation that survives source
 // re-import. Adapters lower source formats (Figma / Mitosis / Claude
 // Design HTML / etc.) into IRNode trees keyed by `stable_anchor_id`;
 // the tweaks layer (`pulp-tweaks.json`) is keyed by the same anchors,
 // so dev overrides survive when the designer regenerates the source.
-//
-// Spec: /tmp/pulp-ir-spec-spike.md (sub-agent #25 draft).
-// Phase 1: types + Claude Design HTML adapter (content-hash anchors)
-// + tweaks read/write + 5-scenario harness.
 
-// ── Value types (§1.1, §2.1) ──────────────────────────────────────────
+// ── Value types ───────────────────────────────────────────────────────
 
 export type TokenRef = `{${string}}`;
 
@@ -28,7 +24,7 @@ export type Color = string | TokenRef;
 export type Pixels = number | TokenRef;
 export type NumberRef = number | TokenRef;
 
-// ── TypedLayout (§1.2) ────────────────────────────────────────────────
+// ── TypedLayout ───────────────────────────────────────────────────────
 
 export interface TypedLayout {
     display?: 'flex' | 'none' | 'contents' | 'block' | 'inline-flex' | string;
@@ -90,7 +86,7 @@ export interface TypedLayout {
     overflowY?: 'visible' | 'hidden' | 'scroll' | 'auto';
 }
 
-// ── TypedPaint (§2.2) ─────────────────────────────────────────────────
+// ── TypedPaint ────────────────────────────────────────────────────────
 
 export interface Gradient {
     type: 'linear' | 'radial' | 'conic';
@@ -171,7 +167,7 @@ export interface TypedPaint {
     cursor?: 'default' | 'pointer' | 'text' | 'crosshair' | 'grab' | 'grabbing' | 'not-allowed';
 }
 
-// ── TypedText (§3) ────────────────────────────────────────────────────
+// ── TypedText ─────────────────────────────────────────────────────────
 
 export interface TypedText {
     fontFamily?: string | TokenRef;
@@ -198,7 +194,7 @@ export interface TypedText {
     text?: string;
 }
 
-// ── raw_source (§5) ──────────────────────────────────────────────────
+// ── raw_source ────────────────────────────────────────────────────────
 
 export type SourceFormat =
     | { kind: 'figma-reconstruction'; spec: unknown }
@@ -212,7 +208,7 @@ export type SourceFormat =
     | { kind: 'rn-file'; jsxText: string }
     | { kind: 'unknown'; payload: unknown };
 
-// ── provenance (§6) ──────────────────────────────────────────────────
+// ── provenance ────────────────────────────────────────────────────────
 
 export interface IRProvenance {
     adapter: string;
@@ -228,7 +224,7 @@ export interface IRProvenance {
     source_commit?: string;
 }
 
-// ── confidence (§7.2) ────────────────────────────────────────────────
+// ── confidence ────────────────────────────────────────────────────────
 
 export type Confidence = 'PASS' | 'DIVERGE' | 'NOT_IMPL';
 
@@ -272,7 +268,7 @@ export interface IRNode {
     confidence: Confidence;
 }
 
-// ── Adapter contract (§7) ────────────────────────────────────────────
+// ── Adapter contract ─────────────────────────────────────────────────
 
 export type AnchorStrategy = 'adapter' | 'content-hash' | 'path';
 
@@ -303,7 +299,7 @@ export interface SourceAdapter<R = unknown> {
     applyTweaks(node: IRNode, tweaks: TweaksFile): IRNode;
 }
 
-// ── Tweaks layer (§8) ────────────────────────────────────────────────
+// ── Tweaks layer ─────────────────────────────────────────────────────
 
 export interface TweaksFile {
     $schema?: string;
@@ -319,7 +315,7 @@ export type TweakValue = {
     [path: string]: unknown;
 };
 
-// ── DTCG token tree (§10 Q3 — post-lowering resolution) ──────────────
+// ── DTCG token tree ──────────────────────────────────────────────────
 
 export interface DTCGTokenTree {
     /** Recursive token map. Leaves carry `$value` per DTCG spec. */

@@ -59,11 +59,10 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
     // low nibble carries the system-message subtype rather than a channel,
     // but the bit-layout reassembly is identical: status = top | low.
     //
-    // The previous "is_system → return inStatus unchanged" special case
-    // turned every system message into 0xF0 (sysex start), so MIDI clock
-    // / start / stop / continue / song-position / quarter-frame all
-    // arrived at the Processor with the wrong status byte. Codex review
-    // on PR #638 caught this; the unit test in test_au_v2_effect.cpp now
+    // Returning inStatus unchanged for system messages would turn every
+    // system message into 0xF0 (sysex start), so MIDI clock / start / stop /
+    // continue / song-position / quarter-frame would arrive at the Processor
+    // with the wrong status byte. The unit test in test_au_v2_effect.cpp
     // mirrors the SDK splitting so the regression cannot reappear.
     const uint8_t status_byte =
         static_cast<uint8_t>((inStatus & 0xF0) | (inChannel & 0x0F));
@@ -85,14 +84,13 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
 
-            // Resolve host accommodations once (host-quirks plan, P3) via
-            // the runtime policy (PULP_HOST_QUIRKS env / API).
+            // Resolve host accommodations once via the runtime policy.
             const auto host_info = detect_host_info();
             host_quirks_ = resolved_quirks(host_info.type, host_info.version);
 
-            // synthesize_bypass_parameter (host-quirks P3d): inject an
-            // automatable Bypass when the plugin declared none (before the
-            // AU param list is built from the store), then detect it so
+            // Inject an automatable Bypass when host-quirk policy requests
+            // one and the plugin declared none. Do this before the AU param
+            // list is built from the store, then detect it so
             // ProcessBufferLists can honor it with a pass-through.
             maybe_synthesize_bypass(store_, host_quirks_);
             for (const auto& p : store_.all_params()) {
@@ -425,11 +423,10 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
     }
 
-    // synthesize_bypass_parameter (host-quirks P3d): when the Bypass param
-    // (declared or synthesized) is engaged, copy main input → main output
+    // When the Bypass param is engaged, copy main input to main output
     // (null-guarded), zero any output channel without a matching input, and
-    // skip the Processor — mirrors the VST3/CLAP pass-through. The value was
-    // pulled into the store from GetParameter() above.
+    // skip the Processor. The value was pulled into the store from
+    // GetParameter() above.
     if (bypass_param_id_ != 0 && store_.get_value(bypass_param_id_) >= 0.5f) {
         for (UInt32 ch = 0; ch < out_channels; ++ch) {
             float* dst = output_ptrs_[ch];
@@ -440,12 +437,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                 std::memset(dst, 0, sizeof(float) * inFramesToProcess);
             }
         }
-        // Drain + DISCARD any MIDI queued by HandleMIDIEvent/HandleSysEx
-        // while bypassed. Without this the queue grows for the whole bypass
+        // Drain and discard any MIDI queued by HandleMIDIEvent/HandleSysEx
+        // while bypassed. Otherwise the queue grows for the whole bypass
         // window and floods the processor with stale notes/CCs the instant
-        // bypass turns off (Codex review on #3246). A bypassed plugin is a
-        // wire — inbound MIDI is dropped with the block, matching the VST3
-        // path (which leaves MIDI buffers empty on the bypass short-circuit).
+        // bypass turns off. A bypassed plugin is a wire, so inbound MIDI is
+        // dropped with the block.
         while (midi_in_queue_.try_pop()) {}
         while (sysex_in_queue_.try_pop()) {}
         return noErr;
@@ -473,11 +469,10 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
-    // Phase 3 — uniform param-events contract + RT-safety guard. AU v2 has no
-    // scheduled-parameter event source, so the queue is empty (host params flow
-    // via store_ as before); set it anyway so a Processor always sees a non-null
-    // queue. Wrap ONLY the process call in ScopedNoAlloc — the preamble above
-    // (param snapshot, pointer-vector resizes) legitimately allocates.
+    // AU v2 has no scheduled-parameter event source, so this queue is empty
+    // and host params flow via store_ as before. Set it anyway so a Processor
+    // always sees a non-null queue. Wrap only the process call in
+    // ScopedNoAlloc; the preamble above legitimately allocates.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
     std::array<ProcessBusBufferView<const float>, 1> input_buses{{
@@ -524,12 +519,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // notification, would be done from a main-thread pump, never a render-thread
     // notify; no current plugin drives parameters from process().)
 
-    // Item 3.11 — push latency / tail change notifications the processor
-    // flagged during process(). AU v2 hosts watch
-    // kAudioUnitProperty_Latency and kAudioUnitProperty_TailTime via
-    // PropertyListeners; PropertyChanged is the canonical SDK call
-    // that wakes them. Safe to call from the render callback (AU SDK
-    // marshals through the host's property-listener queue).
+    // Push latency / tail change notifications the processor flagged during
+    // process(). AU v2 hosts watch kAudioUnitProperty_Latency and
+    // kAudioUnitProperty_TailTime via PropertyListeners; PropertyChanged is
+    // the canonical SDK call that wakes them. Safe to call from the render
+    // callback because the AU SDK marshals through the host's listener queue.
     if (processor_->consume_latency_changed_flag()) {
         PropertyChanged(kAudioUnitProperty_Latency,
                         kAudioUnitScope_Global, 0);
@@ -620,8 +614,8 @@ Float64 PulpAUEffect::GetTailTime()
 Float64 PulpAUEffect::GetLatency()
 {
     if (!processor_) return 0.0;
-    // clamp_latency_to_nonneg (host-quirks P3): route the existing clamp
-    // through the quirk so PULP_HOST_QUIRKS=off reports raw latency too.
+    // Route the non-negative latency clamp through host-quirk policy so
+    // disabling host quirks reports raw latency too.
     int latency = reported_latency_samples(processor_->latency_samples(), host_quirks_);
     return GetSampleRate() > 0 ? static_cast<Float64>(latency) / GetSampleRate() : 0.0;
 }

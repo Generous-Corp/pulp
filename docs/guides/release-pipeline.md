@@ -69,13 +69,15 @@ PR merge to main
 │   5. fix rpaths (Linux patchelf) / install-name (macOS) │
 │   6. package_cli.py → `pulp-${PLATFORM}.tar.gz`         │
 │      Contents: pulp (Rust), pulp-cpp (C++ delegate),    │
+│      pulp-mcp (Claude Code MCP server), and             │
 │      libwgpu_native.dylib (or .so / .dll)               │
 │   7. Reconfigure into `build-sdk/` with                 │
 │      PULP_BUILD_WEBVIEW=ON, repackage as                │
 │      `pulp-sdk-${PLATFORM}.tar.gz`                      │
 │   8. smoke-cli matrix gate (#395): extract on a fresh   │
-│      runner and run `pulp help` to catch missing-symbol │
-│      / bad-rpath bugs before publish                    │
+│      runner and run `pulp help`, `pulp-cpp help`, and   │
+│      `pulp-mcp --version` to catch missing-symbol /     │
+│      bad-rpath bugs before publish                      │
 │   9. Upload as a GitHub Actions artifact                │
 │                                                          │
 │ Final `release` job (runs once, after all 5 platforms): │
@@ -146,7 +148,7 @@ A successful release publishes exactly **11 assets** to the GitHub Release page:
 | Asset | Purpose |
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
-| `pulp-darwin-arm64.tar.gz` | CLI tarball (the user-facing tool) |
+| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, and runtime library) |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |
 | `pulp-windows-arm64.zip` | " |

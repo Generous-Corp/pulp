@@ -37,40 +37,39 @@ namespace methods {
     constexpr auto kInspectorEnable    = "Inspector.enable";
     constexpr auto kInspectorDisable   = "Inspector.disable";
     constexpr auto kInspectorGetInfo   = "Inspector.getInfo";
-    // Phase 0b: direct-manipulation edit capture. In-memory only at
-    // this phase; Phase 1 lands the pulp-tweaks.json sidecar.
+    // Direct-manipulation edit capture and tweak storage.
     //   applyTweak — record a single (anchor, dottedPath, value) edit.
-    //   listTweaks — return the current in-memory tweak table.
+    //   listTweaks — return the current tweak table and overlays.
     //   clearTweaks — remove tweaks (optionally scoped to anchor/path).
     //   setBypass — toggle the sibling `bypassed` overlay for an anchor.
     constexpr auto kInspectorApplyTweak  = "Inspector.applyTweak";
     constexpr auto kInspectorListTweaks  = "Inspector.listTweaks";
     constexpr auto kInspectorClearTweaks = "Inspector.clearTweaks";
     constexpr auto kInspectorSetBypass   = "Inspector.setBypass";
-    // Phase 2.5: setLocked toggles the sibling `locked` overlay for an
-    // anchor — a locked anchor is protected from bulk-clear / reimport.
-    // Mirrors setBypass; the management panel surfaces this state.
+    // setLocked toggles the sibling `locked` overlay for an anchor. A
+    // locked anchor is protected from bulk-clear / reimport. Mirrors
+    // setBypass; the management panel surfaces this state.
     constexpr auto kInspectorSetLocked   = "Inspector.setLocked";
-    // Phase 1: pulp-tweaks.json disk persistence. All three require a
-    // TweakStore wired in. Path defaults to $PULP_TWEAKS_FILE or the
-    // resolved <project>/pulp-tweaks.json — see TweakStore::default_tweaks_path().
+    // pulp-tweaks.json disk persistence. All three require a TweakStore
+    // wired in. Path defaults to $PULP_TWEAKS_FILE or the resolved
+    // <project>/pulp-tweaks.json — see TweakStore::default_tweaks_path().
     //   loadTweaks  — read disk -> replace in-memory state.
     //   saveTweaks  — write current in-memory state -> disk (atomic).
     //   setAutoSave — opt-in flush on every mutation.
     constexpr auto kInspectorLoadTweaks  = "Inspector.loadTweaks";
     constexpr auto kInspectorSaveTweaks  = "Inspector.saveTweaks";
     constexpr auto kInspectorSetAutoSave = "Inspector.setAutoSave";
-    // Phase 5.3: editor URI plumbing for the future source-jump action.
-    // setEditorUrlTemplate validates and stores the template; getEditorUrlTemplate
-    // returns the current effective template plus where it came from
-    // (env / config / default). See pulp/inspect/editor_url.hpp.
+    // Editor URL template plumbing for source-jump. setEditorUrlTemplate
+    // validates and stores the template; getEditorUrlTemplate returns the
+    // current effective template plus where it came from (env / config /
+    // default). See pulp/inspect/editor_url.hpp.
     constexpr auto kInspectorSetEditorUrlTemplate = "Inspector.setEditorUrlTemplate";
     constexpr auto kInspectorGetEditorUrlTemplate = "Inspector.getEditorUrlTemplate";
-    // Phase 5.1: the concrete source-jump action. Resolves the selected
-    // (or a given `anchorId`'s) view's recorded source location and formats
-    // the editor URL. It defaults to dry-run; callers must pass
-    // `dryRun:false` to hand the URL to the OS and open the user's editor.
-    // Returns {ok, url, path, line, col, launched}. See
+    // Concrete source-jump action. Resolves the selected (or a given
+    // `anchorId`'s) view's recorded source location and formats the
+    // editor URL. It defaults to dry-run; callers must pass
+    // `dryRun:false` to hand the URL to the OS and open the user's
+    // editor. Returns {ok, url, path, line, col, launched}. See
     // pulp/inspect/source_jump.hpp.
     constexpr auto kInspectorJumpToSource = "Inspector.jumpToSource";
 
@@ -87,9 +86,9 @@ namespace methods {
     constexpr auto kCSSGetTheme         = "CSS.getTheme";
     constexpr auto kCSSThemeChanged     = "CSS.themeChanged";
 
-    // LiveConstant domain (Tier A Slice 13). RPC for PULP_LIVE_CONSTANT
-    // surfaces — list/set/reset the registry-tracked sliders without
-    // opening the LiveConstantEditor overlay.
+    // LiveConstant domain. RPC for PULP_LIVE_CONSTANT surfaces —
+    // list/set/reset the registry-tracked sliders without opening the
+    // LiveConstantEditor overlay.
     constexpr auto kLiveConstList  = "LiveConstant.list";
     constexpr auto kLiveConstSet   = "LiveConstant.set";
     constexpr auto kLiveConstReset = "LiveConstant.reset";
@@ -98,9 +97,9 @@ namespace methods {
     constexpr auto kPerfGetMetrics      = "Performance.getMetrics";
     constexpr auto kPerfEnableTracking  = "Performance.enableTracking";
     constexpr auto kPerfMetrics         = "Performance.metrics";
-    // Tier A Slice 6: toggle DirtyTracker::debug_overlay() from the
-    // inspector. Body for set: {"enabled": <bool>}. get returns
-    // {"enabled": <bool>, "available": <bool>}.
+    // Toggle DirtyTracker::debug_overlay() from the inspector. Body for
+    // set: {"enabled": <bool>}. get returns {"enabled": <bool>,
+    // "available": <bool>}.
     constexpr auto kPerfSetRepaintFlash = "Performance.setRepaintFlash";
     constexpr auto kPerfGetRepaintFlash = "Performance.getRepaintFlash";
 

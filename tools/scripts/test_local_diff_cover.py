@@ -212,7 +212,7 @@ class ConfigKeysAreConsumed(unittest.TestCase):
     def _key_is_consumed(key: str, script_text: str, workflow_text: str) -> bool:
         """Structural check: key is read by an actual consumer pattern.
 
-        Codex P2 on PR #1152 — the previous `key in text` check matched
+        Per PR #1152 — the previous `key in text` check matched
         comments and docstrings, so a key mentioned only in a doc block
         looked "consumed". Match the executable read shapes we
         actually use:
@@ -265,7 +265,7 @@ class ConfigKeysAreConsumed(unittest.TestCase):
             f"remove it, or rename it with a leading underscore "
             f"(e.g. `_meta`) if it is documentation-only metadata. "
             f"NOTE: a comment-only mention does NOT count as consumed "
-            f"(Codex P2 on PR #1152).",
+            f"(see PR #1152).",
         )
 
     def test_comment_only_mention_does_not_count_as_consumed(self) -> None:

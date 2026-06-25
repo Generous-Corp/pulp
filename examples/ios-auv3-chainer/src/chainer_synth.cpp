@@ -25,8 +25,8 @@ constexpr double kTwoPi = 6.283185307179586;
 
 // "Chainer-style" iOS editor: title Label + Knob (bound to the Drive
 // parameter on the AU parameter tree) + Meter (audio-output peak). All
-// three widgets paint through the same Skia/Dawn GPU path the iOS-D.1
-// smoke validated; this view trades the cycling-quad smoke for a real
+// three widgets paint through the same Skia/Dawn GPU path the GPU smoke
+// example validates; this view trades the cycling-quad smoke for a real
 // plug-in editor shape so a HostApp screenshot looks like a plug-in.
 class ChainerView : public pulp::view::View {
 public:

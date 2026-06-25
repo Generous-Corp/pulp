@@ -1,9 +1,9 @@
 #pragma once
 
-// Hosted-editor → WindowHost attachment (item 4.4).
+// Hosted-editor → WindowHost attachment.
 //
-// PR #2844 (native-window embedding) established the canonical contract for
-// embedding a platform-native child view inside a Pulp WindowHost via
+// Native-window embedding uses the canonical contract for embedding a
+// platform-native child view inside a Pulp WindowHost via
 // WindowHost::attach_native_child_view / set_native_child_view_bounds /
 // detach_native_child_view. This header migrates the legacy "void* editor
 // handle" hosting path onto that canonical contract.
@@ -22,7 +22,7 @@
 // EditorAttachment is non-copyable, move-constructible. It is null-safe — if
 // the slot has no editor or the WindowHost has no factory for native child
 // embedding on this platform, create() returns nullptr and the host can fall
-// back to a separate top-level window (Phase 6.5 DocumentWindow et al).
+// back to a separate top-level window.
 
 // iOS skip: pulp::host (and therefore plugin_slot.hpp) is not on the include
 // path on iOS — iOS bundles never host third-party plugins. Use

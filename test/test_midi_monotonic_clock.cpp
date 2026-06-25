@@ -1,5 +1,5 @@
 // MonotonicMidiClock — seconds-since-open MIDI timestamp source
-// (#3327 / Linux catch-up L4). The Linux ALSA raw-midi path used to stamp
+// (#3327). The Linux ALSA raw-midi path used to stamp
 // every event `timestamp = 0.0`; this helper restores real monotonic
 // timing. The `now`-taking overloads are pure, so this suite verifies the
 // conversion deterministically without touching the wall clock. Runs on all

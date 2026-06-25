@@ -50,11 +50,10 @@ void RecordingCanvas::restore() {
 }
 
 void RecordingCanvas::restore_to_count(int target) {
-    // pulp #1368 — pop saves until depth matches `target`. Mirrors
-    // SkCanvas::restoreToCount semantics so CanvasWidget::paint() can
-    // defend against an unbalanced JS draw script. We record one
-    // DrawCommand::Type::restore per popped level so tests can assert
-    // on the count.
+    // Pop saves until depth matches `target`. Mirrors SkCanvas::restoreToCount
+    // semantics so CanvasWidget::paint() can defend against an unbalanced JS
+    // draw script. We record one DrawCommand::Type::restore per popped level
+    // so tests can assert on the count.
     if (target < 0) target = 0;
     while (save_depth_ > target) {
         commands_.push_back({DrawCommand::Type::restore});
@@ -126,9 +125,9 @@ void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
 }
 
 void RecordingCanvas::clip(FillRule rule) {
-    // pulp Wave 2 cheap wiring — capture the JS-supplied fillRule arg in
-    // f[0] (0 = nonzero, 1 = evenodd) so [wave2-canvas2d] band tests can
-    // assert the bridge plumbed `ctx.clip('evenodd')` end-to-end.
+    // Capture the JS-supplied fillRule in f[0] (0 = nonzero, 1 = evenodd)
+    // so bridge tests can assert `ctx.clip('evenodd')` reaches the command
+    // stream end-to-end.
     DrawCommand cmd{DrawCommand::Type::clip};
     cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
     commands_.push_back(cmd);
@@ -182,7 +181,7 @@ void RecordingCanvas::fill_rect(float x, float y, float w, float h) {
     commands_.push_back(cmd);
 }
 
-// pulp #929 — record clearRect distinctly from fill_rect so tests can assert
+// Record clearRect distinctly from fill_rect so tests can assert
 // CanvasWidget::paint() does not pre-fill its bounds with a solid background.
 void RecordingCanvas::clear_rect(float x, float y, float w, float h) {
     DrawCommand cmd{DrawCommand::Type::clear_rect};
@@ -246,8 +245,8 @@ void RecordingCanvas::set_font_full(const std::string& family, float size,
                                     int weight, int slant, float letter_spacing) {
     font_size_ = size;
     // Record both the legacy set_font (for back-compat with existing tests
-    // that count fonts) and the rich set_font_full so callers can assert
-    // on the propagated weight / slant / letter_spacing. pulp #927.
+    // that count fonts) and the rich set_font_full so callers can assert on
+    // the propagated weight / slant / letter_spacing.
     {
         DrawCommand cmd{DrawCommand::Type::set_font};
         cmd.text = family;
@@ -273,17 +272,16 @@ void RecordingCanvas::fill_text(const std::string& text, float x, float y) {
     DrawCommand cmd{DrawCommand::Type::fill_text};
     cmd.text = text;
     cmd.f[0] = x; cmd.f[1] = y;
-    // pulp #1525 — legacy 3-arg form: f[2]=0 means "no maxWidth constraint".
+    // Legacy 3-arg form: f[2]=0 means "no maxWidth constraint".
     cmd.f[2] = 0.0f;
     commands_.push_back(cmd);
 }
 
 void RecordingCanvas::fill_text_with_max_width(const std::string& text,
                                                 float x, float y, float max_width) {
-    // pulp #1525 — capture the maxWidth so harness tests can assert the
-    // bridge plumbed the optional fourth arg through. Negative / zero is
-    // the "no constraint" sentinel; f[2] preserves the raw value as
-    // received from the bridge.
+    // Capture the maxWidth so harness tests can assert the bridge plumbed the
+    // optional fourth arg through. Negative / zero is the "no constraint"
+    // sentinel; f[2] preserves the raw value as received from the bridge.
     DrawCommand cmd{DrawCommand::Type::fill_text};
     cmd.text = text;
     cmd.f[0] = x; cmd.f[1] = y;
@@ -305,7 +303,7 @@ float RecordingCanvas::measure_text(const std::string& text) {
     return static_cast<float>(text.size()) * 7.0f;
 }
 
-// ── issue-916: Canvas2D API gap closures ────────────────────────────────────
+// ── Canvas2D API command-stream coverage ────────────────────────────────────
 
 void RecordingCanvas::set_line_dash(const float* intervals, int count, float phase) {
     DrawCommand cmd{DrawCommand::Type::set_line_dash};
@@ -334,10 +332,9 @@ bool RecordingCanvas::draw_image_from_file(const std::string& path,
     return true;
 }
 
-// pulp #1737 — 9-arg drawImage source-rect form. Dst rect stays in
-// f[0..3] (matches the 5-arg test path); source rect (sx, sy, sw, sh)
-// goes into floats[0..3] so harness tests can assert sprite-sheet
-// slicing was plumbed end-to-end.
+// 9-arg drawImage source-rect form. Dst rect stays in f[0..3] (matches the
+// 5-arg test path); source rect (sx, sy, sw, sh) goes into floats[0..3] so
+// harness tests can assert sprite-sheet slicing was plumbed end-to-end.
 bool RecordingCanvas::draw_image_from_file_rect(const std::string& path,
                                                  float sx, float sy, float sw, float sh,
                                                  float dx, float dy, float dw, float dh) {
@@ -383,7 +380,7 @@ void RecordingCanvas::save_backdrop_filter(float x, float y, float w, float h,
     commands_.push_back(cmd);
 }
 
-// ── issue-925: box-shadow primitive ─────────────────────────────────────────
+// ── Box-shadow primitive ────────────────────────────────────────────────────
 
 void Canvas::draw_box_shadow(float x, float y, float w, float h,
                               float dx, float dy, float blur, float spread,
@@ -443,7 +440,7 @@ void RecordingCanvas::draw_box_shadow(float x, float y, float w, float h,
     commands_.push_back(std::move(cmd));
 }
 
-// ── issue-1434 batch 7: Canvas2D shadow* sticky state ──────────────────────
+// ── Canvas2D shadow* sticky state ───────────────────────────────────────────
 // Each setter records one command so widget-level tests can assert that the
 // bridge flushed the JS-side `ctx.shadowColor` / `ctx.shadowBlur` /
 // `ctx.shadowOffsetX` / `ctx.shadowOffsetY` writes through to the canvas
@@ -477,7 +474,7 @@ void RecordingCanvas::set_shadow_offset_y(float dy) {
     commands_.push_back(std::move(cmd));
 }
 
-// ── issue-1434 bridge-thin gap-fill: Canvas2D state setters ─────────────────
+// ── Canvas2D state setters ──────────────────────────────────────────────────
 // Mirror the shadow-state recording shape — one cmd per setter so the
 // canvas2d bridge harness can assert flush order without rasterizing.
 void RecordingCanvas::set_miter_limit(float limit) {
@@ -494,31 +491,30 @@ void RecordingCanvas::set_image_smoothing(bool enabled,
     commands_.push_back(cmd);
 }
 
-// pulp #1520 — capture Canvas2D ctx.direction. Enum packed into f[0]
-// (0=ltr, 1=rtl, 2=inherit). RecordingCanvas doesn't shape text — it
-// models the bridge intent so tests can assert the JS shim flushed
-// the direction setter at the right point in the command stream.
+// Capture Canvas2D ctx.direction. Enum packed into f[0] (0=ltr, 1=rtl,
+// 2=inherit). RecordingCanvas doesn't shape text — it models the bridge intent
+// so tests can assert the JS shim flushed the direction setter at the right
+// point in the command stream.
 void RecordingCanvas::set_direction(TextDirection direction) {
     DrawCommand cmd{DrawCommand::Type::set_direction};
     cmd.f[0] = static_cast<float>(direction);
     commands_.push_back(cmd);
 }
 
-// pulp #1520 — capture Canvas2D ctx.filter raw CSS string. The Skia
-// backend parses this into an SkImageFilter chain at draw time;
-// RecordingCanvas stores the source string verbatim so harness tests
-// can round-trip the bridge value without depending on a parser.
+// Capture Canvas2D ctx.filter raw CSS string. The Skia backend parses this
+// into an SkImageFilter chain at draw time; RecordingCanvas stores the source
+// string verbatim so harness tests can round-trip the bridge value without
+// depending on a parser.
 void RecordingCanvas::set_filter(const std::string& filter) {
     DrawCommand cmd{DrawCommand::Type::set_filter};
     cmd.text = filter;
     commands_.push_back(std::move(cmd));
 }
 
-// pulp #1434 bridge-thin gap-fill — capture Canvas2D ctx.createPattern
-// flushes. Image source string lives in `text`; tile modes go in
-// f[0] (x) and f[1] (y) as 0 = repeat, 1 = no_repeat. RecordingCanvas
-// doesn't decode the image — it models intent only, so the canvas2d
-// adapter can assert that the bridge issued the right setter at the
+// Capture Canvas2D ctx.createPattern flushes. Image source string lives in
+// `text`; tile modes go in f[0] (x) and f[1] (y) as 0 = repeat, 1 = no_repeat.
+// RecordingCanvas doesn't decode the image — it models intent only, so the
+// canvas2d adapter can assert that the bridge issued the right setter at the
 // right point in the command stream.
 void RecordingCanvas::set_fill_pattern(const std::string& image_src,
                                         PatternTileMode tile_x,
@@ -540,7 +536,7 @@ void RecordingCanvas::set_stroke_pattern(const std::string& image_src,
     commands_.push_back(std::move(cmd));
 }
 
-// ── Stroke gradients (pulp Wave 3 c2d.7) ────────────────────────────────────
+// ── Stroke gradients ────────────────────────────────────────────────────────
 //
 // Capture intent only — RecordingCanvas doesn't render. Tests assert on
 // the recorded command type + geometry to prove the bridge plumbed the
@@ -608,7 +604,7 @@ void RecordingCanvas::clear_stroke_gradient() {
     commands_.push_back({DrawCommand::Type::clear_stroke_gradient});
 }
 
-// ── issue-965: Canvas2D path API recording ──────────────────────────────────
+// ── Canvas2D path API recording ─────────────────────────────────────────────
 void RecordingCanvas::begin_path() {
     commands_.push_back({DrawCommand::Type::begin_path});
 }
@@ -646,9 +642,9 @@ void RecordingCanvas::close_path() {
 }
 
 void RecordingCanvas::fill_current_path(FillRule rule) {
-    // pulp Wave 2 cheap wiring — capture the JS-supplied fillRule arg in
-    // f[0] (0 = nonzero, 1 = evenodd) so [wave2-canvas2d] band tests can
-    // assert the bridge plumbed `ctx.fill('evenodd')` end-to-end.
+    // Capture the JS-supplied fillRule in f[0] (0 = nonzero, 1 = evenodd)
+    // so bridge tests can assert `ctx.fill('evenodd')` reaches the command
+    // stream end-to-end.
     DrawCommand cmd{DrawCommand::Type::fill_current_path};
     cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
     commands_.push_back(cmd);
@@ -658,7 +654,7 @@ void RecordingCanvas::stroke_current_path() {
     commands_.push_back({DrawCommand::Type::stroke_current_path});
 }
 
-// ── pulp #1521: native arc subpath recording ────────────────────────────────
+// ── Native arc subpath recording ────────────────────────────────────────────
 //
 // These mirror the Skia / CG implementations as a pure capture so widget
 // tests can assert on the emitted command stream without a raster surface.

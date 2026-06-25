@@ -1,11 +1,10 @@
 // font_flight_recorder.hpp
 //
-// Pulp #2163 — font v2 Slice 2.2. The FontFlightRecorder is the
-// process-global sink for FallbackTraceRecord events produced by
-// FontResolver every time a typeface resolves. It's a bounded
-// ring buffer; callers (the --font-trace CLI flag, the import-
-// missing-font-advisor, a developer's debug overlay) can drain it
-// to see exactly which font cascade step produced each glyph.
+// FontFlightRecorder is the process-global sink for FallbackTraceRecord
+// events produced by FontResolver every time a typeface resolves. It's a
+// bounded ring buffer; callers (the --font-trace CLI flag, the
+// import-missing-font-advisor, a developer's debug overlay) can drain it to
+// see exactly which font cascade step produced each glyph.
 //
 // The recorder runs always-on with a reasonable default capacity
 // (1024 records) — there's no measurable overhead at typical UI
@@ -70,9 +69,9 @@ private:
 };
 
 /// Convenience: drain the global recorder and emit one JSON object per
-/// record to `out`. Used by `pulp-ui-preview --font-trace --format=json`
-/// (Slice 2.2.b CLI wiring lands separately) + the import-missing-font-
-/// advisor.
+/// record to `out`. Intended drain path for a future
+/// `pulp-ui-preview --font-trace --format=json` flag and the
+/// import-missing-font-advisor.
 std::string flight_recorder_drain_json();
 
 } // namespace pulp::canvas

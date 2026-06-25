@@ -47,7 +47,7 @@
       "yoga": 56,
       "react": 0,
       "html": 59,
-      "canvas2d": 63,
+      "canvas2d": 66,
       "imports": 5
     },
     "changelog": {
@@ -6531,9 +6531,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
-        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_css_per_edge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"addEventListener('drop', fn) routes through registerDrop\""
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 `wheel` and `drag*`/`drop` event types are now routed through `registerWheel` / `registerDrop` from inside `_registerNativeEvent`, so DOM consumers no longer need to call the platform-specific bridge fns directly. The full multi-stage drag lifecycle (native drag-image rendering, dragstart/drag/dragend on the source element) remains a roadmap item \u2014 the bridge fires a single `drop` callback at completion and we synthesize a DragEvent-shaped object for the target element. Hover events fixed earlier in PR #1173 (pulp #1149 part a).",
       "issue": "1149"
@@ -7226,7 +7225,7 @@
     }
   },
   "canvas2d": {
-    "_note": "Populated 2026-05-04 from web-compat-canvas.js (~36 prototype methods + 7 attrs) crossed against widget_bridge.cpp's canvas* register_function entries (~47 funcs) and the Skia/CG backends in core/canvas/. Spec source: HTML Living Standard CanvasRenderingContext2D / https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D. The bridge layer is consistent across Skia (Linux/Windows) and CG (mac); divergences are noted per-entry. Heavy expansion landed in PR #1348 (pulp #1346 / #1322): save, restore, setTransform, translate, scale, rotate, globalAlpha, globalCompositeOperation, createLinearGradient, createRadialGradient, arc, arcTo, bezierCurveTo, quadraticCurveTo, rect, roundRect, ellipse, clip, fillText, strokeText. Skia gradient shape fills landed in #1353; CG counterpart in #1360 (merged 2026-05-03).",
+    "_note": "Populated 2026-05-04 from web-compat-canvas.js (~36 prototype methods + 7 attrs), refreshed against the Canvas2D bridge manifest and split canvas2d_api.cpp bridge source plus the Skia/CG backends in core/canvas/. Spec source: HTML Living Standard CanvasRenderingContext2D / https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D. The bridge layer is consistent across Skia (Linux/Windows) and CG (mac); backend notes are preserved per entry where useful. Heavy expansion landed in PR #1348 (pulp #1346 / #1322): save, restore, setTransform, translate, scale, rotate, globalAlpha, globalCompositeOperation, createLinearGradient, createRadialGradient, arc, arcTo, bezierCurveTo, quadraticCurveTo, rect, roundRect, ellipse, clip, fillText, strokeText. Skia gradient shape fills landed in #1353; CG counterpart in #1360 (merged 2026-05-03).",
     "canvas2d/fillRect": {
       "status": "supported",
       "mapsTo": "web-compat-canvas.js: ctx.fillRect(x,y,w,h) -> _syncGlobalState + _applyFillStyle + canvasRect(id,x,y,w,h). Bridge `canvasRect` honors the active fillStyle / gradient via the use_active_style path (#968).",

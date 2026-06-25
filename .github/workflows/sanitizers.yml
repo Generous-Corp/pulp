@@ -95,7 +95,7 @@ jobs:
           # their own PULP_SANITIZER_<T>_RUNS_ON_JSON repo variable — they do NOT
           # read PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON. This matches the
           # coverage lane's deliberate stance (coverage.yml resolve-runners):
-          # advisory macОS lanes (coverage / sanitizer / release) must never
+          # advisory macOS lanes (coverage / sanitizer / release) must never
           # spill onto the shared build-gate pool that serves the required
           # `macos` check. Because Namespace macOS routing is OFF by default
           # (kept UNSET for cost control — see .shipyard/config.toml and
@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           resolve() {
             # $5 (optional): comma-separated labels the resolved selector must
-            # NOT contain. Mirrors coverage.yml. Used to hard-fail if a macОS
+            # NOT contain. Mirrors coverage.yml. Used to hard-fail if a macOS
             # sanitizer is ever routed onto the required build-gate pool
             # (pulp-build / pulp-build-vm), which would contend with the
             # required `macos` check. A bare GitHub-hosted label (e.g.
@@ -124,7 +124,7 @@ jobs:
               --default-label "$4" \
               ${5:+--deny-labels "$5"}
           }
-          # macОS sanitizers carry the deny-labels guard so a dedicated
+          # macOS sanitizers carry the deny-labels guard so a dedicated
           # ephemeral VM lane (label pulp-sanitizer-vm-macos, #4101) can never
           # be misrouted onto the gate pool. The guard is plumbed for all three
           # even though they are flipped to a local lane ONE AT A TIME behind
@@ -153,7 +153,7 @@ jobs:
           # (or a debugging mistake on the var) would fail resolve-runners
           # entirely and block ASan/TSan/UBSan for every PR — turning a
           # dispatch-only knob into a required-check outage.
-          # See #438 P2 Codex review on #424.
+          # See #438 / #424.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             rtsan=$(resolve \
               "RealtimeSanitizer (Linux x86_64)" \

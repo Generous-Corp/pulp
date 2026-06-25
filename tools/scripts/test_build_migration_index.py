@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Fixture tests for tools/scripts/build_migration_index.py.
 
-Regression coverage for the Codex post-merge sweep wave 3 findings on
-PR #571 (release-discovery Slice 3):
+Regression coverage for migration-index validation:
 
-- P2: `bool("false")` is True — if a schema-incorrect `breaking = "false"`
+- `bool("false")` is True — if a schema-incorrect `breaking = "false"`
   (quoted string) slipped through, the codegen silently emitted a
   `breaking = true` row. The generator must reject non-boolean values
   for a boolean field rather than coercing.
-- P2: `version = "abc"` or `version = "0.29"` was silently keyed as
+- `version = "abc"` or `version = "0.29"` was silently keyed as
   (0,0,0) in the sort, and the runtime hop-filter — which parses semver
   from the same string at load time — dropped the entry completely.
   Users would never see the note. Reject non-semver versions at
@@ -64,7 +63,7 @@ class LoadEntryValidation(unittest.TestCase):
             self.assertEqual(e.summary, "s")
 
     def test_string_value_rejected_for_boolean_field(self):
-        # Codex P2: bool("false") is True.
+        # Regression guard: bool("false") is True.
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td)
             doc = _write_doc(
@@ -78,7 +77,7 @@ class LoadEntryValidation(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 2)
 
     def test_non_semver_version_rejected(self):
-        # Codex P2: silent (0,0,0) sort + runtime hop-filter drops entry.
+        # Regression guard: silent (0,0,0) sort + runtime hop-filter drops entry.
         # SEMVER_RE deliberately allows prerelease/build suffixes like
         # "0.27.0-rc.1" or "0.27.0.beta" — those are rejected as
         # "not semver" in the stricter sense, but the generator has

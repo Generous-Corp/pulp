@@ -1,4 +1,4 @@
-// Phase 3b live-editable field-edit tests, split from test_inspector.cpp (P11-5, #2647).
+// Inspector live-editable field-edit tests.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -31,12 +31,11 @@
 using namespace pulp::view;
 using namespace pulp::inspect;
 
-// ── Phase 3b — live-editable box-model fields ─────────────────────────────
+// ── Live-editable box-model fields ─────────────────────────────────────────
 //
 // Click a numeric value in the property panel → enter edit mode →
 // type / arrow-nudge / Enter to commit (tweak emitted) / Esc to
-// cancel. The tweak path reuses Phase 0b PR-C-1's
-// emit_tweak_for_selection() so persistence (Phase 1 disk write)
+// cancel. The tweak path reuses emit_tweak_for_selection() so persistence
 // gets keyboard edits for free.
 //
 // Test surface uses begin_field_edit() / handle_key_event() directly
@@ -388,12 +387,11 @@ TEST_CASE("InspectorOverlay Phase 3b: deactivating inspector cancels active edit
 
 TEST_CASE("InspectorOverlay Phase 3b: Esc while editing does NOT exit inspector",
           "[inspect][overlay][phase3b]") {
-    // Spec (updated — maintainer's Figma-like Esc): Esc inside an edit cancels
-    // the edit (selection intact). After that, Esc with a selection DESELECTS
-    // (it no longer ascends to the parent), and Esc with nothing selected is a
-    // NO-OP — Esc never exits the inspector (Cmd+I / the window close button
-    // does that). The inspector stays active throughout so hover + click keep
-    // working without a Cmd+I cycle.
+    // Esc inside an edit cancels the edit (selection intact). After that, Esc
+    // with a selection DESELECTS (it no longer ascends to the parent), and Esc
+    // with nothing selected is a NO-OP — Esc never exits the inspector (Cmd+I /
+    // the window close button does that). The inspector stays active throughout
+    // so hover + click keep working without a Cmd+I cycle.
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     REQUIRE(s.overlay.is_active());
@@ -431,4 +429,3 @@ TEST_CASE("InspectorOverlay Phase 3b: Tab without paint does nothing extra",
     // find a next field — we're no longer editing.
     REQUIRE_FALSE(s.overlay.is_editing());
 }
-

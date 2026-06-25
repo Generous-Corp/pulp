@@ -1,4 +1,4 @@
-// update_check.cpp — Implementation for release-discovery Slice 2 (#547).
+// update_check.cpp — latest-release cache and banner helpers.
 //
 // All non-trivial string/time logic lives here so the unit tests can
 // compile just update_check.cpp + the test TU without pulling in

@@ -1,10 +1,10 @@
 // test_cli_version_diag.cpp — Unit tests for `pulp doctor --versions`
 //
-// Issue #499 Slice 1. Exercises the pure-logic core of version_diag
-// (semver parse/compare + skew analyzer) and the plugin.json scraper,
-// without shelling out to the built binary. Shell-out coverage lives
-// in test_cli_shellout.cpp ([cli][shellout][issue-499]) and in the
-// cli-doctor-versions CTest case registered in tools/cli/CMakeLists.txt.
+// Exercises the pure-logic core of version_diag (semver parse/compare + skew
+// analyzer) and the plugin.json scraper, without shelling out to the built
+// binary. Shell-out coverage lives in test_cli_shellout.cpp
+// ([cli][shellout][issue-499]) and in the cli-doctor-versions CTest case
+// registered in tools/cli/CMakeLists.txt.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,8 +30,8 @@ struct TempDir {
     fs::path path;
     TempDir() {
         auto base = fs::temp_directory_path();
-        // %p gives a unique per-process token; combine with a counter
-        // for parallel test isolation.
+        // The this-pointer value gives a unique per-instance token; combine
+        // with a counter for parallel test isolation.
         static std::atomic<int> seq{0};
         int n = seq.fetch_add(1);
         path = base / ("pulp-version-diag-test-" + std::to_string(
@@ -348,12 +348,12 @@ TEST_CASE("read_project_cli_min_version ignores an empty project root",
     REQUIRE(v.raw.empty());
 }
 
-// Codex 2026-04-21 review on #546: the earlier scanner treated any line
-// containing the `cli_min_version` substring as a real config entry and
-// grabbed the next quoted value. A commented example therefore produced
-// a false skew warning in `pulp doctor --versions`. The fix strips
-// in-line `#` comments before matching, so the commented line is
-// silently ignored and `read_project_cli_min_version` returns empty.
+// Issue #546: the earlier scanner treated any line containing the
+// `cli_min_version` substring as a real config entry and grabbed the next
+// quoted value. A commented example therefore produced a false skew warning in
+// `pulp doctor --versions`. The fix strips in-line `#` comments before
+// matching, so the commented line is silently ignored and
+// `read_project_cli_min_version` returns empty.
 TEST_CASE("read_project_cli_min_version ignores commented-out examples",
           "[version-diag][issue-499][codex-546]") {
     TempDir tmp;
@@ -413,7 +413,7 @@ TEST_CASE("read_project_cli_min_version ignores unquoted and malformed values",
     REQUIRE(v.raw.empty());
 }
 
-// ── Slice 1b (#552) — per-project skew via VersionReport.projects ──
+// ── Per-project skew via VersionReport.projects (#552) ─────────────
 
 TEST_CASE("analyze warns per-project when project[].cli_min exceeds CLI",
           "[version-diag][issue-552]") {
@@ -520,7 +520,7 @@ TEST_CASE("analyze uses the path basename when project name is empty",
     REQUIRE(saw_basename);
 }
 
-// ── Slice 6 (#551) — plugin ↔ CLI skew detection ─────────────────────
+// ── Plugin ↔ CLI skew detection (#551) ─────────────────────────────
 
 TEST_CASE("read_plugin_min_cli_version scrapes min_cli_version field",
           "[version-diag][issue-551]") {
@@ -542,9 +542,9 @@ TEST_CASE("read_plugin_min_cli_version scrapes min_cli_version field",
 
 TEST_CASE("read_plugin_min_cli_version is empty when the field is absent",
           "[version-diag][issue-551]") {
-    // Forward-compatible: older plugin builds (pre-Slice 6) shipped no
-    // min_cli_version field. The helper must return empty, not choke,
-    // so the skew analyzer silently skips the check.
+    // Forward-compatible: older plugin builds shipped no min_cli_version field.
+    // The helper must return empty, not choke, so the skew analyzer silently
+    // skips the check.
     TempDir tmp;
     auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
     write_file(plugin_json, R"({

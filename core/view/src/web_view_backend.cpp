@@ -30,8 +30,7 @@ namespace pulp::view {
 // When PULP_BUILD_WEBVIEW is OFF the WebView implementation file
 // (web_view.cpp) is excluded from the build, so reporting "wkwebview"
 // would lie about a build that physically cannot construct a
-// WebViewPanel. Honor the documented "none if disabled" contract
-// (Codex PR #3016 P2).
+// WebViewPanel. Honor the documented "none if disabled" contract.
 #if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
 std::string detect_webview_backend() { return "none"; }
 bool webview_backend_available() { return false; }

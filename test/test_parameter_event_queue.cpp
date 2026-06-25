@@ -111,6 +111,68 @@ TEST_CASE("ParameterEventQueue hot operations are allocation-free",
     REQUIRE(allocated_bytes == 0);
 }
 
+TEST_CASE("ParameterEventQueue sort() yields correct order under a full reversed flood",
+          "[host][parameter-event-queue][rt-safety][flood]") {
+    // Adversarial worst case for the insertion sort: a capacity-sized batch in
+    // strictly descending sample_offset. Must still produce correct ascending
+    // order, drop nothing, and never allocate (bounded O(n^2), n == kCapacity).
+    ParameterEventQueue q;
+    const auto cap = q.capacity();
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (std::size_t i = 0; i < cap; ++i) {
+            // offset = cap - i  => first push has the largest offset (reversed).
+            REQUIRE(q.push(ParameterEvent{
+                .param_id = static_cast<pulp::state::ParamID>(i),
+                .sample_offset = static_cast<int32_t>(cap - i),
+                .value = static_cast<float>(i),
+            }));
+        }
+        q.sort();
+        allocation_count = probe.allocation_count();
+    }
+
+    REQUIRE(allocation_count == 0);
+    const auto events = q.events();
+    REQUIRE(events.size() == cap);
+    for (std::size_t i = 1; i < events.size(); ++i) {
+        REQUIRE(events[i - 1].sample_offset <= events[i].sample_offset);
+    }
+    // The smallest offset (1, from the last push) sorts to the front; the
+    // largest (cap, from the first push) to the back.
+    REQUIRE(events.front().sample_offset == 1);
+    REQUIRE(events.back().sample_offset == static_cast<int32_t>(cap));
+}
+
+TEST_CASE("ParameterEventQueue sort() is stable across duplicate offsets at scale",
+          "[host][parameter-event-queue][flood]") {
+    // Many events share a handful of offsets; the stable sort must preserve the
+    // push order within each offset bucket. param_id encodes push order.
+    ParameterEventQueue q;
+    const auto cap = q.capacity();
+    for (std::size_t i = 0; i < cap; ++i) {
+        REQUIRE(q.push(ParameterEvent{
+            .param_id = static_cast<pulp::state::ParamID>(i),
+            .sample_offset = static_cast<int32_t>(i % 4),  // 4 dense buckets
+            .value = 0.0f,
+        }));
+    }
+
+    q.sort();
+
+    const auto events = q.events();
+    REQUIRE(events.size() == cap);
+    // Offsets non-decreasing overall; within each equal-offset run the
+    // param_ids (push order) stay strictly increasing => stable.
+    for (std::size_t i = 1; i < events.size(); ++i) {
+        REQUIRE(events[i - 1].sample_offset <= events[i].sample_offset);
+        if (events[i - 1].sample_offset == events[i].sample_offset) {
+            REQUIRE(events[i - 1].param_id < events[i].param_id);
+        }
+    }
+}
+
 TEST_CASE("ParameterEventQueue exposes overflow telemetry",
           "[host][parameter-event-queue][telemetry][phase2]") {
     ParameterEventQueue q;

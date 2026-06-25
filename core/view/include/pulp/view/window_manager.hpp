@@ -163,7 +163,7 @@ public:
 
     /// Set the shared GPU device handle (Dawn wgpu::Device*).
     /// All windows MUST share the same device. Each window gets its own
-    /// surface/swapchain on this device. Phase 13 (Three.js bridge) will
+    /// surface/swapchain on this device. Three.js/WebGPU bridge surfaces
     /// also use this shared device.
     void set_shared_gpu_device(void* device_handle);
 

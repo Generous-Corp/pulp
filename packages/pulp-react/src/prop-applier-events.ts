@@ -1,10 +1,8 @@
-// prop-applier-events — overlay-claim / ARIA-driven interaction props
-// (P5-NEW-A split of the former monolithic applyOne switch).
+// prop-applier-events — overlay-claim / ARIA-driven interaction props.
 //
 // `applyEventProp(id, key, value)` returns true if it handled the key,
-// false otherwise. Behavior is byte-identical to the matching cases in
-// the pre-split prop-applier switch — same bridge calls in the same
-// order.
+// false otherwise. Each handled prop emits the bridge calls expected by
+// the corresponding event-routing contract.
 //
 // Note: `on*` event handlers (onClick, onMouseEnter, …) are NOT routed
 // here — they go through `applyEventHandler` in prop-applier.ts, which
@@ -20,26 +18,24 @@ export function applyEventProp(
     value: unknown,
 ): boolean {
     switch (key) {
-        // pulp #1148 — generalized overlay-click routing. `overlay={true}`
-        // claims the view as the active click-eligible overlay so React
-        // popovers built on `<View position="absolute">` receive clicks
-        // even though hit_test would otherwise resolve to a sibling. The
-        // matching releaseOverlay is emitted by applyChangedProps when
-        // the prop flips off, and by detach() at unmount.
+        // Generalized overlay-click routing. `overlay={true}` claims the
+        // view as the active click-eligible overlay so React popovers built
+        // on `<View position="absolute">` receive clicks even though
+        // hit_test would otherwise resolve to a sibling. The matching
+        // releaseOverlay is emitted by applyChangedProps when the prop flips
+        // off, and by detach() at unmount.
         case 'overlay':
             if (value) { call('claimOverlay', id); return true; }
             call('releaseOverlay', id);
             return true;
 
-        // pulp ARIA modal/popup auto-overlay — UX best-practice default.
+        // ARIA modal/popup auto-overlay. This makes semantically modal
+        // controls dismissable by default without each consumer duplicating
+        // overlay-position heuristics.
         // When the JSX declares an ARIA role that semantically IS a
         // dismissable overlay (`role="dialog" | "alertdialog" | "menu" |
         // "listbox"`) or sets `aria-modal="true"`, claim the overlay so
-        // Esc-dismiss + outside-click routing fire automatically. Pre-fix,
-        // every consumer (Spectr's dom-adapter, etc.) had to opt in by
-        // mirroring a position:absolute heuristic, which missed inset:0
-        // full-screen modal backdrops (the most common modal pattern) and
-        // every dropdown/menu authored without explicit positioning.
+        // Esc-dismiss + outside-click routing fire automatically.
         //
         // Override semantics: an explicit `overlay={false}` still wins
         // because applyChangedProps emits that case AFTER the role case

@@ -10,6 +10,8 @@ import {
   widgetKindByNamePrefix,
   entryForKind,
   LIBRARY_VERSION,
+  customControlFactoryId,
+  type DesignControlEntry,
 } from "../src/library-registry";
 import manifest from "../library-manifest.json";
 
@@ -69,4 +71,29 @@ test("entryForKind + LIBRARY_VERSION are wired from the manifest", () => {
   assert.ok(knob);
   assert.equal(knob.component_set_key, manifest.widgets.knob.component_set_key);
   assert.equal(knob.name_prefix, "Pulp / Knob");
+});
+
+// ── Custom-control resolution from merged package fragments ─────────────────
+const dcEntries: DesignControlEntry[] = [
+  { factory_id: "acme.spinner", component_set_key: "1:2abc", name_prefix: "Acme / Spinner" },
+  { factory_id: "acme.xy", name_prefix: "Acme / XY" },
+];
+
+test("customControlFactoryId: component-set key is authoritative", () => {
+  assert.equal(customControlFactoryId("1:2abc", "Whatever", dcEntries), "acme.spinner");
+});
+
+test("customControlFactoryId: name prefix is the fallback (case-insensitive)", () => {
+  assert.equal(customControlFactoryId(null, "acme / xy pad", dcEntries), "acme.xy");
+  assert.equal(customControlFactoryId(undefined, "Acme / Spinner Large", dcEntries), "acme.spinner");
+});
+
+test("customControlFactoryId: key match wins over a different name", () => {
+  assert.equal(customControlFactoryId("1:2abc", "Acme / XY", dcEntries), "acme.spinner");
+});
+
+test("customControlFactoryId: no match → undefined (never a stray factory)", () => {
+  assert.equal(customControlFactoryId("9:9", "Reverb", dcEntries), undefined);
+  assert.equal(customControlFactoryId(null, null, dcEntries), undefined);
+  assert.equal(customControlFactoryId("1:2abc", "x", []), undefined);
 });

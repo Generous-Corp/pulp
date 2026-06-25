@@ -39,11 +39,10 @@ jobs:
         working-directory: packages/pulp-react
 
       - name: Test (with coverage)
-        # pulp #1886 Phase 1 — measure-only. The vitest v8 lane emits a
-        # Cobertura XML under `packages/pulp-react/coverage/`; Codecov
-        # consumes it via the upload step below. No thresholds enforced
-        # at this step (`coverage.yml` runs the diff-cover gate with the
-        # per-tier `continue-on-error` policy through Phase 1).
+        # Measure-only Vitest coverage. The v8 lane emits Cobertura
+        # XML under `packages/pulp-react/coverage/`; Codecov consumes
+        # it via the upload step below. Threshold enforcement lives in
+        # the canonical Coverage workflow, not this package build.
         run: npm run test:coverage
         working-directory: packages/pulp-react
 

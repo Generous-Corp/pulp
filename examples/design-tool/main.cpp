@@ -14,7 +14,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/view/viewport_reconcile.hpp>
-#include <pulp/inspect/inspector_overlay.hpp>  // WYSIWYG T6 — in-canvas overlay
+#include <pulp/inspect/inspector_overlay.hpp>  // in-canvas overlay
 #include <pulp/inspect/tweak_store.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/runtime/system.hpp>
@@ -164,15 +164,15 @@ static void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
-    // pulp-internal #70 — defense-in-depth GPU host check. The CMake
-    // build gate at examples/design-tool/CMakeLists.txt should refuse
-    // to configure without PULP_HAS_SKIA, but the same check repeated
-    // here at startup catches the case where someone built with
+    // Defense-in-depth GPU host check. The CMake build gate at
+    // examples/design-tool/CMakeLists.txt should refuse to configure without
+    // PULP_HAS_SKIA, but the same check repeated here at startup catches the case
+    // where someone built with
     // -DPULP_ENABLE_GPU=OFF or hand-edited the example out of the
     // mandatory list. Without Skia/Dawn the design-viewport and
     // aspect-lock are no-ops (set_design_viewport / set_fixed_aspect_
     // ratio are base-class no-ops) and the user gets a broken UX with
-    // no obvious cause — burned ~3h of session in 2026-05.
+    // no obvious cause.
 #ifndef PULP_HAS_SKIA
     std::cerr <<
         "FATAL: pulp-design-tool was built without PULP_HAS_SKIA. The GPU "
@@ -186,11 +186,11 @@ int main(int argc, char* argv[]) {
 
     fs::path js_path;
     AutomationOptions automation;
-    uint64_t exit_after_ms = 0;     // pulp-internal #71 — 0 = disabled (normal interactive use)
-    bool no_show_window = false;    // pulp-internal #71 — true = skip Dock icon + window display
-    // pulp-internal #70 — design viewport sizing. Operator-level CLI
-    // overrides; if both stay 0 the size is read from JS metadata,
-    // auto-measured from the view tree, or falls back to 1320×860.
+    uint64_t exit_after_ms = 0;     // 0 = disabled (normal interactive use)
+    bool no_show_window = false;    // true = skip Dock icon + window display
+    // Design viewport sizing. Operator-level CLI overrides; if both stay 0 the
+    // size is read from JS metadata, auto-measured from the view tree, or falls
+    // back to 1320×860.
     float cli_design_w = 0.0f;
     float cli_design_h = 0.0f;
 
@@ -353,10 +353,9 @@ int main(int argc, char* argv[]) {
     // Open window — title derives from the script filename so a user
     // running `pulp-design-tool --script spectr/editor.js` sees "Spectr —
     // editor.js" in the title bar rather than the generic "Pulp Style
-    // Designer". pulp-internal #61. Stable identifier: strip extension,
-    // keep the immediate parent directory if it looks meaningful (not
-    // "dist" / "build" / "out"), fall back to "Pulp Design Tool" only
-    // when no script was given.
+    // Designer". Stable identifier: strip extension, keep the immediate parent
+    // directory if it looks meaningful (not "dist" / "build" / "out"), fall back
+    // to "Pulp Design Tool" only when no script was given.
     WindowOptions opts;
     {
         std::string title;
@@ -395,8 +394,7 @@ int main(int argc, char* argv[]) {
     // canvas-refit both fail. The window host instead pins the root
     // at design size and applies an aspect-correct paint-time fit.
     //
-    // pulp-internal #70 — auto-measure / metadata-driven viewport.
-    // Priority order (first match wins):
+    // Auto-measure / metadata-driven viewport priority order (first match wins):
     //   1. CLI flag --design-width / --design-height (operator override)
     //   2. PULP_DESIGN_WIDTH / _HEIGHT env vars (CI / scripted runs)
     //   3. globalThis.__pulpDesignViewport__ = { width, height } in JS
@@ -596,21 +594,19 @@ int main(int argc, char* argv[]) {
 
     opts.width  = static_cast<uint32_t>(kDesignWidth);
     opts.height = static_cast<uint32_t>(kDesignHeight);
-    // pulp-internal #70 — min size = settled size. The probe-scan
-    // settled width is the smallest window where the JSX renders
-    // without column-overlap. Going below that (which the previous
-    // 0.5x min-floor allowed) shrunk the viewport's uniform scale
-    // below 1.0 and produced unusably-tiny knob sizes, AND on some
-    // drag paths macOS's aspect-lock would slip and the bands could
-    // overlap. Pinning min to settled size + windowWillResize aspect-
-    // snap together guarantee the window can only grow proportionally
-    // above the natural authoring size, never shrink into the bad
-    // zone.
+    // Min size = settled size. The probe-scan settled width is the smallest
+    // window where the JSX renders without column-overlap. Going below that
+    // (which the previous 0.5x min-floor allowed) shrunk the viewport's uniform
+    // scale below 1.0 and produced unusably-tiny knob sizes, AND on some drag
+    // paths macOS's aspect-lock would slip and the bands could overlap. Pinning
+    // min to settled size + windowWillResize aspect-snap together guarantee the
+    // window can only grow proportionally above the natural authoring size, never
+    // shrink into the bad zone.
     opts.min_width  = static_cast<uint32_t>(kDesignWidth);
     opts.min_height = static_cast<uint32_t>(kDesignHeight);
     opts.resizable = true;
     opts.use_gpu = true;
-    opts.initially_hidden = no_show_window;  // pulp-internal #71
+    opts.initially_hidden = no_show_window;
 
     // pulp #1899 — clamp any oversize absolute-positioned descendants
     // to the design viewport before first layout, so runtime-imported
@@ -642,12 +638,12 @@ int main(int argc, char* argv[]) {
         std::cout << "Window closed\n";
     });
 
-    // ── WYSIWYG T6 — in-canvas move/resize/reflow overlay ──────────────────
+    // ── In-canvas move/resize/reflow overlay ───────────────────────────────
     //
     // Wire the SAME InspectorOverlay + install_inspector_hooks that ui-preview
-    // and the standalone host use, so the design tool gets the WYSIWYG direct-
+    // and the standalone host use, so the design tool gets the direct
     // manipulation layer (drag-to-move, corner-resize, reflow reorder/reparent,
-    // Text-tool inline edit with the T2 caret/selection) on its live JS-built
+    // Text-tool inline edit with caret/selection) on its live JS-built
     // view tree.
     //
     // Clean integration with design-tool's existing JS-side inspector:
@@ -716,10 +712,10 @@ int main(int argc, char* argv[]) {
             bridge->set_repaint_callback([&window] {
                 if (window) window->repaint();
             });
-            // Codex P2 — re-run viewport reconciliation against the
-            // freshly-rebuilt tree using the CURRENT window size, not
-            // the initial opts.* values (the user may have resized
-            // since launch). Without this, a hot-reloaded script with
+            // Re-run viewport reconciliation against the freshly-rebuilt
+            // tree using the current window size, not the initial opts.*
+            // values (the user may have resized since launch). Without
+            // this, a hot-reloaded script with
             // oversize absolute roots regresses to the same off-screen
             // layout that the cold-start reconcile call (line ~295)
             // exists to prevent.
@@ -754,10 +750,10 @@ int main(int argc, char* argv[]) {
     dispatch_source_set_event_handler(reload_timer, ^{
         try {
             if (*bridge_slot) {
-                // pulp-internal #71 — full per-tick bridge pump. Both halves
-                // are required: poll_async_results drains async-exec
-                // results + queued frame callbacks; service_frame_callbacks
-                // drains JS setTimeout / setInterval timers via
+                // Full per-tick bridge pump. Both halves are required:
+                // poll_async_results drains async-exec results + queued frame
+                // callbacks; service_frame_callbacks drains JS setTimeout /
+                // setInterval timers via
                 // __flushTimers__. Skipping the second call leaves every
                 // imported app's polling-state-update path frozen — the
                 // app's React tree never re-evaluates because setInterval
@@ -775,7 +771,7 @@ int main(int argc, char* argv[]) {
     });
     dispatch_resume(reload_timer);
 
-    // pulp-internal #71 — auto-exit support for live-host smoke tests
+    // Auto-exit support for live-host smoke tests
     // (tools/import-validation/live-host-pump-smoke.sh). dispatch_after on
     // the main queue calls window->request_close() cleanly so the run loop
     // exits via the normal close path rather than SIGTERM. No-op when

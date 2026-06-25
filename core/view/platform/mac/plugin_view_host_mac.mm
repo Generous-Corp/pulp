@@ -646,12 +646,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     if (self.rootView) {
         [self collectAccessibleChildren:self.rootView into:children];
     }
-    // pulp #2255 (font v2 Slice 2.6 macOS) — merge in any
-    // TextAccessibilityNodes registered through the cross-platform
-    // text-a11y scaffold. The Pulp-View-role tree above and the text
-    // registry are independent surfaces; without this merge the
-    // registry would be a private map and VoiceOver would never
-    // discover painted text registered via
+    // Merge any TextAccessibilityNodes registered through the
+    // cross-platform text-a11y scaffold. The Pulp-View-role tree above
+    // and the text registry are independent surfaces; without this
+    // merge the registry would be a private map and VoiceOver would
+    // never discover painted text registered via
     // register_text_accessibility_node().
     NSArray* text_elements = pulp::view::pulp_text_accessibility_all_elements_macos();
     for (NSAccessibilityElement* el in text_elements) {
@@ -720,7 +719,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
             // before hit_test. Painting them outside the transform would put
             // them at root coords in window space → visually misaligned and
             // non-clickable at any host size that isn't exactly design size.
-            // Matches the standalone host (pulp PR #1984 Codex P1).
+            // Matches the standalone host.
             pulp::view::View::paint_overlays(canvas, self.rootView);
             canvas.restore_to_count(saved);
         } else {
@@ -1507,7 +1506,6 @@ public:
                skia_surface_->is_available();
     }
 
-    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
     // Mirrors WindowHost::gpu_surface() so a scripted UI mounted inside an
     // AUv3 / VST3 / CLAP editor can route navigator.gpu /
     // canvas.getContext('webgpu') through the same wgpu::Surface that
@@ -1711,7 +1709,7 @@ private:
             // coords, mouse input inverse-maps window→root before hit_test.
             // Painting outside the transform would visually misalign + make
             // overlays non-clickable at any non-design-size host. Matches
-            // the standalone GPU host (pulp PR #1984 Codex P1).
+            // the standalone GPU host.
             View::paint_overlays(canvas, &root_);
             canvas.restore_to_count(saved);
         } else {
@@ -2021,7 +2019,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
             return host;
         }
         // GPU init failed (no Dawn/Metal adapter in this host process) — fall
-        // back to the CoreGraphics host so the editor never disappears (item 9).
+        // back to the CoreGraphics host so the editor never disappears.
         // The adapter's runtime scream-guard logs the mismatch loudly.
         host.reset();
     }

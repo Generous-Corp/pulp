@@ -1,17 +1,9 @@
 // cli_doctor_helpers.cpp — `pulp doctor` check implementations.
 //
-// Extracted from cli_common.cpp in the 2026-05 Phase 2 (R2-4) batch.
-// The 971-line doctor block is the single largest concern in the
-// cli_common monolith; pulling it into its own TU drops cli_common
-// to ~1700 lines and isolates doctor-specific edits.
-//
-// Public API stays declared in `cli_common.hpp` (DoctorCheck struct,
-// run_doctor_checks, run_doctor_android_checks, run_doctor_ios_checks)
-// — extracted code here is the implementation, not new API. Per the
-// Codex R2-4 risk callout, no new public header is introduced.
-//
-// Phase 2 follow-up (R2-8) will refactor the bodies of run_doctor_checks
-// here into a DoctorCheck registry.
+// Public API stays declared in `cli_common.hpp` (DoctorCheck struct and
+// the run_doctor_* entry points). This translation unit owns the
+// implementation details so doctor-specific edits do not churn the
+// shared CLI helpers.
 
 #include "cli_common.hpp"
 #include "package_registry.hpp"
@@ -30,11 +22,10 @@
 
 namespace fs = std::filesystem;
 
-// R2-8 P2 follow-up: case-insensitive substring filter helper. When
-// `only_filter` is empty, returns true (probes always run). Otherwise
-// probes whose name doesn't match are skipped — no process spawn, no
-// file IO. Codex's P2 on PR #2145 flagged the original "display
-// filter" shape as defeating the targeted-check contract.
+// Case-insensitive substring filter helper. When `only_filter` is
+// empty, returns true (probes always run). Otherwise probes whose name
+// doesn't match are skipped — no process spawn, no file IO. This keeps
+// `pulp doctor --only` targeted instead of display-only.
 bool doctor_check_matches_only_filter(const std::string& only_filter,
                                       const std::string& check_name) {
     if (only_filter.empty()) return true;
@@ -45,8 +36,7 @@ bool doctor_check_matches_only_filter(const std::string& only_filter,
     return b.find(a) != std::string::npos;
 }
 
-// File-local helper, lifted from cli_common.cpp in the R2-4 extraction
-// since only the doctor checks below use it.
+// File-local helper used only by the doctor checks below.
 namespace {
 std::string first_line(std::string text) {
     auto newline = text.find_first_of("\r\n");
@@ -63,7 +53,7 @@ std::string first_line(std::string text) {
 }
 }  // namespace
 
-// ── Doctor checks ───────────────���──────────────────────��────────────────────
+// -- Doctor checks -------------------------------------------------------------
 
 static bool sdk_config_ready(const fs::path& sdk_dir) {
     if (sdk_dir.empty()) return false;
@@ -551,8 +541,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             //     check needs to flag. The previous version used --jq
             //     '.secrets[].name' and gated on the output being non-empty,
             //     which made the bootstrap case (zero secrets) look the
-            //     same as the "gh failed" case and skipped silently. Codex
-            //     P1 on #149.
+            //     same as the "gh failed" case and skipped silently.
             auto raw = exec_output(
                 "gh api 'repos/" + repo_slug + "/actions/secrets' --paginate 2>/dev/null");
             if (!raw.empty()) {
@@ -826,7 +815,7 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
         if (adb.empty() && !sdk.empty()) {
             // Default Android SDK installs ship adb.exe on Windows,
             // adb on macOS / Linux — probe both so the fallback
-            // doesn't miss a perfectly valid SDK. #438 P2 for #389.
+            // doesn't miss a perfectly valid SDK.
             auto candidate = sdk / "platform-tools" / "adb";
             auto candidate_exe = sdk / "platform-tools" / "adb.exe";
             if (fs::exists(candidate_exe)) adb = candidate_exe.string();
@@ -838,7 +827,6 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
             // `Application Support`) would otherwise split on
             // whitespace and the probe would silently fail while
             // c.passed stayed true, producing a false positive.
-            // See #438 P2 Codex review on #442.
             auto detail = first_line(
                 exec_output(shell_quote(adb) + " version 2>&1"));
             // If the probe failed (empty output), don't claim pass —
@@ -865,8 +853,8 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
             else if (fs::exists(candidate))  emu = candidate.string();
         }
         if (!emu.empty()) {
-            // Shell-quote per #438 P2 Codex review on #442 — same
-            // argv-split risk as the adb fallback above. SDK paths
+            // Shell-quote for the same argv-split risk as the adb
+            // fallback above. SDK paths
             // with spaces would otherwise produce a misleading
             // "No AVDs configured" failure.
             auto avds = exec_output(shell_quote(emu) + " -list-avds 2>/dev/null");
@@ -975,7 +963,7 @@ std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filte
     return checks;
 }
 
-// ── pulp doctor ios (#60 follow-up) ─────────────────────────────────────────
+// ── pulp doctor ios ─────────────────────────────────────────────────────────
 
 std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
@@ -1052,4 +1040,3 @@ std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter) {
     return checks;
 #endif
 }
-

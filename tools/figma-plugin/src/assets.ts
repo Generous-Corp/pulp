@@ -4,15 +4,17 @@
 //   - For image fills: Figma exposes a stable `imageHash`. Multiple nodes can
 //     reference the same hash. We cache by imageHash → bytes once.
 //   - For VECTOR / BOOLEAN_OPERATION / shape nodes: call exportAsync(SVG_STRING).
-//     There's no built-in dedup key, so we compute sha256(bytes) ourselves.
-//   - Each emitted asset gets a stable `asset_id` keyed by content_hash (sha256
-//     hex of the bytes). Nodes reference assets via `asset_ref = asset_id`.
+//     There's no built-in dedup key, so we compute content_hash from the bytes.
+//   - Each emitted asset gets a stable `asset_id` keyed by content_hash. Nodes
+//     reference assets via `asset_ref = asset_id`.
 //
-// The crypto subtle API is available in Figma's plugin sandbox (modern V8).
+// content_hash uses SHA-256 when the Figma sandbox exposes crypto.subtle, with
+// a deterministic FNV-1a fallback for older/sandboxed runtimes. The hash is for
+// deduplication, not cryptographic integrity.
 
 export interface AssetEntry {
   asset_id: string;
-  content_hash: string;       // sha256 hex
+  content_hash: string;
   bytes: Uint8Array;          // raw bytes, fed to ZIP packager in UI
   mime: string;
   width?: number;
@@ -130,11 +132,9 @@ export class AssetCache {
 
 // ── crypto + format helpers ──────────────────────────────────────────────
 
-// Figma's plugin sandbox doesn't reliably expose crypto.subtle either, so we
-// use a fast non-cryptographic hash (FNV-1a 64-bit, encoded as 16 hex chars)
-// for content-addressable dedupe. Collisions are theoretically possible but
-// vanishingly rare within a single export and acceptable here — we're hashing
-// for de-duplication, not cryptographic integrity.
+// Prefer SHA-256 when crypto.subtle is available; fall back to a fast
+// non-cryptographic FNV-1a 64-bit hash (encoded as 16 hex chars) for
+// content-addressable dedupe in runtimes without WebCrypto.
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   try {
     if (typeof crypto !== "undefined" && crypto.subtle && typeof crypto.subtle.digest === "function") {
@@ -184,7 +184,7 @@ function peekImageSize(bytes: Uint8Array, mime: string): { w: number; h: number 
     const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
     return { w: w >>> 0, h: h >>> 0 };
   }
-  // JPEG / GIF / WebP size parsing skipped — slice-2 plugin doesn't need exact pixel dims.
+  // JPEG / GIF / WebP size parsing skipped — importer only needs exact PNG dims.
   return undefined;
 }
 

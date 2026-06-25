@@ -55,18 +55,17 @@ EXPECTED_CONSUMERS = {
     "pulp-view-embed": "embed_abi",
     "pulp-embed-iplug2": "embed_adapter",
     "pulp-embed-juce": "embed_adapter",
-    "pulp-import-iplug": "project_importer",
-    "pulp-import-juce": "project_importer",
 }
 DESIGN_IR_CONSUMERS = {
     "pulp-view-embed",
     "pulp-embed-iplug2",
     "pulp-embed-juce",
 }
-PROJECT_IR_CONSUMERS = {
-    "pulp-import-iplug",
-    "pulp-import-juce",
-}
+# Project-importer consumers (ProjectIR) are tracked in private sibling repos
+# and are intentionally NOT listed in this public manifest, so this set is
+# empty here. The project_importer category + ProjectIR/DesignIR boundary
+# checks below are retained so a future public importer validates correctly.
+PROJECT_IR_CONSUMERS = set()
 ALLOWED_CATEGORIES = {"embed_abi", "embed_adapter", "project_importer"}
 
 
@@ -353,7 +352,7 @@ def validate_manifest(manifest):
 
     consumers = manifest.get("consumers")
     require(isinstance(consumers, list) and len(consumers) == len(EXPECTED_CONSUMERS),
-            "consumers must contain exactly the five downstream repos",
+            "consumers must contain exactly the expected downstream repos",
             errors)
     seen = set()
     command_count = 0
@@ -367,7 +366,7 @@ def validate_manifest(manifest):
                 seen.add(repo)
             command_count += validate_consumer(consumer, index, errors)
     require(seen == set(EXPECTED_CONSUMERS),
-            "consumers must contain exactly the five downstream repos",
+            "consumers must contain exactly the expected downstream repos",
             errors)
 
     return errors, len(consumers) if isinstance(consumers, list) else 0, command_count

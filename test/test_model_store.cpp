@@ -1,4 +1,4 @@
-// Generic pulp::runtime model registry/store (MM-PR1) — proves a non-audio consumer
+// Generic pulp::runtime model registry/store — proves a non-audio consumer
 // can link the runtime header and that list/install/activate round-trips, with
 // subsystem isolation. (The audio CLI's behavior is covered by test_audio_tools.cpp.)
 #include <catch2/catch_test_macros.hpp>

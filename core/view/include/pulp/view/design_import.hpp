@@ -41,6 +41,51 @@ class TextEditor;
 class XYPad;
 class WaveformView;
 
+// ── Import report ────────────────────────────────────────────────────────────
+// Surfaces the per-control resolution provenance the IR carries so a
+// low-confidence or conflicted control is SEEN at import time — in the CLI and
+// as machine-readable JSON a CI gate can threshold — instead of discovered later.
+struct ImportReportEntry {
+    std::string source_node_id;       ///< Figma node id (empty if unknown)
+    std::string kind;                 ///< resolved interactive-element kind
+    int resolution_rung = 0;          ///< 0=unset..5=inert (see InteractiveElementKind)
+    float confidence_score = 1.0f;    ///< 0..1
+    std::vector<std::string> conflict_signals;  ///< cross-signal conflicts
+    bool verification_pass = true;
+};
+
+struct ImportReport {
+    std::vector<ImportReportEntry> controls;
+    int conflicted = 0;       ///< controls with >=1 conflict signal
+    int low_confidence = 0;   ///< controls with confidence below the threshold
+    int unresolved = 0;       ///< controls resolved only at the inert rung (5)
+    /// True when the import is clean enough to pass a CI gate at the given policy
+    /// (no conflicts and nothing inert). low_confidence alone is advisory.
+    bool ok() const { return conflicted == 0 && unresolved == 0; }
+};
+
+// Walk a parsed DesignIR root and collect the resolution report over every
+// interactive element (recursively). `low_confidence_threshold` flags controls
+// whose confidence is below it (default 0.6).
+ImportReport collect_import_report(const IRNode& root,
+                                   float low_confidence_threshold = 0.6f);
+
+// Render an ImportReport as JSON (for a CI gate / tooling) or a human summary.
+std::string import_report_to_json(const ImportReport& report);
+std::string import_report_to_text(const ImportReport& report);
+
+// Render-placement verification. Walks the IR and flags interactive overlays
+// that cannot render where
+// they claim to: a degenerate extent (no hit radius and a zero-area box), or a
+// box that falls entirely outside the node's own render region [0,0,frame_w,
+// frame_h] (when the frame size is known, >0). A flagged control gets
+// verification_pass=false plus a recorded conflict, so collect_import_report
+// surfaces it and --fail-on-unresolved can gate on it. Mutates `root` in place;
+// returns the number of controls newly flagged. frame_w/h <= 0 means "unknown"
+// (skip the bounds half, keep the degenerate-extent check). This is a
+// geometry-level check, not a pixel diff.
+int apply_placement_verification(IRNode& root, float frame_w = 0.0f, float frame_h = 0.0f);
+
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;

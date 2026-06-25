@@ -152,7 +152,6 @@ using fn_create  = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE*, int, int, MKL_LONG, MKL
 // (mismatched ABI, no default-argument promotion guarantees). We MUST keep
 // the variadic prototype on the function pointer we call through, and let
 // the compiler handle argument promotion at the call site (float → double).
-// Regression: Codex PR #3021 review.
 using fn_set     = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE, int, ...);
 using fn_commit  = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE);
 using fn_compute = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE, void*);
@@ -346,7 +345,7 @@ struct MultiBackendFft::Impl {
         // the variadic interface; the compiler emits the right ABI dance
         // (varargs promote float → double, MKL recovers it via va_arg). The
         // standalone `fn_set_f` typed alias that previously aliased the
-        // same dlsym handle was undefined behavior (Codex PR #3021 review).
+        // same dlsym handle was undefined behavior.
         b.set(mkl_desc, mkl_dyn::DFTI_BACKWARD_SCALE,
               1.0f / static_cast<float>(size));
         if (b.commit(mkl_desc) != 0)

@@ -89,9 +89,9 @@ void SvgImage::render(Canvas& canvas, float x, float y, float w, float h) const 
     canvas.translate(x, y);
     canvas.scale(scale, scale);
 
-    // pulp #72 — render fills + cubic Bezier curves via Canvas's path API
-    // instead of approximating each path as straight lines between control
-    // handles. The previous implementation:
+    // Render fills and cubic Bezier curves via Canvas's path API instead
+    // of approximating each path as straight lines between control handles.
+    // The previous implementation:
     //   for (i = 0; i < npts - 1; i += 3)
     //       stroke_line(pts[i*2], pts[i*2+1], pts[(i+3)*2], pts[(i+3)*2+1])
     // had two latent bugs that surfaced as "preset preview blank":
@@ -149,10 +149,9 @@ void SvgImage::render(Canvas& canvas, float x, float y, float w, float h) const 
         }
 
         if (has_fill) {
-            // Codex review on PR #2011 — honor `fill-rule="evenodd"`
-            // so SVGs with cutouts/holes (a common preset-thumbnail
-            // pattern) render correctly. nanosvg exposes the rule on
-            // the shape; default in SVG is nonzero.
+            // Honor `fill-rule="evenodd"` so SVGs with cutouts or holes
+            // (a common preset-thumbnail pattern) render correctly. nanosvg
+            // exposes the rule on the shape; default in SVG is nonzero.
             FillRule rule = (shape->fillRule == NSVG_FILLRULE_EVENODD)
                 ? FillRule::evenodd
                 : FillRule::nonzero;

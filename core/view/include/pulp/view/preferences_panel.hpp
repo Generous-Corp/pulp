@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file preferences_panel.hpp
-/// PreferencesPanel — sidebar-of-pages container for app preferences
-/// (closes the gap-doc P3 row "PreferencesPanel").
+/// PreferencesPanel — sidebar-of-pages container for app preferences.
 ///
 /// `PreferencesPanel` is a `View` subclass that hosts a sidebar of named
 /// "pages". Each page is a (title, icon, content) tuple; the panel
@@ -25,7 +24,7 @@
 /// Headless-friendly: pages register `View` content but `PreferencesPanel`
 /// never paints in tests — it just owns the registry + active-index state.
 ///
-/// License-lineage note: the name is Pulp-native per the gap-doc rule.
+/// License-lineage note: the name is Pulp-native.
 
 #include <algorithm>
 #include <functional>

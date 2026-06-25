@@ -1,6 +1,5 @@
 // Tests for UmpSysex7Reassembler — shared UMP Type-0x3 sysex7
-// reassembler extracted from the AUv3 / CoreMIDI inline state machines
-// (macOS plugin authoring plan item 8.2).
+// reassembler extracted from the AUv3 / CoreMIDI inline state machines.
 //
 // Pinned regressions:
 //   - #239 / #292 P1: per-packet word cursor must advance correctly;

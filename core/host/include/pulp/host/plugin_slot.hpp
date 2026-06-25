@@ -103,26 +103,23 @@ public:
     virtual std::vector<uint8_t> save_state() const = 0;
     virtual bool restore_state(const std::vector<uint8_t>& data) = 0;
 
-    // Editor — legacy void* handle API.
+    // Editor handle API.
     //
-    // Item 4.4 (macOS plan): the canonical surface is `create_hosted_editor()`
-    // below. PR #2844 established `pulp::view::WindowHost::attach_native_child_view`
-    // as the host-side bridge, and `pulp::view::EditorAttachment`
-    // (`core/view/include/pulp/view/hosted_editor_attachment.hpp`) wires the
-    // two together. Slots may still override these for now — the default
-    // `create_hosted_editor()` falls back to them so unchanged subclasses keep
-    // working — but new slots should override `create_hosted_editor()`
-    // directly and the legacy entry points are slated for removal once every
-    // adapter is migrated.
+    // `create_hosted_editor()` is the typed surface for embedding native
+    // plugin editors. `pulp::view::WindowHost::attach_native_child_view` is
+    // the host-side bridge and `pulp::view::EditorAttachment` wires the two
+    // together. Slots may still override these void* entry points when they
+    // have not moved to the typed surface; the default `create_hosted_editor()`
+    // fallback keeps those subclasses working.
     virtual bool has_editor() const = 0;
     [[deprecated("Override create_hosted_editor() instead — see pulp::view::EditorAttachment "
-                 "(item 4.4 macOS plan).")]]
+                 "for typed hosted editor attachment.")]]
     virtual void* create_editor_view() = 0;  // Returns platform-native view handle
     [[deprecated("Override destroy_hosted_editor() instead — see pulp::view::EditorAttachment "
-                 "(item 4.4 macOS plan).")]]
+                 "for typed hosted editor attachment.")]]
     virtual void destroy_editor_view() = 0;
 
-    // ── Hosted editor (workstream 03 slice 3.4) ────────────────────────
+    // Hosted editor.
     //
     // Typed replacement for the void* editor API. Slot implementations
     // fill in a platform-native parent-window handle, initial size, and
@@ -134,7 +131,7 @@ public:
     //   // ... on close ...
     //   slot->destroy_hosted_editor(std::move(ed));
     //
-    // Format wiring per slice (6.3..6.5 / 3.4 follow-ups):
+    // Format-specific editor surfaces:
     //   CLAP   — clap_plugin_gui: create / set_parent / show / get_size
     //   VST3   — IEditController::createView("editor") + IPlugView::attached
     //   AU     — AUAudioUnit.requestViewControllerWithCompletionHandler
@@ -147,7 +144,7 @@ public:
     };
 
     /// Create the hosted editor. Default implementation preserves the
-    /// legacy void* path so every slot already compiled against
+    /// void* path so every slot already compiled against
     /// create_editor_view() still works; new slots override this directly.
     virtual std::unique_ptr<HostedEditor>
     create_hosted_editor(void* /*parent_window*/) {
@@ -182,7 +179,7 @@ public:
     virtual int latency_samples() const = 0;
     virtual int tail_samples() const = 0;
 
-    // ── Extensions visitor (item 4.5) ───────────────────────────────────
+    // Extensions visitor.
     //
     // Typed plugin introspection: subclass ExtensionsVisitor, override
     // the visit_* methods you care about, then call
@@ -197,9 +194,9 @@ public:
     }
 
     // Additive host-side multi-bus processing entry point. Keep appended to
-    // preserve the legacy PluginSlot virtual ordering.
+    // preserve the existing PluginSlot virtual ordering.
     //
-    // The default projection preserves the legacy PluginSlot contract by
+    // The default projection preserves the original PluginSlot contract by
     // selecting the active main output and optional main input from
     // ProcessBuffers, then calling the original main-in/main-out process()
     // callback. Slot implementations that need direct access to sidechain,

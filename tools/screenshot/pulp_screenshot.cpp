@@ -18,7 +18,7 @@
 using namespace pulp::view;
 using namespace pulp::state;
 
-// pulp #1899 — viewport reconciliation for runtime-imported content.
+// Viewport reconciliation for runtime-imported content.
 //
 // Imports (Spectr, v0.dev, Stitch, Figma exports) routinely ship a
 // top-level container with literal-CSS hardcoded dimensions that
@@ -120,10 +120,7 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
     // `--scale` arguments, which throw on malformed input. Without this
     // pre-scan, a command like `pulp-screenshot --width foo --help`
     // would throw before reaching the help check and exit non-zero
-    // instead of printing usage with exit code 0. Regression:
-    // #2956 / Codex comment 3304939247 (resurfaced after #2957's
-    // partial fix moved the flag-set into the loop without breaking
-    // out of it).
+    // instead of printing usage with exit code 0.
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -151,12 +148,11 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
 }
 
 static bool normalize_backend(ScreenshotCliOptions& options) {
-    // pulp #1919 (Codex P2) — only default to Skia when the build
-    // actually compiled it in. Otherwise the CLI would report
-    // `backend=skia` while silently producing CoreGraphics output.
-    // We defer the warning until after argument parsing so that an
-    // explicit `--backend coregraphics` doesn't print a spurious
-    // "falling back" line.
+    // Only default to Skia when the build actually compiled it in.
+    // Otherwise the CLI would report `backend=skia` while silently
+    // producing CoreGraphics output. We defer the warning until after
+    // argument parsing so that an explicit `--backend coregraphics`
+    // doesn't print a spurious "falling back" line.
 #ifdef PULP_HAS_SKIA
     constexpr bool kHasSkia = true;
 #else
@@ -410,13 +406,12 @@ int main(int argc, char* argv[]) {
     auto options = parse_options(argc, argv);
     if (options.help) { print_usage(); return 0; }
 
-    // pulp #1919 (Codex P2) — refuse a silent downgrade. If the caller
-    // explicitly asked for Skia but Skia isn't compiled in, fail loudly
-    // with exit code 2 so CI / harness diffs catch the mismatch instead
-    // of comparing CoreGraphics output against a Skia baseline.
-    // TODO: pin in #1919 test — add CLI-shellout test covering both the
-    // "no PULP_HAS_SKIA, default" warning path and the explicit-skia
-    // exit-code-2 error path.
+    // Refuse a silent downgrade. If the caller explicitly asked for Skia
+    // but Skia isn't compiled in, fail loudly with exit code 2 so CI and
+    // harness diffs catch the mismatch instead of comparing CoreGraphics
+    // output against a Skia baseline.
+    // TODO: add CLI-shellout coverage for both the default warning path
+    // when Skia is absent and the explicit-skia exit-code-2 error path.
     if (!normalize_backend(options)) return 2;
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
@@ -451,8 +446,8 @@ int main(int argc, char* argv[]) {
     else if (options.theme_name == "pro_audio") root.set_theme(Theme::pro_audio());
     else root.set_theme(Theme::dark());
 
-    // pulp #1899 — apply --width/--height to the root's bounds BEFORE
-    // any script runs. Without this, root.local_bounds() is (0,0,0,0)
+    // Apply --width/--height to the root's bounds BEFORE any script runs.
+    // Without this, root.local_bounds() is (0,0,0,0)
     // when yoga_layout reads it; YGNodeStyleSetWidth/Height(root) then
     // gets 0, and every position:absolute + inset:0 child computes to
     // 0×0 — blanking any chain of absolute-positioned containers (the
@@ -472,8 +467,8 @@ int main(int argc, char* argv[]) {
     ScriptEngine engine;
     WidgetBridge bridge(engine, root, store);
 
-    // pulp #1899 — install runtime-import handlers so React-imported
-    // trees (Spectr's editor.js et al.) can register & drain useEffect /
+    // Install runtime-import handlers so React-imported trees (Spectr's
+    // editor.js et al.) can register & drain useEffect /
     // requestAnimationFrame / setTimeout callbacks. These are registered
     // conditionally because plain createKnob / createFader scripts don't
     // need them. Always install in pulp-screenshot since the tool's
@@ -509,20 +504,19 @@ int main(int argc, char* argv[]) {
         }
         bridge.load_script(code);
 
-        // pulp #1899 — after React mount, reconcile any oversize
-        // absolute descendants with the viewport so bottom-anchored
-        // content lands within the captured frame. No-op when content
-        // fits. Walks the entire subtree, not just direct children of
-        // root_, because runtime-import adapters (Spectr's dom-adapter
-        // at tsx:440-441) propagate the hardcoded oversize through
-        // multiple intermediate wrappers.
+        // After React mount, reconcile any oversize absolute descendants
+        // with the viewport so bottom-anchored content lands within the
+        // captured frame. No-op when content fits. Walks the entire
+        // subtree, not just direct children of root_, because
+        // runtime-import adapters (Spectr's dom-adapter at tsx:440-441)
+        // propagate the hardcoded oversize through multiple wrappers.
         pulp::view::reconcile_oversize_absolute_subtree(root, options.width, options.height);
     }
 
-    // pulp #1899 — drain React's useEffect callbacks, requestAnimationFrame
-    // queue, and setTimeout/setInterval timers BEFORE rendering. Without
-    // this, headless captures of React-imported trees show only what
-    // mounts synchronously — any drawing that lives inside useEffect
+    // Drain React's useEffect callbacks, requestAnimationFrame queue, and
+    // setTimeout/setInterval timers BEFORE rendering. Without this,
+    // headless captures of React-imported trees show only what mounts
+    // synchronously — any drawing that lives inside useEffect
     // (canvas paint, dB axis labels, frequency labels, grid lines) never
     // runs because the underlying message loop doesn't tick between
     // script-load and render. Spectr's editor uses this pattern for

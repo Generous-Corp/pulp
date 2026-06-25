@@ -181,7 +181,7 @@ void AsyncStream::write_loop() {
 
         // Update accounting and collect drain callback under the lock; fire
         // it *outside* the lock so callers can re-enter write_async() from
-        // on_drain without deadlocking (issue #134 P1).
+        // on_drain without deadlocking.
         AsyncCloseCallback drain_cb;
         {
             std::lock_guard<std::mutex> lock(mutex_);

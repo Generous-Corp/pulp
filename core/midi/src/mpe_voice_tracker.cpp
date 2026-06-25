@@ -351,8 +351,7 @@ void MpeVoiceTracker::apply_per_note_management(uint8_t ch, uint8_t note, uint8_
     //     controllers from the currently sounding note (its expression
     //     state is frozen for the rest of its lifecycle).
     //
-    // The flag-combination semantics per the UMP spec
-    // (Codex P1 on #2860, MIDI 2.0 spec § Per-Note Management):
+    // The flag-combination semantics per the MIDI 2.0 UMP spec:
     //   S alone   → reset the currently sounding note immediately
     //   D alone   → detach, leave expression untouched
     //   D + S     → detach takes effect on the currently sounding note
@@ -361,10 +360,9 @@ void MpeVoiceTracker::apply_per_note_management(uint8_t ch, uint8_t note, uint8_
     //               note) index. Pulp does not yet maintain the
     //               armed-for-future-note memory — D+S degrades to
     //               detach-only on the live note here, which matches
-    //               the spec for the sounding note. The "arm reset for
-    //               future" slice is tracked as a deferred follow-up
-    //               in the macOS plan; see SKILL.md "UMP per-note
-    //               management" gotchas.
+    //               the spec for the sounding note. See the MPE skill's
+    //               UMP per-note management gotcha before changing this
+    //               behavior.
     const bool reset_controllers = (flags & UmpPacket::kPerNoteResetControllers) != 0;
     const bool detach_controllers = (flags & UmpPacket::kPerNoteDetachControllers) != 0;
     const bool reset_live_note = reset_controllers && !detach_controllers;
@@ -389,8 +387,8 @@ float MpeVoiceTracker::ump_bend_normalised(uint32_t v32) {
     // Explicit narrowing cast silences MSVC C4244 — the math runs in
     // double for precision, then we narrow to float to match the
     // declared return type. Was implicit when this body lived in the
-    // header (different warning context); explicit now that it's in
-    // a .cpp compiled at /W4.
+    // header (different warning context); explicit now that this file
+    // is compiled with MSVC's warning level 4 enabled.
     return static_cast<float>(
         (static_cast<double>(v32) - 2147483648.0) / 2147483648.0);
 }

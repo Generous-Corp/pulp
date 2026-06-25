@@ -6,6 +6,7 @@
 // parameters, and toggle bypass.
 
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <clap/clap.h>
@@ -97,6 +98,23 @@ public:
         } else {
             processing_ = true;
         }
+        // Reserve per-block scratch so the graph-driven RT path never
+        // reallocates in process(). Channels match the slot's declared port
+        // counts (the graph sizes node buffers from these, floored at stereo);
+        // events cover pending host edits + a full sample-accurate
+        // parameter-event queue + the graph's realtime MIDI cap. A direct
+        // caller passing more channels or an un-capacity-limited MidiBuffer is
+        // outside this contract; the PULP_DBG_ASSERTs in process() flag it in
+        // debug builds.
+        constexpr int kMinReservedChannels = 2;
+        constexpr std::size_t kReservedMidiEvents = 1024;
+        in_ptrs_.reserve(
+            static_cast<std::size_t>(std::max(info_.num_inputs, kMinReservedChannels)));
+        out_ptrs_.reserve(
+            static_cast<std::size_t>(std::max(info_.num_outputs, kMinReservedChannels)));
+        in_event_storage_.reserve(params_.size()
+                                  + ParameterEventQueue::kCapacity
+                                  + kReservedMidiEvents);
         return true;
     }
 
@@ -126,10 +144,14 @@ public:
         const uint32_t nch_out = (uint32_t)output.num_channels();
         const uint32_t nch_in = (uint32_t)input.num_channels();
 
+        PULP_DBG_ASSERT(in_ptrs_.capacity() >= nch_in,
+                        "CLAP slot in_ptrs_ would grow on the audio thread");
         in_ptrs_.resize(nch_in);
         for (uint32_t c = 0; c < nch_in; ++c) {
             in_ptrs_[c] = const_cast<float*>(input.channel_ptr(c));
         }
+        PULP_DBG_ASSERT(out_ptrs_.capacity() >= nch_out,
+                        "CLAP slot out_ptrs_ would grow on the audio thread");
         out_ptrs_.resize(nch_out);
         for (uint32_t c = 0; c < nch_out; ++c) {
             out_ptrs_[c] = output.channel_ptr(c);
@@ -148,9 +170,12 @@ public:
         // event-pointer array keyed by sample_offset so the plugin can
         // iterate them in time order.
         in_event_storage_.clear();
+        // Capacity is reserved in prepare(); capturing it lets the assert after
+        // the emplace loops prove no reallocation happened on the audio thread.
+        const std::size_t reserved_event_capacity = in_event_storage_.capacity();
         // Drain host-initiated set_parameter edits as time=0 events. Uses
         // try_lock so the audio thread never blocks on the host side;
-        // if contended, pending edits ride to the next block (#296).
+        // if contended, pending edits ride to the next block.
         {
             std::unique_lock<std::mutex> lock(pending_edits_mu_, std::try_to_lock);
             if (lock.owns_lock() && !pending_edits_.empty()) {
@@ -204,6 +229,8 @@ public:
             ev.data[2] = msg.size() > 2 ? msg.data()[2] : 0;
             in_event_storage_.emplace_back(EventAny{.midi = ev, .kind = EventKind::Midi});
         }
+        PULP_DBG_ASSERT(in_event_storage_.capacity() == reserved_event_capacity,
+                        "CLAP slot in_event_storage_ reallocated on the audio thread");
         // Sort by header.time.
         std::sort(in_event_storage_.begin(), in_event_storage_.end(),
                   [](const EventAny& a, const EventAny& b) {
@@ -236,7 +263,6 @@ public:
                 && ev->type == CLAP_EVENT_MIDI && self->out_midi_sink_) {
                 // memcpy into a stack local to avoid UBSan "misaligned
                 // address" when ev isn't aligned to alignof(clap_event_midi_t).
-                // #688.
                 clap_event_midi_t m;
                 std::memcpy(&m, ev, sizeof(m));
                 pulp::midi::MidiEvent e;
@@ -270,7 +296,7 @@ public:
     float get_parameter(uint32_t id) const override {
         // Prefer the cached last-set value so a set_parameter call is
         // observable to the host immediately, even before the next
-        // process() block delivers the edit to the plugin (#296).
+        // process() block delivers the edit to the plugin.
         // Falls through to the plugin's own get_value if no cached
         // entry exists yet.
         {
@@ -284,9 +310,9 @@ public:
         return 0.0f;
     }
 
-    // True if `id` corresponds to one of the parameters the plugin
-    // published via the clap_plugin_params extension. Used to fail
-    // visibly on set_parameter with an unknown ID (#296).
+    // True if `id` corresponds to one of the parameters the plugin published
+    // via the clap_plugin_params extension. Used to fail visibly on
+    // set_parameter with an unknown ID.
     bool is_known_param(uint32_t id) const {
         for (const auto& p : params_) {
             if (p.id == id) return true;
@@ -295,8 +321,8 @@ public:
     }
 
     void set_parameter(uint32_t id, float value) override {
-        // Resolving #296: queue a pending host edit so the next process()
-        // block delivers it as a CLAP_EVENT_PARAM_VALUE at time=0.
+        // Queue a pending host edit so the next process() block delivers it
+        // as a CLAP_EVENT_PARAM_VALUE at time=0.
         //
         // Thread model: set_parameter is called from host/UI threads;
         // process() runs on the audio thread. We use a mutex but the
@@ -400,9 +426,9 @@ public:
         return (int)ext->get(plugin_);
     }
 
-    // Item 4.5 — typed plugin introspection. Surface the underlying
-    // `const clap_plugin_t*` and host struct so callers can reach into
-    // CLAP-specific extensions without round-tripping through `void*`.
+    // Typed plugin introspection surfaces the underlying `const clap_plugin_t*`
+    // and host struct so callers can reach into CLAP-specific extensions
+    // without round-tripping through `void*`.
     void accept(ExtensionsVisitor& visitor) const override {
         ClapExtension ext;
         ext.plugin = const_cast<clap_plugin_t*>(plugin_);
@@ -497,9 +523,9 @@ private:
     std::vector<EventAny> in_event_storage_;
     midi::MidiBuffer* out_midi_sink_ = nullptr;
 
-    // Host-initiated set_parameter queue (#296). Mutex-guarded on the
-    // host side, try_lock on the audio side. unordered_map gives us
-    // latest-wins coalescing per param_id.
+    // Host-initiated set_parameter queue. Mutex-guarded on the host side,
+    // try_lock on the audio side. unordered_map gives us latest-wins
+    // coalescing per param_id.
     mutable std::mutex pending_edits_mu_;
     std::unordered_map<uint32_t, float> pending_edits_;
     std::unordered_map<uint32_t, float> cached_values_;

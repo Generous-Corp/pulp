@@ -59,12 +59,11 @@ static const Command commands[] = {
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
     {"project",  "Per-project SDK pin: bump, undo", cmd_project},
-    // Regression fix 2026-04-21 (Codex post-merge sweep wave 2): the
-    // #562 PR added `{"config", ..., cmd_config}` to this dispatch
+    // Regression fix: #562 added `{"config", ..., cmd_config}` to this dispatch
     // table, but the #563 merge dropped the line, leaving `pulp config`
     // (and the update.mode / channel / check_interval_hours surface
-    // it guards) completely unreachable. Restore so Codex's P1/P2
-    // findings on cmd_config.cpp are actually observable behaviour.
+    // it guards) completely unreachable. Restore so the
+    // cmd_config.cpp fixes are actually observable behaviour.
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
     {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
@@ -116,7 +115,7 @@ static int delegate_to_binary(const BinaryCommand& bc, const std::vector<std::st
                                     bc.extra_arg ? std::string(bc.extra_arg) : std::string{});
 }
 
-// ── Package Manager Commands ───────────────────────────────────────────��───
+// Package Manager Commands
 
 static int handle_audit(const std::vector<std::string>& args) {
     bool pkg_flag = false, plat_flag = false, lic_flag = false;
@@ -173,7 +172,7 @@ static void print_usage() {
     std::cout << "  pulp status             # Show project info\n";
 }
 
-// ── Update-check dispatch (Slice 2 #547 + Slice 5 #550 of #499) ─────────────
+// ── Update-check dispatch ──────────────────────────────────────────────────
 //
 // Before we dispatch the user's command, we optionally:
 //   1. Complete any pending auto-mode upgrade staged by a previous
@@ -192,7 +191,7 @@ static void print_usage() {
 //      download and write ~/.pulp/pending-upgrade so the next
 //      invocation completes the swap.
 //
-// Slice 5 (#550) scope:
+// Current mode-enforcement scope:
 //   - All four modes wired into the invocation path.
 //   - ~/.pulp/pending-upgrade marker (read on next invocation).
 //   - ~/.pulp/update-snooze (24h) for prompt-mode decline.
@@ -269,7 +268,7 @@ fs::path pending_upgrade_path() {
 // Fire a best-effort background refresh. We deliberately don't block
 // on the result — the banner will pick it up on the *next* invocation.
 //
-// Codex 2026-04-21 wave 2 P1 on #562: a previous version stored the
+// #562: a previous version stored the
 // `std::future` returned by `std::async(std::launch::async, ...)` in
 // a static local. That future's destructor is NOT detached — it
 // blocks on the task to finish. On process exit (or on the next
@@ -310,10 +309,10 @@ void kick_background_refresh(const fs::path& cache_path) {
 // network fetch is delegated to a detached thread so we don't block
 // the user's command.
 //
-// Slice 5's wiring intentionally stops short of actually downloading
-// the tarball — cmd_upgrade already owns that code and we don't want
-// to duplicate the signature/platform arch matrix. The marker we drop
-// here is the signal for the next invocation (or the user's next
+// This wiring intentionally stops short of actually downloading the
+// tarball — cmd_upgrade already owns that code and we don't want to
+// duplicate the signature/platform arch matrix. The marker we drop here
+// is the signal for the next invocation (or the user's next
 // `pulp upgrade`) to perform the swap. This preserves the Section G
 // non-goal "no binary is ever replaced without the user's session
 // touching `pulp` again".
@@ -322,7 +321,7 @@ void kick_background_refresh(const fs::path& cache_path) {
 // (empty args, unwritable PULP_HOME, etc.). The auto-mode banner
 // suppresses its "downloaded / will complete next invocation" notice
 // on false so the user isn't promised a completion that can't happen
-// (#590 Codex P2 / wave-4 sweep).
+// (#590).
 bool kick_auto_stage(const fs::path& marker_path,
                      const std::string& staged_version) {
     if (marker_path.empty() || staged_version.empty()) return false;
@@ -331,8 +330,8 @@ bool kick_auto_stage(const fs::path& marker_path,
     p.staged_at_epoch_sec = uc::now_epoch_sec();
     // Leave staged_binary_path empty — cmd_upgrade's next invocation
     // will perform the download + swap. The marker's purpose here is
-    // to signal intent; the binary path field is reserved for a
-    // future slice where the background download lands a file.
+    // to signal intent; the binary path field is reserved for a staged
+    // background download path.
     p.staged_binary_path = "";
     return um::write_pending_upgrade(marker_path, p);
 }
@@ -350,7 +349,7 @@ void maybe_complete_pending_upgrade() {
     // missing or unreadable. The opportunistic tombstone sweep at the
     // bottom of this function must also run for the common "no marker"
     // path so `*.pulp.old` files left behind by direct `pulp upgrade`
-    // flows get cleaned up (#590 Codex P2 / wave-4 sweep).
+    // flows get cleaned up (#590).
     if (!marker.empty()) {
         if (auto pending = um::read_pending_upgrade(marker)) {
             if (pending->version == std::string(PULP_SDK_VERSION)) {
@@ -466,7 +465,7 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
                 // marker actually landed. If PULP_HOME is read-only,
                 // full, or otherwise unwritable, suppress the notice
                 // so users aren't promised a completion that cannot
-                // happen (#590 Codex P2 / wave-4 sweep).
+                // happen (#590).
                 if (kick_auto_stage(marker, latest)) {
                     std::cerr << um::compose_auto_staged_notice(latest) << "\n";
                     cache.banner_shown_for_version = latest;

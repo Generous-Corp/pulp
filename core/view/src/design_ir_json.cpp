@@ -1,17 +1,15 @@
 // design_ir_json.cpp — DesignIR JSON serialize / deserialize band.
 //
-// Extracted verbatim from design_import.cpp in the 2026-05-29 frontend-IR
-// refactor (PR-1, planning/2026-05-29-frontend-ir-refactor-plan.md). This
-// is a relocation-only split: the JSON helpers, serialize_design_ir, and
-// parse_design_ir_json moved here unchanged. Four helpers
-// (parse_ir_node, parse_ir_tokens, make_import_diagnostic,
-// is_asset_reference_key) are promoted from static to external linkage
-// because the asset pipeline / source parsers that remain in
-// design_import.cpp call them; their declarations live in
+// JSON helpers, serialize_design_ir, and parse_design_ir_json live here. Four
+// helpers (parse_ir_node, parse_ir_tokens, make_import_diagnostic,
+// is_asset_reference_key) have external linkage because the asset pipeline /
+// source parsers in design_import.cpp call them; their declarations live in
 // design_import_internal.hpp. promote_interactive_frames stays defined in
 // design_import.cpp and is declared in that same header.
 
 #include <pulp/view/design_import.hpp>
+
+#include <pulp/runtime/log.hpp>
 
 #include "design_binding_metadata.hpp"
 #include "design_import_internal.hpp"
@@ -51,33 +49,54 @@ static bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
     return def;
 }
 
-// ── Faithful-vector import (Plan B) enum<->id ───────────────────────────
+// ── Faithful-vector import enum<->id ────────────────────────────────────
 static NodeRenderMode render_mode_from_id(const std::string& s) {
     return s == "faithful_svg" ? NodeRenderMode::faithful_svg : NodeRenderMode::normal;
 }
 static const char* render_mode_id(NodeRenderMode m) {
     return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
 }
-// Unknown ids fall back to `knob` (the original kind) for forward-compat.
-static InteractiveElementKind interactive_kind_from_id(const std::string& s) {
-    if (s == "dropdown") return InteractiveElementKind::dropdown;
-    if (s == "text_field") return InteractiveElementKind::text_field;
-    if (s == "tab_group") return InteractiveElementKind::tab_group;
-    if (s == "stepper") return InteractiveElementKind::stepper;
+// Maps a wire `kind` string to an InteractiveElementKind. Unknown ids fall back
+// to `knob` for forward-compat, but set `*recognized = false` so the caller can
+// diagnose a genuinely-unknown kind instead of silently shipping a wrong knob.
+// `recognized` may be null.
+static InteractiveElementKind interactive_kind_from_id(const std::string& s,
+                                                       bool* recognized = nullptr) {
+    if (recognized) *recognized = true;
+    if (s == "knob")        return InteractiveElementKind::knob;
+    if (s == "fader")       return InteractiveElementKind::fader;
+    if (s == "toggle")      return InteractiveElementKind::toggle;
+    if (s == "dropdown")    return InteractiveElementKind::dropdown;
+    if (s == "text_field")  return InteractiveElementKind::text_field;
+    if (s == "tab_group")   return InteractiveElementKind::tab_group;
+    if (s == "stepper")     return InteractiveElementKind::stepper;
+    if (s == "swap")        return InteractiveElementKind::swap;
+    if (s == "action")      return InteractiveElementKind::action;
+    if (s == "xy_pad")      return InteractiveElementKind::xy_pad;
+    if (s == "value_label") return InteractiveElementKind::value_label;
+    if (s == "custom")      return InteractiveElementKind::custom;
+    if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
-static const char* interactive_kind_id(InteractiveElementKind k) {
+const char* interactive_kind_id(InteractiveElementKind k) {
     switch (k) {
-        case InteractiveElementKind::dropdown:   return "dropdown";
-        case InteractiveElementKind::text_field: return "text_field";
-        case InteractiveElementKind::tab_group:  return "tab_group";
-        case InteractiveElementKind::stepper:    return "stepper";
-        case InteractiveElementKind::knob:       break;
+        case InteractiveElementKind::fader:       return "fader";
+        case InteractiveElementKind::toggle:      return "toggle";
+        case InteractiveElementKind::dropdown:    return "dropdown";
+        case InteractiveElementKind::text_field:  return "text_field";
+        case InteractiveElementKind::tab_group:   return "tab_group";
+        case InteractiveElementKind::stepper:     return "stepper";
+        case InteractiveElementKind::swap:        return "swap";
+        case InteractiveElementKind::action:      return "action";
+        case InteractiveElementKind::xy_pad:      return "xy_pad";
+        case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::custom:      return "custom";
+        case InteractiveElementKind::knob:        break;
     }
     return "knob";
 }
 
-// ── box-shadow parse / serialize (pulp #41) ─────────────────────────────
+// ── box-shadow parse / serialize ────────────────────────────────────────
 //
 // CSS `box-shadow` is a comma-separated list of layers; each layer is
 // `[inset] <ox> <oy> [<blur> [<spread>]] <color>` with lengths in arbitrary
@@ -545,11 +564,9 @@ void normalize_figma_plugin_binding(IRNode& node) {
     md.serialize(node);
 }
 
-// ── parse_ir_node post-passes (pulp #41 extraction) ─────────────────────
-// These ran as inline blocks at the tail of parse_ir_node; pulled out into
-// named functions so each rule reads as one testable unit. Behavior is
-// unchanged from the inline versions (the shadow snap now reads the parsed
-// IRBoxShadow layers instead of re-parsing the raw CSS string each time).
+// ── parse_ir_node post-passes ────────────────────────────────────────────
+// Named post-parse rules. The shadow snap reads parsed IRBoxShadow layers
+// instead of re-parsing the raw CSS string each time.
 
 // Shadow-driven sibling snap. When a frame has a downward drop shadow and an
 // absolutely-positioned sibling sits just below it with a small gap, the gap
@@ -729,12 +746,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         if (!node.text_runs.empty()) break;
     }
 
-    // Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-    // capture the source-native ID so the `adapter` anchor strategy can use
-    // it as its anchor. Figma + Pencil + Mitosis-style exports all carry an
-    // ID under one of these field names; first non-empty wins. Sources
-    // without native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this
-    // empty and fall through to the content-hash strategy.
+    // Capture the source-native ID so the `adapter` anchor strategy can use it
+    // as its anchor. Figma + Pencil + Mitosis-style exports all carry an ID
+    // under one of these field names; first non-empty wins. Sources without
+    // native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this empty and fall
+    // through to the content-hash strategy.
     for (const char* k : {"id", "nodeId", "node_id", "source_node_id", "sourceNodeId"}) {
         if (!obj.hasObjectMember(k)) continue;
         auto v = obj[k];
@@ -790,7 +806,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.raw_source = std::string(obj["rawSource"].toString());
     }
 
-    // ── Faithful-vector import (Plan B): render mode + SVG asset + overlays ──
+    // ── Faithful-vector import: render mode + SVG asset + overlays ──
     for (const char* k : {"render_mode", "renderMode"}) {
         if (obj.hasObjectMember(k) && obj[k].isString()) {
             node.render_mode = render_mode_from_id(get_string(obj, k));
@@ -810,12 +826,27 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             const auto e = arr[static_cast<int>(i)];
             if (!e.isObject()) continue;
             IRInteractiveElement el;
-            el.kind = interactive_kind_from_id(get_string(e, "kind", "knob"));
+            const std::string kind_str = get_string(e, "kind", "knob");
+            bool kind_recognized = true;
+            el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
+            if (!kind_recognized) {
+                // Don't silently materialize an unknown control as a working
+                // knob — surface it so the import isn't quietly wrong.
+                pulp::runtime::log_warn(
+                    "design-import: unknown interactive_element kind '{}' "
+                    "(node {}); falling back to knob render",
+                    kind_str,
+                    e.hasObjectMember("source_node_id") &&
+                            e["source_node_id"].isString()
+                        ? std::string(e["source_node_id"].toString())
+                        : std::string("?"));
+            }
             el.cx = get_float(e, "cx");
             el.cy = get_float(e, "cy");
             el.hit_radius = get_float(e, "hit_radius");
             el.svg_patch_d = get_string(e, "svg_patch_d");
             el.default_value = get_float(e, "default_value", 0.5f);
+            el.flash = get_bool(e, "flash");  // toggle: press-flash vs sticky
             // Overlay-control fields (dropdown / text_field / tab_group).
             el.x = get_float(e, "x");
             el.y = get_float(e, "y");
@@ -825,6 +856,26 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.placeholder = get_string(e, "placeholder");
             el.bg_color = get_string(e, "bg_color");
             el.label = get_string(e, "label");
+            // swap / action / xy_pad / value_label fields.
+            el.target_frame = static_cast<int>(get_float(e, "target_frame", -1.0f));
+            el.action = get_string(e, "action");
+            el.text = get_string(e, "text");
+            el.value_left_align = get_bool(e, "value_left_align");
+            el.default_value_y = get_float(e, "default_value_y", 0.5f);
+            // Import report (resolution provenance).
+            el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
+            el.confidence_score = get_float(e, "confidence_score", 1.0f);
+            el.verification_pass = get_bool(e, "verification_pass", true);
+            // custom — registered native control.
+            el.factory_id = get_string(e, "factory_id");
+            el.custom_props = get_string(e, "custom_props");
+            if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
+                const auto cs = e["conflict_signals"];
+                for (uint32_t j = 0; j < cs.size(); ++j)
+                    if (cs[static_cast<int>(j)].isString())
+                        el.conflict_signals.push_back(
+                            std::string(cs[static_cast<int>(j)].toString()));
+            }
             if (e.hasObjectMember("options") && e["options"].isArray()) {
                 const auto opts = e["options"];
                 for (uint32_t j = 0; j < opts.size(); ++j)
@@ -849,6 +900,27 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         obj["figma"]["blend_mode"].isString()) {
         node.style.mix_blend_mode =
             normalize_blend_mode(std::string(obj["figma"]["blend_mode"].toString()));
+    }
+    // Preserve the Figma component identity the serializer packs into the
+    // `figma` block (serialize.ts: component_key / main_component_name). The
+    // built-in TS lane only stamps `audio_widget` for Pulp-Library keys, so a
+    // THIRD-PARTY design's instances reach the importer with this identity but
+    // NO audio_widget. The recognition resolver (recognition_resolver.hpp)
+    // re-resolves these against the merged manifest set after parse, so a user
+    // manifest can wire a designer's own component-set keys. Stored verbatim in
+    // attributes (free-form passthrough) — keyed on the canonical token, never
+    // a layer name. Additive: absent for non-figma-plugin sources.
+    if (obj.hasObjectMember("figma") && obj["figma"].isObject()) {
+        const auto fig = obj["figma"];
+        if (fig.hasObjectMember("component_key") && fig["component_key"].isString()) {
+            auto key = std::string(fig["component_key"].toString());
+            if (!key.empty()) node.attributes["figmaComponentKey"] = std::move(key);
+        }
+        if (fig.hasObjectMember("main_component_name") &&
+            fig["main_component_name"].isString()) {
+            auto name = std::string(fig["main_component_name"].toString());
+            if (!name.empty()) node.attributes["figmaMainComponentName"] = std::move(name);
+        }
     }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);
@@ -895,7 +967,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // Top-level `asset_ref` (figma-plugin lane stamps it directly on the node,
     // not under `attributes`). Promote it into node.attributes so the import
     // CLI's asset-resolution pass can resolve it to a file path — this feeds
-    // both the knob sprite-strip skin and the #3191 fader/meter skin sampling.
+    // both the knob sprite-strip skin and fader/meter skin sampling.
     // Don't overwrite an attributes-nested asset_ref if one was already set.
     if (obj.hasObjectMember("asset_ref") && obj["asset_ref"].isString() &&
         node.attributes.find("asset_ref") == node.attributes.end()) {
@@ -905,7 +977,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     // SVG path geometry — preserve the path-data string under a canonical key
     // so codegen can lower vector/path/svg_path nodes to a native SvgPathWidget
-    // instead of silently dropping them (the dropped-vector invariant, #3275).
+    // instead of silently dropping them.
     // Multi-spelling so Pencil / Stitch / v0 / Claude / RN SVG exports all
     // survive (the figma lane rasterizes vectors to PNG, so this serves the
     // path-carrying sources). First non-empty wins; an attributes-nested
@@ -1092,7 +1164,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // which means we end up with width ≈ 5e-06 — invisible in any renderer.
     // Promote the stroke weight to the visible dimension and turn the
     // node into a colored rect (drop the empty PNG fill) so it actually
-    // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 1.
+    // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 0.5.
     {
         constexpr float kDegenerateAxis = 0.5f;
         constexpr float kMinStrokeWeight = 0.5f;  // Figma "1px" strokes
@@ -1176,7 +1248,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Shadow-driven sibling snap (extracted — pulp #41).
+    // Shadow-driven sibling snap.
     snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
@@ -1262,7 +1334,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Tail post-passes, extracted into named functions (pulp #41).
+    // Tail post-passes, extracted into named functions.
     detect_node_audio_widget(node, explicit_audio_widget);
     parse_shape_stroke_color(node, obj);
     extract_widget_shape_dims(node);
@@ -1423,7 +1495,7 @@ ImportDiagnostic make_import_diagnostic(ImportDiagnosticSeverity severity,
     return diagnostic;
 }
 
-static std::string json_escape(std::string_view text) {
+std::string json_escape(std::string_view text) {
     std::ostringstream out;
     for (unsigned char c : text) {
         switch (c) {
@@ -1728,7 +1800,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
         write_string_member(out, first, "raw_source", node.raw_source);
     }
 
-    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    // ── Faithful-vector import ───────────────────────────────────────────
     // Structural, not source-metadata: a faithful_svg node must round-trip
     // its render mode + asset + overlays regardless of metadata stripping.
     if (node.render_mode != NodeRenderMode::normal)
@@ -1748,6 +1820,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_float_member(out, ef, "hit_radius", el.hit_radius);
             if (!el.svg_patch_d.empty()) write_string_member(out, ef, "svg_patch_d", el.svg_patch_d);
             write_float_member(out, ef, "default_value", el.default_value);
+            if (el.flash) { write_key(out, ef, "flash"); out << "true"; }
             // Overlay-control fields — emitted only when set (knobs stay lean).
             if (el.x != 0.0f) write_float_member(out, ef, "x", el.x);
             if (el.y != 0.0f) write_float_member(out, ef, "y", el.y);
@@ -1765,6 +1838,31 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 for (size_t j = 0; j < el.options.size(); ++j) {
                     if (j) out << ',';
                     out << '"' << json_escape(el.options[j]) << '"';
+                }
+                out << ']';
+            }
+            // swap / action / xy_pad / value_label fields — emitted only when set.
+            if (el.target_frame != -1)
+                write_int_member(out, ef, "target_frame", el.target_frame);
+            if (!el.action.empty()) write_string_member(out, ef, "action", el.action);
+            if (!el.text.empty()) write_string_member(out, ef, "text", el.text);
+            if (el.value_left_align) { write_key(out, ef, "value_left_align"); out << "true"; }
+            if (el.kind == InteractiveElementKind::xy_pad)
+                write_float_member(out, ef, "default_value_y", el.default_value_y);
+            // Import report fields — emitted only when set (lean otherwise).
+            if (el.resolution_rung != 0)
+                write_int_member(out, ef, "resolution_rung", el.resolution_rung);
+            if (el.confidence_score != 1.0f)
+                write_float_member(out, ef, "confidence_score", el.confidence_score);
+            if (!el.verification_pass) { write_key(out, ef, "verification_pass"); out << "false"; }
+            if (!el.factory_id.empty()) write_string_member(out, ef, "factory_id", el.factory_id);
+            if (!el.custom_props.empty()) write_string_member(out, ef, "custom_props", el.custom_props);
+            if (!el.conflict_signals.empty()) {
+                write_key(out, ef, "conflict_signals");
+                out << '[';
+                for (size_t j = 0; j < el.conflict_signals.size(); ++j) {
+                    if (j) out << ',';
+                    out << '"' << json_escape(el.conflict_signals[j]) << '"';
                 }
                 out << ']';
             }

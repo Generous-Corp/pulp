@@ -1,7 +1,6 @@
 """Queue persistence + job normalization for local CI.
 
-Extracted from local_ci.py as part of the R2-1 phased split. The three
-helpers here own:
+The three helpers here own:
 
   - `normalize_job` — fill in id (sha1 of branch|sha|queued_at if missing),
     priority, target list ordering, status, validation mode, and the

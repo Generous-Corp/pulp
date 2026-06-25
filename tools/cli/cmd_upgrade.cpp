@@ -1,15 +1,8 @@
 // cmd_upgrade.cpp — `pulp upgrade` subcommand
 //
-// Moved out of cmd_misc.cpp in release-discovery Slice 2 (#547) so the
-// surface grows independently. This slice adds `--check-only` which
-// reports the cached latest release without downloading anything, and
-// wires the pre-fetch/cache read so the upgrade path shares state with
-// the on-every-invocation update banner.
-//
-// The actual enforcement of auto/prompt/manual/off update modes lands
-// in Slice 5 (#499). This slice is the minimal surface: a config
-// reader, a cache, a banner, and a stub that tells the user what
-// would happen.
+// Owns `--check-only`, which reports the cached latest release without
+// downloading anything, and wires the pre-fetch/cache read so the
+// upgrade path shares state with the on-every-invocation update banner.
 //
 // URL/asset-name convention lives in upgrade_url.hpp — DO NOT bake
 // the version into the filename. See .agents/skills/cli-maintenance
@@ -106,16 +99,16 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (args[i][0] != '-') target_version = args[i];
     }
 
-    // ── --notes path (Slice 3 surface) ──────────────────────────────────────
+    // ── --notes path ────────────────────────────────────────────────────────
     //
     // Print migration notes that apply to the hop `from` → `to` and
     // exit. No network, no binary swap. Defaults:
     //   from = PULP_SDK_VERSION (the version of the running binary)
     //   to   = cached latest_version (falls back to `from` if no cache)
     //
-    // The JSON variant is stable-shape (see migration_index.hpp) — Slice 4
-    // depends on it. Printed to stdout so scripts can `pulp upgrade
-    // --notes --json | jq` without stripping a banner.
+    // The JSON variant is stable-shape (see migration_index.hpp).
+    // Printed to stdout so scripts can `pulp upgrade --notes --json | jq`
+    // without stripping a banner.
     if (notes_only) {
         std::string from = !from_override.empty() ? from_override : std::string(PULP_SDK_VERSION);
         std::string to = to_override;
@@ -139,7 +132,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // ── --check-only path (Slice 2 surface) ─────────────────────────────────
+    // ── --check-only path ───────────────────────────────────────────────────
     //
     // Reports what the banner would say. Uses uc::resolve_latest_with_persist
     // so a stale or empty cache triggers a synchronous refresh. The
@@ -397,29 +390,25 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         }
     }
 
-    // Slice 7 (#564) wiring: honor update.bump_projects after a
-    // successful CLI upgrade. The just-installed binary owns the
-    // actual `pulp project bump --all` behaviour — we emit a hint
-    // or exec into the binary depending on the configured mode.
+    // Honor update.bump_projects after a successful CLI upgrade.
+    // The just-installed binary must own any future automatic
+    // `pulp project bump --all` execution, so this command only emits
+    // the post-upgrade nudge.
     //
     //   prompt (default) → print the hint; let the user run it
-    //   auto             → print the hint; a future slice execs it
-    //                      (Windows-safe: runs OUTSIDE pulp.exe)
+    //   auto             → print the same hint; accepted for compatibility
     //   off              → stay quiet
     //
     // The full "end-to-end silent" flow from the design doc needs the
     // replaced binary to be the one running `project bump`, which is
-    // the NEXT invocation. This slice prints the correct nudge now;
-    // the actual spawn lives in the follow-up (tracked inline).
+    // the NEXT invocation. This command deliberately stops at printing
+    // the nudge.
     {
         auto bp = trim(read_user_config_value("update", "bump_projects"));
         if (bp.empty()) bp = "prompt";
         if (bp != "off") {
             std::cout << "\n  Pin projects to the new CLI version:\n"
                       << "    pulp project bump --all" << "\n";
-            if (bp == "auto") {
-                std::cout << "    (update.bump_projects = auto; will run on next invocation)\n";
-            }
         }
     }
 

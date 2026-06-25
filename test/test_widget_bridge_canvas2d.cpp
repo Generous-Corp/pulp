@@ -1,16 +1,13 @@
-// test_widget_bridge_canvas2d.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 continuation) refactor. Covers the
-// Canvas2D bridge surface end-to-end through CanvasWidget::paint:
+// WidgetBridge Canvas2D tests covering the bridge surface end-to-end through
+// CanvasWidget::paint:
 //
-//   - canvasSetTransform / canvasClip / canvasGlobalCompositeOperation
-//     (issue-896): the bridge records a CanvasDrawCmd, paint() replays it
+//   - canvasSetTransform / canvasClip / canvasGlobalCompositeOperation:
+//     the bridge records a CanvasDrawCmd, paint() replays it
 //   - canvasMeasureText / canvasSetLineDash / canvasDrawImage /
 //     canvasGetImageData / canvasPutImageData (issue-916)
-//   - pulp #1899 / #1901 — 4-arg canvasFillText preserves prior state
+//   - 4-arg canvasFillText preserves prior state
 //
-// Tests share fixtures with test_widget_bridge.cpp (the parent TU still
-// owns the smaller widget surfaces); this slice peels off the canvas2d
-// concern as one of P5-1's per-surface splits.
+// Tests share fixtures with the smaller WidgetBridge surface clusters.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -307,9 +304,9 @@ TEST_CASE("WidgetBridge direct Canvas2D gap APIs replay expected canvas commands
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// pulp #899 — WidgetBridge auto-wires repaint_callback_ to the root view's
-// host invalidator so JS-driven UI changes (and rAF callbacks) actually
-// schedule a paint when the View owns its own bridge.
+// WidgetBridge auto-wires repaint_callback_ to the root view's host invalidator
+// so JS-driven UI changes (and rAF callbacks) actually schedule a paint when
+// the View owns its own bridge.
 // ───────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -478,11 +475,10 @@ TEST_CASE("View::request_repaint reaches host through propagated descendants (is
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// pulp #921 — __requestFrame__ must call request_repaint() so that
-// requestAnimationFrame() actually drives the host paint loop. Without
-// this wiring, JS-side rAF callbacks accumulate in pending_frame_ids_
-// but the host never schedules the paint that drains them — Spectr's
-// FilterBank canvas stays blank.
+// __requestFrame__ must call request_repaint() so that requestAnimationFrame()
+// actually drives the host paint loop. Without this wiring, JS-side rAF
+// callbacks accumulate in pending_frame_ids_ but the host never schedules the
+// paint that drains them — Spectr's FilterBank canvas stays blank.
 // ───────────────────────────────────────────────────────────────────────────
 
 TEST_CASE("WidgetBridge requestAnimationFrame triggers a host repaint (issue 921)",
@@ -602,8 +598,7 @@ TEST_CASE("WidgetBridge requestAnimationFrame chain keeps requesting paints (iss
 // These five CanvasRenderingContext2D bridge functions close the gap
 // list in issue-916. The first three are the user-priority items
 // (Spectr FilterBank text alignment + footer icon rendering); the last
-// two are P2 follow-ups but ship together to land the surface in one
-// pass.
+// two ship together to land the surface in one pass.
 
 TEST_CASE("WidgetBridge canvasMeasureText returns full TextMetrics object",
           "[view][bridge][canvas][issue-916]") {
@@ -803,8 +798,8 @@ TEST_CASE("WidgetBridge canvasDrawImage records draw_image with src + dst rect",
     REQUIRE(drawIndex >= 0);
 }
 
-// pulp #1737 — drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) sprite-sheet
-// slicing form. Pre-fix, the JS shim accepted the 9-arg signature but
+// drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) sprite-sheet slicing form.
+// Pre-fix, the JS shim accepted the 9-arg signature but
 // silently dropped the source rect — only the dst rect made it across
 // the bridge, so a sprite-sheet `drawImage(strip, 32,0,32,32, 0,0,32,32)`
 // drew the entire strip scaled into the 32×32 dst tile. Post-fix, the
@@ -865,15 +860,10 @@ TEST_CASE("WidgetBridge canvasDrawImage 9-arg form plumbs source rect end-to-end
     REQUIRE(drawIndex >= 0);
 }
 
-// pulp #1739 codecov backfill — focused unit test for the bridge-side
-// 9-arg drawImage plumbing. The end-to-end test above (#1737) exercises
-// the same path through the JS shim, but codecov's per-line attribution
-// reported 0% on widget_bridge.cpp lines 7045-7051 (the `args.numArgs
-// >= 10` branch that sets has_source_rect + stashes sx,sy,sw,sh in
-// x2,y2,x3,y3). This test invokes canvasDrawImage directly via JS to
-// pin the bridge plumbing to a tight Catch2 fixture so codecov measures
-// it. Asserts target the CanvasDrawCmd state right at the
-// JS-→-bridge boundary (read back via CanvasWidget::commands()).
+// Focused unit test for the bridge-side 9-arg drawImage plumbing. The
+// end-to-end test above exercises the same path through the JS shim; this test
+// invokes canvasDrawImage directly via JS and asserts the CanvasDrawCmd state
+// right at the JS-→-bridge boundary (read back via CanvasWidget::commands()).
 TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the recorded cmd",
           "[view][bridge][canvas][issue-1739][canvas2d][coverage]") {
     ScriptEngine engine;
@@ -885,8 +875,8 @@ TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the 
 
     // Drive canvasDrawImage directly with the 10-arg shape so the
     // `args.numArgs >= 10` branch in widget_bridge.cpp fires. Using the
-    // raw bridge function (not the JS shim) keeps the call site tightly
-    // bound to the lines under test for codecov line-attribution.
+    // raw bridge function (not the JS shim) keeps the call site tightly bound
+    // to the branch under test.
     bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'bridge-9arg-canvas';
@@ -908,8 +898,8 @@ TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the 
 
     // CanvasWidget::commands() exposes the recorded cmd queue (read-only).
     // We assert directly on the CanvasDrawCmd to pin the bridge's
-    // x2/y2/x3/y3 + has_source_rect writes — no paint-replay layer in
-    // between for codecov to lose track of.
+    // x2/y2/x3/y3 + has_source_rect writes without an intervening paint-replay
+    // layer.
     const auto& cmds = canvas->commands();
     REQUIRE(cmds.size() == 1);
     const auto& cmd = cmds.front();
@@ -970,15 +960,14 @@ TEST_CASE("WidgetBridge canvasDrawImage 6-arg call leaves has_source_rect=false"
     REQUIRE_THAT(cmd.y3, WithinAbs(0.0f, 1e-5f));
 }
 
-// ── pulp #1899 / #1901 review — 4-arg canvasFillText preserves prior state ──
+// ── 4-arg canvasFillText preserves prior state ─────────────────────────────
 //
 // The original 4-arg shim (#1899) unconditionally injected a `set_font`
 // (system-ui 14px) ahead of every fillText cmd AND overwrote
 // `cmd.color` to white. That stomped any prior `fillStyle = "..."` or
-// `font = "..."` set by the caller. Codex flagged both as P1 on
-// PR #1901. The fix gates each default on whether any prior fill-style
-// / font-state cmd has been recorded on the canvas; if so, we propagate
-// that state into the fill_text cmd rather than reset to defaults.
+// `font = "..."` set by the caller. The fix gates each default on whether any
+// prior fill-style / font-state cmd has been recorded on the canvas; if so, we
+// propagate that state into the fill_text cmd rather than reset to defaults.
 
 TEST_CASE("WidgetBridge 4-arg canvasFillText preserves prior fillStyle color",
           "[view][bridge][canvas][issue-1901][canvas2d][coverage]") {
@@ -1117,12 +1106,11 @@ TEST_CASE("WidgetBridge canvasPutImageData records pixel buffer for paint replay
     REQUIRE(writeIndex >= 0);
 }
 
-// pulp #1737 — putImageData(imageData, dx, dy, dirtyX, dirtyY, dirtyW,
-// dirtyH) sub-rect form. Pre-fix the JS shim accepted the 7-arg
-// signature but silently dropped dirtyX/Y/W/H and wrote the entire
-// ImageData. Per HTML5 spec only the (dirtyX, dirtyY)→(dirtyX+dirtyW,
-// dirtyY+dirtyH) sub-rect of the source ImageData is written, at
-// destination top-left (dx + dirtyX, dy + dirtyY).
+// putImageData(imageData, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) sub-rect
+// form. Pre-fix the JS shim accepted the 7-arg signature but silently dropped
+// dirtyX/Y/W/H and wrote the entire ImageData. Per HTML5 spec only the
+// (dirtyX, dirtyY)→(dirtyX+dirtyW, dirtyY+dirtyH) sub-rect of the source
+// ImageData is written, at destination top-left (dx + dirtyX, dy + dirtyY).
 //
 // Test drives a 4×4 ImageData with a recognisable colour pattern and
 // asks the shim to write only the 2×2 bottom-right sub-rect at
@@ -1205,11 +1193,10 @@ TEST_CASE("WidgetBridge canvasPutImageData 7-arg sub-rect slices on the JS side"
     REQUIRE(writeIndex >= 0);
 }
 
-// pulp #1737 — putImageData with an empty dirty rect (e.g. dirtyW <= 0
-// after clamping) is a no-op per HTML5 spec. Pre-fix the JS shim
-// dropped the dirty args entirely, so an empty dirty rect would still
-// blast the whole ImageData onto the canvas. Post-fix the shim
-// recognises the empty case and bails before encoding/sending.
+// putImageData with an empty dirty rect (e.g. dirtyW <= 0 after clamping) is a
+// no-op per HTML5 spec. Pre-fix the JS shim dropped the dirty args entirely, so
+// an empty dirty rect would still blast the whole ImageData onto the canvas.
+// Post-fix the shim recognises the empty case and bails before encoding/sending.
 TEST_CASE("WidgetBridge canvasPutImageData 7-arg empty dirty rect is a no-op",
           "[view][bridge][canvas][issue-916][issue-1737]") {
     ScriptEngine engine;
@@ -1278,4 +1265,3 @@ TEST_CASE("WidgetBridge canvasGetImageData returns a TextMetrics-like object "
     // 4*4*4 == 64 bytes for the RGBA array.
     REQUIRE(length.getWithDefault<double>(-1.0) == 64);
 }
-

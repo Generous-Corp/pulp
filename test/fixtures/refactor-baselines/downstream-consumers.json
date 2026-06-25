@@ -11,10 +11,7 @@
       "pulp-embed-iplug2",
       "pulp-embed-juce"
     ],
-    "project_ir_consumers": [
-      "pulp-import-iplug",
-      "pulp-import-juce"
-    ]
+    "project_ir_consumers": []
   },
   "sdk_recipe": {
     "prefix_env": "PULP_SDK_PREFIX",
@@ -241,110 +238,6 @@
           "expected": {
             "type": "log",
             "value": "SELFCHECK opened=1 gpu=1 liveCapture=ok deterministic=ok"
-          }
-        }
-      ]
-    },
-    {
-      "repo": "pulp-import-iplug",
-      "category": "project_importer",
-      "remote": "https://github.com/danielraffel/pulp-import-iplug.git",
-      "checkout_path_candidates": [
-        "/Volumes/Workshop/Code/pulp-import-iplug",
-        "/Users/danielraffel/Code/pulp-import-iplug"
-      ],
-      "reviewed_head": "2ba988323ab0869f16f17768dbac0bbdb86ef626",
-      "live_head": "2ba988323ab0869f16f17768dbac0bbdb86ef626",
-      "live_dirty": false,
-      "dependency_surfaces": [
-        "ProjectIR draft schema",
-        "import-spi-v0 detect analyze envelopes",
-        "iPlug2 extractor fixtures",
-        "golden ProjectIR reports"
-      ],
-      "affected_roadmap_items": [
-        "P0.4",
-        "P2.3",
-        "P3.1"
-      ],
-      "required_commands": [
-        {
-          "id": "spike-goldens",
-          "description": "Run the iPlug2 extractor spike and compare ProjectIR goldens.",
-          "working_dir": "$PULP_IMPORT_IPLUG_REPO/spike",
-          "command": "cd \"$PULP_IMPORT_IPLUG_REPO/spike\" && ./run_spike.sh",
-          "required_for": [
-            "project_import_spi",
-            "project_ir_schema"
-          ],
-          "expected": {
-            "type": "log",
-            "value": "=== spike OK ==="
-          }
-        },
-        {
-          "id": "spi-unittest",
-          "description": "Run the iPlug2 JSON-stdio SPI contract tests.",
-          "working_dir": "$PULP_IMPORT_IPLUG_REPO",
-          "command": "cd \"$PULP_IMPORT_IPLUG_REPO\" && python3 -m unittest spike.test_spi",
-          "required_for": [
-            "project_import_spi"
-          ],
-          "expected": {
-            "type": "log",
-            "value": "OK"
-          }
-        }
-      ]
-    },
-    {
-      "repo": "pulp-import-juce",
-      "category": "project_importer",
-      "remote": "https://github.com/danielraffel/pulp-import-juce.git",
-      "checkout_path_candidates": [
-        "/Volumes/Workshop/Code/pulp-import-juce",
-        "/Users/danielraffel/Code/pulp-import-juce"
-      ],
-      "reviewed_head": "e06b04b3953f6bb92e779829b68811d4c4f5efa4",
-      "live_head": "e06b04b3953f6bb92e779829b68811d4c4f5efa4",
-      "live_dirty": false,
-      "dependency_surfaces": [
-        "ProjectIR draft schema",
-        "import-spi-v0 detect analyze envelopes",
-        "JUCE extractor fixtures",
-        "golden ProjectIR reports"
-      ],
-      "affected_roadmap_items": [
-        "P0.4",
-        "P2.3",
-        "P3.1"
-      ],
-      "required_commands": [
-        {
-          "id": "spike-goldens",
-          "description": "Run the JUCE extractor spike and compare ProjectIR goldens.",
-          "working_dir": "$PULP_IMPORT_JUCE_REPO/spike",
-          "command": "cd \"$PULP_IMPORT_JUCE_REPO/spike\" && ./run_spike.sh",
-          "required_for": [
-            "project_import_spi",
-            "project_ir_schema"
-          ],
-          "expected": {
-            "type": "log",
-            "value": "=== spike OK ==="
-          }
-        },
-        {
-          "id": "spi-unittest",
-          "description": "Run the JUCE JSON-stdio SPI contract tests.",
-          "working_dir": "$PULP_IMPORT_JUCE_REPO",
-          "command": "cd \"$PULP_IMPORT_JUCE_REPO\" && python3 -m unittest spike.test_spi",
-          "required_for": [
-            "project_import_spi"
-          ],
-          "expected": {
-            "type": "log",
-            "value": "OK"
           }
         }
       ]

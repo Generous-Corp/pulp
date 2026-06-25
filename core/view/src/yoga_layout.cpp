@@ -1,4 +1,4 @@
-// Yoga layout adapter — replaces hand-rolled flexbox with Meta's Yoga engine.
+// Yoga layout adapter — drives View-tree layout via Meta's Yoga engine.
 // Conditionally compiled only when PULP_HAS_YOGA is defined.
 
 #ifdef PULP_HAS_YOGA
@@ -13,8 +13,8 @@
 
 namespace pulp::view {
 
-// pulp #1899 — diagnostic: dump computed bounds tree after Yoga layout.
-// Gated by PULP_DUMP_BOUNDS env var so it never runs in production.
+// Diagnostic: dump the computed bounds tree after Yoga layout.
+// Gated by PULP_DUMP_BOUNDS so it never runs in production.
 static void dump_bounds_tree(const View& view, int depth) {
     auto b = view.bounds();
     const char* pos_str = "static";
@@ -42,9 +42,8 @@ static void dump_bounds_tree(const View& view, int depth) {
 }
 
 // Map Pulp FlexDirection to Yoga.
-// pulp #1434 (rn batch B) — row_reverse / column_reverse now route
-// to YGFlexDirectionRowReverse / ColumnReverse. Before, the ternary
-// silently mapped them to YGFlexDirectionColumn (the false branch).
+// Each Pulp direction maps to the matching Yoga enum. The final return is a
+// defensive fallback for exhaustive-switch hygiene.
 static YGFlexDirection to_yg_direction(FlexDirection d) {
     switch (d) {
         case FlexDirection::row:            return YGFlexDirectionRow;
@@ -56,7 +55,6 @@ static YGFlexDirection to_yg_direction(FlexDirection d) {
 }
 
 // Map Pulp FlexAlign to Yoga.
-// pulp #1434 (rn batch B) — `baseline` added.
 static YGAlign to_yg_align(FlexAlign a) {
     switch (a) {
         case FlexAlign::start:    return YGAlignFlexStart;
@@ -69,13 +67,11 @@ static YGAlign to_yg_align(FlexAlign a) {
     }
 }
 
-// pulp #1434 (sub-agent #12 follow-up) — align-content has a wider
-// value vocabulary than align-items / align-self because the space-*
-// distributions (space-between / space-around / space-evenly) are
-// meaningful here but not on the per-item alignment axis. We carry
-// the space variant on a sibling FlexStyle::AlignContentSpace enum
-// and dispatch here so the rest of the flow stays uniform with the
-// existing FlexAlign enum.
+// align-content has a wider value vocabulary than align-items / align-self
+// because the space-* distributions (space-between / space-around /
+// space-evenly) are meaningful here but not on the per-item alignment axis.
+// We carry the space variant on a sibling FlexStyle::AlignContentSpace enum
+// and dispatch here so the rest of the flow stays uniform with FlexAlign.
 static YGAlign to_yg_align_content(FlexAlign a, FlexStyle::AlignContentSpace s) {
     using AcSpace = FlexStyle::AlignContentSpace;
     if (s == AcSpace::space_between) return YGAlignSpaceBetween;
@@ -106,16 +102,15 @@ static YGJustify to_yg_justify(FlexJustify j) {
 // must not consume "remaining space" on the parent's flex line. Pulp's
 // FlexStyle defaults (flex_shrink = 1) would otherwise leak in and let
 // Yoga shrink an absolute-with-explicit-dimension child to fit a flex
-// neighbour's slot. See pulp #1379 / #998. Direction / align / justify
-// still describe the absolute box's OWN inner layout, so those stay.
+// neighbour's slot. Direction / align / justify still describe the absolute
+// box's own inner layout, so those stay.
 static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute) {
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));
     YGNodeStyleSetAlignItems(node, to_yg_align(f.align_items));
     YGNodeStyleSetAlignSelf(node, to_yg_align(f.align_self));
-    // pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-axis
-    // distribution. Routes to YGNodeStyleSetAlignContent. Default
-    // (FlexAlign::start, AlignContentSpace::none) maps to YGAlignFlexStart
-    // which matches Yoga's default.
+    // Multi-line flex cross-axis distribution. Default (FlexAlign::start,
+    // AlignContentSpace::none) maps to YGAlignFlexStart, matching Yoga's
+    // default.
     YGNodeStyleSetAlignContent(node, to_yg_align_content(f.align_content, f.align_content_space));
     YGNodeStyleSetJustifyContent(node, to_yg_justify(f.justify_content));
 
@@ -125,7 +120,7 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         // containing block sizing path, not the flex line.
         YGNodeStyleSetFlexGrow(node, f.flex_grow);
         YGNodeStyleSetFlexShrink(node, f.flex_shrink);
-        // pulp #1434 (rn batch C) — dispatch flex_basis on dim_*.unit:
+        // Dispatch flex_basis on dim_*.unit:
         // `'auto'` → YGNodeStyleSetFlexBasisAuto; `'50%'` →
         // YGNodeStyleSetFlexBasisPercent; numeric → existing px API.
         if (f.dim_flex_basis.unit == DimensionUnit::auto_) {
@@ -136,24 +131,21 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
             YGNodeStyleSetFlexBasis(node, f.flex_basis);
         }
     } else {
-        // Be explicit: zero them so a previously-set Yoga node (we don't
-        // recycle here today, but defensively) doesn't carry residue, and
-        // so Yoga's "absolute child has flex_basis" code path doesn't fire.
+        // Out-of-flow boxes must not participate in the parent's flex line;
+        // force grow/shrink to 0 regardless of FlexStyle defaults.
         YGNodeStyleSetFlexGrow(node, 0.0f);
         YGNodeStyleSetFlexShrink(node, 0.0f);
     }
 
-    // pulp #1434 Triage #14 — tri-state wrap; YGWrapWrapReverse covers
-    // the previously-inexpressible `wrap-reverse` mode.
+    // Tri-state wrap: YGWrapWrapReverse covers `wrap-reverse`.
     YGWrap yoga_wrap = YGWrapNoWrap;
     if (f.flex_wrap == FlexWrap::wrap)              yoga_wrap = YGWrapWrap;
     else if (f.flex_wrap == FlexWrap::wrap_reverse) yoga_wrap = YGWrapWrapReverse;
     YGNodeStyleSetFlexWrap(node, yoga_wrap);
 
-    // pulp #1516 — CSS box-sizing. Yoga 3.x's native
-    // `YGNodeStyleSetBoxSizing` does the spec-correct math so we don't
-    // have to subtract padding+border from declared dimensions
-    // ourselves. Default content_box matches the CSS spec.
+    // CSS box-sizing. Yoga 3.x's native `YGNodeStyleSetBoxSizing` does the
+    // spec-correct math so we don't have to subtract padding+border from
+    // declared dimensions ourselves. Default content_box matches the CSS spec.
     YGNodeStyleSetBoxSizing(node,
         f.box_sizing == BoxSizing::border_box
             ? YGBoxSizingBorderBox
@@ -166,8 +158,8 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     if (rg > 0) YGNodeStyleSetGap(node, YGGutterRow, rg);
     if (cg > 0) YGNodeStyleSetGap(node, YGGutterColumn, cg);
 
-    // Padding — pulp #1434 (cross-surface mega-batch) dispatches on
-    // dim_padding_*.unit when set. percent → YGNodeStyleSetPaddingPercent.
+    // Padding dispatches on dim_padding_*.unit when set.
+    // percent → YGNodeStyleSetPaddingPercent.
     // Yoga's padding does NOT support `auto` (only margin does), so the
     // auto_ unit is treated as no-op here (the bridge already rejects
     // 'auto' on padding edges, but defensive belt-and-suspenders).
@@ -184,8 +176,8 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     apply_padding(YGEdgeBottom, f.dim_padding_bottom, f.padding_bottom, f.padding);
     apply_padding(YGEdgeLeft,   f.dim_padding_left,   f.padding_left,   f.padding);
 
-    // Margin — pulp #1434 (cross-surface mega-batch) dispatches on
-    // dim_margin_*.unit. percent → YGNodeStyleSetMarginPercent;
+    // Margin dispatches on dim_margin_*.unit.
+    // percent → YGNodeStyleSetMarginPercent;
     // auto_ → YGNodeStyleSetMarginAuto (used for centering with
     // `marginLeft: 'auto'; marginRight: 'auto'` etc.). px or unset
     // falls through to the legacy per-edge / uniform float path.
@@ -200,7 +192,6 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         }
         // When the bridge explicitly set a px dimension, route the typed
         // value through — preserves the sign so CSS-spec negative margins
-        // (used by figma-import for cap-height icon nudges and elsewhere)
         // actually reach Yoga. The legacy float path below only handled
         // positives and silently dropped negatives.
         if (dim.unit == DimensionUnit::px && dim.value != 0) {
@@ -215,14 +206,14 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     apply_margin(YGEdgeBottom, f.dim_margin_bottom, f.margin_bottom, f.margin);
     apply_margin(YGEdgeLeft,   f.dim_margin_left,   f.margin_left,   f.margin);
 
-    // pulp #1542 — yoga logical-edge fan-out. CSS / RN
+    // Yoga logical-edge fan-out. CSS / RN
     // `marginStart` / `marginEnd` / `paddingStart` / `paddingEnd` /
     // `start` / `end` translate to Yoga's `YGEdgeStart` / `YGEdgeEnd`
-    // which Yoga resolves against the node's writing direction (set
-    // below via YGNodeStyleSetDirection). Only dispatch when the
-    // dimension was explicitly set (unit != px || value != 0) so an
-    // unset start/end doesn't override the per-side left/right that
-    // ran above.
+    // which Yoga resolves against the node's writing direction (set by
+    // build_yoga_subtree via YGNodeStyleSetDirection). Margins and positions dispatch
+    // auto_ plus non-zero percent/px values; padding has no auto API and only
+    // dispatches positive percent/px values. An unset start/end must not
+    // override the per-side left/right that ran above.
     auto apply_logical_margin = [&](YGEdge edge, const Dimension& dim) {
         if (dim.unit == DimensionUnit::auto_) {
             YGNodeStyleSetMarginAuto(node, edge);
@@ -248,11 +239,10 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         }
     };
     auto apply_logical_position = [&](YGEdge edge, const Dimension& dim) {
-        // pulp DIVERGE→PASS sweep — Yoga DOES have a position-auto API
-        // (`YGNodeStyleSetPositionAuto`). `inset-inline-start: auto` is
-        // the CSS default ("not anchored to that edge"); routing the
-        // keyword through here lets it take effect instead of being
-        // silently dropped.
+        // Yoga has a position-auto API (`YGNodeStyleSetPositionAuto`).
+        // `inset-inline-start: auto` is the CSS default ("not anchored to
+        // that edge"); routing the keyword through here lets it take effect
+        // instead of being silently dropped.
         if (dim.unit == DimensionUnit::auto_) {
             YGNodeStyleSetPositionAuto(node, edge);
             return;
@@ -272,38 +262,16 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     apply_logical_position(YGEdgeStart, f.dim_start);
     apply_logical_position(YGEdgeEnd,   f.dim_end);
 
-    // pulp #1542 — node writing direction (CSS `direction` / RN
-    // I18nManager). Controls how Yoga resolves `YGEdgeStart` /
-    // `YGEdgeEnd` and how it orders row-axis children. `inherit`
-    // (default) lets the layout-root's direction propagate, so a
-    // node inside an RTL root resolves start as the right edge.
-    switch (f.writing_direction) {
-        case FlexStyle::WritingDirection::ltr:
-            YGNodeStyleSetDirection(node, YGDirectionLTR);
-            break;
-        case FlexStyle::WritingDirection::rtl:
-            YGNodeStyleSetDirection(node, YGDirectionRTL);
-            break;
-        case FlexStyle::WritingDirection::inherit:
-        default:
-            YGNodeStyleSetDirection(node, YGDirectionInherit);
-            break;
-    }
-
-    // Dimensions — pulp #1423 dispatches on dim_*.unit so width/height
+    // Dimensions dispatch on dim_*.unit so width/height
     // accept percentage values. The bridge's setFlex(width|height, ...)
     // path populates dim_width / dim_height with the unit info; this
     // adapter routes percent values to Yoga's native percent API
     // instead of treating "100%" as 100 px.
-    // pulp #1434 (sub-agent #12 follow-up) — `width: 'auto'` /
-    // `height: 'auto'` route to Yoga's YGNodeStyleSetWidthAuto /
+    // `width: 'auto'` / `height: 'auto'` route to Yoga's YGNodeStyleSetWidthAuto /
     // SetHeightAuto so the node sizes to its content (Figma "hug
     // contents", v0 intrinsic-sizing cards, Claude Design responsive
-    // containers). Without this branch the bridge's preferred_width
-    // = 0 fallback left the node with Yoga's default (auto) by
-    // accident; the explicit Auto API matches the user intent and
-    // ensures a previously-set explicit dimension on a recycled node
-    // gets cleared.
+    // containers). The explicit Auto API matches user intent and keeps the
+    // requested auto sizing explicit in the Yoga tree.
     if (f.dim_width.unit == DimensionUnit::auto_) {
         YGNodeStyleSetWidthAuto(node);
     } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value >= 0) {
@@ -318,7 +286,7 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     } else if (f.preferred_height > 0) {
         YGNodeStyleSetHeight(node, f.preferred_height);
     }
-    // pulp #1434 (rn batch C) — min/max width/height dispatch on dim_*.unit
+    // min/max width/height dispatch on dim_*.unit
     // for the percent path; existing px path stays for numeric values.
     if (f.dim_min_width.unit == DimensionUnit::percent && f.dim_min_width.value >= 0) {
         YGNodeStyleSetMinWidthPercent(node, f.dim_min_width.value);
@@ -333,7 +301,7 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         YGNodeStyleSetMaxHeightPercent(node, f.dim_max_height.value);
     } else if (f.max_height > 0) YGNodeStyleSetMaxHeight(node, f.max_height);
 
-    // Aspect ratio (pulp #1434) — Yoga sizes the cross axis from the main
+    // Aspect ratio: Yoga sizes the cross axis from the main
     // axis using `width / height`. Only forward when explicitly set so the
     // default (no aspect constraint) doesn't fight other size constraints.
     // Negative / zero values are nonsensical for ratio semantics; treat
@@ -360,12 +328,12 @@ static void apply_position_style(YGNodeRef node, const View& view) {
             break;
     }
 
-    // pulp #1434 batch 6 — dispatch on per-edge unit so top/right/bottom/left
+    // Dispatch on per-edge unit so top/right/bottom/left
     // accept percent values. The bridge's setTop / setRight / setBottom /
     // setLeft path populates View::top_unit_ / etc. with the unit info; this
     // adapter routes percent values to Yoga's native percent API instead of
-    // treating "50%" as 50 px. Mirrors the FlexStyle::dim_width path from
-    // pulp #1423 (PR #1426) for the View positional fields.
+    // treating "50%" as 50 px. Mirrors the FlexStyle::dim_width path for the
+    // View positional fields.
     if (view.has_top()) {
         if (view.top_unit() == DimensionUnit::percent) {
             YGNodeStyleSetPositionPercent(node, YGEdgeTop, view.top());
@@ -406,7 +374,7 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     float h = view->intrinsic_height();
     if (w <= 0) w = width;
 
-    // pulp-internal #74 — Label-specific width-aware height. When a
+    // Label-specific width-aware height. When a
     // multi-line Label is laid out in a bounded-width parent, the
     // intrinsic (\n-counted) height is a lower bound that misses
     // soft-wrap line additions. `measured_height(width)` consults the
@@ -423,16 +391,15 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     return {w, h};
 }
 
-// pulp #2163 / font-v2 Slice 1.1.b — baseline callback for text-bearing
-// nodes. Yoga's `align-items: baseline` walks each child and asks for
-// its baseline offset; the parent then aligns children so their
+// Baseline callback for text-bearing nodes. Yoga's `align-items: baseline`
+// walks each child and asks for its baseline offset; the parent then aligns
+// children so their
 // baselines sit on a common line. Without this callback, Yoga falls
 // back to "baseline == node height", which is the bottom of the box —
-// effectively top-align of unequal-height children, which is exactly
-// the CHAIN INFO bug in Chainer (#2163): bold labels and description
-// text in the same flex row render top-aligned because the measure
-// callback today only reports width+height. Wiring this closes that
-// gap. See Label::baseline_y() for the ascent computation.
+// effectively top-align of unequal-height children, which is why bold labels
+// and description text in the same flex row would render top-aligned when the
+// measure callback only reports width+height. See
+// Label::baseline_y() for the ascent computation.
 static float yoga_baseline(YGNodeConstRef node, float width, float height) {
     (void) width;
     (void) height;
@@ -443,8 +410,7 @@ static float yoga_baseline(YGNodeConstRef node, float width, float height) {
     // Non-text nodes: fall through to Yoga's default (height = bottom).
     // For non-text widgets that contain text (Button, Toggle label
     // strip, etc.) the painter's vertical-centering math takes care of
-    // alignment internally; Phase 2 may revisit those if they enter a
-    // baseline-aligned row in real designs.
+    // alignment internally; they can add a real baseline callback if needed.
     return height;
 }
 
@@ -466,16 +432,15 @@ static std::vector<View*> ordered_visible_children(View& parent) {
     return children;
 }
 
-// pulp #1543 — wire View's border-width state through to Yoga so the
-// box-sizing math (#1516) is correct. Pulp's borders have always been
-// painted as a Skia stroke, but Yoga never knew about them. With
-// box-sizing default `border-box`, Yoga subtracts (padding + border)
+// Wire View's border-width state through to Yoga so the box-sizing math is
+// correct. With box-sizing default `border-box`, Yoga subtracts
+// (padding + border)
 // from the declared dimensions to compute the inner content area. If
 // the border slot is 0 in Yoga's view, the content area is too large
 // by 2 * border_width and children leak under the painted stroke.
 //
-// Per-edge resolution (pulp #1566 — Codex P2 follow-up): an explicitly
-// set per-side value wins, even if it's 0. CSS / RN semantics: a
+// Per-edge resolution: an explicitly set per-side value wins, even if it's 0.
+// CSS / RN semantics: a
 // shorthand `borderWidth: 10` with `borderTopWidth: 0` must yield a
 // 0-px top border. Only when the per-edge `set` flag is false do we
 // fall back to the uniform `border_width()`. Yoga's
@@ -510,19 +475,18 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
     // flex_basis can be gated on absolute-ness in apply_flex_style and
-    // never contribute to the parent's flex line. (pulp #1379 / #998)
+    // never contribute to the parent's flex line.
     apply_position_style(node, view);
 
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
     apply_flex_style(node, view.flex(), is_absolute);
     apply_border_widths(node, view);
-    // pulp DIVERGE→PASS sweep — wire View::Overflow through to Yoga so
-    // the engine knows about clipping context. Yoga's overflow has 3
+    // Wire View::Overflow through to Yoga so the engine knows about clipping
+    // context. Yoga's overflow has 3
     // values (visible/hidden/scroll) matching CSS — for layout the only
     // observable difference is in descendant-overflow contribution to
-    // the box's preferred size, but having the slot wired closes the
-    // yoga/overflow harness gap (paint-side clipping is in view.cpp).
+    // the box's preferred size; paint-side clipping is in view.cpp.
     {
         YGOverflow yo = YGOverflowVisible;
         switch (view.overflow()) {
@@ -532,16 +496,16 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
         }
         YGNodeStyleSetOverflow(node, yo);
     }
-    // pulp #1434 Phase A2-3 — writing direction propagates into Yoga's
-    // YGDirection (controls how `start`/`end` resolve and whether
-    // flexDirection: row visually reverses under RTL). Use the raw
+    // Writing direction propagates into Yoga's YGDirection, which controls how
+    // `start`/`end` resolve and whether `flexDirection: row` visually reverses
+    // under RTL. Use the raw
     // `direction()` (not `resolved_direction()`, which collapses
     // `auto_` to LTR unconditionally) so that:
     //   - explicit ltr/rtl on a node maps to YGDirectionLTR/RTL,
-    //   - `auto_` on a non-root maps to YGDirectionInherit, allowing
-    //     descendants to actually pick up an RTL ancestor,
-    //   - `auto_` on the root falls back to LTR (no parent to inherit
-    //     from; first-strong-character heuristic is a follow-up).
+    //   - `auto_` on a non-root falls back to flex().writing_direction, then
+    //     YGDirectionInherit, allowing descendants to pick up an RTL ancestor,
+    //   - `auto_` on the root falls back to LTR because there is no parent to
+    //     inherit from and no first-strong-character scan here.
     {
         YGDirection ydir;
         switch (view.direction()) {
@@ -549,7 +513,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
             case View::WritingDirection::rtl: ydir = YGDirectionRTL; break;
             case View::WritingDirection::auto_:
             default:
-                // pulp #1542 — when View::direction is auto_, fall back to the
+                // When View::direction is auto_, fall back to the
                 // FlexStyle::writing_direction set via the bridge's
                 // direction_writing sub-key. If both are unset, inherit from
                 // parent (or LTR at root).
@@ -572,8 +536,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
 
     if (!has_managed_children && (view.intrinsic_width() > 0 || view.intrinsic_height() > 0)) {
         YGNodeSetMeasureFunc(node, yoga_measure);
-        // pulp #2163 / font-v2 Slice 1.1.b — wire Yoga's baseline channel
-        // for text-bearing leaves so flex containers can honor
+        // Wire Yoga's baseline channel for text-bearing leaves so flex
+        // containers can honor
         // `align-items: baseline`. Today only Labels report a real
         // baseline; non-Label leaves fall through to Yoga's default in
         // yoga_baseline().
@@ -625,10 +589,10 @@ void yoga_layout(View& root) {
     YGNodeStyleSetHeight(ygRoot, rootBounds.height);
     build_yoga_subtree(root, ygRoot);
 
-    // pulp #1542 — root direction follows the View's own
-    // writing_direction. When `inherit` (the default), Yoga falls back
-    // to LTR at the root, matching CSS / RN where `dir=auto` resolves
-    // to LTR for unknown content. Setting `rtl` on the root flips the
+    // Root direction follows the View's own writing_direction. When `inherit`
+    // (the default), Yoga falls back to LTR at the root, matching CSS / RN
+    // fallback behavior when content provides no directional signal.
+    // Setting `rtl` on the root flips the
     // row-axis layout and resolves YGEdgeStart to the right edge for
     // every descendant that also inherits.
     YGDirection rootDir = YGDirectionLTR;

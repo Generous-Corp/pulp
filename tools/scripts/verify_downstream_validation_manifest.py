@@ -23,8 +23,6 @@ EXPECTED_CONSUMERS = {
     "pulp-view-embed": "ViewEmbed C ABI and installed SDK consumption",
     "pulp-embed-iplug2": "iPlug2 editor lifecycle through pulp-view-embed",
     "pulp-embed-juce": "JUCE component lifecycle through pulp-view-embed",
-    "pulp-import-iplug": "ProjectIR importer SPI, separate from Pulp DesignIR",
-    "pulp-import-juce": "ProjectIR importer SPI, separate from Pulp DesignIR",
 }
 
 EMBED_CONSUMERS = {
@@ -33,10 +31,10 @@ EMBED_CONSUMERS = {
     "pulp-embed-juce",
 }
 
-IMPORT_CONSUMERS = {
-    "pulp-import-iplug",
-    "pulp-import-juce",
-}
+# ProjectIR importer consumers live in private sibling repos and are
+# intentionally not listed in this public manifest, so this set is empty.
+# The import-specific checks below are retained for a future public importer.
+IMPORT_CONSUMERS: set[str] = set()
 
 ROOT_KEYS = {
     "schema_version",
@@ -172,7 +170,7 @@ def validate_check(check: Any, consumer_name: str, errors: list[str]) -> str | N
 
 def validate_consumers(consumers: Any, errors: list[str]) -> None:
     require(isinstance(consumers, list) and len(consumers) == len(EXPECTED_CONSUMERS),
-            "consumers must list exactly the five roadmap P0.4 downstream repos",
+            "consumers must list exactly the roadmap P0.4 downstream repos",
             errors)
     if not isinstance(consumers, list):
         return
@@ -374,7 +372,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_local and isinstance(manifest, dict):
         local_failures = print_local_checkout_report(manifest, args.require_clean)
 
-    print("downstream_validation_manifest_ok=true consumers=5 roadmap_item=P0.4")
+    consumer_count = len(manifest.get("consumers", [])) if isinstance(manifest, dict) else 0
+    print(
+        "downstream_validation_manifest_ok=true "
+        f"consumers={consumer_count} roadmap_item=P0.4")
     if local_failures:
         print(f"downstream_validation_local_clean=false failures={local_failures}",
               file=sys.stderr)

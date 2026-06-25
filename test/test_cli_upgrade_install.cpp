@@ -1,9 +1,9 @@
 // Regression coverage for the C++ `pulp upgrade` install helper.
 //
-// Older pre-cutover C++ CLIs can upgrade straight into a Phase 8 Rust
-// archive. That archive contains `pulp` plus sibling artifacts such as
-// `pulp-cpp` and the wgpu runtime library; copying only `pulp` strands
-// the new Rust CLI without its C++ fallthrough delegate (#1673).
+// Older pre-cutover C++ CLIs can upgrade straight into a Rust CLI archive.
+// That archive contains `pulp` plus sibling artifacts such as `pulp-cpp` and
+// the wgpu runtime library; copying only `pulp` strands the new Rust CLI
+// without its C++ fallthrough delegate (#1673).
 
 #include <catch2/catch_test_macros.hpp>
 

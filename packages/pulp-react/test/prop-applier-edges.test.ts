@@ -1,8 +1,7 @@
-// pulp #1434 (cross-surface mega-batch) — verify @pulp/react prop-applier
-// forwards per-edge margin/padding values verbatim (number, percent string,
-// or 'auto' for margin only). Bridge + Yoga path is covered by the
-// Catch2 round-trip tests; this file covers the JS-side type-narrowing
-// + bridge-call shape.
+// Verify @pulp/react prop-applier forwards per-edge margin/padding
+// values verbatim (number, percent string, or 'auto' for margin only).
+// Bridge + Yoga path is covered by the Catch2 round-trip tests; this
+// file covers the JS-side type-narrowing + bridge-call shape.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -34,7 +33,7 @@ function setFlexCalls(b: MockBridge, key: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === key);
 }
 
-describe('prop-applier per-edge margin / padding (pulp #1434 cross-surface mega-batch)', () => {
+describe('prop-applier per-edge margin / padding', () => {
     it('paddingTop accepts numeric (px) and forwards verbatim', () => {
         applyChangedProps(makeInstance(), {}, { paddingTop: 12 });
         expect(setFlexCalls(bridge, 'padding_top')[0].args).toEqual(['k', 'padding_top', 12]);

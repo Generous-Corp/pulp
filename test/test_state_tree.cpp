@@ -1490,7 +1490,7 @@ TEST_CASE("StateTreeSynchroniser detaches removed subtrees before later mutation
     REQUIRE(sync.take_deltas().empty());
 }
 
-// ── StateTreeSynchroniser nested-node routing (P7-3) ────────────────────
+// ── StateTreeSynchroniser nested-node routing ───────────────────────────
 //
 // Regression tests for two defects: deltas captured on a nested node must
 // (1) record a path that identifies that node, not a bare type name, and
@@ -1656,7 +1656,7 @@ TEST_CASE("StateTreeSynchroniser detach after a removed subtree is destroyed is 
     REQUIRE(sync.take_deltas().size() == 1);
 }
 
-// ── Thread-safety contract regression (gap-doc Phase 0 audit, 2026-05-26) ───
+// ── Thread-safety contract regression ────────────────────────────────────
 //
 // StateTree is documented as "NOT thread-safe — caller must serialise".
 // These fixtures pin the contract two ways:
@@ -1791,8 +1791,8 @@ TEST_CASE("ObservableValue: external mutex serialises concurrent set/get",
 }
 
 // ── Synchronized clone (single-process) ──────────────────────────────
-// Closes the gap-doc Phase 3 row: "Single-process StateTree deep clone
-// w/ listener wiring (currently IPC-only StateTreeSynchroniser)".
+// Single-process StateTree deep clone with listener wiring, matching the
+// existing IPC-only StateTreeSynchroniser contract.
 
 TEST_CASE("SyncedClone: deep copy reflects starting state",
           "[state][tree][synced-clone]") {
@@ -1925,11 +1925,10 @@ TEST_CASE("SyncedClone destructor detaches listeners",
     REQUIRE(captured_clone->get_int("x") == 1);
 }
 
-// Regression for the Codex P1 review comment "Keep synced-clone wiring
-// from dangling after child removal" — when the synced source subtree
-// is removed and no other shared_ptr keeps it alive, the wiring vector
-// must skip listener-removal on the dead node instead of dereferencing
-// a dangling raw pointer.
+// Regression: synced-clone wiring must not dangle after child removal.
+// When the synced source subtree is removed and no other shared_ptr keeps
+// it alive, the wiring vector must skip listener-removal on the dead node
+// instead of dereferencing a dangling raw pointer.
 TEST_CASE("SyncedClone detach survives removed-and-dropped child subtree",
           "[state][tree][synced-clone][codex-p1]") {
     auto src = StateTree::create("root");
@@ -1945,9 +1944,8 @@ TEST_CASE("SyncedClone detach survives removed-and-dropped child subtree",
     child.reset();
     src->remove_child(0);
 
-    // Detach must not crash on the now-dead wiring entry. Before the
-    // fix this dereferenced a dangling raw pointer; after the fix the
-    // weak_ptr lock returns null and the entry is skipped.
+    // Detach must not crash on the now-dead wiring entry; the weak_ptr
+    // lock returns null and the entry is skipped.
     REQUIRE_NOTHROW(sync.detach());
     REQUIRE_FALSE(sync.is_attached());
 }

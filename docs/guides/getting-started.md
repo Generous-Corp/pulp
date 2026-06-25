@@ -467,9 +467,9 @@ Scripted UI sessions automatically apply a sibling `theme.json` when the UI load
 
 - **[From React/CSS Guide](from-react-css.md)** — mapping your web skills to Pulp
 - **[Cookbook](cookbook.md)** — 10 recipes for common UI patterns
-- **[API Reference](../reference/js-bridge.md)** — all 110+ JS bridge functions
+- **[API Reference](../reference/js-bridge.md)** — commonly used JS bridge functions
 - **[Design Tokens Guide](design-tokens.md)** — deep dive into theming
 - **[Custom Rendering Guide](custom-rendering.md)** — Canvas, SDF, and WebGPU drawing
-- **[Examples Gallery](examples.md)** — walkthroughs of all example plugins
+- **[Examples Gallery](examples.md)** — curated walkthroughs of core example plugins
 - **[CMake Reference](../reference/cmake.md)** — full `pulp_add_plugin()` documentation
 - **[CLI Reference](../reference/cli.md)** — all CLI commands

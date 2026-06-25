@@ -1,6 +1,6 @@
-// Tests for Workstream 03 items 3.7, 3.8, and 3.11 — bus-layout
-// validation, processBlock precision contract, and the cross-adapter
-// RT-safe latency / tail change notification pattern.
+// Tests for bus-layout validation, the processBlock precision contract,
+// and the cross-adapter RT-safe latency / tail change notification
+// pattern.
 //
 // These tests exercise the Processor-side API surface only. Adapter-
 // specific wiring (VST3 setBusArrangements, AU PropertyChanged, CLAP
@@ -93,7 +93,7 @@ public:
 
 } // namespace
 
-// ── Item 3.7 — bus layout validation ──────────────────────────────────────
+// ── Bus layout validation ─────────────────────────────────────────────────
 
 TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo "
           "matching the descriptor's bus count",
@@ -160,22 +160,20 @@ TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
     REQUIRE_FALSE(p.is_bus_layout_supported(mismatched_out));
 }
 
-// ── Item 3.8 — processBlock precision contract ────────────────────────────
+// ── processBlock precision contract ───────────────────────────────────────
 
 TEST_CASE("Processor::process is declared with float-precision BufferView. "
           "All four adapters today route only float buffers; double-"
           "precision support is opt-in per future Processor overload.",
           "[processor][precision][item-3.8]") {
-    // The contract under audit: the single virtual `process()` on
-    // pulp::format::Processor is `BufferView<float>` only — there is
+    // The single virtual `process()` on pulp::format::Processor is
+    // `BufferView<float>` only — there is
     // no `BufferView<double>` overload. Adapters wire float input ↔
     // output buffers in every format (VST3 channelBuffers32, AU
     // float32 render block, CLAP audio_buffer_t.data32, AAX float
     // pages). A regression that adds a second virtual or that
     // changes the element type to a wider scalar would silently
-    // un-implement every adapter; this static_assert pins the
-    // contract until item 3.8's follow-up adds an explicit double
-    // overload.
+    // un-implement every adapter; this static_assert pins that contract.
     using ProcessSig = void (Processor::*)(
         pulp::audio::BufferView<float>&,
         const pulp::audio::BufferView<const float>&,
@@ -204,7 +202,7 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     SUCCEED("process() ran with float buffers");
 }
 
-// ── Phase 2 — additive multi-bus process surface ──────────────────────────
+// ── Additive multi-bus process surface ───────────────────────────────────
 
 TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio",
           "[processor][process-buffers][phase2]") {
@@ -435,7 +433,7 @@ TEST_CASE("Processor multi-bus overload no-ops when no active main output exists
     REQUIRE(processor.simple_process_calls == 0);
 }
 
-// ── Phase 2 — runtime mode contract ───────────────────────────────────────
+// ── Runtime mode contract ─────────────────────────────────────────────────
 
 TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predicates",
           "[processor][process-context][phase2]") {
@@ -486,7 +484,7 @@ TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
     REQUIRE(ctx.should_render_tail_only());
 }
 
-// ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────
+// ── Latency / tail change notifications (RT-safe) ─────────────────────────
 
 TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "
           "yields exactly one consume per flag",

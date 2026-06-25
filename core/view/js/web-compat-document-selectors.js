@@ -1,13 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSS selector engine (P5-7 first cut — extracted from web-compat-document.js)
+// CSS selector engine
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// Per the U-2 export map, web-compat-document.js (1,820 lines) splits
-// naturally into four concerns:
-//   1. StyleSheet + style application (stays in parent)
-//   2. CSS parser (~150 lines, stays in parent for now)
-//   3. **Selector engine** (this file)
-//   4. getComputedStyle + global install (stays in parent)
 //
 // This file owns the minimal CSS selector parser + matcher used by
 // document.querySelector / document.querySelectorAll:
@@ -17,7 +10,8 @@
 //     selector, honoring tag / id / class / attribute / pseudo /
 //     descendant + direct-child combinators
 //   - _matchesPseudoClass(el, pseudo) — :hover, :focus, :active,
-//     :nth-child, :first-child, :last-child, :not, :is, :where
+//     :disabled, :enabled, :checked, :root, :empty, :nth-child,
+//     :nth-last-child, :first-child, :last-child, :only-child, :not
 //   - _matchesNth(pos, arg) — :nth-child(an+b) parser
 //   - _querySelector / _querySelectorAll — top-level entry points
 //   - _findMatch(root, parsed, findAll) — DOM walker shared by both
@@ -31,7 +25,7 @@
 // Selector parsing and matching
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// pulp Wave 3 html.3 — minimal CSS selector parser.
+// Minimal CSS selector parser.
 //
 // Supports the subset that React / Three.js helper code actually uses
 // in practice:
@@ -67,7 +61,7 @@ function _parseSelector(str) {
     // level so a real-world selector like `div.foo:hover` still
     // matches `div.foo` instead of refusing to parse.
     //
-    // pulp #1641 followup: scan for `:` at bracket depth 0 only, so
+    // Scan for `:` at bracket depth 0 only, so
     // colons inside attribute selectors like `[href="http://x"]` or
     // `[data-time="12:30"]` aren't misinterpreted as pseudo-class
     // boundaries (which would truncate the selector mid-bracket).
@@ -102,9 +96,9 @@ function _parseSelector(str) {
         else if (depth === 0 && ch === " " && ci < mainPart.length - 1 &&
                  mainPart[ci + 1] !== ">" && (ci === 0 || mainPart[ci - 1] !== ">")) {
             splitIdx = ci; splitDirect = false;
-            // Don't break — keep walking left to find the *rightmost*
-            // descendant boundary so the parent selector accumulates
-            // correctly for `a b c` -> parent=`a b`, child=`c`.
+            // Break on the first match. We scan right-to-left, so this is
+            // the rightmost descendant boundary (`a b c` -> parent=`a b`,
+            // child=`c`).
             break;
         }
     }
@@ -181,7 +175,7 @@ function _matchesSelector(el, parsed) {
         if (!el.classList.contains(parsed.classes[i])) return false;
     }
 
-    // pulp Wave 3 html.3 — attribute selectors.
+    // Attribute selectors.
     if (parsed.attrs && parsed.attrs.length) {
         for (var ai = 0; ai < parsed.attrs.length; ai++) {
             var a = parsed.attrs[ai];
@@ -239,17 +233,18 @@ function _matchesSelector(el, parsed) {
         }
     }
 
-    // pulp #1737 — pseudo-class state matching for querySelector. The
+    // Pseudo-class state matching for querySelector. The
     // parser stored parsed.pseudo (e.g. `disabled`, `checked`, `nth-child(2)`)
-    // but pre-fix _matchesSelector ignored it, so `div:disabled` matched
-    // every `div` (catalog DIVERGE on html/document_querySelector).
+    // but the old _matchesSelector path ignored it, so `div:disabled`
+    // matched every `div`.
     //
     // Implemented here: state-on-element pseudo-classes (`:disabled`,
-    // `:checked`, `:enabled`, `:hover`, `:focus`) read directly from the
-    // matching el._* slot the bridge already maintains. DOM-position
-    // pseudo-classes (`:first-child`, `:last-child`, `:nth-child(N)`,
-    // `:nth-of-type(N)`) walk the parent's children. `:not(<simple>)`
-    // recursively dispatches to _matchesSelector with the negated selector.
+    // `:checked`, `:enabled`, `:hover`, `:focus`, `:active`) read directly
+    // from the matching el._* slot the bridge already maintains.
+    // DOM-position pseudo-classes (`:first-child`, `:last-child`,
+    // `:only-child`, `:nth-child(N)`, `:nth-last-child(N)`) walk the
+    // parent's children. `:not(<simple>)` recursively dispatches to
+    // _matchesSelector with the negated selector.
     //
     // Pseudo-classes that require the full CSS Selectors Level 4 cascade
     // engine (`:has()`, `:is()`, `:where()`, attribute-namespace forms)
@@ -263,13 +258,13 @@ function _matchesSelector(el, parsed) {
     return true;
 }
 
-// pulp #1737 — pseudo-class evaluator. Returns true if `el` matches the
+// Pseudo-class evaluator. Returns true if `el` matches the
 // pseudo-class string (e.g. `disabled`, `checked`, `nth-child(2n+1)`,
 // `not(.foo)`). Unknown / unimplemented forms return false (the broader
 // catalog claim is "no-match rather than throw" — same precedent as the
-// pre-#1737 parser-tolerates-but-matcher-ignores behaviour, except now
-// the matcher explicitly rejects so `div:nth-child(2)` no longer leaks
-// to all `div`).
+// earlier parser-tolerates-but-matcher-ignores behaviour, except now the
+// matcher explicitly rejects so `div:nth-child(2)` no longer leaks to all
+// `div`).
 function _matchesPseudoClass(el, pseudo) {
     if (!pseudo) return true;
     var lower = pseudo.toLowerCase();
@@ -295,7 +290,7 @@ function _matchesPseudoClass(el, pseudo) {
         return !!parent && parent._children && parent._children.length === 1
             && parent._children[0] === el;
     }
-    // pulp #1737 (Codex P2 followup #3 on #1779): `:root` matches the
+    // `:root` matches the
     // document root element specifically (`__bodyElement__`), not any
     // element with no parent. The previous `!el._parentElement` check
     // also matched DETACHED elements (createElement before appendChild),
@@ -352,7 +347,7 @@ function _matchesPseudoClass(el, pseudo) {
     return false;
 }
 
-// pulp #1737 — :nth-child(N) argument parser. Accepts:
+// :nth-child(N) argument parser. Accepts:
 //   * `odd` / `even` (case-insensitive)
 //   * a positive integer literal (`2`, `5`)
 //   * `An+B` / `An-B` formula (e.g. `2n`, `2n+1`, `3n-1`, `-n+3`).
@@ -408,4 +403,3 @@ function _findMatch(root, parsed, findAll) {
 
     return findAll ? results : null;
 }
-

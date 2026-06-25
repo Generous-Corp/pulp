@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.453.0
+    VERSION 0.478.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -55,8 +55,7 @@ message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 # (pulp::host, the CLI binary, plugin scanners) that we deliberately skip on
 # mobile. Forcing tests OFF on iOS also prevents downstream example
 # CMakeLists from invoking `catch_discover_tests` when the Catch2 include
-# was never loaded for that target. See 2026-05-24 AUv3 iOS validation plan
-# Phase iOS-A.
+# was never loaded for that target.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
     option(PULP_BUILD_TESTS "Build unit tests" OFF)
 else()
@@ -129,11 +128,11 @@ option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SD
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
-option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters (Slice 0 of #516). Tooling-only; OFF by default so production builds see zero overhead." OFF)
+option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters. Tooling-only; OFF by default so production builds see zero overhead." OFF)
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
 endif()
-# Item 4.2 — opt-in suite that drives real third-party plugin binaries
+# Opt-in suite that drives real third-party plugin binaries
 # (Surge XT / Vital / OB-Xd / Dexed) through the host stack. OFF by default
 # so the public CI matrix never depends on third-party download mirrors;
 # developers and dedicated lanes flip it on with
@@ -162,7 +161,7 @@ else()
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>")
 endif()
 
-# ── Windows runtime library (Tier A Slice 12) ──────────────────────────────
+# ── Windows runtime library ────────────────────────────────────────────────
 # Statically link the MSVC runtime so redistributed Pulp binaries don't
 # require the user to have the matching Visual C++ Redistributable
 # installed. Without this, the default is the dynamic /MD runtime and
@@ -197,8 +196,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
 pulp_configure_aax_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
-# Extracted to tools/cmake/PulpDependencies.cmake in the 2026-05 Phase 3
-# (C2) refactor.
+# Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
@@ -233,8 +231,8 @@ add_subdirectory(core/native-components)
 # Skipping the subdirectory also dodges a libc++ availability error on the
 # iPhoneSimulator SDK: `scanner_clap.cpp` calls `runtime::log_warn(...)`,
 # which `std::format`-instantiates over arithmetic types — including
-# `long double to_chars`, marked unavailable on iOS. Tracked in the
-# 2026-05-24 AUv3 iOS validation plan (Phase iOS-A blocker).
+# `long double to_chars`, marked unavailable on iOS. Keep host support out of
+# iOS until the AUv3 validation path has an iOS-safe scanner/link strategy.
 if(NOT IOS)
     add_subdirectory(core/host)
 endif()
@@ -276,8 +274,8 @@ add_subdirectory(tools/audio)
 # Tests are not built on iOS or Android — they assume a desktop POSIX shell,
 # linkable hosting libraries (pulp::host scans VST3/CLAP plugins on disk),
 # and a CTest harness that doesn't run inside a sandboxed iOS .app. Mobile
-# CI runs the test suite on macOS / Linux runners and the configure smoke
-# (Phase iOS-A) on the iPhoneSimulator SDK.
+# CI runs the test suite on macOS / Linux runners and the iPhoneSimulator
+# configure smoke separately.
 if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     # The design-import test cluster (~40 targets) links the authoring symbols
     # gated by PULP_ENABLE_DESIGN_IMPORT, and they are interleaved with other
@@ -321,12 +319,10 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
     add_subdirectory(tools/cli)
 endif()
 
-# ── Rust CLI (Phase 8 binary swap, issues #686 / #767) ────────────────────
+# ── Rust CLI (experimental desktop bridge) ────────────────────────────────
 # Bridges `cargo build` for the experimental Rust CLI port into the
 # CMake build graph. Coexists with pulp-cli (the C++ binary) — both
-# install side-by-side under `${CMAKE_INSTALL_BINDIR}`. PR #2 of the
-# swap pair flips the user-facing default; this file is the no-op
-# build-graph scaffolding (PR #1).
+# install side-by-side under `${CMAKE_INSTALL_BINDIR}`.
 #
 # Mirror the EXACT desktop guard used for tools/cli above — both the
 # `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
@@ -334,8 +330,7 @@ endif()
 # GPU-off jobs still pull cargo into the default `all` build whenever
 # cargo happens to be on PATH, introducing unrelated Rust-toolchain
 # / network failures (and minutes of cargo build time) in lanes that
-# intentionally disable the CLI/GPU paths. Codex review on PR #778
-# (CMakeLists:523) flagged the missing guard as a P2.
+# intentionally disable the CLI/GPU paths.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
@@ -349,7 +344,7 @@ endif()
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 add_subdirectory(tools/screenshot)
 
-# ── Out-of-process plugin scan worker (workstream 03 slice 3.3b) ──────────
+# ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID)
     add_subdirectory(tools/scan-worker)
 endif()
@@ -434,8 +429,8 @@ if(ANDROID)
 
     # TalkBack accessibility JNI entry points live in pulp-view
     # (core/view/platform/android/accessibility_android.cpp). pulp-view is
-    # not whole-archived — whole-archiving it pulls in SDL3's JNI_OnLoad
-    # and duplicates ours (see closed PR #148). Instead, force-reference
+    # not whole-archived — doing so pulls in SDL3's JNI_OnLoad and
+    # duplicates ours. Instead, force-reference
     # each Java_com_pulp_accessibility_* symbol so the linker keeps the
     # containing object file. This preserves just the JNI exports without
     # dragging SDL3 into the JNI closure. Without this the app hits
@@ -456,8 +451,7 @@ if(ANDROID)
 endif()
 
 # ── SDK Install Rules ──────────────────────────────────────────────────────
-# Extracted to tools/cmake/PulpInstallRules.cmake in the 2026-05 Phase 3
-# (C2) refactor.
+# Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
 # ── Linux fontconfig post-pass ──────────────────────────────────────────

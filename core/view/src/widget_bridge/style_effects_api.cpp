@@ -17,11 +17,10 @@ void WidgetBridge::register_widget_style_filter_clip_api(
     auto parseColor = std::move(parse_color);
 
     // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
-    //   - pulp #1434 Phase A2-4 CSS filter chain. Walks the function
-    //   sequence and builds View::FilterOp entries; the View paint
-    //   path passes the chain to canvas.save_layer_with_filters which
-    //   composes via SkImageFilters on the Skia backend (CG falls
-    //   through to blur-only for now).
+    // Walks the function sequence and builds View::FilterOp entries; the
+    // View paint path passes the chain to canvas.save_layer_with_filters,
+    // which composes via SkImageFilters on the Skia backend (CG falls
+    // through to blur-only for now).
     register_bridge_function(api, "setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto filter_str = args.get<std::string>(1, "");
@@ -141,8 +140,8 @@ void WidgetBridge::register_widget_style_filter_clip_api(
     });
 
     // setBackdropFilter(id, blur_px) - CSS `backdrop-filter: blur(Npx)` for
-    // frosted-glass overlays / modal backgrounds (issue-926). Numeric
-    // overload to keep the bridge cheap; string-form CSS parsing stays in
+    // frosted-glass overlays / modal backgrounds. Numeric overload keeps
+    // the bridge cheap; string-form CSS parsing stays in
     // setFilter.
     register_bridge_function(api, "setBackdropFilter",
         [this](choc::javascript::ArgumentList args) {
@@ -153,14 +152,11 @@ void WidgetBridge::register_widget_style_filter_clip_api(
             return choc::value::Value();
         });
 
-    // setClipPath(id, value) - CSS `clip-path` (pulp #1515). The paint
-    // side feeds the stored slot to `Canvas::clip_path_svg` which calls
-    // `SkPath::FromSVGString` - that parser only accepts raw SVG path
-    // "d" data, so we must unwrap `path("...")` here and explicitly
-    // skip shapes / URL refs that the paint side cannot honor (they
-    // remain documented as deferred). Forwarding the verbatim value
-    // produced silent paint failures on every non-path() form (Codex
-    // #1616 P1 on #1540).
+    // setClipPath(id, value) - CSS `clip-path`. The paint side feeds the
+    // stored slot to `Canvas::clip_path_svg` which calls
+    // `SkPath::FromSVGString`; that parser only accepts raw SVG path "d"
+    // data. Unwrap `path("...")` here and explicitly skip shapes / URL
+    // refs the paint side cannot honor.
     register_bridge_function(api, "setClipPath",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -177,8 +173,7 @@ void WidgetBridge::register_widget_style_filter_clip_api(
             // CSS keywords (`none`, `path(...)`, `circle(...)`, etc.) are
             // case-insensitive per spec. Build a lowercased copy of the
             // prefix-bearing portion for comparison; preserve the original
-            // case for the SVG path "d" data inside path("...") (Codex
-            // #1616 P2 on #1540 follow-up #1698).
+            // case for the SVG path "d" data inside path("...").
             std::string t_lower = t;
             for (auto& c : t_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (t_lower.empty() || t_lower == "none") {
@@ -209,10 +204,10 @@ void WidgetBridge::register_widget_style_filter_clip_api(
 void WidgetBridge::register_widget_style_blend_api() {
     BridgeApiContext api{engine_};
 
-    // pulp #1549 - setMixBlendMode(id, "multiply") for CSS / RN
-    // `mix-blend-mode`. Maps the W3C blend-mode keyword set to the
-    // canvas BlendMode enum so the View paint path can pass it
-    // straight into `save_layer_with_blend()` at compositing time.
+    // setMixBlendMode(id, "multiply") for CSS / RN `mix-blend-mode`.
+    // Maps the W3C blend-mode keyword set to the canvas BlendMode enum
+    // so the View paint path can pass it straight into
+    // `save_layer_with_blend()` at compositing time.
     // The keyword set mirrors the W3C separable + non-separable blend
     // modes (the same 16 values RN's New Architecture surface accepts;
     // see tools/harness/oracles/rn/rn-viewstyle.json::mixBlendMode).
@@ -243,8 +238,8 @@ void WidgetBridge::register_widget_style_blend_api() {
             else if (kw == "saturation")  mode = BM::saturation;
             else if (kw == "color")       mode = BM::color;
             else if (kw == "luminosity")  mode = BM::luminosity;
-            // pulp Wave 2 css.9 - `plus-lighter` and `plus-darker` are CSS
-            // Compositing & Blending Level 2 keywords. Both map to
+            // `plus-lighter` and `plus-darker` are CSS Compositing &
+            // Blending Level 2 keywords. Both map to
             // `SkBlendMode::kPlus` (additive) at the Skia layer (see
             // canvas.hpp::BlendMode::lighter, index 26). `plus-darker` is
             // technically a multiplicative variant in the W3C draft but

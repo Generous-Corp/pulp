@@ -19,12 +19,12 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 |---|---|---|
 | `formats.clap` | Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.vst3` | Only bus index 0 routed to process(); multi-bus + sidechain not wired. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | setBusArrangements forwards without validating channel counts or reading negotiated layout. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.au_v2` | MIDI input dead: AUEffectBase has no MIDI routing. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.auv3` | Single input bus; no sidechain support. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../planning/production-readiness/01-format-adapters.md#1.5) |
@@ -32,9 +32,9 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `audio_io.alsa` | No input capture path. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `midi_io.coremidi` | UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
-| `midi_io.win32_midi` | Legacy mmeapi; no windows.devices.midi2, no hotplug. SysEx input routed via MIM_LONGDATA; WinRT MIDI runtime still pending. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
-| `midi_io.alsa_midi` | Running status not handled; timestamps always 0; no hotplug. SysEx input accumulator landed. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
+| `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
+| `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
+| `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
 | `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
 | `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
@@ -48,9 +48,9 @@ Pulp wraps a single `Processor` subclass and exposes it through multiple plugin 
 | Capability | Status | Module | Docs | Examples |
 |---|---|---|---|---|
 | VST3 effect | usable | [format](modules.md#format) | [getting-started](../guides/getting-started.md) | pulp-gain, pulp-effect, pulp-compressor |
-| VST3 instrument | usable | [format](modules.md#format) | | PulpSynth, PulpDrums |
+| VST3 instrument | usable | [format](modules.md#format) | | PulpTone, PulpPluck |
 | Audio Unit v2 effect | usable | [format](modules.md#format) | [getting-started](../guides/getting-started.md) | pulp-gain, pulp-effect |
-| Audio Unit v2 instrument | usable | [format](modules.md#format) | | PulpSynth |
+| Audio Unit v2 instrument | usable | [format](modules.md#format) | | PulpTone, PulpPluck |
 | CLAP effect | usable | [format](modules.md#format) | | pulp-gain, pulp-effect |
 | CLAP instrument | usable | [format](modules.md#format) | | PulpSynth |
 | Standalone app | usable | [format](modules.md#format) | | pulp-gain |
@@ -300,7 +300,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
 | File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
 | Drag and drop | usable | macOS | File + text drop targets |
-| Plugin view hosting | usable | macOS/iOS | Native NSView/UIView + Metal, including native child attach/bounds/detach. Windows/Linux/Android require a host-registered `PluginViewHost::Factory`. |
+| Plugin view hosting | usable | macOS/iOS, Windows, Linux | Native NSView/UIView/HWND/X11 plugin-editor hosts. Windows requires Skia; Linux requires Skia + X11 and degrades to headless capture when no display is available. Android/custom targets still require a host-registered `PluginViewHost::Factory`. Native child attach/bounds/detach inside plugin editors is built in on macOS/iOS only; non-Apple child embedding remains factory-backed. |
 | Native child view embedding (WindowHost) | partial | macOS + factory-backed non-Apple | Built-in standalone support is macOS-only. Built-in iOS `WindowHost` does not expose the embedding handles. Windows/Linux/Android require a host-registered `WindowHost::Factory` that implements attach/bounds/detach. |
 | SDL window host | partial | all | Cross-platform windowing via SDL3. SDL does not provide first-party native child embedding; non-Apple platforms require a host-registered `WindowHost::Factory` for native presentation. Recording-canvas-only for now. |
 
@@ -316,7 +316,7 @@ Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp
 | Skia Graphite rendering | experimental | [render](modules.md#render) | |
 | Dawn/Metal iOS surface | experimental | [render](modules.md#render) | |
 | Dawn/D3D12 surface (Windows) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
-| Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
+| Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | X11 surface creation implemented; Wayland extraction exists but presentation is not wired; not runtime-validated |
 | CoreGraphics fallback | usable | [render](modules.md#render) | Default render path on macOS |
 
 Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`

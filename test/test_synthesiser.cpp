@@ -142,7 +142,7 @@ TEST_CASE("Synthesiser note_off marks the matching voice as releasing",
     REQUIRE(synth.voice(0).releasing());
     // Still active until the subclass calls mark_inactive().
     REQUIRE(synth.voice(0).active());
-    // Codex P2 on #2870 — `note().releasing` MUST stay in sync with
+    // #2870 — `note().releasing` MUST stay in sync with
     // the voice's `releasing_` flag so subclasses reading either
     // path see the same state.
     REQUIRE(synth.voice(0).note().releasing);

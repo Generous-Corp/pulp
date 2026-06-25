@@ -15,7 +15,7 @@ PluginDescriptor SineSynth::descriptor() const {
     PluginDescriptor d;
     d.name = "Pulp Sine Synth";
     d.manufacturer = "Pulp";
-    d.bundle_id = "com.pulp.examples.sinesynth";
+    d.bundle_id = "com.pulp.examples.sinesynth.host.PulpSineSynth";
     d.version = "0.1.0";
     d.category = PluginCategory::Instrument;
     d.accepts_midi = true;

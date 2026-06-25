@@ -488,7 +488,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         // in real Figma imports) must lower to an apply_css_background_gradient
         // runtime call plus the helper include. Dropping it was the dominant
         // ELYSIUM dark/light parity gap. This lives in the always-built tool
-        // test so the codegen path is covered even when the planning-gated
+        // test so the codegen path is covered even when the artifact-gated
         // pulp-test-design-import-cpp-codegen target is skipped.
         const auto grad_input = tmp.path / "gradient-envelope.json";
         const auto cpp_output = tmp.path / "generated" / "gradient_ui.cpp";
@@ -1072,7 +1072,7 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Issue #47 — .pulp.zip auto-unpack
+// .pulp.zip auto-unpack
 //
 // The Pulp Figma plugin ships its "Export to Pulp" as a `.pulp.zip` that
 // contains scene.pulp.json + assets/*.png. Before this fix the CLI read
@@ -1204,8 +1204,8 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     const auto zip = tmp.path / "smoke.pulp.zip";
     const auto output = tmp.path / "ui.js";
 
-    // Minimal figma-plugin envelope with a Pulp / Knob recognised by
-    // Phase 3's audio_widget="knob" path. The full envelope shape is
+    // Minimal figma-plugin envelope with a Pulp / Knob recognised by the
+    // audio_widget="knob" path. The full envelope shape is
     // documented in tools/figma-plugin/schema/figma-plugin-export-v1.json
     // and exercised end-to-end by test/test_design_import_codegen.cpp's
     // "[figma-plugin][phase-3]" cases. Here we only care that the CLI
@@ -1270,8 +1270,7 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     // The CLI should have emitted a native createKnob call with the
     // designer-set range / value. If this assertion fails after a
     // future codegen refactor, update the expected pattern rather than
-    // weakening the contract — the whole point of #47 is that the IR
-    // survives the round-trip.
+    // weakening the contract: the IR must survive the zip round-trip.
     const auto js = read_text(output);
     REQUIRE(js.find("createKnob('Cutoff_Knob") != std::string::npos);
     REQUIRE(js.find("setValue('Cutoff_Knob") != std::string::npos);
@@ -1856,10 +1855,10 @@ TEST_CASE("pulp-import-design rolls back .pulp.zip sidecar and C++ files as one 
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Issue #50 — adversarial-review hardening of the .pulp.zip extractor.
+// .pulp.zip extractor hardening.
 //
-// Self-review on #3189 found three zip-slip/zip-bomb gaps the original
-// guards missed:
+// These cases pin three zip-slip/zip-bomb gaps that the original guards
+// missed:
 //   (1) mz_zip_reader_get_filename truncates to the supplied buffer
 //       size; a 2-KB entry name like
 //         "<1020 safe chars>/../../../etc/passwd"
@@ -2004,7 +2003,7 @@ TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",
     REQUIRE(r.stderr_output.find("entries (>") != std::string::npos);
 }
 
-// ── Workstream A1 — `--format css-variables` token export ────────────────
+// ── `--format css-variables` token export ────────────────────────────────
 // export_css_variables is unit-covered in test_design_import_w3c_tokens.cpp.
 // These exercise the CLI dispatch end-to-end through the standalone tool (true
 // exit codes): the --format flag selects the body, the sidecar default flips
@@ -2080,10 +2079,9 @@ TEST_CASE("pulp-import-design rejects an unknown --format value",
     REQUIRE_FALSE(fs::exists(out));
 }
 
-// Tailwind formats are gated to --from designmd until Workstream A2. They must
-// be rejected (exit 2) rather than silently emitting W3C under the requested
-// format name — both in --export-tokens (no designmd context) and on a
-// non-designmd import source.
+// Tailwind formats are gated to --from designmd. They must be rejected (exit 2)
+// rather than silently emitting W3C under the requested format name — both in
+// --export-tokens (no designmd context) and on a non-designmd import source.
 TEST_CASE("pulp-import-design --export-tokens rejects tailwind formats",
           "[cli][import-design][tool][css]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
@@ -2146,10 +2144,10 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
     REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
 }
 
-// Workstream B1 — `--emit swiftui` per-view theme naming (Codex review). The
-// theme artifact/type derive from the view name (<RootView>Theme[.swift]) so
-// the view and theme are always distinct files (no clobber, even for
-// --output PulpTheme.swift) and two imports never collide on a shared theme.
+// `--emit swiftui` per-view theme naming. The theme artifact/type derive from
+// the view name (<RootView>Theme[.swift]) so the view and theme are always
+// distinct files (no clobber, even for --output PulpTheme.swift) and two
+// imports never collide on a shared theme.
 namespace {
 const char* kMiniSwiftScene =
     R"({"format_version":"2026.05-figma-plugin-v1",)"

@@ -3,7 +3,7 @@
 
 Reskinnable widgets must resolve their colours from theme tokens
 (`resolve_color("token", fallback)`); a bare colour literal in paint code can
-never be restyled by a theme/token swap (Design-System-Import-Plan Phase 2).
+never be restyled by a theme/token swap.
 
 This is a RATCHET, not an absolute gate. It freezes the current per-file count
 of non-`resolve_color` colour literals in the view layer as a baseline and fails
@@ -48,6 +48,10 @@ EXCLUDE_BASENAMES = {
 LITERAL_RE = re.compile(r"color_from_hex\(\s*0x|Color::rgba8?\(|Color::rgb\(")
 
 
+def baseline_key(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
 def count_hardcodes(path: Path) -> int:
     n = 0
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -67,7 +71,7 @@ def scan() -> dict[str, int]:
             continue
         c = count_hardcodes(path)
         if c:
-            counts[str(path.relative_to(REPO_ROOT))] = c
+            counts[baseline_key(path)] = c
     return counts
 
 

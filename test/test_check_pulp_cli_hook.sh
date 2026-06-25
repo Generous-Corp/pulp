@@ -125,7 +125,7 @@ rm -rf "$case3"
 # A non-existent PULP_CHECK_CWD should not crash the hook (hooks must
 # never block Claude session init).
 #
-# pulp #2000 Codex P2 — capture the hook's exit code into `status`
+# pulp #2000 — capture the hook's exit code into `status`
 # directly via `|| status=$?`, NOT via `out=$(...) || true; status=$?`.
 # The latter pattern always reports 0 because `true` is what `$?` sees,
 # so a regression where the hook started returning non-zero would slip

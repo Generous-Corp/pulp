@@ -194,7 +194,7 @@ TEST_CASE("widget-size: below-native-minimum clamp-up is informational",
         {n, "K0", 56.0f, 56.0f, FidelityElement::widget});
     REQUIRE(i.has_value());
     CHECK(i->kind == "widget-undersized");
-    // Codex #3274: the clamp-up is advisory — it must carry the informational
+    // #3274: the clamp-up is advisory — it must carry the informational
     // flag so --strict-fidelity (which fails on hard findings only) ignores it.
     CHECK(i->informational);
 }
@@ -436,7 +436,7 @@ TEST_CASE("count_strict_fidelity_failures ignores informational findings",
 
 TEST_CASE("text-vcenter: an auto-height label (n-a) in a tall slot self-skips",
           "[view][import][fidelity][harness]") {
-    // Codex #3274: when the IR carries no explicit height, codegen synthesizes
+    // #3274: when the IR carries no explicit height, codegen synthesizes
     // label_h = font*1.4 (19.6 for 14px), which lands in the tall-slot range and
     // is stamped top-aligned. Without the "n-a" guard this fires a FALSE
     // text-vcenter on every ordinary auto-height label and breaks

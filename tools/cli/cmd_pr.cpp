@@ -590,8 +590,8 @@ int cmd_pr(const std::vector<std::string>& args) {
         if (!repo.empty() && repo.find('/') != std::string::npos) {
             // Probe without --jq so we can distinguish "gh errored" (empty
             // stdout) from "repo has zero secrets" (non-empty JSON, no
-            // matches). Codex P1 on #149: the previous guard gated on
-            // `!secrets.empty()` which collapsed both cases into silence
+            // matches). The previous guard gated on `!secrets.empty()`,
+            // which collapsed both cases into silence
             // and suppressed the warning in the exact bootstrap scenario
             // where the user needs it most. --paginate also handles repos
             // with many secrets where the token might be on page 2+.

@@ -340,8 +340,8 @@ mod tests {
 
     #[test]
     fn it_tolerates_forward_compat_fields() {
-        // Codex 2026-04-21 P1 on #563: unknown fields like
-        // `"meta":{...}` must not break the reader.
+        // #563: unknown forward-compat fields like `"meta":{...}`
+        // must not break the reader.
         let td = tempfile::tempdir().unwrap();
         let p = td.path().join("projects.json");
         std::fs::write(

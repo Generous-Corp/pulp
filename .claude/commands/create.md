@@ -12,11 +12,11 @@ Run: `pulp create $ARGUMENTS` when the CLI is on PATH, or `./build/pulp create $
 If no arguments provided, ask the user for:
 1. **Name** — the plugin name (e.g., "My Synth")
 2. **Type** — effect or instrument (default: effect)
-3. **Formats** — which formats to target (default: vst3,au,clap)
-4. **MPE** — for instruments, offer `--mpe` to opt into MPE (per-note expression).
+3. **MPE** — for instruments, offer `--mpe` to opt into MPE (per-note expression).
    When set, the generated descriptor declares `supports_mpe = true` and the
    header includes `<pulp/midi/mpe_buffer.hpp>`. See `docs/guides/mpe.md`.
+4. **Android scaffold** — if requested, add `--targets android`.
 
-Then run: `pulp create "<name>" --type <type> --formats <formats> [--mpe]` or `./build/pulp create ...` from a source build.
+Then run: `pulp create "<name>" --type <type> [--mpe] [--targets android]` or `./build/pulp create ...` from a source build.
 
 After scaffolding, build the new project and run its tests to verify everything works.

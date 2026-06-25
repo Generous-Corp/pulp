@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/reaper.hpp
-/// Per-host quirks for Cockos REAPER (macOS plan item 5.8).
+/// Per-host quirks for Cockos REAPER.
 ///
 /// REAPER is a forgiving host — it absorbs many spec violations — but it
 /// also exposes more permissive configurations (e.g. arbitrary pin
@@ -9,10 +9,8 @@
 /// than the typical VST3 / CLAP / AU host, so several quirks are
 /// REAPER-specific accommodations rather than spec bugs.
 ///
-/// This header now owns the **full** REAPER quirk dispatch (DAW-quirks
-/// rows 15 + R1-R7), pulled out of `core/format/src/host_quirks.cpp`
-/// into a per-host module so the dispatch table doesn't grow further and
-/// REAPER-specific lessons live next to each other.
+/// This header owns the full REAPER quirk dispatch (DAW-quirks rows 15
+/// + R1-R7), keeping REAPER-specific lessons next to each other.
 ///
 /// ## Rows covered
 ///
@@ -46,21 +44,21 @@
 ///   without re-allocating.
 /// * row R5 (`reaper_vst3_gesture_ordering` covers the gesture half;
 ///   the vendor/product-string identity contract for REAPER's
-///   compatibility-allow-list is handled by Track 3.12 — the
-///   `PluginDescriptor::manufacturer` string contract — and does not
-///   need a dedicated flag here. Documented for cross-reference.)
+///   compatibility-allow-list is handled by the
+///   `PluginDescriptor::manufacturer` string contract and does not need
+///   a dedicated flag here. Documented for cross-reference.)
 /// * row R6 (`reaper_midsession_setstate`) — REAPER's per-track FX-state
 ///   save/restore can fire `setState` at arbitrary times during a
 ///   session, not just at project-load. `Processor::set_state` must
 ///   stay safely callable mid-play; no resource re-allocation may
 ///   require `prepare()` to be re-called.
 /// * row R7 (CLAP canary, no dedicated flag) — REAPER's CLAP host is
-///   among the most reference-correct in the wild and is used by
-///   Track 3.4 as the canary for any CLAP adapter regression. Carried
-///   here as documentation; the CLAP-side acceptance lives in the CLAP
-///   adapter test matrix.
+///   among the most reference-correct in the wild and is used as the
+///   canary for any CLAP adapter regression. Carried here as
+///   documentation; the CLAP-side acceptance lives in the CLAP adapter
+///   test matrix.
 ///
-/// Plus the iPlug2-audit lesson layered on top:
+/// Plus the keyboard-only-space lesson layered on top:
 ///
 /// * `reaper_keyboard_only_space` — REAPER's VST2/VST3 `onKeyDown` /
 ///   `effEditKeyDown` pipeline only delivers a well-formed `keyMsg`
@@ -79,15 +77,12 @@
 ///
 /// ## Tier status
 ///
-/// All of these flags are tagged `Speculative` in `HostQuirksMeta` as
-/// of this header extraction: they are documented from REAPER vendor
-/// docs + reproducer reports, with per-symptom isolation tests in
-/// `test/test_host_quirks.cpp` pinning the dispatch — but the in-DAW
-/// bench evidence (driving real REAPER 7.x sessions through Pulp's
-/// adapters) is still pending. Promote to `Validated` when the bench
-/// rows ship. `reaper_keyboard_only_space` remains `LessonOnly` since
-/// it ships as a 2026-05-25 iPlug2-audit catalog lesson without an
-/// in-tree bench yet.
+/// `HostQuirksMeta` now reflects a mixed evidence set. Rows backed by
+/// checked-in REAPER 7.x DAW-bench evidence are `Validated`; the
+/// remaining REAPER dispatch rows stay `Speculative` until their
+/// scenarios are bench-confirmed. The REAPER keyboard-only-Space and
+/// AU v3 in-process sizing rows remain `LessonOnly` because they are
+/// carried as catalog lessons without in-tree bench evidence.
 ///
 /// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.8
 /// docs=https://www.reaper.fm/sdk/vst/vst_ext.php
@@ -126,18 +121,17 @@ inline void apply_reaper(HostQuirks& q, HostVersion /*v*/) {
 }
 
 /// Populate REAPER keyboard-only-space flag onto `q`. Layered on top of
-/// `apply_reaper(...)` so the iPlug2-audit lesson can stay at a
-/// different validation tier (LessonOnly today) without changing the
-/// rest of the REAPER dispatch (Speculative).
+/// `apply_reaper(...)` so the lesson can stay at a different validation
+/// tier (LessonOnly today) without changing the rest of the REAPER
+/// dispatch.
 inline void apply_reaper_keyboard(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_keyboard_only_space = true;
 }
 
 /// Populate REAPER AU v3 in-process `preferredContentSize` lesson onto
-/// `q`. Layered on top of `apply_reaper(...)` so the 2026-05-26
-/// iPlug2-audit lesson can stay at a different validation tier
-/// (LessonOnly today) without changing the rest of the REAPER
-/// dispatch.
+/// `q`. Layered on top of `apply_reaper(...)` so the lesson can stay at
+/// a different validation tier (LessonOnly today) without changing the
+/// rest of the REAPER dispatch.
 ///
 /// REAPER's AU v3 host is in-process: it creates the `AUAudioUnit` on
 /// the main thread via `createAudioUnitWithComponentDescription`,
@@ -150,7 +144,7 @@ inline void apply_reaper_keyboard(HostQuirks& q, HostVersion /*v*/) {
 /// path.
 ///
 /// Reference: https://developer.apple.com/documentation/audiotoolbox/auaudiounit
-/// (in-process host extension contract) + Pulp issue #3044.
+/// (in-process host extension contract) plus the REAPER AU v3 sizing reproducer.
 inline void apply_reaper_auv3_in_process(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_auv3_in_process_preferred_size_sync = true;
 }

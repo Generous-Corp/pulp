@@ -70,9 +70,8 @@ choc::value::Value entry_to_json(const std::string& path,
     obj.addMember("num_inputs", e.info.num_inputs);
     obj.addMember("num_outputs", e.info.num_outputs);
 
-    // Richer metadata (workstream 03 slice 3.7). Emit as additive fields
-    // so older schema-v1 blobs (without them) still parse via defaults
-    // on the reader side.
+    // Emit richer metadata as additive fields so older schema-v1 blobs
+    // without them still parse via defaults on the reader side.
     obj.addMember("category", e.info.category);
     obj.addMember("description", e.info.description);
     obj.addMember("has_editor", e.info.has_editor);
@@ -111,8 +110,8 @@ bool entry_from_json(const choc::value::ValueView& v,
     out_entry.info.num_outputs =
         v.hasObjectMember("num_outputs") ? v["num_outputs"].getInt64() : 2;
 
-    // Richer metadata (workstream 03 slice 3.7). All additive; missing
-    // fields preserve struct defaults for older schema-v1 blobs.
+    // Richer metadata is additive; missing fields preserve struct defaults
+    // for older schema-v1 blobs.
     out_entry.info.category =
         v.hasObjectMember("category") ? v["category"].toString() : "";
     out_entry.info.description =

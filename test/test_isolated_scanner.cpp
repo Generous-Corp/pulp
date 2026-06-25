@@ -120,7 +120,7 @@ TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",
     REQUIRE(rejected.stdout_output.empty());
 }
 
-// Regression for the Codex P2 finding on PR #3110: when a directory contains
+// Regression for PR #3110: when a directory contains
 // multiple `.vst3` symlinks pointing at the same real bundle, the worker must
 // preserve the requested-alias identity (lexical absolute path) instead of
 // canonicalizing through symlinks. Otherwise a request for `alias.vst3` could

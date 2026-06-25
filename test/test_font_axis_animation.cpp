@@ -1,4 +1,4 @@
-// test_font_axis_animation.cpp — Pulp #2163, font v2 Slice 3.3.
+// test_font_axis_animation.cpp — variable-font animation cache eviction.
 //
 // Variable-font animation cache eviction. 60fps `wght` interpolation
 // produces 60 distinct FontOptions hashes per second per family.

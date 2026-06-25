@@ -1,6 +1,6 @@
 # Importing Designs
 
-Pulp can import designs from external tools and translate them into web-compat JS code that runs as plugin UIs. Supported sources: **Figma**, **Google Stitch**, **v0.dev**, **Pencil/OpenPencil**, **Claude Design**, and **Google DESIGN.md** (design *system* — tokens only, no screen).
+Pulp can import designs from external tools and translate them into web-compat JS, DesignIR, baked C++/SwiftUI, or token artifacts. Supported sources: **Figma/Figma plugin**, **Google Stitch**, **v0.dev**, **Pencil/OpenPencil**, **Claude Design**, and **Google DESIGN.md** (design *system* -- tokens only, no screen).
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ pulp import-design --from pencil --file design.json --validate --reference sourc
 pulp import-design --from pencil --file design.json --dry-run
 
 # Export current theme as W3C Design Tokens
-pulp export-tokens --output tokens.json
+pulp export-tokens --tokens tokens.json
 ```
 
 ## How It Works
@@ -26,10 +26,13 @@ pulp export-tokens --output tokens.json
 The import pipeline has three layers:
 
 ```
-Figma JSON ──┐
-Stitch HTML ─┤
-v0 TSX ──────┤──→ Normalized IR ──→ Pulp Native JS + W3C Tokens
-Pencil JSON ─┘
+Figma REST/file JSON ----.
+Figma plugin .pulp.zip --|
+Stitch HTML / directory -|--> Normalized IR --> JS / DesignIR / baked native artifacts
+v0 / Figma Make TSX ----|
+Pencil/OpenPencil JSON --'
+
+DESIGN.md ------------------> tokens.json only
 ```
 
 ## Source-Specific Guides
@@ -46,7 +49,7 @@ Pencil variables map directly to Pulp theme tokens.
 
 #### Pencil Layout Precision
 
-For highest fidelity, the import skill uses Pencil's `snapshot_layout` MCP tool to get exact pixel positions and sizes for every element. This data is injected into the IR as `_layoutHeight`/`_layoutWidth` attributes, which the code generator uses instead of computing heights from children (which can differ by 5-20px due to estimation).
+For highest fidelity, agent workflows can use Pencil's `snapshot_layout` MCP tool to acquire exact pixel positions and sizes for every element before writing the JSON consumed by `pulp import-design`. That data is injected into the IR as `_layoutHeight`/`_layoutWidth` attributes, which the code generator uses instead of computing heights from children (which can differ by 5-20px due to estimation).
 
 ```
 Pencil MCP workflow:
@@ -66,44 +69,49 @@ Example: `pulpgain-pencil-source.png`, `pulpgain-pencil-render.png`, `pulpgain-p
 
 ### Figma
 
-Figma Design files are imported via the Figma MCP server:
+Figma imports are file/URL based at the CLI. Use `figma-plugin` for the Pulp Figma plugin's `.pulp.json` / `.pulp.zip` envelope, or `figma` for raw REST/file JSON:
 
 ```bash
+pulp import-design --from figma-plugin --file design.pulp.zip
 pulp import-design --from figma --file design.json
 ```
 
-Key Figma MCP tools used:
+Agent workflows may use Figma MCP tools to acquire source context or reference screenshots before producing those files:
 - `get_design_context` — code + screenshot + design tokens in one call
 - `get_screenshot` — reference PNG for validation
 - `get_variable_defs` — design tokens (colors, spacing, typography)
 - `get_metadata` — layer tree with IDs, names, types, positions, sizes
 
-See [GitHub issue #49](https://github.com/danielraffel/pulp/issues/49) for Figma Design + Make adapter status.
+Raw MCP responses are acquisition data, not a separate CLI source. Translate or export them into one of the supported file shapes before importing.
+
+The raw Figma and Figma Make adapter lanes are tracked in the compatibility
+import reference, which records the current parser status instead of relying on
+a one-off issue link.
 
 ### Google Stitch
 
-Stitch screens are imported via the Stitch MCP server:
+Stitch screens are imported from HTML/directory exports or translated IR JSON. Stitch MCP can be used by an agent to acquire the screen, but the CLI still consumes a file:
 
 ```bash
 pulp import-design --from stitch --file screen.html
 ```
 
-Key Stitch MCP tools:
+Useful Stitch acquisition helpers:
 - `get_screen` — HTML code + screenshot
 - `get_project` — design system (50+ named colors, fonts, roundness)
 - `generate_screen_from_text` — AI-generate a screen from prompt
 
 ### v0.dev
 
-v0 generates React/Tailwind which maps to Pulp:
+The current v0 lane accepts a v0 project envelope or a single React TSX/JSX component that stays within Pulp's supported runtime-import DOM/CSS/API subset:
 
 ```bash
 pulp import-design --from v0 --file component.tsx --output my-ui.js
 ```
 
-- Tailwind classes → inline style properties
-- shadcn/ui components → Pulp widget equivalents
-- `useState` → `getParam`/`setParam`
+- Inline styles and supported DOM tags are normalized into the runtime import surface.
+- Default Tailwind, shadcn/Radix, Next.js, and custom-component-heavy exports need preprocessing into the supported subset; they are rejected rather than partially imported.
+- Simple state/value evidence is captured where the parser can prove the control contract.
 
 ### Google DESIGN.md
 
@@ -133,9 +141,9 @@ fence must be present, and the frontmatter must declare `name:` plus
 at least one canonical token group. A generic Jekyll blog post with
 `name:` in its frontmatter will not match.
 
-Phase 1 is tokens-only. Phase 2 adds `pulp design lint` / `pulp
-design diff` and Tailwind v3 + v4 export. Phase 3 makes DESIGN.md a
-round-trippable project source of truth. See
+The importer is tokens-only. `pulp design lint` and `pulp design diff`
+cover DESIGN.md quality and semantic token changes. Tailwind v3/v4 export
+and project-source round-tripping remain future work. See
 [`reference/imports/designmd.md`](../reference/imports/designmd.md)
 for the full reference.
 
@@ -292,22 +300,19 @@ pulp import-design --from pencil --file design.json --debug
 
 Reports: element counts (containers/widgets/labels), token counts, timing (ms), validation results, and gaps (unmapped shapes).
 
-## WIP MCP Integration Status
+## Acquisition vs Import
 
-| Source | MCP Connected | Design Created | Imported | Rendered | Validated | Parity |
-|--------|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Pencil** (PulpGain) | ✓ | ✓ | ✓ | ✓ | ✓ | **96%** |
-| **Pencil** (PulpEQ) | ✓ | ✓ | ✓ | ✓ | ✓ | **96%** |
-| **Stitch** (PulpDelay) | ✓ | ✓ | ✓ | ✓ | N/A* | Layout match |
-| **Figma Make** | ✓ | Source read ✓ | [#49](https://github.com/danielraffel/pulp/issues/49) | — | — | — |
-| **Figma Design** | ✓ (auth) | Screenshot ✓ | [#49](https://github.com/danielraffel/pulp/issues/49) | — | — | — |
+MCP connectors are acquisition helpers unless a source contract says otherwise. They can read a live tool, capture screenshots, or gather metadata, then an agent writes a supported file for `pulp import-design`.
 
-*\*Stitch validation compares plugin render vs app thumbnail (different resolution/chrome) — not comparable.*
+| Source | Acquisition helpers | CLI input |
+|--------|---------------------|-----------|
+| Figma plugin | In-tree Figma plugin or REST exporter | `.pulp.json` / `.pulp.zip` with `--from figma-plugin` |
+| Figma / Figma Make | Figma MCP or REST data acquisition | Raw Figma JSON or constrained React TSX via `--from figma` |
+| Stitch | Stitch MCP or directory export | HTML/directory export or translated IR via `--from stitch` |
+| Pencil/OpenPencil | Pencil MCP / OpenPencil export | JSON export or translated node data via `--from pencil` |
+| v0.dev | v0 MCP/project access | Project envelope or constrained React TSX via `--from v0` |
 
-Screenshot files in `build/design-debug/`:
-- `pulpgain-pencil-source.png`, `pulpgain-import-pencil-render.png`, `pulpgain-import-pencil-diff.png`
-- `pulpeq-pencil-source.png`, `pulpeq-import-pencil-render.png`, `pulpeq-import-pencil-diff.png`
-- `pulpdelay-stitch-source.png`, `pulpdelay-stitch-render.png`, `pulpdelay-stitch-diff.png`
+Current runtime parsers reject raw provider MCP JSON unless that source's parser explicitly documents the shape.
 
 ## CLI Reference
 
@@ -315,10 +320,11 @@ Screenshot files in `build/design-debug/`:
 pulp import-design --from <source> [options]
 
 Sources:
-  figma     Figma export JSON or MCP data
-  stitch    Google Stitch screen HTML or MCP data
-  v0        v0.dev TSX/Tailwind output
-  pencil    Pencil/OpenPencil node JSON or .pen export
+  figma         Figma REST/file JSON or constrained Figma Make React export
+  figma-plugin  Pulp Figma plugin .pulp.json/.pulp.zip envelope
+  stitch        Google Stitch screen HTML or translated IR file
+  v0            v0.dev project envelope or constrained React TSX
+  pencil        Pencil/OpenPencil JSON or translated node export
   claude    Claude Design standalone HTML export
   designmd  Google DESIGN.md (Apache-2.0) — tokens only, no ui.js
 

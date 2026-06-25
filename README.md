@@ -19,7 +19,7 @@ Then:
 pulp create my-plugin && cd my-plugin && pulp run
 ```
 
-Three commands from zero to a working plugin in all formats.
+Three commands from zero to a working native plugin for your platform.
 
 The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use **Claude Code**, you can additionally install the [Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin) for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP server:
 
@@ -51,7 +51,7 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Optional AAX support via external SDK
 
 **Create & Build**
-- `pulp create` scaffolds a full plugin project with all format targets
+- `pulp create` scaffolds a full plugin project with the default native targets for your platform
 - `pulp build` builds all formats in one pass
 - `pulp test` runs the local test suite (`ctest` over the project's build directory); cross-platform execution and coverage roll up to CI — coverage is tracked at [codecov.io/gh/danielraffel/pulp](https://app.codecov.io/gh/danielraffel/pulp)
 - `pulp run` launches standalone for quick iteration
@@ -65,16 +65,17 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Hot reload for rapid UI iteration (standalone host; plugin host support planned)
 - Screenshot capture and headless rendering
 - Component inspector for debugging view hierarchy
-- AI design tool (`pulp design`) for generating UIs from prompts
-- Import from Figma, Stitch, and Pencil via MCP
+- AI-assisted design tool (`pulp design`) for token, shader, and widget-style iteration
+- Design import from Figma/Figma plugin, Stitch, v0, Pencil/OpenPencil, Claude Design, and DESIGN.md exports
 - Agent-first motion observability — runtime traces, fixture record/replay/assert, visual analysis, Swift + Kotlin facades, scrubber, cost attribution ([guide](docs/guides/motion-observability.md))
 
 **DSP & Audio**
 - 30+ signal processors: oscillator, filters, compressor, reverb, delay, FFT, envelope follower, and more
 - Thread-safe parameter system with atomic reads and gesture-aware bindings
 - Headless audio processing for testing and offline rendering
-- MIDI I/O with full event parsing
-- Audio file read/write (WAV, AIFF, FLAC, MP3)
+- MIDI I/O with parsed short messages, SysEx, UMP helpers, and documented backend limits
+- Audio file import for WAV, AIFF/AIFF-C, FLAC, MP3, Ogg Vorbis, and CoreAudio-backed Apple formats
+- Audio file export for WAV/AIFF, with optional FLAC, MP3, AAC, and ALAC encoders via `pulp add`
 - Multi-bus I/O with sidechain support
 
 **Rendering**
@@ -122,7 +123,8 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 git clone https://github.com/danielraffel/pulp.git
 cd pulp
 ./setup.sh                                    # bootstrap deps
-cmake -S . -B build && cmake --build build    # build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
+cmake --build build                            # build
 ctest --test-dir build --output-on-failure    # test
 ```
 
@@ -207,8 +209,8 @@ extend the framework, or to build a plugin against source); see
 
 Two high-impact ways to contribute that don't require digging into the framework:
 
-- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
-- **[#3042 — AAX support: Avid SDK access](https://github.com/danielraffel/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
+- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts without checked-in results: Logic, Live, Bitwig, Cubase, Studio One, Wavelab, FL Studio, and AUM.
+- **[#3042 — Validate AAX with an Avid SDK setup](https://github.com/danielraffel/pulp/issues/3042)** — AAX is optional and requires a developer-supplied Avid SDK plus DigiShell/AAX Validator. If you have Avid access and can run local Pro Tools validation, comment so we can verify the adapter and host-quirk rows.
 
 ### Workflow
 

@@ -1,7 +1,7 @@
 // pulp host / pulp scan — thin CLI wrappers around pulp::host.
 //
 // `pulp scan`  — walk the system plug-in paths and print what was found.
-// `pulp host`  — load a .clap (today) and run a short synthetic block
+// `pulp host`  — load a plugin bundle and run a short synthetic block
 //                through it. Smoke-tests the hosting pipeline without
 //                requiring a DAW.
 
@@ -172,11 +172,10 @@ int cmd_scan(const std::vector<std::string>& args) {
             // (scanner_au.mm), so scan_au covers both. The actual
             // PluginInfo.format is already tagged per-entry by
             // scanner_au.mm's infer_format(), which lets us narrow the
-            // results to exactly AU v2 or exactly AUv3 below. Codex P2 on
-            // PR #531 / #500: without that post-scan filter, a user who
-            // asked for `--format au` still got mixed AU/AUv3 results,
-            // contradicting the docs and making plugin selection
-            // unreliable.
+            // results to exactly AU v2 or exactly AUv3 below. Without that
+            // post-scan filter, a user who asked for `--format au` still got
+            // mixed AU/AUv3 results, contradicting the docs and making plugin
+            // selection unreliable.
             opts.scan_au   = (f == PluginFormat::AudioUnit || f == PluginFormat::AudioUnitV3);
             opts.scan_clap = (f == PluginFormat::CLAP);
             opts.scan_lv2  = (f == PluginFormat::LV2);
@@ -242,10 +241,11 @@ int cmd_host(const std::vector<std::string>& args) {
     using namespace pulp::host;
 
     if (args.empty() || args[0] == "--help" || args[0] == "-h") {
-        std::printf("Usage: pulp host <path/to/plugin.clap> [--format clap]\n");
-        std::printf("       pulp host --id <clap-id>\n");
+        std::printf("Usage: pulp host <path/to/plugin> [--format clap|vst3|au|auv3|lv2] [--id <unique-id>]\n");
         std::printf("\nLoads the plug-in and runs a 256-sample synthetic block\n");
         std::printf("through it. Prints plug-in metadata and peak output level.\n");
+        std::printf("\n  --format <fmt>, -f <fmt>  Format: clap, vst3, au, auv3, lv2 (default: clap)\n");
+        std::printf("  --id <unique-id>          Select a descriptor URI / unique-id for LV2 or multi-plugin CLAP bundles\n");
         return args.empty() ? 1 : 0;
     }
 
@@ -312,13 +312,12 @@ int cmd_host(const std::vector<std::string>& args) {
 #if !PULP_HOST_HAS_AU
             case PluginFormat::AudioUnit:
             case PluginFormat::AudioUnitV3:
-                // Codex 2026-04-21 wave 2 P2 on #557: the AU loader is
-                // gated by AudioUnitSDK presence (`PULP_HAS_AUSDK`,
-                // auto-detected when external/AudioUnitSDK exists) +
-                // the APPLE platform, NOT a `PULP_HAS_AU` option —
-                // that flag does not exist in the build system, so
-                // the old hint was not actionable. Point users at the
-                // real fix: clone the AudioUnitSDK (macOS only).
+                // The AU loader is gated by AudioUnitSDK presence
+                // (`PULP_HAS_AUSDK`, auto-detected when
+                // external/AudioUnitSDK exists) plus the APPLE platform, not a
+                // `PULP_HAS_AU` option. That flag does not exist in the build
+                // system, so the old hint was not actionable. Point users at
+                // the real fix: clone the AudioUnitSDK (macOS only).
                 std::fprintf(stderr, "  AU host loader not available in this build (macOS only).\n"
                                      "  Rebuild on macOS with external/AudioUnitSDK present\n"
                                      "  (git clone https://github.com/apple/AudioUnitSDK external/AudioUnitSDK).\n");
@@ -332,7 +331,7 @@ int cmd_host(const std::vector<std::string>& args) {
 #endif
             default:
                 std::fprintf(stderr, "  The plug-in bundle may be malformed, unsigned, or ABI-incompatible.\n"
-                                     "  Re-scan with `pulp host scan` for a structured diagnosis.\n");
+                                     "  Re-scan with `pulp scan` for a structured diagnosis.\n");
                 break;
         }
         return 1;

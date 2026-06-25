@@ -1,4 +1,4 @@
-// test_font_color_mode.cpp — Pulp #2163, font v2 Slice 3.1.
+// test_font_color_mode.cpp — color-font mode resolution.
 //
 // ResolvedFont::supports_color_font / color_font_active behavior.
 // Tests the predicates against the bundled non-color Inter face,
@@ -99,12 +99,12 @@ TEST_CASE("ColorFont: no typeface => supports_color_font is false",
     REQUIRE_FALSE(r.color_font_active());
 }
 
-// pulp #2243 follow-up (Codex review P2): the explicit ColorFontMode
-// values (Bitmap / COLR / SVG) request a SPECIFIC color format. The
-// pre-fix `color_font_active()` returned true for any of those modes
-// whenever `supports_color_font()` returned true — i.e. it treated
-// every explicit mode like Auto, silently accepting "I have CBDT" as
-// satisfying "I asked for COLR".
+// Regression for pulp #2243: the explicit ColorFontMode values
+// (Bitmap / COLR / SVG) request a SPECIFIC color format. The
+// `color_font_active()` must not treat `supports_color_font()` as
+// sufficient for every explicit mode — that treats explicit modes like
+// Auto, silently accepting "I have CBDT" as satisfying "I asked for
+// COLR".
 //
 // On macOS, Apple Color Emoji uses the `sbix` (bitmap) table and
 // does NOT carry COLR. Ask for ColorFontMode::COLR against it and

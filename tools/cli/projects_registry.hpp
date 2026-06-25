@@ -1,8 +1,8 @@
 // projects_registry.hpp — `~/.pulp/projects.json` project registry
 //
-// Issue #499 / #552 (Slice 1b): authoritative registry of known Pulp
-// projects, populated by `pulp create` on successful scaffold and by
-// explicit `pulp projects add/remove` commands. Lives alongside
+// Authoritative registry of known Pulp projects, populated by
+// `pulp create` on successful scaffold and by explicit
+// `pulp projects add/remove` commands. Lives alongside
 // version_diag.{hpp,cpp} and is deliberately link-free of cli_common so
 // the unit test binary can exercise it standalone.
 //
@@ -62,7 +62,7 @@ bool write_registry(const fs::path& registry_json,
 // `write_registry()` actually persisted the update; callers that
 // surface user-visible confirmation ("Project registered at ...")
 // should check it so a failed write doesn't silently present as
-// success. Codex 2026-04-21 wave 2 P2 on #563.
+// success (#563).
 std::vector<Project> add_project(const fs::path& registry_json,
                                  const fs::path& project_path,
                                  const std::string& project_name,

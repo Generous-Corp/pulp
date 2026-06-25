@@ -2,6 +2,8 @@
 
 Pulp's built-in `core/signal/` subsystem covers 30+ DSP processors. These guides help you add third-party libraries for capabilities beyond what ships natively.
 
+The live registry is `tools/packages/registry.json`. It currently contains more entries than this hand-written guide set; use `pulp search <query>` to browse the full registry.
+
 ## Before You Add a Package
 
 1. **Check built-ins first.** Pulp may already cover your need — see `docs/reference/modules.md` for the signal subsystem inventory.
@@ -42,7 +44,7 @@ Pulp's built-in `core/signal/` subsystem covers 30+ DSP processors. These guides
 
 ## Search Tips
 
-Looking for a capability? Use `pulp search` (Phase 2) or check the registry directly:
+Looking for a capability? Use `pulp search` or check the registry directly:
 
 ```bash
 python3 tools/packages/validate_registry.py  # verify registry integrity

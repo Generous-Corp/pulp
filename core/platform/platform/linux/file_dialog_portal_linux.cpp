@@ -1,4 +1,4 @@
-// Linux file dialogs via xdg-desktop-portal (#301 / L6).
+// Linux file dialogs via xdg-desktop-portal.
 //
 // The desktop portal (org.freedesktop.portal.Desktop, FileChooser
 // interface) is the toolkit-agnostic way to raise a native file picker on
@@ -9,11 +9,10 @@
 // call honest-fails (nullopt / {}) so the JS bridge can distinguish "user
 // cancelled" from "platform unsupported".
 //
-// Scope (MVP): open one/many files, save (with a suggested name), and choose
-// a folder. File-type filters and a pre-selected folder are intentionally
-// deferred — the portal marshals those as nested (a(sa(us)) / ay) variants
-// the minimal DBus client does not yet emit; the dialog still works without
-// them (it just shows all files / the portal's default folder). See L6 notes.
+// Supported operations: open one/many files, save with a suggested name, and
+// choose a folder. File-type filters and a pre-selected folder are not wired
+// through this minimal DBus client yet; the dialog still works without them
+// and shows all files / the portal's default folder.
 //
 // This is a real built-in backend (like file_dialog_mac.mm), not a
 // host-registered one: make_linux_portal_backend() is referenced from

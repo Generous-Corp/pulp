@@ -1,6 +1,6 @@
-// Unit tests for the ARA 2.x scaffolding (workstream 06 slice 6.1).
+// Unit tests for the ARA 2.x scaffolding.
 // These tests exercise only the Pulp-side stubs. Actual SDK integration +
-// adapter companion factories land in slices 6.3..6.5.
+// adapter companion factories are added once the SDK is wired in.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/ara.hpp>

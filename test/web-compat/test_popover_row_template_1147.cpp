@@ -125,16 +125,15 @@ TEST_CASE("popover-1147 (A): button display:block lays out children in a column"
     REQUIRE(desc->bounds().y >= row->bounds().y + row->bounds().height - 1.5f);
 
     // (A) — anti-drift assertion #1147.
-    // Both children must fit inside the button horizontally. Pre-fix the
-    // <span display:block> description span paints past the right edge
-    // because its native widget never receives a wrapped content width.
+    // Both children must fit inside the button horizontally. Without a
+    // wrapped content width the <span display:block> description span
+    // paints past the right edge — its native widget never receives one.
     REQUIRE(row->bounds().x + row->bounds().width  <= btn->bounds().width + 1.0f);
     REQUIRE(desc->bounds().x + desc->bounds().width <= btn->bounds().width + 1.0f);
 
     // The description must occupy non-zero height so the popover row is
-    // actually visible to the user (regression: pre-fix Yoga collapses it
-    // when the parent <span>'s intrinsic measure func clobbers child
-    // layout).
+    // actually visible to the user (regression: Yoga collapses it when the
+    // parent <span>'s intrinsic measure func clobbers child layout).
     REQUIRE(desc->bounds().height > 0.0f);
 }
 

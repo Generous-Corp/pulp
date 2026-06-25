@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Adapter-vs-production split (workstream 08 slice 8.6).
+Validate that supported adapter/platform pairs have matching production-host
+coverage entries.
 
 Reads `docs/status/support-matrix.yaml` and reports on two things:
 

@@ -1,14 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — layout domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — layout domain handler
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the Yoga flex / grid / box-model / dimensions / positioning
 // CSS properties. `_applyLayoutProp(decl, id, key, resolved, value)`
-// returns true if it claimed the key, false otherwise — exactly the
-// per-domain dispatcher contract used by the @pulp/react prop-applier
-// split (prop-applier-layout.ts). Each `case` body below is byte-
-// identical to the matching arm of the pre-split `_applyProperty`
-// switch — same bridge calls, same order.
+// returns true if it claimed the key, false otherwise. It mirrors the
+// per-domain dispatcher contract used by the @pulp/react layout
+// prop-applier.
 //
 // `decl` is the CSSStyleDeclaration `this`; the display case reads
 // `decl._props` and the position/zIndex cases call
@@ -26,9 +24,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             if (resolved === "none") { setVisible(id, false); }
             else if (resolved === "flex" || resolved === "block" ||
                      resolved === "inline-block" || resolved === "inline-flex") {
-                // pulp #1420 — `inline-block` ≡ `block` and `inline-flex`
-                // ≡ `flex` in pulp's non-text-flowing layout system. This
-                // matches react-native semantics and CSS spec for
+                // `inline-block` maps to `block` and `inline-flex` maps to
+                // `flex` in Pulp's non-text-flowing layout system. This
+                // matches React Native semantics and the CSS spec for
                 // formatting contexts that don't have inline flow.
                 setVisible(id, true);
                 // CSS web-compat: `display: flex` defaults to flex-direction: row.
@@ -36,8 +34,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
                 // convention), so we explicitly emit a row-direction here unless
                 // the consumer ALSO declared flexDirection / flex-direction —
                 // in which case the explicit declaration overrides this default
-                // either later in this flush (individual setters apply in order)
-                // or via _flushAll's iteration. See pulp #1147.
+                // either later in this flush (individual setters apply in
+                // order) or via _flushAll's iteration.
                 if (resolved === "flex" || resolved === "inline-flex") {
                     var hasExplicitDirection =
                         Object.prototype.hasOwnProperty.call(decl._props, "flexDirection") ||
@@ -61,11 +59,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             return true;
         case "flexDirection":
-            // pulp #1434 (rn batch B) — forward all four CSS values
-            // verbatim. Bridge dispatches to YGFlexDirectionRow /
-            // RowReverse / Column / ColumnReverse. Previously only
-            // "row" survived; "row-reverse"/"column-reverse" silently
-            // collapsed to "col".
+            // Forward row / row-reverse / column-reverse verbatim; column
+            // maps to the legacy `col` token accepted by the bridge.
             setFlex(id, "direction",
                 resolved === "row" ? "row" :
                 resolved === "row-reverse" ? "row-reverse" :
@@ -73,10 +68,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
                 "col");
             return true;
         case "flexWrap":
-            // pulp #1434 Triage #14 — forward the keyword verbatim so the
-            // bridge can route `wrap-reverse` through Yoga's
-            // YGWrapWrapReverse path. Previous behavior coerced to 0/1
-            // and silently dropped wrap-reverse to plain wrap.
+            // Forward the keyword verbatim so the bridge can route
+            // `wrap-reverse` through Yoga's YGWrapWrapReverse path.
             setFlex(id, "flex_wrap", resolved);
             return true;
         case "flexGrow":
@@ -90,17 +83,13 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             if (fb) setFlex(id, "flex_basis", fb.value);
             return true;
         case "flex": {
-            // Shorthand: flex: <grow> [<shrink>] [<basis>]
-            // pulp DIVERGE→PASS sweep — accept the CSS shorthand
-            // keywords `auto` / `none` / `initial`. Per the CSS Flexible
-            // Box spec these expand to:
+            // Shorthand: flex: <grow> [<shrink>] [<basis>].
+            // Per the CSS Flexible Box spec, the keyword forms expand to:
             //   flex: auto    ≡ 1 1 auto
             //   flex: none    ≡ 0 0 auto
             //   flex: initial ≡ 0 1 auto   (the CSS default)
-            // Without this branch the keyword fell through to
-            // parseFloat() → NaN → 0 and silently zeroed flex_grow,
-            // making `flex: auto` equivalent to `flex: 0` — the wrong
-            // semantics for the "fill remaining space" idiom.
+            // Keep the keywords out of the numeric parse path so `flex:
+            // auto` keeps the "fill remaining space" semantics.
             var fkw = String(resolved).trim().toLowerCase();
             if (fkw === "auto" || fkw === "none" || fkw === "initial") {
                 var grow   = (fkw === "auto") ? 1 : 0;
@@ -138,16 +127,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             setFlex(id, "order", parseInt(resolved) || 0);
             return true;
         case "gap": {
-            // pulp Wave 2 css.2 — CSS shorthand `gap: <row-gap> [<col-gap>]`.
-            // When two tokens are present, fan out to setRowGap +
-            // setColumnGap so each axis gets its own value (matching the
-            // CSS spec). Single-token form writes the shared `gap` slot.
-            //
-            // Codex #1616 P1 on #1638 — single-token writes were ignoring
-            // any prior 2-token state, leaving stale row_gap/column_gap
-            // (which FlexStyle::effective_gap prefers when ≥0). The fix
-            // resets per-axis to the -1 sentinel before writing the
-            // shared slot so the new shorthand value actually wins.
+            // CSS shorthand `gap: <row-gap> [<col-gap>]`. When two tokens
+            // are present, fan out to row_gap + column_gap so each axis gets
+            // its own value. Single-token form writes the shared `gap` slot.
             var gapToks = String(resolved).trim().split(/\s+/);
             if (gapToks.length >= 2) {
                 var grRow = resolveCSSLength(gapToks[0]);
@@ -157,16 +139,14 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
                 if (grCol) setFlex(id, "column_gap",
                     grCol.unit === "%" ? (grCol.value + "%") : grCol.value);
             } else {
-                // Codex P2 followup on #1700 (#1707): parse FIRST,
-                // then reset per-axis only if the new value is valid.
-                // The earlier ordering cleared row_gap/column_gap
-                // unconditionally, which silently nuked prior 2-token
-                // state when the new value was malformed.
+                // Parse first, then reset per-axis only if the new value is
+                // valid; malformed single-token writes leave existing axis
+                // values untouched.
                 var g = resolveCSSLength(resolved);
                 if (g) {
-                    // Reset per-axis (-1 = "consult shared gap") so
-                    // the new single-token value isn't shadowed by a
-                    // prior 2-token write.
+                    // Reset per-axis (-1 = "consult shared gap") so the
+                    // new single-token value is not shadowed by a prior
+                    // two-token write.
                     setFlex(id, "row_gap", -1);
                     setFlex(id, "column_gap", -1);
                     setFlex(id, "gap",
@@ -176,18 +156,18 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             return true;
         }
         case "rowGap": {
-            // pulp Wave 2 css.2 — forward `'NN%'` verbatim so the bridge
-            // stores the percent value on the FlexStyle.row_gap slot
-            // (best-effort: Yoga has no row-gap percent API yet, so the
-            // value is treated as px until the Yoga update lands).
+            // Forward `'NN%'` verbatim so the bridge stores the percent
+            // value on the FlexStyle.row_gap slot. Yoga has no row-gap
+            // percent API yet, so the value is treated as px until the
+            // Yoga bridge grows that path.
             var rg = resolveCSSLength(resolved);
             if (rg) setFlex(id, "row_gap",
                 rg.unit === "%" ? (rg.value + "%") : rg.value);
             return true;
         }
         case "columnGap": {
-            // pulp Wave 2 css.2 — forward `'NN%'` verbatim (same caveat
-            // as rowGap above).
+            // Forward `'NN%'` verbatim; see rowGap for the current Yoga
+            // percent-gap limitation.
             var cg = resolveCSSLength(resolved);
             if (cg) setFlex(id, "column_gap",
                 cg.unit === "%" ? (cg.value + "%") : cg.value);
@@ -195,16 +175,15 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         }
 
         // Dimensions
-        // pulp #1423 — pass the resolved string verbatim for width/height
-        // when it is a percent value. The bridge's setFlex(width|height,
-        // ...) inspects the third arg as a string and detects '%' suffix.
+        // Pass percent width/height strings verbatim. The bridge's
+        // setFlex(width|height, ...) inspects the third arg as a string
+        // and detects the '%' suffix.
         // This keeps the existing px path numeric (no JS-side regression)
         // while letting "100%" survive through to Yoga's native
         // YGNodeStyleSet{Width,Height}Percent path.
         case "width": {
-            // pulp #1434 (sub-agent #12 follow-up) — forward `'auto'`
-            // verbatim so the bridge can route to YGNodeStyleSetWidthAuto
-            // ("hug contents"). Mirrors the percent path.
+            // Forward `'auto'` verbatim so the bridge can route to
+            // YGNodeStyleSetWidthAuto ("hug contents").
             if (resolved === "auto") { setFlex(id, "width", "auto"); return true; }
             var w = resolveCSSLength(resolved);
             if (!w) return true;
@@ -222,13 +201,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             else setFlex(id, "height", h.value);
             return true;
         }
-        // pulp #1576 — these four min/max length properties previously
-        // had a dual-path: a `/^(calc|min|max|clamp)\(/` guard that
-        // routed calc-family values into resolveCSSLength's number-
-        // return shape, and a parseCSSLength branch for the px/%/auto
-        // case. After #1576 restored resolveCSSLength to the unified
-        // {value, unit} shape (drop-in replacement for parseCSSLength),
-        // both paths collapse into a single resolveCSSLength call.
+        // These min/max length properties use resolveCSSLength's unified
+        // {value, unit} shape; percent values route through the bridge's
+        // percent setters.
         case "minWidth": {
             var mw = resolveCSSLength(resolved);
             if (mw) setFlex(id, "min_width",
@@ -254,9 +229,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // Margin (individual) — pulp #1434 cross-surface mega-batch:
-        // forward `'NN%'` and `'auto'` strings verbatim so the bridge can
-        // route through Yoga's YGNodeStyleSetMargin{Percent,Auto} APIs.
+        // Margin (individual): forward `'NN%'` and `'auto'` strings
+        // verbatim so the bridge can route through Yoga's
+        // YGNodeStyleSetMargin{Percent,Auto} APIs.
         // Numeric values flow through parseCSSLength as before. `auto`
         // is the canonical centering idiom (e.g. `marginLeft: auto;
         // marginRight: auto`) — Yoga supports it on margin only.
@@ -294,12 +269,12 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         }
         // Margin shorthand
         case "margin": {
-            // pulp Wave 2 css.2 — per-token `auto` / `%` support in the
-            // shorthand. Mirrors the per-edge `marginTop` etc. behavior.
-            // expandShorthand collapses all tokens to numeric values
-            // (lossy for auto / percent), so we re-tokenize here and
-            // dispatch each side via the same string-aware setFlex
-            // pathway used by per-edge keys. CSS shorthand convention:
+            // Per-token `auto` / `%` support mirrors the per-edge
+            // `marginTop` etc. behavior. expandShorthand collapses all
+            // tokens to numeric values, which is lossy for auto / percent,
+            // so re-tokenize here and dispatch each side via the same
+            // string-aware setFlex pathway used by per-edge keys.
+            // CSS shorthand convention:
             //   1 token  → all four
             //   2 tokens → vertical / horizontal
             //   3 tokens → top / horizontal / bottom
@@ -321,18 +296,16 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             }
             return true;
         }
-        // pulp #1434 batch 4 — React Native shorthand aliases. RN code
-        // commonly writes `style={{ marginHorizontal: 8 }}` which CSS
+        // React Native shorthand aliases. RN code commonly writes
+        // `style={{ marginHorizontal: 8 }}` which CSS
         // doesn't recognize, but the DOM-lite el.style adapter sees the
         // raw key when consumers port RN snippets verbatim. Fan out to
         // the same per-edge bridge calls the CSS marginInline / margin
         // shorthand uses so the behavior is identical regardless of the
-        // entry surface. `auto` is a no-op for now (parseCSSLength returns
-        // null for non-numeric input); numeric and percent paths route
-        // through the same setFlex per-edge dispatch as marginLeft etc.
+        // entry surface. Numeric, percent, and `auto` paths route through
+        // the same setFlex per-edge dispatch as marginLeft etc.
         case "marginHorizontal": {
-            // pulp #1434 cross-surface mega-batch — forward %/auto through
-            // the per-edge fan-out so RN snippets like
+            // Forward %/auto through the per-edge fan-out so RN snippets like
             // `style={{ marginHorizontal: '5%' }}` or
             // `style={{ marginHorizontal: 'auto' }}` route correctly.
             if (resolved === "auto") {
@@ -361,8 +334,7 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // Padding (individual) — pulp #1434 cross-surface mega-batch:
-        // forward `'NN%'` strings verbatim (Yoga's
+        // Padding (individual): forward `'NN%'` strings verbatim (Yoga's
         // YGNodeStyleSetPaddingPercent). Yoga's padding does NOT support
         // `auto` (only margin does), so the keyword is silently dropped
         // here.
@@ -396,8 +368,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         }
         // Padding shorthand
         case "padding": {
-            // pulp Wave 2 css.2 — per-token `%` support in the shorthand.
-            // Yoga's padding doesn't accept `auto` (only margin does), so
+            // Per-token `%` support in the shorthand. Yoga's padding
+            // doesn't accept `auto` (only margin does), so
             // the keyword is silently dropped per token. Otherwise the
             // tokenizing logic mirrors the `margin` shorthand above.
             var pTokens = String(resolved).trim().split(/\s+/);
@@ -414,13 +386,12 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             }
             return true;
         }
-        // pulp #1434 batch 4 — React Native shorthand aliases for padding.
+        // React Native shorthand aliases for padding.
         // Same fan-out pattern as marginHorizontal / marginVertical above
         // — paddingHorizontal sets padding_left + padding_right to the
         // same value, paddingVertical sets padding_top + padding_bottom.
         case "paddingHorizontal": {
-            // pulp #1434 cross-surface mega-batch — forward percent through
-            // the per-edge fan-out so RN snippets like
+            // Forward percent through the per-edge fan-out so RN snippets like
             // `style={{ paddingHorizontal: '5%' }}` route correctly.
             // Yoga's padding does NOT support 'auto', so the keyword is
             // a no-op (unlike the marginHorizontal alias).
@@ -440,9 +411,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // pulp #1434 Phase A2-3 — CSS `direction: ltr | rtl`. Maps to
-        // View::WritingDirection via setDirection bridge fn; Yoga
-        // honors at layout, Skia paragraph_style at text shape.
+        // CSS `direction: ltr | rtl` maps to View::WritingDirection via
+        // setDirection; Yoga honors it at layout time, and Skia
+        // paragraph_style uses it during text shaping.
         case "direction": {
             if (typeof setDirection !== "undefined") {
                 setDirection(id, resolved);
@@ -454,9 +425,9 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         case "overflow":
             setOverflow(id, resolved);
             return true;
-        // pulp #1434 A4 Bundle 4 — overflow per-axis. Pulp's View has a
-        // single Overflow enum (visible|hidden) that clips both axes
-        // together; CSS `overflow-x` / `overflow-y` ask for axis-tied
+        // Overflow per-axis: Pulp's View has a single Overflow enum that
+        // clips both axes together; CSS `overflow-x` / `overflow-y` ask
+        // for axis-tied
         // clipping which the layout engine doesn't model. Forward the
         // value to the same setOverflow bridge — last-write-wins across
         // the two axes, which is the conservative interpretation
@@ -471,20 +442,19 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         // Position
         case "position":
             setPosition(id, resolved);
-            // pulp #1148 (slice b) — auto-overlay heuristic. Re-evaluate
-            // whenever `position` changes; switching to `absolute` with
-            // a sufficient z-index claims the global overlay slot, and
-            // switching back to `static` / `relative` releases it.
+            // Re-evaluate the auto-overlay heuristic whenever `position`
+            // changes; switching to `absolute` with a sufficient z-index
+            // claims the global overlay slot, and switching back to
+            // `static` / `relative` releases it.
             decl._reevaluateOverlay();
             return true;
-        // pulp #1434 batch 6 — pass the resolved string verbatim for
-        // top/right/bottom/left when the unit is %. The bridge's setTop /
+        // Pass the resolved string verbatim for top/right/bottom/left when
+        // the unit is %. The bridge's setTop /
         // setRight / setBottom / setLeft inspect arg index 1 as a string
         // and detect '%' suffix, routing the value through Yoga's native
-        // YGNodeStyleSetPositionPercent path. Mirrors PR #1426 for the
-        // View positional fields.
-        // pulp Wave 2 css.2 — relative-unit resolution for top/right/
-        // bottom/left. em/rem are resolved against the default 14px
+        // YGNodeStyleSetPositionPercent path.
+        // Relative-unit resolution for top/right/bottom/left: em/rem
+        // resolve against the default 14px
         // font-size (no per-element cascade context here); vh/vw are
         // resolved against an 800x600 default viewport (matches
         // resolveLength in css-parser.js). Numeric px and `%` paths
@@ -529,8 +499,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         // z-index
         case "zIndex":
             setZIndex(id, parseInt(resolved) || 0);
-            // pulp #1148 (slice b) — z-index moving above/below the
-            // popover threshold flips the auto-overlay heuristic.
+            // z-index moving above/below the popover threshold flips the
+            // auto-overlay heuristic.
             decl._reevaluateOverlay();
             return true;
 
@@ -590,7 +560,7 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             if (grow[1]) setGrid(id, "row_end", grow[1]);
             return true;
         }
-        // pulp #1434 Phase A2-2 — extended grid surface
+        // Extended grid surface.
         case "gridAutoColumns":
             setGrid(id, "auto_columns", resolved);
             return true;
@@ -609,7 +579,7 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             setGrid(id, "grid_area", resolved);
             return true;
 
-        // aspect-ratio: "16/9", "1.5", or "auto" (pulp #1434).
+        // aspect-ratio: "16/9", "1.5", or "auto".
         // Three value forms accepted — RN exports use the plain number form,
         // CSS exports use the `width / height` form, "auto" clears the slot.
         // Both `aspectRatio` (camelCase, set via `style.aspectRatio = ...`)
@@ -649,10 +619,8 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
 
         // flex-flow shorthand
         case "flexFlow": {
-            // pulp #1434 Triage #14 — recognize the full direction +
-            // wrap vocabulary including `row-reverse` / `column-reverse`
-            // (already-wired but missing from this shorthand path) and
-            // `wrap-reverse` (newly wired through the bridge).
+            // Recognize the full direction + wrap vocabulary, including
+            // `row-reverse`, `column-reverse`, and `wrap-reverse`.
             var ffp = resolved.split(/\s+/);
             for (var ffi = 0; ffi < ffp.length; ffi++) {
                 var fftok = ffp[ffi];
@@ -689,15 +657,17 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
             setFlex(id, "align_content", _cssToFlex(resolved));
             return true;
 
-        // pulp #1434 A4 Bundle 3 — logical-edge fan-out. Every logical
-        // edge maps to the LTR / horizontal-tb physical edge:
+        // Logical-edge fan-out. Every logical edge maps to the LTR /
+        // horizontal-tb physical edge:
         //   inline-start → left,  inline-end → right
         //   block-start  → top,   block-end  → bottom
-        // RTL writing direction would swap inline-start/end; #1434 still
-        // tracks this as a follow-up. The bridge stores the value on the
-        // physical edge today, which is correct for LTR (the overwhelming
-        // common case). When direction-aware mapping lands, only this
-        // dispatch table needs to consult the View's writing direction.
+        // RTL writing direction would swap inline-start/end. The bridge
+        // stores the value on the physical edge today, which is correct for
+        // LTR. When direction-aware mapping lands, only this dispatch table
+        // needs to consult the View's writing direction.
+        // The two-edge shorthands below use expandShorthand, so `%` and
+        // `auto` are not preserved there. The per-edge start/end cases keep
+        // their string-aware `%` / `auto` handling.
         case "marginInline": {
             var mi = expandShorthand(resolved);
             setFlex(id, "margin_left", mi[0]); setFlex(id, "margin_right", mi[1]);
