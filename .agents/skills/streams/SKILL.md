@@ -98,6 +98,13 @@ When `options.auto_read = true` the reader and writer run on
 starve queued writes. Do not re-introduce a single worker loop
 without understanding this — request/response flows break otherwise.
 
+### 7. Callback state must outlive the stream and executor
+
+When callbacks capture mutexes, condition variables, or other local state,
+declare that state before the `AsyncStream` and before any executor loop
+that may run queued callbacks. `stop()` / destruction can dispatch `on_close`;
+do not let callback captures die before the stream and loop have drained.
+
 ## Extending with a new transport
 
 To add WebSocket, S3, or any other transport:
