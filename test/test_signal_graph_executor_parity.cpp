@@ -1,10 +1,11 @@
 // Convergence proof for the SignalGraph -> canonical-executor translation: for
-// graphs in the executor-eligible subset (AudioInput / AudioOutput / Gain,
-// plain audio feedforward + feedback), driving the TRANSLATED routing through
-// GraphRuntimeExecutor::process_routed() produces output bit-identical to
-// SignalGraph's own process() walk. Also checks eligibility gating and that a
-// post-prepare set_node_gain() is honored on the routed path (the binding reads
-// the live snapshot's atomic).
+// graphs in the executor-eligible subset (AudioInput / AudioOutput / Gain /
+// live Plugin / MidiInput / MidiOutput, with audio, sidechain, feedback, MIDI,
+// sparse automation, dense audio-rate modulation, and PDC), driving the
+// TRANSLATED routing through GraphRuntimeExecutor::process_routed() produces
+// output bit-identical to SignalGraph's own process() walk. Also checks
+// eligibility gating and that a post-prepare set_node_gain() is honored on the
+// routed path (the binding reads the live snapshot's atomic).
 
 #include "harness/rt_allocation_probe.hpp"
 

@@ -65,8 +65,9 @@ struct SignalGraphExecutorRouting {
 
 // True iff `nodes`/`connections` are in the subset the executor reproduces
 // bit-exactly:
-//   - nodes only AudioInput / AudioOutput / Gain (fixed 2-in/2-out, always
-//     fully writes) / live Plugin / MidiInput / MidiOutput. Every Plugin node
+//   - nodes only AudioInput / AudioOutput / Gain / live Plugin / MidiInput /
+//     MidiOutput. Gain is the fixed 2-in/2-out built-in utility and always
+//     fully writes. Every Plugin node
 //     must carry a live slot; its output region is pinned persistent so a plugin
 //     that does not fully write matches SignalGraph's persistent per-node buffer;
 //     a reported latency is fine because its delay compensation is replicated on
