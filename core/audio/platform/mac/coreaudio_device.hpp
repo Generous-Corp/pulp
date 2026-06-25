@@ -5,6 +5,7 @@
 #include <AudioToolbox/AudioToolbox.h>
 
 #include <atomic>
+#include <mutex>
 #include <cstdint>
 
 #if defined(__APPLE__)
@@ -65,6 +66,17 @@ private:
         const AudioObjectPropertyAddress* inAddresses,
         void* inClientData);
 
+    // Fires (on a CoreAudio thread) when the SYSTEM default output device changes.
+    // For a follow_default_ unit it live-switches the AudioUnit to the new default
+    // so audio moves to newly-selected outputs (AirPods/headphones) without a
+    // relaunch. Serialized against stop()/close() by switch_mutex_.
+    static OSStatus default_output_changed_listener(
+        AudioObjectID inObjectID,
+        UInt32 inNumberAddresses,
+        const AudioObjectPropertyAddress* inAddresses,
+        void* inClientData);
+    void switch_to_default_output();
+
     /// Query the active device for its IO-thread workgroup; cache it
     /// into `workgroup_`. No-op on older OS / when the device does
     /// not publish one.
@@ -89,6 +101,15 @@ private:
     std::atomic<bool> wg_joined_{false};
     std::atomic<std::uint64_t> xrun_counter_{0};
     bool overload_listener_installed_ = false;
+
+    // Default-output following: when the unit was opened against the system
+    // default (no pinned device, output-only), track default-device changes and
+    // re-point the unit live. switch_mutex_ serializes the listener's stop/start
+    // against the main thread's stop()/close() so the unit can't be disposed while
+    // the listener is mid-switch.
+    bool follow_default_ = false;
+    bool default_output_listener_installed_ = false;
+    std::mutex switch_mutex_;
 
     // Buffers for the callback
     std::vector<float*> output_ptrs_;

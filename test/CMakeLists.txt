@@ -5659,6 +5659,14 @@ pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp
     LIBRARIES pulp::audio)
 
+# CoreAudio follow-default output-device live switch (macOS only).
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-coreaudio-default-follow
+        SOURCES test_coreaudio_default_follow.mm
+        LIBRARIES pulp::audio)
+    target_link_libraries(pulp-test-coreaudio-default-follow PRIVATE "-framework CoreAudio")
+endif()
+
 # Plugin matrix tests (sample rate/buffer size/edge case sweep)
 add_executable(pulp-test-matrix test_plugin_matrix.cpp)
 target_link_libraries(pulp-test-matrix PRIVATE pulp::format Catch2::Catch2WithMain)

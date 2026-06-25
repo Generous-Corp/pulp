@@ -145,7 +145,13 @@ bool StandaloneApp::start() {
         return false;
     }
 
-    config_.audio_device_id = audio_device_->info().id;
+    // Only remember a CONCRETE device id when the user explicitly pinned one. For
+    // the default-following case keep audio_device_id empty so the next launch (and
+    // the live default-device listener) keep tracking the system default output —
+    // overwriting it with the resolved id here would pin the app to whatever was
+    // default at launch and it would only "follow" on relaunch.
+    if (!config_.audio_device_id.empty())
+        config_.audio_device_id = audio_device_->info().id;
     config_.sample_rate = audio_device_->sample_rate();
     config_.buffer_size = audio_device_->buffer_size();
 

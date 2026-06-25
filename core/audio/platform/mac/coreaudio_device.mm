@@ -130,7 +130,7 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     // This is what makes switching to AirPods / headphones mid-session keep playing.
     // A pinned device, or any input-capable config, uses HALOutput instead
     // (DefaultOutput has no input bus).
-    const bool follow_default =
+    follow_default_ =
         (device_id_ == kAudioObjectUnknown) && config_.input_channels == 0;
     if (device_id_ == kAudioObjectUnknown) {
         device_id_ = CoreAudioSystem::get_default_device(false);
@@ -145,7 +145,7 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     AudioComponentDescription desc{};
     desc.componentType = kAudioUnitType_Output;
     desc.componentSubType =
-        follow_default ? kAudioUnitSubType_DefaultOutput : kAudioUnitSubType_HALOutput;
+        follow_default_ ? kAudioUnitSubType_DefaultOutput : kAudioUnitSubType_HALOutput;
     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 
     auto component = AudioComponentFindNext(nullptr, &desc);
@@ -169,7 +169,7 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     // DefaultOutput follows the system default automatically — only HALOutput needs
     // (and accepts) an explicit CurrentDevice binding. Skipping the bind here is what
     // lets a follow_default unit move to a newly-selected output device live.
-    status = follow_default ? noErr : AudioUnitSetProperty(audio_unit_,
+    status = follow_default_ ? noErr : AudioUnitSetProperty(audio_unit_,
         kAudioOutputUnitProperty_CurrentDevice,
         kAudioUnitScope_Global, 0,
         &device_id_, sizeof(device_id_));
@@ -363,14 +363,76 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         }
     }
 
+    // Follow the system default output live: when no device was pinned we track
+    // kAudioHardwarePropertyDefaultOutputDevice and re-point the unit when the user
+    // picks a different output (AirPods/headphones) WITHOUT relaunching. DefaultOutput
+    // alone only resolves the default at open; this listener makes it move live.
+    if (follow_default_) {
+        AudioObjectPropertyAddress def_prop{};
+        def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+        def_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        def_prop.mElement  = kAudioObjectPropertyElementMain;
+        OSStatus def_status = AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject, &def_prop, default_output_changed_listener, this);
+        default_output_listener_installed_ = (def_status == noErr);
+        if (!default_output_listener_installed_)
+            runtime::log_warn("CoreAudio: default-output-device listener not installed ({})",
+                static_cast<int>(def_status));
+    }
+
     is_open_ = true;
-    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch",
+    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch{}",
         info().name, config_.sample_rate, config_.buffer_size,
-        input_enabled_ ? config_.input_channels : 0);
+        input_enabled_ ? config_.input_channels : 0,
+        follow_default_ ? " (follows system default)" : "");
     return true;
 }
 
+// Live-switch the unit to the current system default output device. Runs on the
+// CoreAudio property-listener thread; switch_mutex_ serializes it against
+// stop()/close() so the unit is never disposed mid-switch.
+void CoreAudioDevice::switch_to_default_output() {
+    std::lock_guard<std::mutex> lock(switch_mutex_);
+    if (!is_open_ || !audio_unit_ || !follow_default_) return;
+    const AudioDeviceID new_default = CoreAudioSystem::get_default_device(false);
+    if (new_default == kAudioObjectUnknown || new_default == device_id_) return;
+
+    const bool was_running = is_running_;
+    if (was_running) AudioOutputUnitStop(audio_unit_);
+    OSStatus st = AudioUnitSetProperty(audio_unit_,
+        kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+        &new_default, sizeof(new_default));
+    if (st == noErr) {
+        device_id_ = new_default;
+        runtime::log_info("CoreAudio: default output changed -> following to device {}",
+            static_cast<unsigned>(new_default));
+    } else {
+        runtime::log_warn("CoreAudio: could not follow to new default output ({})",
+            static_cast<int>(st));
+    }
+    if (was_running) AudioOutputUnitStart(audio_unit_);
+}
+
+OSStatus CoreAudioDevice::default_output_changed_listener(
+    AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* client) {
+    if (auto* self = static_cast<CoreAudioDevice*>(client)) self->switch_to_default_output();
+    return noErr;
+}
+
 void CoreAudioDevice::close() {
+    // Stop new default-change callbacks from firing, then take switch_mutex_ so any
+    // in-flight switch_to_default_output() finishes before we dispose the unit.
+    if (default_output_listener_installed_) {
+        AudioObjectPropertyAddress def_prop{};
+        def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+        def_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        def_prop.mElement  = kAudioObjectPropertyElementMain;
+        AudioObjectRemovePropertyListener(
+            kAudioObjectSystemObject, &def_prop, default_output_changed_listener, this);
+        default_output_listener_installed_ = false;
+    }
+    std::lock_guard<std::mutex> switch_lock(switch_mutex_);
+
     // Tear the callback path down first. AudioUnitUninitialize blocks
     // until any in-flight render_callback returns — combined with
     // is_running_ being cleared in stop(), this gives the manager's
@@ -422,6 +484,9 @@ bool CoreAudioDevice::start(AudioCallback callback) {
 }
 
 void CoreAudioDevice::stop() {
+    // Serialize against switch_to_default_output() so a default-change can't restart
+    // the unit after we stop it (or operate on it as we tear down).
+    std::lock_guard<std::mutex> switch_lock(switch_mutex_);
     if (audio_unit_ && is_running_) {
         // AudioOutputUnitStop blocks until the I/O thread observes
         // the stop request. Subsequent callbacks observe
@@ -750,22 +815,23 @@ std::vector<DeviceInfo> CoreAudioSystem::enumerate_devices() {
 }
 
 std::unique_ptr<AudioDevice> CoreAudioSystem::create_device(const std::string& device_id) {
-    AudioDeviceID id;
-    if (device_id.empty()) {
-        id = get_default_device(false);
-    } else {
+    // Leave the id as kAudioObjectUnknown for the empty/invalid (no explicit pin)
+    // case: CoreAudioDevice::open() then resolves the current default AND marks the
+    // unit follow_default_, so it tracks the system default output LIVE (AirPods /
+    // headphones mid-session). Resolving to a concrete id here would pin the unit to
+    // whatever was default at launch and it would only "follow" on relaunch.
+    AudioDeviceID id = kAudioObjectUnknown;
+    if (!device_id.empty()) {
         try {
             auto parsed = static_cast<AudioDeviceID>(std::stoul(device_id));
             if (device_exists(parsed)) {
-                id = parsed;
+                id = parsed;  // explicit, valid pin
             } else {
-                id = get_default_device(false);
-                runtime::log_warn("CoreAudio: saved device '{}' is unavailable; using default output",
+                runtime::log_warn("CoreAudio: saved device '{}' is unavailable; following the default output",
                     device_id);
             }
         } catch (...) {
-            id = get_default_device(false);
-            runtime::log_warn("CoreAudio: saved device '{}' is invalid; using default output",
+            runtime::log_warn("CoreAudio: saved device '{}' is invalid; following the default output",
                 device_id);
         }
     }
