@@ -60,6 +60,12 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Offline-equals-online: OfflineSignalGraphHost renders a deterministic graph at
+# different block partitionings and the harness proves block-partitioning
+# invariance (with a declared-exemption path for block-size-dependent nodes).
+pulp_add_test_suite(pulp-test-signal-graph-offline-parity
+    SOURCES test_signal_graph_offline_parity.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Parallel SignalGraph plugin bindings must not share fallback MIDI/parameter
 # scratch when the routed executor runs same-level Plugin nodes concurrently.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch
