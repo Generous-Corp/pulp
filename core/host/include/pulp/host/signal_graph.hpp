@@ -693,6 +693,10 @@ private:
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
         std::vector<RoutedMidiNode> routing_midi_inputs;
         std::vector<RoutedMidiNode> routing_midi_outputs;
+        // Per-node parameter-event queues + per-connection slew state for routed
+        // sparse automation, owned per-snapshot like exec_pool. Empty (node_count
+        // 0) for graphs with no sparse automation.
+        format::GraphRuntimeAutomationScratch routing_automation;
     };
 
     std::vector<GraphNode> nodes_;

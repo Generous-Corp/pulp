@@ -105,8 +105,12 @@ bool plugin_binding(fmt::ProcessBlock&,
     midi_out.clear();
     midi_out.clear_sysex();
     if (auto* ump = midi_out.ump()) ump->clear();
-    pctx->slot->process(buffers, midi_in, midi_out, pctx->scratch->param_events,
-                        num_samples);
+    // Use the executor's per-node parameter-automation events when supplied (an
+    // automation graph); the empty shared scratch queue otherwise.
+    state::ParameterEventQueue& param_events =
+        ctx.node_param_events != nullptr ? *ctx.node_param_events
+                                         : pctx->scratch->param_events;
+    pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
     return true;
 }
 
@@ -145,15 +149,15 @@ bool node_eligible(const GraphNode& node) noexcept {
 }
 
 bool connection_eligible(const Connection& c) noexcept {
-    // Audio and MIDI edges. Feedback is fine (the executor handles one-block
-    // feedback). Sidechain is fine: SignalGraph routes a sidechain edge as a
-    // plain audio edge into a higher input port of the destination plugin (the
-    // plugin's input_ports count already includes its sidechain ports, and the
-    // single concatenated input bus carries them), and it participates in PDC
-    // exactly like any audio edge. MIDI edges are carried as event connections
-    // and routed by the executor's MIDI gather. Automation / audio-rate-mod
-    // still keep the legacy walk.
-    return !c.automation && !c.audio_rate_modulation;
+    // Audio, MIDI, and SPARSE parameter-automation edges. Feedback is fine (the
+    // executor handles one-block feedback). Sidechain is fine: SignalGraph routes
+    // a sidechain edge as a plain audio edge into a higher input port of the
+    // destination plugin and it participates in PDC like any audio edge. MIDI
+    // edges are carried as event connections. Sparse automation (`automation` &&
+    // !`audio_rate_modulation`) is carried as an automation connection and built
+    // into the plugin's parameter-event queue by the executor's automation
+    // gather. Dense audio-rate modulation still keeps the legacy walk.
+    return !c.audio_rate_modulation;
 }
 
 } // namespace
@@ -165,6 +169,27 @@ bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
     }
     for (const auto& c : connections) {
         if (!connection_eligible(c)) return false;
+    }
+    // The executor's automation gather accumulates distinct automated parameters
+    // per node in a fixed on-stack array (kMaxParamsPerNode); a node automating
+    // more than that would silently drop the overflow. Keep such a graph on the
+    // legacy walk (fail closed) rather than route it and diverge.
+    std::vector<std::pair<NodeId, std::vector<std::uint32_t>>> per_dest;
+    for (const auto& c : connections) {
+        if (!c.automation || c.audio_rate_modulation) continue;  // sparse only
+        auto it = std::find_if(per_dest.begin(), per_dest.end(),
+                               [&](const auto& e) { return e.first == c.dest_node; });
+        if (it == per_dest.end()) {
+            per_dest.push_back({c.dest_node, {c.automation_param_id}});
+            continue;
+        }
+        auto& ids = it->second;
+        if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
+            ids.push_back(c.automation_param_id);
+            if (ids.size() > fmt::GraphRuntimeAutomationScratch::kMaxParamsPerNode) {
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -249,10 +274,38 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     std::vector<gr::GraphRuntimeConnectionSpec> conn_specs;
     conn_specs.reserve(connections.size());
     for (const auto& c : connections) {
-        conn_specs.push_back(gr::GraphRuntimeConnectionSpec{
+        gr::GraphRuntimeConnectionSpec spec{
             c.source_node, c.source_port, c.dest_node, c.dest_port,
             c.feedback, /*event=*/c.midi,
-        });
+        };
+        // A sparse parameter-automation edge becomes an automation connection
+        // carrying its mapping. Resolve the destination plugin's parameter bounds
+        // OFF the audio thread (so the realtime gather's Add-mix clamp matches the
+        // legacy walk's bounds_for_param without a plugin call). Dense audio-rate
+        // edges stay on the legacy walk (connection_eligible rejects them).
+        if (c.automation && !c.audio_rate_modulation) {
+            spec.is_automation = true;
+            spec.automation.param_id = c.automation_param_id;
+            spec.automation.range_lo = c.automation_range_lo;
+            spec.automation.range_hi = c.automation_range_hi;
+            spec.automation.smoothing_ms = c.automation_smoothing_ms;
+            spec.automation.mix_add = c.automation_mix == AutomationMix::Add;
+            spec.automation.audio_rate = false;
+            // Default bounds to the mapped range, then refine to the plugin's
+            // declared parameter bounds if resolvable (matching bounds_for_param).
+            spec.automation.bounds_lo = c.automation_range_lo;
+            spec.automation.bounds_hi = c.automation_range_hi;
+            PluginSlot* dest_slot = plugin_for ? plugin_for(c.dest_node) : nullptr;
+            if (dest_slot != nullptr) {
+                for (const auto& p : dest_slot->parameters()) {
+                    if (p.id != c.automation_param_id) continue;
+                    spec.automation.bounds_lo = p.min_value;
+                    spec.automation.bounds_hi = p.max_value;
+                    break;
+                }
+            }
+        }
+        conn_specs.push_back(spec);
     }
 
     auto plan = gr::build_graph_runtime_plan(node_specs, conn_specs);

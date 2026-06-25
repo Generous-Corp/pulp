@@ -7,6 +7,7 @@
 #include <pulp/graph/graph_runtime_queue.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #include <array>
 #include <atomic>
@@ -64,6 +65,12 @@ struct GraphRuntimeNodeProcessContext {
     // to its own scratch.
     midi::MidiBuffer* node_midi_in = nullptr;
     midi::MidiBuffer* node_midi_out = nullptr;
+    // Per-node parameter automation events (non-null only on the routing path
+    // when the call supplies a GraphRuntimeAutomationScratch). The executor fills
+    // it from this node's inbound automation connections before the binding runs;
+    // a plugin binding passes it to PluginSlot::process. Null when the graph
+    // carries no automation — a binding then uses an empty queue.
+    state::ParameterEventQueue* node_param_events = nullptr;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -323,6 +330,56 @@ private:
     std::uint32_t node_count_ = 0;
 };
 
+/// Pre-allocated scratch backing the routing path's parameter-automation edges.
+///
+/// Per node: one ParameterEventQueue (the automation events handed to the
+/// plugin). Per connection: the persisted per-source slew state (last delivered
+/// value + primed flag) a sparse automation edge ramps from across blocks. Both
+/// are sized off-RT from the snapshot; the executor's automation gather fills a
+/// node's queue from its inbound automation connections before the node runs.
+class GraphRuntimeAutomationScratch {
+public:
+    // Upper bound on distinct automated parameters per node — the size of the
+    // gather's on-stack accumulator. A graph automating more than this on any one
+    // node must be rejected by the caller (kept on the legacy walk) rather than
+    // routed, since the gather would otherwise silently drop the overflow.
+    static constexpr std::uint32_t kMaxParamsPerNode = 64;
+
+    // Off-RT: allocate `node_count` event queues and `connection_count` slew
+    // states (zero-initialized, un-primed). Returns false on allocation failure.
+    bool reset(std::uint32_t node_count, std::uint32_t connection_count);
+    void clear() noexcept;
+
+    std::uint32_t node_count() const noexcept { return node_count_; }
+    std::uint32_t connection_count() const noexcept { return connection_count_; }
+
+    state::ParameterEventQueue* events(std::uint32_t node_index) noexcept {
+        return node_index < node_count_ ? events_[node_index].get() : nullptr;
+    }
+    // Persisted per-connection slew state (RT-mutable). last() is the previous
+    // block's post-slew value; primed() guards the first-block snap.
+    float& slew_last(std::uint32_t conn_index) noexcept { return slew_last_[conn_index]; }
+    bool slew_primed(std::uint32_t conn_index) const noexcept {
+        return slew_primed_[conn_index] != 0;
+    }
+    void set_slew_primed(std::uint32_t conn_index, bool v) noexcept {
+        slew_primed_[conn_index] = v ? 1 : 0;
+    }
+
+    bool fits(std::uint32_t node_count, std::uint32_t connection_count) const noexcept {
+        return node_count_ >= node_count && connection_count_ >= connection_count;
+    }
+
+private:
+    // ParameterEventQueue is large and non-copyable; hold it via unique_ptr so a
+    // reallocating vector never needs to move/copy it.
+    std::vector<std::unique_ptr<state::ParameterEventQueue>> events_;  // per node
+    std::vector<float> slew_last_;                    // per connection
+    std::vector<std::uint8_t> slew_primed_;           // per connection
+    std::uint32_t node_count_ = 0;
+    std::uint32_t connection_count_ = 0;
+};
+
 class GraphRuntimeExecutor {
 public:
     static constexpr std::size_t kMaxInlineCommandCapacity = 256;
@@ -401,6 +458,7 @@ public:
         const GraphRuntimeSnapshot& snapshot,
         GraphRuntimeBufferPool& pool,
         GraphRuntimeMidiScratch* midi = nullptr,
+        GraphRuntimeAutomationScratch* automation = nullptr,
         std::span<const graph::GraphTimedCommand> commands = {},
         std::span<GraphRuntimeCommandDecision> command_results = {},
         GraphRuntimeCommandHandler command_handler = {},
