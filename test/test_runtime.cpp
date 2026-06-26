@@ -75,7 +75,7 @@ private:
 } // namespace
 
 TEST_CASE("RuntimeBudgetPolicy keeps critical audio running",
-          "[runtime][budget-policy][phase4]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetRequest request;
     request.lane = RuntimeWorkLane::CriticalAudio;
     request.estimated_cost = 100;
@@ -91,7 +91,7 @@ TEST_CASE("RuntimeBudgetPolicy keeps critical audio running",
 }
 
 TEST_CASE("RuntimeBudgetPolicy preserves reserve for interactive work",
-          "[runtime][budget-policy][phase4]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetPolicy policy;
     policy.critical_audio_reserve = 128;
 
@@ -112,7 +112,7 @@ TEST_CASE("RuntimeBudgetPolicy preserves reserve for interactive work",
 }
 
 TEST_CASE("RuntimeBudgetPolicy sheds opportunistic work under pressure",
-          "[runtime][budget-policy][phase4]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetRequest request;
     request.lane = RuntimeWorkLane::Opportunistic;
     request.estimated_cost = 8;
@@ -128,7 +128,7 @@ TEST_CASE("RuntimeBudgetPolicy sheds opportunistic work under pressure",
 }
 
 TEST_CASE("RuntimeBudgetPolicy makes background degradation explicit",
-          "[runtime][budget-policy][phase4]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetRequest request;
     request.lane = RuntimeWorkLane::Background;
     request.estimated_cost = 200;
@@ -156,7 +156,7 @@ TEST_CASE("RuntimeBudgetPolicy makes background degradation explicit",
 }
 
 TEST_CASE("RuntimeBudgetFrame consumes budget and records degradation",
-          "[runtime][budget-policy][phase4][consumer]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetPolicy policy;
     policy.critical_audio_reserve = 32;
 
@@ -186,7 +186,7 @@ TEST_CASE("RuntimeBudgetFrame consumes budget and records degradation",
 }
 
 TEST_CASE("RuntimeBudgetFrame supports overload and refill hooks",
-          "[runtime][budget-policy][phase4][consumer]") {
+          "[runtime][budget-policy]") {
     RuntimeBudgetPolicy policy;
     policy.shed_background_on_overload = true;
 
@@ -214,7 +214,7 @@ TEST_CASE("RuntimeBudgetFrame supports overload and refill hooks",
 }
 
 TEST_CASE("RuntimeBudgetFrame hot path is allocation-free",
-          "[runtime][budget-policy][phase4][consumer][rt]") {
+          "[runtime][budget-policy][rt]") {
     RuntimeBudgetPolicy policy;
     policy.critical_audio_reserve = 16;
     RuntimeBudgetFrame frame(512, policy);
@@ -271,7 +271,7 @@ TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
 }
 
 TEST_CASE("BackgroundJobService runs higher priority queued work first",
-          "[runtime][background-job][phase2]") {
+          "[runtime][background-job]") {
     BackgroundJobService service;
     std::mutex mutex;
     std::condition_variable cv;
@@ -327,7 +327,7 @@ TEST_CASE("BackgroundJobService runs higher priority queued work first",
 }
 
 TEST_CASE("BackgroundJobService publishes progress and observes cancellation",
-          "[runtime][background-job][cancel][phase2]") {
+          "[runtime][background-job][cancel]") {
     BackgroundJobService service;
     std::atomic<bool> job_started{false};
     std::atomic<bool> saw_cancel{false};
@@ -363,7 +363,7 @@ TEST_CASE("BackgroundJobService publishes progress and observes cancellation",
 }
 
 TEST_CASE("BackgroundJobService cancels and drains queued work on teardown",
-          "[runtime][background-job][cancel][lifetime][phase2]") {
+          "[runtime][background-job][cancel][lifetime]") {
     BackgroundJobService service;
     std::mutex mutex;
     std::condition_variable cv;
@@ -419,7 +419,7 @@ TEST_CASE("BackgroundJobService cancels and drains queued work on teardown",
 }
 
 TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred reclaim",
-          "[runtime][background-job][rt-handoff][phase2]") {
+          "[runtime][background-job][rt-handoff]") {
     struct PreparedResource {
         int value = 0;
     };
@@ -440,7 +440,7 @@ TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred recla
 }
 
 TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
-          "[runtime][background-job][rt-handoff][telemetry][phase2]") {
+          "[runtime][background-job][rt-handoff][telemetry]") {
     struct PreparedResource {
         int value = 0;
     };
@@ -466,7 +466,7 @@ TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
 }
 
 TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
-          "[runtime][background-job][rt-handoff][rt-safety][phase2]") {
+          "[runtime][background-job][rt-handoff][rt-safety]") {
     struct PreparedResource {
         int value = 0;
     };
@@ -486,7 +486,7 @@ TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
 }
 
 TEST_CASE("Background resource job publishes immutable audio resource",
-          "[runtime][background-job][resource-recipe][phase2]") {
+          "[runtime][background-job][resource-recipe]") {
     struct PreparedResource {
         std::array<float, 4> values{};
         std::string source_id;
@@ -535,7 +535,7 @@ TEST_CASE("Background resource job publishes immutable audio resource",
 }
 
 TEST_CASE("Cancelled background resource job does not publish stale resource",
-          "[runtime][background-job][resource-recipe][cancel][phase2]") {
+          "[runtime][background-job][resource-recipe][cancel]") {
     struct PreparedResource {
         int revision = 0;
     };
@@ -577,7 +577,7 @@ TEST_CASE("Cancelled background resource job does not publish stale resource",
 }
 
 TEST_CASE("SpscQueue reuses slots after wrap-around",
-          "[runtime][spsc][coverage][issue-641]") {
+          "[runtime][spsc]") {
     SpscQueue<int, 4> q;
     REQUIRE(q.capacity() == 4);
 
@@ -632,7 +632,7 @@ TEST_CASE("SpscQueue cross-thread", "[runtime][spsc]") {
     REQUIRE(sum.load() == expected);
 }
 
-TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage]") {
+TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc]") {
     SpscQueue<std::string, 2> q;
 
     REQUIRE(q.try_push(std::string("alpha")));
@@ -645,7 +645,7 @@ TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage]") {
 }
 
 TEST_CASE("SpscQueue preserves moved string payload order",
-          "[runtime][spsc][coverage]") {
+          "[runtime][spsc]") {
     SpscQueue<std::string, 3> q;
 
     std::string alpha = "alpha";
@@ -663,7 +663,7 @@ TEST_CASE("SpscQueue preserves moved string payload order",
 }
 
 TEST_CASE("SpscQueue exposes producer overflow telemetry",
-          "[runtime][spsc][telemetry][phase2]") {
+          "[runtime][spsc][telemetry]") {
     SpscQueue<int, 2> q;
     REQUIRE(q.overflow_count() == 0);
 
@@ -691,7 +691,7 @@ TEST_CASE("SpscQueue exposes producer overflow telemetry",
 }
 
 TEST_CASE("SpscQueue telemetry hot path allocates zero times",
-          "[runtime][spsc][telemetry][rt-safety][phase2]") {
+          "[runtime][spsc][telemetry][rt-safety]") {
     SpscQueue<int, 2> q;
 
     pulp::test::RtAllocationProbe probe;
@@ -736,7 +736,7 @@ TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]
 }
 
 TEST_CASE("ScopeGuard dismiss after move suppresses transferred cleanup",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -747,7 +747,7 @@ TEST_CASE("ScopeGuard dismiss after move suppresses transferred cleanup",
 }
 
 TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
-          "[runtime][scope_guard][coverage][issue-641]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         PULP_ON_SCOPE_EXIT(++calls);
@@ -757,7 +757,7 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
 }
 
 TEST_CASE("ScopeGuard move preserves dismissed state",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -770,7 +770,7 @@ TEST_CASE("ScopeGuard move preserves dismissed state",
 }
 
 TEST_CASE("Range reports containment intersections and empty spans",
-          "[runtime][range][codecov]") {
+          "[runtime][range]") {
     const IntRange range{10, 20};
 
     REQUIRE(range.length() == 10);
@@ -792,7 +792,7 @@ TEST_CASE("Range reports containment intersections and empty spans",
 }
 
 TEST_CASE("Range union constrain and expansion handle edge inputs",
-          "[runtime][range][codecov]") {
+          "[runtime][range]") {
     REQUIRE(IntRange{5, 5}.enclosing_union(IntRange{2, 4}) == IntRange{2, 4});
     REQUIRE(IntRange{2, 4}.enclosing_union(IntRange{8, 10}) == IntRange{2, 10});
 
@@ -828,7 +828,7 @@ TEST_CASE("Runtime environment helpers", "[runtime][system]") {
 }
 
 TEST_CASE("Runtime environment helpers treat unset and empty as missing",
-          "[runtime][system][codecov]") {
+          "[runtime][system]") {
     ScopedEnvVar env("PULP_RUNTIME_TEST_EMPTY_ENV");
 
     env.unset();
@@ -839,7 +839,7 @@ TEST_CASE("Runtime environment helpers treat unset and empty as missing",
 }
 
 TEST_CASE("Runtime environment helpers preserve non-empty values verbatim",
-          "[runtime][system][codecov]") {
+          "[runtime][system]") {
     ScopedEnvVar env("PULP_RUNTIME_TEST_VERBATIM_ENV");
 
     env.set(" value with spaces = yes ");
@@ -862,7 +862,7 @@ TEST_CASE("Runtime GMT helper returns UTC tm", "[runtime][system]") {
 }
 
 TEST_CASE("Runtime GMT helper handles leap-day timestamps",
-          "[runtime][system][codecov]") {
+          "[runtime][system]") {
     auto tm = gmtime_utc(static_cast<std::time_t>(951827696)); // 2000-02-29 12:34:56 UTC
     REQUIRE(tm.tm_year == 100);
     REQUIRE(tm.tm_mon == 1);
@@ -872,7 +872,7 @@ TEST_CASE("Runtime GMT helper handles leap-day timestamps",
     REQUIRE(tm.tm_sec == 56);
 }
 
-TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system][coverage]") {
+TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system]") {
     auto tm = localtime_local(static_cast<std::time_t>(0));
     REQUIRE(tm.tm_mon >= 0);
     REQUIRE(tm.tm_mon <= 11);
@@ -893,7 +893,7 @@ TEST_CASE("Runtime C string copy truncates safely", "[runtime][system]") {
 }
 
 TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone",
-          "[runtime][system][codecov]") {
+          "[runtime][system]") {
     char exact[4]{};
     copy_c_string(exact, "abc");
     REQUIRE(exact[0] == 'a');
@@ -912,7 +912,7 @@ TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone"
 }
 
 TEST_CASE("Runtime C string copy writes terminator for empty sources",
-          "[runtime][system][coverage]") {
+          "[runtime][system]") {
     std::array<char, 4> buffer{'x', 'y', 'z', 'w'};
 
     copy_c_string(buffer.data(), buffer.size(), "");
@@ -924,7 +924,7 @@ TEST_CASE("Runtime C string copy writes terminator for empty sources",
 }
 
 TEST_CASE("Runtime C string copy respects string_view length with embedded nulls",
-          "[runtime][system][codecov]") {
+          "[runtime][system]") {
     std::array<char, 5> buffer{'?', '?', '?', '?', '?'};
     constexpr char source[] = {'a', '\0', 'b'};
 
@@ -950,7 +950,7 @@ TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]
 }
 
 TEST_CASE("Runtime system info convenience helpers mirror cached info",
-          "[runtime][system][coverage]") {
+          "[runtime][system]") {
     const auto& info = get_system_info();
     REQUIRE_FALSE(info.os_name.empty());
     REQUIRE_FALSE(info.arch.empty());
@@ -1014,7 +1014,7 @@ TEST_CASE("TemporaryFile move assignment cleans previous file", "[runtime][tempo
 }
 
 TEST_CASE("TemporaryFile self move assignment leaves file ownership intact",
-          "[runtime][temporary_file][coverage]") {
+          "[runtime][temporary_file]") {
     std::filesystem::path path;
     {
         TemporaryFile file(".self");
@@ -1066,7 +1066,7 @@ TEST_CASE("DynamicLibrary move keeps failed handles closed", "[runtime][dynamic_
     REQUIRE_FALSE(second.error().empty());
 }
 
-TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library][coverage]") {
+TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library]") {
     DynamicLibrary original;
 #ifdef __APPLE__
     REQUIRE(original.open("/usr/lib/libSystem.B.dylib"));
@@ -1093,7 +1093,7 @@ TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_lib
 }
 
 TEST_CASE("DynamicLibrary failed reopen closes the previous handle",
-          "[runtime][dynamic_library][coverage]") {
+          "[runtime][dynamic_library]") {
     DynamicLibrary library;
 #ifdef __APPLE__
     REQUIRE(library.open("/usr/lib/libSystem.B.dylib"));
@@ -1133,7 +1133,7 @@ TEST_CASE("DynamicLibrary failed reopen closes the previous handle",
 }
 
 TEST_CASE("HighResolutionTimer starts stops and reports running state",
-          "[runtime][timer][coverage]") {
+          "[runtime][timer]") {
     HighResolutionTimer timer;
     std::atomic<int> calls{0};
 
@@ -1160,7 +1160,7 @@ TEST_CASE("HighResolutionTimer starts stops and reports running state",
 }
 
 TEST_CASE("HighResolutionTimer restart replaces callback",
-          "[runtime][timer][coverage]") {
+          "[runtime][timer]") {
     HighResolutionTimer timer;
     std::atomic<int> first{0};
     std::atomic<int> second{0};
@@ -1187,7 +1187,7 @@ TEST_CASE("HighResolutionTimer restart replaces callback",
 }
 
 TEST_CASE("HighResolutionTimer can stop from its own callback",
-          "[runtime][timer][coverage]") {
+          "[runtime][timer]") {
     HighResolutionTimer timer;
     std::atomic<int> calls{0};
 
@@ -1208,7 +1208,7 @@ TEST_CASE("HighResolutionTimer can stop from its own callback",
 }
 
 TEST_CASE("runtime logging wrappers accept formatted payloads",
-          "[runtime][log][coverage]") {
+          "[runtime][log]") {
     REQUIRE_NOTHROW(log_info("info {} {}", "message", 1));
     REQUIRE_NOTHROW(log_warn("warn {}", 2));
     REQUIRE_NOTHROW(log_error("error {}", 3));

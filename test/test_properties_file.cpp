@@ -94,7 +94,7 @@ TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[stat
 }
 
 TEST_CASE("PropertiesFile numeric getters reject partially parsed strings",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("count_suffix", "12items");
     props.set_string("count_prefix", "id12");
@@ -112,7 +112,7 @@ TEST_CASE("PropertiesFile numeric getters reject partially parsed strings",
 }
 
 TEST_CASE("PropertiesFile numeric getters reject trailing text",
-          "[state][properties][coverage][phase3]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("count", "12abc");
     props.set_string("gain", "3.5ms");
@@ -131,7 +131,7 @@ TEST_CASE("PropertiesFile numeric getters reject trailing text",
 }
 
 TEST_CASE("PropertiesFile numeric getters reject out-of-range strings",
-          "[state][properties][coverage][phase3]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("count", "999999999999999999999999999999999999");
     props.set_string("gain", "1e9999");
@@ -141,7 +141,7 @@ TEST_CASE("PropertiesFile numeric getters reject out-of-range strings",
 }
 
 TEST_CASE("PropertiesFile numeric getters reject partial parses",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("count_suffix", "512junk");
     props.set_string("count_decimal", "512.5");
@@ -160,7 +160,7 @@ TEST_CASE("PropertiesFile numeric getters reject partial parses",
 }
 
 TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
-          "[state][properties][issue-641]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("word_false", "false");
     props.set_string("zero", "0");
@@ -204,7 +204,7 @@ TEST_CASE("PropertiesFile set and get bool", "[state][properties]") {
 }
 
 TEST_CASE("PropertiesFile typed setters store retrievable string values",
-          "[state][properties][coverage][phase3]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_int("voices", 16);
     props.set_double("gain", -3.25);
@@ -216,7 +216,7 @@ TEST_CASE("PropertiesFile typed setters store retrievable string values",
 }
 
 TEST_CASE("PropertiesFile bool getter accepts true and numeric-one strings",
-          "[state][properties][codecov]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("true_text", "true");
     props.set_string("one_text", "1");
@@ -230,7 +230,7 @@ TEST_CASE("PropertiesFile bool getter accepts true and numeric-one strings",
 }
 
 TEST_CASE("PropertiesFile bool getter requires exact true tokens",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("upper_true", "TRUE");
     props.set_string("title_true", "True");
@@ -336,7 +336,7 @@ TEST_CASE("PropertiesFile load invalid JSON returns false", "[state][properties]
 }
 
 TEST_CASE("PropertiesFile load non-object JSON leaves existing values intact",
-          "[state][properties][issue-641]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -351,7 +351,7 @@ TEST_CASE("PropertiesFile load non-object JSON leaves existing values intact",
 }
 
 TEST_CASE("PropertiesFile load rejects non-object JSON without clearing values",
-          "[state][properties][codecov]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -367,7 +367,7 @@ TEST_CASE("PropertiesFile load rejects non-object JSON without clearing values",
 }
 
 TEST_CASE("PropertiesFile load coerces scalar JSON members and skips nested values",
-          "[state][properties][codecov]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -409,7 +409,7 @@ TEST_CASE("PropertiesFile load empty file clears existing values", "[state][prop
 }
 
 TEST_CASE("PropertiesFile load skips unsupported JSON member types",
-          "[state][properties][json][issue-641]") {
+          "[state][properties][json]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -504,7 +504,7 @@ TEST_CASE("PropertiesFile save without path returns false", "[state][properties]
 }
 
 TEST_CASE("PropertiesFile save fails when destination is a directory",
-          "[state][properties][issue-641]") {
+          "[state][properties]") {
     auto dir = std::filesystem::temp_directory_path() /
                ("pulp_props_dir_dest_" + std::to_string(std::random_device{}()));
     std::filesystem::create_directories(dir);
@@ -549,7 +549,7 @@ TEST_CASE("PropertiesFile save and reload preserves path", "[state][properties]"
 }
 
 TEST_CASE("PropertiesFile remove missing key and clear empty file are no-ops",
-          "[state][properties][issue-641]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.remove("missing");
     REQUIRE(props.size() == 0);
@@ -564,7 +564,7 @@ TEST_CASE("PropertiesFile remove missing key and clear empty file are no-ops",
 }
 
 TEST_CASE("PropertiesFile save and reload preserves escaped string values",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
 
     PropertiesFile props;
@@ -579,7 +579,7 @@ TEST_CASE("PropertiesFile save and reload preserves escaped string values",
 }
 
 TEST_CASE("PropertiesFile save and reload preserves tab and carriage escapes",
-          "[state][properties][coverage][phase3-github]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
 
     PropertiesFile props;
@@ -592,7 +592,7 @@ TEST_CASE("PropertiesFile save and reload preserves tab and carriage escapes",
 }
 
 TEST_CASE("PropertiesFile round-trips mixed JSON string escapes",
-          "[state][properties][coverage]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     const std::string value = "path\\\\plugin\t\"quoted\"\nnext line";
 
@@ -606,7 +606,7 @@ TEST_CASE("PropertiesFile round-trips mixed JSON string escapes",
 }
 
 TEST_CASE("PropertiesFile set_path can clear the implicit save destination",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     PropertiesFile props;
     props.set_string("key", "value");
@@ -619,7 +619,7 @@ TEST_CASE("PropertiesFile set_path can clear the implicit save destination",
 }
 
 TEST_CASE("PropertiesFile successful load replaces stale values",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -638,7 +638,7 @@ TEST_CASE("PropertiesFile successful load replaces stale values",
 }
 
 TEST_CASE("PropertiesFile load coerces false and numeric JSON scalars",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -656,7 +656,7 @@ TEST_CASE("PropertiesFile load coerces false and numeric JSON scalars",
 }
 
 TEST_CASE("PropertiesFile can save to a path without a parent directory",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     const std::filesystem::path path("properties_file_parentless_unit.json");
     std::filesystem::remove(path);
 
@@ -674,7 +674,7 @@ TEST_CASE("PropertiesFile can save to a path without a parent directory",
 }
 
 TEST_CASE("PropertiesFile setters copy string-view keys and values",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     std::string key = "dynamic_key";
     std::string value = "dynamic_value";
 
@@ -689,7 +689,7 @@ TEST_CASE("PropertiesFile setters copy string-view keys and values",
 }
 
 TEST_CASE("PropertiesFile remove and reinsert keeps sorted key enumeration",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("b", "2");
     props.set_string("a", "1");
@@ -702,7 +702,7 @@ TEST_CASE("PropertiesFile remove and reinsert keeps sorted key enumeration",
 }
 
 TEST_CASE("PropertiesFile empty string values remain present",
-          "[state][properties][coverage][phase3-github]") {
+          "[state][properties]") {
     PropertiesFile props;
     props.set_string("empty", "");
 
@@ -716,7 +716,7 @@ TEST_CASE("PropertiesFile empty string values remain present",
 }
 
 TEST_CASE("PropertiesFile contains tracks string-view keys across mutation",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     PropertiesFile props;
     std::string key = "dynamic";
 
@@ -734,7 +734,7 @@ TEST_CASE("PropertiesFile contains tracks string-view keys across mutation",
 // ── ApplicationProperties ───────────────────────────────────────────────
 
 TEST_CASE("ApplicationProperties exposes independent user and common stores",
-          "[state][properties][coverage][phase3]") {
+          "[state][properties]") {
     ApplicationProperties app("PulpUnit");
     REQUIRE(app.app_name() == "PulpUnit");
 
@@ -764,7 +764,7 @@ TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][prope
 }
 
 TEST_CASE("ApplicationProperties load reads user settings from the platform path",
-          "[state][properties][coverage][phase3-large]") {
+          "[state][properties]") {
     TemporaryFile home_marker(".home");
     const auto home_dir = std::filesystem::path(home_marker.path_string() + "_dir");
     std::filesystem::create_directories(home_dir);

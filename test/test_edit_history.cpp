@@ -134,7 +134,7 @@ TEST_CASE("EditHistory empty undo/redo returns false", "[state][undo]") {
 }
 
 TEST_CASE("EditHistory lowering max depth trims existing undo stack",
-          "[state][undo][codecov]") {
+          "[state][undo]") {
     EditHistory history(5);
     int v = 0;
 
@@ -161,7 +161,7 @@ TEST_CASE("EditHistory lowering max depth trims existing undo stack",
 }
 
 TEST_CASE("EditHistory zero max depth performs actions without retaining history",
-          "[state][undo][codecov]") {
+          "[state][undo]") {
     EditHistory history(0);
     int v = 0;
 
@@ -175,7 +175,7 @@ TEST_CASE("EditHistory zero max depth performs actions without retaining history
 }
 
 TEST_CASE("EditHistory clear also drops redo history",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     EditHistory history;
     int v = 0;
 
@@ -195,7 +195,7 @@ TEST_CASE("EditHistory clear also drops redo history",
 }
 
 TEST_CASE("EditHistory increasing max depth preserves existing undo stack",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     EditHistory history(2);
     int v = 0;
 
@@ -214,7 +214,7 @@ TEST_CASE("EditHistory increasing max depth preserves existing undo stack",
 }
 
 TEST_CASE("EditHistory re-enabling coalescing affects subsequent actions only",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     EditHistory history;
     int v = 0;
 
@@ -235,7 +235,7 @@ TEST_CASE("EditHistory re-enabling coalescing affects subsequent actions only",
 }
 
 TEST_CASE("LambdaEdit tolerates empty callbacks and preserves description",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     LambdaEdit action({}, {}, "empty");
 
     action.redo();
@@ -245,7 +245,7 @@ TEST_CASE("LambdaEdit tolerates empty callbacks and preserves description",
 }
 
 TEST_CASE("EditHistory coalesced replacement controls undo and redo values",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     EditHistory history;
     int v = 0;
 

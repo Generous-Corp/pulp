@@ -42,7 +42,7 @@ TEST_CASE("Environment: singleton state defaults are sentinel-safe", "[environme
 }
 
 TEST_CASE("Environment: empty listener subscription is inert",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
 
     auto token = Environment::instance().subscribe({});
@@ -55,7 +55,7 @@ TEST_CASE("Environment: empty listener subscription is inert",
 }
 
 TEST_CASE("EnvironmentChange: any reflects individual flags",
-          "[environment][issue-640]") {
+          "[environment]") {
     EnvironmentChange change;
     REQUIRE_FALSE(change.any());
 
@@ -88,7 +88,7 @@ TEST_CASE("EnvironmentChange: any reflects individual flags",
 }
 
 TEST_CASE("SafeAreaInsets zero detection checks all edges",
-          "[environment][coverage][issue-640]") {
+          "[environment]") {
     SafeAreaInsets insets;
     REQUIRE(insets.is_zero());
 
@@ -151,7 +151,7 @@ TEST_CASE("Environment: token RAII unsubscribes", "[environment]") {
 }
 
 TEST_CASE("Environment: reset clears listeners held by live tokens",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -170,7 +170,7 @@ TEST_CASE("Environment: reset clears listeners held by live tokens",
 }
 
 TEST_CASE("Environment: token reset is idempotent and preserves other listeners",
-          "[environment][coverage][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int second_calls = 0;
@@ -210,8 +210,8 @@ TEST_CASE("Environment: token move transfers ownership", "[environment]") {
     REQUIRE(calls == 1);
 }
 
-TEST_CASE("Environment: publish without listeners still updates snapshot",
-          "[environment][coverage][issue-649]") {
+TEST_CASE("Environment: publish updates snapshot without listeners",
+          "[environment]") {
     Environment::reset_for_test();
 
     auto state = make_state(ColorScheme::light, 1.25f, 48.0f);
@@ -228,7 +228,7 @@ TEST_CASE("Environment: publish without listeners still updates snapshot",
 }
 
 TEST_CASE("Environment: token reset and self-move assignment are idempotent",
-          "[environment][coverage][issue-649]") {
+          "[environment]") {
     Environment::reset_for_test();
     int calls = 0;
 
@@ -251,7 +251,7 @@ TEST_CASE("Environment: token reset and self-move assignment are idempotent",
 }
 
 TEST_CASE("Environment: token move assignment replaces prior subscription",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int second_calls = 0;
@@ -275,8 +275,8 @@ TEST_CASE("Environment: token move assignment replaces prior subscription",
     REQUIRE(second_calls == 1);
 }
 
-TEST_CASE("Environment: token self move assignment preserves subscription",
-          "[environment][issue-640]") {
+TEST_CASE("Environment: token self-move via reference preserves subscription",
+          "[environment]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -306,7 +306,7 @@ TEST_CASE("Environment: keyboard inset change propagates separately",
 }
 
 TEST_CASE("Environment: keyboard animation duration diffs separately",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     EnvironmentChange last;
     EnvironmentState last_state;
@@ -366,7 +366,7 @@ TEST_CASE("Environment: safe-area diff detection across all four edges",
 }
 
 TEST_CASE("Environment: display metadata changes are display-only",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     EnvironmentChange last;
     EnvironmentState last_state;
@@ -400,7 +400,7 @@ TEST_CASE("Environment: display metadata changes are display-only",
 }
 
 TEST_CASE("Environment: orientation and lifecycle emit isolated diffs",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
     EnvironmentChange last;
     EnvironmentState last_state;
@@ -462,7 +462,7 @@ TEST_CASE("Environment: memory pressure transitions", "[environment]") {
 // core/platform/platform/mac/environment_mac.mm — see #466 follow-up
 // for the layered coverage decision.
 TEST_CASE("Environment: memory pressure recovery to normal fires diff",
-          "[environment][issue-404]") {
+          "[environment]") {
     Environment::reset_for_test();
     EnvironmentChange last_change{};
     EnvironmentState  last_state{};
@@ -503,7 +503,7 @@ TEST_CASE("Environment: callback that drops its own token does not deadlock",
 
 TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
           "(#403)",
-          "[environment][issue-403]") {
+          "[environment]") {
     Environment::reset_for_test();
 
     int a_calls = 0;
@@ -541,7 +541,7 @@ TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
 }
 
 TEST_CASE("Environment: listener removed before its dispatch turn is skipped",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
 
     int victim_calls = 0;
@@ -565,7 +565,7 @@ TEST_CASE("Environment: listener removed before its dispatch turn is skipped",
 }
 
 TEST_CASE("Environment: reset during dispatch clears later callbacks",
-          "[environment][issue-640]") {
+          "[environment]") {
     Environment::reset_for_test();
 
     int resetter_calls = 0;
@@ -613,8 +613,8 @@ TEST_CASE("Environment: snapshot is consistent with last publish",
     REQUIRE(got.safe_area.top   == 22.0f);
 }
 
-TEST_CASE("Environment: publish without listeners still updates snapshot",
-          "[environment][coverage]") {
+TEST_CASE("Environment: inject_for_test updates snapshot without listeners",
+          "[environment]") {
     Environment::reset_for_test();
     auto state = make_state(ColorScheme::dark, 1.25f, 48.0f);
     state.lifecycle = LifecycleState::background;
@@ -629,7 +629,7 @@ TEST_CASE("Environment: publish without listeners still updates snapshot",
 }
 
 TEST_CASE("Environment: multiple listeners receive the same change snapshot",
-          "[environment][coverage]") {
+          "[environment]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int second_calls = 0;
@@ -665,7 +665,7 @@ TEST_CASE("Environment: multiple listeners receive the same change snapshot",
 }
 
 TEST_CASE("Environment: default token reset is inert",
-          "[environment][coverage]") {
+          "[environment]") {
     Environment::reset_for_test();
     Environment::Token token;
     REQUIRE_FALSE(token.valid());
@@ -677,8 +677,8 @@ TEST_CASE("Environment: default token reset is inert",
     REQUIRE(Environment::instance().snapshot().color_scheme == ColorScheme::dark);
 }
 
-TEST_CASE("Environment: token self move assignment preserves subscription",
-          "[environment][coverage]") {
+TEST_CASE("Environment: token self-move via pointer preserves subscription",
+          "[environment]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -694,7 +694,7 @@ TEST_CASE("Environment: token self move assignment preserves subscription",
 }
 
 TEST_CASE("Environment: move assigning an empty token unsubscribes existing listener",
-          "[environment][coverage]") {
+          "[environment]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -711,7 +711,7 @@ TEST_CASE("Environment: move assigning an empty token unsubscribes existing list
 }
 
 TEST_CASE("Environment: listener subscribed during dispatch waits for next publish",
-          "[environment][coverage]") {
+          "[environment]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int late_calls = 0;
@@ -741,7 +741,7 @@ TEST_CASE("Environment: listener subscribed during dispatch waits for next publi
 }
 
 TEST_CASE("Environment: reset restores defaults after published state",
-          "[environment][coverage]") {
+          "[environment]") {
     Environment::reset_for_test();
     auto state = make_state(ColorScheme::dark, 3.0f, 240.0f);
     state.safe_area.bottom = 12.0f;
