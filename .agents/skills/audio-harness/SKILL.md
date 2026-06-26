@@ -229,7 +229,8 @@ pulp audio validate assert audio-run/assertions.json
 entry has a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`,
 `frequency_near`), a `file` (relative to the JSON), and the check's named
 tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
-...). The `/audio-harness` slash command documents these verbs.
+...). The `/audio-harness` slash command documents these verbs and points at the
+offline render path below.
 
 ## Offline plugin render (`pulp audio render`)
 
