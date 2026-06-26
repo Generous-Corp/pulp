@@ -123,7 +123,7 @@ TEST_CASE("DiagnosticReporter captures parameter values", "[format][diagnostic]"
 }
 
 TEST_CASE("DiagnosticReporter renders unitless parameters without a unit suffix",
-          "[format][diagnostic][coverage][phase3]") {
+          "[format][diagnostic][coverage]") {
     DiagnosticReporter diag;
     auto desc = make_desc();
     StateStore store;
@@ -193,7 +193,7 @@ TEST_CASE("DiagnosticReporter JSON reflects instrument/effect type and parameter
 }
 
 TEST_CASE("DiagnosticReporter JSON escapes string fields",
-          "[format][diagnostic][coverage][phase3]") {
+          "[format][diagnostic][coverage]") {
     DiagnosticReporter diag;
     PluginDescriptor desc;
     desc.name = R"(Quote "Synth")";
@@ -214,7 +214,7 @@ TEST_CASE("DiagnosticReporter JSON escapes string fields",
 }
 
 TEST_CASE("DiagnosticReporter replacing plugin info clears stale parameter snapshot",
-          "[format][diagnostic][coverage][phase3]") {
+          "[format][diagnostic][coverage]") {
     DiagnosticReporter diag;
 
     auto first_desc = make_desc();
@@ -263,7 +263,7 @@ TEST_CASE("HostType names and feature heuristics cover fixed-size and no-sidecha
 }
 
 TEST_CASE("HostType names cover every declared host enum",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE(host_type_name(HostType::LogicPro) == "Logic Pro");
     REQUIRE(host_type_name(HostType::GarageBand) == "GarageBand");
     REQUIRE(host_type_name(HostType::AbletonLive) == "Ableton Live");
@@ -282,7 +282,7 @@ TEST_CASE("HostType names cover every declared host enum",
 }
 
 TEST_CASE("HostType feature heuristics default permissive for modern hosts",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     for (auto host : {HostType::LogicPro,
                       HostType::AbletonLive,
                       HostType::Reaper,
@@ -302,7 +302,7 @@ TEST_CASE("HostType feature heuristics default permissive for modern hosts",
 }
 
 TEST_CASE("HostType process-name classifier covers DAW executable aliases",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE(host_type_from_process_name("/Applications/Logic Pro.app/Contents/MacOS/Logic Pro") == HostType::LogicPro);
     REQUIRE(host_type_from_process_name("GARAGEBAND") == HostType::GarageBand);
     REQUIRE(host_type_from_process_name("/Applications/Ableton Live 12 Suite.app/Live") == HostType::AbletonLive);
@@ -328,7 +328,7 @@ TEST_CASE("HostType process-name classifier covers DAW executable aliases",
 }
 
 TEST_CASE("HostType process-name classifier is substring ordered",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE(host_type_from_process_name("logic-live-helper") == HostType::LogicPro);
     REQUIRE(host_type_from_process_name("garageband-live-helper") == HostType::GarageBand);
     REQUIRE(host_type_from_process_name("ableton-reaper-bridge") == HostType::AbletonLive);
@@ -340,7 +340,7 @@ TEST_CASE("HostType process-name classifier is substring ordered",
 }
 
 TEST_CASE("HostType process-name classifier handles empty and path-like unknown names",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE(host_type_from_process_name("") == HostType::Unknown);
     REQUIRE(host_type_from_process_name("/usr/bin/pluginval") == HostType::Unknown);
     REQUIRE(host_type_from_process_name("/tmp/not-a-daw") == HostType::Unknown);
@@ -348,7 +348,7 @@ TEST_CASE("HostType process-name classifier handles empty and path-like unknown 
 }
 
 TEST_CASE("HostType process-name classifier feeds the feature policy",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE_FALSE(host_supports_resize(host_type_from_process_name("Pro Tools")));
     REQUIRE_FALSE(host_supports_resize(host_type_from_process_name("GarageBand")));
     REQUIRE_FALSE(host_supports_sidechain(host_type_from_process_name("Tenacity")));
@@ -356,6 +356,6 @@ TEST_CASE("HostType process-name classifier feeds the feature policy",
 }
 
 TEST_CASE("HostType process detection delegates through the classifier",
-          "[format][host-type][coverage][phase3]") {
+          "[format][host-type][coverage]") {
     REQUIRE_FALSE(host_type_name(detect_host_type()).empty());
 }

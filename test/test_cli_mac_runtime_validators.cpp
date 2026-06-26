@@ -58,7 +58,7 @@ struct StubEnv {
 
 }  // namespace
 
-TEST_CASE("expand_target_name", "[cli][mac-validators][phase5]") {
+TEST_CASE("expand_target_name", "[cli][mac-validators]") {
     REQUIRE(mr::expand_target_name("standalone")
             == std::vector<std::string>{"standalone"});
     REQUIRE(mr::expand_target_name("auv3")
@@ -71,7 +71,7 @@ TEST_CASE("expand_target_name", "[cli][mac-validators][phase5]") {
     REQUIRE(mr::expand_target_name("").empty());
 }
 
-TEST_CASE("resolve_standalone_executable", "[cli][mac-validators][phase5]") {
+TEST_CASE("resolve_standalone_executable", "[cli][mac-validators]") {
     StubEnv s;
     fs::path bundle = "/tmp/Foo.app";
     s.existing_paths.insert((bundle / "Contents" / "MacOS").string());
@@ -83,7 +83,7 @@ TEST_CASE("resolve_standalone_executable", "[cli][mac-validators][phase5]") {
 }
 
 TEST_CASE("resolve_standalone_executable rejects non-app",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     auto env = s.build();
     REQUIRE(mr::resolve_standalone_executable("/tmp/Foo.appex", env).empty());
@@ -92,7 +92,7 @@ TEST_CASE("resolve_standalone_executable rejects non-app",
 }
 
 TEST_CASE("standalone validator: missing bundle fails",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     auto env = s.build();
     auto r = mr::run_standalone_validator("/tmp/missing.app", env);
@@ -101,7 +101,7 @@ TEST_CASE("standalone validator: missing bundle fails",
 }
 
 TEST_CASE("standalone validator: skips non-Apple hosts",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     s.is_apple = false;
     auto env = s.build();
@@ -111,7 +111,7 @@ TEST_CASE("standalone validator: skips non-Apple hosts",
 }
 
 TEST_CASE("standalone validator: passes when smoke exec returns 0",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     fs::path bundle = "/tmp/Synth.app";
     s.existing_paths.insert(bundle.string());
@@ -127,7 +127,7 @@ TEST_CASE("standalone validator: passes when smoke exec returns 0",
 }
 
 TEST_CASE("standalone validator: surfaces non-zero exit",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     fs::path bundle = "/tmp/Crashy.app";
     s.existing_paths.insert(bundle.string());
@@ -141,14 +141,11 @@ TEST_CASE("standalone validator: surfaces non-zero exit",
     REQUIRE(r.summary.find("Library not loaded") != std::string::npos);
 }
 
-// Regression: PR #3005. The smoke command must pass
-// PULP_SCREENSHOT alongside PULP_HEADLESS so `run_with_editor` doesn't
-// early-fail on the missing screenshot path (see
-// core/format/src/standalone.cpp:264). Without PULP_SCREENSHOT, every
-// healthy standalone bundle would report a false failure.
+// The smoke command must pass PULP_SCREENSHOT alongside PULP_HEADLESS so
+// `run_with_editor` does not early-fail on the missing screenshot path. Without
+// PULP_SCREENSHOT, every healthy standalone bundle would report a false failure.
 TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
-          "PULP_HEADLESS so the binary actually smoke-runs "
-          "(regression: PR #3005 review)",
+          "PULP_HEADLESS so the binary actually smoke-runs",
           "[cli][mac-validators][issue-3005]") {
     StubEnv s;
     fs::path bundle = "/tmp/Synth.app";
@@ -170,14 +167,11 @@ TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
     REQUIRE(cmd.find("PULP_HEADLESS=1") != std::string::npos);
 }
 
-// Regression: PR #3005. A `.app` bundle that exists but has no
-// runnable binary inside is a packaging regression. Previously this
-// returned `skip` (exit 0 unless --strict), letting malformed standalone
-// artifacts sneak past `pulp validate --target standalone`. Now it
-// returns `fail` so the gate actually gates.
+// A `.app` bundle that exists but has no runnable binary inside is a packaging
+// regression. It must fail so malformed standalone artifacts cannot pass
+// `pulp validate --target standalone`.
 TEST_CASE("standalone validator fails (not skips) on a malformed "
-          ".app bundle with no runnable binary "
-          "(regression: PR #3005 review)",
+          ".app bundle with no runnable binary",
           "[cli][mac-validators][issue-3005]") {
     StubEnv s;
     fs::path bundle = "/tmp/Headless.app";
@@ -204,7 +198,7 @@ TEST_CASE("standalone validator fails (not skips) on a malformed "
     }
 }
 
-TEST_CASE("parse_au_component_tuple", "[cli][mac-validators][phase5]") {
+TEST_CASE("parse_au_component_tuple", "[cli][mac-validators]") {
     std::string plist_dump = R"(
         "AudioComponents" => [
             0 => {
@@ -222,7 +216,7 @@ TEST_CASE("parse_au_component_tuple", "[cli][mac-validators][phase5]") {
 }
 
 TEST_CASE("parse_au_component_tuple handles missing fields",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     auto tuple = mr::parse_au_component_tuple("nothing here");
     REQUIRE(tuple.type.empty());
     REQUIRE(tuple.subtype.empty());
@@ -230,7 +224,7 @@ TEST_CASE("parse_au_component_tuple handles missing fields",
 }
 
 TEST_CASE("auv3 validator: skips on non-Apple",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     s.is_apple = false;
     auto env = s.build();
@@ -239,7 +233,7 @@ TEST_CASE("auv3 validator: skips on non-Apple",
 }
 
 TEST_CASE("auv3 validator: pass path through auval",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     // Use the appex directly — the container-walk path uses real
     // fs::directory_iterator, which can't be stubbed via MacValidatorEnv.
@@ -261,7 +255,7 @@ TEST_CASE("auv3 validator: pass path through auval",
 }
 
 TEST_CASE("auv3 validator: container walk finds embedded appex",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     // Real-FS variant: build a tiny .app bundle on disk so the
     // directory_iterator inside run_auv3_validator can find the
     // embedded .appex. We make the auval call deterministic by
@@ -293,7 +287,7 @@ TEST_CASE("auv3 validator: container walk finds embedded appex",
 }
 
 TEST_CASE("auv3 validator: skips when auval not installed",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     fs::path bundle = "/tmp/Synth.appex";
     s.existing_paths.insert(bundle.string());
@@ -308,7 +302,7 @@ TEST_CASE("auv3 validator: skips when auval not installed",
 }
 
 TEST_CASE("auv3 validator: rejects unparseable Info.plist",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     fs::path bundle = "/tmp/Broken.appex";
     s.existing_paths.insert(bundle.string());
@@ -322,7 +316,7 @@ TEST_CASE("auv3 validator: rejects unparseable Info.plist",
 }
 
 TEST_CASE("extract_min_macos_version: LC_BUILD_VERSION minos",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     std::string otool_out = R"(
         Load command 4
               cmd LC_BUILD_VERSION
@@ -336,7 +330,7 @@ TEST_CASE("extract_min_macos_version: LC_BUILD_VERSION minos",
 }
 
 TEST_CASE("extract_min_macos_version: LC_VERSION_MIN_MACOSX",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     std::string otool_out = R"(
         Load command 2
               cmd LC_VERSION_MIN_MACOSX
@@ -348,11 +342,11 @@ TEST_CASE("extract_min_macos_version: LC_VERSION_MIN_MACOSX",
 }
 
 TEST_CASE("extract_min_macos_version: no load command",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     REQUIRE(mr::extract_min_macos_version("nothing").empty());
 }
 
-TEST_CASE("meets_macos_floor", "[cli][mac-validators][phase5]") {
+TEST_CASE("meets_macos_floor", "[cli][mac-validators]") {
     REQUIRE(mr::meets_macos_floor("13.0"));
     REQUIRE(mr::meets_macos_floor("13.4"));
     REQUIRE(mr::meets_macos_floor("14.1"));
@@ -364,7 +358,7 @@ TEST_CASE("meets_macos_floor", "[cli][mac-validators][phase5]") {
 }
 
 TEST_CASE("macho validator: skips on non-Apple",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     s.is_apple = false;
     auto env = s.build();
@@ -373,7 +367,7 @@ TEST_CASE("macho validator: skips on non-Apple",
 }
 
 TEST_CASE("macho validator: missing bundle fails",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     auto env = s.build();
     auto r = mr::run_macho_validator("/tmp/missing.app", env);
@@ -381,7 +375,7 @@ TEST_CASE("macho validator: missing bundle fails",
 }
 
 TEST_CASE("macho validator: skips when no payloads found",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     // Bundle exists but no files inside — enumerate returns empty
     // since the dir is empty / unreadable.
     static std::atomic<int> seq{0};
@@ -398,7 +392,7 @@ TEST_CASE("macho validator: skips when no payloads found",
 }
 
 TEST_CASE("enumerate_mach_o_payloads picks up dylib + executable",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     static std::atomic<int> seq{0};
     fs::path tmp = fs::temp_directory_path() /
                ("pulp-mac-validator-payloads-" +
@@ -427,7 +421,7 @@ TEST_CASE("enumerate_mach_o_payloads picks up dylib + executable",
 }
 
 TEST_CASE("macho validator: pass when codesign + otool happy",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     static std::atomic<int> seq{0};
     fs::path tmp = fs::temp_directory_path() /
                ("pulp-mac-validator-pass-" +
@@ -449,7 +443,7 @@ TEST_CASE("macho validator: pass when codesign + otool happy",
 }
 
 TEST_CASE("macho validator: fails when codesign --verify rejects",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     static std::atomic<int> seq{0};
     fs::path tmp = fs::temp_directory_path() /
                ("pulp-mac-validator-fail-" +
@@ -472,7 +466,7 @@ TEST_CASE("macho validator: fails when codesign --verify rejects",
 }
 
 TEST_CASE("macho validator: rejects pre-13.0 minos",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     static std::atomic<int> seq{0};
     fs::path tmp = fs::temp_directory_path() /
                ("pulp-mac-validator-floor-" +
@@ -495,7 +489,7 @@ TEST_CASE("macho validator: rejects pre-13.0 minos",
 }
 
 TEST_CASE("run_all_targets dispatches three validators in order",
-          "[cli][mac-validators][phase5]") {
+          "[cli][mac-validators]") {
     StubEnv s;
     auto env = s.build();
     auto results = mr::run_all_targets("/tmp/missing.app", env);

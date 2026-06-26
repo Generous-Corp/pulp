@@ -1125,7 +1125,7 @@ public:
         // Root = octave (C-2..C8). Octave granularity keeps the dropdown short
         // enough to fit + flip above when needed (a 121-note chromatic list was
         // taller than the window and got clipped). idx -> MIDI note idx*12.
-        label(20, 320, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        label(20, 324, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
@@ -1151,7 +1151,7 @@ public:
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(124, 320, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
@@ -1179,11 +1179,11 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(256, 320, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        label(344, 324, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 306, 322, 86, 16);
+            place(*fader, 396, 322, 86, 16);
             fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
                                                               : effective_bpm()));
             fader->on_change = [this, norm_to_bpm](float v) {
@@ -1200,16 +1200,18 @@ public:
             live->text = [this] {
                 return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
             };
-            place(*live, 398, 320, 64, 18);
+            place(*live, 488, 320, 64, 18);
             root->add_child(std::move(live));
         }
 
-        // Live slice count (updates after a drop or a sensitivity change).
+        // Live slice count, in green and sitting RIGHT OF THE SENS fader (which
+        // drives it) — mirroring how the BPM readout sits right of the TEMPO fader.
         {
             auto live = std::make_unique<LiveText>();
             live->font_family = mono;
+            live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 468, 320, 84, 18);
+            place(*live, 252, 320, 84, 18);
             root->add_child(std::move(live));
         }
 
@@ -1522,19 +1524,55 @@ private:
         const int target = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));  // 1..kMaxSlices
         const int keep = std::max(0, target - 1);  // number of cut points
 
+        // Minimum slice length (~40 ms) so dense onsets never produce a sliver clip
+        // — worst at high sensitivity, and at the FIRST slice [0, first cut) which
+        // OnsetDetector's inter-onset spacing doesn't guard. Snap radius (~5 ms) so
+        // each cut lands on a zero-crossing: a slice boundary is shared by the end
+        // of one slice and the start of the next, so snapping it declicks BOTH edges.
+        const long kMinSlice = std::max<long>(256, std::lround(0.040 * raw_sr_));
+        const long kSnap = std::max<long>(32, std::lround(0.005 * raw_sr_));
+        auto sum_at = [&](long i) {
+            float v = 0.0f;
+            for (int c = 0; c < raw_channels_; ++c) v += raw_[c][static_cast<size_t>(i)];
+            return v;
+        };
+        auto snap_zc = [&](long f) {
+            const long lo = std::max(1L, f - kSnap), hi = std::min(raw_frames_ - 1, f + kSnap);
+            long best = f, bestd = kSnap + 1;
+            for (long i = lo; i <= hi; ++i)
+                if ((sum_at(i - 1) <= 0.0f) != (sum_at(i) <= 0.0f)) {
+                    const long d = std::llabs(i - f);
+                    if (d < bestd) { bestd = d; best = i; }
+                }
+            return best;
+        };
+
         std::vector<audio::OnsetMarker> cand;
         for (const auto& m : onsets.markers)
             if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
                 cand.push_back(m);
         std::sort(cand.begin(), cand.end(),
                   [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-        if (static_cast<int>(cand.size()) > keep) cand.resize(static_cast<std::size_t>(keep));
+
+        // Greedily accept the highest-confidence cuts (preserving the
+        // sensitivity->count mapping) that keep EVERY slice — including the first
+        // and last — at least kMinSlice long, snapping each to a zero-crossing.
+        std::vector<long> cuts;
+        for (const auto& m : cand) {
+            if (static_cast<int>(cuts.size()) >= keep) break;
+            const long f = snap_zc(static_cast<long>(m.frame));
+            if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
+            bool ok = true;
+            for (long c : cuts)
+                if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
+            if (ok) cuts.push_back(f);
+        }
+        std::sort(cuts.begin(), cuts.end());
 
         slices_orig_.clear();
         slices_orig_.push_back(0);
-        for (const auto& m : cand) slices_orig_.push_back(static_cast<long>(m.frame));
+        for (long c : cuts) slices_orig_.push_back(c);
         slices_orig_.push_back(raw_frames_);
-        std::sort(slices_orig_.begin(), slices_orig_.end());
         slices_orig_.erase(std::unique(slices_orig_.begin(), slices_orig_.end()), slices_orig_.end());
     }
 

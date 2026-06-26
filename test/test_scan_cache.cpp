@@ -111,7 +111,7 @@ TEST_CASE("JSON round-trip preserves all fields", "[scan_cache]") {
     REQUIRE(e.info.format == PluginFormat::VST3);
 }
 
-TEST_CASE("JSON round-trip preserves workstream 03 slice 3.7 metadata",
+TEST_CASE("JSON round-trip preserves rich plugin metadata",
           "[scan_cache][metadata]") {
     // Covers the additive richer-metadata fields on PluginInfo —
     // scan_cache.hpp's doc promises "older cache blobs that don't
@@ -305,7 +305,7 @@ TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
 }
 
 TEST_CASE("ScanCache from_json keeps existing cache when entry fields have wrong types",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache][codecov]") {
     HostScanCache cache;
     cache.put("/tmp/existing.vst3", sample_info());
 
@@ -509,7 +509,7 @@ TEST_CASE("ScanCache duplicate JSON entries keep the last valid record",
 }
 
 TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache][codecov]") {
     HostScanCache written;
 
     const std::vector<std::pair<PluginFormat, std::string>> formats = {
@@ -612,7 +612,7 @@ TEST_CASE("ScanCache save_to creates nested parent directories",
 }
 
 TEST_CASE("ScanCache from_json loads entries without optional metadata",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache][codecov]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,
@@ -644,7 +644,7 @@ TEST_CASE("ScanCache from_json loads entries without optional metadata",
 }
 
 TEST_CASE("ScanCache from_json keeps valid siblings around malformed records",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache][codecov]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,

@@ -19,8 +19,8 @@ namespace pulp::format {
 ///
 /// Tasks are claimed cooperatively via an atomic cursor, so a task is a small
 /// index the caller maps to a unit of work (e.g. a node in the current level).
-/// The same pool is reused across blocks. Idle workers spin with a yield-backoff
-/// (a refinement to OS-park / device-workgroup join is left to a later slice).
+/// The same pool is reused across blocks. Idle workers spin with a yield-backoff;
+/// OS-park / device-workgroup joins are outside the current pool contract.
 ///
 /// Lifetime: start()/stop() are control-thread only. run() is audio-thread only
 /// and must not overlap a stop(). A run_fn must be RT-safe (no alloc/lock) — the

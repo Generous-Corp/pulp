@@ -53,8 +53,8 @@ AtlasInventory make_atlas_inventory() {
 
 } // namespace
 
-TEST_CASE("InspectorOverlay Phase 6.2: A key toggles the atlas viewer",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: A key toggles the atlas viewer",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -73,8 +73,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: A key toggles the atlas viewer",
     REQUIRE_FALSE(overlay.atlas_viewer_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: A key ignored when inspector inactive",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: A key ignored when inspector inactive",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -89,8 +89,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: A key ignored when inspector inactive",
     REQUIRE_FALSE(overlay.atlas_viewer_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: viewer renders a row per atlas",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: viewer renders a row per atlas",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_id("root");
     // Tall enough that the panel's lower section fits both atlas rows.
@@ -117,8 +117,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: viewer renders a row per atlas",
     REQUIRE(overlay.atlas_row_count() == 2);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: viewer degrades gracefully with no inventory",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: viewer degrades gracefully with no inventory",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 500, 320});
     InspectorOverlay overlay(root);
@@ -132,8 +132,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: viewer degrades gracefully with no invent
     REQUIRE(overlay.atlas_row_count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: empty inventory shows the unavailable state",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: empty inventory shows the unavailable state",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 500, 320});
     InspectorOverlay overlay(root);
@@ -149,8 +149,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: empty inventory shows the unavailable sta
     REQUIRE(overlay.atlas_row_count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: dismissing the inspector clears atlas rows",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: dismissing the inspector clears atlas rows",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 500, 720});
     InspectorOverlay overlay(root);
@@ -171,8 +171,8 @@ TEST_CASE("InspectorOverlay Phase 6.2: dismissing the inspector clears atlas row
     REQUIRE(overlay.atlas_viewer_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 6.2: pass viewer takes precedence over atlas tab",
-          "[inspect][overlay][atlas][phase6.2]") {
+TEST_CASE("InspectorOverlay atlas viewer: pass viewer takes precedence over atlas tab",
+          "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 500, 720});
     InspectorOverlay overlay(root);

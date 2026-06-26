@@ -31,7 +31,7 @@ const char* kTweaksFixture = R"({
 }  // namespace
 
 TEST_CASE("pulp tweaks --help prints usage and exits 0",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto r = run_pulp({"tweaks", "--help"});
     REQUIRE(r.exit_code == 0);
@@ -41,7 +41,7 @@ TEST_CASE("pulp tweaks --help prints usage and exits 0",
 }
 
 TEST_CASE("pulp tweaks with no subcommand prints usage and exits 0",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto r = run_pulp({"tweaks"});
     REQUIRE(r.exit_code == 0);
@@ -49,7 +49,7 @@ TEST_CASE("pulp tweaks with no subcommand prints usage and exits 0",
 }
 
 TEST_CASE("pulp tweaks <unknown-subcommand> exits 2 with a diagnostic",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto r = run_pulp({"tweaks", "frobnicate"});
     REQUIRE(r.exit_code == 2);
@@ -57,7 +57,7 @@ TEST_CASE("pulp tweaks <unknown-subcommand> exits 2 with a diagnostic",
 }
 
 TEST_CASE("pulp tweaks diff reports orphaned tweaks and exits 1",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto dir = unique_temp_dir("pulp-tweaks-diff-orphan");
@@ -83,7 +83,7 @@ TEST_CASE("pulp tweaks diff reports orphaned tweaks and exits 1",
 }
 
 TEST_CASE("pulp tweaks diff with no drift exits 0",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto dir = unique_temp_dir("pulp-tweaks-diff-clean");
@@ -105,7 +105,7 @@ TEST_CASE("pulp tweaks diff with no drift exits 0",
 }
 
 TEST_CASE("pulp tweaks diff --json emits a structured report",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto dir = unique_temp_dir("pulp-tweaks-diff-json");
@@ -131,7 +131,7 @@ TEST_CASE("pulp tweaks diff --json emits a structured report",
 }
 
 TEST_CASE("pulp tweaks diff detects property-level drift via the anchors map",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto dir = unique_temp_dir("pulp-tweaks-diff-prop");
@@ -159,7 +159,7 @@ TEST_CASE("pulp tweaks diff detects property-level drift via the anchors map",
 }
 
 TEST_CASE("pulp tweaks diff with a missing tweaks file exits 2",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto dir = unique_temp_dir("pulp-tweaks-diff-missing");
     fs::create_directories(dir);
@@ -174,7 +174,7 @@ TEST_CASE("pulp tweaks diff with a missing tweaks file exits 2",
 }
 
 TEST_CASE("pulp tweaks diff with a malformed design file exits 2",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto dir = unique_temp_dir("pulp-tweaks-diff-baddesign");
     fs::create_directories(dir);
@@ -194,7 +194,7 @@ TEST_CASE("pulp tweaks diff with a malformed design file exits 2",
 }
 
 TEST_CASE("pulp tweaks diff rejects a non-array property manifest entry",
-          "[cli][shellout][tweaks][phase2][regression]") {
+          "[cli][shellout][tweaks][regression]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto dir = unique_temp_dir("pulp-tweaks-diff-bad-props");
     fs::create_directories(dir);
@@ -220,7 +220,7 @@ TEST_CASE("pulp tweaks diff rejects a non-array property manifest entry",
 // `property-not-found`.
 // drift (exit 1).
 TEST_CASE("pulp tweaks diff rejects a string-valued anchor manifest entry",
-          "[cli][shellout][tweaks][phase2][regression][issue-2437]") {
+          "[cli][shellout][tweaks][regression][issue-2437]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto dir = unique_temp_dir("pulp-tweaks-diff-string-anchor");
     fs::create_directories(dir);
@@ -245,7 +245,7 @@ TEST_CASE("pulp tweaks diff rejects a string-valued anchor manifest entry",
 }
 
 TEST_CASE("pulp tweaks diff rejects an unknown flag with exit 2",
-          "[cli][shellout][tweaks][phase2]") {
+          "[cli][shellout][tweaks]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
     auto r = run_pulp({"tweaks", "diff", "--bogus-flag"});
     REQUIRE(r.exit_code == 2);

@@ -424,7 +424,7 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
 }
 
 TEST_CASE("AU v2 latency and tail report processor runtime contract",
-          "[au][auv2][latency][tail][phase2]") {
+          "[au][auv2][latency][tail]") {
     constexpr int kTailSamples = 24000;
 
     REQUIRE_THAT(pulp::format::au::tail_samples_to_seconds(kTailSamples, 48000.0),
@@ -451,7 +451,7 @@ TEST_CASE("AU v2 latency and tail report processor runtime contract",
 }
 
 TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
-          "[au][auv2][transport][reset][phase2]") {
+          "[au][auv2][transport][reset]") {
     ScopedFactoryRegistration registration(create_effect_processor);
 
     pulp::format::au::PulpAUEffect effect(nullptr);
@@ -877,7 +877,7 @@ TEST_CASE("AU v3 render events drop past realtime parameter capacity without gro
 }
 
 TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext",
-          "[au][auv3][transport][reset][phase2]") {
+          "[au][auv3][transport][reset]") {
     @autoreleasepool {
         AudioComponentDescription desc{};
         desc.componentType = kAudioUnitType_Effect;
@@ -1740,7 +1740,7 @@ TEST_CASE("current_auv3_wrapper_identifier — Apple bundle inspection",
     REQUIRE((id.empty() || !id.empty()));  // tautology — pins no-throw.
 }
 
-// Regression: #2967 — main_is_extension used to test
+// Regression coverage: main_is_extension used to test
 // `[bundleIdentifier hasSuffix:@".appex"]`, but bundle IDENTIFIERS are
 // reverse-DNS strings and never carry `.appex`. The check was always false
 // inside real AUv3 extension processes, so detect_host_type() leaked the
@@ -1752,7 +1752,7 @@ TEST_CASE("current_auv3_wrapper_identifier — Apple bundle inspection",
 // AU_HOST_BUNDLE_ID env-var channel always wins regardless of bundle
 // state — that protects the documented override contract that downstream
 // hosts rely on.
-TEST_CASE("current_auv3_wrapper_identifier — AU_HOST_BUNDLE_ID env wins (#2967)",
+TEST_CASE("current_auv3_wrapper_identifier — AU_HOST_BUNDLE_ID env wins",
           "[au][auv3][host-detection][issue-2967]") {
     const char* prior = std::getenv("AU_HOST_BUNDLE_ID");
     setenv("AU_HOST_BUNDLE_ID", "com.test.fake-host-2967", /*overwrite=*/1);

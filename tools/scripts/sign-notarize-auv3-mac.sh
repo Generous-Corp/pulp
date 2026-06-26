@@ -14,8 +14,7 @@
 #   APPEX_ENTITLEMENTS  Absolute path to .appex entitlements plist
 #   HOST_ENTITLEMENTS   Absolute path to host .app entitlements plist
 #
-# This implements the macOS AU v3 packaging recipe from
-# planning/2026-05-23-auv3-macos-ui-phase35.md:
+# This implements the macOS AU v3 packaging recipe:
 #   1. Sign nested dylibs (libwgpu_native.dylib, etc.) FIRST
 #   2. Sign framework with hardened runtime
 #   3. Sign .appex with hardened runtime + sandbox entitlements

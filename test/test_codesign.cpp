@@ -161,7 +161,7 @@ TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign]") {
 }
 
 TEST_CASE("codesign reports unsigned regular files without identity metadata",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
     ScopedTempDir temp("pulp-codesign-unsigned");
     const auto file = temp.path / "plain-tool";
     std::ofstream(file) << "not a Mach-O";
@@ -185,7 +185,7 @@ TEST_CASE("codesign reports unsigned regular files without identity metadata",
 }
 
 TEST_CASE("codesign failure paths leave requested outputs absent",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
     ScopedTempDir temp("pulp-codesign-failures");
     const auto pkg = temp.path / "missing.pkg";
     const auto signed_pkg = temp.path / "missing-signed.pkg";
@@ -211,7 +211,7 @@ TEST_CASE("codesign failure paths leave requested outputs absent",
 }
 
 TEST_CASE("combined pkg rejects empty and missing component inputs",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
     ScopedTempDir temp("pulp-combined-pkg-failures");
     const auto empty_output = temp.path / "empty.pkg";
     const auto missing_output = temp.path / "missing.pkg";
@@ -343,7 +343,7 @@ TEST_CASE("codesign parsers tolerate noisy command output",
 #endif
 
 TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
     const auto plist = default_audio_entitlements();
 #ifdef __APPLE__
     REQUIRE(plist.find(R"(<?xml version="1.0" encoding="UTF-8"?>)") != std::string::npos);
@@ -362,7 +362,7 @@ TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
 }
 
 TEST_CASE("codesign detail parser extracts identity and team fields",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
 #ifdef __APPLE__
     auto info = pulp::ship::detail::parse_codesign_details(R"(
 Executable=/Applications/Pulp.app/Contents/MacOS/Pulp
@@ -401,7 +401,7 @@ TeamIdentifier=FIRST12345
 }
 
 TEST_CASE("notarytool submit parser accepts UUID ids only",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
 #ifdef __APPLE__
     auto accepted = pulp::ship::detail::parse_notarytool_submit_id(R"(
 Submission ID received
@@ -456,7 +456,7 @@ TEST_CASE("notarytool submit parser keeps UUID boundaries strict",
 }
 
 TEST_CASE("notarytool status parser classifies terminal states",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
 #ifdef __APPLE__
     auto accepted = pulp::ship::detail::parse_notarytool_status("status: Accepted\nmessage: Ready");
     REQUIRE(accepted.complete);
@@ -503,7 +503,7 @@ issues:
 }
 
 TEST_CASE("security identity parser preserves quoted display names",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign][coverage]") {
 #ifdef __APPLE__
     auto identities = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
   1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Developer ID Application: Pulp Audio LLC (ABCDE12345)"

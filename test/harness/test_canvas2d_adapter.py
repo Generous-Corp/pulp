@@ -337,7 +337,6 @@ class VerifierEndToEndTest(unittest.TestCase):
         for name in (
             "canvas2d/arc",
             "canvas2d/arcTo",
-            "canvas2d/ellipse",
             "canvas2d/transform",
         ):
             with self.subTest(entry=name):

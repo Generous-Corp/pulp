@@ -471,7 +471,7 @@ TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json
 }
 
 TEST_CASE("pulp cache usage and parser errors are deterministic",
-          "[cli][shellout][cache][coverage][phase3]") {
+          "[cli][shellout][cache][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto home = unique_temp_dir("pulp-cache-shellout-home");
@@ -637,7 +637,7 @@ TEST_CASE("pulp status reports effective PR workflow",
 }
 
 TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
-          "[cli][shellout][misc][coverage][phase3]") {
+          "[cli][shellout][misc][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto status_extra = run_pulp({"status", "extra"});
@@ -654,7 +654,7 @@ TEST_CASE("pulp status and clean reject unexpected arguments before side effects
 }
 
 TEST_CASE("pulp clean removes the active project build directory",
-          "[cli][shellout][misc][coverage][phase3]") {
+          "[cli][shellout][misc][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto project = unique_temp_dir("pulp-clean-shellout");
@@ -1230,7 +1230,7 @@ TEST_CASE("pulp help output lists the top-level subcommands",
 }
 
 TEST_CASE("pulp macos validates local operator arguments before gh calls",
-          "[cli][shellout][macos][coverage][phase3]") {
+          "[cli][shellout][macos][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1287,7 +1287,7 @@ TEST_CASE("pulp macos validates local operator arguments before gh calls",
 }
 
 TEST_CASE("pulp overflow validates non-mutating operator arguments",
-          "[cli][shellout][overflow][coverage][phase3]") {
+          "[cli][shellout][overflow][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1549,7 +1549,7 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
 }
 
 TEST_CASE("pulp create validates parser errors before scaffolding",
-          "[cli][shellout][create][coverage][phase3]") {
+          "[cli][shellout][create][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto base = fs::temp_directory_path() /
@@ -1789,7 +1789,7 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
 }
 
 TEST_CASE("pulp build validates js engine option before compatibility checks",
-          "[cli][shellout][build][coverage][phase3]") {
+          "[cli][shellout][build][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto tmp = unique_temp_dir("pulp-shellout-build-js-engine");
@@ -2091,7 +2091,7 @@ TEST_CASE("pulp project bump rejects non-semver --to",
 }
 
 TEST_CASE("pulp project bump rejects missing --to values before project lookup",
-          "[cli][shellout][project][coverage][phase3]") {
+          "[cli][shellout][project][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const auto bin = fs::absolute(pulp_binary());
@@ -2115,7 +2115,7 @@ TEST_CASE("pulp project bump rejects missing --to values before project lookup",
 }
 
 TEST_CASE("pulp project validates stray parser arguments before project lookup",
-          "[cli][shellout][project][coverage][phase3]") {
+          "[cli][shellout][project][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const auto bin = fs::absolute(pulp_binary());

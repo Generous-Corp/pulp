@@ -131,13 +131,13 @@ fs::path write_archive_with_unlisted_payload(const fs::path& archive,
 }  // namespace
 
 TEST_CASE("pulp content validates the content-pack fixture",
-          "[cli][content][phase2]") {
+          "[cli][content]") {
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     REQUIRE(cmd_content({"validate", fixture.string(), "--json"}) == 0);
 }
 
 TEST_CASE("pulp content installs, lists, reveals, and removes data-only packs",
-          "[cli][content][phase2]") {
+          "[cli][content]") {
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     const std::string plugin = "dev.pulp.fixtures.content-target";
@@ -192,7 +192,7 @@ TEST_CASE("pulp content install writes the index atomically with no temp sidecar
 }
 
 TEST_CASE("pulp content install refuses to overwrite an installed pack version",
-          "[cli][content][phase2]") {
+          "[cli][content]") {
     TempDir data;
     TempDir changed_pack;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -214,7 +214,7 @@ TEST_CASE("pulp content install refuses to overwrite an installed pack version",
 }
 
 TEST_CASE("pulp content install is visible through ContentRegistry",
-          "[cli][content][phase2]") {
+          "[cli][content]") {
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     const std::string plugin = "dev.pulp.fixtures.content-target";
@@ -246,7 +246,7 @@ TEST_CASE("pulp content install is visible through ContentRegistry",
 }
 
 TEST_CASE("pulp content commands reject unsafe path components before mutation",
-          "[cli][content][phase2][security]") {
+          "[cli][content][security]") {
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     const std::string plugin = "dev.pulp.fixtures.content-target";
@@ -285,7 +285,7 @@ TEST_CASE("pulp content commands reject unsafe path components before mutation",
 }
 
 TEST_CASE("pulp content install rejects symlinked directory entries before copy",
-          "[cli][content][phase2][security]") {
+          "[cli][content][security]") {
     TempDir data;
     TempDir pack;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -309,7 +309,7 @@ TEST_CASE("pulp content install rejects symlinked directory entries before copy"
 }
 
 TEST_CASE("pulp content install and update reject bare manifest files before mutation",
-          "[cli][content][phase2][security]") {
+          "[cli][content][security]") {
     TempDir data;
     TempDir pack;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -341,7 +341,7 @@ TEST_CASE("pulp content install and update reject bare manifest files before mut
 }
 
 TEST_CASE("pulp content preview reports runtime compatibility and reload policy",
-          "[cli][content][phase3]") {
+          "[cli][content]") {
     TempDir tmp;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     const auto runtime = tmp.path / "pulp.plugin-runtime.json";
@@ -384,7 +384,7 @@ TEST_CASE("pulp content preview reports runtime compatibility and reload policy"
 }
 
 TEST_CASE("pulp content update replaces a local pack version without touching user files",
-          "[cli][content][phase5]") {
+          "[cli][content]") {
     TempDir data;
     TempDir updated_pack;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -414,7 +414,7 @@ TEST_CASE("pulp content update replaces a local pack version without touching us
 }
 
 TEST_CASE("pulp content update rejects invalid packs before replacing installed content",
-          "[cli][content][phase5]") {
+          "[cli][content]") {
     TempDir data;
     TempDir invalid_pack;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -451,7 +451,7 @@ TEST_CASE("pulp content update rejects invalid packs before replacing installed 
 }
 
 TEST_CASE("pulp content rescan rebuilds the content index without touching packs",
-          "[cli][content][phase3]") {
+          "[cli][content]") {
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
     const std::string plugin = "dev.pulp.fixtures.content-target";
@@ -479,7 +479,7 @@ TEST_CASE("pulp content rescan rebuilds the content index without touching packs
 }
 
 TEST_CASE("pulp content validates and installs a packed .pulpcontent archive",
-          "[cli][content][phase2]") {
+          "[cli][content]") {
     TempDir tmp;
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -503,7 +503,7 @@ TEST_CASE("pulp content validates and installs a packed .pulpcontent archive",
 }
 
 TEST_CASE("pulp content rejects archives without files.sha256 manifests",
-          "[cli][content][phase2][security]") {
+          "[cli][content][security]") {
     TempDir tmp;
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -524,7 +524,7 @@ TEST_CASE("pulp content rejects archives without files.sha256 manifests",
 }
 
 TEST_CASE("pulp content rejects archives with unlisted payload files",
-          "[cli][content][phase2][security]") {
+          "[cli][content][security]") {
     TempDir tmp;
     TempDir data;
     const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
@@ -545,7 +545,7 @@ TEST_CASE("pulp content rejects archives with unlisted payload files",
 }
 
 TEST_CASE("pulp content validation catches missing sample and wavetable exports",
-          "[cli][content][phase3]") {
+          "[cli][content]") {
     TempDir pack;
     write_file(pack.path / "pulp.package.json", R"json({
   "schema": "pulp-package-v1",
