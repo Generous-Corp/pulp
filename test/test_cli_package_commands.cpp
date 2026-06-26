@@ -458,7 +458,7 @@ TEST_CASE("cmd_target list shows source-checkout defaults without pulp.toml",
 }
 
 TEST_CASE("cmd_target covers alternate valid architectures",
-          "[cli][package-commands][target][coverage][phase3-batch757]") {
+          "[cli][package-commands][target][coverage]") {
     TempDir tmp;
     write_project_scaffold(tmp.path);
     REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
