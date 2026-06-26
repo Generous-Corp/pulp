@@ -5762,8 +5762,8 @@ endif()
 # WebView backend detection smoke — always built. Validates that
 # `pulp::view::detect_webview_backend()` returns one of the documented
 # identifiers ("wkwebview", "webview2", "webkitgtk", "chromium", "none")
-# on every supported OS. Gap-doc 2026-05-24 row "WebBrowserComponent
-# (per-platform: WKWebView/WebView2/WebKitGTK/Chromium)".
+# on every supported OS and keeps the native WebView backend identifier
+# contract aligned with the public WebView guide.
 if(WIN32)
     pulp_add_test_suite(pulp-test-webview-backend-detect
         LIBRARIES pulp::view

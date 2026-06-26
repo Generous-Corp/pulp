@@ -133,7 +133,7 @@ Important notes from the working proof:
 - use the local build script in `examples/webview-monaco/build_monaco_bundle.mjs`
 - prefer `editor.main.js` so Monaco's real CSS/features come through
 - worker URLs must point at the built `vs/languages/features/...` layout
-- the current Monaco build imports `@vscode/monaco-lsp-client`; for the Phase 7 example we stub that at bundle time because the example is not doing LSP
+- the current Monaco build imports `@vscode/monaco-lsp-client`; for the Monaco example we stub that at bundle time because the example is not doing LSP
 - browser preview is useful for cheap layout proof, but `bridge unavailable` is expected there because only the native host injects `window.pulp`
 - the native proof should reach `editor ready`
 

@@ -22,13 +22,13 @@ constexpr int kPaletteHeight = 260;
 
 void register_palette_assets() {
   auto& assets = AssetManager::instance();
-  assets.register_embedded("phase7_palette_html",
+  assets.register_embedded("webview_palette_html",
                            pulp_webview_palette_assets::index_html,
                            pulp_webview_palette_assets::index_html_size);
-  assets.register_embedded("phase7_palette_css",
+  assets.register_embedded("webview_palette_css",
                            pulp_webview_palette_assets::palette_css,
                            pulp_webview_palette_assets::palette_css_size);
-  assets.register_embedded("phase7_palette_js",
+  assets.register_embedded("webview_palette_js",
                            pulp_webview_palette_assets::palette_js,
                            pulp_webview_palette_assets::palette_js_size);
 }
@@ -93,10 +93,10 @@ int main() {
   WebViewOptions webview_options;
   webview_options.enable_debug = true;
   webview_options.fetch_resource = make_webview_embedded_resource_fetcher(
-      "phase7_palette_html",
+      "webview_palette_html",
       {
-          { "palette.css", "phase7_palette_css", "text/css" },
-          { "palette.js", "phase7_palette_js", "text/javascript" },
+          { "palette.css", "webview_palette_css", "text/css" },
+          { "palette.js", "webview_palette_js", "text/javascript" },
       });
   webview_options.custom_scheme_uri = "pulp://palette";
 
