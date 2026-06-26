@@ -170,7 +170,7 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
 }
 
 TEST_CASE("MpeVoiceAllocator per-note expression updates only the matching voice",
-          "[midi][mpe][expression][phase3]") {
+          "[midi][mpe][expression]") {
     MpeVoiceAllocator<TestVoice> alloc{4};
 
     alloc.dispatch(note_on_event(1, 60, 100, 11));
@@ -199,7 +199,7 @@ TEST_CASE("MpeVoiceAllocator per-note expression updates only the matching voice
 }
 
 TEST_CASE("MpeVoiceAllocator per-note expression dispatch allocates zero times",
-          "[midi][mpe][expression][rt-safety][phase3]") {
+          "[midi][mpe][expression][rt-safety]") {
     MpeVoiceAllocator<TestVoice> alloc{8};
     MpeBuffer buf;
     buf.add(note_on_event(1, 60, 100, 21));
@@ -425,7 +425,7 @@ TEST_CASE("MpeVoiceAllocator steal path decrements glide refcount", "[midi][mpe]
 }
 
 TEST_CASE("MpeVoiceAllocator exposes voice-count telemetry",
-          "[midi][mpe][telemetry][phase2]") {
+          "[midi][mpe][telemetry]") {
     MpeVoiceAllocator<TestVoice> alloc{2};
     alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
 
@@ -462,7 +462,7 @@ TEST_CASE("MpeVoiceAllocator exposes voice-count telemetry",
 }
 
 TEST_CASE("MpeVoiceAllocator evaluates optional runtime budget from voice telemetry",
-          "[midi][mpe][budget-policy][phase4]") {
+          "[midi][mpe][budget-policy]") {
     MpeVoiceAllocator<TestVoice> alloc{2};
     alloc.dispatch(note_on_event(1, 60, 100, 1));
     alloc.dispatch(note_on_event(1, 62, 100, 2));
@@ -500,7 +500,7 @@ TEST_CASE("MpeVoiceAllocator evaluates optional runtime budget from voice teleme
 }
 
 TEST_CASE("MpeVoiceAllocator optional runtime budget has deterministic large-voice cost",
-          "[midi][mpe][budget-policy][scale][phase4]") {
+          "[midi][mpe][budget-policy][scale]") {
     constexpr std::size_t kVoices = 128;
     MpeVoiceAllocator<TestVoice> alloc{kVoices};
     for (std::size_t i = 0; i < kVoices; ++i) {
@@ -530,7 +530,7 @@ TEST_CASE("MpeVoiceAllocator optional runtime budget has deterministic large-voi
 }
 
 TEST_CASE("MpeVoiceAllocator telemetry path allocates zero times",
-          "[midi][mpe][telemetry][rt-safety][phase2]") {
+          "[midi][mpe][telemetry][rt-safety]") {
     MpeVoiceAllocator<TestVoice> alloc{2};
     alloc.dispatch(note_on_event(1, 60, 100, 1));
     alloc.dispatch(note_on_event(1, 62, 100, 2));

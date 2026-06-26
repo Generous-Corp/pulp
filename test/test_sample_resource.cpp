@@ -42,7 +42,7 @@ SampleResourcePage make_page(uint64_t start_frame,
 } // namespace
 
 TEST_CASE("SampleResourceHandle publishes loaded sample snapshots",
-          "[audio][sample-resource][phase3]") {
+          "[audio][sample-resource]") {
     SampleResourceHandle handle;
     REQUIRE_FALSE(handle.snapshot().ready());
 
@@ -69,7 +69,7 @@ TEST_CASE("SampleResourceHandle publishes loaded sample snapshots",
 }
 
 TEST_CASE("SampleResourceHandle records missing resources without sample data",
-          "[audio][sample-resource][missing][phase3]") {
+          "[audio][sample-resource][missing]") {
     SampleResourceHandle handle;
     handle.publish_missing("missing/snare.wav", "file not found");
 
@@ -86,7 +86,7 @@ TEST_CASE("SampleResourceHandle records missing resources without sample data",
 }
 
 TEST_CASE("SampleResourceHandle rejects decoded samples over memory budget",
-          "[audio][sample-resource][budget][phase3]") {
+          "[audio][sample-resource][budget]") {
     SampleResourceHandle handle;
     auto data = make_sample(2, 64);
     const auto bytes = SampleResourceHandle::decoded_byte_size(data);
@@ -107,7 +107,7 @@ TEST_CASE("SampleResourceHandle rejects decoded samples over memory budget",
 }
 
 TEST_CASE("SampleResourceHandle relink advances generation and replaces state",
-          "[audio][sample-resource][relink][phase3]") {
+          "[audio][sample-resource][relink]") {
     SampleResourceHandle handle;
     handle.publish_missing("old.wav", "file not found");
     const auto missing = handle.snapshot();
@@ -126,7 +126,7 @@ TEST_CASE("SampleResourceHandle relink advances generation and replaces state",
 }
 
 TEST_CASE("SampleResourceHandle snapshot is allocation-free after publish",
-          "[audio][sample-resource][rt-safety][phase3]") {
+          "[audio][sample-resource][rt-safety]") {
     SampleResourceHandle handle;
     auto data = make_sample(2, 32);
     REQUIRE(handle.publish_loaded(std::move(data), "rt.wav"));
@@ -144,7 +144,7 @@ TEST_CASE("SampleResourceHandle snapshot is allocation-free after publish",
 }
 
 TEST_CASE("SampleResourceCache records cache misses without publishing data",
-          "[audio][sample-resource][cache][miss][phase3]") {
+          "[audio][sample-resource][cache][miss]") {
     SampleResourceCache cache({.max_entries = 2});
     REQUIRE(cache.get("missing.wav") == nullptr);
 
@@ -156,7 +156,7 @@ TEST_CASE("SampleResourceCache records cache misses without publishing data",
 }
 
 TEST_CASE("SampleResourceCache publishes cached sample data to a resource handle",
-          "[audio][sample-resource][cache][phase3]") {
+          "[audio][sample-resource][cache]") {
     SampleResourceCache cache({.max_entries = 2});
     auto data = make_sample(2, 12, 44100);
     REQUIRE(cache.put("loop.wav", std::move(data)));
@@ -182,7 +182,7 @@ TEST_CASE("SampleResourceCache publishes cached sample data to a resource handle
 }
 
 TEST_CASE("SampleResourceCache evicts least recently used decoded samples",
-          "[audio][sample-resource][cache][eviction][phase3]") {
+          "[audio][sample-resource][cache][eviction]") {
     SampleResourceCache cache({.max_entries = 2});
     REQUIRE(cache.put("a.wav", make_sample(1, 4)));
     REQUIRE(cache.put("b.wav", make_sample(1, 4)));
@@ -200,7 +200,7 @@ TEST_CASE("SampleResourceCache evicts least recently used decoded samples",
 }
 
 TEST_CASE("SampleResourceCache rejects oversized decoded samples without eviction",
-          "[audio][sample-resource][cache][budget][phase3]") {
+          "[audio][sample-resource][cache][budget]") {
     auto small = make_sample(1, 4);
     const auto small_bytes = SampleResourceHandle::decoded_byte_size(small);
     SampleResourceCache cache({
@@ -221,7 +221,7 @@ TEST_CASE("SampleResourceCache rejects oversized decoded samples without evictio
 }
 
 TEST_CASE("SampleResourcePageHandoff reads resident pages without file callbacks",
-          "[audio][sample-resource][page-handoff][rt-safety][phase3]") {
+          "[audio][sample-resource][page-handoff][rt-safety]") {
     std::atomic<int> file_reads{0};
     auto decode_page = [&](uint64_t start_frame) {
         ++file_reads;
@@ -259,7 +259,7 @@ TEST_CASE("SampleResourcePageHandoff reads resident pages without file callbacks
 }
 
 TEST_CASE("SampleResourcePageHandoff reports cache misses as silence",
-          "[audio][sample-resource][page-handoff][miss][phase3]") {
+          "[audio][sample-resource][page-handoff][miss]") {
     SampleResourcePageWindow window;
     window.sample_rate = 48000;
     window.channel_count = 1;
@@ -283,7 +283,7 @@ TEST_CASE("SampleResourcePageHandoff reports cache misses as silence",
 }
 
 TEST_CASE("SampleResourcePageHandoff window replacement resets page misses",
-          "[audio][sample-resource][page-handoff][phase3]") {
+          "[audio][sample-resource][page-handoff]") {
     SampleResourcePageHandoff handoff;
     REQUIRE(handoff.sample_or_zero(0, 99) == 0.0f);
     REQUIRE(handoff.diagnostics().page_misses == 1);
@@ -313,7 +313,7 @@ TEST_CASE("SampleResourcePageHandoff window replacement resets page misses",
 }
 
 TEST_CASE("SampleResourceService loads decoded samples on a background job",
-          "[audio][sample-resource][service][background][phase3]") {
+          "[audio][sample-resource][service][background]") {
     std::atomic<int> decode_count{0};
     std::string decoded_path;
     SampleResourceService service(
@@ -350,7 +350,7 @@ TEST_CASE("SampleResourceService loads decoded samples on a background job",
 }
 
 TEST_CASE("SampleResourceService prefetch caches decoded data for later publish",
-          "[audio][sample-resource][service][prefetch][cache][phase3]") {
+          "[audio][sample-resource][service][prefetch][cache]") {
     std::atomic<int> decode_count{0};
     std::string decoded_path;
     SampleResourceService service(
@@ -390,7 +390,7 @@ TEST_CASE("SampleResourceService prefetch caches decoded data for later publish"
 }
 
 TEST_CASE("SampleResourceService publishes missing diagnostics on decode failure",
-          "[audio][sample-resource][service][missing][phase3]") {
+          "[audio][sample-resource][service][missing]") {
     SampleResourceService service(
         {},
         [](const std::string&, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
@@ -417,7 +417,7 @@ TEST_CASE("SampleResourceService publishes missing diagnostics on decode failure
 }
 
 TEST_CASE("SampleResourceService cancellation avoids stale publication",
-          "[audio][sample-resource][service][cancel][phase3]") {
+          "[audio][sample-resource][service][cancel]") {
     std::atomic<bool> started{false};
     SampleResourceService service(
         {},
@@ -448,7 +448,7 @@ TEST_CASE("SampleResourceService cancellation avoids stale publication",
 }
 
 TEST_CASE("SampleResourceService applies handle memory budgets after decode",
-          "[audio][sample-resource][service][budget][phase3]") {
+          "[audio][sample-resource][service][budget]") {
     SampleResourceService service(
         {},
         [](const std::string&, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
