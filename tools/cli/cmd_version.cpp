@@ -154,6 +154,15 @@ static int version_bump(const std::vector<std::string>& args) {
             } else {
                 cl_content = new_entry + cl_content;
             }
+            // Deliberately non-fatal: a CHANGELOG write failure WARNs but does
+            // not fail the bump (we fall through to a 0 exit below). The bump's
+            // load-bearing output is the CMakeLists.txt VERSION rewrite, which
+            // DOES fail hard (returns 1) on a write error above; the CHANGELOG
+            // entry is a convenience and the atomic writer leaves any existing
+            // CHANGELOG.md intact on failure, so a warning is the right
+            // severity. (If a scripted caller needs CHANGELOG writes to be
+            // fatal, that's a deliberate future policy change, not an
+            // oversight.)
             if (pulp::cli::version_internal::write_text_file_checked(changelog, cl_content)) {
                 print_ok("Added CHANGELOG.md entry for " + new_str);
             } else {

@@ -104,6 +104,39 @@ TEST_CASE("MessageLoopIntegration backend without a kind tag stays self-consiste
     REQUIRE(MainThreadDispatcher::unregister_backend(token));
 }
 
+TEST_CASE("MessageLoopIntegration kind tag override and revert transitions",
+          "[events][message-loop-integration]") {
+    // Locks the full lifecycle the Custom fallback's correctness rests on:
+    // untagged backend reports Custom; a later register_kind() overrides it;
+    // unregister_kind() reverts to the Custom fallback (backend still present);
+    // unregister_backend() returns to None. The invariant
+    // `available() == (active_kind() != None)` holds at every step (single
+    // observer; see the cross-mutex caveat in message_loop_integration.cpp).
+    std::atomic<int> calls{0};
+    auto token = MainThreadDispatcher::register_backend(make_noop_backend(&calls));
+    REQUIRE(token != 0);
+
+    // 1. Present but untagged → Custom fallback.
+    REQUIRE(MessageLoopIntegration::active_kind() == MainLoopKind::Custom);
+    REQUIRE(MessageLoopIntegration::available());
+
+    // 2. Tagging overrides the fallback with the concrete kind.
+    MessageLoopIntegration::register_kind(token, MainLoopKind::Cocoa);
+    REQUIRE(MessageLoopIntegration::active_kind() == MainLoopKind::Cocoa);
+
+    // 3. Untagging (backend still registered) reverts to the Custom fallback,
+    //    not None — the present-but-unknown state.
+    MessageLoopIntegration::unregister_kind(token);
+    REQUIRE(MessageLoopIntegration::active_kind() == MainLoopKind::Custom);
+    REQUIRE(MessageLoopIntegration::available());
+
+    // 4. Removing the backend returns to None (the early-return path dominates
+    //    any stale tag).
+    REQUIRE(MainThreadDispatcher::unregister_backend(token));
+    REQUIRE(MessageLoopIntegration::active_kind() == MainLoopKind::None);
+    REQUIRE_FALSE(MessageLoopIntegration::available());
+}
+
 TEST_CASE("MessageLoopIntegration register_kind with token=0 is a no-op",
           "[events][message-loop-integration]") {
     MessageLoopIntegration::register_kind(0, MainLoopKind::Cocoa);

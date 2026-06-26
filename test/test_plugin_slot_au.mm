@@ -29,6 +29,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -110,9 +111,16 @@ TEST_CASE("AU host output AudioBufferList reuses pre-sized storage (A2 RT no-all
 
 TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
           "[host][au][integration][a2]") {
+    // This exercises the real AuSlot::process render path that CI historically
+    // couldn't. It is NOT the no-allocation proof — that is the unit test above,
+    // asserted deterministically on the extracted helper. We deliberately do
+    // NOT wrap process() in an RtAllocationProbe here: it calls Apple's
+    // AudioUnitRender, which allocates internally, so an `allocs == 0` assertion
+    // over it would be build/OS-fragile (the A1b lesson). This test's job is to
+    // confirm the reused buffer drives a correct render end to end.
     const std::string uid = first_apple_effect_unique_id();
     if (uid.empty()) {
-        SUCCEED("no Apple effect AU registered in this environment");
+        WARN("skipped: no Apple effect AU registered in this environment");
         return;
     }
 
@@ -126,7 +134,7 @@ TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
 
     auto slot = host::PluginSlot::load(info);
     if (!slot) {
-        SUCCEED("system AU '" + uid + "' did not load in this environment");
+        WARN("skipped: system AU '" + uid + "' did not load in this environment");
         return;
     }
     REQUIRE(slot->prepare(48000.0, 512));
@@ -134,7 +142,7 @@ TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
     constexpr int channels = 2;
     constexpr int frames = 512;
     std::vector<float> in0(frames, 0.25f), in1(frames, 0.25f);
-    std::vector<float> out0(frames, 0.0f), out1(frames, 0.0f);
+    std::vector<float> out0(frames), out1(frames);
     std::array<const float*, channels> in_ptrs{in0.data(), in1.data()};
     std::array<float*, channels> out_ptrs{out0.data(), out1.data()};
     audio::BufferView<const float> input(in_ptrs.data(), channels, frames);
@@ -142,13 +150,18 @@ TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
     midi::MidiBuffer midi_in, midi_out;
     host::ParameterEventQueue params;
 
-    // Drive many blocks through the real render path (what CI couldn't). A
-    // reallocated/corrupted output AudioBufferList would surface as a render
-    // error or NaN/garbage in the output; require every sample stays finite.
+    // Drive many blocks through the real render path. Pre-fill the output with a
+    // NaN sentinel each block: a SUCCESSFUL render overwrites every sample with
+    // finite audio, so `all_finite` proves the AU actually wrote output through
+    // the reused AudioBufferList. A render that errored (the slot swallows the
+    // OSStatus as a warning) or a malformed/corrupted ABL would leave the NaN
+    // sentinel (or write garbage) → the assertion fails. Pre-zeroing instead
+    // would let an errored no-op pass, which is exactly the gap this guards.
+    const float nan_sentinel = std::numeric_limits<float>::quiet_NaN();
     bool all_finite = true;
     for (int blk = 0; blk < 64 && all_finite; ++blk) {
-        std::fill(out0.begin(), out0.end(), 0.0f);
-        std::fill(out1.begin(), out1.end(), 0.0f);
+        std::fill(out0.begin(), out0.end(), nan_sentinel);
+        std::fill(out1.begin(), out1.end(), nan_sentinel);
         slot->process(output, input, midi_in, midi_out, params, frames);
         for (int i = 0; i < frames; ++i) {
             if (!std::isfinite(out0[i]) || !std::isfinite(out1[i])) {

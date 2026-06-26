@@ -3,34 +3,58 @@
 // Exposes the file-write primitive used when rewriting CMakeLists.txt's
 // project(VERSION ...) line so it can be exercised directly by
 // test/test_cli_version_write.cpp. Deliberately dependency-free (only
-// <fstream>/<filesystem>) so the test compiles without the cli_common
-// link surface — same isolation contract as version_diag / project_bump.
+// std headers) so the test compiles without the cli_common link surface —
+// same isolation contract as version_diag / project_bump.
 #pragma once
 
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 
 namespace pulp::cli::version_internal {
 
 namespace fs = std::filesystem;
 
-// Write `content` to `path`, truncating any existing file. Returns false if
-// the stream could not be opened OR if the write/flush failed for any reason
-// (e.g. disk full, I/O error, destination is a directory). The caller treats
-// a false return as a hard failure and must not report success.
+// Atomically write `content` to `path`: write a sibling temp file, flush +
+// close it (the explicit close() surfaces a failed final flush in the stream
+// state — the ofstream destructor would close after the object is gone, losing
+// the error), then rename it over `path`. Returns false — leaving any existing
+// `path` UNCHANGED — if the temp can't be opened, the write/flush fails (disk
+// full, I/O error, destination/parent not writable), or the rename fails.
 //
-// Why the explicit close()+good() check: the ofstream destructor flushes and
-// closes the buffer, but by then the stream object is gone and its error
-// state is unobservable — a failed final flush would otherwise be lost and the
-// truncated file silently reported as a successful write.
+// Atomic, not just checked: this mirrors the temp+rename convention the
+// core/state writers use (PropertiesFile, PresetManager, content_registry).
+// A crash or failure mid-write can never leave a truncated/corrupt
+// destination — which matters most for CMakeLists.txt, the file the whole
+// build derives from. `std::filesystem::rename` has replace semantics on all
+// platforms (POSIX rename / MoveFileExW(REPLACE_EXISTING) on Windows), so it
+// overwrites an existing target. This is a flush-to-OS check, not an fsync
+// durability fence — a delayed-allocation ENOSPC committed after close() can
+// still slip through; sufficient for a dev-time version bump.
 inline bool write_text_file_checked(const fs::path& path,
                                      const std::string& content) {
-    std::ofstream f(path, std::ios::out | std::ios::trunc);
-    if (!f) return false;
-    f << content;
-    f.close();          // surface flush/close errors in the stream state
-    return f.good();
+    fs::path tmp = path;
+    tmp += ".pulp-tmp";
+    {
+        std::ofstream f(tmp, std::ios::out | std::ios::trunc | std::ios::binary);
+        if (!f) return false;
+        f << content;
+        f.close();  // surface flush/close errors while the stream is alive
+        if (!f.good()) {
+            std::error_code rm;
+            fs::remove(tmp, rm);
+            return false;
+        }
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec) {
+        std::error_code rm;
+        fs::remove(tmp, rm);  // don't leave the temp behind on a failed rename
+        return false;
+    }
+    return true;
 }
 
 }  // namespace pulp::cli::version_internal
