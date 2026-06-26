@@ -1754,21 +1754,25 @@ Gotchas:
 - **`pulp doctor list` + `--only <name>`** (2026-05, R2-8). `pulp doctor list` enumerates available checks; `pulp doctor --only <substring>` case-insensitive filter runs a subset. Works across modes (`pulp doctor android list`, `pulp doctor --only emulator`). Filter logic lives in `cmd_doctor.cpp`, not in the helpers TU — the `DoctorCheck` vector returned by `run_doctor_checks` already IS the registry. No new struct or registration step needed when adding a check.
 - **Validator commands must suppress editor hosts.** Any CLI path that shells out to `auval`, `pluginval`, `clap-validator`, or `vstvalidator` must run the command with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`. This is part of the launch-safety contract: validation should never open a native plugin editor or OS window on a user/agent machine.
 
-## Build type — repo/example builds default to Release (perf)
+## Build type — helper-backed tool builds default to Release (perf)
 
-`ensure_repo_build_configured` (`cli_common.cpp`, the `pulp build` configure
-path for repo/example plugins) now passes `-DCMAKE_BUILD_TYPE=Release` on a
-fresh configure. Previously it passed NO build type, so CMake configured with
-no optimization (no `-O`, no `NDEBUG`) — an unoptimized binary whose plugin
-editor/DSP feels sluggish in a DAW for the same reason a Debug build does
-(confirmed 2026-05-22: ChainerSynth AU laggy unoptimized, "super snappy" in
-Release). `pulp create` already defaults Release with a `--debug` opt-in.
+`ensure_repo_build_configured` (`cli_common.cpp`, currently used by the
+`pulp design` configure path in `cmd_design.cpp`) passes
+`-DCMAKE_BUILD_TYPE=Release` on a fresh configure. Previously it passed NO build
+type, so CMake configured with no optimization (no `-O`, no `NDEBUG`) — an
+unoptimized binary whose plugin editor/DSP feels sluggish in a DAW for the same
+reason a Debug build does (confirmed 2026-05-22: ChainerSynth AU laggy
+unoptimized, "super snappy" in Release). `pulp create` already defaults Release
+with a `--debug` opt-in.
+
+`pulp build` has its own configure path in `tools/cli/cmd_build.cpp`; do not
+assume changes to `ensure_repo_build_configured` affect `pulp build`.
 
 Notes for CLI maintenance:
-- Override per-build with `PULP_BUILD_TYPE=Debug pulp build` (read in
+- Override helper-backed fresh configures with `PULP_BUILD_TYPE=Debug` (read in
   `ensure_repo_build_configured`); it only applies on a FRESH configure — an
   existing `CMakeCache.txt` build type is left untouched (re-configure or wipe
-  `build/` to change it). `pulp build` prints `Build type: <type>`.
+  `build/` to change it). The helper prints `Build type: <type>`.
 - The `PULP_BUILD_TYPE` value is `shell_quote`'d before it goes into the cmake
   command (the configure runs via the shell), like every other interpolated
   value there. Never concatenate a raw env value into a shell command string —
