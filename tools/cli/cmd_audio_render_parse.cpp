@@ -253,6 +253,8 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
     if (r.out_wav.empty()) return usage_error("--out <file.wav> is required");
     if (!r.input_wav.empty() && input_signal_seen)
         return usage_error("--input and --input-signal are mutually exclusive");
+    if (r.in_channels == 0 && r.input_kind != AudioRenderInputKind::Silence)
+        return usage_error("--in-channels 0 cannot be combined with --input or sine --input-signal");
     if (has_ms && has_frames)
         return usage_error("--duration-ms and --duration-frames are mutually exclusive");
     if (!has_ms && !has_frames)

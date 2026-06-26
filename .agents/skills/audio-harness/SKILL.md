@@ -238,7 +238,7 @@ tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
 loads an explicit plugin bundle through `pulp::host::PluginSlot` (the generic CLI
 has no registered factory, so a bundle is the only offline render source),
 drives it block-by-block from declarative flags, writes an int16 WAV, and emits
-the same `pulp::audio-analysis` metrics manifest the `validate` verbs read
+the same `pulp::audio-analysis` metrics JSON as `validate summarize --json`
 (`--manifest <file>` / `--json`). No DAW, no audio device. Drive it with
 `--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is
 at `--sample-rate` — no resampling), `--param <id>=<value>[@frame]`, and

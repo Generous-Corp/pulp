@@ -220,6 +220,22 @@ TEST_CASE("audio render parser: minimal valid request", "[audio-render]") {
     REQUIRE(r.input_kind == AudioRenderInputKind::Silence);
 }
 
+TEST_CASE("audio render parser: zero input channels are instrument-only",
+          "[audio-render]") {
+    const auto instrument = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0"});
+    REQUIRE(instrument.ok);
+    REQUIRE(instrument.in_channels == 0);
+
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0", "--input-signal", "sine:440"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0", "--input", "i.wav"}).ok);
+}
+
 TEST_CASE("audio render parser: --duration-ms resolves against sample rate", "[audio-render]") {
     const auto r = parse_audio_render_args(
         {"--plugin", "p", "--out", "o", "--sample-rate", "48000", "--duration-ms", "100"});

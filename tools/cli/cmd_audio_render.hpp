@@ -4,9 +4,9 @@
 //
 // Sibling of `pulp audio validate` (which keeps its no-plugin contract): render
 // loads an explicit `--plugin <bundle>` through pulp::host::PluginSlot, drives it
-// offline from declarative flags, and writes a WAV plus a metrics manifest the
-// `validate` verbs can analyze — so an agent can render → analyze → assert
-// entirely from the CLI, with no DAW and no audio device.
+// offline from declarative flags, and writes a WAV plus the same metrics JSON
+// emitted by `pulp audio validate summarize --json`, with no DAW and no audio
+// device.
 
 #include <cstdint>
 #include <string>

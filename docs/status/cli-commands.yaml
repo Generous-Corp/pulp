@@ -1563,7 +1563,7 @@ commands:
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
       - name: render
-        summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit a metrics manifest the validate verbs can read. --param values are in the PLAIN domain (native min..max), not normalized."
+        summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
         args:
           - name: --plugin
             kind: option

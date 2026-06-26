@@ -2,9 +2,9 @@
 //
 // Loads a plugin bundle through pulp::host::PluginSlot, renders it offline from
 // declarative flags (input signal, parameter changes, MIDI notes), writes the
-// result to a WAV, and emits a metrics manifest the `pulp audio validate` verbs
-// can consume. No DAW, no audio device — the render loop is the device-free
-// pure stepper in cmd_audio_render_step.hpp.
+// result to a WAV, and emits the same metrics JSON as `pulp audio validate
+// summarize --json`. No DAW, no audio device — the render loop is the
+// device-free pure stepper in cmd_audio_render_step.hpp.
 
 #include "cmd_audio_render.hpp"
 
@@ -44,8 +44,8 @@ void print_render_usage() {
         "  pulp audio render --plugin <bundle> --out <file.wav> \\\n"
         "       (--duration-ms <n> | --duration-frames <n>) [options]\n\n"
         "Loads the plugin via the host slot, renders it offline (no DAW, no audio\n"
-        "device), writes a WAV, and prints/writes a metrics manifest that\n"
-        "`pulp audio validate summarize|assert` can read.\n\n"
+        "device), writes a WAV, and prints/writes the same metrics JSON as\n"
+        "`pulp audio validate summarize --json`.\n\n"
         "Required:\n"
         "  --plugin <bundle>            Plugin bundle path\n"
         "  --out <file.wav>             Output WAV (int16)\n"
@@ -56,7 +56,7 @@ void print_render_usage() {
         "Render setup:\n"
         "  --sample-rate <hz>           (default: 48000)\n"
         "  --block <n>                  Max block size (default: 512)\n"
-        "  --in-channels <n>            (default: 2)\n"
+        "  --in-channels <n>            (default: 2; use 0 for no input bus)\n"
         "  --out-channels <n>           (default: 2)\n\n"
         "Input signal (mutually exclusive; default silence):\n"
         "  --input <file.wav>           Use a WAV as input (used as-is at --sample-rate;\n"
@@ -86,7 +86,8 @@ host::PluginFormat parse_format(std::string_view s, bool& known) {
 // the render sample rate). Width is in_channels; the stepper handles length.
 audio::Buffer<float> materialize_input(const ParseAudioRenderResult& req, bool& ok) {
     ok = true;
-    const std::uint32_t channels = std::max<std::uint32_t>(1, req.in_channels);
+    const std::uint32_t channels = req.in_channels;
+    if (channels == 0) return {};
 
     if (req.input_kind == AudioRenderInputKind::Wav) {
         const auto decoded = audio::read_audio_file(req.input_wav);
@@ -214,7 +215,7 @@ int cmd_audio_render(const std::vector<std::string>& args) {
                      [](const auto& a, const auto& b) { return a.frame < b.frame; });
 
     audio_render::StepSpec spec;
-    spec.input_channels = std::max<std::uint32_t>(1, req.in_channels);
+    spec.input_channels = req.in_channels;
     spec.output_channels = req.out_channels;
     spec.max_block_frames = req.block;
     spec.frame_count = req.duration_frames;
