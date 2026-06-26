@@ -23,13 +23,14 @@ The table covers the tag-to-widget mapping, the Element surface (~40 properties
 
 ## Counts
 
-Harness verdict (per `tools/harness/verifier`):
+Harness verdict (per `tools/harness/verifier --all` after evidence validation):
 
 | Verdict | Count |
 |---------|------:|
-| PASS    | 57 |
-| DIVERGE | 1  |
-| NO-OP   | 1  |
+| PASS    | 2 |
+| SUPPORTED-NO-EVIDENCE | 57 |
+| DIVERGE | 0 |
+| NO-OP   | 0 |
 | NOT-IMPL | 0 |
 | OOS     | 0 |
 
@@ -37,9 +38,14 @@ Catalog status counts (informational):
 
 | Status | Count |
 |--------|------:|
-| supported | ~57 |
-| partial | 1 (`html/img` — deferred Skia codec) |
+| supported | 59 |
+| partial | 0 |
 | missing | 0 |
+
+`SUPPORTED-NO-EVIDENCE` means the static implementation checks pass, but the
+catalog's `evidence.tests` references are missing, stale, or point at tags that
+no longer exist. See `docs/reports/harness-coverage.md` for the full drift
+list.
 
 ## Current support notes
 
@@ -73,13 +79,6 @@ browser API.
   through the `@pulp/react` `SvgPath` intrinsic (which is the
   canonical rendered-path API).
 
-Retained at `partial` (genuinely deferred — not arch):
-
-- **`html/img`** — partial-deferred-skia-codec. Image src loading
-  is gated on `SkCodec` wiring; placeholder Label keeps the layout
-  slot until Skia decode lands. Will flip to `supported` once that
-  pipeline ships.
-
 ## Architectural reclassification
 
 - **`html/dialog`** — `Element.show()` / `showModal()` / `close()` are
@@ -88,7 +87,7 @@ Retained at `partial` (genuinely deferred — not arch):
 - **`html/input`** — `<input>` is
   fully wired through `_ensureNative` -> bridge `createTextEditor` /
   `createFader` / `createCheckbox`.
-- **Architectural reclassification (5 entries, status retained):**
+- **Architectural reclassification (4 entries, status retained):**
   - `html/StyleSheet_inline` and `html/style` — @media / @keyframes /
     @import / @font-face / @supports / complex selectors are
     `arch-no-cascade-engine` (Pulp doesn't model the CSS cascade by
@@ -96,9 +95,6 @@ Retained at `partial` (genuinely deferred — not arch):
   - `html/DocumentFragment` — full Range / Selection API is
     `arch-text-editor-owns-selection` (Pulp's text editor has its
     own selection model).
-  - `html/img` — actual image src loading is
-    `partial-deferred-skia-codec`; placeholder Label keeps the layout
-    slot until Skia decode lands.
   - `html/svg` — full SVG rasterization of children is
     `arch-explicit-non-goal` (createCol shim reserves layout space;
     use @pulp/react SvgPath intrinsic for rendered paths).
@@ -128,12 +124,14 @@ These entries are implemented by the current DOM-lite runtime:
   `type=date/time/file/color/url/search` to text-editor IS the
   supported behavior; these accept input correctly. Specialized
   chrome (date pickers etc.) is a separate UX concern.
+- **`html/img`** — `<img>` now creates an `ImageView`; `src`
+  routes through `setImageSource` to `ImageView::set_image_path`, and
+  Skia-backed canvases decode file paths through `draw_image_from_file`.
+  Empty or undecodable sources still render the built-in `IMG`
+  placeholder.
 
-Current divergent entry:
-
-| Entry | Why DIVERGE |
-|---|---|
-| `html/img` | Image src loading pipeline (Skia codec) — deferred, not arch. Flips to PASS once `SkCodec` wiring ships. |
+Current divergent entries: none. Remaining non-PASS rows in the harness
+report are `SUPPORTED-NO-EVIDENCE` evidence-anchor refresh work.
 
 ## Tag → widget mapping
 
@@ -149,7 +147,7 @@ Current divergent entry:
 | `canvas` | `createCanvas` | Use `getContext('2d')` or `getContext('webgpu')`. |
 | `progress` | `createProgress` | |
 | `hr` | `createCol` + 1px height + grey background | Visual divider. |
-| `img` | `createLabel` (placeholder) | HTML `width` / `height` attrs reserve flex space. |
+| `img` | `createImage` / `ImageView` | `src` routes to `setImageSource`; HTML `width` / `height` attrs reserve flex space. |
 | `svg` | `createCol` | Layout-leaf placeholder; HTML width/height reserve space; child shapes do NOT render. For rendered SVG paths, use `<SvgPath>` from `@pulp/react`. |
 | `details` | `createCol` | Toggle / summary semantics not modeled. |
 | `dialog` | `createPanel` + hidden | `showModal()` / `close()` not wired. |
@@ -195,31 +193,25 @@ change, focus, blur, wheel, drop), `dispatchEvent`, `setPointerCapture` /
 
 ## Notable gaps
 
-1. **`html/img`** (partial — DIVERGE) — image `src` loading is
-   placeholder-only; `<img>` mounts as `createLabel` and the HTML
-   `width` / `height` attributes reserve flex layout space. Actual
-   pixel decode is gated on Skia codec wiring (partial-deferred-skia-
-   codec). Use `<Image>` from `@pulp/react` or the canvas
-   `drawImage` path until that pipeline lands.
-2. **`html/ARIA`** state routing — `aria-label` and `role` route
+1. **`html/ARIA`** state routing — `aria-label` and `role` route
    through to `View::set_access_label_` / `set_access_role_`; the
    `aria-pressed` / `aria-checked` / `aria-disabled` / `aria-hidden`
    set is partial-deferred-access-state (the View doesn't expose a
    state slot today). Linux AT-SPI / Windows UIA platform routing is
    tracked under #217.
-3. **`html/document_querySelector`** — full CSS Selectors Level 4 is
+2. **`html/document_querySelector`** — full CSS Selectors Level 4 is
    arch-no-cascade-engine. Pseudo-classes, pseudo-elements, sibling
    combinators (`+` / `~`), selector lists (`a, b`), and the case-
    insensitive flag are explicit non-goals; consumers reach for
    `@pulp/react` state-dependent components instead.
-4. **`html/StyleSheet_inline`** / **`html/style`** —
+3. **`html/StyleSheet_inline`** / **`html/style`** —
    arch-no-cascade-engine. `@media`, `@keyframes`, `@import`,
    `@font-face`, `@supports` are explicit non-goals.
-5. **`html/DocumentFragment`** — arch-text-editor-owns-selection.
+4. **`html/DocumentFragment`** — arch-text-editor-owns-selection.
    Range / Selection API is not modeled.
-6. **`html/svg`** — arch-explicit-non-goal. Layout-leaf shim only;
+5. **`html/svg`** — arch-explicit-non-goal. Layout-leaf shim only;
    use `<SvgPath>` from `@pulp/react` for rendered paths.
-7. **Source-side drag lifecycle** — drop-target registration is wired
+6. **Source-side drag lifecycle** — drop-target registration is wired
    through `addEventListener('drop', ...)` / `registerDrop`, but
    JS-initiated drags, native drag-image rendering, and the full
    `dragstart` / `drag` / `dragend` source lifecycle are not modeled.

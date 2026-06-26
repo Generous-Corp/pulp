@@ -1,10 +1,10 @@
-"""Tests for the catalog-status -> harness-Status mapping (pulp #1475).
+"""Tests for the catalog-status -> harness-Status mapping.
 
-Pins the five-value catalog vocabulary:
+Pins the catalog vocabulary:
 
 * `supported`  -> PASS
 * `partial`    -> DIVERGE
-* `noop`       -> NO_OP   (added in #1475)
+* `noop`       -> NO_OP
 * `missing`    -> NOT_IMPL
 * `wontfix`    -> OOS
 * unknown / None / "" -> NOT_IMPL (defensive default)
@@ -47,8 +47,7 @@ class MapCatalogStatusToExpectedTests(unittest.TestCase):
         self.assertIs(map_catalog_status_to_expected("partial"), Status.DIVERGE)
 
     def test_noop_maps_to_no_op(self) -> None:
-        # The pulp #1475 vocabulary extension. Without this, css/animation*
-        # and css/touchAction (intentional bridge NO-OPs) drift forever.
+        # Intentional bridge NO-OPs should not drift as missing code.
         self.assertIs(map_catalog_status_to_expected("noop"), Status.NO_OP)
 
     def test_missing_maps_to_not_impl(self) -> None:
@@ -88,9 +87,10 @@ class StatusPropertyTests(unittest.TestCase):
             with self.subTest(status=status):
                 self.assertEqual(status.is_pass, status is Status.PASS)
 
-    def test_is_progress_includes_pass_and_diverge(self) -> None:
+    def test_is_progress_matches_progress_percentage_numerator(self) -> None:
         progress_statuses = {
             Status.PASS,
+            Status.SUPPORTED_NO_EVIDENCE,
             Status.DIVERGE,
         }
         for status in Status:
