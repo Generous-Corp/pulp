@@ -332,6 +332,7 @@ public:
             if ((opts.transient_mode == StretchTransientMode::verbatim_relocate ||
                  opts.relocate_transients) && opts.time_ratio != 1.0)
                 relocate_transients(in, in_frames, out, out_frames, opts.time_ratio);
+            restore_onset_head(in, in_frames, out, out_frames);  // attack at sample 0 (soft-start)
             match_spectral_rms(in, in_frames, out, out_frames);  // restore the PV energy loss
             return true;
         }
@@ -776,6 +777,43 @@ private:
         }
     }
 
+    // Restore the attack at the very start of the render. The phase vocoder
+    // reconstructs a hard onset at sample 0 from an EMPTY analysis history — the
+    // Hann analysis window is ~0 at its edge, so the first frames weight the onset
+    // near-zero and the attack comes up as a RAMP over ~fft/2 samples (~10 ms at the
+    // percussive window). The length-lock trim aligns input[0] to output[0] but does
+    // not remove the ramp, so the head is too quiet. relocate_transients can't fix
+    // it: detect_onsets needs a flux RISE and a sample-0 attack is already inside its
+    // first window (no rise), so the boundary onset is structurally missed.
+    // Graft the input's leading attack over the head with an equal-power crossfade
+    // back to the PV body (input[0] is the true first sample, so no peak search is
+    // needed — unlike the interior graft). No-op when the input head is silent (a
+    // real fade-in) or the PV did not actually lose the attack. Runs BEFORE
+    // match_spectral_rms (whose interior-RMS window excludes the head, and whose
+    // soft-clip still bounds any grafted peak).
+    void restore_onset_head(const float* const* in, long in_frames,
+                            float* const* out, long out_frames) const noexcept {
+        const long head = std::min<long>({out_frames, in_frames,
+                                          std::llround(kHeadMs * sample_rate_)});
+        if (head < 2) return;
+        float in_peak = 0.0f, out_peak = 0.0f;
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < head; ++i) {
+                in_peak = std::max(in_peak, std::fabs(in[c][static_cast<size_t>(i)]));
+                out_peak = std::max(out_peak, std::fabs(out[c][static_cast<size_t>(i)]));
+            }
+        if (in_peak <= kHeadEps) return;               // input head silent (fade-in) -> preserve
+        if (in_peak <= out_peak * kHeadRatio) return;  // PV didn't lose the attack -> no-op
+        constexpr double kHalfPi = 1.5707963267948966;
+        for (long i = 0; i < head; ++i) {
+            const double cw = std::cos(kHalfPi * static_cast<double>(i) / static_cast<double>(head));
+            const float w = static_cast<float>(cw * cw);  // equal-power: 1 at 0 -> 0 at head
+            for (int c = 0; c < channels_; ++c)
+                out[c][static_cast<size_t>(i)] =
+                    w * in[c][static_cast<size_t>(i)] + (1.0f - w) * out[c][static_cast<size_t>(i)];
+        }
+    }
+
     void relocate_transients(const float* const* in, long in_frames,
                              float* const* out, long out_frames, double ratio) const {
         if (in_frames <= 0 || out_frames <= 0) return;
@@ -916,6 +954,9 @@ private:
     static constexpr long kReloXfade = 64;           // ~1.3 ms linear edge crossfade
     static constexpr long kReloBack = 768;           // input-peak search look-back (onset lags the peak)
     static constexpr long kReloSearch = 1536;        // +/- ~32 ms output-peak search
+    static constexpr double kHeadMs = 0.010;         // onset-head graft span (~10 ms)
+    static constexpr float kHeadEps = 1e-3f;         // input head silent -> no soft-start
+    static constexpr float kHeadRatio = 1.1f;        // PV must have lost the attack to fire
     static constexpr double kReloHpHz = 300.0;       // graft only the high band above this (low end stays on the clean PV)
     RealtimePitchTimeProcessor engine_;
     RealtimePitchTimeProcessor pitch_engine_;
