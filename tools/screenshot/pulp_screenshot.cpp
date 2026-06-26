@@ -1,5 +1,5 @@
-// pulp-screenshot — Render a plugin UI to PNG for visual validation
-// Used by: pulp CLI (`pulp screenshot`), MCP server, CI pipelines
+// pulp-screenshot — Render a built-in demo or scripted UI to PNG for visual validation
+// Used by: kit verification, MCP server, CI pipelines
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>

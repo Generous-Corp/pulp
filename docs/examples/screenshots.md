@@ -1,20 +1,23 @@
-# Example Plugin Screenshots
+# Example UI Screenshot Notes
 
-Visual documentation of each Pulp example plugin's auto-generated UI.
+Visual notes for the Pulp example plugin UIs plus the local demo/script tools
+that generate screenshot artifacts.
 
 ## Generating Screenshots
 
-Screenshots are captured via the headless screenshot tool:
+`pulp-screenshot` renders the built-in demo UI or a JavaScript UI file. It
+does not load a plugin by name. Use the standalone/plugin validation paths for
+actual plugin editor screenshots.
 
 ```bash
-# Capture a single plugin's UI
-./build/tools/screenshot/pulp-screenshot --demo --plugin PulpGain --output docs/examples/img/pulp-gain.png
+# Capture the built-in demo UI
+./build/tools/screenshot/pulp-screenshot --demo --output docs/examples/img/pulp-demo.png
 
-# Capture all examples
+# Capture the built-in demo at common gallery viewport sizes
 ./tools/scripts/capture-all-screenshots.sh
 
-# Capture with a specific theme
-./build/tools/screenshot/pulp-screenshot --theme dark --plugin PulpGain --output pulp-gain-dark.png
+# Capture a scripted UI file with a specific theme
+./build/tools/screenshot/pulp-screenshot --script path/to/ui.js --theme dark --output docs/examples/img/ui-dark.png
 ```
 
 ## PulpGain — Stereo Gain Effect
@@ -76,10 +79,13 @@ Screenshots are captured via the headless screenshot tool:
 ## Screenshot Automation
 
 Screenshot capture is currently a local/docs-maintenance workflow, not a
-published `gh-pages` branch flow:
+published `gh-pages` branch flow. The helper script renders demo viewport
+presets only; it does not select or load plugin bundles.
 
-1. Build all plugins and the screenshot tool
-2. For each plugin, render the AutoUi at default size
-3. Save PNGs to `docs/examples/img/`
-4. Publish the resulting assets through the docs-site path you are actually
+1. Build the screenshot tool for demo/script captures
+2. For plugin editor screenshots, build the relevant standalone or plugin bundle
+3. Use `pulp run --headless --screenshot <file>` for standalone screenshots, or
+   `pulp validate --screenshot` for validation-harness plugin screenshots
+4. Save PNGs to `docs/examples/img/`
+5. Publish the resulting assets through the docs-site path you are actually
 using; there is no `gh-pages` branch deploy in the current repo setup

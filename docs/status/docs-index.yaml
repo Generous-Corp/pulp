@@ -237,7 +237,7 @@ docs:
   - slug: example-screenshots
     path: examples/screenshots.md
     kind: guide
-    summary: Example plugin screenshots — visual documentation and capture script
+    summary: Example UI screenshot notes — plugin UI inventory plus demo/script capture tooling
 
   - slug: gpu-validation
     path: guides/gpu-validation-checklist.md
