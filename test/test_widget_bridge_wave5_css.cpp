@@ -1527,7 +1527,7 @@ TEST_CASE("CSS animationPlayState paused honored by tick_animations recursion",
 // Mirror the gate: a View with an active CSS animation and
 // play_state != "paused" must signal "needs frames"; flipping to
 // paused must clear that signal.
-TEST_CASE("View signals continuous-frame need while CSS animation runs (Codex P1 on #1734)",
+TEST_CASE("View signals continuous-frame need while CSS animation runs (#1734)",
           "[view][css][issue-1734][frame-loop]") {
     using namespace pulp::view;
 

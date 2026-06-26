@@ -97,7 +97,7 @@ TEST_CASE("HMAC-SHA1 RFC 2202 test case 2 ('Jefe')",
     REQUIRE(to_hex(*tag) == "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
 }
 
-TEST_CASE("HMAC returns optional so callers can detect mbedTLS failure (Codex #2841 P1)",
+TEST_CASE("HMAC returns optional so callers can detect mbedTLS failure (#2841)",
           "[runtime][crypto][hmac][regression]") {
     // Smoke: the success path of every supported MAC must yield a value
     // of the expected length. Failure-mode (alloc/build-config) is hard

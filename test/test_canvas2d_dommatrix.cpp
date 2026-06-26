@@ -233,7 +233,7 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix inverse of a 2x scale is 0.5x scale",
 
 // ── Serialization ─────────────────────────────────────────────────
 
-TEST_CASE("Canvas2D _PulpCanvasMatrix toJSON honors actual is2D state (Codex P2 #1754)",
+TEST_CASE("Canvas2D _PulpCanvasMatrix toJSON honors actual is2D state (#1754)",
           "[canvas2d][dommatrix][issue-1527][issue-1754]") {
     auto out = eval_in_bridge(ctx_and_matrix_setup() + R"(
         ctx.setTransform(0, 0, 0, 0, 0, 0);
@@ -256,7 +256,7 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array length is 16",
 }
 
 TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array serialization order "
-          "(non-identity matrix detects transposition — Codex P2 on #2387)",
+          "(non-identity matrix detects transposition, #2387)",
           "[canvas2d][dommatrix][issue-1527]") {
     // The identity matrix is symmetric, so row-major vs column-major output
     // looks identical. To make ordering bugs

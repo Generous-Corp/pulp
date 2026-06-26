@@ -113,7 +113,7 @@ TEST_CASE("buffer_ops::clip on BufferView clips every channel", "[audio][buffer_
     REQUIRE_THAT(buf.channel(1)[0], WithinAbs(-1.0f, 1e-6f));
 }
 
-TEST_CASE("buffer_ops::clip sanitizes NaN to lo (Codex P1 on #2864)",
+TEST_CASE("buffer_ops::clip sanitizes NaN to lo (#2864)",
           "[audio][buffer_ops][regression]") {
     // The doc contract says NaN inputs become `lo`. simd_clamp / std::clamp
     // propagate NaN through ordered comparisons, so the impl converts

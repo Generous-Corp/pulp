@@ -401,7 +401,7 @@ TEST_CASE("read_registry skips malformed and mixed-shape JSON entries",
 }
 
 TEST_CASE("read_registry tolerates forward-compatible non-string fields",
-          "[projects-registry][codex-563]") {
+          "[projects-registry][issue-563]") {
     // Issue #563: the schema documents unknown fields as forward-compatible,
     // so a future writer is allowed to emit non-string values (objects,
     // booleans, arrays). The previous parser assumed every value was a string
@@ -447,7 +447,7 @@ TEST_CASE("read_registry tolerates forward-compatible non-string fields",
 }
 
 TEST_CASE("add_project reports write_registry failure via out_wrote_ok",
-          "[projects-registry][codex-563]") {
+          "[projects-registry][issue-563]") {
     // Issue #563: add_project previously swallowed write_registry() failures —
     // callers saw the in-memory list as if the write had succeeded, producing
     // silent data loss on unwritable $PULP_HOME. The out-parameter surface lets

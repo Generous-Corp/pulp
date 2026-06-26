@@ -247,7 +247,7 @@ TEST_CASE("Wavetable explicit band construction with empty samples is rejected",
     REQUIRE_NOTHROW(wt.next());
 }
 
-TEST_CASE("Wavetable rapid retune preserves crossfade continuity (Codex #2865 P1)",
+TEST_CASE("Wavetable rapid retune preserves crossfade continuity (#2865)",
           "[signal][wavetable][regression]") {
     auto wt = Wavetable::make_saw(/*bands=*/10);
     wt.set_sample_rate(48000.0f);
@@ -282,7 +282,7 @@ TEST_CASE("Wavetable rapid retune preserves crossfade continuity (Codex #2865 P1
     REQUIRE(max_delta < 2.0f);
 }
 
-TEST_CASE("Wavetable factories reject non-positive reference sample rate (Codex #2865 P2)",
+TEST_CASE("Wavetable factories reject non-positive reference sample rate (#2865)",
           "[signal][wavetable][regression]") {
     // Earlier impl passed `reference_sample_rate <= 0` through to
     // std::floor(nyquist / clamped_ceiling) and then size_t-cast the

@@ -439,7 +439,7 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
 // after `gap: 10px 20px` would read 10/20 instead of 5/5 unless the
 // per-axis slots reset to the -1 sentinel before writing the shared slot.
 TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
-          "[view][bridge][css][issue-1638][codex-p1]") {
+          "[view][bridge][css][issue-1638]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -832,7 +832,7 @@ TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
 // pulp #3336: a plain set_text() must supersede prior per-range runs. The old
 // spans index into the OLD string, so leaving has_attributed_ set would paint
 // stale, mis-indexed runs over the new text.
-TEST_CASE("set_text clears stale attributed runs (Codex #3336)",
+TEST_CASE("set_text clears stale attributed runs",
           "[view][widget][text][issue-3336]") {
     ScriptEngine engine;
     View root;
@@ -853,7 +853,7 @@ TEST_CASE("set_text clears stale attributed runs (Codex #3336)",
 // pulp #3336: paint_attributed_ must honor the text-align cascade instead of
 // hard-coding a left/x=0 anchor. RecordingCanvas measures 7px/char, so the two
 // spans ("Hello"+" world" = 11 chars) span 77px inside a 200px-wide label.
-TEST_CASE("paint_attributed_ honors text-align (Codex #3336)",
+TEST_CASE("paint_attributed_ honors text-align",
           "[view][widget][text][issue-3336]") {
     using pulp::canvas::DrawCommand;
     using pulp::canvas::RecordingCanvas;
