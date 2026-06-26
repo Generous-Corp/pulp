@@ -21,7 +21,12 @@ consume `pulp/canvas/sdf_text.hpp`.
 - `core/canvas/shaders/sdf_text.sksl` — single-channel sampler
 - `core/canvas/shaders/msdf_text.sksl` — `median(r,g,b)` sampler
 - `docs/reference/sdf-text.md` — rendering pipeline reference
-- `examples/sdf-text-demo/` — SDF vs MSDF side-by-side atlas dump
+- `examples/sdf-text-demo/` — runtime SDF text rendering and bloom demo
+- `examples/sdf-vs-msdf-demo/` — console SDF/MSDF atlas dump; MSDF RGB
+  output is currently single-channel-equivalent until `msdfgen` is wired
+- `examples/sdf-effects-demo/` — enumerates host-side effect presets and
+  writes software-rendered baseline files; visual effects wait for the SkSL
+  draw path
 
 ## Gotchas
 
@@ -61,17 +66,23 @@ consume `pulp/canvas/sdf_text.hpp`.
 ```bash
 cmake --build build --target \
   pulp-test-sdf-atlas pulp-test-msdf-atlas pulp-test-psdf-atlas \
-  pulp-test-sdf-text pulp-sdf-text-demo -j$(sysctl -n hw.ncpu)
+  pulp-test-sdf-text pulp-test-sdf-effects \
+  pulp-sdf-text-demo pulp-sdf-vs-msdf-demo pulp-sdf-effects-demo \
+  -j$(sysctl -n hw.ncpu)
 
 ./build/test/pulp-test-sdf-atlas
 ./build/test/pulp-test-msdf-atlas
 ./build/test/pulp-test-psdf-atlas
 ./build/test/pulp-test-sdf-text
-./build/examples/sdf-text-demo/pulp-sdf-text-demo   # writes /tmp/pulp-*-atlas.{pgm,ppm}
+./build/test/pulp-test-sdf-effects
+./build/examples/sdf-text-demo/pulp-sdf-text-demo
+./build/examples/sdf-vs-msdf-demo/pulp-sdf-vs-msdf-demo   # writes /tmp/pulp-*-atlas.{pgm,ppm}
+./build/examples/sdf-effects-demo/pulp-sdf-effects-demo   # writes /tmp/pulp-sdf-effects-*.pgm
 ```
 
 ## Future work (deferred, see `planning/next-features-plan.md` § Feature 4)
 
 - Vendor Chlumský's `msdfgen` library (MIT) for shape-decomposed channels
-- `SdfEffect` layer (glow / shadow / outline / bevel)
+- Wire `SdfEffectParams` through a SkSL-backed draw path so glow / shadow /
+  outline / bevel visibly render
 - Runtime atlas growth + LRU eviction

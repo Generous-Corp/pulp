@@ -774,9 +774,9 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
 | SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |
 | SDF text | `sdf_atlas.hpp` | Single-channel signed distance field glyph atlas for resolution-independent GPU text. See [docs/reference/sdf-text.md](./sdf-text.md). |
-| MSDF text | `msdf_atlas.hpp` | Multi-channel SDF atlas with `median(r,g,b)` sampler for sharp corners at extreme zoom (in-house median-of-three generator). |
+| MSDF text | `msdf_atlas.hpp` | Multi-channel SDF atlas scaffold with `median(r,g,b)` sampler plumbing; current generator emits equal RGB placeholder distances until `msdfgen` is wired. |
 | PSDF text | `psdf_atlas.hpp` | Pseudo-SDF variant with vector-fallback helper for extreme zoom. |
-| SDF effects | `sdf_effects.hpp` | Design-token presets for outline / shadow / glow / bevel over any SDF atlas (SkSL effect module). |
+| SDF effects | `sdf_effects.hpp` | Host-side design-token presets for outline / shadow / glow / bevel; visible rendering waits for the SkSL-backed SDF text draw path. |
 | SDF atlas cache | `sdf_atlas_cache.hpp` | Frame-based LRU glyph sharing across `fill_text_sdf` call-sites with dirty-rect upload hints. |
 | Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes. |
 
