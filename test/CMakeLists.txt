@@ -1149,7 +1149,7 @@ pulp_add_test_suite(pulp-test-network-stream
 # MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
 
-pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
 
 pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc)
 
