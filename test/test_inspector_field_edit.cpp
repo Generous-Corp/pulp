@@ -87,8 +87,8 @@ KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
 
 } // namespace
 
-TEST_CASE("InspectorOverlay Phase 3b: begin_field_edit sets editing state",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: begin_field_edit sets editing state",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     REQUIRE(s.overlay.selected_view() == s.child);
     REQUIRE_FALSE(s.overlay.is_editing());
@@ -101,8 +101,8 @@ TEST_CASE("InspectorOverlay Phase 3b: begin_field_edit sets editing state",
     REQUIRE(s.overlay.edit_caret_pos() == 1);  // caret at end of "8"
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: begin_field_edit refuses without selection",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: begin_field_edit refuses without selection",
+          "[inspect][overlay][field-edit]") {
     View root;
     InspectorOverlay overlay(root);
     overlay.set_active(true);
@@ -112,8 +112,8 @@ TEST_CASE("InspectorOverlay Phase 3b: begin_field_edit refuses without selection
     REQUIRE_FALSE(overlay.is_editing());
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: typing digits extends edit buffer",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: typing digits extends edit buffer",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     REQUIRE(s.overlay.begin_field_edit("layout.padding", 8.0f));
     REQUIRE(s.overlay.edit_buffer() == "8");
@@ -131,8 +131,8 @@ TEST_CASE("InspectorOverlay Phase 3b: typing digits extends edit buffer",
     REQUIRE(s.child->flex().padding == 850.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: backspace trims buffer",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: backspace trims buffer",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     s.overlay.handle_key_event(make_key(KeyCode::num5));
@@ -143,8 +143,8 @@ TEST_CASE("InspectorOverlay Phase 3b: backspace trims buffer",
     REQUIRE(s.overlay.edit_caret_pos() == 1);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Enter commits tweak to TweakStore",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Enter commits tweak to TweakStore",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Type "5" → buffer is "85"
@@ -164,8 +164,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Enter commits tweak to TweakStore",
     REQUIRE(s.child->flex().padding == 85.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Esc cancels and reverts",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Esc cancels and reverts",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Bump to "85" — real-time preview mutates the View.
@@ -178,8 +178,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Esc cancels and reverts",
     REQUIRE(s.child->flex().padding == 8.0f);      // reverted
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Up arrow increments by 1",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Up arrow increments by 1",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
@@ -192,8 +192,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Up arrow increments by 1",
     REQUIRE(s.child->flex().padding == 10.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Down arrow decrements by 1",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Down arrow decrements by 1",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
@@ -202,8 +202,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Down arrow decrements by 1",
     REQUIRE(s.child->flex().padding == 7.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Shift+Up nudges by 10",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Shift+Up nudges by 10",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
@@ -215,8 +215,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Shift+Up nudges by 10",
     REQUIRE(s.overlay.edit_buffer() == "8");
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Cmd+Up nudges by 100 (Figma semantics)",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Cmd+Up nudges by 100 (Figma semantics)",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
@@ -230,8 +230,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Cmd+Up nudges by 100 (Figma semantics)",
     REQUIRE(s.child->flex().padding == 108.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Tab commits and moves to next field",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Tab commits and moves to next field",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     // Paint once so editable_fields_ is populated with the panel's
     // tab order.
@@ -251,8 +251,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Tab commits and moves to next field",
     REQUIRE(s.overlay.editing_field() != "layout.padding");
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: clicking a numeric value enters edit mode",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: clicking a numeric value enters edit mode",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     // Paint to populate editable_fields_ (the panel-side hit rects).
     pulp::canvas::RecordingCanvas canvas;
@@ -293,8 +293,8 @@ TEST_CASE("InspectorOverlay Phase 3b: clicking a numeric value enters edit mode"
     REQUIRE(entered);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: editing layout.width writes to preferred_width",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: editing layout.width writes to preferred_width",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.width", s.child->flex().preferred_width);
     REQUIRE(s.overlay.edit_buffer() == "80");
@@ -309,8 +309,8 @@ TEST_CASE("InspectorOverlay Phase 3b: editing layout.width writes to preferred_w
     REQUIRE(v->getFloat32() == 805.0f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: editing style.opacity round-trips",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: editing style.opacity round-trips",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.child->set_opacity(0.5f);
     s.overlay.begin_field_edit("style.opacity", 0.5f);
@@ -328,8 +328,8 @@ TEST_CASE("InspectorOverlay Phase 3b: editing style.opacity round-trips",
     REQUIRE(v.has_value());
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: cancel_field_edit on inactive is no-op",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: cancel_field_edit on inactive is no-op",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     REQUIRE_FALSE(s.overlay.is_editing());
     s.overlay.cancel_field_edit();  // must not crash
@@ -337,9 +337,9 @@ TEST_CASE("InspectorOverlay Phase 3b: cancel_field_edit on inactive is no-op",
     REQUIRE(s.store.count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: commit_field_edit with empty buffer "
+TEST_CASE("InspectorOverlay field edit: commit_field_edit with empty buffer "
           "exits edit without emitting tweak",
-          "[inspect][overlay][phase3b]") {
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Backspace twice to empty the buffer ("8" → "")
@@ -351,8 +351,8 @@ TEST_CASE("InspectorOverlay Phase 3b: commit_field_edit with empty buffer "
     REQUIRE(s.store.count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: caret moves with Left/Right/Home/End",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: caret moves with Left/Right/Home/End",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 80.0f);
     REQUIRE(s.overlay.edit_buffer() == "80");
@@ -371,8 +371,8 @@ TEST_CASE("InspectorOverlay Phase 3b: caret moves with Left/Right/Home/End",
     REQUIRE(s.overlay.edit_caret_pos() == 2);  // already at end
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: deactivating inspector cancels active edit",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: deactivating inspector cancels active edit",
+          "[inspect][overlay][field-edit]") {
     Phase3bScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     s.overlay.handle_key_event(make_key(KeyCode::num5));
@@ -385,8 +385,8 @@ TEST_CASE("InspectorOverlay Phase 3b: deactivating inspector cancels active edit
     REQUIRE(s.store.count() == 0);              // no tweak emitted
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Esc while editing does NOT exit inspector",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Esc while editing does NOT exit inspector",
+          "[inspect][overlay][field-edit]") {
     // Esc inside an edit cancels the edit (selection intact). After that, Esc
     // with a selection DESELECTS (it no longer ascends to the parent), and Esc
     // with nothing selected is a NO-OP — Esc never exits the inspector (Cmd+I /
@@ -413,8 +413,8 @@ TEST_CASE("InspectorOverlay Phase 3b: Esc while editing does NOT exit inspector"
     REQUIRE(s.overlay.is_active());
 }
 
-TEST_CASE("InspectorOverlay Phase 3b: Tab without paint does nothing extra",
-          "[inspect][overlay][phase3b]") {
+TEST_CASE("InspectorOverlay field edit: Tab without paint does nothing extra",
+          "[inspect][overlay][field-edit]") {
     // Tab consults the editable_fields_ list populated by the last
     // paint. If we Tab without ever painting, commit happens but no
     // next-field move occurs (gracefully).
