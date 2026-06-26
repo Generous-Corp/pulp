@@ -34,13 +34,20 @@ What you get:
   - `pulp audio validate doctor out.wav --thd [--fundamental <hz>]` / `--response f1,f2,...`
   - `pulp audio validate compare a.wav b.wav [--mode null|spectral] [--tolerance <dbfs>]`
   - `pulp audio validate assert audio-run/assertions.json` — re-check stored assertions, nonzero on failure
+- **`pulp audio render` CLI** — offline scenario render of an explicit plugin
+  bundle through `PluginSlot`, no DAW or audio device:
+  - `pulp audio render --plugin <bundle> --out out.wav --duration-ms 1000`
+  - drive it with `--input-signal`, `--input`, repeatable `--param`, and repeatable `--midi`
+  - `--param <id>=<value>[@frame]` values are the PLAIN native parameter domain, not normalized
 
 To add coverage for a new effect, copy the nearest contract fixture in
 `test/test_audio_contracts.cpp` (or a Doctor case in `test/test_audio_doctor.cpp`)
 and adjust the expectations — don't hand-roll sample loops. For a captured WAV or
-an `audio-run/` bundle, reach for the `pulp audio validate` verbs above.
+an `audio-run/` bundle, reach for the `pulp audio validate` verbs above. For a
+plugin bundle that needs a deterministic offline scenario, use `pulp audio render`.
 
 > Live in-app inspection has landed in `/audio-inspect` and
-> `pulp run --audio-inspector`. The still-planned harness slices are live
-> ring-capture-to-WAV and a scenario-driven `render` verb; until those land,
-> use the fixtures, Audio Scope, and the `validate` verbs above.
+> `pulp run --audio-inspector`. The still-planned harness slice is the live
+> rolling-ring capture-to-WAV path; until it lands, use the fixtures, Audio
+> Scope, earliest-window `pulp run --audio-capture-wav`, `pulp audio validate`,
+> and `pulp audio render` according to the window/source you need.
