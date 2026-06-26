@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for coverage_tier_check.py (#566 Phase 2).
+"""Unit tests for coverage_tier_check.py (#566).
 
 Pure-Python, no subprocess, no CI dependency. Exercises every branch
 of classify_file / aggregate / render so a regression fails fast.
@@ -29,12 +29,11 @@ TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 # vitest v8 lane in `packages/pulp-react/**`.
 _FIRST_PARTY_PREFIXES = (
     "core/", "tools/", "apple/", "android/", "inspect/",
-    # Only the JS/TS package wired to vitest coverage is audited in
-    # Phase 1. Other entries under `packages/` (e.g. pulp-import-ir)
-    # join the audit when their coverage lane lands — adding them to
-    # the prefix list without a coverage source would silently fail
-    # the completeness check for files that genuinely have no Cobertura
-    # data yet.
+    # Only the JS/TS package wired to vitest coverage is audited here.
+    # Other entries under `packages/` join the audit when their coverage
+    # lane lands; adding them before they emit Cobertura data would fail
+    # the completeness check for files that genuinely have no coverage
+    # source yet.
     "packages/pulp-react/",
 )
 # Extension list MUST stay in lock-step with the
