@@ -88,10 +88,10 @@ TEST_CASE("BufferPool acquire and release", "[render][atlas]") {
     REQUIRE(pool.pool_size() == 0);
 }
 
-// ── Additional coverage — issue-646 ─────────────────────────────────────
+// ── Additional coverage — atlas edge cases ─────────────────────────────────────
 
-TEST_CASE("AtlasPacker starts new shelf when current is full - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("AtlasPacker starts new shelf when current is full",
+          "[render][atlas][edge-cases]") {
     // 100-wide packer: first 60 fit on shelf 0, second 60 won't fit next to them,
     // so the allocator rolls to a new shelf and returns x=0 at y=shelf_h.
     AtlasPacker p(100, 200);
@@ -109,8 +109,8 @@ TEST_CASE("AtlasPacker starts new shelf when current is full - issue-646",
     REQUIRE(p.height() == 200);
 }
 
-TEST_CASE("AtlasPacker returns false when atlas is full - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("AtlasPacker returns false when atlas is full",
+          "[render][atlas][edge-cases]") {
     AtlasPacker p(64, 64);
     AtlasPacker::Region r{};
     REQUIRE(p.allocate(64, 50, r));   // occupies most of the height
@@ -119,8 +119,8 @@ TEST_CASE("AtlasPacker returns false when atlas is full - issue-646",
     REQUIRE_FALSE(p.allocate(64, 20, r));
 }
 
-TEST_CASE("AtlasPacker reset lets us pack again from origin - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("AtlasPacker reset lets us pack again from origin",
+          "[render][atlas][edge-cases]") {
     AtlasPacker p(64, 64);
     AtlasPacker::Region r{};
     REQUIRE(p.allocate(64, 64, r));
@@ -132,8 +132,8 @@ TEST_CASE("AtlasPacker reset lets us pack again from origin - issue-646",
     REQUIRE(r.y == 0);
 }
 
-TEST_CASE("AtlasPacker shelf height tracks the tallest item - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("AtlasPacker shelf height tracks the tallest item",
+          "[render][atlas][edge-cases]") {
     AtlasPacker p(80, 80);
     AtlasPacker::Region r{};
 
@@ -149,8 +149,8 @@ TEST_CASE("AtlasPacker shelf height tracks the tallest item - issue-646",
     REQUIRE(r.y == 30);
 }
 
-TEST_CASE("AtlasPacker rejects non-positive dimensions - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("AtlasPacker rejects non-positive dimensions",
+          "[render][atlas][edge-cases]") {
     AtlasPacker p(64, 64);
     AtlasPacker::Region r{};
 
@@ -164,8 +164,8 @@ TEST_CASE("AtlasPacker rejects non-positive dimensions - issue-646",
     REQUIRE(r.y == 0);
 }
 
-TEST_CASE("ImageAtlas cache hit keeps original region and refcount - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("ImageAtlas cache hit keeps original region and refcount",
+          "[render][atlas][edge-cases]") {
     ImageAtlas atlas(64);
     AtlasPacker::Region first{};
     AtlasPacker::Region second{};
@@ -187,8 +187,8 @@ TEST_CASE("ImageAtlas cache hit keeps original region and refcount - issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("ImageAtlas mark_used keeps live entry from eviction - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("ImageAtlas mark_used keeps live entry from eviction",
+          "[render][atlas][edge-cases]") {
     ImageAtlas atlas(256);
     AtlasPacker::Region r{};
     REQUIRE(atlas.allocate(7, 16, 16, r));
@@ -204,8 +204,8 @@ TEST_CASE("ImageAtlas mark_used keeps live entry from eviction - issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("ImageAtlas release of unknown key is a no-op - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("ImageAtlas release of unknown key is a no-op",
+          "[render][atlas][edge-cases]") {
     ImageAtlas atlas(128);
     atlas.release(999);                 // no entry, must not crash or mutate
     REQUIRE(atlas.entry_count() == 0);
@@ -213,8 +213,8 @@ TEST_CASE("ImageAtlas release of unknown key is a no-op - issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero",
+          "[render][atlas][edge-cases]") {
     ImageAtlas atlas(128);
     AtlasPacker::Region r{};
     REQUIRE(atlas.allocate(5, 8, 8, r));
@@ -223,8 +223,8 @@ TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero - issue-646",
     REQUIRE(atlas.entry_count() == 1);
 }
 
-TEST_CASE("ImageAtlas rejects full atlas allocations and clamps release - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("ImageAtlas rejects full atlas allocations and clamps release",
+          "[render][atlas][edge-cases]") {
     ImageAtlas atlas(16);
     AtlasPacker::Region r{};
     REQUIRE(atlas.allocate(1, 16, 16, r));
@@ -237,8 +237,8 @@ TEST_CASE("ImageAtlas rejects full atlas allocations and clamps release - issue-
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops",
+          "[render][atlas][edge-cases]") {
     GradientAtlas ga;
     REQUIRE_FALSE(ga.has(42));
     int row = -1;
@@ -251,8 +251,8 @@ TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops - issue-
     REQUIRE(ga.entry_count() == 1);
 }
 
-TEST_CASE("GradientAtlas reports capacity exhaustion - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GradientAtlas reports capacity exhaustion",
+          "[render][atlas][edge-cases]") {
     GradientAtlas ga;
     int row = -1;
     for (int i = 0; i < 512; ++i) {
@@ -264,8 +264,8 @@ TEST_CASE("GradientAtlas reports capacity exhaustion - issue-646",
     REQUIRE(ga.entry_count() == 512);
 }
 
-TEST_CASE("GradientAtlas cache hit still succeeds after capacity is full - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GradientAtlas cache hit still succeeds after capacity is full",
+          "[render][atlas][edge-cases]") {
     GradientAtlas ga;
     int row = -1;
     for (int i = 0; i < 512; ++i) {
@@ -281,8 +281,8 @@ TEST_CASE("GradientAtlas cache hit still succeeds after capacity is full - issue
     REQUIRE(ga.entry_count() == 512);
 }
 
-TEST_CASE("GradientAtlas allocates monotonically after eviction - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GradientAtlas allocates monotonically after eviction",
+          "[render][atlas][edge-cases]") {
     GradientAtlas ga;
     int row = -1;
     REQUIRE(ga.allocate(1, row));
@@ -295,8 +295,8 @@ TEST_CASE("GradientAtlas allocates monotonically after eviction - issue-646",
     REQUIRE(ga.entry_count() == 1);
 }
 
-TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age",
+          "[render][atlas][edge-cases]") {
     GlyphAtlas atlas(256);
     AtlasPacker::Region r1{};
     AtlasPacker::Region r2{};
@@ -322,16 +322,16 @@ TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age - issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("GlyphAtlas rejects oversized glyph - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GlyphAtlas rejects oversized glyph",
+          "[render][atlas][edge-cases]") {
     GlyphAtlas atlas(32);
     AtlasPacker::Region r{};
     REQUIRE_FALSE(atlas.allocate(1, /*w=*/64, /*h=*/64, r));
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("GlyphAtlas rejects full atlas allocations without dropping entries - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("GlyphAtlas rejects full atlas allocations without dropping entries",
+          "[render][atlas][edge-cases]") {
     GlyphAtlas atlas(16);
     AtlasPacker::Region r{};
     REQUIRE(atlas.allocate(1, 16, 16, r));
@@ -339,8 +339,8 @@ TEST_CASE("GlyphAtlas rejects full atlas allocations without dropping entries - 
     REQUIRE(atlas.entry_count() == 1);
 }
 
-TEST_CASE("PathAtlas allocate, cache hit, and eviction - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("PathAtlas allocate, cache hit, and eviction",
+          "[render][atlas][edge-cases]") {
     PathAtlas atlas(256);
     AtlasPacker::Region r1{};
     AtlasPacker::Region r2{};
@@ -360,16 +360,16 @@ TEST_CASE("PathAtlas allocate, cache hit, and eviction - issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("PathAtlas rejects oversized path bitmap - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("PathAtlas rejects oversized path bitmap",
+          "[render][atlas][edge-cases]") {
     PathAtlas atlas(64);
     AtlasPacker::Region r{};
     REQUIRE_FALSE(atlas.allocate(1, /*w=*/128, /*h=*/128, r));
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("PathAtlas mark_used missing key is a no-op and full atlas rejects - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("PathAtlas mark_used missing key is a no-op and full atlas rejects",
+          "[render][atlas][edge-cases]") {
     PathAtlas atlas(16);
     AtlasPacker::Region r{};
     atlas.mark_used(999, 1);
@@ -380,8 +380,8 @@ TEST_CASE("PathAtlas mark_used missing key is a no-op and full atlas rejects - i
     REQUIRE(atlas.entry_count() == 1);
 }
 
-TEST_CASE("Atlas eviction treats future last-used frames as fresh - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("Atlas eviction treats future last-used frames as fresh",
+          "[render][atlas][edge-cases]") {
     AtlasPacker::Region r{};
 
     ImageAtlas image(64);
@@ -415,8 +415,8 @@ TEST_CASE("Atlas eviction treats future last-used frames as fresh - issue-646",
     REQUIRE(path.evict_stale(101, /*max_age=*/0) == 1);
 }
 
-TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
-          "[render][atlas][issue-646]") {
+TEST_CASE("BufferPool caps retained buffers at max_pool_size",
+          "[render][atlas][edge-cases]") {
     BufferPool<int> pool;
     // max_pool_size_ defaults to 32 (see texture_atlas.hpp); release many more
     // and verify the pool does not grow unbounded.

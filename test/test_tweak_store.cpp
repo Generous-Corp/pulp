@@ -341,9 +341,9 @@ TEST_CASE("TweakStore: from_json preserves existing locked anchors",
 }
 
 TEST_CASE("TweakStore: load_from_disk preserves a locked anchor absent from the file",
-          "[inspect][tweak-store][lock][disk][regression][issue-2432]") {
-    // Issue 2432: importing a file that omits a currently-locked
-    // anchor must NOT delete that anchor's tweaks or lock state — the
+          "[inspect][tweak-store][lock][disk][regression][locked-anchor]") {
+    // Importing a file that omits a currently-locked anchor must NOT
+    // delete that anchor's tweaks or lock state — the
     // lock contract promises protection from re-import. This exercises
     // the real disk path (load_from_disk), not just from_json.
     TempTweaksDir tmp;
@@ -396,9 +396,9 @@ TEST_CASE("TweakStore: load_from_disk keeps in-memory tweaks for a locked anchor
 }
 
 TEST_CASE("TweakStore: clear preserves multiple locked anchors and drops all unlocked",
-          "[inspect][tweak-store][lock][regression][issue-2432]") {
-    // Issue 2432: a global Inspector.clearTweaks routes through
-    // clear(). Locked anchors (tweaks + bypass + lock) must survive;
+          "[inspect][tweak-store][lock][regression][locked-anchor]") {
+    // Global Inspector.clearTweaks routes through clear(). Locked
+    // anchors (tweaks + bypass + lock) must survive;
     // every unlocked anchor must be erased.
     TweakStore s;
     s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(1), {});
@@ -730,13 +730,13 @@ TEST_CASE("Inspector.listTweaks / clearTweaks / setBypass without store error",
         R"({"anchorId":"a","value":true})")).is_error);
 }
 
-// Issue 2300: listTweaks must include anchors that
-// have ONLY a bypass (no tweak records). Otherwise setBypass on an
-// anchor with no entries — or one whose entries were later cleared
-// via clearTweaks — silently drops out of the protocol response and
-// the disk-persistence path loses the bypass state.
-TEST_CASE("Inspector.listTweaks includes bypass-only anchors (issue 2300 regression)",
-          "[inspect][protocol][listTweaks][regression][issue-2300]") {
+// listTweaks must include anchors that have ONLY a bypass (no tweak
+// records). Otherwise setBypass on an anchor with no entries — or one
+// whose entries were later cleared via clearTweaks — silently drops
+// out of the protocol response and the disk-persistence path loses the
+// bypass state.
+TEST_CASE("Inspector.listTweaks includes bypass-only anchors",
+          "[inspect][protocol][listTweaks][regression][bypass-only]") {
     Fixture f;
     // Anchor "a" has a tweak; anchor "b" has only a bypass.
     f.store.apply_tweak("a", "layout.padding",
@@ -756,8 +756,8 @@ TEST_CASE("Inspector.listTweaks includes bypass-only anchors (issue 2300 regress
 }
 
 TEST_CASE("Inspector.listTweaks reports bypass-only anchor after clearTweaks "
-          "removes its records (issue 2300 regression)",
-          "[inspect][protocol][listTweaks][regression][issue-2300]") {
+          "removes its records",
+          "[inspect][protocol][listTweaks][regression][bypass-only]") {
     // Tweak on anchor c + a path-bypass on the same anchor. Then
     // clearTweaks({anchorId: c}) wipes c's tweak entries but leaves
     // its bypass intact. listTweaks must still surface the bypass.
@@ -782,8 +782,8 @@ TEST_CASE("Inspector.listTweaks reports bypass-only anchor after clearTweaks "
 }
 
 TEST_CASE("TweakStore::bypassed_anchors enumerates every bypass entry "
-          "regardless of tweak presence (issue 2300 regression)",
-          "[inspect][tweak-store][regression][issue-2300]") {
+          "regardless of tweak presence",
+          "[inspect][tweak-store][regression][bypass-only]") {
     TweakStore s;
     s.apply_tweak("with-tweak", "x", choc::value::createInt32(1), {});
     s.set_bypass("with-tweak", true);
@@ -1349,7 +1349,7 @@ TEST_CASE("TweakStore::diff ignores bypass overlay — bypassed tweaks still dri
 // lock once, writes all keys, and flushes EXACTLY once.
 
 TEST_CASE("TweakStore::apply_tweaks_batch writes all keys in one atomic flush",
-          "[inspect][tweak-store][batch][atomic-write][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TempTweaksDir tmp;
     TweakStore s;
     s.set_auto_save(true, tmp.file.string());
@@ -1395,7 +1395,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch writes all keys in one atomic flush",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch flushes disk exactly once",
-          "[inspect][tweak-store][batch][atomic-write][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TempTweaksDir tmp;
     TweakStore s;
     s.set_auto_save(true, tmp.file.string());
@@ -1427,7 +1427,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch flushes disk exactly once",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch with empty entries is a no-op",
-          "[inspect][tweak-store][batch][atomic-write][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TweakStore s;
     s.apply_tweak("a", "x", choc::value::createInt32(1));
     auto total = s.apply_tweaks_batch("a", {}, "noop");
@@ -1436,7 +1436,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch with empty entries is a no-op",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch overwrites existing keys",
-          "[inspect][tweak-store][batch][atomic-write][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TweakStore s;
     s.apply_tweak("a", "layout.left", choc::value::createFloat32(5.0f), "old");
     std::vector<TweakStore::BatchEntry> batch;

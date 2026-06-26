@@ -46,7 +46,7 @@ constexpr Sample kSamples[] = {
     { "Hello world", "Inter", 14.0f, "Latin proportional regular" },
     { "Hello world", "IBM Plex Mono", 14.0f, "Latin monospace regular" },
 
-    // The original #2163 callbacks — the sizes that drove the
+    // Compact plugin-label samples — the sizes that drive the
     // empirical safety margin into TextShaper::measure_metrics.
     { "CROSSOVER",          "IBM Plex Mono", 7.0f,  "fontSize 7 section title (Chainer)" },
     { "MID / SIDE WIDTH",   "IBM Plex Mono", 7.0f,  "fontSize 7 section title (Chainer)" },
@@ -63,7 +63,7 @@ constexpr Sample kSamples[] = {
 } // namespace
 
 TEST_CASE("font measurement-paint width parity within 0.5px",
-          "[font][parity][issue-2163]") {
+          "[font][parity][metrics]") {
 #ifndef PULP_HAS_SKIA
     SUCCEED("Skia not compiled — parity harness needs SkFont::measureText");
     return;
