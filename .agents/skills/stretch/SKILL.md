@@ -92,7 +92,17 @@ resample, no EQ) vs `--character clean` (time-stretch).
   compression. Offline-only (allocates; runs on the render worker, never the audio
   thread). Enabled by default in the PulpTempoSampler render path. Crest factor is
   the WRONG success metric (restoring all peaks moves peak AND RMS together) — use
-  per-transient peak-vs-source + attack slope.
+  per-transient peak-vs-source + attack slope. **(4) Graft only the HIGH band**
+  (`kReloHpHz`, 300 Hz): the PV smears high-frequency attacks but reconstructs
+  sustained LOW frequencies cleanly + continuously. A full-band graft re-injects
+  low-frequency attack energy whose phase can't match the PV body across the short
+  (~1 ms) seam — and a deep kick's period (~15 ms) is longer than the whole graft
+  window — so the seam can't bridge it: a low-frequency discontinuity that "blows
+  out" deep hits, ONLY at stretch (no PV body to mismatch at ratio 1). The graft
+  high-passes both sides and swaps only the high band, leaving the kick body to the
+  PV. Crossover tuned by ear on a real break (180 Hz still blew out; 300 Hz clean +
+  punchy). This artifact is INVISIBLE to peak/clip/wobble metrics (output stays
+  ~0.8 full-scale) — found only via a graft-on/off vs PV-only listening A/B.
 
 ## Fine-tune + share a preset (`StretchPreset`)
 
