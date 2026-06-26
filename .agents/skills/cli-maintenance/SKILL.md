@@ -885,11 +885,14 @@ honors `PULP_NO_MODIFY_PATH=1` (same opt-out as `install.sh`) and is idempotent
 profile-selection logic, keep it in sync with `tools/install/install.sh`'s PATH
 block so the two install surfaces agree.
 
-## `pulp run --headless / --screenshot / --frames / --watch`
+## `pulp run --headless / screenshot / live audio flags`
 
 `tools/cli/cmd_run.cpp` plus the shared parser in
 `tools/cli/cmd_run_parse.cpp` (`parse_run_options` / `assemble_launch_args`)
-expose four CI-friendly flags on top of the basic launch path:
+expose CI-friendly rendering flags and live-audio inspection flags on top of
+the basic launch path. The Rust front end mirrors this surface in
+`experimental/pulp-rs/src/cmd/run_parse.rs`; keep both parsers and forwarding
+orders in lockstep.
 
 - `--headless` — run the standalone offscreen (no window). Forwarded
   as `--headless` and as the `PULP_HEADLESS=1` env var so binaries
@@ -905,12 +908,25 @@ expose four CI-friendly flags on top of the basic launch path:
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
+- `--audio-inspector` — open the live Audio Inspector. Forwarded as
+  `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
+- `--audio-probe-json <path>` — write live probe metrics JSON and exit.
+  Implies `--headless`, but does not imply a screenshot artifact. Forwarded
+  as `--audio-probe-json <path>` and `PULP_AUDIO_PROBE_JSON=<path>`.
+- `--audio-scope-json <path>` — write versioned live Audio Scope JSON and
+  exit. It owns the acquisition flags `--audio-scope-window`,
+  `--audio-scope-trigger`, and `--audio-scope-channel`; those flags are only
+  valid with `--audio-scope-json`. Forward all four argv values plus
+  `PULP_AUDIO_SCOPE_JSON`, `PULP_AUDIO_SCOPE_WINDOW`,
+  `PULP_AUDIO_SCOPE_TRIGGER`, and `PULP_AUDIO_SCOPE_CHANNEL`.
 
 The CLI parser is unit-tested in `test/test_cli_run_options.cpp`
 (parse + forwarding contract) and end-to-end shell-out coverage lives
 in `test/test_cli_shellout.cpp`, which exercises
 the discover-binary → launch-with-flags → PNG-on-disk path against the
-fixture binary in `test/fixtures/cli_run_fixture.cpp`.
+fixture binary in `test/fixtures/cli_run_fixture.cpp`. Rust parser and
+orchestrator parity lives in `experimental/pulp-rs/src/cmd/run_parse.rs`
+and `experimental/pulp-rs/src/cmd/orchestrate.rs` tests.
 
 Gotchas:
 
@@ -929,6 +945,8 @@ Gotchas:
 - `--watch` is consumed by the CLI; it is NOT forwarded to the
   launched binary. The launched binary just sees the headless
   flags.
+- `--audio-scope-json` cannot be combined with `--audio-inspector` because
+  both consume the live capture FIFO.
 
 ## `pulp validate` — plugin-format validators
 

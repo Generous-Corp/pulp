@@ -557,9 +557,14 @@ pub fn run_cmd<S: Spawner>(
     };
 
     // Default screenshot path so `pulp run --headless` still produces
-    // an artifact in CI without an explicit path. Mirrors C++
-    // `cmd_run.cpp` lines 95-100.
-    if opts.headless && opts.screenshot_path.is_empty() {
+    // an artifact in CI without an explicit path. JSON-only audio probe
+    // and scope runs are already artifact-producing, so mirror the C++
+    // path and do not force an extra PNG for those modes.
+    if opts.headless
+        && opts.screenshot_path.is_empty()
+        && opts.audio_probe_json_path.is_empty()
+        && opts.audio_scope_json_path.is_empty()
+    {
         let base = if opts.target_name.is_empty() {
             "pulp-run".to_owned()
         } else {
@@ -574,8 +579,16 @@ pub fn run_cmd<S: Spawner>(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     if opts.headless {
-        writeln!(out, "Launching {name} (headless) \u{2192} {}", opts.screenshot_path)
+        if opts.screenshot_path.is_empty() {
+            writeln!(out, "Launching {name} (headless)").map_err(io_err)?;
+        } else {
+            writeln!(
+                out,
+                "Launching {name} (headless) \u{2192} {}",
+                opts.screenshot_path
+            )
             .map_err(io_err)?;
+        }
     } else {
         writeln!(out, "Launching {name}...").map_err(io_err)?;
     }
@@ -593,7 +606,17 @@ pub fn run_cmd<S: Spawner>(
         .map_err(io_err)?;
     }
 
-    let mut inv = Invocation::new(binary.to_string_lossy().into_owned());
+    let mut inv = apply_run_env(
+        Invocation::new(binary.to_string_lossy().into_owned()),
+        &opts,
+    );
+    for a in assemble_launch_args(&opts) {
+        inv = inv.arg(a);
+    }
+    spawner.run(&inv)
+}
+
+fn apply_run_env(mut inv: Invocation, opts: &RunArgs) -> Invocation {
     if opts.headless {
         inv = inv.env("PULP_HEADLESS", "1");
     }
@@ -603,17 +626,36 @@ pub fn run_cmd<S: Spawner>(
     if opts.frames != 1 {
         inv = inv.env("PULP_FRAMES", opts.frames.to_string());
     }
-    for a in assemble_launch_args(&opts) {
-        inv = inv.arg(a);
+    if opts.audio_inspector {
+        inv = inv.env("PULP_AUDIO_INSPECTOR", "1");
     }
-    spawner.run(&inv)
+    if !opts.audio_probe_json_path.is_empty() {
+        inv = inv.env("PULP_AUDIO_PROBE_JSON", opts.audio_probe_json_path.clone());
+    }
+    if !opts.audio_scope_json_path.is_empty() {
+        inv = inv
+            .env("PULP_AUDIO_SCOPE_JSON", opts.audio_scope_json_path.clone())
+            .env(
+                "PULP_AUDIO_SCOPE_WINDOW",
+                opts.audio_scope_window.to_string(),
+            )
+            .env("PULP_AUDIO_SCOPE_TRIGGER", opts.audio_scope_trigger.clone())
+            .env(
+                "PULP_AUDIO_SCOPE_CHANNEL",
+                opts.audio_scope_channel.to_string(),
+            );
+    }
+    inv
 }
 
 fn write_run_help(out: &mut impl Write) -> Result<()> {
     writeln!(
         out,
         "pulp run — launch a standalone Pulp application\n\n\
-         Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>] [--watch] [-- args...]\n\n\
+         Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n\
+                [--watch] [--audio-inspector] [--audio-probe-json <file>]\n\
+                [--audio-scope-json <file>] [--audio-scope-window <n>]\n\
+                [--audio-scope-trigger <mode>] [--audio-scope-channel <n>] [-- args...]\n\n\
          If no target is specified, finds the first standalone binary in the\n\
          active project build. Arguments after `--` are passed to the launched\n\
          application.\n\n\
@@ -628,11 +670,17 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          PULP_FRAMES=<n>.)\n  \
          --watch                 Re-launch the binary on source changes.\n                          \
          Composes with --headless / --screenshot.\n  \
+         --audio-inspector       Open the live Audio Inspector window.\n                          \
+         (Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1.)\n  \
+         --audio-probe-json <file>\n                          \
+         Write live probe metrics as JSON, then exit. Implies --headless.\n  \
+         --audio-scope-json <file>\n                          \
+         Write live Audio Scope JSON, then exit. Use --audio-scope-window,\n                          \
+         --audio-scope-trigger, and --audio-scope-channel to control acquisition.\n  \
          -h, --help              Show this help and exit.\n"
     )
     .map_err(io_err)
 }
-
 
 // ── clean ────────────────────────────────────────────────────────────
 
@@ -1337,6 +1385,21 @@ mod tests {
         std::fs::write(proj.build_dir.join("CMakeCache.txt"), "").unwrap();
     }
 
+    fn make_run_binary(proj: &ActiveProject, name: &str) -> PathBuf {
+        let bin = proj.build_dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let target = bin.join(name);
+        std::fs::write(&target, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&target).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&target, perms).unwrap();
+        }
+        target
+    }
+
     #[test]
     fn parse_build_args_captures_flags() {
         let a = parse_build_args(&[
@@ -1842,11 +1905,7 @@ mod tests {
 
     #[test]
     fn parse_run_args_first_positional_wins() {
-        let r = parse_run_args(&[
-            "first".to_owned(),
-            "second".to_owned(),
-            "third".to_owned(),
-        ]);
+        let r = parse_run_args(&["first".to_owned(), "second".to_owned(), "third".to_owned()]);
         // First positional wins as target; subsequent positionals
         // (#914 contract, matches C++) land in user_pass_through.
         assert_eq!(r.target_name, "first");
@@ -1854,6 +1913,111 @@ mod tests {
             r.user_pass_through,
             vec!["second".to_owned(), "third".to_owned()]
         );
+    }
+
+    #[test]
+    fn run_help_advertises_live_audio_flags() {
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&["--help".to_owned()]);
+
+        let rc = run_cmd(Path::new("."), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        assert!(spawner.calls.borrow().is_empty());
+        let help = String::from_utf8(out).unwrap();
+        assert!(help.contains("--audio-inspector"));
+        assert!(help.contains("--audio-probe-json"));
+        assert!(help.contains("--audio-scope-json"));
+    }
+
+    #[test]
+    fn run_cmd_forwards_audio_probe_json_without_default_screenshot() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let binary = make_run_binary(&proj, "my-app");
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&[
+            "my-app".to_owned(),
+            "--audio-probe-json".to_owned(),
+            "probe.json".to_owned(),
+        ]);
+
+        let rc = run_cmd(td.path(), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert_eq!(call.program, binary.to_string_lossy());
+        assert_eq!(
+            call.args,
+            vec![
+                "--headless".to_owned(),
+                "--audio-probe-json".to_owned(),
+                "probe.json".to_owned()
+            ]
+        );
+        assert!(call
+            .envs
+            .contains(&("PULP_HEADLESS".to_owned(), "1".to_owned())));
+        assert!(call
+            .envs
+            .contains(&("PULP_AUDIO_PROBE_JSON".to_owned(), "probe.json".to_owned())));
+        assert!(!call.envs.iter().any(|(key, _)| key == "PULP_SCREENSHOT"));
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("Launching my-app (headless)"));
+        assert!(!stdout.contains(".png"));
+    }
+
+    #[test]
+    fn run_cmd_forwards_audio_scope_json_env_and_args() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        make_run_binary(&proj, "scope-app");
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&[
+            "scope-app".to_owned(),
+            "--audio-scope-json=scope.json".to_owned(),
+            "--audio-scope-window=4096".to_owned(),
+            "--audio-scope-trigger".to_owned(),
+            "raw".to_owned(),
+            "--audio-scope-channel".to_owned(),
+            "1".to_owned(),
+        ]);
+
+        let rc = run_cmd(td.path(), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        let call = &calls[0];
+        assert_eq!(
+            call.args,
+            vec![
+                "--headless".to_owned(),
+                "--audio-scope-json".to_owned(),
+                "scope.json".to_owned(),
+                "--audio-scope-window".to_owned(),
+                "4096".to_owned(),
+                "--audio-scope-trigger".to_owned(),
+                "raw".to_owned(),
+                "--audio-scope-channel".to_owned(),
+                "1".to_owned(),
+            ]
+        );
+        for pair in [
+            ("PULP_HEADLESS", "1"),
+            ("PULP_AUDIO_SCOPE_JSON", "scope.json"),
+            ("PULP_AUDIO_SCOPE_WINDOW", "4096"),
+            ("PULP_AUDIO_SCOPE_TRIGGER", "raw"),
+            ("PULP_AUDIO_SCOPE_CHANNEL", "1"),
+        ] {
+            assert!(call.envs.contains(&(pair.0.to_owned(), pair.1.to_owned())));
+        }
     }
 
     #[test]
