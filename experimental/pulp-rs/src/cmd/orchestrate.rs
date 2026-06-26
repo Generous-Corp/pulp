@@ -648,33 +648,8 @@ fn write_live_audio_notice(out: &mut impl Write, opts: &RunArgs) -> Result<()> {
 }
 
 fn apply_run_env(mut inv: Invocation, opts: &RunArgs) -> Invocation {
-    if opts.headless {
-        inv = inv.env("PULP_HEADLESS", "1");
-    }
-    if !opts.screenshot_path.is_empty() {
-        inv = inv.env("PULP_SCREENSHOT", opts.screenshot_path.clone());
-    }
-    if opts.frames != 1 {
-        inv = inv.env("PULP_FRAMES", opts.frames.to_string());
-    }
-    if opts.audio_inspector {
-        inv = inv.env("PULP_AUDIO_INSPECTOR", "1");
-    }
-    if !opts.audio_probe_json_path.is_empty() {
-        inv = inv.env("PULP_AUDIO_PROBE_JSON", opts.audio_probe_json_path.clone());
-    }
-    if !opts.audio_scope_json_path.is_empty() {
-        inv = inv
-            .env("PULP_AUDIO_SCOPE_JSON", opts.audio_scope_json_path.clone())
-            .env(
-                "PULP_AUDIO_SCOPE_WINDOW",
-                opts.audio_scope_window.to_string(),
-            )
-            .env("PULP_AUDIO_SCOPE_TRIGGER", opts.audio_scope_trigger.clone())
-            .env(
-                "PULP_AUDIO_SCOPE_CHANNEL",
-                opts.audio_scope_channel.to_string(),
-            );
+    for (key, value) in crate::cmd::run_parse::assemble_launch_env(opts) {
+        inv = inv.env(key, value);
     }
     inv
 }
@@ -708,6 +683,9 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          --audio-scope-json <file>\n                          \
          Write live Audio Scope JSON, then exit. Use --audio-scope-window,\n                          \
          --audio-scope-trigger, and --audio-scope-channel to control acquisition.\n  \
+         PULP_RUN_AUDIO_NOTICE=0\n                          \
+         Suppress the pre-launch notice that the standalone may activate\n                          \
+         system audio output.\n  \
          -h, --help              Show this help and exit.\n"
     )
     .map_err(io_err)
@@ -1966,6 +1944,7 @@ mod tests {
         assert!(help.contains("--audio-inspector"));
         assert!(help.contains("--audio-probe-json"));
         assert!(help.contains("--audio-scope-json"));
+        assert!(help.contains("PULP_RUN_AUDIO_NOTICE=0"));
     }
 
     #[test]

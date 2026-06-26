@@ -390,6 +390,52 @@ pub fn assemble_launch_args(opts: &RunOptions) -> Vec<String> {
     out
 }
 
+/// Build the environment variables exported to the launched standalone binary.
+///
+/// Kept next to [`assemble_launch_args`] so future launcher flags update argv
+/// and env forwarding together.
+#[must_use]
+pub fn assemble_launch_env(opts: &RunOptions) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if opts.headless {
+        out.push(("PULP_HEADLESS".to_owned(), "1".to_owned()));
+    }
+    if !opts.screenshot_path.is_empty() {
+        out.push(("PULP_SCREENSHOT".to_owned(), opts.screenshot_path.clone()));
+    }
+    if opts.frames != 1 {
+        out.push(("PULP_FRAMES".to_owned(), opts.frames.to_string()));
+    }
+    if opts.audio_inspector {
+        out.push(("PULP_AUDIO_INSPECTOR".to_owned(), "1".to_owned()));
+    }
+    if !opts.audio_probe_json_path.is_empty() {
+        out.push((
+            "PULP_AUDIO_PROBE_JSON".to_owned(),
+            opts.audio_probe_json_path.clone(),
+        ));
+    }
+    if !opts.audio_scope_json_path.is_empty() {
+        out.push((
+            "PULP_AUDIO_SCOPE_JSON".to_owned(),
+            opts.audio_scope_json_path.clone(),
+        ));
+        out.push((
+            "PULP_AUDIO_SCOPE_WINDOW".to_owned(),
+            opts.audio_scope_window.to_string(),
+        ));
+        out.push((
+            "PULP_AUDIO_SCOPE_TRIGGER".to_owned(),
+            opts.audio_scope_trigger.clone(),
+        ));
+        out.push((
+            "PULP_AUDIO_SCOPE_CHANNEL".to_owned(),
+            opts.audio_scope_channel.to_string(),
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,6 +743,23 @@ mod tests {
     }
 
     #[test]
+    fn assemble_env_matches_forwarded_render_flags() {
+        let mut opts = RunOptions::new();
+        opts.headless = true;
+        opts.screenshot_path = "ui.png".to_owned();
+        opts.frames = 30;
+
+        assert_eq!(
+            assemble_launch_env(&opts),
+            vec![
+                ("PULP_HEADLESS".to_owned(), "1".to_owned()),
+                ("PULP_SCREENSHOT".to_owned(), "ui.png".to_owned()),
+                ("PULP_FRAMES".to_owned(), "30".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn assemble_full_combo_order_matches_cpp() {
         let mut opts = RunOptions::new();
         opts.headless = true;
@@ -717,6 +780,31 @@ mod tests {
                 "--audio-probe-json".to_owned(),
                 "probe.json".to_owned(),
                 "--child".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn assemble_env_matches_forwarded_live_audio_flags() {
+        let mut opts = RunOptions::new();
+        opts.headless = true;
+        opts.audio_inspector = true;
+        opts.audio_probe_json_path = "probe.json".to_owned();
+        opts.audio_scope_json_path = "scope.json".to_owned();
+        opts.audio_scope_window = 4096;
+        opts.audio_scope_trigger = "raw".to_owned();
+        opts.audio_scope_channel = 1;
+
+        assert_eq!(
+            assemble_launch_env(&opts),
+            vec![
+                ("PULP_HEADLESS".to_owned(), "1".to_owned()),
+                ("PULP_AUDIO_INSPECTOR".to_owned(), "1".to_owned()),
+                ("PULP_AUDIO_PROBE_JSON".to_owned(), "probe.json".to_owned()),
+                ("PULP_AUDIO_SCOPE_JSON".to_owned(), "scope.json".to_owned()),
+                ("PULP_AUDIO_SCOPE_WINDOW".to_owned(), "4096".to_owned()),
+                ("PULP_AUDIO_SCOPE_TRIGGER".to_owned(), "raw".to_owned()),
+                ("PULP_AUDIO_SCOPE_CHANNEL".to_owned(), "1".to_owned()),
             ]
         );
     }
