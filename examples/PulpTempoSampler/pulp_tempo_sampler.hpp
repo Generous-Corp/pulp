@@ -681,10 +681,11 @@ public:
     // instead of the piano layout's white-key gaps — those map a,s,d,f,g to notes
     // 0,2,4,5,7 and SKIP the black-key slices (1,3,6), so with N slices you run out
     // every few keys (the "first 4 keys work then it stops" report). Host MIDI is
-    // unaffected (it triggers chromatically via process()). Deterministic so
-    // note-on and note-off resolve to the SAME trigger note; black keys collapse to
-    // the white key below (harmless for the home-row slice-pad use). Only the typing
-    // path remaps — waveform clicks and host MIDI map a slice per semitone directly.
+    // unaffected (it triggers chromatically via process()). The key-down trigger
+    // note is remembered per held physical key so note-off releases the same voice
+    // even if ROOT changes mid-hold. Black keys collapse to the white key below
+    // (harmless for the home-row slice-pad use). Only the typing path remaps —
+    // waveform clicks and host MIDI map a slice per semitone directly.
     int slice_trigger_note(int note) const {
         const int root = static_cast<int>(state().get_value(kRootNote));
         static const int white_below[12] = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6};
@@ -693,27 +694,54 @@ public:
         if (rem < 0) { rem += 12; --oct; }
         return root + oct * 7 + white_below[rem];
     }
+    bool is_keyboard_note_held(int physical_note) const {
+        return std::any_of(held_keyboard_triggers_ui_.begin(), held_keyboard_triggers_ui_.end(),
+                           [physical_note](const HeldKeyboardTrigger& held) {
+                               return held.physical_note == physical_note;
+                           });
+    }
+    int held_trigger_note_for(int physical_note) const {
+        for (const auto& held : held_keyboard_triggers_ui_)
+            if (held.physical_note == physical_note) return held.trigger_note;
+        return slice_trigger_note(physical_note);
+    }
+    void forget_held_keyboard_trigger(int physical_note) {
+        held_keyboard_triggers_ui_.erase(
+            std::remove_if(held_keyboard_triggers_ui_.begin(), held_keyboard_triggers_ui_.end(),
+                           [physical_note](const HeldKeyboardTrigger& held) {
+                               return held.physical_note == physical_note;
+                           }),
+            held_keyboard_triggers_ui_.end());
+    }
+    std::vector<int> held_physical_notes() const {
+        std::vector<int> notes;
+        notes.reserve(held_keyboard_triggers_ui_.size());
+        for (const auto& held : held_keyboard_triggers_ui_)
+            notes.push_back(held.physical_note);
+        return notes;
+    }
     void keyboard_play_on(int note, float velocity) {
-        ui_note_on(slice_trigger_note(note), velocity);  // consecutive-slice trigger
-        if (std::find(held_notes_ui_.begin(), held_notes_ui_.end(), note) ==
-            held_notes_ui_.end())
-            held_notes_ui_.push_back(note);              // light the PHYSICAL key
+        const int trigger = slice_trigger_note(note);
+        ui_note_on(trigger, velocity);                   // consecutive-slice trigger
+        if (!is_keyboard_note_held(note))
+            held_keyboard_triggers_ui_.push_back({note, trigger});
         push_keyboard_lights();
     }
     void keyboard_play_off(int note) {
-        ui_note_off(slice_trigger_note(note));
-        held_notes_ui_.erase(
-            std::remove(held_notes_ui_.begin(), held_notes_ui_.end(), note),
-            held_notes_ui_.end());
+        ui_note_off(held_trigger_note_for(note));
+        forget_held_keyboard_trigger(note);
         push_keyboard_lights();
     }
     /// Push the current held-note set to the on-screen keyboard so it lights the
     /// matching keys (absolute MIDI). No-op until the keyboard window exists.
     void push_keyboard_lights() {
-        if (kb_) kb_->set_active_notes(held_notes_ui_);
+        if (kb_) {
+            auto notes = held_physical_notes();
+            kb_->set_active_notes(notes);
+        }
     }
     /// Test-only: the held-note set currently lit on the on-screen keyboard.
-    const std::vector<int>& held_notes_for_test() const { return held_notes_ui_; }
+    std::vector<int> held_notes_for_test() const { return held_physical_notes(); }
     /// Test-only: inject the SDK keyboard so the held-note → set_active_notes wiring
     /// can be exercised headlessly (the live path creates it in toggle_keyboard_window).
     void set_keyboard_for_test(std::unique_ptr<view::MusicalTypingKeyboard> kb) {
@@ -740,8 +768,8 @@ public:
             //     clear the lit display so nothing lingers lit on the next open.
             kb_window_->set_app_key_monitor({});   // stop routing app keys to the keyboard
             if (kb_) kb_->set_input_capture(false);
-            for (int n : held_notes_ui_) ui_note_off(slice_trigger_note(n));
-            held_notes_ui_.clear();
+            for (const auto& held : held_keyboard_triggers_ui_) ui_note_off(held.trigger_note);
+            held_keyboard_triggers_ui_.clear();
             push_keyboard_lights();
             kb_window_->hide();
             return;
@@ -1061,7 +1089,8 @@ public:
         root->add_child(std::move(wf));
 
         // Musical typing: the SDK MusicalTypingController turns the QWERTY row
-        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … This is the
+        // into notes; the processor remaps those typing notes so the natural
+        // home row (a,s,d,f,g,h,j,…) plays consecutive slices. This is the
         // SINGLE computer-keyboard source (the on-screen keyboard is display-only).
         // Notes flow through keyboard_play_on/off, which both plays the slice (same
         // lock-free UI->audio queue as host MIDI / slice clicks) AND lights the
@@ -1809,11 +1838,14 @@ private:
     // window (which holds a View& to kb_) destructs first.
     std::unique_ptr<view::MusicalTypingKeyboard> kb_;
     std::unique_ptr<view::WindowHost> kb_window_;
-    // Currently-held MIDI notes lit on the on-screen keyboard (UI thread only).
-    // Fed by the editor's QWERTY typing and by clicks on the keyboard's keys;
-    // pushed to the keyboard via set_active_notes on every change. Empty → no lit
-    // keys (e.g. while the keyboard is hidden, since typing is gated off then).
-    std::vector<int> held_notes_ui_;
+    struct HeldKeyboardTrigger {
+        int physical_note = 0;
+        int trigger_note = 0;
+    };
+    // Currently-held keyboard notes (UI thread only). physical_note lights the
+    // key; trigger_note is the note-on value to release even if ROOT changed.
+    // Fed by QWERTY typing and keyboard clicks. Empty -> no lit keys.
+    std::vector<HeldKeyboardTrigger> held_keyboard_triggers_ui_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {
