@@ -1531,9 +1531,11 @@ This wires a 24h update-check cache plus a config surface for
   `banner_shown_for_version` after a successful upgrade so the
   next-invocation banner stays quiet for the version we just installed.
 - **`tools/cli/cmd_config.cpp`** — `pulp config get|set|list` with an
-  allow-list of keys (`update.mode`, `update.check_interval_hours`,
-  `update.channel`). Allow-list prevents typos silently inflating the
-  config surface.
+  allow-list of keys (`pr.workflow`, `update.mode`,
+  `update.check_interval_hours`, `update.channel`,
+  `update.bump_projects`, `import_design.default_mode`,
+  `import_design.default_emit`, and `claude.send_user_file`).
+  Allow-list prevents typos silently inflating the config surface.
 - **`tools/cli/pulp_cli.cpp`** — `maybe_emit_update_banner_and_refresh()`
   runs before dispatch. `PULP_UPDATE_CHECK_DISABLED` env short-circuits
   it (used by CI). `banner_blocked_commands` = `config`, `version`,
