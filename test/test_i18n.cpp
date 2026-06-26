@@ -64,7 +64,7 @@ TEST_CASE("i18n add and translate", "[runtime][i18n]") {
     REQUIRE(strings.count() == 1);
 }
 
-TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n][coverage]") {
+TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("mode", "old");
     strings.add("mode", "new");
@@ -72,7 +72,7 @@ TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n][cove
     REQUIRE(strings.translate("mode") == "new");
 }
 
-TEST_CASE("i18n accepts empty in-memory keys", "[runtime][i18n][coverage]") {
+TEST_CASE("i18n accepts empty in-memory keys", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("", "metadata");
     strings.add("normal", "value");
@@ -117,28 +117,28 @@ TEST_CASE("i18n argument substitution also applies to missing-key fallback",
 }
 
 TEST_CASE("i18n argument substitution handles adjacent placeholders",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     LocalisedStrings strings;
     strings.add("compact", "{0}{1}{0}");
     REQUIRE(strings.translate("compact", {"A", "B"}) == "ABA");
 }
 
 TEST_CASE("i18n argument substitution treats double braces as literal text",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     LocalisedStrings strings;
     strings.add("template", "{{0}} {0}");
     REQUIRE(strings.translate("template", {"value"}) == "{value} value");
 }
 
 TEST_CASE("i18n argument substitution applies later indexes after earlier replacements",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     LocalisedStrings strings;
     strings.add("nested", "{0} {1}");
     REQUIRE(strings.translate("nested", {"{1}", "done"}) == "done done");
 }
 
 TEST_CASE("i18n argument substitution handles multi-digit indexes literally",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("many", "{9}:{10}:{0}");
     std::vector<std::string> args = {
@@ -159,7 +159,7 @@ TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
 }
 
 TEST_CASE("i18n clear leaves selected locale intact",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.set_locale("ja");
     strings.add("hello", "konnichiwa");
@@ -217,7 +217,7 @@ TEST_CASE("i18n .strings parser ignores malformed lines", "[runtime][i18n]") {
 }
 
 TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".strings");
     {
         std::ofstream f(tmp.path());
@@ -234,7 +234,7 @@ TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
 }
 
 TEST_CASE("i18n .strings parser accepts keys and values with spaces",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".strings");
     {
         std::ofstream f(tmp.path());
@@ -249,7 +249,7 @@ TEST_CASE("i18n .strings parser accepts keys and values with spaces",
 }
 
 TEST_CASE("i18n .strings parser keeps entries without semicolons",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".strings");
     {
         std::ofstream f(tmp.path());
@@ -262,7 +262,7 @@ TEST_CASE("i18n .strings parser keeps entries without semicolons",
 }
 
 TEST_CASE("i18n .strings parser permits empty keys",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".strings");
     {
         std::ofstream f(tmp.path());
@@ -277,7 +277,7 @@ TEST_CASE("i18n .strings parser permits empty keys",
 }
 
 TEST_CASE("i18n .strings load failure leaves existing translations intact",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("existing", "kept");
 
@@ -350,7 +350,7 @@ TEST_CASE("i18n .po parser commits previous entry when new msgid starts",
 }
 
 TEST_CASE("i18n .po parser replaces duplicate msgids",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".po");
     {
         std::ofstream f(tmp.path());
@@ -367,7 +367,7 @@ TEST_CASE("i18n .po parser replaces duplicate msgids",
 }
 
 TEST_CASE("i18n .po parser ignores msgids without translations",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".po");
     {
         std::ofstream f(tmp.path());
@@ -383,7 +383,7 @@ TEST_CASE("i18n .po parser ignores msgids without translations",
 }
 
 TEST_CASE("i18n .po parser accepts empty msgid continuations",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".po");
     {
         std::ofstream f(tmp.path());
@@ -399,7 +399,7 @@ TEST_CASE("i18n .po parser accepts empty msgid continuations",
 }
 
 TEST_CASE("i18n .po load failure leaves translations intact",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("existing", "kept");
 
@@ -409,7 +409,7 @@ TEST_CASE("i18n .po load failure leaves translations intact",
 }
 
 TEST_CASE("i18n .po parser ignores orphan msgstr lines",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".po");
     {
         std::ofstream f(tmp.path());
@@ -469,7 +469,7 @@ TEST_CASE("i18n JSON parser handles escapes and keyless entries", "[runtime][i18
 }
 
 TEST_CASE("i18n JSON parser handles standard control escapes",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -487,7 +487,7 @@ TEST_CASE("i18n JSON parser handles standard control escapes",
     REQUIRE(strings.translate("formfeed") == "page\fbreak");
 }
 
-TEST_CASE("i18n JSON parser accepts commas and duplicate keys", "[runtime][i18n][coverage]") {
+TEST_CASE("i18n JSON parser accepts commas and duplicate keys", "[runtime][i18n]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -527,7 +527,7 @@ TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
 }
 
 TEST_CASE("i18n JSON load failure preserves existing translations",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -543,7 +543,7 @@ TEST_CASE("i18n JSON load failure preserves existing translations",
 }
 
 TEST_CASE("i18n JSON parser accepts empty objects",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -578,7 +578,7 @@ TEST_CASE("i18n JSON parser allows duplicate keys and trailing comma",
 }
 
 TEST_CASE("i18n JSON parser accepts compact objects without whitespace",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -592,7 +592,7 @@ TEST_CASE("i18n JSON parser accepts compact objects without whitespace",
 }
 
 TEST_CASE("i18n JSON parser treats unknown escapes as literal escaped char",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -606,7 +606,7 @@ TEST_CASE("i18n JSON parser treats unknown escapes as literal escaped char",
 }
 
 TEST_CASE("i18n JSON parser tolerates missing closing brace after entries",
-          "[runtime][i18n][coverage][large]") {
+          "[runtime][i18n][large]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -619,7 +619,7 @@ TEST_CASE("i18n JSON parser tolerates missing closing brace after entries",
 }
 
 TEST_CASE("i18n JSON parser accepts whitespace separated key value pairs",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     TemporaryFile tmp(".json");
     {
         std::ofstream f(tmp.path());
@@ -673,7 +673,7 @@ TEST_CASE("i18n system_locale returns non-empty", "[runtime][i18n]") {
 }
 
 TEST_CASE("i18n system_locale normalizes LANG where supported",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     ScopedLang lang("fr_CA.UTF-8");
 
 #if defined(_WIN32)
@@ -684,7 +684,7 @@ TEST_CASE("i18n system_locale normalizes LANG where supported",
 }
 
 TEST_CASE("i18n system_locale falls back when LANG is absent",
-          "[runtime][i18n][coverage]") {
+          "[runtime][i18n]") {
     ScopedLang lang(nullptr);
     REQUIRE(LocalisedStrings::system_locale() == "en");
 }
