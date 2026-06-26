@@ -192,6 +192,20 @@ predictable output, no MIDI.
   and built into the same per-node event queue. A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
+- **Transport-aware `process()`.** Alongside the no-transport
+  `process(out, in, n)` there is an additive
+  `process(out, in, n, const format::ProcessContext& transport)` overload. Both
+  delegate to one private `process_impl(..., const format::ProcessContext*)`; the
+  3-arg form passes `nullptr` and is bit-identical to its prior behaviour. When a
+  transport is supplied it populates the routed `ProcessBlock`
+  (`block.transport = &ctx`, `block.mode = ctx.process_mode`) so nodes that consume
+  it (e.g. a `ProcessorNode`, via `context_for_block`) see the host playhead, mode,
+  and render-speed hint. `block.render_speed` stays the numeric `1.0`: the
+  render-speed hint is categorical and travels through `*block.transport`, never the
+  multiplier. Nodes that ignore `block.transport` are bit-identical to the
+  no-transport path, so routed-vs-walk parity is unaffected. Under active
+  anticipation the supplied transport is SUPPRESSED for the block (see the
+  anticipation gotchas and `transport_suppressed_for_anticipation()`).
 - **Parallel-executor routing (opt-in, default OFF, independent of the serial
   opt-in).** `set_parallel_routing_enabled(true)` drives the SAME eligible subset
   through `GraphRuntimeExecutor::process_parallel` — a levelized fork-join over a
@@ -292,7 +306,12 @@ predictable output, no MIDI.
   MUST stop/join the pump before any `prepare()`/mutation — prepare reinitializes
   the SAME plugin instances the pump renders (a data race otherwise; same rule as
   "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
-  detected — safe only because no transport reaches the routed render today.
+  detected by the static eligibility pass; the transport-aware `process()` overload
+  therefore SUPPRESSES the supplied transport for any block where anticipation is
+  active (counted by `transport_suppressed_for_anticipation()`), so the ahead-render
+  and the live render both see absent transport. A per-node transport-sensitivity
+  opt-out is the precondition for letting a transport-aware interior coexist with
+  anticipation; until that exists, suppression is the conservative guarantee.
   (A masked node must not be an `AudioOutput` or a feedback endpoint; the
   partition guarantees this and `process_routed` debug-asserts it.) (4) The lane
   uses a FIXED block size (the prepared max). A block of a different size — or a
