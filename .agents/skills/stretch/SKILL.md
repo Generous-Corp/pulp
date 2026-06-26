@@ -66,6 +66,17 @@ resample, no EQ) vs `--character clean` (time-stretch).
 - `--transient-sens X` raises the Röbel reset sensitivity (sharper attacks); off by
   default — a fine-tune knob. (Measured to REGRESS at 2× on its own — a graft is
   better; see relocation below.)
+- **Transient-reset refractory gate** (`TransientPhasePolicy::Config::refractory_frames`,
+  default 3): the detector fires a phase reset per high-flux frame, so a drum hit's
+  DECAY/ring re-fires it on many consecutive frames — and each full-spectrum reset
+  discards the vocoder's accumulated synthesis-phase lead. Sustained re-firing
+  degenerates the PV toward raw OLA at the synthesis hop, which (a) pitches partials
+  DOWN by the stretch factor and (b) breaks phase coherence — audible as a
+  "blown-out / wobbly" sound on the harder, DEEPER hits (kicks). The gate fires once
+  at the onset then suppresses re-fires for N frames (≈8 ms at hop 128), keeping the
+  attack sharp while killing the over-fire. This is NOT detectable by peak/clip
+  metrics (the output never exceeds ~0.8 full-scale) — it's a perceptual transient
+  distortion; trust ears + a controlled FULL/HALF/OFF reset A/B over a metric here.
 - **Verbatim transient relocation** (`StretchTransientMode::verbatim_relocate`, or
   `--relocate`): grafts each ORIGINAL attack back onto the PV output, PEAK-ALIGNED,
   restoring the punch the PV smears (transient peak ~73% → ~97%+ of source across

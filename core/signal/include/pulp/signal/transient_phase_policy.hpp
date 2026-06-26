@@ -38,6 +38,16 @@ public:
         float sensitivity = 1.0f;
         /// Phase-reset amount handed back on detection (0..1).
         float strength = 1.0f;
+        /// Refractory period: after a reset fires, suppress further resets for
+        /// this many analysis frames. A transient is ONE event — without this
+        /// the detector re-fires on every frame of a hit's decay/ring (broadband
+        /// flux stays above threshold), and each full-spectrum reset discards the
+        /// vocoder's accumulated synthesis-phase lead. Sustained re-firing drives
+        /// the PV toward raw overlap-add at the synthesis hop, which both pitches
+        /// every partial DOWN by the stretch factor and breaks phase coherence
+        /// (the "wobble"). 0 disables (legacy behaviour). At hop≈128 (offline
+        /// drums) 3 frames ≈ 8 ms — below any real inter-onset gap.
+        int refractory_frames = 3;
     };
 
     /// RT contract: prepare() allocates the previous-magnitude buffer and is
@@ -56,6 +66,7 @@ public:
         std::memset(flux_history_, 0, sizeof(flux_history_));
         history_count_ = 0;
         history_pos_ = 0;
+        refractory_remaining_ = 0;
     }
 
     /// Analyze one frame group (all channels of the same time index) and
@@ -91,7 +102,17 @@ public:
         const bool transient =
             flux * static_cast<double>(config_.sensitivity) > 3.0 * median
             && flux > 0.05 * total;
-        return transient ? config_.strength : 0.0f;
+
+        // Refractory gate: count every analyzed frame down, and only let a fresh
+        // transient fire once the guard has elapsed. This collapses a hit's
+        // multi-frame decay into a SINGLE reset at its onset instead of one reset
+        // per ringing frame — the over-firing that bled the synthesis-phase lead.
+        if (refractory_remaining_ > 0) --refractory_remaining_;
+        if (transient && refractory_remaining_ == 0) {
+            refractory_remaining_ = config_.refractory_frames;
+            return config_.strength;
+        }
+        return 0.0f;
     }
 
 private:
@@ -103,6 +124,7 @@ private:
     float flux_history_[kHistory] = {};
     int history_count_ = 0;
     int history_pos_ = 0;
+    int refractory_remaining_ = 0;  // frames left in the post-reset suppression window
 };
 
 } // namespace pulp::signal

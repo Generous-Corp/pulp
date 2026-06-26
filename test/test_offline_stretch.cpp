@@ -11,9 +11,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/signal/transient_phase_policy.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 using pulp::signal::OfflineFormantMode;
@@ -236,6 +238,43 @@ TEST_CASE("tempo-only: exact length, pitch preserved (sine stays ~1 kHz)", "[off
     const double freq = zc / (2.0 * dur);
     CHECK(std::abs(freq - 1000.0) < 40.0); // pitch preserved within ~4%
     CHECK(freq > 850.0);                    // definitely not the repitched 667 Hz
+}
+
+TEST_CASE("transient refractory gate collapses a hit's decay to one reset",
+          "[offline-stretch][transient]") {
+    using pulp::signal::TransientPhasePolicy;
+    const int fft = 256, bins = fft / 2 + 1;
+    // Feed steady warmup frames (no flux), then a "ringing hit": frames whose
+    // magnitude keeps rising so the detector WOULD fire on every frame. Without a
+    // refractory window it re-fires through the whole decay (the over-firing that
+    // bleeds the vocoder's synthesis-phase lead and blows out deep hits); with the
+    // gate it fires once at the onset and suppresses the rest.
+    auto count_fires = [&](int refractory) {
+        TransientPhasePolicy p;
+        TransientPhasePolicy::Config c;
+        c.fft_size = fft;
+        c.refractory_frames = refractory;
+        p.prepare(c);
+        std::vector<std::complex<float>> buf(static_cast<size_t>(bins));
+        const std::complex<float>* frames[1] = {buf.data()};
+        for (int f = 0; f < 12; ++f) {                       // warmup: steady, flux -> 0
+            std::fill(buf.begin(), buf.end(), std::complex<float>(1.0f, 0.0f));
+            p.analyze(frames, 1, bins);
+        }
+        int fires = 0;
+        float mag = 1.0f;
+        for (int f = 0; f < 12; ++f) {                       // ringing hit: rising magnitude
+            mag *= 1.7f;
+            std::fill(buf.begin(), buf.end(), std::complex<float>(mag, 0.0f));
+            if (p.analyze(frames, 1, bins) > 0.0f) ++fires;
+        }
+        return fires;
+    };
+    const int legacy = count_fires(0);  // no gate -> fires through the whole decay
+    const int gated = count_fires(3);   // gate -> a fraction of that
+    CHECK(legacy >= 8);                 // confirms the over-firing condition exists
+    CHECK(gated >= 1);                  // still fires at the onset (transient preserved)
+    CHECK(gated <= legacy / 2);         // refractory collapses the decay re-fires
 }
 
 TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
