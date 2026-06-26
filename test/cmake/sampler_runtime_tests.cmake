@@ -124,6 +124,13 @@ pulp_add_test_suite(pulp-test-anticipation-lane
 pulp_add_test_suite(pulp-test-signal-graph-anticipation
     SOURCES test_signal_graph_anticipation.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Transport plumbing for SignalGraph::process: the transport-aware overload is
+# bit-identical for transport-inert routed nodes, populates the routed block so a
+# ProcessorNode consumer receives the host transport / process_mode / render-speed
+# hint, and suppresses (and counts) the transport whenever anticipation is active.
+pulp_add_test_suite(pulp-test-signal-graph-transport
+    SOURCES test_signal_graph_transport.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
