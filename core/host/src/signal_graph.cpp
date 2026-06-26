@@ -1159,6 +1159,17 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     // keepalive. Ineligible graphs leave routing_valid false and use the walk.
     {
         CompiledGraph& cgr = *cg;
+        // Resolve each node's persistent CPU-load measurer so routed execution
+        // reports the same node_loads() telemetry as the legacy walk. The
+        // measurers are insert-only and persist across snapshots; node_load_ was
+        // populated earlier in compile_. Lock the map's structure mutex (compile_
+        // does not hold it here) — a concurrent UI-thread node_loads() poll
+        // iterates under the same lock.
+        auto load_for = [this](NodeId id) -> audio::AudioProcessLoadMeasurer* {
+            std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+            auto it = node_load_.find(id);
+            return it == node_load_.end() ? nullptr : it->second.get();
+        };
         cg->routing_valid = build_executor_snapshot(
             nodes_, connections_,
             [&cgr](NodeId id) -> std::atomic<float>* {
@@ -1170,7 +1181,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 return it == cgr.plugins.end() ? nullptr : it->second.get();
             },
             cg->routing_plugin_ctx, cg->routing_plugin_scratch,
-            cg->routing_snapshot);
+            cg->routing_snapshot, /*parallel_safe=*/false, load_for);
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
         if (cg->routing_valid && max_block_size > 0) {
@@ -1237,7 +1248,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                     return it == cgr.plugins.end() ? nullptr : it->second.get();
                 },
                 cg->routing_plugin_ctx_parallel, cg->routing_plugin_scratch,
-                cg->routing_snapshot_parallel, /*parallel_safe=*/true);
+                cg->routing_snapshot_parallel, /*parallel_safe=*/true, load_for);
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
                     cg->routing_snapshot_parallel.plan());

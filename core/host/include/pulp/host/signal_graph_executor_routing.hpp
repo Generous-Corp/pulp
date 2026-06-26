@@ -97,6 +97,11 @@ bool signal_graph_executor_eligible(const SignalGraph& graph);
 // `parallel_safe` builds the snapshot's buffer assignment without slot reuse so
 // it can drive GraphRuntimeExecutor::process_parallel (concurrent same-level
 // nodes never alias a recycled slot); default false = the compact serial layout.
+// `load_for`, when provided, resolves a per-node persistent CPU-load measurer
+// that the executor wraps each node's work in (for node_loads() telemetry parity
+// with the legacy walk). Null result = that node is not measured; an empty
+// function = no node is measured (e.g. a baked Processor that exposes no
+// per-node loads).
 bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::span<const Connection> connections,
                              const std::function<std::atomic<float>*(NodeId)>& gain_for,
@@ -104,7 +109,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::vector<PluginBindingContext>& plugin_ctx,
                              PluginRoutingScratch& scratch,
                              format::GraphRuntimeSnapshot& out,
-                             bool parallel_safe = false);
+                             bool parallel_safe = false,
+                             const std::function<audio::AudioProcessLoadMeasurer*(NodeId)>&
+                                 load_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

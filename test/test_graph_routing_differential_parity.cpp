@@ -171,6 +171,12 @@ void build_signal_graph(pulp::host::SignalGraph& g, const RandomGraph& rg,
 
 std::vector<float> signal_graph_block(pulp::host::SignalGraph& g, int frames,
                                       const std::vector<float>& x) {
+    // This is the WALK oracle: force the legacy walk so the comparison stays
+    // walk-vs-executor regardless of the routing default (canonical is ON;
+    // parallel/anticipation take precedence in process() when enabled).
+    g.set_canonical_executor_routing_enabled(false);
+    g.set_parallel_routing_enabled(false);
+    g.set_anticipation_enabled(false);
     std::vector<float> xi = x;
     std::vector<float> yo(static_cast<std::size_t>(frames), 0.0f);
     std::array<const float*, 1> in_ch{xi.data()};

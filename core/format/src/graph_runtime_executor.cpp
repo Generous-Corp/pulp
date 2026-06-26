@@ -1,5 +1,7 @@
 #include <pulp/format/graph_runtime_executor.hpp>
 
+#include <pulp/audio/load_measurer.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -479,6 +481,23 @@ GraphRuntimeExecutorErrorCode run_routed_node(
         gather_node_automation(plan, assignment, pool, *automation, node, node_index,
                                frames, block.sample_rate);
     }
+
+    // Per-node CPU-load attribution: wrap this node's per-block produce step in
+    // the node's measurer (when the host wired one) so routed execution — serial
+    // OR parallel, both reach here — reports the same node_loads() telemetry the
+    // legacy walk does. RAII closes the span on every return below (I/O copy,
+    // missing/failed processor, success). Distinct measurer per node, so parallel
+    // levels touch disjoint instances; begin()/end() are relaxed-atomic, RT-safe.
+    audio::AudioProcessLoadMeasurer* const node_load = bindings[node_index].load;
+    if (node_load != nullptr) {
+        node_load->begin(static_cast<int>(frames), static_cast<float>(block.sample_rate));
+    }
+    struct LoadSpanEnd {
+        audio::AudioProcessLoadMeasurer* m;
+        ~LoadSpanEnd() noexcept {
+            if (m != nullptr) m->end();
+        }
+    } load_span_end{node_load};
 
     if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
         node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {

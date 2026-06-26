@@ -217,10 +217,10 @@ TEST_CASE("Baked graph matches the live graph bit-exactly across blocks",
 TEST_CASE("Baked graph matches the live graph's legacy WALK bit-exactly",
           "[host][graph][bake][parity]") {
     // The baked Processor's documented contract is "matches the live graph's walk."
-    // The default routing path today IS the legacy walk, so leave the live graph in
-    // its default (executor routing OFF) and compare the WALK output to the baked
-    // Processor (which runs process_routed). Bit-exact here proves baked == walk
-    // directly, not merely baked == executor.
+    // Canonical-executor routing is ON by default, so force the live graph OFF to
+    // render the legacy WALK and compare its output to the baked Processor (which
+    // runs process_routed). Bit-exact here proves baked == walk directly, not
+    // merely baked == executor.
     SignalGraph g;
     const auto in = g.add_input_node(1, "In");
     const auto g1 = g.add_gain_node("G1");
@@ -233,7 +233,7 @@ TEST_CASE("Baked graph matches the live graph's legacy WALK bit-exactly",
     REQUIRE(g.connect(g2, 0, out, 0));
     REQUIRE(g.set_node_gain(g1, 0.3838383f));
     REQUIRE(g.set_node_gain(g2, 0.6262626f));
-    // NB: do NOT enable canonical executor routing — the live graph runs the walk.
+    g.set_canonical_executor_routing_enabled(false);  // force the legacy walk
     REQUIRE(g.prepare(kSr, kFrames));
     REQUIRE_FALSE(g.canonical_executor_routing_enabled());  // really the walk
 

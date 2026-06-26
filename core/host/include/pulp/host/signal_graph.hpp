@@ -424,11 +424,12 @@ public:
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
 
-    // Opt in to driving the audio callback through the canonical
-    // GraphRuntimeExecutor when the live snapshot is executor-eligible (only
-    // AudioInput/AudioOutput/Gain nodes, plain audio connections). Default OFF:
-    // the legacy walk runs. Ineligible graphs always fall back to the legacy
-    // walk regardless of this flag. The flag is a control-thread toggle read
+    // Controls whether the audio callback drives the canonical
+    // GraphRuntimeExecutor when the live snapshot is executor-eligible. Default
+    // ON: the routed executor is the primary inter-node backend. Set it OFF to
+    // force the legacy walk — the parity tests do this to keep the walk as an
+    // independent reference oracle. Ineligible graphs always fall back to the
+    // legacy walk regardless of this flag. The flag is a control-thread toggle read
     // relaxed on the audio thread. The two paths produce bit-identical output
     // per block for eligible graphs, so toggling mid-stream is RT-safe and
     // seamless for feedforward graphs. For graphs with FEEDBACK, the legacy walk
@@ -836,14 +837,21 @@ private:
     std::atomic<CompiledGraph*> live_raw_{nullptr};
     std::vector<std::shared_ptr<CompiledGraph>> retired_snapshots_;
 
-    // Canonical-executor opt-in (control toggle, read relaxed on the audio
-    // thread). One long-lived executor whose telemetry survives re-prepare; it
-    // is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
+    // Canonical-executor routing (control toggle, read relaxed on the audio
+    // thread). DEFAULT ON: the routed executor is the primary inter-node backend
+    // for every eligible graph and is bit-identical to the legacy walk for that
+    // subset (proven by the routed-vs-walk parity suite) AND now reports the same
+    // per-node node_loads() telemetry, so the default-ON flip is behaviour-
+    // preserving where it takes effect. Ineligible graphs (Custom/Utility nodes,
+    // or per-node automation past the executor's fixed capacity) still fall back
+    // to the legacy walk, which remains the reference oracle the parity tests pin
+    // OFF explicitly. One long-lived executor whose telemetry survives re-prepare;
+    // it is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
     // pool as arguments) and prepare() never mutates it, so the single audio
-    // thread is its only writer (relaxed stat counters). The mutable scratch
-    // pool is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool)
-    // so it rides the existing RCU lifetime and is never resized under a reader.
-    std::atomic<bool> canonical_executor_routing_enabled_{false};
+    // thread is its only writer (relaxed stat counters). The mutable scratch pool
+    // is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool) so it
+    // rides the existing RCU lifetime and is never resized under a reader.
+    std::atomic<bool> canonical_executor_routing_enabled_{true};
     format::GraphRuntimeExecutor executor_;
     // Levelized parallel routing opt-in + its persistent worker pool. The pool is
     // a long-lived SignalGraph member (NOT per-RCU-snapshot): started off-RT in

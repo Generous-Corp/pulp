@@ -3832,4 +3832,85 @@ TEST_CASE("SignalGraph node_loads() reports per-node CPU load after processing",
     }
 }
 
+TEST_CASE("SignalGraph node_loads() is reported on the canonical-executor path too",
+          "[host][graph][telemetry][executor]") {
+    // The routed executor must attribute per-node CPU load exactly as the legacy
+    // walk: every node (incl. audio I/O) reports a callback per processed block,
+    // with the sample rate threaded into its measurer. This is the telemetry
+    // parity that lets canonical-executor routing be the default backend.
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(2, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(true);  // route, not walk
+
+    constexpr int kFrames = 64;
+    REQUIRE(graph.prepare(48000.0, kFrames));
+
+    std::vector<float> l(kFrames, 0.5f), r(kFrames, 0.5f);
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l.data(), r.data()};
+    std::array<float*, 2> out_ch{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    constexpr std::uint64_t kBlocks = 5;
+    for (std::uint64_t i = 0; i < kBlocks; ++i) {
+        graph.process(out_view, in_view, kFrames);
+    }
+
+    const auto loads = graph.node_loads();
+    REQUIRE(loads.size() == 3);  // input, gain, output — all timed by the executor
+    for (const auto& report : loads) {
+        REQUIRE(report.load.callback_count == kBlocks);
+        REQUIRE(report.load.available_ns > 0);  // sample rate reached the measurer
+    }
+}
+
+TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
+          "[host][graph][telemetry][executor][parallel]") {
+    // The per-node measurers are timed on WORKER threads in the levelized parallel
+    // path. A wide level (many independent gain nodes) forces worker dispatch;
+    // every node must still report exactly one callback per processed block, with
+    // no lost or double counts from the concurrent begin()/end() spans.
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Input");
+    const auto output = graph.add_output_node(2, "Output");
+    constexpr int kWidth = 8;  // a wide parallel level
+    std::vector<NodeId> gains;
+    for (int i = 0; i < kWidth; ++i) {
+        const auto gn = graph.add_gain_node("G");
+        REQUIRE(graph.connect(input, 0, gn, 0));
+        REQUIRE(graph.connect(gn, 0, output, 0));  // fan-in mix at the output
+        REQUIRE(graph.set_node_gain(gn, 0.1f + 0.01f * static_cast<float>(i)));
+        gains.push_back(gn);
+    }
+    graph.set_canonical_executor_routing_enabled(true);
+    graph.set_parallel_routing_enabled(true);  // route across worker threads
+
+    constexpr int kFrames = 64;
+    REQUIRE(graph.prepare(48000.0, kFrames));
+
+    std::vector<float> l(kFrames, 0.5f), r(kFrames, 0.5f);
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l.data(), r.data()};
+    std::array<float*, 2> out_ch{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    constexpr std::uint64_t kBlocks = 8;
+    for (std::uint64_t i = 0; i < kBlocks; ++i) {
+        graph.process(out_view, in_view, kFrames);
+    }
+
+    const auto loads = graph.node_loads();
+    REQUIRE(loads.size() == static_cast<std::size_t>(kWidth + 2));  // gains + I/O
+    for (const auto& report : loads) {
+        REQUIRE(report.load.callback_count == kBlocks);  // exactly one per block
+        REQUIRE(report.load.available_ns > 0);
+    }
+}
+
 // ── Phase 3 GraphSerializer round-trip ──────────────────────────────────

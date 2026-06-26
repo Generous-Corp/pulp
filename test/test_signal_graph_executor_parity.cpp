@@ -44,6 +44,13 @@ std::vector<float> ramp(int n, float seed) {
 std::vector<std::vector<float>> run_legacy(SignalGraph& g, int frames,
                                            const std::vector<std::vector<float>>& in,
                                            std::size_t out_channels) {
+    // The walk oracle: force the legacy walk so this stays an independent
+    // reference. Disable EVERY routing opt-in (canonical is ON by default;
+    // parallel/anticipation take precedence in process() when enabled), so the
+    // oracle is the walk regardless of any other flag a caller set.
+    g.set_canonical_executor_routing_enabled(false);
+    g.set_parallel_routing_enabled(false);
+    g.set_anticipation_enabled(false);
     std::vector<std::vector<float>> ins = in;
     std::vector<std::vector<float>> outs(out_channels,
                                          std::vector<float>(static_cast<std::size_t>(frames), 0.0f));

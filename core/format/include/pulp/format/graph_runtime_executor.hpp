@@ -19,6 +19,10 @@
 #include <span>
 #include <vector>
 
+namespace pulp::audio {
+class AudioProcessLoadMeasurer;
+}
+
 namespace pulp::format {
 
 enum class GraphRuntimeCommandStatus : std::uint8_t {
@@ -99,6 +103,12 @@ struct GraphRuntimeNodeBinding {
     GraphRuntimeNodeProcessFn process = nullptr;
     void* user_data = nullptr;
     bool required = true;
+    // Optional per-node CPU-load measurer. When set, the executor wraps this
+    // node's per-block work in begin()/end() so routed execution attributes
+    // per-node load exactly as the legacy walk does. Null = not measured. The
+    // pointee is owned elsewhere (the host's persistent per-node measurer map)
+    // and must outlive the snapshot; the executor only calls begin()/end().
+    audio::AudioProcessLoadMeasurer* load = nullptr;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.

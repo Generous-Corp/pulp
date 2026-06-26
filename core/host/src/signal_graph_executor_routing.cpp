@@ -211,7 +211,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::vector<PluginBindingContext>& plugin_ctx,
                              PluginRoutingScratch& scratch,
                              fmt::GraphRuntimeSnapshot& out,
-                             bool parallel_safe) {
+                             bool parallel_safe,
+                             const std::function<audio::AudioProcessLoadMeasurer*(NodeId)>&
+                                 load_for) {
     out.clear();
     plugin_ctx.clear();
     if (!signal_graph_topology_executor_eligible(nodes, connections)) return false;
@@ -367,6 +369,11 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, nullptr, nullptr, /*required=*/false});
         }
+        // Wire this node's persistent CPU-load measurer (every node kind, incl.
+        // audio/MIDI I/O) so routed execution attributes per-node load exactly
+        // like the legacy walk. The pointee lives in the host's insert-only
+        // node-load map and outlives the snapshot.
+        bindings.back().load = load_for ? load_for(id) : nullptr;
     }
 
     return out.reset(std::move(plan.plan), bindings, parallel_safe);
