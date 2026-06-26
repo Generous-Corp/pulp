@@ -1093,7 +1093,7 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
 // Previously: set_border_radius(10); set_corner_radius_tl(2);
 // rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
 TEST_CASE("set_border_radius + per-corner override seeds remaining corners",
-          "[view][border][issue-1171][codex-p2]") {
+          "[view][border][issue-1171]") {
     View v;
     v.set_border_radius(10.0f);
     REQUIRE_FALSE(v.has_corner_radii());
@@ -1108,7 +1108,7 @@ TEST_CASE("set_border_radius + per-corner override seeds remaining corners",
 }
 
 TEST_CASE("set_border_radius + multiple per-corner overrides — promote runs once",
-          "[view][border][issue-1171][codex-p2]") {
+          "[view][border][issue-1171]") {
     View v;
     v.set_border_radius(8.0f);
     v.set_corner_radius_tr(4.0f);
@@ -1124,7 +1124,7 @@ TEST_CASE("set_border_radius + multiple per-corner overrides — promote runs on
 }
 
 TEST_CASE("simulate_click bubble does NOT walk past `this` receiver",
-          "[view][simulate_click][issue-1171][codex-p2]") {
+          "[view][simulate_click][issue-1171]") {
     // Build: outer (PARENT) > root (this) > child.
     // outer has on_click set. root + child have no on_click.
     // Calling root->simulate_click(...) MUST NOT bubble up to outer —
@@ -1543,12 +1543,12 @@ TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
 // override should still report non-zero last_paint_self_ns because
 // background_color painting + layer setup runs inside paint_all().
 TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override views "
-          "(codex P2 #2338 regression)",
+          "(#2338 regression)",
           "[view][paint-timing][phase3d][regression]") {
     // Use the BASE pulp::view::View (no paint() override) but set a
     // background color so the framework's background fill runs in
-    // paint_all() between save() and the (no-op) paint() call. The
-    // Timing only the paint() override reports ~0ns for this case; timing the
+    // paint_all() between save() and the (no-op) paint() call. Timing
+    // only the paint() override reports ~0ns for this case; timing the
     // whole paint_all body should report > 0ns even for a no-override styled
     // View.
     auto v = std::make_unique<pulp::view::View>();

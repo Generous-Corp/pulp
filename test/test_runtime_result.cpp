@@ -120,7 +120,7 @@ struct Throwing {
 }  // namespace
 
 TEST_CASE("Result assignment preserves destination on throw",
-          "[runtime][result][codex-p2]") {
+          "[runtime][result]") {
     Result<Throwing, std::string> dst(Ok(Throwing(11)));
     Result<Throwing, std::string> src(Ok(Throwing(99)));
 

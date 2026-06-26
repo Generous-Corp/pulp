@@ -522,7 +522,7 @@ TEST_CASE("raw_midi_parser tolerates omitted callbacks",
     REQUIRE(state.sysex_buffer.empty());
 }
 
-TEST_CASE("raw_midi_parser recovers from aborted sysex (#406 codex P2)",
+TEST_CASE("raw_midi_parser recovers from aborted sysex (#406)",
           "[midi][raw_midi_parser][issue-406]") {
     // Device sends F0 7E <partial> then sends a Note On (0x90) without
     // ever emitting F7. Before the fix, the Note On + its data bytes

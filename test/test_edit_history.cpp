@@ -295,7 +295,7 @@ TEST_CASE("EditHistory window=0 disables time-window coalescing",
     REQUIRE(history.undo_count() == 2);
 }
 
-TEST_CASE("EditHistory undo resets coalesce window timestamp (Codex P1 regression)",
+TEST_CASE("EditHistory undo resets coalesce window timestamp (regression)",
           "[state][undo][time-coalesce][regression]") {
     EditHistory history;
     history.set_coalesce(false); // ensure only window coalescing matters

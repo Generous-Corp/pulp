@@ -502,7 +502,7 @@ TEST_CASE("Environment: callback that drops its own token does not deadlock",
 }
 
 TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
-          "(#403 codex P1)",
+          "(#403)",
           "[environment][issue-403]") {
     Environment::reset_for_test();
 
