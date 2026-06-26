@@ -574,6 +574,8 @@ pub fn run_cmd<S: Spawner>(
         opts.screenshot_path = path.to_string_lossy().into_owned();
     }
 
+    write_live_audio_notice(out, &opts)?;
+
     let name = binary
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -614,6 +616,35 @@ pub fn run_cmd<S: Spawner>(
         inv = inv.arg(a);
     }
     spawner.run(&inv)
+}
+
+fn env_disables_notice(name: &str) -> bool {
+    let Some(raw) = std::env::var_os(name) else {
+        return false;
+    };
+    let value = raw.to_string_lossy().to_ascii_lowercase();
+    matches!(value.as_str(), "0" | "false" | "off" | "no")
+}
+
+fn write_live_audio_notice(out: &mut impl Write, opts: &RunArgs) -> Result<()> {
+    const AUDIO_NOTICE_ENV: &str = "PULP_RUN_AUDIO_NOTICE";
+    if env_disables_notice(AUDIO_NOTICE_ENV) {
+        return Ok(());
+    }
+
+    write!(
+        out,
+        "Notice: launching a standalone may activate the system audio output"
+    )
+    .map_err(io_err)?;
+    if opts.headless {
+        write!(out, "; headless hides UI but does not guarantee silence").map_err(io_err)?;
+    }
+    writeln!(
+        out,
+        ". Use Audio Doctor/HeadlessHost for no-speaker offline checks. Set {AUDIO_NOTICE_ENV}=0 to hide this notice."
+    )
+    .map_err(io_err)
 }
 
 fn apply_run_env(mut inv: Invocation, opts: &RunArgs) -> Invocation {
@@ -1351,6 +1382,12 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
     }
 
     impl Drop for EnvVarGuard {
@@ -1929,6 +1966,56 @@ mod tests {
         assert!(help.contains("--audio-inspector"));
         assert!(help.contains("--audio-probe-json"));
         assert!(help.contains("--audio-scope-json"));
+    }
+
+    #[test]
+    fn run_cmd_prints_live_audio_notice() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = EnvVarGuard::unset("PULP_RUN_AUDIO_NOTICE");
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        make_run_binary(&proj, "my-app");
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&[
+            "my-app".to_owned(),
+            "--audio-probe-json".to_owned(),
+            "probe.json".to_owned(),
+        ]);
+
+        let rc = run_cmd(td.path(), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("Notice: launching a standalone may activate"));
+        assert!(stdout.contains("headless hides UI but does not guarantee silence"));
+        assert!(stdout.contains("PULP_RUN_AUDIO_NOTICE=0"));
+        assert!(stdout.contains("Launching my-app (headless)"));
+    }
+
+    #[test]
+    fn run_cmd_honors_live_audio_notice_opt_out() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = EnvVarGuard::set("PULP_RUN_AUDIO_NOTICE", "0");
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        make_run_binary(&proj, "my-app");
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&[
+            "my-app".to_owned(),
+            "--audio-probe-json".to_owned(),
+            "probe.json".to_owned(),
+        ]);
+
+        let rc = run_cmd(td.path(), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(!stdout.contains("Notice: launching a standalone"));
+        assert!(stdout.contains("Launching my-app (headless)"));
     }
 
     #[test]
