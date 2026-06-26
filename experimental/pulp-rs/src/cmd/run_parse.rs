@@ -24,6 +24,9 @@
 //! - `--audio-scope-json <path>` plus `--audio-scope-window`,
 //!   `--audio-scope-trigger`, and `--audio-scope-channel` — forwarded
 //!   as argv plus matching `PULP_AUDIO_SCOPE_*` env vars.
+//! - `--audio-capture-wav <path>` plus `--audio-capture-frames <n>` —
+//!   implies `--headless`, forwarded as argv plus matching
+//!   `PULP_AUDIO_CAPTURE_WAV*` env vars.
 //! - `--` — everything after this is `user_pass_through` (verbatim
 //!   forwarding to the launched binary).
 //!
@@ -64,6 +67,10 @@ pub struct RunOptions {
     pub audio_scope_trigger: String,
     /// `--audio-scope-channel <index>`.
     pub audio_scope_channel: i32,
+    /// `--audio-capture-wav <path>` — live output ring WAV dump.
+    pub audio_capture_wav_path: String,
+    /// `--audio-capture-frames <samples>`.
+    pub audio_capture_frames: i32,
 
     /// Args explicitly forwarded by the user with `-- ...`, plus any
     /// unknown flags (legacy permissive behaviour).
@@ -117,6 +124,7 @@ pub fn parse_run_options(args: &[String]) -> RunOptions {
     let mut r = RunOptions::new();
     let mut after_separator = false;
     let mut audio_scope_acquisition_option_seen = false;
+    let mut audio_capture_frames_option_seen = false;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -328,6 +336,49 @@ pub fn parse_run_options(args: &[String]) -> RunOptions {
             return r;
         }
 
+        if a == "--audio-capture-wav" {
+            if i + 1 < args.len() && !args[i + 1].is_empty() {
+                r.audio_capture_wav_path = args[i + 1].clone();
+                r.headless = true;
+                i += 2;
+                continue;
+            }
+            r.error = "--audio-capture-wav requires a path argument".to_owned();
+            return r;
+        }
+        if let Some(rest) = a.strip_prefix("--audio-capture-wav=") {
+            if rest.is_empty() {
+                r.error = "--audio-capture-wav= requires a non-empty path".to_owned();
+                return r;
+            }
+            r.audio_capture_wav_path = rest.to_owned();
+            r.headless = true;
+            i += 1;
+            continue;
+        }
+        if a == "--audio-capture-frames" {
+            audio_capture_frames_option_seen = true;
+            if i + 1 < args.len() {
+                if let Some(n) = parse_positive_i32(&args[i + 1]) {
+                    r.audio_capture_frames = n;
+                    i += 2;
+                    continue;
+                }
+            }
+            r.error = "--audio-capture-frames requires a positive integer".to_owned();
+            return r;
+        }
+        if let Some(rest) = a.strip_prefix("--audio-capture-frames=") {
+            audio_capture_frames_option_seen = true;
+            if let Some(n) = parse_positive_i32(rest) {
+                r.audio_capture_frames = n;
+                i += 1;
+                continue;
+            }
+            r.error = "--audio-capture-frames requires a positive integer".to_owned();
+            return r;
+        }
+
         if r.target_name.is_empty() && !a.is_empty() && !a.starts_with('-') {
             r.target_name = a.clone();
             i += 1;
@@ -343,6 +394,14 @@ pub fn parse_run_options(args: &[String]) -> RunOptions {
     }
     if audio_scope_acquisition_option_seen && r.audio_scope_json_path.is_empty() {
         r.error = "--audio-scope-window, --audio-scope-trigger, and --audio-scope-channel require --audio-scope-json".to_owned();
+    }
+    if !r.audio_capture_wav_path.is_empty()
+        && (r.audio_inspector || !r.audio_scope_json_path.is_empty())
+    {
+        r.error = "--audio-capture-wav cannot be combined with --audio-inspector or --audio-scope-json; they share the one live capture FIFO".to_owned();
+    }
+    if audio_capture_frames_option_seen && r.audio_capture_wav_path.is_empty() {
+        r.error = "--audio-capture-frames requires --audio-capture-wav".to_owned();
     }
 
     r
@@ -383,6 +442,14 @@ pub fn assemble_launch_args(opts: &RunOptions) -> Vec<String> {
         out.push(opts.audio_scope_trigger.clone());
         out.push("--audio-scope-channel".to_owned());
         out.push(opts.audio_scope_channel.to_string());
+    }
+    if !opts.audio_capture_wav_path.is_empty() {
+        out.push("--audio-capture-wav".to_owned());
+        out.push(opts.audio_capture_wav_path.clone());
+        if opts.audio_capture_frames > 0 {
+            out.push("--audio-capture-frames".to_owned());
+            out.push(opts.audio_capture_frames.to_string());
+        }
     }
     for a in &opts.user_pass_through {
         out.push(a.clone());
@@ -433,6 +500,18 @@ pub fn assemble_launch_env(opts: &RunOptions) -> Vec<(String, String)> {
             opts.audio_scope_channel.to_string(),
         ));
     }
+    if !opts.audio_capture_wav_path.is_empty() {
+        out.push((
+            "PULP_AUDIO_CAPTURE_WAV".to_owned(),
+            opts.audio_capture_wav_path.clone(),
+        ));
+        if opts.audio_capture_frames > 0 {
+            out.push((
+                "PULP_AUDIO_CAPTURE_WAV_FRAMES".to_owned(),
+                opts.audio_capture_frames.to_string(),
+            ));
+        }
+    }
     out
 }
 
@@ -453,6 +532,8 @@ mod tests {
         assert!(r.screenshot_path.is_empty());
         assert_eq!(r.frames, 1);
         assert!(!r.watch);
+        assert!(r.audio_capture_wav_path.is_empty());
+        assert_eq!(r.audio_capture_frames, 0);
         assert!(r.target_name.is_empty());
         assert!(r.user_pass_through.is_empty());
     }
@@ -641,6 +722,70 @@ mod tests {
     }
 
     #[test]
+    fn parse_audio_capture_wav_implies_headless_and_captures_path() {
+        let r = parse_run_options(&argv(&[
+            "--audio-capture-wav",
+            "capture.wav",
+            "--audio-capture-frames",
+            "1024",
+        ]));
+        assert!(r.error.is_empty());
+        assert!(r.headless);
+        assert_eq!(r.audio_capture_wav_path, "capture.wav");
+        assert_eq!(r.audio_capture_frames, 1024);
+        assert!(r.target_name.is_empty());
+
+        let eq = parse_run_options(&argv(&["--audio-capture-wav=capture2.wav"]));
+        assert!(eq.error.is_empty());
+        assert!(eq.headless);
+        assert_eq!(eq.audio_capture_wav_path, "capture2.wav");
+        assert_eq!(eq.audio_capture_frames, 0);
+    }
+
+    #[test]
+    fn parse_audio_capture_wav_rejects_invalid_combinations() {
+        assert!(parse_run_options(&argv(&["--audio-capture-wav"]))
+            .error
+            .contains("--audio-capture-wav requires a path"));
+        assert!(parse_run_options(&argv(&["--audio-capture-wav="]))
+            .error
+            .contains("--audio-capture-wav= requires"));
+        assert!(parse_run_options(&argv(&["--audio-capture-frames", "512"]))
+            .error
+            .contains("requires --audio-capture-wav"));
+        assert!(parse_run_options(&argv(&[
+            "--audio-capture-wav",
+            "capture.wav",
+            "--audio-capture-frames",
+            "0",
+        ]))
+        .error
+        .contains("requires a positive integer"));
+        assert!(parse_run_options(&argv(&[
+            "--audio-capture-wav",
+            "capture.wav",
+            "--audio-capture-frames=+128",
+        ]))
+        .error
+        .contains("requires a positive integer"));
+        assert!(parse_run_options(&argv(&[
+            "--audio-inspector",
+            "--audio-capture-wav",
+            "capture.wav",
+        ]))
+        .error
+        .contains("cannot be combined"));
+        assert!(parse_run_options(&argv(&[
+            "--audio-scope-json",
+            "scope.json",
+            "--audio-capture-wav",
+            "capture.wav",
+        ]))
+        .error
+        .contains("cannot be combined"));
+    }
+
+    #[test]
     fn parse_target_first_non_flag_wins() {
         let r = parse_run_options(&argv(&["my-app", "another"]));
         assert_eq!(r.target_name, "my-app");
@@ -767,6 +912,8 @@ mod tests {
         opts.frames = 30;
         opts.audio_inspector = true;
         opts.audio_probe_json_path = "probe.json".to_owned();
+        opts.audio_capture_wav_path = "capture.wav".to_owned();
+        opts.audio_capture_frames = 1024;
         opts.user_pass_through = vec!["--child".to_owned()];
         assert_eq!(
             assemble_launch_args(&opts),
@@ -779,6 +926,10 @@ mod tests {
                 "--audio-inspector".to_owned(),
                 "--audio-probe-json".to_owned(),
                 "probe.json".to_owned(),
+                "--audio-capture-wav".to_owned(),
+                "capture.wav".to_owned(),
+                "--audio-capture-frames".to_owned(),
+                "1024".to_owned(),
                 "--child".to_owned()
             ]
         );
@@ -794,6 +945,8 @@ mod tests {
         opts.audio_scope_window = 4096;
         opts.audio_scope_trigger = "raw".to_owned();
         opts.audio_scope_channel = 1;
+        opts.audio_capture_wav_path = "capture.wav".to_owned();
+        opts.audio_capture_frames = 512;
 
         assert_eq!(
             assemble_launch_env(&opts),
@@ -805,6 +958,11 @@ mod tests {
                 ("PULP_AUDIO_SCOPE_WINDOW".to_owned(), "4096".to_owned()),
                 ("PULP_AUDIO_SCOPE_TRIGGER".to_owned(), "raw".to_owned()),
                 ("PULP_AUDIO_SCOPE_CHANNEL".to_owned(), "1".to_owned()),
+                (
+                    "PULP_AUDIO_CAPTURE_WAV".to_owned(),
+                    "capture.wav".to_owned()
+                ),
+                ("PULP_AUDIO_CAPTURE_WAV_FRAMES".to_owned(), "512".to_owned()),
             ]
         );
     }
@@ -830,6 +988,35 @@ mod tests {
                 "raw".to_owned(),
                 "--audio-scope-channel".to_owned(),
                 "1".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn assemble_audio_capture_wav_order_matches_cpp() {
+        let mut opts = RunOptions::new();
+        opts.headless = true;
+        opts.audio_capture_wav_path = "capture.wav".to_owned();
+        opts.audio_capture_frames = 1024;
+
+        assert_eq!(
+            assemble_launch_args(&opts),
+            vec![
+                "--headless".to_owned(),
+                "--audio-capture-wav".to_owned(),
+                "capture.wav".to_owned(),
+                "--audio-capture-frames".to_owned(),
+                "1024".to_owned(),
+            ]
+        );
+
+        opts.audio_capture_frames = 0;
+        assert_eq!(
+            assemble_launch_args(&opts),
+            vec![
+                "--headless".to_owned(),
+                "--audio-capture-wav".to_owned(),
+                "capture.wav".to_owned(),
             ]
         );
     }
