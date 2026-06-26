@@ -180,7 +180,7 @@ TEST_CASE("FileBrowser navigate refreshes entries for the new directory",
 }
 
 TEST_CASE("FileBrowser non-wildcard filters keep directories and reject files",
-          "[view][file-browser][coverage][phase3]") {
+          "[view][file-browser][coverage]") {
     TempDir tmp("non-wildcard-filter");
     std::filesystem::create_directory(tmp.path / "Presets");
     write_file(tmp.path / "alpha.wav");
@@ -199,7 +199,7 @@ TEST_CASE("FileBrowser non-wildcard filters keep directories and reject files",
 }
 
 TEST_CASE("FileBrowser navigating to a regular file is a safe empty listing",
-          "[view][file-browser][coverage][phase3]") {
+          "[view][file-browser][coverage]") {
     TempDir tmp("file-as-root");
     const auto file = tmp.path / "single.wav";
     write_file(file);

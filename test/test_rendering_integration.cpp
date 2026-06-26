@@ -192,7 +192,7 @@ TEST_CASE("RenderPassManager detects over budget", "[render][pass]") {
 }
 
 TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
-          "[render][pass][coverage][phase3]") {
+          "[render][pass][coverage]") {
     render::RenderPassManager pm;
 
     REQUIRE(pm.frame_count() == 0);
@@ -216,7 +216,7 @@ TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
 }
 
 TEST_CASE("RenderPassManager handles empty passes and disabled budget",
-          "[render][pass][coverage][phase3]") {
+          "[render][pass][coverage]") {
     render::RenderPassManager pm;
 
     pm.begin_frame();
@@ -286,7 +286,7 @@ TEST_CASE("FillStyle linear gradient", "[canvas][gradient]") {
 }
 
 TEST_CASE("FillStyle radial gradient exposes focal point and stops",
-          "[canvas][gradient][coverage][phase3]") {
+          "[canvas][gradient][coverage]") {
     canvas::RadialGradient rg{10.0f, 20.0f, 30.0f, 0.0f, 0.0f, {}};
     rg.focal_x = 12.0f;
     rg.focal_y = 18.0f;

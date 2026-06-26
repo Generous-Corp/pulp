@@ -42,7 +42,7 @@ TEST_CASE("AppearanceTracker callback fires on lock", "[view][appearance]") {
 }
 
 TEST_CASE("AppearanceTracker replacing callback uses latest handler only",
-          "[view][appearance][coverage][phase3]") {
+          "[view][appearance][coverage]") {
     AppearanceTracker tracker;
     int first_calls = 0;
     std::vector<Appearance> latest;
@@ -130,7 +130,7 @@ TEST_CASE("ThemeManager callback fires on theme change", "[view][appearance]") {
 }
 
 TEST_CASE("ThemeManager replacing callback uses latest handler only",
-          "[view][appearance][coverage][phase3]") {
+          "[view][appearance][coverage]") {
     ThemeManager mgr;
     int first_calls = 0;
     std::vector<uint8_t> latest_red;

@@ -188,7 +188,7 @@ TEST_CASE("EqCurveView paint covers disabled grid and disabled band handles",
 }
 
 TEST_CASE("EqCurveView set_band updates valid indices",
-          "[view][eq_curve][coverage][phase3]") {
+          "[view][eq_curve][coverage]") {
     EqCurveView eq;
     eq.add_band({500.0f, -3.0f, 0.8f, EqCurveView::FilterType::peak, true});
 
@@ -203,7 +203,7 @@ TEST_CASE("EqCurveView set_band updates valid indices",
 }
 
 TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
-          "[view][eq_curve][coverage][phase3]") {
+          "[view][eq_curve][coverage]") {
     EqCurveView eq;
     eq.set_bounds({0, 0, 240, 120});
     const float spectrum[] = {-18.0f, -12.0f, -24.0f, -6.0f};
@@ -223,7 +223,7 @@ TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
 }
 
 TEST_CASE("EqCurveView forwards rich mouse events to the base pointer hook",
-          "[view][eq_curve][coverage][phase3]") {
+          "[view][eq_curve][coverage]") {
     EqCurveView eq;
     int forwarded = 0;
     eq.on_pointer_event = [&](const MouseEvent& event) {
@@ -378,7 +378,7 @@ TEST_CASE("MidiKeyboard paint emits note names and active highlight color",
 }
 
 TEST_CASE("MidiKeyboard forwards rich mouse events to the base pointer hook",
-          "[view][midi_keyboard][coverage][phase3]") {
+          "[view][midi_keyboard][coverage]") {
     MidiKeyboard kb;
     int forwarded = 0;
     Point last{};
@@ -395,7 +395,7 @@ TEST_CASE("MidiKeyboard forwards rich mouse events to the base pointer hook",
 }
 
 TEST_CASE("MidiKeyboard overlapping black keys win hit testing",
-          "[view][midi_keyboard][coverage][phase3]") {
+          "[view][midi_keyboard][coverage]") {
     MidiKeyboard kb;
     kb.set_range(60, 61);
     kb.set_bounds({0, 0, 100, 80});
@@ -530,7 +530,7 @@ TEST_CASE("ColorPicker paint positions alpha cursor from normalized alpha",
 }
 
 TEST_CASE("ColorPicker paint draws configured swatches",
-          "[view][color_picker][coverage][phase3]") {
+          "[view][color_picker][coverage]") {
     ColorPicker picker;
     picker.set_bounds({0, 0, 200, 260});
     picker.set_swatches({
@@ -550,7 +550,7 @@ TEST_CASE("ColorPicker paint draws configured swatches",
 }
 
 TEST_CASE("ColorPicker forwards rich mouse events to the base pointer hook",
-          "[view][color_picker][coverage][phase3]") {
+          "[view][color_picker][coverage]") {
     ColorPicker picker;
     int forwarded = 0;
     picker.on_pointer_event = [&](const MouseEvent& event) {
@@ -565,7 +565,7 @@ TEST_CASE("ColorPicker forwards rich mouse events to the base pointer hook",
 }
 
 TEST_CASE("ColorPicker hidden alpha bar ignores alpha-region input",
-          "[view][color_picker][coverage][phase3]") {
+          "[view][color_picker][coverage]") {
     ColorPicker picker;
     picker.set_bounds({0, 0, 200, 280});
     picker.set_show_alpha(false);
@@ -652,7 +652,7 @@ TEST_CASE("FileDropZone empty extensions accepts all", "[view][file_drop]") {
 }
 
 TEST_CASE("FileDropZone rejects extensionless files when extensions are required",
-          "[view][file_drop][coverage][phase3]") {
+          "[view][file_drop][coverage]") {
     FileDropZone zone;
     zone.set_accepted_extensions({".wav"});
 
@@ -857,7 +857,7 @@ TEST_CASE("SplitView paint emits horizontal and vertical divider grips",
 }
 
 TEST_CASE("SplitView can replace panes and lays out with custom divider width",
-          "[view][split_view][coverage][phase3-batch]") {
+          "[view][split_view][coverage]") {
     SplitView split;
     split.set_bounds({0, 0, 300, 120});
     split.set_split_fraction(0.25f);
@@ -893,7 +893,7 @@ TEST_CASE("SplitView can replace panes and lays out with custom divider width",
 }
 
 TEST_CASE("SplitView forwards rich mouse events to the base pointer hook",
-          "[view][split_view][coverage][phase3]") {
+          "[view][split_view][coverage]") {
     SplitView split;
     int forwarded = 0;
     split.on_pointer_event = [&](const MouseEvent& event) {
@@ -1034,7 +1034,7 @@ TEST_CASE("PropertyList paints categories and scalar value variants",
 }
 
 TEST_CASE("PropertyList paints color values and selected row highlight",
-          "[view][property_list][coverage][phase3]") {
+          "[view][property_list][coverage]") {
     PropertyList list;
     list.set_bounds({0, 0, 260, 100});
     list.set_row_height(24.0f);
@@ -1212,7 +1212,7 @@ TEST_CASE("ThemeEditor covers missing selection empty theme and selected paint",
 }
 
 TEST_CASE("ThemeEditor wraps swatches when the row is full",
-          "[view][theme-editor][coverage][phase3]") {
+          "[view][theme-editor][coverage]") {
     ThemeEditor editor;
     editor.set_bounds({0, 0, 80, 160});
 
