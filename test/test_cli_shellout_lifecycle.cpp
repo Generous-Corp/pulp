@@ -116,7 +116,7 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
 }
 
 TEST_CASE("pulp design validates owned option values before autobind",
-          "[cli][shellout][design][coverage][phase3]") {
+          "[cli][shellout][design][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     struct Case {
@@ -141,7 +141,7 @@ TEST_CASE("pulp design validates owned option values before autobind",
 }
 
 TEST_CASE("pulp dev validates value options before build or watch",
-          "[cli][shellout][dev][coverage][phase3]") {
+          "[cli][shellout][dev][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto tmp = fs::temp_directory_path() /
@@ -269,7 +269,7 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
 }
 
 TEST_CASE("pulp upgrade validates parser errors before network access",
-          "[cli][shellout][upgrade][coverage][phase3]") {
+          "[cli][shellout][upgrade][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     struct Case {
@@ -295,7 +295,7 @@ TEST_CASE("pulp upgrade validates parser errors before network access",
 }
 
 TEST_CASE("pulp sdk install validates parser errors before side effects",
-          "[cli][shellout][sdk][coverage][phase3]") {
+          "[cli][shellout][sdk][coverage]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto home = unique_temp_dir("pulp-sdk-parser-home");
