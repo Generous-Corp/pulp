@@ -1144,6 +1144,7 @@ pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 # Network Stream tests
 pulp_add_test_suite(pulp-test-network-stream
     LIBRARIES pulp::runtime pulp-cpp-httplib
+    DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests
     PROPERTIES RESOURCE_LOCK network-stream)
 
 # MessageChannel tests
