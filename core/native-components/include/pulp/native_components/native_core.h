@@ -3,9 +3,9 @@
  *
  * The language-neutral C contract a native DSP core (Rust first, also C / Zig /
  * generated FAUST·Cmajor) implements, and a C++ `pulp::format::Processor`
- * adapter owns. This header is the *canonical source of truth*: the Rust
- * `pulp-rust-sys` bindings are generated from it with `bindgen`, never the
- * reverse.
+ * adapter owns. This header is the *canonical source of truth*: in-tree Rust
+ * examples currently hand-mirror the POD structs they use, and any generated
+ * Rust bindings must be generated from this header, never the reverse.
  *
  * STATUS: experimental, source-built. This is shaped *like* a binary ABI (POD
  * structs, leading size/version, opaque handles, status codes, no STL /
