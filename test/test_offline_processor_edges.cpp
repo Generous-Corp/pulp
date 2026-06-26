@@ -266,7 +266,7 @@ TEST_CASE("offline_process supports block size exactly equal to the input", "[au
 }
 
 TEST_CASE("offline_render reports deterministic block schedule metadata",
-          "[audio][offline][advanced][phase3]") {
+          "[audio][offline][advanced]") {
     auto input = make_stereo_fixture();
     OfflineRenderOptions options;
     options.block_size_schedule = {2, 1};
@@ -303,7 +303,7 @@ TEST_CASE("offline_render reports deterministic block schedule metadata",
 }
 
 TEST_CASE("offline_render output can be deterministic across block schedules",
-          "[audio][offline][advanced][phase3]") {
+          "[audio][offline][advanced]") {
     auto input = make_stereo_fixture();
 
     auto render_absolute_sample_index =
@@ -337,7 +337,7 @@ TEST_CASE("offline_render output can be deterministic across block schedules",
 }
 
 TEST_CASE("offline_render rejects invalid block schedules",
-          "[audio][offline][advanced][phase3]") {
+          "[audio][offline][advanced]") {
     auto input = make_stereo_fixture();
     OfflineRenderOptions options;
     options.fallback_block_size = 0;
@@ -355,7 +355,7 @@ TEST_CASE("offline_render rejects invalid block schedules",
 }
 
 TEST_CASE("offline_render tail policy is explicit and deterministic",
-          "[audio][offline][advanced][tail][phase3]") {
+          "[audio][offline][advanced][tail]") {
     AudioFileData input;
     input.sample_rate = 48000;
     input.channels = {{1.0f, 2.0f, 3.0f}};
@@ -402,7 +402,7 @@ TEST_CASE("offline_render tail policy is explicit and deterministic",
 }
 
 TEST_CASE("offline_render reports deterministic transport timeline metadata",
-          "[audio][offline][advanced][transport][phase3]") {
+          "[audio][offline][advanced][transport]") {
     AudioFileData input;
     input.sample_rate = 48000;
     input.channels = {{0.0f, 0.0f, 0.0f, 0.0f}};
@@ -445,7 +445,7 @@ TEST_CASE("offline_render reports deterministic transport timeline metadata",
 }
 
 TEST_CASE("offline_render rejects invalid transport timeline hints",
-          "[audio][offline][advanced][transport][phase3]") {
+          "[audio][offline][advanced][transport]") {
     auto input = make_stereo_fixture();
     OfflineRenderOptions options;
     options.tempo_bpm = 0.0;
@@ -464,7 +464,7 @@ TEST_CASE("offline_render rejects invalid transport timeline hints",
 }
 
 TEST_CASE("offline_render propagates deterministic state generation metadata",
-          "[audio][offline][advanced][state][phase3]") {
+          "[audio][offline][advanced][state]") {
     auto input = make_stereo_fixture();
     OfflineRenderOptions options;
     options.block_size_schedule = {2, 3};
@@ -491,7 +491,7 @@ TEST_CASE("offline_render propagates deterministic state generation metadata",
 }
 
 TEST_CASE("offline_render_stems extracts named channel groups from the mix",
-          "[audio][offline][advanced][stems][phase3]") {
+          "[audio][offline][advanced][stems]") {
     AudioFileData input;
     input.sample_rate = 48000;
     input.channels = {
@@ -536,7 +536,7 @@ TEST_CASE("offline_render_stems extracts named channel groups from the mix",
 }
 
 TEST_CASE("offline_render_stems rejects malformed stem ranges before rendering",
-          "[audio][offline][advanced][stems][phase3]") {
+          "[audio][offline][advanced][stems]") {
     auto input = make_stereo_fixture();
     bool callback_called = false;
     OfflineRenderOptions options;
@@ -576,7 +576,7 @@ TEST_CASE("offline_render_stems rejects malformed stem ranges before rendering",
 }
 
 TEST_CASE("compare_offline_render_audio supports golden and null residual checks",
-          "[audio][offline][advanced][golden][null][phase3]") {
+          "[audio][offline][advanced][golden][null]") {
     AudioFileData expected;
     expected.sample_rate = 48000;
     expected.channels = {
@@ -603,7 +603,7 @@ TEST_CASE("compare_offline_render_audio supports golden and null residual checks
 }
 
 TEST_CASE("compare_offline_render_audio rejects incompatible artifacts",
-          "[audio][offline][advanced][golden][null][phase3]") {
+          "[audio][offline][advanced][golden][null]") {
     auto actual = make_stereo_fixture();
     auto expected = actual;
 
@@ -620,7 +620,7 @@ TEST_CASE("compare_offline_render_audio rejects incompatible artifacts",
 }
 
 TEST_CASE("offline_render outputs null-test clean across block schedules",
-          "[audio][offline][advanced][golden][null][phase3]") {
+          "[audio][offline][advanced][golden][null]") {
     auto input = make_stereo_fixture();
 
     auto render_with_schedule = [&](std::vector<int> schedule) {
@@ -647,7 +647,7 @@ TEST_CASE("offline_render outputs null-test clean across block schedules",
 }
 
 TEST_CASE("offline render manifests hash artifacts and deterministic plans",
-          "[audio][offline][manifest][phase4]") {
+          "[audio][offline][manifest]") {
     auto input = make_stereo_fixture();
 
     OfflineRenderOptions options;
@@ -709,7 +709,7 @@ TEST_CASE("offline render manifests hash artifacts and deterministic plans",
 }
 
 TEST_CASE("offline render manifests separate audio and plan changes",
-          "[audio][offline][manifest][phase4]") {
+          "[audio][offline][manifest]") {
     auto audio = make_stereo_fixture();
 
     OfflineRenderOptions options;
@@ -743,7 +743,7 @@ TEST_CASE("offline render manifests separate audio and plan changes",
 }
 
 TEST_CASE("offline render manifests prove chunked render equivalence",
-          "[audio][offline][manifest][chunks][phase4]") {
+          "[audio][offline][manifest][chunks]") {
     auto input = make_stereo_fixture();
 
     auto render_absolute_position = [&](std::vector<int> schedule) {
@@ -793,7 +793,7 @@ TEST_CASE("offline render manifests prove chunked render equivalence",
 }
 
 TEST_CASE("offline render manifests record staged resources for cache reuse",
-          "[audio][offline][manifest][resources][phase4]") {
+          "[audio][offline][manifest][resources]") {
     auto audio = make_stereo_fixture();
 
     const std::string sample_hash(64, 'a');
@@ -844,7 +844,7 @@ TEST_CASE("offline render manifests record staged resources for cache reuse",
 }
 
 TEST_CASE("offline render manifests expose missing optional resources",
-          "[audio][offline][manifest][resources][phase4]") {
+          "[audio][offline][manifest][resources]") {
     auto audio = make_stereo_fixture();
 
     OfflineRenderOptions options;
@@ -867,7 +867,7 @@ TEST_CASE("offline render manifests expose missing optional resources",
 }
 
 TEST_CASE("offline render manifests reject invalid staged resources",
-          "[audio][offline][manifest][resources][phase4]") {
+          "[audio][offline][manifest][resources]") {
     auto audio = make_stereo_fixture();
 
     OfflineRenderOptions options;
@@ -899,7 +899,7 @@ TEST_CASE("offline render manifests reject invalid staged resources",
 }
 
 TEST_CASE("offline render manifests reject invalid artifacts and options",
-          "[audio][offline][manifest][phase4]") {
+          "[audio][offline][manifest]") {
     AudioFileData empty;
     empty.sample_rate = 48000;
     REQUIRE_FALSE(offline_render_audio_sha256(empty).has_value());
@@ -921,7 +921,7 @@ TEST_CASE("offline render manifests reject invalid artifacts and options",
 }
 
 TEST_CASE("offline render compute policy rejects live audio-thread GPU work",
-          "[audio][offline][gpu-boundary][phase4]") {
+          "[audio][offline][gpu-boundary]") {
     OfflineRenderComputePolicy policy;
     policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
     policy.requested_backend = OfflineRenderComputeBackend::Gpu;
@@ -936,7 +936,7 @@ TEST_CASE("offline render compute policy rejects live audio-thread GPU work",
 }
 
 TEST_CASE("offline render compute policy accepts GPU only for offline scopes",
-          "[audio][offline][gpu-boundary][phase4]") {
+          "[audio][offline][gpu-boundary]") {
     OfflineRenderComputePolicy policy;
     policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
     policy.requested_backend = OfflineRenderComputeBackend::Gpu;
@@ -956,7 +956,7 @@ TEST_CASE("offline render compute policy accepts GPU only for offline scopes",
 }
 
 TEST_CASE("offline render compute policy makes GPU fallback explicit",
-          "[audio][offline][gpu-boundary][phase4]") {
+          "[audio][offline][gpu-boundary]") {
     OfflineRenderComputePolicy policy;
     policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
     policy.requested_backend = OfflineRenderComputeBackend::Gpu;
@@ -979,7 +979,7 @@ TEST_CASE("offline render compute policy makes GPU fallback explicit",
 }
 
 TEST_CASE("offline render compute policy is deterministic for offline analysis",
-          "[audio][offline][gpu-boundary][determinism][phase4]") {
+          "[audio][offline][gpu-boundary][determinism]") {
     const std::vector<OfflineRenderComputePolicy> policies = {
         {
             .scope = OfflineRenderExecutionScope::OfflineAnalysis,
@@ -1019,7 +1019,7 @@ TEST_CASE("offline render compute policy is deterministic for offline analysis",
 }
 
 TEST_CASE("offline render compute policy always accepts CPU requests",
-          "[audio][offline][gpu-boundary][phase4]") {
+          "[audio][offline][gpu-boundary]") {
     OfflineRenderComputePolicy policy;
     policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
     policy.requested_backend = OfflineRenderComputeBackend::Cpu;

@@ -373,7 +373,7 @@ TEST_CASE("MidiMessageCollector returns false when queue is full",
 }
 
 TEST_CASE("MidiMessageCollector exposes queue and pending telemetry",
-          "[midi][collector][telemetry][phase2]") {
+          "[midi][collector][telemetry]") {
     MidiMessageCollector<4> collector;
 
     const auto initial = collector.telemetry();
@@ -409,7 +409,7 @@ TEST_CASE("MidiMessageCollector exposes queue and pending telemetry",
 }
 
 TEST_CASE("MidiMessageCollector telemetry reports queue overflow and preserves future-drop count",
-          "[midi][collector][telemetry][phase2]") {
+          "[midi][collector][telemetry]") {
     MidiMessageCollector<4> queue_collector;
 
     int accepted = 0;
@@ -455,7 +455,7 @@ TEST_CASE("MidiMessageCollector telemetry reports queue overflow and preserves f
 }
 
 TEST_CASE("MidiMessageCollector telemetry path allocates zero times",
-          "[midi][collector][telemetry][rt-safety][phase2]") {
+          "[midi][collector][telemetry][rt-safety]") {
     MidiMessageCollector<4> collector;
 
     REQUIRE(collector.push_now(note_on(0, 60, 100), /*ts=*/10.000));
