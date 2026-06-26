@@ -366,16 +366,27 @@ private:
 /// node's queue from its inbound automation connections before the node runs.
 class GraphRuntimeAutomationScratch {
 public:
-    // Upper bound on distinct automated parameters per node — the size of the
-    // gather's on-stack accumulator. A graph automating more than this on any one
-    // node must be rejected by the caller (kept on the legacy walk) rather than
-    // routed, since the gather would otherwise silently drop the overflow.
-    static constexpr std::uint32_t kMaxParamsPerNode = 64;
+    // Per-node SPARSE (control-rate) automation accumulator. The gather dedups a
+    // node's inbound sparse-automation edges by parameter id and accumulates two
+    // control points (v0 at sample 0, vN at sample N-1) plus the parameter's
+    // clamp bounds and whether any edge mixed Add. One per distinct sparse
+    // parameter a node receives; held in per-node scratch (see sparse_accum) so
+    // an arbitrary per-node parameter count is handled without any on-stack cap,
+    // and disjoint per-node slices keep the parallel gather race-free.
+    struct SparseAccum {
+        std::uint32_t param_id = 0;
+        float v0 = 0.0f;
+        float vN = 0.0f;
+        float lo = 0.0f;
+        float hi = 0.0f;
+        bool has_add = false;
+    };
 
-    // Off-RT: allocate per-node event queues + per-connection slew state, and —
-    // for each node — a max_frames accumulation buffer per distinct DENSE
-    // (audio-rate) automation parameter it receives (precomputed from the plan in
-    // first-seen connection order). Returns false on allocation failure.
+    // Off-RT: allocate per-node event queues + per-connection slew state; for each
+    // node a max_frames accumulation buffer per distinct DENSE (audio-rate)
+    // automation parameter plus its transient gather flags/bounds; and a per-node
+    // SPARSE accumulator slice — all precomputed from the plan in first-seen
+    // connection order. Returns false on allocation failure.
     bool reset(const graph::GraphRuntimePlan& plan, std::uint32_t max_frames);
     void clear() noexcept;
 
@@ -409,6 +420,34 @@ public:
         return dense_storage_.data() + dense_params_[node_dense_first_[node_index] + i].offset;
     }
 
+    // Per-node DENSE transient gather state — one slot per distinct audio-rate
+    // parameter the node receives (same i-indexing as dense_param_id /
+    // dense_buffer). dense_replace/dense_add are the per-param "saw a Replace /
+    // Add edge" flags; dense_lo/dense_hi the clamp bounds. These hold no state
+    // between blocks (the gather re-zeroes its node slice each call); they live in
+    // per-node scratch only so the gather needs no on-stack arrays, and disjoint
+    // per-node slices keep the parallel gather race-free.
+    std::span<float> dense_lo(std::uint32_t node_index) noexcept {
+        return dense_span(dense_lo_, node_index);
+    }
+    std::span<float> dense_hi(std::uint32_t node_index) noexcept {
+        return dense_span(dense_hi_, node_index);
+    }
+    std::span<std::uint8_t> dense_replace(std::uint32_t node_index) noexcept {
+        return dense_span(dense_replace_, node_index);
+    }
+    std::span<std::uint8_t> dense_add(std::uint32_t node_index) noexcept {
+        return dense_span(dense_add_, node_index);
+    }
+
+    // Per-node SPARSE accumulator slice (one SparseAccum per distinct control-rate
+    // parameter the node receives). Disjoint per node => parallel-safe.
+    std::span<SparseAccum> sparse_accum(std::uint32_t node_index) noexcept {
+        if (node_index >= node_count_) return {};
+        return {sparse_accum_storage_.data() + node_sparse_first_[node_index],
+                node_sparse_count_[node_index]};
+    }
+
     bool fits(std::uint32_t node_count, std::uint32_t connection_count,
               std::uint32_t frames) const noexcept {
         return node_count_ >= node_count && connection_count_ >= connection_count &&
@@ -420,6 +459,13 @@ private:
         std::uint32_t param_id = 0;
         std::uint32_t offset = 0;  // into dense_storage_ (floats)
     };
+    // Slice a per-(node,denseparam) flat vector to this node's transient dense
+    // gather state — same first/count layout as dense_params_.
+    template<typename T>
+    std::span<T> dense_span(std::vector<T>& v, std::uint32_t node_index) noexcept {
+        if (node_index >= node_count_) return {};
+        return {v.data() + node_dense_first_[node_index], node_dense_count_[node_index]};
+    }
     // ParameterEventQueue is large and non-copyable; hold it via unique_ptr so a
     // reallocating vector never needs to move/copy it.
     std::vector<std::unique_ptr<state::ParameterEventQueue>> events_;  // per node
@@ -429,6 +475,17 @@ private:
     std::vector<std::uint32_t> node_dense_first_;     // per node: index into dense_params_
     std::vector<std::uint32_t> node_dense_count_;     // per node
     std::vector<float> dense_storage_;                // total dense params × max_frames
+    // Per-(node,denseparam) transient dense gather state (keyed by
+    // node_dense_first_[n] + i, same as dense_params_): clamp bounds + the
+    // Replace/Add edge flags. Sized total_dense; re-zeroed per gather.
+    std::vector<float> dense_lo_;
+    std::vector<float> dense_hi_;
+    std::vector<std::uint8_t> dense_replace_;
+    std::vector<std::uint8_t> dense_add_;
+    // Per-node SPARSE accumulators, flattened (one slice per node).
+    std::vector<SparseAccum> sparse_accum_storage_;
+    std::vector<std::uint32_t> node_sparse_first_;    // per node: index into storage
+    std::vector<std::uint32_t> node_sparse_count_;    // per node
     std::uint32_t node_count_ = 0;
     std::uint32_t connection_count_ = 0;
     std::uint32_t max_frames_ = 0;

@@ -104,8 +104,8 @@ struct SignalGraphExecutorRouting {
 //   - connections may be audio (feedforward, feedback, or sidechain — a sidechain
 //     edge routes as plain audio into a higher input port of the destination
 //     plugin), MIDI event edges, sparse automation, or dense audio-rate
-//     modulation. Sparse and dense automation each fail closed when one node
-//     exceeds GraphRuntimeAutomationScratch::kMaxParamsPerNode distinct params.
+//     modulation. Any per-node automated-parameter count routes — the gather's
+//     per-node accumulators are sized off-RT to the actual count (no fixed cap).
 // No prepared check.
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections);

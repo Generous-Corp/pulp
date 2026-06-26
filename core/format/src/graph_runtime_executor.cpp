@@ -195,13 +195,6 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
     midi.set_in_incomplete(node_index, incomplete);
 }
 
-// Upper bound on distinct automated parameters per node for the on-stack
-// accumulator. The caller (eligibility check) rejects any graph that exceeds
-// this on a node and keeps it on the legacy walk, so the `continue` below is
-// a defense-in-depth backstop, never hit for an eligible graph.
-constexpr std::uint32_t kMaxAutomatedParamsPerNode =
-    GraphRuntimeAutomationScratch::kMaxParamsPerNode;
-
 // Build this node's parameter-automation events from its inbound SPARSE
 // automation connections (audio-rate edges are handled elsewhere). Each edge
 // samples its source's audio output at sample 0 and N-1, maps into the
@@ -221,15 +214,12 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
     queue->clear();
     const int last = static_cast<int>(frames) - 1;
 
-    struct Accum {
-        std::uint32_t param_id;
-        float v0;
-        float vN;
-        float lo;
-        float hi;
-        bool has_add;
-    };
-    std::array<Accum, kMaxAutomatedParamsPerNode> accum{};
+    // Per-node SPARSE accumulator slice (disjoint per node => parallel-safe).
+    // Sized off-RT to this node's distinct sparse param count; zero its slots at
+    // entry since the storage persists across blocks/nodes.
+    using SparseAccum = GraphRuntimeAutomationScratch::SparseAccum;
+    const std::span<SparseAccum> accum = automation.sparse_accum(node_index);
+    for (auto& a : accum) a = SparseAccum{};
     std::uint32_t param_count = 0;
 
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
@@ -285,8 +275,10 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             if (accum[pi].param_id == a.param_id) break;
         }
         if (pi == param_count) {
-            if (param_count >= kMaxAutomatedParamsPerNode) continue;
-            accum[pi] = Accum{a.param_id, 0.0f, 0.0f, a.bounds_lo, a.bounds_hi, false};
+            // Defensive backstop: the slice is sized to this node's distinct
+            // sparse param count, so this never triggers for a valid plan.
+            if (param_count >= accum.size()) continue;
+            accum[pi] = SparseAccum{a.param_id, 0.0f, 0.0f, a.bounds_lo, a.bounds_hi, false};
             ++param_count;
         }
         if (a.mix_add) {
@@ -318,10 +310,18 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
     // stable sort orders them by sample offset), matching the host walk's
     // audio-rate path.
     const std::uint32_t dense_count = automation.dense_param_count(node_index);
-    std::array<bool, kMaxAutomatedParamsPerNode> dense_replace{};
-    std::array<bool, kMaxAutomatedParamsPerNode> dense_add{};
-    std::array<float, kMaxAutomatedParamsPerNode> dense_lo{};
-    std::array<float, kMaxAutomatedParamsPerNode> dense_hi{};
+    // Per-node DENSE transient gather slices (disjoint per node => parallel-safe).
+    // Re-zero this node's flags/bounds at entry — the storage persists.
+    const std::span<std::uint8_t> dense_replace = automation.dense_replace(node_index);
+    const std::span<std::uint8_t> dense_add = automation.dense_add(node_index);
+    const std::span<float> dense_lo = automation.dense_lo(node_index);
+    const std::span<float> dense_hi = automation.dense_hi(node_index);
+    for (std::uint32_t i = 0; i < dense_count; ++i) {
+        dense_replace[i] = 0;
+        dense_add[i] = 0;
+        dense_lo[i] = 0.0f;
+        dense_hi[i] = 0.0f;
+    }
     for (std::uint32_t i = 0; i < dense_count; ++i) {
         std::fill_n(automation.dense_buffer(node_index, i), frames, 0.0f);
     }
@@ -598,36 +598,65 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
         slew_last_.assign(connection_count, 0.0f);
         slew_primed_.assign(connection_count, 0);
 
-        // Per-node dense (audio-rate) parameter layout: each node's distinct
+        // Per-node DENSE (audio-rate) parameter layout: each node's distinct
         // audio-rate param ids in first-seen inbound-connection order, each given
         // a max_frames accumulation region (matching the host walk's per-node
-        // audio_rate_param_data).
+        // audio_rate_param_data). Also count each node's distinct SPARSE
+        // (control-rate) params the same way, so both axes get per-node scratch
+        // slices sized to the actual count — no on-stack cap on either.
         node_dense_first_.assign(node_count, 0);
         node_dense_count_.assign(node_count, 0);
+        node_sparse_first_.assign(node_count, 0);
+        node_sparse_count_.assign(node_count, 0);
         std::uint32_t total_dense = 0;
+        std::uint32_t total_sparse = 0;
         for (std::uint32_t n = 0; n < node_count; ++n) {
             const auto& node = plan.nodes[n];
             node_dense_first_[n] = static_cast<std::uint32_t>(dense_params_.size());
+            node_sparse_first_[n] = total_sparse;
             for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
                 const auto ci =
                     plan.inbound_connection_indices[node.first_inbound_connection + c];
                 const auto& conn = plan.connections[ci];
-                if (!conn.is_automation || !conn.automation.audio_rate) continue;
-                bool seen = false;
-                for (std::uint32_t k = 0; k < node_dense_count_[n]; ++k) {
-                    if (dense_params_[node_dense_first_[n] + k].param_id ==
-                        conn.automation.param_id) {
-                        seen = true;
-                        break;
+                if (!conn.is_automation) continue;
+                if (conn.automation.audio_rate) {
+                    bool seen = false;
+                    for (std::uint32_t k = 0; k < node_dense_count_[n]; ++k) {
+                        if (dense_params_[node_dense_first_[n] + k].param_id ==
+                            conn.automation.param_id) {
+                            seen = true;
+                            break;
+                        }
                     }
+                    if (seen) continue;
+                    dense_params_.push_back({conn.automation.param_id, total_dense * max_frames});
+                    ++node_dense_count_[n];
+                    ++total_dense;
+                } else {
+                    bool seen = false;
+                    for (std::uint32_t k = 0; k < node_sparse_count_[n]; ++k) {
+                        if (sparse_accum_storage_[node_sparse_first_[n] + k].param_id ==
+                            conn.automation.param_id) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (seen) continue;
+                    SparseAccum a{};
+                    a.param_id = conn.automation.param_id;
+                    sparse_accum_storage_.push_back(a);
+                    ++node_sparse_count_[n];
+                    ++total_sparse;
                 }
-                if (seen) continue;
-                dense_params_.push_back({conn.automation.param_id, total_dense * max_frames});
-                ++node_dense_count_[n];
-                ++total_dense;
             }
         }
         dense_storage_.assign(static_cast<std::size_t>(total_dense) * max_frames, 0.0f);
+        // Transient per-(node,denseparam) gather state, sized to the dense param
+        // total (re-zeroed per gather). dense_lo/dense_hi are written before read.
+        dense_lo_.assign(total_dense, 0.0f);
+        dense_hi_.assign(total_dense, 0.0f);
+        dense_replace_.assign(total_dense, 0);
+        dense_add_.assign(total_dense, 0);
     } catch (...) {
         clear();
         return false;
@@ -646,6 +675,13 @@ void GraphRuntimeAutomationScratch::clear() noexcept {
     node_dense_first_.clear();
     node_dense_count_.clear();
     dense_storage_.clear();
+    dense_lo_.clear();
+    dense_hi_.clear();
+    dense_replace_.clear();
+    dense_add_.clear();
+    sparse_accum_storage_.clear();
+    node_sparse_first_.clear();
+    node_sparse_count_.clear();
     node_count_ = 0;
     connection_count_ = 0;
     max_frames_ = 0;

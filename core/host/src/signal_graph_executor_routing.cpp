@@ -214,34 +214,9 @@ bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
         if (!connection_eligible(c)) return false;
     }
     // The executor's automation gather accumulates distinct automated parameters
-    // per node in fixed on-stack arrays (kMaxParamsPerNode) — one for sparse
-    // two-point automation, one for dense audio-rate. A node automating more than
-    // that on EITHER axis would silently drop the overflow, so keep such a graph
-    // on the legacy walk (fail closed). Count sparse and dense distinct params
-    // per node separately.
-    const auto over_cap = [&](bool dense) {
-        std::vector<std::pair<NodeId, std::vector<std::uint32_t>>> per_dest;
-        for (const auto& c : connections) {
-            const bool is_dense = c.audio_rate_modulation;
-            const bool is_sparse = c.automation && !c.audio_rate_modulation;
-            if (dense ? !is_dense : !is_sparse) continue;
-            auto it = std::find_if(per_dest.begin(), per_dest.end(),
-                                   [&](const auto& e) { return e.first == c.dest_node; });
-            if (it == per_dest.end()) {
-                per_dest.push_back({c.dest_node, {c.automation_param_id}});
-                continue;
-            }
-            auto& ids = it->second;
-            if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
-                ids.push_back(c.automation_param_id);
-                if (ids.size() > fmt::GraphRuntimeAutomationScratch::kMaxParamsPerNode) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    if (over_cap(/*dense=*/false) || over_cap(/*dense=*/true)) return false;
+    // per node into per-node scratch slices sized off-RT to the actual count (one
+    // axis for sparse two-point automation, one for dense audio-rate), so there is
+    // no per-node parameter cap to fail closed on — any count routes.
     return true;
 }
 

@@ -1,0 +1,44 @@
+[  0%] Built target pulp-bundled-fonts
+[  0%] Built target pulp-native-components
+[  0%] Built target p256m
+[  0%] Built target SheenBidi
+[  0%] Built target everest
+[  2%] Built target SDL_uclibc
+[  5%] Built target hwy
+[  7%] Built target yogacore
+[ 15%] Built target mbedcrypto
+[ 17%] Built target pulp-platform
+[ 20%] Built target yaml-cpp
+[ 23%] Built target mbedx509
+[ 23%] Built target mbedtls
+[ 33%] Built target Catch2
+[ 38%] Built target pulp-runtime
+[ 38%] Built target Catch2WithMain
+[ 58%] Built target SDL3-static
+[ 58%] Built target pulp-events
+[ 61%] Built target pulp-midi
+[ 61%] Built target pulp-graph
+[ 61%] Built target pulp-state
+[ 64%] Built target pulp-canvas
+[ 64%] Built target pulp-render
+[ 69%] Built target pulp-audio
+[ 71%] Built target pulp-inspect
+[ 74%] Built target pulp-host
+[ 74%] Built target pulp-view
+[ 79%] Built target pulp-view-script
+[ 94%] Built target pulp-view-core
+[ 97%] Built target pulp-format
+[ 97%] Building CXX object test/CMakeFiles/pulp-test-signal-graph-executor-parity.dir/test_signal_graph_executor_parity.cpp.o
+/tmp/pulp-4895/test/test_signal_graph_executor_parity.cpp:1850:19: warning: lambda capture 'kSmall' is not required to be captured for this use [-Wunused-lambda-capture]
+ 1850 |     auto build = [kSmall](SignalGraph& g, int nparams, bool route) {
+      |                   ^~~~~~
+/tmp/pulp-4895/test/test_signal_graph_executor_parity.cpp:1897:19: warning: lambda capture 'kPlugins' is not required to be captured for this use [-Wunused-lambda-capture]
+ 1897 |     auto build = [kPlugins, kParams, kSmall](SignalGraph& g, bool dense, bool parallel) {
+      |                   ^~~~~~~~~
+/tmp/pulp-4895/test/test_signal_graph_executor_parity.cpp:1897:38: warning: lambda capture 'kSmall' is not required to be captured for this use [-Wunused-lambda-capture]
+ 1897 |     auto build = [kPlugins, kParams, kSmall](SignalGraph& g, bool dense, bool parallel) {
+      |                                    ~~^~~~~~
+3 warnings generated.
+[ 97%] Linking CXX executable pulp-test-signal-graph-executor-parity
+ld: warning: ignoring duplicate libraries: '../core/format/libpulp-format.a', '../core/graph/libpulp-graph.a', '../core/host/libpulp-host.a', '../core/view/libpulp-view-core.a', '../core/view/libpulp-view-script.a', '../core/view/libpulp-view.a', '../inspect/libpulp-inspect.a'
+[100%] Built target pulp-test-signal-graph-executor-parity

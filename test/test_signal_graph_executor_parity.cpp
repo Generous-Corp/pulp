@@ -66,6 +66,29 @@ std::vector<std::vector<float>> run_legacy(SignalGraph& g, int frames,
     return outs;
 }
 
+// Drive SignalGraph::process() for one block WITHOUT forcing any routing flag —
+// uses whatever routing the graph has enabled (canonical/parallel). This is the
+// only way to exercise the genuinely-routed automation path, whose per-node
+// MIDI/automation scratch lives in the CompiledGraph (the standalone
+// build_signal_graph_executor_routing snapshot carries no automation scratch).
+std::vector<std::vector<float>> run_graph_process(SignalGraph& g, int frames,
+                                                  const std::vector<std::vector<float>>& in,
+                                                  std::size_t out_channels) {
+    std::vector<std::vector<float>> ins = in;
+    std::vector<std::vector<float>> outs(out_channels,
+                                         std::vector<float>(static_cast<std::size_t>(frames), 0.0f));
+    std::vector<const float*> in_ptrs;
+    std::vector<float*> out_ptrs;
+    for (auto& c : ins) in_ptrs.push_back(c.data());
+    for (auto& c : outs) out_ptrs.push_back(c.data());
+    pulp::audio::BufferView<const float> in_view(in_ptrs.data(), in_ptrs.size(),
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ptrs.data(), out_ptrs.size(),
+                                            static_cast<std::uint32_t>(frames));
+    g.process(out_view, in_view, frames);
+    return outs;
+}
+
 // Drive the translated routing for one block; returns per-channel output.
 std::vector<std::vector<float>> run_routed(pulp::format::GraphRuntimeExecutor& exec,
                                            SignalGraphExecutorRouting& routing, int frames,
@@ -778,23 +801,49 @@ private:
     PluginInfo info_;
 };
 
-// Plugin exposing `num_params` automatable parameters (ids 1..num_params), for
-// the per-node automated-parameter cap. Audio passes through unchanged.
-class ManyParamPlugin final : public PluginSlot {
+// Plugin whose output reflects EVERY automated parameter it receives: per sample
+// the gain is the sum of each parameter's most-recent event value (default 0),
+// applied to the input. Distinct param ids 1..num_params (audio-rate-capable, so
+// usable for both sparse and dense edges). Because the output depends on every
+// param, a gather that dropped any parameter would diverge from the walk — which
+// is what the over-cap parity tests rely on. Walk and routed feed identical
+// event streams, so an exact match proves the routed gather carried them all.
+class ManyParamSumGainPlugin final : public PluginSlot {
 public:
-    ManyParamPlugin(int num_params, int channels)
+    ManyParamSumGainPlugin(int num_params, int channels)
         : num_params_(num_params), info_(test_plugin_info(channels, channels)) {}
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
     bool prepare(double, int) override { return true; }
     void release() override {}
+    static constexpr int kMaxId = 512;  // ids 1..kMaxId; stack-only, RT-safe
     void process(pulp::audio::BufferView<float>& out,
                  const pulp::audio::BufferView<const float>& in,
                  const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&, int n) override {
-        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
-        for (std::size_t c = 0; c < chs; ++c) {
-            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+                 const pulp::host::ParameterEventQueue& params, int n) override {
+        // Running per-param value (indexed by id; ids are 1..num_params_) and its
+        // running sum. Stack array (no audio-thread allocation). Events arrive
+        // sorted by sample offset.
+        std::array<float, kMaxId + 1> cur{};
+        float sum = 0.0f;
+        auto it = params.begin();
+        const std::size_t chs = out.num_channels();
+        for (int s = 0; s < n; ++s) {
+            while (it != params.end() && it->sample_offset <= s) {
+                const std::uint32_t pid = it->param_id;
+                if (pid >= 1 && pid <= static_cast<std::uint32_t>(num_params_) &&
+                    pid <= static_cast<std::uint32_t>(kMaxId)) {
+                    sum -= cur[pid];
+                    cur[pid] = it->value;
+                    sum += cur[pid];
+                }
+                ++it;
+            }
+            for (std::size_t c = 0; c < chs; ++c) {
+                const float* i = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+                out.channel_ptr(c)[static_cast<std::size_t>(s)] =
+                    (i ? i[static_cast<std::size_t>(s)] : 0.0f) * sum;
+            }
         }
     }
     std::vector<pulp::host::HostParamInfo> parameters() const override {
@@ -806,7 +855,7 @@ public:
             p.max_value = 1.0f;
             p.flags.automatable = true;
             p.flags.modulatable = true;
-            p.rate = pulp::state::ParamRate::AudioRate;  // also dense-modulatable
+            p.rate = pulp::state::ParamRate::AudioRate;
             ps.push_back(p);
         }
         return ps;
@@ -1696,44 +1745,71 @@ TEST_CASE("SignalGraph::process automation executor path does not allocate on th
     }
 }
 
-TEST_CASE("SignalGraph::process opt-in falls back to legacy past the per-node automation cap",
-          "[host][graph][executor][routing][automation]") {
-    // A node automating more distinct parameters than the gather's on-stack
-    // accumulator holds must stay ineligible (kept on the legacy walk) rather
-    // than route and silently drop the overflow.
-    constexpr int kOverCap =
-        static_cast<int>(pulp::format::GraphRuntimeAutomationScratch::kMaxParamsPerNode) + 1;
-    SignalGraph g;
-    const auto in = g.add_input_node(2, "In");
-    const auto p = g.add_plugin_node(std::make_unique<ManyParamPlugin>(kOverCap, 2), 2, 2, "P");
-    const auto out = g.add_output_node(2, "Out");
-    for (int c = 0; c < 2; ++c) {
-        REQUIRE(g.connect(in, c, p, c));
-        REQUIRE(g.connect(p, c, out, c));
-    }
-    for (int i = 0; i < kOverCap; ++i) {
-        REQUIRE(g.connect_automation(in, 0, p, static_cast<uint32_t>(i + 1), 0.0f, 1.0f, 0.0f,
-                                     pulp::host::AutomationMix::Add));
-    }
-    REQUIRE(g.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(g));
+TEST_CASE("SignalGraph::process routes any per-node SPARSE automation param count",
+          "[host][graph][executor][routing][parity][automation]") {
+    // A node automating more distinct SPARSE parameters than the old fixed
+    // on-stack cap (64) once forced the legacy walk; the gather now sizes its
+    // per-node accumulator off-RT to the actual count, so an arbitrary count
+    // routes with output bit-identical to the walk. ManyParamSumGainPlugin's
+    // output sums every parameter, so a dropped param would diverge.
+    auto build = [](SignalGraph& g, int nparams, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p =
+            g.add_plugin_node(std::make_unique<ManyParamSumGainPlugin>(nparams, 2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        // Distinct param ids 1..nparams, each a sparse (control-rate) edge with a
+        // small per-param smoothing so the slew state is exercised too.
+        for (int i = 0; i < nparams; ++i) {
+            REQUIRE(g.connect_automation(in, i % 2, p, static_cast<uint32_t>(i + 1), 0.0f,
+                                         1.0f, /*smoothing_ms=*/3.0f,
+                                         pulp::host::AutomationMix::Replace));
+        }
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
 
-    // Exactly at the cap is still eligible.
-    SignalGraph at_cap;
-    const auto in2 = at_cap.add_input_node(2, "In");
-    const auto p2 = at_cap.add_plugin_node(
-        std::make_unique<ManyParamPlugin>(kOverCap - 1, 2), 2, 2, "P");
-    const auto out2 = at_cap.add_output_node(2, "Out");
-    for (int c = 0; c < 2; ++c) {
-        REQUIRE(at_cap.connect(in2, c, p2, c));
-        REQUIRE(at_cap.connect(p2, c, out2, c));
+    // Just past the old fixed cap (65) and a comfortably larger count (100).
+    for (int nparams : {65, 100}) {
+        SignalGraph legacy, routed;
+        build(legacy, nparams, /*route=*/false);
+        build(routed, nparams, /*route=*/true);
+        REQUIRE(signal_graph_executor_eligible(routed));
+        for (int blk = 0; blk < 4; ++blk) {
+            const std::vector<std::vector<float>> input{
+                ramp(kFrames, 0.6f + 0.04f * static_cast<float>(blk)),
+                ramp(kFrames, 0.5f - 0.02f * static_cast<float>(blk))};
+            INFO("nparams " << nparams << " block " << blk);
+            expect_equal(run_legacy(legacy, kFrames, input, 2),
+                         run_graph_process(routed, kFrames, input, 2));
+        }
     }
-    for (int i = 0; i < kOverCap - 1; ++i) {
-        REQUIRE(at_cap.connect_automation(in2, 0, p2, static_cast<uint32_t>(i + 1), 0.0f, 1.0f,
-                                          0.0f, pulp::host::AutomationMix::Add));
+
+    // The routed gather is allocation-free on the audio thread even well past
+    // the old cap (all accumulator storage was sized off-RT in reset()). Build
+    // the I/O buffers OUTSIDE the probe and call g.process() directly inside, so
+    // the probe sees only the engine's work (not the harness's buffer setup).
+    {
+        SignalGraph g;
+        build(g, 100, /*route=*/true);
+        REQUIRE(signal_graph_executor_eligible(g));
+        const auto l = ramp(kFrames, 0.7f), r = ramp(kFrames, 0.6f);
+        std::vector<float> li = l, ri = r;
+        std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 2> ic{li.data(), ri.data()};
+        std::array<float*, 2> oc{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+        pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+        g.process(ov, iv, kFrames);  // warm-up outside the probe
+        {
+            pulp::test::RtAllocationProbe probe;
+            g.process(ov, iv, kFrames);
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
     }
-    REQUIRE(at_cap.prepare(kSr, kFrames));
-    CHECK(signal_graph_executor_eligible(at_cap));
 }
 
 TEST_CASE("SignalGraph::process automation matches legacy: source also drives audio",
@@ -1770,32 +1846,102 @@ TEST_CASE("SignalGraph::process automation matches legacy: source also drives au
     }
 }
 
-TEST_CASE("SignalGraph::process opt-in falls back to legacy past the per-node dense automation cap",
-          "[host][graph][executor][routing][automation]") {
-    // The dense gather's per-param accumulators are also a fixed on-stack array;
-    // a node receiving more distinct audio-rate params than the cap must stay on
-    // the legacy walk.
-    constexpr int kOverCap =
-        static_cast<int>(pulp::format::GraphRuntimeAutomationScratch::kMaxParamsPerNode) + 1;
-    SignalGraph g;
-    const auto in = g.add_input_node(2, "In");
-    const auto p = g.add_plugin_node(std::make_unique<ManyParamPlugin>(kOverCap, 2), 2, 2, "P");
-    const auto out = g.add_output_node(2, "Out");
-    for (int c = 0; c < 2; ++c) {
-        REQUIRE(g.connect(in, c, p, c));
-        REQUIRE(g.connect(p, c, out, c));
+TEST_CASE("SignalGraph::process routes any per-node DENSE automation param count",
+          "[host][graph][executor][routing][parity][automation]") {
+    // The dense (audio-rate) gather's per-param accumulators were also a fixed
+    // on-stack array; they now live in per-node scratch sized off-RT, so an
+    // arbitrary distinct audio-rate param count routes bit-identically to the
+    // walk. This PINS the dense-array move to per-node storage (a stack overflow
+    // before the fix). A small block keeps the per-sample event count
+    // (params * block) inside the parameter-event-queue capacity.
+    constexpr int kSmall = 8;
+    auto build = [kSmall](SignalGraph& g, int nparams, bool route) {
+        const auto in = g.add_input_node(2, "In");
+        const auto p =
+            g.add_plugin_node(std::make_unique<ManyParamSumGainPlugin>(nparams, 2), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        for (int i = 0; i < nparams; ++i) {
+            REQUIRE(g.connect_audio_rate_modulation(in, i % 2, p, static_cast<uint32_t>(i + 1),
+                                                    0.0f, 1.0f, 0.0f,
+                                                    pulp::host::AutomationMix::Replace));
+        }
+        g.set_canonical_executor_routing_enabled(route);
+        REQUIRE(g.prepare(kSr, kSmall));
+    };
+
+    // Just past the old fixed cap (65) and a larger count (100); 100 * 8 = 800
+    // per-sample events stays within the per-node event-queue capacity.
+    for (int nparams : {65, 100}) {
+        SignalGraph legacy, routed;
+        build(legacy, nparams, /*route=*/false);
+        build(routed, nparams, /*route=*/true);
+        REQUIRE(signal_graph_executor_eligible(routed));
+        for (int blk = 0; blk < 4; ++blk) {
+            const std::vector<std::vector<float>> input{
+                ramp(kSmall, 0.6f + 0.04f * static_cast<float>(blk)),
+                ramp(kSmall, 0.5f - 0.02f * static_cast<float>(blk))};
+            INFO("nparams " << nparams << " block " << blk);
+            expect_equal(run_legacy(legacy, kSmall, input, 2),
+                         run_graph_process(routed, kSmall, input, 2));
+        }
     }
-    for (int i = 0; i < kOverCap; ++i) {
-        REQUIRE(g.connect_audio_rate_modulation(in, 0, p, static_cast<uint32_t>(i + 1),
-                                                0.0f, 1.0f, 0.0f,
-                                                pulp::host::AutomationMix::Add));
+}
+
+TEST_CASE("SignalGraph::process parallel path routes large per-node automation counts",
+          "[host][graph][executor][routing][parity][parallel][automation]") {
+    // Several plugin nodes at the same graph level, each automating more distinct
+    // parameters than the old fixed cap, run concurrently on the parallel path.
+    // Each node's automation gather touches only its own per-node accumulator
+    // slice; the parallel-routed output must stay bit-identical to the legacy
+    // walk across blocks — locking the per-node-slice parallel-safety of both the
+    // sparse and dense accumulators.
+    constexpr int kSmall = 8;
+    constexpr int kPlugins = 4;
+    constexpr int kParams = 100;  // well past the old fixed cap (64)
+    auto build = [kPlugins, kParams, kSmall](SignalGraph& g, bool dense, bool parallel) {
+        const auto in = g.add_input_node(2, "In");
+        const auto out = g.add_output_node(2, "Out");
+        for (int k = 0; k < kPlugins; ++k) {
+            const auto p = g.add_plugin_node(
+                std::make_unique<ManyParamSumGainPlugin>(kParams, 2), 2, 2, "P");
+            for (int c = 0; c < 2; ++c) {
+                REQUIRE(g.connect(in, c, p, c));
+                REQUIRE(g.connect(p, c, out, c));
+            }
+            for (int i = 0; i < kParams; ++i) {
+                const auto pid = static_cast<uint32_t>(i + 1);
+                if (dense) {
+                    REQUIRE(g.connect_audio_rate_modulation(in, i % 2, p, pid, 0.0f, 1.0f, 0.0f,
+                                                            pulp::host::AutomationMix::Replace));
+                } else {
+                    REQUIRE(g.connect_automation(in, i % 2, p, pid, 0.0f, 1.0f, 3.0f,
+                                                 pulp::host::AutomationMix::Replace));
+                }
+            }
+        }
+        g.set_parallel_routing_enabled(parallel);
+        REQUIRE(g.prepare(kSr, dense ? kSmall : kFrames));
+    };
+
+    for (bool dense : {false, true}) {
+        const int frames = dense ? kSmall : kFrames;
+        SignalGraph legacy, par;
+        build(legacy, dense, /*parallel=*/false);
+        build(par, dense, /*parallel=*/true);
+        REQUIRE(signal_graph_executor_eligible(par));
+        for (int blk = 0; blk < 4; ++blk) {
+            const std::vector<std::vector<float>> input{
+                ramp(frames, 0.6f + 0.03f * static_cast<float>(blk)),
+                ramp(frames, 0.5f - 0.02f * static_cast<float>(blk))};
+            INFO((dense ? "dense" : "sparse") << " block " << blk);
+            expect_equal(run_legacy(legacy, frames, input, 2),
+                         run_graph_process(par, frames, input, 2));
+        }
     }
-    // Prepare with a tiny block so the per-sample events (kOverCap * block) fit
-    // the parameter-event-queue capacity (1024) — otherwise prepare rejects the
-    // graph before eligibility is queried. With a prepared graph, the per-node
-    // dense param cap is the gate that keeps it on the legacy walk.
-    REQUIRE(g.prepare(kSr, /*max_block=*/8));
-    CHECK_FALSE(signal_graph_executor_eligible(g));
 }
 
 TEST_CASE("SignalGraph::process automation matches legacy: dense Replace + Add on one param",
