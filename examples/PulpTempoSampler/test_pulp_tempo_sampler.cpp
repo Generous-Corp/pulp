@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -800,45 +801,132 @@ TEST_CASE("QWERTY typing keeps triggering audio across tempo + slice changes",
     CHECK(qwerty_energy(view::KeyCode::a, 90.0) > 1e-6);
 }
 
-// #race-3 (M1): the home row (a,s,d,f,g,h,j) must play CONSECUTIVE slices, not the
-// piano layout's white keys (0,2,4,5,7,9,11) which skip black-key slices and run
-// out after a few keys ("first 4 keys work then it stops"). slice_trigger_note
-// remaps the typing path so a,s,d,f,g,h,j -> slices 0..6.
-TEST_CASE("QWERTY home row plays consecutive slices (no black-key gap)",
-          "[tempo-sampler][issue-home-row]") {
+// The typing keyboard is a chromatic piano — the home row a,s,d,f,g,h,j,k plays the
+// WHITE notes and the upper row w,e,t,y,u,o,p plays the SHARPS above them (gaps at
+// E/F and B/C). Each key is a distinct semitone, so with slice-per-semitone every
+// key triggers a UNIQUE consecutive slice (a=0, w=1, s=2, e=3, d=4, ...). This locks
+// the chromatic 1:1 mapping: no two distinct keys share a slice (guarding against a
+// remap that would collapse the black-key row onto the white slices and double them).
+TEST_CASE("QWERTY typing maps every key to a unique chromatic slice (no doubling)",
+          "[tempo-sampler][issue-typing-double]") {
     Fixture f;
-    auto loop = percussive_loop(48000, 7);  // ~7 slices
-    const float* ch[1] = {loop.data()};
-    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
-    f.proc->set_loop_bpm_for_test(120.0);
-    std::vector<float> l(512), r(512);
-    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
-    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 6; }));
 
+    // Capture the slice index each physical key resolves to through the real path:
+    // SamplerEditorRoot key event -> typing controller -> keyboard_play_on(note).
     SamplerEditorRoot root;
     root.current_root_note = [] { return 60; };
     root.keyboard_window_visible = [] { return true; };
-    root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
-    root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
+    int last_slice = -1;
+    root.typing.on_note_on = [&](int n, float) { last_slice = f.proc->slice_index_for_note_test(n); };
     auto key = [](view::KeyCode k, bool down) { view::KeyEvent e; e.key = k; e.is_down = down; return e; };
-    auto play = [&](view::KeyCode k) {
+    auto slice_of = [&](view::KeyCode k) {
+        last_slice = -1;
         root.on_key_event(key(k, true));
-        double e = 0.0;
-        for (int b = 0; b < 10; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
-            for (float v : l) e += static_cast<double>(v) * v; }
         root.on_key_event(key(k, false));
-        return e;
+        return last_slice;
     };
-    // All SEVEN home-row keys must sound with a 7-slice sample (they map to slices 0..6).
-    view::KeyCode home[] = {view::KeyCode::a, view::KeyCode::s, view::KeyCode::d,
-                            view::KeyCode::f, view::KeyCode::g, view::KeyCode::h, view::KeyCode::j};
-    for (int i = 0; i < 7; ++i) {
-        INFO("home-row key index " << i);
-        CHECK(play(home[i]) > 1e-6);
+
+    // White row -> white notes: a,s,d,f,g,h,j,k = slices 0,2,4,5,7,9,11,12.
+    CHECK(slice_of(view::KeyCode::a) == 0);
+    CHECK(slice_of(view::KeyCode::s) == 2);
+    CHECK(slice_of(view::KeyCode::d) == 4);
+    CHECK(slice_of(view::KeyCode::f) == 5);
+    CHECK(slice_of(view::KeyCode::g) == 7);
+    CHECK(slice_of(view::KeyCode::h) == 9);
+    CHECK(slice_of(view::KeyCode::j) == 11);
+    CHECK(slice_of(view::KeyCode::k) == 12);
+    // Black row -> sharps above the white keys (gaps where no black key exists):
+    // w,e,t,y,u = slices 1,3,6,8,10.
+    CHECK(slice_of(view::KeyCode::w) == 1);
+    CHECK(slice_of(view::KeyCode::e) == 3);
+    CHECK(slice_of(view::KeyCode::t) == 6);
+    CHECK(slice_of(view::KeyCode::y) == 8);
+    CHECK(slice_of(view::KeyCode::u) == 10);
+    // The full interleaved run a,w,s,e,d,f,t,g is strictly 0..7 — no two keys collide.
+    view::KeyCode run[] = {view::KeyCode::a, view::KeyCode::w, view::KeyCode::s, view::KeyCode::e,
+                           view::KeyCode::d, view::KeyCode::f, view::KeyCode::t, view::KeyCode::g};
+    std::set<int> seen;
+    for (int i = 0; i < 8; ++i) {
+        int s = slice_of(run[i]);
+        INFO("run key index " << i);
+        CHECK(s == i);              // consecutive
+        CHECK(seen.insert(s).second);  // unique — the no-doubling guarantee
     }
-    // No voices left stuck after releasing every key (note-off remapped consistently).
-    CHECK(f.proc->held_notes_for_test().empty());
+}
+
+// Lowering the tempo made the output sound "blown out / clipping." Voices sum into
+// the output with no headroom, so overlapping slices can exceed full-scale — worst
+// at slow tempos, where each slice is stretched LONGER and successive triggers
+// overlap. The master soft-limiter bounds the summed mix to +/-1.0. Drive a hot loop
+// at a slow tempo, trigger every slice at once (max polyphony — a sum that would far
+// exceed full-scale unprotected), and assert the OUTPUT the device sees stays
+// bounded while still being loud (the limiter engaged rather than silencing).
+TEST_CASE("overlapping slices at slow tempo never clip the output",
+          "[tempo-sampler][issue-stretch-clip]") {
+    Fixture f;
+    // Sharp full-scale clicks + a decaying body — hot, transient-rich material.
+    std::vector<float> loop(48000, 0.0f);
+    for (int b = 0; b < 8; ++b) {
+        const int o = b * 6000;
+        loop[o] = 0.99f; loop[o + 1] = -0.95f; loop[o + 2] = 0.9f;
+        for (int i = 3; i < 3000 && o + i < 48000; ++i)
+            loop[o + i] += 0.6f * std::exp(-6.0 * i / 3000.0) *
+                           std::sin(2.0 * 3.14159265358979323846 * 110.0 * i / 48000.0);
+    }
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+
+    std::vector<float> l(512), r(512);
+    const double slow = 60.0;                                  // R = 120/60 = 2.0, long slices
+    f.proc->render_now(slow);
+    { midi::MidiBuffer m; process_midi(*f.proc, slow, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 6; }));
+
+    // Trigger every slice simultaneously at full velocity -> max overlapping voices.
+    { midi::MidiBuffer m;
+      for (int n = 0; n < 8; ++n) m.add(midi::MidiEvent::note_on(0, 60 + n, 127));
+      process_midi(*f.proc, slow, m, l, r); }
+
+    float peak = 0.0f;
+    for (int b = 0; b < 16; ++b) {
+        midi::MidiBuffer m; process_midi(*f.proc, slow, m, l, r);
+        for (float v : l) peak = std::max(peak, std::fabs(v));
+        for (float v : r) peak = std::max(peak, std::fabs(v));
+    }
+    INFO("output peak with 8 overlapping voices: " << peak);
+    CHECK(peak <= 1.0f);   // bounded — no digital clip on the device
+    CHECK(peak > 0.9f);    // and the limiter engaged (loud), not silenced
+}
+
+// Changing the slice count (re-slice on the SAME sample) must preserve the user's
+// tempo. The footer TEMPO poller re-detects BPM only when load_generation advances;
+// a re-slice bumps raw_generation (so the waveform/slice display repaints) but must
+// NOT bump load_generation (so the tempo override survives). A genuinely new load
+// bumps BOTH (tempo legitimately re-detects). This locks the counter split.
+TEST_CASE("re-slice preserves tempo; new load re-detects it", "[tempo-sampler][issue-slice-tempo]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 6);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    const std::uint64_t load0 = f.proc->load_generation();
+    const std::uint64_t raw0  = f.proc->raw_generation();
+
+    // Re-slice the SAME sample (more onsets) — the display generation must advance
+    // while the tempo-poller generation stays put.
+    f.store.set_value(kOnsetSens, 0.85f);
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->raw_generation() != raw0; }));
+    CHECK(f.proc->load_generation() == load0);   // tempo poller does NOT fire -> tempo preserved
+
+    // A genuinely new sample must advance load_generation so the poller re-detects BPM.
+    auto loop2 = percussive_loop(24000, 4);
+    const float* ch2[1] = {loop2.data()};
+    REQUIRE(f.proc->load_loop(ch2, 1, 24000, 48000.0));
+    CHECK(f.proc->load_generation() != load0);
 }
 
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
