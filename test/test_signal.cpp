@@ -85,7 +85,7 @@ TEST_CASE("DelayLine handles empty, wraparound, and reset edges",
 }
 
 TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
-          "[signal][delay][coverage][phase3-github]") {
+          "[signal][delay][coverage]") {
     DelayLine dl;
     dl.prepare(0);
 
@@ -154,7 +154,7 @@ TEST_CASE("Gain linear setter and buffer processing", "[signal][gain][issue-645]
 }
 
 TEST_CASE("Gain dB conversion floors zero and negative linear values",
-          "[signal][gain][coverage][phase3]") {
+          "[signal][gain][coverage]") {
     REQUIRE_THAT(linear_to_db(0.0f), WithinAbs(-200.0f, 0.001f));
     REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 0.001f));
 
@@ -170,7 +170,7 @@ TEST_CASE("Gain dB conversion floors zero and negative linear values",
 }
 
 TEST_CASE("Gain zero-length buffer calls leave sentinels untouched",
-          "[signal][gain][coverage][phase3-github]") {
+          "[signal][gain][coverage]") {
     Gain g;
     g.set_gain_linear(-2.0f);
 
@@ -216,7 +216,7 @@ TEST_CASE("SimpleMixer clamps mix and processes buffers",
 }
 
 TEST_CASE("SimpleMixer zero-length buffer processing leaves output untouched",
-          "[signal][mix][coverage][phase3]") {
+          "[signal][mix][coverage]") {
     SimpleMixer mixer;
     mixer.set_mix(0.5f);
 
@@ -229,7 +229,7 @@ TEST_CASE("SimpleMixer zero-length buffer processing leaves output untouched",
 }
 
 TEST_CASE("SimpleMixer scalar path clamps endpoint mixes",
-          "[signal][mix][coverage][phase3-github]") {
+          "[signal][mix][coverage]") {
     SimpleMixer mixer;
 
     mixer.set_mix(-0.25f);
@@ -388,7 +388,7 @@ TEST_CASE("SmoothedValue clamps one-sample ramps and partially skips",
 }
 
 TEST_CASE("SmoothedValue ignores non-positive skips",
-          "[signal][smooth][coverage][phase3]") {
+          "[signal][smooth][coverage]") {
     SmoothedValue<float> sv(0.0f);
     sv.set_ramp_time(0.01f, 1000.0f);
     sv.set_target(10.0f);
@@ -402,7 +402,7 @@ TEST_CASE("SmoothedValue ignores non-positive skips",
 }
 
 TEST_CASE("SmoothedValue double precision path reaches targets after skip",
-          "[signal][smooth][coverage][phase3-github]") {
+          "[signal][smooth][coverage]") {
     SmoothedValue<double> sv(2.0);
     sv.set_ramp_time(0.004, 1000.0);
     sv.set_target(6.0);
@@ -506,7 +506,7 @@ TEST_CASE("ADSR handles immediate stages, idle note_off, and reset",
 }
 
 TEST_CASE("ADSR retrigger continues from current release level",
-          "[signal][adsr][coverage][phase3]") {
+          "[signal][adsr][coverage]") {
     Adsr env;
     env.set_sample_rate(1000.0f);
     env.set_params({0.01f, 0.01f, 0.5f, 0.02f});
@@ -532,7 +532,7 @@ TEST_CASE("ADSR retrigger continues from current release level",
 }
 
 TEST_CASE("ADSR retrigger continues from current level",
-          "[signal][adsr][coverage][phase3-github]") {
+          "[signal][adsr][coverage]") {
     Adsr env;
     env.set_sample_rate(100.0f);
     env.set_params({0.1f, 0.2f, 0.25f, 0.1f});
@@ -923,7 +923,7 @@ TEST_CASE("Oscillator reset, phase wrap, and PolyBLEP edges are deterministic",
 }
 
 TEST_CASE("Oscillator zero frequency leaves phase fixed across waveforms",
-          "[signal][osc][coverage][phase3-github]") {
+          "[signal][osc][coverage]") {
     for (auto waveform : {
              Oscillator::Waveform::sine,
              Oscillator::Waveform::saw,
@@ -1128,7 +1128,7 @@ TEST_CASE("NoiseGate ignores nonpositive buffer lengths",
 }
 
 TEST_CASE("NoiseGate sanitizes invalid params without amplifying quiet input",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(1000.0f);
     gate.set_params({
@@ -1151,7 +1151,7 @@ TEST_CASE("NoiseGate sanitizes invalid params without amplifying quiet input",
 }
 
 TEST_CASE("NoiseGate clamps timing and ratio to stable instantaneous behavior",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(1000.0f);
     gate.set_params({-20.0f, 0.25f, -1.0f, -10.0f, -48.0f});
@@ -1166,7 +1166,7 @@ TEST_CASE("NoiseGate clamps timing and ratio to stable instantaneous behavior",
 }
 
 TEST_CASE("NoiseGate invalid sample rates fall back to finite coefficients",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(-1.0f);
     gate.set_params({-20.0f, 20.0f, 0.5f, 50.0f, -24.0f});
@@ -1184,7 +1184,7 @@ TEST_CASE("NoiseGate invalid sample rates fall back to finite coefficients",
 }
 
 TEST_CASE("NoiseGate null buffers and valid buffers preserve callback safety",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(1000.0f);
     gate.set_params({-20.0f, 20.0f, 0.0f, 0.0f, -24.0f});
@@ -1206,7 +1206,7 @@ TEST_CASE("NoiseGate null buffers and valid buffers preserve callback safety",
 }
 
 TEST_CASE("NoiseGate reset releases held attenuation after sanitized params",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(std::numeric_limits<float>::infinity());
     gate.set_params({-20.0f, 20.0f, 0.0f, 1000.0f, -18.0f});
@@ -1223,7 +1223,7 @@ TEST_CASE("NoiseGate reset releases held attenuation after sanitized params",
 }
 
 TEST_CASE("NoiseGate non-finite range falls back to bounded attenuation",
-          "[signal][gate][coverage][phase3]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(std::numeric_limits<float>::quiet_NaN());
     gate.set_params({
@@ -1384,7 +1384,7 @@ TEST_CASE("Chorus dry mix, phase wrap, and reset are deterministic",
 }
 
 TEST_CASE("Chorus is safe before prepare and rejects non-finite mix",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus unprepared;
     unprepared.set_mix(1.0f);
     unprepared.set_depth(1.0f);
@@ -1409,7 +1409,7 @@ TEST_CASE("Chorus is safe before prepare and rejects non-finite mix",
 }
 
 TEST_CASE("Chorus wet zero-depth delay is centered and mono-compatible",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus chorus;
     chorus.prepare(1000.0f);
     chorus.set_rate(0.0f);
@@ -1433,7 +1433,7 @@ TEST_CASE("Chorus wet zero-depth delay is centered and mono-compatible",
 }
 
 TEST_CASE("Chorus clamps mix and delay to safe callback ranges",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus dry;
     dry.prepare(1000.0f);
     dry.set_mix(-1.0f);
@@ -1461,7 +1461,7 @@ TEST_CASE("Chorus clamps mix and delay to safe callback ranges",
 }
 
 TEST_CASE("Chorus depth clamps preserve modulation timing bounds",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus limited_depth;
     limited_depth.prepare(1000.0f);
     limited_depth.set_rate(0.0f);
@@ -1497,7 +1497,7 @@ TEST_CASE("Chorus depth clamps preserve modulation timing bounds",
 }
 
 TEST_CASE("Chorus reset clears delayed audio and restarts the same response",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus chorus;
     chorus.prepare(1000.0f);
     chorus.set_rate(0.0f);
@@ -1529,7 +1529,7 @@ TEST_CASE("Chorus reset clears delayed audio and restarts the same response",
 }
 
 TEST_CASE("Chorus invalid sample rates and fast modulation stay finite",
-          "[signal][chorus][coverage][phase3]") {
+          "[signal][chorus][coverage]") {
     Chorus chorus;
     chorus.prepare(0.0f);
     chorus.set_rate(std::numeric_limits<float>::infinity());
@@ -1608,7 +1608,7 @@ TEST_CASE("Phaser clamps stage and feedback settings and resets",
 }
 
 TEST_CASE("Phaser zero-length block processing is a no-op",
-          "[signal][phaser][coverage][phase3-github]") {
+          "[signal][phaser][coverage]") {
     Phaser phaser;
     phaser.set_sample_rate(48000.0f);
     phaser.set_mix(1.0f);
@@ -1744,7 +1744,7 @@ TEST_CASE("Signal target covers window families and bounded application",
 }
 
 TEST_CASE("WindowFunction edge sizes and symmetry stay deterministic",
-          "[signal][window][coverage][phase3]") {
+          "[signal][window][coverage]") {
     REQUIRE(WindowFunction::generate(-3, WindowFunction::Type::blackman).empty());
 
     for (auto type : {WindowFunction::Type::hann,
@@ -1773,7 +1773,7 @@ TEST_CASE("WindowFunction edge sizes and symmetry stay deterministic",
 }
 
 TEST_CASE("WindowFunction applies only provided coefficients and honors Kaiser alpha",
-          "[signal][window][coverage][phase3]") {
+          "[signal][window][coverage]") {
     float partial[] = {2.0f, 4.0f, 8.0f, 16.0f};
     WindowFunction::apply(partial, {0.25f, 0.5f});
     REQUIRE_THAT(partial[0], WithinAbs(0.5f, 1e-6f));

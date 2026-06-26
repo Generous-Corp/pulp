@@ -464,7 +464,7 @@ TEST_CASE("MidiKeyboardState note on vel=0 is note off", "[midi][keyboard]") {
 }
 
 TEST_CASE("MidiKeyboardState note on velocity zero fires note-off callback",
-          "[midi][keyboard][coverage][phase3]") {
+          "[midi][keyboard][coverage]") {
     MidiKeyboardState keys;
     std::vector<int> released;
     keys.on_note_off = [&](uint8_t channel, uint8_t note) {

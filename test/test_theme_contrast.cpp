@@ -64,7 +64,7 @@ TEST_CASE("Min contrast thresholds are correct", "[view][contrast]") {
 }
 
 TEST_CASE("Unknown contrast levels fall back to AA normal",
-          "[view][contrast][coverage][phase3]") {
+          "[view][contrast][coverage]") {
     auto invalid = static_cast<ContrastLevel>(99);
     REQUIRE_THAT(min_contrast_for_level(invalid), WithinAbs(4.5, 0.01));
 }
@@ -96,7 +96,7 @@ TEST_CASE("Auto contrast picks black on light background", "[view][contrast]") {
 }
 
 TEST_CASE("Auto contrast fallback chooses the higher ratio color",
-          "[view][contrast][coverage][phase3]") {
+          "[view][contrast][coverage]") {
     auto background = Color::rgba8(128, 128, 128);
     auto fg = auto_contrast_foreground(background, ContrastLevel::aaa_normal);
 
@@ -120,7 +120,7 @@ TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
 }
 
 TEST_CASE("Auto contrast falls back to the higher-ratio endpoint",
-          "[view][contrast][coverage][phase3]") {
+          "[view][contrast][coverage]") {
     auto background = Color::rgba8(120, 120, 120);
     REQUIRE_FALSE(meets_contrast(Color::rgba8(255, 255, 255),
                                  background,
@@ -137,7 +137,7 @@ TEST_CASE("Auto contrast falls back to the higher-ratio endpoint",
 }
 
 TEST_CASE("Adjust for contrast preserves already compliant colors",
-          "[view][contrast][coverage][phase3]") {
+          "[view][contrast][coverage]") {
     auto foreground = Color::rgba8(255, 255, 255, 128);
     auto background = Color::rgba8(0, 0, 0);
 
@@ -155,7 +155,7 @@ TEST_CASE("Adjust for contrast preserves already compliant colors",
 }
 
 TEST_CASE("Adjust for contrast returns nullopt when threshold is impossible",
-          "[view][contrast][coverage][phase3]") {
+          "[view][contrast][coverage]") {
     auto background = Color::rgba8(128, 128, 128);
     auto foreground = Color::rgba8(128, 128, 128);
 
@@ -311,7 +311,7 @@ TEST_CASE("Theme contrast validation skips missing pairs and reports failures",
 }
 
 TEST_CASE("Auto-fix leaves unresolved contrast issues unchanged",
-          "[view][contrast][theme][coverage][phase3]") {
+          "[view][contrast][theme][coverage]") {
     Theme bad;
     bad.colors["bg.primary"] = Color::rgba8(128, 128, 128);
     bad.colors["text.primary"] = Color::rgba8(128, 128, 128);

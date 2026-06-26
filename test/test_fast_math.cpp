@@ -19,7 +19,7 @@ TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
 }
 
 TEST_CASE("FastMath tanh clamps exactly beyond approximation range",
-          "[signal][fast_math][coverage][phase3]") {
+          "[signal][fast_math][coverage]") {
     REQUIRE(FastMath::tanh(-100.0f) == -1.0f);
     REQUIRE(FastMath::tanh(-4.0001f) == -1.0f);
     REQUIRE(FastMath::tanh(4.0001f) == 1.0f);
@@ -59,7 +59,7 @@ TEST_CASE("FastMath exp2 approximation", "[signal][fast_math]") {
 }
 
 TEST_CASE("FastMath exp2 preserves ordering across integer boundaries",
-          "[signal][fast_math][coverage][phase3]") {
+          "[signal][fast_math][coverage]") {
     const float below = FastMath::exp2(1.999f);
     const float exact = FastMath::exp2(2.0f);
     const float above = FastMath::exp2(2.001f);
@@ -70,7 +70,7 @@ TEST_CASE("FastMath exp2 preserves ordering across integer boundaries",
 }
 
 TEST_CASE("FastMath exp2 covers fractional octaves across zero",
-          "[signal][fast_math][coverage][phase3-large]") {
+          "[signal][fast_math][coverage][large]") {
     REQUIRE_THAT(FastMath::exp2(-0.5f), WithinAbs(std::exp2(-0.5f), 0.01f));
     REQUIRE_THAT(FastMath::exp2(1.25f), WithinRel(std::exp2(1.25f), 0.01f));
     REQUIRE_THAT(FastMath::exp2(7.75f), WithinRel(std::exp2(7.75f), 0.01f));
@@ -84,14 +84,14 @@ TEST_CASE("FastMath log2 approximation", "[signal][fast_math]") {
 }
 
 TEST_CASE("FastMath log2 handles normalized power-of-two range",
-          "[signal][fast_math][coverage][phase3]") {
+          "[signal][fast_math][coverage]") {
     REQUIRE_THAT(FastMath::log2(0.25f), WithinAbs(-2.0f, 0.02f));
     REQUIRE_THAT(FastMath::log2(16.0f), WithinAbs(4.0f, 0.02f));
     REQUIRE_THAT(FastMath::log2(1024.0f), WithinAbs(10.0f, 0.02f));
 }
 
 TEST_CASE("FastMath log2 tracks mantissa-heavy values",
-          "[signal][fast_math][coverage][phase3-large]") {
+          "[signal][fast_math][coverage][large]") {
     REQUIRE_THAT(FastMath::log2(1.5f), WithinAbs(std::log2(1.5f), 0.02f));
     REQUIRE_THAT(FastMath::log2(3.25f), WithinAbs(std::log2(3.25f), 0.04f));
     REQUIRE_THAT(FastMath::log2(96.0f), WithinAbs(std::log2(96.0f), 0.03f));
@@ -114,7 +114,7 @@ TEST_CASE("FastMath pow and reciprocal guard edge inputs",
 }
 
 TEST_CASE("FastMath pow handles fractional and identity exponents",
-          "[signal][fast_math][coverage][phase3-large]") {
+          "[signal][fast_math][coverage][large]") {
     REQUIRE_THAT(FastMath::pow(9.0f, 0.5f), WithinAbs(3.0f, 0.08f));
     REQUIRE_THAT(FastMath::pow(7.0f, 0.0f), WithinAbs(1.0f, 0.02f));
     REQUIRE_THAT(FastMath::pow(1.0f, 32.0f), WithinAbs(1.0f, 0.02f));

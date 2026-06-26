@@ -157,7 +157,7 @@ TEST_CASE("Oscillator waveforms produce finite bounded startup samples",
 }
 
 TEST_CASE("Oscillator polyBLEP handles late-cycle discontinuities",
-          "[signal][oscillator][coverage][phase3]") {
+          "[signal][oscillator][coverage]") {
     Oscillator osc;
     osc.set_sample_rate(10.0f);
     osc.set_frequency(3.0f);
@@ -257,7 +257,7 @@ TEST_CASE("FirFilter empty coefficients pass samples through and reset safely",
 }
 
 TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
-          "[signal][fir][coverage][phase3]") {
+          "[signal][fir][coverage]") {
     FirFilter fir;
     fir.set_coefficients({0.5f, 0.5f});
     REQUIRE_THAT(fir.process(1.0f), WithinAbs(0.5f, 1e-6f));
@@ -269,7 +269,7 @@ TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
 }
 
 TEST_CASE("FirFilter highpass spectral inversion boosts center tap",
-          "[signal][fir][coverage][phase3]") {
+          "[signal][fir][coverage]") {
     auto lowpass = FirFilter::lowpass(5, 1000.0f, 48000.0f);
     auto highpass = FirFilter::highpass(5, 1000.0f, 48000.0f);
 
@@ -358,7 +358,7 @@ TEST_CASE("BallisticsFilter clamps time constants and processes buffers",
 }
 
 TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state",
-          "[signal][ballistics][coverage][phase3]") {
+          "[signal][ballistics][coverage]") {
     BallisticsFilter env;
     env.prepare(0.0f);
     env.set_attack_ms(10.0f);
@@ -372,7 +372,7 @@ TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state"
 }
 
 TEST_CASE("BallisticsFilter mode switch reports current envelope consistently",
-          "[signal][ballistics][coverage][phase3]") {
+          "[signal][ballistics][coverage]") {
     BallisticsFilter env;
     env.prepare(1000.0f);
     env.set_attack_ms(0.01f);
@@ -447,7 +447,7 @@ TEST_CASE("SmoothedValue supports double ramps and terminal skips",
 }
 
 TEST_CASE("SmoothedValue handles immediate ramps and inert skips",
-          "[signal][smooth][coverage][phase3]") {
+          "[signal][smooth][coverage]") {
     SmoothedValue<float> immediate(1.0f);
     immediate.set_ramp_time(0.0f, 48000.0f);
     immediate.set_target(4.0f);
@@ -488,7 +488,7 @@ TEST_CASE("LogRampedValue jumps for non-positive endpoints",
 }
 
 TEST_CASE("LogRampedValue ignores non-positive skips",
-          "[signal][log_ramp][coverage][phase3]") {
+          "[signal][log_ramp][coverage]") {
     LogRampedValue v(100.0f);
     v.set_ramp_time(0.01f, 1000.0f);
     v.set_target(200.0f);
@@ -503,7 +503,7 @@ TEST_CASE("LogRampedValue ignores non-positive skips",
 }
 
 TEST_CASE("LogRampedValue skip to exact ramp end snaps to target",
-          "[signal][log_ramp][coverage][phase3]") {
+          "[signal][log_ramp][coverage]") {
     LogRampedValue value(100.0f);
     value.set_ramp_time(0.004f, 1000.0f);
     value.set_target(1600.0f);
@@ -556,7 +556,7 @@ TEST_CASE("WaveShaper processes buffers in-place", "[signal][waveshaper][issue-6
 }
 
 TEST_CASE("WaveShaper invalid curve falls back to driven input",
-          "[signal][waveshaper][coverage][phase3]") {
+          "[signal][waveshaper][coverage]") {
     WaveShaper shaper;
     shaper.set_drive(1.5f);
     shaper.set_curve(static_cast<WaveShaper::Curve>(99));
@@ -638,7 +638,7 @@ TEST_CASE("ProcessorChain reset skips processors without reset methods",
 }
 
 TEST_CASE("ProcessorChain zero and negative length buffers are no-ops",
-          "[signal][chain][coverage][phase3]") {
+          "[signal][chain][coverage]") {
     ProcessorChain<ScaleBy2, AddOne> chain;
     float samples[] = {1.0f, 2.0f};
 
@@ -726,7 +726,7 @@ TEST_CASE("LookupTable indexed access clamps and zero-length buffers are no-ops"
 }
 
 TEST_CASE("LookupTable interpolates between adjacent entries",
-          "[signal][lookup][coverage][phase3]") {
+          "[signal][lookup][coverage]") {
     LookupTable table(3, 0.0f, 2.0f, [](float x) { return x * 10.0f; });
 
     REQUIRE(table.size() == 3);
@@ -736,7 +736,7 @@ TEST_CASE("LookupTable interpolates between adjacent entries",
 }
 
 TEST_CASE("LookupTable degenerate tables stay finite and indexable",
-          "[signal][lookup][coverage][phase3-large]") {
+          "[signal][lookup][coverage][large]") {
     LookupTable single(1, 4.0f, 9.0f, [](float x) { return x * 2.0f; });
     REQUIRE(single.size() == 1);
     REQUIRE_THAT(single.process(-100.0f), WithinAbs(8.0f, 1e-6f));
@@ -751,7 +751,7 @@ TEST_CASE("LookupTable degenerate tables stay finite and indexable",
 }
 
 TEST_CASE("LookupTable accepts reversed input ranges",
-          "[signal][lookup][coverage][phase3-large]") {
+          "[signal][lookup][coverage][large]") {
     LookupTable reversed(5, 1.0f, -1.0f, [](float x) { return x; });
 
     REQUIRE_THAT(reversed.process(-2.0f), WithinAbs(-1.0f, 1e-6f));
@@ -831,7 +831,7 @@ TEST_CASE("TptFilter cutoff clamping", "[signal][tpt]") {
 }
 
 TEST_CASE("TptFilter combined output resets to initial impulse response",
-          "[signal][tpt][coverage][phase3]") {
+          "[signal][tpt][coverage]") {
     TptFilter filter;
     filter.prepare(48000.0f);
     filter.set_cutoff(1200.0f);
@@ -905,7 +905,7 @@ TEST_CASE("FrequencyAxis maps linear logarithmic and mel scales",
 }
 
 TEST_CASE("Spectrogram helpers cover fallback ramps scales and zero-bin columns",
-          "[signal][spectrogram][coverage][phase3]") {
+          "[signal][spectrogram][coverage]") {
     ColorMapper mapper(static_cast<ColorRamp>(99));
     auto gray = mapper.map(0.5f);
     REQUIRE(gray.r == gray.g);
@@ -1062,7 +1062,7 @@ TEST_CASE("AlignedBuffer resizes moves clears and copies bounded input",
 }
 
 TEST_CASE("AlignedBuffer partial copy preserves untouched suffix",
-          "[signal][simd][coverage][phase3]") {
+          "[signal][simd][coverage]") {
     AlignedBuffer buffer(4);
     float initial[] = {1.0f, 2.0f, 3.0f, 4.0f};
     buffer.copy_from(initial, 4);
@@ -1077,7 +1077,7 @@ TEST_CASE("AlignedBuffer partial copy preserves untouched suffix",
 }
 
 TEST_CASE("AlignedBuffer resize to same size preserves allocation contents",
-          "[signal][simd][coverage][phase3]") {
+          "[signal][simd][coverage]") {
     AlignedBuffer buffer(2);
     buffer[0] = 0.25f;
     buffer[1] = -0.5f;
@@ -1091,7 +1091,7 @@ TEST_CASE("AlignedBuffer resize to same size preserves allocation contents",
 }
 
 TEST_CASE("AlignedBuffer exposes const iteration and self move assignment",
-          "[signal][simd][coverage][phase3]") {
+          "[signal][simd][coverage]") {
     AlignedBuffer empty;
     empty.clear();
     REQUIRE(empty.empty());
@@ -1140,7 +1140,7 @@ TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
 }
 
 TEST_CASE("Special functions cover sinc and Lanczos boundaries",
-          "[signal][math][coverage][phase3]") {
+          "[signal][math][coverage]") {
     REQUIRE_THAT(sinc(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(sinc(1.0f), WithinAbs(0.0f, 1e-6f));
 
@@ -1151,7 +1151,7 @@ TEST_CASE("Special functions cover sinc and Lanczos boundaries",
 }
 
 TEST_CASE("Special functions convert gain and MIDI reference points",
-          "[signal][math][coverage][phase3]") {
+          "[signal][math][coverage]") {
     REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 1e-6f));
@@ -1162,7 +1162,7 @@ TEST_CASE("Special functions convert gain and MIDI reference points",
 }
 
 TEST_CASE("Special functions wrap standard gamma and error functions",
-          "[signal][math][coverage][phase3]") {
+          "[signal][math][coverage]") {
     REQUIRE_THAT(bessel_i0(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE(bessel_i0(2.0f) > 2.0f);
 
