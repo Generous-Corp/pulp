@@ -17,7 +17,7 @@ namespace pulp::format {
 /// is no second routing path — a ProcessorNode is wired into a snapshot exactly
 /// like any other GraphRuntimeNodeBinding.
 ///
-/// Scope (audio-only first slice): one Main mono audio input and one Main mono
+/// Current scope: one Main mono audio input and one Main mono
 /// audio output. Parameters, MIDI, latency, and state are deliberately out of
 /// scope; the binding presents no EventBlock to the processor, so a processor
 /// that emits MIDI on this path sees the bridge's discard sink.

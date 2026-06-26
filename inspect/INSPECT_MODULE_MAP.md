@@ -1,6 +1,6 @@
 # Inspect Module Map
 
-This is the Phase 1 ownership map for shrinking the Pulp inspector surface under
+This is the ownership map for shrinking the Pulp inspector surface under
 `inspect/`. It documents the current seams, target extraction modules, and
 invariants that must survive future refactors. It is not a claim that the split
 has already happened.
@@ -8,7 +8,7 @@ has already happened.
 The inspector already builds as a dedicated `pulp-inspect` target from
 `inspect/CMakeLists.txt` and exposes the `pulp::inspect` alias. That umbrella
 target links view/render/state/events/audio, but several inspector translation
-units are pure protocol or CPU-side helpers. The strongest Phase 1 seam is to
+units are pure protocol or CPU-side helpers. The strongest current seam is to
 make those low-dependency leaves explicit before taking on riskier overlay or
 domain-handler splits.
 
