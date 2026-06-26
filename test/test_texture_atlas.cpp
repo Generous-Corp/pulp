@@ -442,8 +442,8 @@ TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
 // shelf-packer occupancy estimate. These tests pin the read-only accessors
 // added to AtlasPacker / ImageAtlas / GlyphAtlas / GradientAtlas / PathAtlas.
 
-TEST_CASE("AtlasPacker reports capacity and occupancy - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasPacker reports capacity and occupancy",
+          "[render][atlas][introspection][occupancy]") {
     AtlasPacker p(64, 64);
     REQUIRE(p.capacity() == 64u * 64u);
     REQUIRE(p.used_area() == 0u);
@@ -461,15 +461,15 @@ TEST_CASE("AtlasPacker reports capacity and occupancy - phase6.2",
     REQUIRE(p.occupancy() == Catch::Approx(1.0f));
 }
 
-TEST_CASE("AtlasPacker occupancy is zero for a degenerate atlas - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasPacker occupancy is zero for a degenerate atlas",
+          "[render][atlas][introspection][occupancy]") {
     AtlasPacker p(0, 0);
     REQUIRE(p.capacity() == 0u);
     REQUIRE(p.occupancy() == Catch::Approx(0.0f));  // no divide-by-zero.
 }
 
 TEST_CASE("AtlasPacker clamps degenerate capacity and used-area introspection",
-          "[render][atlas][coverage][phase3-render]") {
+          "[render][atlas][coverage][introspection]") {
     AtlasPacker zero_width(0, 64);
     AtlasPacker zero_height(64, 0);
     AtlasPacker negative_width(-16, 64);
@@ -497,8 +497,8 @@ TEST_CASE("AtlasPacker clamps degenerate capacity and used-area introspection",
     REQUIRE_FALSE(negative_height.allocate(1, 1, r));
 }
 
-TEST_CASE("ImageAtlas exposes dimensions and occupancy - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("ImageAtlas exposes dimensions and occupancy",
+          "[render][atlas][introspection][occupancy]") {
     ImageAtlas atlas(128);
     REQUIRE(atlas.width() == 128);
     REQUIRE(atlas.height() == 128);
@@ -510,8 +510,8 @@ TEST_CASE("ImageAtlas exposes dimensions and occupancy - phase6.2",
     REQUIRE(atlas.entry_count() == 1);
 }
 
-TEST_CASE("GlyphAtlas and PathAtlas expose dimensions - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("GlyphAtlas and PathAtlas expose dimensions",
+          "[render][atlas][introspection]") {
     GlyphAtlas glyphs(256);
     REQUIRE(glyphs.width() == 256);
     REQUIRE(glyphs.height() == 256);
@@ -523,8 +523,8 @@ TEST_CASE("GlyphAtlas and PathAtlas expose dimensions - phase6.2",
     REQUIRE(paths.occupancy() == Catch::Approx(0.0f));
 }
 
-TEST_CASE("GradientAtlas exposes row capacity and occupancy - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("GradientAtlas exposes row capacity and occupancy",
+          "[render][atlas][introspection][occupancy]") {
     GradientAtlas ga;
     REQUIRE(ga.row_capacity() == 512);
     REQUIRE(ga.rows_used() == 0);
@@ -539,8 +539,8 @@ TEST_CASE("GradientAtlas exposes row capacity and occupancy - phase6.2",
 
 // ── AtlasInventory aggregator ───────────────────────────────────────────────
 
-TEST_CASE("AtlasInventory starts empty - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInventory starts empty",
+          "[render][atlas][inventory]") {
     AtlasInventory inv;
     REQUIRE(inv.empty());
     REQUIRE(inv.size() == 0);
@@ -549,8 +549,8 @@ TEST_CASE("AtlasInventory starts empty - phase6.2",
     REQUIRE(inv.average_occupancy() == Catch::Approx(0.0f));
 }
 
-TEST_CASE("AtlasInventory snapshots a packed atlas - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInventory snapshots a packed atlas",
+          "[render][atlas][inventory]") {
     GlyphAtlas glyphs(256);
     AtlasPacker::Region r{};
     REQUIRE(glyphs.allocate(7, 128, 256, r));  // half-page → 50% occupancy.
@@ -572,8 +572,8 @@ TEST_CASE("AtlasInventory snapshots a packed atlas - phase6.2",
     REQUIRE(info.texel_capacity() == 256u * 256u);
 }
 
-TEST_CASE("AtlasInventory snapshot_gradient uses row capacity as height - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInventory snapshot_gradient uses row capacity as height",
+          "[render][atlas][inventory]") {
     GradientAtlas ga;
     int row = -1;
     for (int i = 0; i < 128; ++i)
@@ -589,8 +589,8 @@ TEST_CASE("AtlasInventory snapshot_gradient uses row capacity as height - phase6
     REQUIRE(info.occupancy == Catch::Approx(0.25f));  // 128 / 512.
 }
 
-TEST_CASE("AtlasInventory aggregates across multiple atlases - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInventory aggregates across multiple atlases",
+          "[render][atlas][inventory]") {
     ImageAtlas images(128);
     GlyphAtlas glyphs(256);
     AtlasPacker::Region r{};
@@ -612,7 +612,7 @@ TEST_CASE("AtlasInventory aggregates across multiple atlases - phase6.2",
 }
 
 TEST_CASE("AtlasInventory clamps malformed page counts and occupancy inputs",
-          "[render][atlas][coverage][phase3-render]") {
+          "[render][atlas][coverage][inventory]") {
     AtlasInventory inv;
     inv.add({AtlasKind::image, "negative pages", 10, 20, -5, 2u, -0.25f});
     inv.add({AtlasKind::glyph, "zero pages", 5, 7, 0, 3u, 1.25f});
@@ -633,7 +633,7 @@ TEST_CASE("AtlasInventory clamps malformed page counts and occupancy inputs",
 }
 
 TEST_CASE("AtlasInfo texel capacity clamps negative dimensions to zero",
-          "[render][atlas][coverage][phase3-render]") {
+          "[render][atlas][coverage][inventory]") {
     AtlasInfo negative_width;
     negative_width.width = -10;
     negative_width.height = 20;
@@ -660,7 +660,7 @@ TEST_CASE("AtlasInfo texel capacity clamps negative dimensions to zero",
 }
 
 TEST_CASE("AtlasInventory gradient snapshots clamp invalid ramp width",
-          "[render][atlas][coverage][phase3-render]") {
+          "[render][atlas][coverage][inventory]") {
     GradientAtlas ga;
     int row = -1;
     REQUIRE(ga.allocate(1, row));
@@ -681,8 +681,8 @@ TEST_CASE("AtlasInventory gradient snapshots clamp invalid ramp width",
     REQUIRE(info.texel_capacity() == 0u);
 }
 
-TEST_CASE("AtlasInventory clear empties the collection - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInventory clear empties the collection",
+          "[render][atlas][inventory]") {
     ImageAtlas images(64);
     AtlasInventory inv;
     inv.add_atlas(images, AtlasKind::image);
@@ -692,8 +692,8 @@ TEST_CASE("AtlasInventory clear empties the collection - phase6.2",
     REQUIRE(inv.total_pages() == 0);
 }
 
-TEST_CASE("AtlasInfo occupancy_percent clamps out-of-range values - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("AtlasInfo occupancy_percent clamps out-of-range values",
+          "[render][atlas][inventory][occupancy]") {
     AtlasInfo over;
     over.occupancy = 1.7f;
     REQUIRE(over.occupancy_percent() == 100);  // clamped high.
@@ -707,8 +707,8 @@ TEST_CASE("AtlasInfo occupancy_percent clamps out-of-range values - phase6.2",
     REQUIRE(mid.occupancy_percent() == 33);    // rounds to nearest.
 }
 
-TEST_CASE("atlas_kind_name covers every AtlasKind - phase6.2",
-          "[render][atlas][phase6.2]") {
+TEST_CASE("atlas_kind_name covers every AtlasKind",
+          "[render][atlas][inventory]") {
     REQUIRE(std::string(atlas_kind_name(AtlasKind::glyph))    == "glyph");
     REQUIRE(std::string(atlas_kind_name(AtlasKind::image))    == "image");
     REQUIRE(std::string(atlas_kind_name(AtlasKind::gradient)) == "gradient");

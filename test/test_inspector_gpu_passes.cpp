@@ -46,8 +46,8 @@ int count_text_containing(const pulp::canvas::RecordingCanvas& canvas,
 
 } // namespace
 
-TEST_CASE("InspectorOverlay Phase 6.1: capture_pass_frame is a no-op without an RPM",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: capture_pass_frame is a no-op without an RPM",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -59,8 +59,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: capture_pass_frame is a no-op without an 
         REQUIRE(a.samples == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: capture accumulates per-pass history",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: capture accumulates per-pass history",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -115,8 +115,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: capture accumulates per-pass history",
     REQUIRE_FALSE(effects.present);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: capture de-dups within a single frame",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: capture de-dups within a single frame",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -137,8 +137,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: capture de-dups within a single frame",
     REQUIRE(attrib[static_cast<int>(RenderPassType::content)].samples == 1);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: same pass type twice in a frame sums",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: same pass type twice in a frame sums",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -161,8 +161,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: same pass type twice in a frame sums",
     REQUIRE(ov.last_draw_calls == 6);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: history ring caps at kPassHistoryFrames",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: history ring caps at kPassHistoryFrames",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -186,8 +186,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: history ring caps at kPassHistoryFrames",
     REQUIRE(content.samples == InspectorOverlay::kPassHistoryFrames);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: budget overruns are counted",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: budget overruns are counted",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -212,8 +212,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: budget overruns are counted",
     REQUIRE(overlay.budget_overrun_count() == 2);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: P key toggles the attribution viewer",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: P key toggles the attribution viewer",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -232,8 +232,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: P key toggles the attribution viewer",
     REQUIRE_FALSE(overlay.pass_viewer_enabled());
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: P key ignored when inspector inactive",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: P key ignored when inspector inactive",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -248,8 +248,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: P key ignored when inspector inactive",
     REQUIRE_FALSE(overlay.pass_viewer_enabled());
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: viewer renders per-pass rows",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: viewer renders per-pass rows",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_id("root");
     // Tall enough that the panel's lower section fits both pass rows
@@ -288,8 +288,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: viewer renders per-pass rows",
     REQUIRE(count_text_containing(canvas, "effects") == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: viewer reports missing RPM gracefully",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: viewer reports missing RPM gracefully",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 500, 320});
     InspectorOverlay overlay(root);
@@ -303,8 +303,8 @@ TEST_CASE("InspectorOverlay Phase 6.1: viewer reports missing RPM gracefully",
     REQUIRE(count_text_containing(canvas, "No RenderPassManager") >= 1);
 }
 
-TEST_CASE("InspectorOverlay Phase 6.1: paint() drives capture automatically",
-          "[inspect][overlay][phase6]") {
+TEST_CASE("InspectorOverlay: paint() drives capture automatically",
+          "[inspect][overlay][render-pass]") {
     View root;
     root.set_bounds({0, 0, 500, 320});
     InspectorOverlay overlay(root);
