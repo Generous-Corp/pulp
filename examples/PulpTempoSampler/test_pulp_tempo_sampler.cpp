@@ -800,6 +800,47 @@ TEST_CASE("QWERTY typing keeps triggering audio across tempo + slice changes",
     CHECK(qwerty_energy(view::KeyCode::a, 90.0) > 1e-6);
 }
 
+// #race-3 (M1): the home row (a,s,d,f,g,h,j) must play CONSECUTIVE slices, not the
+// piano layout's white keys (0,2,4,5,7,9,11) which skip black-key slices and run
+// out after a few keys ("first 4 keys work then it stops"). slice_trigger_note
+// remaps the typing path so a,s,d,f,g,h,j -> slices 0..6.
+TEST_CASE("QWERTY home row plays consecutive slices (no black-key gap)",
+          "[tempo-sampler][issue-home-row]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 7);  // ~7 slices
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 6; }));
+
+    SamplerEditorRoot root;
+    root.current_root_note = [] { return 60; };
+    root.keyboard_window_visible = [] { return true; };
+    root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
+    root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
+    auto key = [](view::KeyCode k, bool down) { view::KeyEvent e; e.key = k; e.is_down = down; return e; };
+    auto play = [&](view::KeyCode k) {
+        root.on_key_event(key(k, true));
+        double e = 0.0;
+        for (int b = 0; b < 10; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            for (float v : l) e += static_cast<double>(v) * v; }
+        root.on_key_event(key(k, false));
+        return e;
+    };
+    // All SEVEN home-row keys must sound with a 7-slice sample (they map to slices 0..6).
+    view::KeyCode home[] = {view::KeyCode::a, view::KeyCode::s, view::KeyCode::d,
+                            view::KeyCode::f, view::KeyCode::g, view::KeyCode::h, view::KeyCode::j};
+    for (int i = 0; i < 7; ++i) {
+        INFO("home-row key index " << i);
+        CHECK(play(home[i]) > 1e-6);
+    }
+    // No voices left stuck after releasing every key (note-off remapped consistently).
+    CHECK(f.proc->held_notes_for_test().empty());
+}
+
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
     SamplerEditorRoot root;
     root.current_root_note = [] { return 60; };  // base 'a' = root note

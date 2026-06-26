@@ -676,15 +676,32 @@ public:
     // for the keyboard's lit keys; when the keyboard's OWN window is focused it
     // self-captures keys (set_input_capture(true)) and routes them here too. Host MIDI
     // arrives on the audio thread and is not reflected here (no UI-thread hook).
+    // Map a chromatic TYPING note to a slice-consecutive trigger note, so the
+    // natural home row (a,s,d,f,g,h,j,k) plays slices 0,1,2,3,4,5,6,7 in order
+    // instead of the piano layout's white-key gaps — those map a,s,d,f,g to notes
+    // 0,2,4,5,7 and SKIP the black-key slices (1,3,6), so with N slices you run out
+    // every few keys (the "first 4 keys work then it stops" report). Host MIDI is
+    // unaffected (it triggers chromatically via process()). Deterministic so
+    // note-on and note-off resolve to the SAME trigger note; black keys collapse to
+    // the white key below (harmless for the home-row slice-pad use). Only the typing
+    // path remaps — waveform clicks and host MIDI map a slice per semitone directly.
+    int slice_trigger_note(int note) const {
+        const int root = static_cast<int>(state().get_value(kRootNote));
+        static const int white_below[12] = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6};
+        int oct = (note - root) / 12;
+        int rem = (note - root) % 12;
+        if (rem < 0) { rem += 12; --oct; }
+        return root + oct * 7 + white_below[rem];
+    }
     void keyboard_play_on(int note, float velocity) {
-        ui_note_on(note, velocity);
+        ui_note_on(slice_trigger_note(note), velocity);  // consecutive-slice trigger
         if (std::find(held_notes_ui_.begin(), held_notes_ui_.end(), note) ==
             held_notes_ui_.end())
-            held_notes_ui_.push_back(note);
+            held_notes_ui_.push_back(note);              // light the PHYSICAL key
         push_keyboard_lights();
     }
     void keyboard_play_off(int note) {
-        ui_note_off(note);
+        ui_note_off(slice_trigger_note(note));
         held_notes_ui_.erase(
             std::remove(held_notes_ui_.begin(), held_notes_ui_.end(), note),
             held_notes_ui_.end());
@@ -723,7 +740,7 @@ public:
             //     clear the lit display so nothing lingers lit on the next open.
             kb_window_->set_app_key_monitor({});   // stop routing app keys to the keyboard
             if (kb_) kb_->set_input_capture(false);
-            for (int n : held_notes_ui_) ui_note_off(n);
+            for (int n : held_notes_ui_) ui_note_off(slice_trigger_note(n));
             held_notes_ui_.clear();
             push_keyboard_lights();
             kb_window_->hide();
