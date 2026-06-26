@@ -53,6 +53,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     bool after_separator = false;
     bool audio_scope_acquisition_option_seen = false;
     bool audio_capture_frames_option_seen = false;
+    bool audio_capture_rolling_frames_option_seen = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& a = args[i];
@@ -279,6 +280,48 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
 
+        if (a == "--audio-capture-rolling") {
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                r.error = "--audio-capture-rolling requires a path argument";
+                return r;
+            }
+            r.audio_capture_rolling_path = args[++i];
+            r.headless = true;
+            continue;
+        }
+        if (a.rfind("--audio-capture-rolling=", 0) == 0) {
+            r.audio_capture_rolling_path =
+                a.substr(std::string("--audio-capture-rolling=").size());
+            if (r.audio_capture_rolling_path.empty()) {
+                r.error = "--audio-capture-rolling= requires a non-empty path";
+                return r;
+            }
+            r.headless = true;
+            continue;
+        }
+        if (a == "--audio-capture-rolling-frames") {
+            audio_capture_rolling_frames_option_seen = true;
+            if (i + 1 >= args.size()
+                || !parse_frame_count(args[i + 1], r.audio_capture_rolling_frames)
+                || r.audio_capture_rolling_frames <= 0) {
+                r.error = "--audio-capture-rolling-frames requires a positive integer";
+                return r;
+            }
+            ++i;
+            continue;
+        }
+        if (a.rfind("--audio-capture-rolling-frames=", 0) == 0) {
+            audio_capture_rolling_frames_option_seen = true;
+            if (!parse_frame_count(
+                    a.substr(std::string("--audio-capture-rolling-frames=").size()),
+                    r.audio_capture_rolling_frames)
+                || r.audio_capture_rolling_frames <= 0) {
+                r.error = "--audio-capture-rolling-frames requires a positive integer";
+                return r;
+            }
+            continue;
+        }
+
         if (r.target_name.empty() && !a.empty() && a[0] != '-') {
             r.target_name = a;
             continue;
@@ -303,6 +346,19 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     }
     if (audio_capture_frames_option_seen && r.audio_capture_wav_path.empty()) {
         r.error = "--audio-capture-frames requires --audio-capture-wav";
+    }
+    // --audio-capture-rolling has its own buffer, but the standalone runs exactly
+    // one capture one-shot per invocation, so it cannot be combined with the
+    // other single-consumer capture modes.
+    if (!r.audio_capture_rolling_path.empty()
+        && (r.audio_inspector || !r.audio_scope_json_path.empty()
+            || !r.audio_capture_wav_path.empty())) {
+        r.error = "--audio-capture-rolling cannot be combined with --audio-inspector, "
+                  "--audio-scope-json, or --audio-capture-wav; the standalone runs one "
+                  "capture mode per invocation";
+    }
+    if (audio_capture_rolling_frames_option_seen && r.audio_capture_rolling_path.empty()) {
+        r.error = "--audio-capture-rolling-frames requires --audio-capture-rolling";
     }
 
     return r;
@@ -344,6 +400,14 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
         if (opts.audio_capture_frames > 0) {
             out.push_back("--audio-capture-frames");
             out.push_back(std::to_string(opts.audio_capture_frames));
+        }
+    }
+    if (!opts.audio_capture_rolling_path.empty()) {
+        out.push_back("--audio-capture-rolling");
+        out.push_back(opts.audio_capture_rolling_path);
+        if (opts.audio_capture_rolling_frames > 0) {
+            out.push_back("--audio-capture-rolling-frames");
+            out.push_back(std::to_string(opts.audio_capture_rolling_frames));
         }
     }
     for (const auto& a : opts.user_pass_through) {

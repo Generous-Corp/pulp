@@ -4,6 +4,7 @@
 #include <pulp/audio/device.hpp>
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe.hpp>
+#include <pulp/audio/rolling_audio_capture_buffer.hpp>
 #endif
 #include <pulp/format/processor.hpp>
 #include <pulp/format/test_signal.hpp>
@@ -96,6 +97,16 @@ struct StandaloneConfig {
     // ring holds, clamped to the capture cap). Captures all output channels.
     std::string audio_capture_wav_path;
     int audio_capture_wav_frames = 0;
+
+    // Programmatic live ROLLING capture-to-WAV. Unlike audio_capture_wav_path
+    // (which dumps the probe FIFO's EARLIEST window), this taps the output
+    // boundary into a RollingAudioCaptureBuffer and writes the LAST
+    // `audio_capture_rolling_frames` frames as a float WAV the offline `pulp
+    // audio validate` verbs can read — the steady-state window `doctor`/`compare`
+    // want, with no int16 quantization floor. The one-shot then exits. Only
+    // meaningful when PULP_ENABLE_AUDIO_PROBES is ON. Captures all output channels.
+    std::string audio_capture_rolling_path;
+    int audio_capture_rolling_frames = 0;
 
     // Built-in tempo source. The standalone host has no DAW providing
     // transport, so it acts as one: it surfaces `tempo_bpm` / time signature on
@@ -205,6 +216,19 @@ private:
     // Pre-allocated channel-pointer array for the probe view (no audio-thread
     // allocation). Sized in start() to the output channel count.
     std::vector<const float*> output_probe_ptrs_;
+
+    // Rolling last-N output capture, separate from the probe FIFO. prepare()d in
+    // start() only when audio_capture_rolling_path is set; the audio callback
+    // append()s each output block (RT-safe), and the one-shot materializes the
+    // last window to a float WAV. `rolling_capture_active_` gates the
+    // audio-thread append so there is zero added work when the flag is off.
+    audio::RollingAudioCaptureBuffer rolling_capture_;
+    bool rolling_capture_active_ = false;
+    // Channel count the audio callback actually delivers (set on the audio
+    // thread). The rolling ring is prepared to the configured output_channels;
+    // if the device under-delivers, the writer trims the WAV to this so it has
+    // no phantom silent channels. Relaxed: a single int published once per run.
+    std::atomic<int> rolling_capture_channels_{0};
 
     // Developer Audio Inspector tool window. A separate floating
     // window that reads `output_probe_.latest()` each UI tick and renders the

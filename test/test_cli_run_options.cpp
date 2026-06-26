@@ -510,6 +510,47 @@ TEST_CASE("pulp run rejects invalid audio-capture-wav options and FIFO contentio
                                      "--audio-capture-wav", "/tmp/c.wav"}).error.empty());
 }
 
+TEST_CASE("pulp run --audio-capture-rolling implies headless and forwards the path",
+          "[cli][run][audio-capture-rolling]") {
+    auto r = parse_run_options({"--audio-capture-rolling", "/tmp/roll.wav",
+                                "--audio-capture-rolling-frames", "8192"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_capture_rolling_path == "/tmp/roll.wav");
+    REQUIRE(r.audio_capture_rolling_frames == 8192);
+    REQUIRE(r.headless);
+    auto args = assemble_launch_args(r);
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-rolling") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "/tmp/roll.wav") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-rolling-frames")
+            != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "8192") != args.end());
+
+    auto eq = parse_run_options({"--audio-capture-rolling=/tmp/roll2.wav"});
+    REQUIRE(eq.error.empty());
+    REQUIRE(eq.audio_capture_rolling_path == "/tmp/roll2.wav");
+    REQUIRE(eq.headless);
+    auto eq_args = assemble_launch_args(eq);
+    REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-frames")
+            == eq_args.end());
+}
+
+TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mode contention",
+          "[cli][run][audio-capture-rolling]") {
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling="}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames", "0",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    // --audio-capture-rolling-frames requires --audio-capture-rolling.
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames", "512"}).error.empty());
+    // Only one capture mode per invocation.
+    REQUIRE_FALSE(parse_run_options({"--audio-inspector",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-json", "/tmp/s.json",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-wav", "/tmp/c.wav",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+}
+
 TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
           "[cli][run][coverage]") {
     auto r = parse_run_options({"--standalone", "demo"});

@@ -1925,7 +1925,6 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
-
 # Standalone editor chrome helpers
 # These construct a StandaloneApp, which opens the real audio device on init
 # (standalone.cpp create_device/open/start) — same RT-thread-starved teardown
@@ -1935,6 +1934,7 @@ pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalon
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
