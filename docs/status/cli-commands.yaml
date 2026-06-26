@@ -504,6 +504,12 @@ commands:
       - name: --audio-scope-channel
         kind: option
         description: Source channel index for --audio-scope-json.
+      - name: --audio-capture-wav
+        kind: option
+        description: Capture the live output to a WAV at <file> after rendering, then exit, so `pulp audio validate` can analyze it; implies --headless for UI but still launches the live audio device. Forwarded as --audio-capture-wav <file> and PULP_AUDIO_CAPTURE_WAV=<file>. Shares the one capture FIFO with --audio-inspector and --audio-scope-json (mutually exclusive). Captures the earliest window (int16) — best for validate summarize/assert.
+      - name: --audio-capture-frames
+        kind: option
+        description: Ring window in samples for --audio-capture-wav (0 = as much as the ring holds, clamped). Forwarded as --audio-capture-frames <n> and PULP_AUDIO_CAPTURE_WAV_FRAMES=<n>.
       - name: PULP_RUN_AUDIO_NOTICE
         kind: environment
         description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.

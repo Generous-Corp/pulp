@@ -56,7 +56,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
 
-`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns both the model/bundle tooling (model/excerpt-find/read-bundle) AND the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin). `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` verbs. Keep the live/planned boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, while live ring-capture-to-WAV and a scenario-driven `render` verb remain planned. When adding a `validate` verb, update `cmd_audio_validate.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both the `audio-harness` and this skill.
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns both the model/bundle tooling (model/excerpt-find/read-bundle) AND the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin). `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` verbs. Keep the live/planned boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live ring-capture-to-WAV is landed under `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`; the rolling-ring variant for `doctor`/`compare`, and a scenario-driven `render` verb, remain planned). When adding a `validate` verb, update `cmd_audio_validate.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both the `audio-harness` and this skill.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
@@ -475,10 +475,16 @@ to the `print_help` text plus the `pulp run --help` shellout assertion in
 `test_cli_shellout.cpp` and the parser test in `test_cli_run_options.cpp`.
 The Audio Inspector flags follow this shape: `--audio-inspector` →
 `PULP_AUDIO_INSPECTOR=1` (does NOT imply headless); `--audio-probe-json <path>`
-→ `PULP_AUDIO_PROBE_JSON=<path>` (implies headless, like `--screenshot`). A
-bare `--audio-probe-json` run is headless but must NOT auto-assign a default
-screenshot PNG path — guard the headless-default branch on an empty probe-json
-path. See `docs/guides/audio-inspector.md`.
+→ `PULP_AUDIO_PROBE_JSON=<path>` (implies headless, like `--screenshot`);
+`--audio-scope-json <path>` → `PULP_AUDIO_SCOPE_JSON=<path>` (+ window/trigger/
+channel); `--audio-capture-wav <file>` → `PULP_AUDIO_CAPTURE_WAV=<file>` (+
+`--audio-capture-frames` → `PULP_AUDIO_CAPTURE_WAV_FRAMES`), which dumps the live
+output ring to a WAV for `pulp audio validate`, implies headless, and shares the
+single capture FIFO with `--audio-inspector` / `--audio-scope-json` (the three
+are mutually exclusive at parse time). A bare `--audio-probe-json` /
+`--audio-scope-json` / `--audio-capture-wav` run is headless but must NOT
+auto-assign a default screenshot PNG path — guard the headless-default branch on
+all three being empty. See `docs/guides/audio-inspector.md`.
 
 The live window also reads display-only waveform env vars:
 `PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero`, `PULP_AUDIO_INSPECTOR_GRID=0`, and

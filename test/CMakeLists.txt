@@ -1934,6 +1934,7 @@ pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalon
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
@@ -1943,7 +1944,6 @@ pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft LIBRARIES pulp::signal)
-
 # Visualization bridge and widget tests
 pulp_add_test_suite(pulp-test-visualization LIBRARIES pulp::view)
 
