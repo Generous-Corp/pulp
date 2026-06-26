@@ -112,7 +112,7 @@ struct CanvasDrawCmd {
         clip,                      // intersect clip with current path
         // Image
         draw_image,
-        // Canvas2D API gap closures
+        // Canvas2D API coverage
         set_line_dash,             ///< pattern in `gradient_positions`, phase in `extra`
         put_image_data,            ///< RGBA pixels in `text` (binary), int_val=width, x2=height (as int)
         // Canvas2D shadow* sticky state setters

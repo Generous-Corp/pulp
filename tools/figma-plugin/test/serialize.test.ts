@@ -253,7 +253,7 @@ function ieErrors(el: any): string[] {
   return errors;
 }
 
-test("interactive_element schema accepts every producer-emitted kind (P1a)", () => {
+test("interactive_element schema accepts every producer-emitted kind", () => {
   const knob = { kind: "knob", cx: 50, cy: 50, hit_radius: 22, svg_patch_d: "M50 38L50 30", default_value: 0.5, source_node_id: "1:1" };
   const fader = { kind: "fader", x: 10, y: 10, w: 8, h: 80, svg_patch_d: "M14 80L14 70", default_value: 0.3, cx: 14, cy: 75, source_node_id: "1:2" };
   const toggle = { kind: "toggle", x: 10, y: 10, w: 40, h: 20, default_value: 1, flash: true, source_node_id: "1:3" };
@@ -273,14 +273,14 @@ test("interactive_element schema accepts every producer-emitted kind (P1a)", () 
   }
 });
 
-test("interactive_element schema requires factory_id for a custom control (P7 Tier-3)", () => {
+test("interactive_element schema requires factory_id for a custom control", () => {
   // A custom control with no factory_id can't be built — the schema must reject it.
   const errs = ieErrors({ kind: "custom", x: 0, y: 0, w: 60, h: 40 });
   assert.ok(errs.some((e) => e.includes("'factory_id'")),
     `custom must require factory_id, got:\n${errs.join("\n")}`);
 });
 
-test("interactive_element schema accepts the P7 import-report fields (F0)", () => {
+test("interactive_element schema accepts the import-report fields", () => {
   // A control carrying full resolution provenance validates against the schema.
   const conflicted = {
     kind: "knob", cx: 50, cy: 50, hit_radius: 20,
@@ -295,12 +295,12 @@ test("interactive_element schema accepts the P7 import-report fields (F0)", () =
     "conflict_signals must be an array");
 });
 
-test("interactive_element schema rejects an unknown kind (P1a)", () => {
+test("interactive_element schema rejects an unknown kind", () => {
   const errs = ieErrors({ kind: "wormhole", x: 0, y: 0, w: 10, h: 10 });
   assert.ok(errs.some((e) => e.includes("not in enum")), `expected enum rejection, got:\n${errs.join("\n")}`);
 });
 
-test("interactive_element schema enforces per-kind required fields (P1a)", () => {
+test("interactive_element schema enforces per-kind required fields", () => {
   // A knob missing its cx/cy/hit_radius fails (the knob allOf branch).
   const knobMissing = ieErrors({ kind: "knob" });
   assert.ok(knobMissing.some((e) => e.includes("'cx'")), `knob should require cx, got:\n${knobMissing.join("\n")}`);

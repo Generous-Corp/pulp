@@ -174,7 +174,7 @@ def extract_style(n, ctx=None):
                 ih = f.get("imageRef") or f.get("imageHash")
                 if ih:
                     s["background_image"] = f"pending:{ih}"
-                    # P2: accumulate into the explicit context (no module global).
+                    # Accumulate into the explicit context (no module global).
                     # ctx is None only on direct extract_style() calls (unit tests
                     # that don't exercise image-fill resolution).
                     if ctx is not None:
@@ -332,7 +332,7 @@ def is_pure_vector_illustration(n):
 # with audio_widget set so the importer renders it NATIVELY (silver knob / fader /
 # meter — the figma-plugin lane default) at the node's own size, instead of
 # capturing its internal vectors as images (which suppresses recognition and
-# renders a misplaced raw sprite). Mirror this in the TS extractor (P2/P3).
+# renders a misplaced raw sprite). Mirror this in the TS extractor.
 def _tokenize_name(name):
     """Whole-word tokens mirroring the C++ tokenize_name (design_import.cpp):
     split on non-alphanumerics AND camelCase / acronym / digit boundaries,
@@ -484,7 +484,7 @@ def extract_layout(n):
     return l
 
 class ExtractContext:
-    """P2 — explicit accumulators for walk()'s side effects, replacing the old
+    """Explicit accumulators for walk()'s side effects, replacing the old
     module globals (ASSET_IDS / FONT_ASSETS / IMAGE_FILL_REFS). node_tree_to_ir()
     creates one, threads it through walk()/extract_style()/_record_font(), and
     returns it so the caller reads the outputs explicitly instead of reaching into
@@ -522,7 +522,7 @@ def _record_font(n, ctx):
 def node_tree_to_ir(root):
     """Walk a Figma node tree into the Pulp IR, returning (ir_node, ExtractContext)
     so the side effects (asset ids / fonts / image fills) are EXPLICIT outputs —
-    no module globals. The decomposed seam (P2 'the real refactor')."""
+    no module globals. The decomposed seam."""
     ctx = ExtractContext()
     ir = walk(root, None, 0, ctx)
     return ir, ctx

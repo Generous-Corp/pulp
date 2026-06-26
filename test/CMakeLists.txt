@@ -1671,7 +1671,7 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
     catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
 
-    # GPU view-host-in-plugins (P1) — proves a Processor::create_view() editor
+    # GPU view-host-in-plugins — proves a Processor::create_view() editor
     # that sets requires_gpu_host() auto-selects the GPU host, mounts a real
     # (non-AutoUi) tree, and paints a nonblank offscreen Dawn/Skia frame.
     # Soft-skips on Dawn-init failure.

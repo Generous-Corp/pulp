@@ -137,7 +137,7 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     me.is_down = isDown;
     me.modifiers = 0x8000; // Touch flag
 
-    // Stylus / pressure data (P3: Apple Pencil support)
+    // Stylus / pressure data (Apple Pencil support)
     if (touch.maximumPossibleForce > 0)
         me.pressure = static_cast<float>(touch.force / touch.maximumPossibleForce);
     if (touch.type == UITouchTypePencil) {
@@ -186,7 +186,7 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     }
 }
 
-// ── iPadOS hover support (P6: trackpad/mouse connected) ─────────────────
+// ── iPadOS hover support (trackpad/mouse connected) ─────────────────────
 
 - (void)setupHoverIfAvailable {
     if (@available(iOS 13.0, *)) {

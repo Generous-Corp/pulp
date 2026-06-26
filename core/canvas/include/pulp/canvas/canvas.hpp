@@ -1248,7 +1248,7 @@ struct DrawCommand {
         // legacy set_font command so existing tests that count set_font
         // continue to pass.
         set_font_full,
-        // ── Canvas2D API gaps ────────────────────────────────────────
+        // ── Canvas2D API coverage ────────────────────────────────────
         set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
         draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
         write_pixels,       ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]

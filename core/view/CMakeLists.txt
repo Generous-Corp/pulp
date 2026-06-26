@@ -62,7 +62,7 @@ set(PULP_JS_PRELUDES
     # CanvasRenderingContext2D.getTransform() instantiates this lazily
     # at call time so embed order relative to canvas.js is flexible.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
-    # Canvas2D API gap-closure methods:
+    # Canvas2D API coverage methods:
     # measureText / drawImage / setLineDash / getLineDash /
     # getImageData / putImageData. Loaded AFTER the parent so the
     # CanvasRenderingContext2D constructor is in scope.

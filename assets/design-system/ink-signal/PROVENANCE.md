@@ -1,7 +1,7 @@
 # Ink & Signal — Provenance & License
 
 This directory vendors the **"Ink & Signal"** design language assets that seed
-Pulp's global design system (see `planning/Design-System-Import-Plan.md`, Phase 0).
+Pulp's global design system.
 It exists so the token foundation, Figma library, and fidelity baseline are
 reproducible from a clean clone — no external `~/Downloads` bundle required.
 
@@ -11,7 +11,7 @@ reproducible from a clean clone — no external `~/Downloads` bundle required.
 |---|---|---|
 | `tokens/pulp.tokens.json` | Tokens-Studio-format design tokens (`core` + `dark` + `light`) | Original Pulp work |
 | `tokens/css/*.css` | The same language as CSS custom properties (colors, semantic, themes, spacing, typography, elevation, motion, fonts) | Original Pulp work |
-| `reference/screenshots/*.png` | Per-component reference renders used as the fidelity-diff baseline (Phase 6) | Original Pulp work |
+| `reference/screenshots/*.png` | Per-component reference renders used as the fidelity-diff baseline | Original Pulp work |
 
 ## License determination (MIT-compatible)
 
@@ -27,7 +27,7 @@ was checked against that policy:
   Mono** (values/code) *by family name only*. No font binaries are vendored here.
   Both are SIL OFL 1.1 (MIT-compatible); if/when binaries are bundled for
   shipping, add an OFL `NOTICE.md` entry at that time.
-- **Icons** — vendored at Phase 3 under `icons/` (66 line-style 24×24 SVGs,
+- **Icons** — vendored under `icons/` (66 line-style 24×24 SVGs,
   signal-teal stroke). The generic glyphs are **Lucide**-derived (ISC); the
   audio glyphs (compressor, delay, distortion, eq, filter, fader, envelope,
   reverb, …) are original Pulp work. ISC is MIT-compatible; attribution is
