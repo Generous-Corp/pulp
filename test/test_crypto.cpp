@@ -26,7 +26,7 @@ TEST_CASE("SHA-256 binary data", "[crypto][sha256]") {
 }
 
 TEST_CASE("SHA-256 pointer hex overload handles empty input",
-          "[crypto][sha256][coverage][phase3-batch742]") {
+          "[crypto][sha256]") {
     auto digest = sha256(nullptr, 0);
     auto hex = sha256_hex(nullptr, 0);
 
@@ -35,7 +35,7 @@ TEST_CASE("SHA-256 pointer hex overload handles empty input",
 }
 
 TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
-          "[crypto][sha256][coverage][issue-641]") {
+          "[crypto][sha256][issue-641]") {
     const std::vector<uint8_t> data = {'a', 'b', 'c', 0x00, 'd', 'e', 'f'};
 
     auto digest = sha256(data.data(), data.size());
@@ -50,7 +50,7 @@ TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
 
 // ── SHA-1 ───────────────────────────────────────────────────────────────
 
-TEST_CASE("SHA-1 empty string", "[crypto][sha1][coverage][phase3-batch742]") {
+TEST_CASE("SHA-1 empty string", "[crypto][sha1]") {
     const std::vector<uint8_t> expected = {
         0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
         0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
@@ -69,7 +69,7 @@ TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
     REQUIRE(digest == expected);
 }
 
-TEST_CASE("SHA-1 empty input matches known digest", "[crypto][sha1][coverage]") {
+TEST_CASE("SHA-1 empty input matches known digest", "[crypto][sha1]") {
     const std::vector<uint8_t> expected = {
         0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
         0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
@@ -79,7 +79,7 @@ TEST_CASE("SHA-1 empty input matches known digest", "[crypto][sha1][coverage]") 
 }
 
 TEST_CASE("SHA-1 pointer overload preserves embedded NUL bytes",
-          "[crypto][sha1][coverage][issue-641]") {
+          "[crypto][sha1][issue-641]") {
     const std::vector<uint8_t> data = {'w', 's', 0x00, 'k', 'e', 'y'};
     const std::vector<uint8_t> expected = {
         0xb1, 0x24, 0x2e, 0x4b, 0x0c, 0x53, 0x4d, 0x49, 0x0f, 0x5e,
@@ -102,7 +102,7 @@ TEST_CASE("MD5 known value", "[crypto][md5]") {
 }
 
 TEST_CASE("MD5 pointer overload handles empty input",
-          "[crypto][md5][coverage][phase3-batch742]") {
+          "[crypto][md5]") {
     const std::vector<uint8_t> expected = {
         0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
         0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e,
@@ -112,7 +112,7 @@ TEST_CASE("MD5 pointer overload handles empty input",
 }
 
 TEST_CASE("MD5 binary data returns raw digest bytes",
-          "[crypto][md5][coverage][issue-641]") {
+          "[crypto][md5][issue-641]") {
     const std::vector<uint8_t> data = {0x00, 0xff, 0x10, 0x20, 0x00};
     const std::vector<uint8_t> expected = {
         0x96, 0x26, 0x6b, 0xae, 0xb1, 0xeb, 0x57, 0x35,
@@ -123,7 +123,7 @@ TEST_CASE("MD5 binary data returns raw digest bytes",
 }
 
 TEST_CASE("MD5 hex string_view preserves embedded NUL bytes",
-          "[crypto][md5][coverage][phase3-large]") {
+          "[crypto][md5]") {
     std::string payload = "abc";
     payload.push_back('\0');
     payload += "def";
@@ -172,7 +172,7 @@ TEST_CASE("AES empty plaintext", "[crypto][aes]") {
 }
 
 TEST_CASE("AES binary plaintext preserves embedded zero bytes",
-          "[crypto][aes][coverage][phase3]") {
+          "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
     std::memset(key, 0x33, 32);
@@ -189,7 +189,7 @@ TEST_CASE("AES binary plaintext preserves embedded zero bytes",
 }
 
 TEST_CASE("AES one-byte plaintext round-trips with padding",
-          "[crypto][aes][coverage][phase3-batch742]") {
+          "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
     std::memset(key, 0x11, 32);
@@ -206,7 +206,7 @@ TEST_CASE("AES one-byte plaintext round-trips with padding",
 }
 
 TEST_CASE("AES exact block plaintext adds and removes full padding block",
-          "[crypto][aes][coverage][issue-641]") {
+          "[crypto][aes][issue-641]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
     std::memset(key, 0x21, 32);
@@ -247,7 +247,7 @@ TEST_CASE("AES decrypt rejects non-block-aligned ciphertext", "[crypto][aes]") {
 }
 
 TEST_CASE("AES decrypt rejects empty ciphertext",
-          "[crypto][aes][coverage][phase3]") {
+          "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
 
@@ -256,7 +256,7 @@ TEST_CASE("AES decrypt rejects empty ciphertext",
 }
 
 TEST_CASE("AES decrypt rejects explicit zero padding byte",
-          "[crypto][aes][coverage][phase3-batch742]") {
+          "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
 
@@ -271,7 +271,7 @@ TEST_CASE("AES decrypt rejects explicit zero padding byte",
 }
 
 TEST_CASE("AES decrypt rejects invalid PKCS7 padding bytes",
-          "[crypto][aes][coverage][issue-641]") {
+          "[crypto][aes][issue-641]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
     std::memset(key, 0x5c, 32);
@@ -289,7 +289,7 @@ TEST_CASE("AES decrypt rejects invalid PKCS7 padding bytes",
 }
 
 TEST_CASE("AES decrypt rejects inconsistent PKCS7 padding bytes",
-          "[crypto][aes][coverage]") {
+          "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
 
@@ -326,7 +326,7 @@ TEST_CASE("Machine ID is non-empty", "[crypto][machine_id]") {
 }
 
 TEST_CASE("Machine ID is lowercase hexadecimal",
-          "[crypto][machine_id][coverage][phase3]") {
+          "[crypto][machine_id]") {
     auto id = machine_id();
     REQUIRE(id.size() == 64);
     REQUIRE(std::all_of(id.begin(), id.end(), [](unsigned char c) {

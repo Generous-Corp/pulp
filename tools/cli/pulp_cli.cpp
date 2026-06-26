@@ -58,7 +58,7 @@ static const Command commands[] = {
     {"content",  "Validate and install data-only content packs", pulp::cli::content::cmd_content},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
-    {"project",  "Per-project SDK pin: bump, undo", cmd_project},
+    {"project",  "Per-project SDK pin: pin, unpin, undo", cmd_project},
     // Regression fix: #562 added `{"config", ..., cmd_config}` to this dispatch
     // table, but the #563 merge dropped the line, leaving `pulp config`
     // (and the update.mode / channel / check_interval_hours surface

@@ -8,6 +8,23 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05020"></a>
+## [0.502.0] - 2026-06-26
+
+- feat(host): thread per-block transport context into SignalGraph::process ([#4946](https://github.com/danielraffel/pulp/pull/4946))
+
+<a id="v05011"></a>
+## [0.501.1] - 2026-06-26
+
+- fix(cli): align project pin surface in rust ([#4956](https://github.com/danielraffel/pulp/pull/4956))
+- fix(sampler): unique slice per key, master soft-limit, tempo survives re-slice ([#4954](https://github.com/danielraffel/pulp/pull/4954))
+- chore(examples): reuse pluck processor in web demo ([#4951](https://github.com/danielraffel/pulp/pull/4951))
+- fix(sampler): release typing notes after root changes ([#4947](https://github.com/danielraffel/pulp/pull/4947))
+- docs(test): normalize stale Codex regression labels ([#4941](https://github.com/danielraffel/pulp/pull/4941))
+- fix(sampler): typing keyboard plays consecutive slices (home row, not white-key gaps) ([#4943](https://github.com/danielraffel/pulp/pull/4943))
+- docs(cli): fix troubleshooting plugin install command ([#4944](https://github.com/danielraffel/pulp/pull/4944))
+- docs(format): align ARA companion factory status ([#4940](https://github.com/danielraffel/pulp/pull/4940))
+
 <a id="v05010"></a>
 ## [0.501.0] - 2026-06-26
 
@@ -5253,6 +5270,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.502.0]: https://github.com/danielraffel/pulp/releases/tag/v0.502.0
+[0.501.1]: https://github.com/danielraffel/pulp/releases/tag/v0.501.1
 [0.501.0]: https://github.com/danielraffel/pulp/releases/tag/v0.501.0
 [0.500.0]: https://github.com/danielraffel/pulp/releases/tag/v0.500.0
 [0.499.1]: https://github.com/danielraffel/pulp/releases/tag/v0.499.1

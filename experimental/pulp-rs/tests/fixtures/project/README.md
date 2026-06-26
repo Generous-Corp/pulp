@@ -1,9 +1,9 @@
-# `tests/fixtures/project/` — Phase 6b project-bump fixtures
+# `tests/fixtures/project/` — Phase 6b project pin/bump fixtures
 
 Each subdirectory contains one `CMakeLists.txt` shape exercising a
 different pin kind. The `project_parity_test` integration test
 copies the fixture tree into a tempdir before invoking `pulp-rs
-project bump`, so the originals remain immutable.
+project pin` / `project bump`, so the originals remain immutable.
 
 | Fixture                | Pin kind                  | Expected bump behaviour              |
 |------------------------|---------------------------|--------------------------------------|

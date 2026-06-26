@@ -30,7 +30,7 @@ Commands:
   content        Validate and install data-only content packs
   pr             One-shot push-a-PR: gates + bump + ship
   projects       Manage the ~/.pulp/projects.json registry
-  project        Per-project SDK pin: bump, undo
+  project        Per-project SDK pin: pin, unpin, undo
   config         Read or write ~/.pulp/config.toml settings
   coverage       Local coverage tooling (diff-cover gate mirror)
 

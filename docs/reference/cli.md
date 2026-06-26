@@ -574,13 +574,14 @@ empty list — no first-run setup is required.
 
 **Status**: usable
 
-Per-project SDK pin management. Updates a consumer project's pinned
-Pulp SDK version and records an undo batch at
+Per-project SDK pin management. Pins a consumer project to a specific
+Pulp SDK version, switches it back to floating mode, and records pin
+undo batches at
 `~/.pulp/bump-undo-<timestamp>.json` so mistakes are one command away
 from recovery.
 
 In standalone SDK-mode projects (`pulp.toml` present), the SDK pin is
-`pulp.toml` `sdk_version`. `pulp project bump` updates that field and
+`pulp.toml` `sdk_version`. `pulp project pin` updates that field and
 the versioned `find_package(Pulp X.Y.Z ...)` line together. It does
 not rewrite `project(NAME VERSION ...)`; that remains the app/plugin
 product version. If `sdk_path` points at a managed Pulp SDK cache for
@@ -593,22 +594,35 @@ In legacy source-embedded projects, the command recognizes
 `project(NAME VERSION X.Y.Z ...)`.
 
 ```bash
-pulp project bump                     # bump CWD project to CLI's own version
-pulp project bump 0.32.0              # bump to explicit version (positional)
-pulp project bump --to=0.32.0         # bump to explicit version (named)
-pulp project bump --all               # iterate ~/.pulp/projects.json
-pulp project bump --all --dry-run     # show plan without writing
-pulp project bump --force-dirty       # skip the git-clean check
-pulp project bump --allow-downgrade   # target older than current pin
-pulp project bump --allow-cli-skew    # target newer than installed CLI
-pulp project bump --allow-redundant   # ignore origin/main already-newer guard
-pulp project bump --verify-builds     # build after bump; roll back on failure
+pulp project pin                      # pin CWD project to CLI's own version
+pulp project pin 0.32.0               # pin to explicit version (positional)
+pulp project pin --to=0.32.0          # pin to explicit version (named)
+pulp project pin --all                # iterate ~/.pulp/projects.json
+pulp project pin --all --dry-run      # show plan without writing
+pulp project pin --force-dirty        # skip the git-clean check
+pulp project pin --allow-downgrade    # target older than current pin
+pulp project pin --allow-cli-skew     # target newer than installed CLI
+pulp project pin --allow-redundant    # ignore origin/main already-newer guard
+pulp project pin --verify-builds      # build after pin; roll back on failure
+
+pulp project unpin                    # set sdk_version = "latest"
+pulp project unpin --dry-run          # show the unpin rewrite without writing
+
+pulp project bump                     # deprecated alias for `pin`
 
 pulp project undo                     # revert the newest batch
 pulp project undo <timestamp>         # revert a specific batch
 ```
 
-**Cross-binary parity:** `pulp project bump` and `pulp project undo` round-trip byte-exactly between the C++ and Rust CLI implementations. A bump written by one binary's `bump` is correctly understood by the other binary's `undo`, including the optional `notes:[...]` field the Rust port emits. The C++ undo-batch parser silently skips unknown ARRAY / OBJECT fields it doesn't recognize so future schema additions don't desync the parser.
+`pulp project bump` remains a deprecated alias for `pulp project pin`
+through the compatibility window, but new docs and scripts should use
+`pin`.
+
+`pulp project unpin` preserves the `sdk_version` field and rewrites its
+value to `"latest"`. That marker resolves to the newest installed SDK
+under `~/.pulp/sdk/<x.y.z>/` on each rebuild.
+
+**Cross-binary parity:** `pulp project pin` / `bump` and `pulp project undo` round-trip byte-exactly between the C++ and Rust CLI implementations. A pin written by one binary is correctly understood by the other binary's `undo`, including the optional `notes:[...]` field the Rust port emits. The C++ undo-batch parser silently skips unknown ARRAY / OBJECT fields it doesn't recognize so future schema additions don't desync the parser.
 
 **Safety rails:** branch pins (`GIT_TAG main`) and SHA pins are
 skipped with a diagnostic; dirty pin-bearing files are gated behind
@@ -624,15 +638,15 @@ consumer project SDK bump.
 **Migration notes** print after a successful bump so users see any API
 changes the hop introduced.
 
-**When to use `pulp upgrade` vs `pulp project bump`:** use
+**When to use `pulp upgrade` vs `pulp project pin`:** use
 `pulp upgrade` to replace the installed Pulp CLI/SDK toolchain. Use
-`pulp project bump` after that when the current project should move to
+`pulp project pin` after that when the current project should move to
 that SDK. The Claude `/upgrade` flow exposes this as "upgrade the
 tool" vs "upgrade the tool and bump this project's SDK pin".
 
 **Post-upgrade hook:** the `update.bump_projects` config key (prompt
 | auto | off; default prompt) controls whether `pulp upgrade` prints
-a `pulp project bump --all` hint after a successful CLI upgrade.
+a project-pin hint after a successful CLI upgrade.
 
 ### ci-host
 
@@ -1654,7 +1668,7 @@ Supported update keys:
   Changing `update.mode` clears `~/.pulp/update-snooze` so the new mode takes effect on the next invocation.
 - `update.check_interval_hours` — integer hours between background checks (default `24`). The 24h default stays under the 60/hour anonymous GitHub API rate limit by a wide margin.
 - `update.channel` — `stable | beta` (default `stable`). Reserved for future release-channel support; ignored today.
-- `update.bump_projects` — `prompt | auto | off` (default `prompt`). Controls whether a successful `pulp upgrade` nudges the user toward `pulp project bump --all`.
+- `update.bump_projects` — `prompt | auto | off` (default `prompt`). Controls whether a successful `pulp upgrade` nudges the user toward `pulp project pin --all`.
 
 Supported import-design keys:
 

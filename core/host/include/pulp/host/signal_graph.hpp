@@ -532,10 +532,13 @@ public:
     //
     // SAFETY NOTE: the static eligibility (analyze_anticipation_eligibility) does
     // NOT detect a host-clock-sensitive interior plugin (one whose output depends
-    // on the transport playhead). It is safe today only because process() does not
-    // propagate transport into the routed render, so the ahead-render and a live
-    // render see identical (absent) transport. When transport plumbing lands, such
-    // an interior must be excluded (a per-node opt-out) before enabling this.
+    // on the transport playhead). The transport process() overload therefore
+    // SUPPRESSES the supplied transport for any block where anticipation is active
+    // (counted by transport_suppressed_for_anticipation), so the ahead-render and
+    // the live render both see absent transport — exactly the safe no-transport
+    // interior render. A per-node transport-sensitivity opt-out is the precondition
+    // for letting a transport-aware interior coexist with anticipation; until that
+    // exists, suppression is the conservative guarantee.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
     }
@@ -566,6 +569,32 @@ public:
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples);
+
+    // Process one block with host transport/timeline context. Additive overload
+    // of the no-transport process() above: the supplied transport is delivered to
+    // the nodes that consume it (e.g. ProcessorNode, via the routed ProcessBlock's
+    // transport pointer), so a Processor sees the host playhead, mode, and
+    // render-speed hint for the block. Nodes that do not consume transport are
+    // bit-identical to the no-transport overload. When anticipative rendering is
+    // active the transport is conservatively SUPPRESSED for the block (see
+    // set_anticipation_enabled / transport_suppressed_for_anticipation): an
+    // ahead-rendered interior would diverge from the live playhead, and the
+    // per-node transport-sensitivity opt-out that would let the two coexist does
+    // not exist yet.
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 int num_samples,
+                 const format::ProcessContext& transport);
+
+    // Count of blocks for which a supplied transport was SUPPRESSED because
+    // anticipative rendering was active (see the transport process() overload).
+    // Stays 0 unless both transport and anticipation are in use at once; a
+    // non-zero value confirms the anticipation interior rendered without the
+    // live playhead, exactly as the no-transport path would. Relaxed-atomic,
+    // written only by the audio thread.
+    std::uint64_t transport_suppressed_for_anticipation() const noexcept {
+        return transport_suppressed_for_anticipation_.load(std::memory_order_relaxed);
+    }
 
     // Clear all nodes and connections
     void clear();
@@ -906,6 +935,10 @@ private:
     // See routed_walk_fallbacks(): incremented when an eligible routed path failed
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
+    // See transport_suppressed_for_anticipation(): incremented when a supplied
+    // transport was dropped for a block because anticipation was active.
+    // Audio-thread writer only.
+    std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
@@ -935,6 +968,13 @@ private:
 
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;
+    // Shared body of both process() overloads. `transport` is the host
+    // transport context for the block, or nullptr for the no-transport path.
+    // RT-safe (no allocation per block).
+    void process_impl(audio::BufferView<float>& output,
+                      const audio::BufferView<const float>& input,
+                      int num_samples,
+                      const format::ProcessContext* transport);
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();

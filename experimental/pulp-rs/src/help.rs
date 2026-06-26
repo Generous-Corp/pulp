@@ -162,7 +162,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "project",
-        summary: "Per-project SDK pin: bump, undo",
+        summary: "Per-project SDK pin: pin, unpin, undo",
     },
     Entry {
         name: "config",

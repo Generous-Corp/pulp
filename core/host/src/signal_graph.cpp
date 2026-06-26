@@ -13,6 +13,7 @@
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <algorithm>
 #include <array>
@@ -1681,6 +1682,20 @@ bool SignalGraph::set_custom_node_state(NodeId id,
 void SignalGraph::process(audio::BufferView<float>& output,
                           const audio::BufferView<const float>& input,
                           int num_samples) {
+    process_impl(output, input, num_samples, /*transport=*/nullptr);
+}
+
+void SignalGraph::process(audio::BufferView<float>& output,
+                          const audio::BufferView<const float>& input,
+                          int num_samples,
+                          const format::ProcessContext& transport) {
+    process_impl(output, input, num_samples, &transport);
+}
+
+void SignalGraph::process_impl(audio::BufferView<float>& output,
+                               const audio::BufferView<const float>& input,
+                               int num_samples,
+                               const format::ProcessContext* transport) {
     struct ProcessReadGuard {
         explicit ProcessReadGuard(SignalGraph& owner) noexcept : owner_(owner) {
             // See prune_retired_snapshots_(): this reader count and the raw
@@ -1722,10 +1737,36 @@ void SignalGraph::process(audio::BufferView<float>& output,
             buses.add_input("main", input, pulp::format::BusRole::Main) &&
             buses.add_output("main", output, pulp::format::BusRole::Main);
         if (buses_ok) {
+            // Anticipation safety: an ahead-rendered interior is advanced solely
+            // by the producer and can never observe the live playhead, so feeding
+            // it transport would diverge from the masked live render. While
+            // anticipation is active, SUPPRESS the supplied transport for this
+            // block (the per-node transport-sensitivity opt-out that would let a
+            // transport-aware interior coexist with anticipation does not exist
+            // yet). This reproduces the safe no-transport interior render exactly.
+            const bool anticipation_active =
+                anticipation_enabled_.load(std::memory_order_relaxed) && cg &&
+                cg->anticipation_valid;
+            const pulp::format::ProcessContext* effective_transport =
+                anticipation_active ? nullptr : transport;
+            if (effective_transport != transport) {
+                transport_suppressed_for_anticipation_.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
+
             pulp::format::ProcessBlock block;
             block.sample_rate = cg->sample_rate;
             block.frame_count = frames32;
             block.buses = &buses;
+            if (effective_transport != nullptr) {
+                // Deliver transport + process_mode + render_speed_hint to
+                // Processors via *block.transport. block.sample_rate stays sourced
+                // from cg (the prepared rate is authoritative). render_speed is left
+                // at 1.0: render_speed_hint is a categorical hint that reaches
+                // Processors through *block.transport, not a numeric multiplier.
+                block.transport = effective_transport;
+                block.mode = effective_transport->process_mode;
+            }
 
             // Run one routed path with the shared MIDI mailbox bridge around it.
             // `run` returns the executor result; this returns true iff routing

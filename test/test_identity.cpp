@@ -95,7 +95,7 @@ TEST_CASE("Uuid string round-trip", "[runtime][identity]") {
     }
 }
 
-TEST_CASE("Uuid ordering and hashing cover deterministic values", "[runtime][identity][coverage][issue-656]") {
+TEST_CASE("Uuid ordering and hashing cover deterministic values", "[runtime][identity][issue-656]") {
     auto low = Uuid::from_string("00000000-0000-0000-0000-000000000001");
     auto high = Uuid::from_string("00000000-0000-0000-0000-000000000002");
 
@@ -110,13 +110,13 @@ TEST_CASE("Uuid ordering and hashing cover deterministic values", "[runtime][ide
 }
 
 TEST_CASE("Uuid parsing rejects malformed dashed layout",
-          "[runtime][identity][coverage][issue-656]") {
+          "[runtime][identity][issue-656]") {
     auto parsed = Uuid::from_string("0011223344556677-8899-aabb-ccdd-eeff");
     REQUIRE(parsed.is_nil());
 }
 
 TEST_CASE("Uuid parsing rejects dashed strings with empty groups",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     REQUIRE(Uuid::from_string("-0112233-4455-6677-8899-aabbccddeeff").is_nil());
     REQUIRE(Uuid::from_string("00112233--455-6677-8899-aabbccddeeff").is_nil());
     REQUIRE(Uuid::from_string("00112233-4455-6677-8899-aabbccddee-").is_nil());
@@ -133,7 +133,7 @@ TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
 }
 
 TEST_CASE("Uuid parsing rejects short, long, and whitespace-padded values",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     REQUIRE(Uuid::from_string("").is_nil());
     REQUIRE(Uuid::from_string("00112233445566778899aabbccddee").is_nil());
     REQUIRE(Uuid::from_string("00112233445566778899aabbccddeeff00").is_nil());
@@ -143,7 +143,7 @@ TEST_CASE("Uuid parsing rejects short, long, and whitespace-padded values",
 }
 
 TEST_CASE("Uuid formatting preserves leading zero bytes",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     Uuid id;
     id.hi = 0x0001020304050607ULL;
     id.lo = 0x08090a0b0c0d0e0fULL;
@@ -223,7 +223,7 @@ TEST_CASE("Typed identity nil and hashing are stable", "[runtime][identity][issu
 }
 
 TEST_CASE("Typed identity nil strings use canonical uuid format",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
     REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
     REQUIRE(ObjectId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
@@ -231,7 +231,7 @@ TEST_CASE("Typed identity nil strings use canonical uuid format",
 }
 
 TEST_CASE("Typed identity wrappers compare and hash deterministic values",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     auto first = ObjectId::from_string("00000000-0000-0000-0000-000000000001");
     auto second = ObjectId::from_string("00000000-0000-0000-0000-000000000002");
 
@@ -251,7 +251,7 @@ TEST_CASE("Typed identity wrappers compare and hash deterministic values",
 }
 
 TEST_CASE("Typed transient identity wrappers hash deterministic values",
-          "[runtime][identity][codecov]") {
+          "[runtime][identity]") {
     SessionId session{Uuid::from_string("10000000-0000-0000-0000-000000000001")};
     RunId run{Uuid::from_string("20000000-0000-0000-0000-000000000002")};
     CorrelationId correlation{Uuid::from_string("30000000-0000-0000-0000-000000000003")};
@@ -278,7 +278,7 @@ TEST_CASE("Typed transient identity wrappers hash deterministic values",
 }
 
 TEST_CASE("Transient identity wrappers hash deterministic values",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     const Uuid first_uuid{0x1000, 0x2000};
     const Uuid second_uuid{0x1000, 0x2001};
     const RunId first_run{first_uuid};
@@ -302,7 +302,7 @@ TEST_CASE("Transient identity wrappers hash deterministic values",
 }
 
 TEST_CASE("Typed identity generated strings parse back where supported",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     auto object = ObjectId::generate();
 
     REQUIRE_FALSE(object.is_nil());
@@ -310,7 +310,7 @@ TEST_CASE("Typed identity generated strings parse back where supported",
 }
 
 TEST_CASE("Typed transient identities hash and stringify nil values",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     std::unordered_set<SessionId> sessions;
     std::unordered_set<RunId> runs;
     std::unordered_set<CorrelationId> correlations;
@@ -331,7 +331,7 @@ TEST_CASE("Typed transient identities hash and stringify nil values",
 }
 
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     EventEnvelope env;
 
     REQUIRE(env.timestamp == 0.0);

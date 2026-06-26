@@ -1,10 +1,10 @@
 // cmd_project_undo.cpp — `pulp project undo`.
 //
-//   pulp project undo                     Revert the newest bump batch
+//   pulp project undo                     Revert the newest pin/bump batch
 //   pulp project undo <timestamp>         Revert a specific batch
 //
 // Reads `~/.pulp/bump-undo-<timestamp>.json` written by a previous
-// `pulp project bump` and rewrites each pin back to its pre-bump
+// `pulp project pin` / `bump` and rewrites each pin back to its previous
 // value, skipping any project whose pin drifted since.
 
 #include "cmd_project_internal.hpp"
