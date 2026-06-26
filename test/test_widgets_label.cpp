@@ -757,15 +757,18 @@ TEST_CASE("Label re-shapes when a font registration bumps the generation",
     // fresh prepare(). (Before the font_gen key field, this was 0 — stale.)
     //
     // Guarded because the assertion only holds when font registration can
-    // actually move the generation counter. In a no-Skia / no-GPU build
-    // (uses_real_shaping() == false) bump_font_registration_generation() is a
-    // no-op stub (bundled_fonts.cpp / font_registry_stubs.cpp), so the
-    // generation field in the cache key never changes → the key still matches →
-    // cache hit → prepare() is NOT re-invoked (delta 0). The soft-wrap cache IS
-    // still populated in that build (the sibling prepare()-delta==1 tests above
-    // pass on no-GPU lanes); it's specifically the generation bump that can't
-    // fire. uses_real_shaping() tracks the same PULP_HAS_TEXT_SHAPING gate as
-    // the real bump, so it is the correct predicate. The fill_text assertion
+    // actually move the generation counter. The real
+    // bump_font_registration_generation() is compiled only under PULP_HAS_SKIA;
+    // otherwise it's a no-op stub (bundled_fonts.cpp / font_registry_stubs.cpp),
+    // so the generation field in the cache key never changes → the key still
+    // matches → cache hit → prepare() is NOT re-invoked (delta 0). The soft-wrap
+    // cache IS still populated in a no-Skia build (the sibling prepare()-delta==1
+    // tests above pass on no-GPU lanes); it's specifically the generation bump
+    // that can't fire. uses_real_shaping() (tied to PULP_HAS_TEXT_SHAPING) is a
+    // safe predicate: it's only ever true when PULP_HAS_SKIA is too, so it never
+    // asserts when the bump is a stub — at worst it conservatively SKIPS the
+    // check in the rare PULP_HAS_SKIA + PULP_TEXT_SHAPING=OFF config (real bump
+    // compiled, but no shaper), which is acceptable. The fill_text assertion
     // below still verifies the label re-paints in every build configuration.
     if (pulp::canvas::global_text_shaper().uses_real_shaping()) {
         REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);

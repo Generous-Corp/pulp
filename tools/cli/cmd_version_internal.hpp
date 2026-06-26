@@ -29,9 +29,13 @@ namespace fs = std::filesystem;
 // destination — which matters most for CMakeLists.txt, the file the whole
 // build derives from. `std::filesystem::rename` has replace semantics on all
 // platforms (POSIX rename / MoveFileExW(REPLACE_EXISTING) on Windows), so it
-// overwrites an existing target. This is a flush-to-OS check, not an fsync
-// durability fence — a delayed-allocation ENOSPC committed after close() can
-// still slip through; sufficient for a dev-time version bump.
+// overwrites an existing target. A symlink AT `path` is replaced by a regular
+// file (rename targets the link itself, not its referent) — the old in-place
+// `ofstream` wrote *through* the link instead; this matches the core/state
+// temp+rename writers' behaviour and is fine for a VCS-tracked build file.
+// This is a flush-to-OS check, not an fsync durability fence — a delayed-
+// allocation ENOSPC committed after close() can still slip through; sufficient
+// for a dev-time version bump.
 inline bool write_text_file_checked(const fs::path& path,
                                      const std::string& content) {
     fs::path tmp = path;
