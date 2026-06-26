@@ -274,6 +274,14 @@ TEST_CASE("Offline SignalGraph render equals online render across partitionings"
     const auto offline_big =
         run_offline(f.build, kBlockBig, f.in_channels, f.out_channels, host_input);
     require_within(online, offline_big, 1e-6f);
+
+    // Non-vacuity guard: the gain/sum fixture must actually produce signal, so a
+    // broad "every path silent" regression in SignalGraph::process() cannot pass
+    // the equal-output comparisons trivially.
+    float peak = 0.0f;
+    for (const auto& ch : online)
+        for (float s : ch) peak = std::max(peak, std::fabs(s));
+    CHECK(peak > 0.1f);
 }
 
 TEST_CASE("Offline render zero-pads a source shorter than the frame count",

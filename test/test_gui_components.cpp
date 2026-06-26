@@ -435,7 +435,7 @@ TEST_CASE("Toolbar paint emits button, separator, custom, and orientation comman
 // ── Extended Buttons ────────────────────────────────────────────────────
 
 TEST_CASE("TextButton disabled state suppresses click and still paints",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     TextButton button("Render");
     button.set_bounds({0, 0, 96, 32});
 
@@ -458,7 +458,7 @@ TEST_CASE("TextButton disabled state suppresses click and still paints",
 }
 
 TEST_CASE("ArrowButton paints all directions and invokes click callback",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ArrowButton button;
     button.set_bounds({0, 0, 24, 24});
 
@@ -481,7 +481,7 @@ TEST_CASE("ArrowButton paints all directions and invokes click callback",
 }
 
 TEST_CASE("ShapeButton reports hover and pressed state to custom painter",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ShapeButton button;
     button.set_bounds({0, 0, 32, 20});
 
@@ -513,7 +513,7 @@ TEST_CASE("ShapeButton reports hover and pressed state to custom painter",
 }
 
 TEST_CASE("ImageButton selects normal hover and pressed image paths",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ImageButton button;
     button.set_bounds({0, 0, 40, 24});
     button.set_image("normal.png");
@@ -545,7 +545,7 @@ TEST_CASE("ImageButton selects normal hover and pressed image paths",
 }
 
 TEST_CASE("ImageButton falls back to normal image for missing state assets",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ImageButton button;
     button.set_bounds({0, 0, 40, 24});
     button.set_image("normal.png");
@@ -562,7 +562,7 @@ TEST_CASE("ImageButton falls back to normal image for missing state assets",
 }
 
 TEST_CASE("ResizableCorner reports drag deltas from mouse down origin",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ResizableCorner corner;
     corner.set_bounds({0, 0, 16, 16});
 
@@ -583,7 +583,7 @@ TEST_CASE("ResizableCorner reports drag deltas from mouse down origin",
 }
 
 TEST_CASE("Button constructors expose deterministic accessibility and intrinsic sizing",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     TextButton default_text;
     REQUIRE(default_text.label().empty());
     REQUIRE(default_text.focusable());
@@ -625,7 +625,7 @@ TEST_CASE("Button constructors expose deterministic accessibility and intrinsic 
 }
 
 TEST_CASE("Buttons tolerate absent callbacks and reset transient states",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     TextButton text("Mute");
     text.set_bounds({0, 0, 96, 32});
     REQUIRE_NOTHROW(text.on_mouse_down({4, 4}));
@@ -667,7 +667,7 @@ TEST_CASE("Buttons tolerate absent callbacks and reset transient states",
 }
 
 TEST_CASE("HyperlinkButton setter and hover states determine painted affordance",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     HyperlinkButton link("Docs", "https://example.invalid/docs");
     link.set_bounds({0, 0, 140, 28});
     REQUIRE(link.text() == "Docs");
@@ -698,7 +698,7 @@ TEST_CASE("HyperlinkButton setter and hover states determine painted affordance"
 }
 
 TEST_CASE("ResizableCorner drag without callback is safe and later reports new origin",
-          "[gui][buttons][coverage][phase3]") {
+          "[gui][buttons][coverage]") {
     ResizableCorner corner;
     corner.set_bounds({0, 0, 20, 20});
 
@@ -831,7 +831,7 @@ TEST_CASE("ConcertinaPanel paint and mouse hit testing cover content offsets",
 }
 
 TEST_CASE("ConcertinaPanel handles null content and default content heights",
-          "[gui][concertina][coverage][phase3]") {
+          "[gui][concertina][coverage]") {
     ConcertinaPanel panel;
     panel.set_bounds({0, 0, 160, 220});
     panel.set_header_height(18.0f);
@@ -867,7 +867,7 @@ TEST_CASE("ConcertinaPanel handles null content and default content heights",
 }
 
 TEST_CASE("ConcertinaPanel exclusive expansion collapses visible content",
-          "[gui][concertina][coverage][phase3]") {
+          "[gui][concertina][coverage]") {
     ConcertinaPanel panel;
     panel.set_exclusive(true);
 
@@ -1227,7 +1227,7 @@ TEST_CASE("LassoComponent callback fires", "[gui][lasso]") {
 }
 
 TEST_CASE("SelectionRect contains and intersects use half-open bounds",
-          "[gui][lasso][coverage][phase3]") {
+          "[gui][lasso][coverage]") {
     SelectionRect rect{10.0f, 20.0f, 40.0f, 30.0f};
 
     REQUIRE(rect.contains(10.0f, 20.0f));
@@ -1243,7 +1243,7 @@ TEST_CASE("SelectionRect contains and intersects use half-open bounds",
 }
 
 TEST_CASE("LassoComponent inactive updates and end are no-ops",
-          "[gui][lasso][coverage][phase3]") {
+          "[gui][lasso][coverage]") {
     LassoComponent lasso;
     int changed = 0;
     int completed = 0;
@@ -1261,7 +1261,7 @@ TEST_CASE("LassoComponent inactive updates and end are no-ops",
 }
 
 TEST_CASE("LassoComponent completes selection and only paints while active",
-          "[gui][lasso][coverage][phase3]") {
+          "[gui][lasso][coverage]") {
     LassoComponent lasso;
     SelectionRect completed;
     int complete_calls = 0;

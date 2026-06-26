@@ -221,7 +221,7 @@ test("detectOverlayControls: finds a search text_field and a tab group", () => {
   assert.equal(tabs[0].selected_index, 2);  // the filled button
 });
 
-test("detectOverlayControls: emits swap / action / xy_pad / value_label from named nodes (P1b)", () => {
+test("detectOverlayControls: emits swap / action / xy_pad / value_label from named nodes", () => {
   const readout = baseNode({
     figma_type: "TEXT", name: "Cutoff Readout", figma_node_id: "v1", content: "1.2 kHz",
     absolute_bounds: { x: 10, y: 200, w: 80, h: 16 },
@@ -257,7 +257,7 @@ test("detectOverlayControls: emits swap / action / xy_pad / value_label from nam
   assert.equal(label!.source_node_id, "v1");
 });
 
-test("detectOverlayControls: P1b name gates do not fire on generic names", () => {
+test("detectOverlayControls: name gates do not fire on generic names", () => {
   // A plain panel with unrelated names must NOT sprout swap/action/xy_pad/
   // value_label overlays. Crucially a STATIC text layer literally named "Value"
   // or "Display" must stay static — the gate requires a deliberate readout
@@ -279,7 +279,7 @@ test("detectOverlayControls: P1b name gates do not fire on generic names", () =>
     ["swap", "action", "xy_pad", "value_label"].indexOf(e.kind) !== -1).length, 0);
 });
 
-test("detectOverlayControls: stamps the P7 resolution report on every control (F2)", () => {
+test("detectOverlayControls: stamps the resolution report on every control", () => {
   // A well-shaped xy_pad resolves cleanly; a deliberately mis-shaped one (named
   // 'XY Pad' but a wide strip) is CAUGHT as a conflict in the live pipeline — the
   // silent-knob stumble, surfaced.

@@ -307,7 +307,7 @@ TEST_CASE("AudioDeviceManager CPU-load tracks work performed in the audio window
 }
 
 TEST_CASE("AudioDeviceManager exposes load and xrun runtime telemetry snapshot",
-          "[audio][audio-device-manager][telemetry][phase2]") {
+          "[audio][audio-device-manager][telemetry]") {
     AudioDeviceManager mgr;
 
     mgr.bump_xrun_counter(3);
@@ -328,7 +328,7 @@ TEST_CASE("AudioDeviceManager exposes load and xrun runtime telemetry snapshot",
 }
 
 TEST_CASE("AudioDeviceManager runtime telemetry polling allocates zero times",
-          "[audio][audio-device-manager][telemetry][rt-safety][phase2]") {
+          "[audio][audio-device-manager][telemetry][rt-safety]") {
     AudioDeviceManager mgr;
     mgr.bump_xrun_counter(2);
 

@@ -38,7 +38,7 @@ TEST_CASE("Polynomial roots_quadratic complex roots", "[signal][poly]") {
 }
 
 TEST_CASE("Polynomial roots_quadratic reports repeated real roots",
-          "[signal][poly][coverage][phase3]") {
+          "[signal][poly][coverage]") {
     auto [r1, r2] = Polynomial::roots_quadratic(1.0f, -2.0f, 1.0f);
     REQUIRE_THAT(r1.real(), WithinAbs(1.0f, 0.001f));
     REQUIRE_THAT(r2.real(), WithinAbs(1.0f, 0.001f));
@@ -184,7 +184,7 @@ TEST_CASE("Mat3 determinant", "[signal][matrix]") {
 }
 
 TEST_CASE("Mat3 determinant and identity composition cover nontrivial matrices",
-          "[signal][matrix][coverage][phase3]") {
+          "[signal][matrix][coverage]") {
     Mat3 a{{{2.0f, -1.0f, 0.5f},
             {3.0f, 4.0f, -2.0f},
             {1.0f, 0.0f, 5.0f}}};

@@ -1,5 +1,5 @@
 /// @file test_motion_provenance.cpp
-/// Phase 9 — Provenance adapters: confirm that each animation surface
+/// Provenance adapters: confirm that each animation surface
 /// (Tween, AnimatorSet, CSS TransitionSpec, JS rAF via ambient slot)
 /// stamps an identifiable `motion::Provenance` envelope on the events
 /// it publishes. An offline reader of the fixture can answer
@@ -66,7 +66,7 @@ const SampleEvent* find_event_by_kind(const std::vector<SampleEvent>& events,
 // ── Tween + PULP_MOTION_TWEEN macro ─────────────────────────────────────
 
 TEST_CASE("Tween::set_motion_provenance stamps publishes",
-          "[motion][provenance][tween][issue-pulp-motion-phase9]") {
+          "[motion][provenance][tween]") {
     MotionCapture cap;
 
     Tween t(0.0f, 1.0f, 0.1f, easing::linear);
@@ -90,7 +90,7 @@ TEST_CASE("Tween::set_motion_provenance stamps publishes",
 }
 
 TEST_CASE("PULP_MOTION_TWEEN macro auto-fills source_file/source_line",
-          "[motion][provenance][tween][macro][issue-pulp-motion-phase9]") {
+          "[motion][provenance][tween][macro]") {
     MotionCapture cap;
 
     // Note the line number of the next statement — it'll be captured by
@@ -122,7 +122,7 @@ TEST_CASE("PULP_MOTION_TWEEN macro auto-fills source_file/source_line",
 // ── AnimatorSetBuilder::name() ──────────────────────────────────────────
 
 TEST_CASE("AnimatorSetBuilder::name() propagates as motion provenance",
-          "[motion][provenance][animator-set][issue-pulp-motion-phase9]") {
+          "[motion][provenance][animator-set]") {
     MotionCapture cap;
 
     float captured = 0.0f;
@@ -149,7 +149,7 @@ TEST_CASE("AnimatorSetBuilder::name() propagates as motion provenance",
 // ── CSS TransitionSpec source attribution ───────────────────────────────
 
 TEST_CASE("parse_transition_shorthand_with_provenance carries file/line",
-          "[motion][provenance][css-transition][issue-pulp-motion-phase9]") {
+          "[motion][provenance][css-transition]") {
     auto specs = parse_transition_shorthand_with_provenance(
         "opacity 200ms ease, transform 300ms ease-in 100ms",
         "/styles/card.css", 17);
@@ -163,7 +163,7 @@ TEST_CASE("parse_transition_shorthand_with_provenance carries file/line",
 }
 
 TEST_CASE("CssAnimation publish stamps css-transition provenance",
-          "[motion][provenance][css-transition][issue-pulp-motion-phase9]") {
+          "[motion][provenance][css-transition]") {
     MotionCapture cap;
 
     auto specs = parse_transition_shorthand_with_provenance(
@@ -193,7 +193,7 @@ TEST_CASE("CssAnimation publish stamps css-transition provenance",
 // ── Ambient provenance (rAF / design-import substrate) ──────────────────
 
 TEST_CASE("Ambient provenance fills in when PublishOptions::provenance empty",
-          "[motion][provenance][ambient][issue-pulp-motion-phase9]") {
+          "[motion][provenance][ambient]") {
     MotionCapture cap;
 
     Provenance p;
@@ -218,7 +218,7 @@ TEST_CASE("Ambient provenance fills in when PublishOptions::provenance empty",
 }
 
 TEST_CASE("Design-import provenance round-trips through publish channel",
-          "[motion][provenance][design-import][issue-pulp-motion-phase9]") {
+          "[motion][provenance][design-import]") {
     MotionCapture cap;
 
     // Simulate a generated JS bundle calling motion.set_provenance(...)
@@ -251,7 +251,7 @@ TEST_CASE("Design-import provenance round-trips through publish channel",
 // ── WidgetBridge::load_script(code, script_id) + JS motion bindings ───
 
 TEST_CASE("WidgetBridge load_script(code, script_id) tags rAF publishes",
-          "[motion][provenance][widget-bridge][raf][issue-pulp-motion-phase9]") {
+          "[motion][provenance][widget-bridge][raf]") {
     MotionCapture cap;
 
     ScriptEngine engine;
@@ -290,7 +290,7 @@ TEST_CASE("WidgetBridge load_script(code, script_id) tags rAF publishes",
 }
 
 TEST_CASE("motion.setProvenance + motion.publishValue round-trip from JS",
-          "[motion][provenance][widget-bridge][js][design-import][issue-pulp-motion-phase9]") {
+          "[motion][provenance][widget-bridge][js][design-import]") {
     MotionCapture cap;
 
     ScriptEngine engine;
@@ -320,10 +320,10 @@ TEST_CASE("motion.setProvenance + motion.publishValue round-trip from JS",
     REQUIRE(current_ambient_provenance().source_kind.empty());
 }
 
-// ── Backwards compat: pre-Phase-9 publishes still work unchanged ────────
+// ── Backwards compat: publishes without provenance still work unchanged ─
 
 TEST_CASE("Publishes without provenance still emit (backwards compatible)",
-          "[motion][provenance][backcompat][issue-pulp-motion-phase9]") {
+          "[motion][provenance][backcompat]") {
     MotionCapture cap;
 
     PublishOptions po{};  // empty provenance

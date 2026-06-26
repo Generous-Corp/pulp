@@ -31,8 +31,9 @@ node-interface generation and the public `pulp_node_v1` C ABI is
   types.
 - **One language-neutral boundary, multiple bindings.** The stable contract is a
   **C ABI**, usable from Rust, C, Zig, generated DSP, and later WebAssembly
-  loaders. Rust is the first ergonomic binding (`pulp-rust-sys` raw bindings plus
-  a safe-ish trait layer), but Rust is never *the* boundary.
+  loaders. Rust is the first exercised language in-tree through opt-in Cargo
+  staticlibs with hand-mirrored `#[repr(C)]` reference cores, but Rust is never
+  *the* boundary.
 - **Host-owned buffers, borrowed for the call.** The host owns every process
   buffer; the native side only borrows planar views for the duration of one
   `process()` call. This single rule is what makes static linking, future dynamic
@@ -76,8 +77,8 @@ node-interface generation and the public `pulp_node_v1` C ABI is
 - **No runtime-loaded or downloaded native DSP on iOS / AUv3 / sandboxed targets.**
   See below — this is a platform-policy ceiling, not a roadmap gap.
 - **Pulp does not ship a bundled Rust DSP framework.** It ships the FFI skeleton,
-  bindings, CMake/Cargo glue, 1–2 reference cores, and ABI/RT-safety tests. DSP API
-  surface and crate-selection opinions are bring-your-own.
+  CMake/Cargo glue, hand-mirrored Rust reference cores, and ABI/RT-safety tests.
+  DSP API surface and crate-selection opinions are bring-your-own.
 
 ## Why
 
@@ -142,9 +143,9 @@ cannot silently drift.
 ## What this means for Rust DSP
 
 - **You bring the DSP; Pulp brings the contract.** "Write DSP however you want;
-  here's the boundary." Pulp ships scaffolding (`pulp-rust-sys`, a safe-ish trait,
-  CMake/Cargo glue, reference gain/biquad cores) and the ABI/RT-safety tests — not
-  a DSP API surface or crate-selection opinions.
+  here's the boundary." Pulp ships the C header contract, CMake/Cargo glue,
+  hand-mirrored Rust reference cores, and ABI/RT-safety tests — not a DSP API
+  surface or crate-selection opinions.
 - **License discipline applies to crates too.** The opt-in lane runs a `cargo-deny`
   license audit against Pulp's allowlist (MIT / BSD-2,3 / Apache-2.0 / ISC / zlib /
   BSL-1.0 / public-domain). CI verifies each crate's actual LICENSE at its pinned

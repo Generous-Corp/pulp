@@ -1,5 +1,5 @@
 {
-  "engine": "OfflineStretch tempo-only (Phase 1, RealtimePitchTimeProcessor)",
+  "engine": "OfflineStretch tempo-only baseline (RealtimePitchTimeProcessor)",
   "rubberband_comparison": "deferred (rubberband not installed)",
   "ratios": [
     0.75,

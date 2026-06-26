@@ -116,7 +116,7 @@ TEST_CASE("Uuid parsing rejects malformed dashed layout",
 }
 
 TEST_CASE("Uuid parsing rejects dashed strings with empty groups",
-          "[runtime][identity][coverage][phase3-batch742]") {
+          "[runtime][identity][coverage]") {
     REQUIRE(Uuid::from_string("-0112233-4455-6677-8899-aabbccddeeff").is_nil());
     REQUIRE(Uuid::from_string("00112233--455-6677-8899-aabbccddeeff").is_nil());
     REQUIRE(Uuid::from_string("00112233-4455-6677-8899-aabbccddee-").is_nil());
@@ -133,7 +133,7 @@ TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
 }
 
 TEST_CASE("Uuid parsing rejects short, long, and whitespace-padded values",
-          "[runtime][identity][coverage][phase3]") {
+          "[runtime][identity][coverage]") {
     REQUIRE(Uuid::from_string("").is_nil());
     REQUIRE(Uuid::from_string("00112233445566778899aabbccddee").is_nil());
     REQUIRE(Uuid::from_string("00112233445566778899aabbccddeeff00").is_nil());
@@ -143,7 +143,7 @@ TEST_CASE("Uuid parsing rejects short, long, and whitespace-padded values",
 }
 
 TEST_CASE("Uuid formatting preserves leading zero bytes",
-          "[runtime][identity][coverage][phase3]") {
+          "[runtime][identity][coverage]") {
     Uuid id;
     id.hi = 0x0001020304050607ULL;
     id.lo = 0x08090a0b0c0d0e0fULL;
@@ -223,7 +223,7 @@ TEST_CASE("Typed identity nil and hashing are stable", "[runtime][identity][issu
 }
 
 TEST_CASE("Typed identity nil strings use canonical uuid format",
-          "[runtime][identity][coverage][phase3-batch742]") {
+          "[runtime][identity][coverage]") {
     REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
     REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
     REQUIRE(ObjectId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
@@ -231,7 +231,7 @@ TEST_CASE("Typed identity nil strings use canonical uuid format",
 }
 
 TEST_CASE("Typed identity wrappers compare and hash deterministic values",
-          "[runtime][identity][coverage][phase3]") {
+          "[runtime][identity][coverage]") {
     auto first = ObjectId::from_string("00000000-0000-0000-0000-000000000001");
     auto second = ObjectId::from_string("00000000-0000-0000-0000-000000000002");
 
@@ -278,7 +278,7 @@ TEST_CASE("Typed transient identity wrappers hash deterministic values",
 }
 
 TEST_CASE("Transient identity wrappers hash deterministic values",
-          "[runtime][identity][coverage][phase3]") {
+          "[runtime][identity][coverage]") {
     const Uuid first_uuid{0x1000, 0x2000};
     const Uuid second_uuid{0x1000, 0x2001};
     const RunId first_run{first_uuid};
@@ -302,7 +302,7 @@ TEST_CASE("Transient identity wrappers hash deterministic values",
 }
 
 TEST_CASE("Typed identity generated strings parse back where supported",
-          "[runtime][identity][coverage][phase3-batch742]") {
+          "[runtime][identity][coverage]") {
     auto object = ObjectId::generate();
 
     REQUIRE_FALSE(object.is_nil());
@@ -331,7 +331,7 @@ TEST_CASE("Typed transient identities hash and stringify nil values",
 }
 
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",
-          "[runtime][identity][coverage][phase3]") {
+          "[runtime][identity][coverage]") {
     EventEnvelope env;
 
     REQUIRE(env.timestamp == 0.0);

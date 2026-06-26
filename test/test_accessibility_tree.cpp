@@ -180,7 +180,7 @@ TEST_CASE("find_by_role_and_label returns nullptr when absent",
 }
 
 TEST_CASE("snapshot preserves depth-first order and first matching view pointer",
-          "[a11y][harness][coverage][phase3]") {
+          "[a11y][harness][coverage]") {
     Probe root;
 
     auto group = std::make_unique<Probe>();

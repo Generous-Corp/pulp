@@ -175,7 +175,7 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
 }
 
 TEST_CASE("Buffer supports non-float sample storage",
-          "[audio][buffer][coverage][phase3-github]") {
+          "[audio][buffer][coverage]") {
     Buffer<int16_t> buffer(2, 3);
     buffer.channel(0)[0] = 12;
     buffer.channel(1)[2] = -34;
@@ -241,7 +241,7 @@ TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
 }
 
 TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
-          "[audio][buffer][coverage][phase3-github]") {
+          "[audio][buffer][coverage]") {
     Buffer<float> buffer(2, 2);
     buffer.channel(0)[0] = 1.0f;
     buffer.channel(1)[1] = -1.0f;
@@ -261,7 +261,7 @@ TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
 }
 
 TEST_CASE("Buffer resize to smaller shape remaps channel spans",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     Buffer<float> buffer(3, 5);
     buffer.channel(0)[4] = 0.25f;
     buffer.channel(2)[4] = -0.5f;
@@ -280,7 +280,7 @@ TEST_CASE("Buffer resize to smaller shape remaps channel spans",
 }
 
 TEST_CASE("Buffer copy owns independent channel storage",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     Buffer<float> original(2, 3);
     original.channel(0)[0] = 1.0f;
     original.channel(1)[2] = 2.0f;
@@ -304,7 +304,7 @@ TEST_CASE("Buffer copy owns independent channel storage",
 }
 
 TEST_CASE("Buffer move refreshes channel pointers for the new owner",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     Buffer<float> original(2, 2);
     original.channel(0)[0] = 0.25f;
     original.channel(1)[1] = -0.5f;
@@ -477,7 +477,7 @@ TEST_CASE("BufferView slices produced from const views still alias source storag
 }
 
 TEST_CASE("Buffer self assignment preserves storage and channel pointers",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     Buffer<float> buffer(2, 3);
     buffer.channel(0)[1] = 0.125f;
     buffer.channel(1)[2] = -0.25f;
@@ -504,7 +504,7 @@ TEST_CASE("Buffer self assignment preserves storage and channel pointers",
 }
 
 TEST_CASE("Buffer rejects dimensions that overflow sample storage",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     const auto max = std::numeric_limits<std::size_t>::max();
     REQUIRE_THROWS_AS((Buffer<float>(2, max)), std::length_error);
 
@@ -605,7 +605,7 @@ TEST_CASE("Device metadata defaults and custom configs are stable",
 }
 
 TEST_CASE("AudioSystem default device-change callback is snapshot safe",
-          "[audio][device][coverage][phase3]") {
+          "[audio][device][coverage]") {
     class DummyAudioSystem final : public AudioSystem {
     public:
         std::vector<DeviceInfo> enumerate_devices() override { return {}; }
@@ -654,7 +654,7 @@ TEST_CASE("AudioSystem default device-change callback is snapshot safe",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
-          "[audio][load][coverage][phase3]") {
+          "[audio][load][coverage]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.begin(0, 48000.0f);
@@ -669,7 +669,7 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
-          "[audio][load][coverage][phase3]") {
+          "[audio][load][coverage]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.begin(64, std::numeric_limits<float>::infinity());
@@ -684,7 +684,7 @@ TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and resets peak load",
-          "[audio][load][coverage][phase3]") {
+          "[audio][load][coverage]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.set_smoothing(-1.0f);
@@ -870,7 +870,7 @@ TEST_CASE("ChannelSet immersive layout preserves documented speaker order",
 }
 
 TEST_CASE("Buffer resize handles type changes and preserves new shape",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     Buffer<double> buf(3, 2);
     buf.channel(0)[0] = 1.0;
     buf.channel(1)[1] = -2.0;
@@ -921,7 +921,7 @@ TEST_CASE("Buffer resize through empty shapes rebuilds channel pointers",
 }
 
 TEST_CASE("BufferView supports zero-sample clears without touching channel pointers",
-          "[audio][buffer][coverage][phase3]") {
+          "[audio][buffer][coverage]") {
     float left = 1.0f;
     float right = -1.0f;
     float* ptrs[2] = {&left, &right};
@@ -939,7 +939,7 @@ TEST_CASE("BufferView supports zero-sample clears without touching channel point
 }
 
 TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
-          "[audio][channel-set][coverage][phase3]") {
+          "[audio][channel-set][coverage]") {
     auto named = ChannelSet::discrete(3);
     auto renamed = named;
     renamed.name = "Three unnamed channels";
@@ -950,7 +950,7 @@ TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
 }
 
 TEST_CASE("ChannelSet speaker names cover top and discrete positions",
-          "[audio][channel-set][coverage][phase3-github]") {
+          "[audio][channel-set][coverage]") {
     REQUIRE(speaker_name(Speaker::TopFrontLeft) == "Top Front Left");
     REQUIRE(speaker_name(Speaker::TopFrontRight) == "Top Front Right");
     REQUIRE(speaker_name(Speaker::TopBackLeft) == "Top Back Left");
@@ -960,7 +960,7 @@ TEST_CASE("ChannelSet speaker names cover top and discrete positions",
 }
 
 TEST_CASE("ChannelSet unsupported surround counts fall back to discrete layouts",
-          "[audio][channel-set][coverage][phase3]") {
+          "[audio][channel-set][coverage]") {
     for (auto channels : {7u, 9u, 10u, 11u}) {
         auto layout = ChannelSet::from_channel_count(channels);
         CAPTURE(channels);

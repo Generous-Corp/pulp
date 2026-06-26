@@ -190,7 +190,7 @@ TEST_CASE("FFT move preserves transform state", "[signal][fft][issue-645]") {
 }
 
 TEST_CASE("FFT move assignment replaces an existing transform",
-          "[signal][fft][coverage][phase3]") {
+          "[signal][fft][coverage]") {
     Fft source(8);
     Fft destination(16);
 
@@ -257,7 +257,7 @@ TEST_CASE("FFT forward_real preserves exact-bin conjugate symmetry", "[signal][f
 }
 
 TEST_CASE("FFT real transform exposes DC and Nyquist bins explicitly",
-          "[signal][fft][coverage][phase3]") {
+          "[signal][fft][coverage]") {
     constexpr int N = 16;
     Fft fft(N);
     std::vector<float> constant(N, 0.25f);
@@ -280,7 +280,7 @@ TEST_CASE("FFT real transform exposes DC and Nyquist bins explicitly",
 }
 
 TEST_CASE("FFT magnitude helpers tolerate empty ranges and preserve destination values",
-          "[signal][fft][coverage][phase3]") {
+          "[signal][fft][coverage]") {
     Fft fft(8);
     std::vector<std::complex<float>> bins(8, {1.0f, 0.0f});
     std::vector<float> linear = {7.0f, 8.0f};
@@ -375,7 +375,7 @@ TEST_CASE("Convolver reset clears buffered overlap", "[signal][convolver][issue-
 }
 
 TEST_CASE("Convolver unloaded and empty IR paths pass through safely",
-          "[signal][convolver][coverage][phase3]") {
+          "[signal][convolver][coverage]") {
     Convolver conv;
     REQUIRE_THAT(conv.process(0.375f), WithinAbs(0.375f, 1e-6f));
     REQUIRE_THAT(conv.process(-0.25f), WithinAbs(-0.25f, 1e-6f));
@@ -407,7 +407,7 @@ TEST_CASE("Convolver unloaded and empty IR paths pass through safely",
 }
 
 TEST_CASE("Convolver default block size and reload reset the buffered stream",
-          "[signal][convolver][coverage][phase3]") {
+          "[signal][convolver][coverage]") {
     Convolver conv;
     float identity[] = {1.0f};
     conv.load_ir(identity, 1);

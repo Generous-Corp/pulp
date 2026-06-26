@@ -104,8 +104,8 @@ For native host integration, `WindowHost` now exposes:
 
 That seam is the current bridge from Pulp's multi-window host layer into an
 embedded native WebView. It is intentionally small: enough to prove palette /
-inspector style embedding without pretending that Phase 7 is already a full
-window-docking system.
+inspector style embedding without overstating it as a full window-docking
+system.
 
 Treat those calls as an instance capability, not a platform guarantee. Check
 the host handle, check the WebView child handle, and branch on the boolean
@@ -250,7 +250,7 @@ For development-only assets that live on disk instead of in the final bundle, us
 ## Monaco / Rich Web Tools
 
 For Monaco-class tooling, treat the browser assets as a prebundled payload.
-The truthful Phase 7 model is:
+The supported WebView model is:
 
 - bundle Monaco's ESM entrypoint and worker files with a supported bundler
   (webpack / parcel / vite / esbuild)
@@ -287,14 +287,14 @@ cmake --build build --target pulp-webview-monaco -j8
 Notes from the working proof:
 - the local bundle script uses `editor.main.js` so Monaco's real CSS and editor features come through
 - worker URLs target the built `vs/languages/features/...` tree, not the older docs/examples layout
-- the current Monaco build imports `@vscode/monaco-lsp-client`; the Phase 7 example stubs that import at bundle time because the example does not use LSP
+- the current Monaco build imports `@vscode/monaco-lsp-client`; the Monaco example stubs that import at bundle time because the example does not use LSP
 - browser preview is valid for layout/bundle proof, but `bridge unavailable` there is expected
 - native host proof is the real bridge proof
 
 The strongest native proof so far is still macOS, because that is where we
 captured the Monaco-in-host runtime screenshot and editor-ready bridge state.
 Windows and Ubuntu now have truthful opt-in backend build/test proof on the
-same Phase 7 API surface, but not the same depth of rich-tool runtime coverage
+same WebView API surface, but not the same depth of rich-tool runtime coverage
 yet.
 
 ## Messaging Model
@@ -341,10 +341,10 @@ That is the current bar for claiming cross-platform backend availability. Do
 not overstate this as full runtime parity or first-party non-Apple native host
 embedding until the platform-specific host work is actually landed.
 
-## Future Skill
+## WebView Skill
 
-Pulp now ships its own `webview-ui` skill for the current Phase 7 workflow. The
-useful pieces pulled forward from the iPlug2 audit are:
+Pulp ships its own `webview-ui` skill for the current WebView workflow. The
+useful pieces it covers are:
 - framework-selection guidance
 - resource-loading and bundling guidance
 - bridge/messaging guidance
@@ -379,7 +379,7 @@ class MyEditor {
 };
 ```
 
-The same `EditorBridge` is also the integration seam for the [pulp #468](https://github.com/danielraffel/pulp/issues/468)
-Claude Design import lane, where the editor runs in a native JS runtime
-instead of a WebView. Plugins built around either renderer stay
-drop-in compatible because both attach paths feed the same dispatcher.
+The same `EditorBridge` is also the integration seam for the Claude Design
+import lane, where the editor runs in a native JS runtime instead of a WebView.
+Plugins built around either renderer stay drop-in compatible because both
+attach paths feed the same dispatcher.

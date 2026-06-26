@@ -35,7 +35,7 @@ class Canvas2dShimFileUnionTests(unittest.TestCase):
         cls.adapter = Canvas2dAdapter(REPO_ROOT)
 
     def test_image_prelude_methods_resolve(self) -> None:
-        """The six API gap-closure methods from `web-compat-canvas-image.js`
+        """The six API coverage methods from `web-compat-canvas-image.js`
         must appear in the adapter's prototype-method set, otherwise the
         verifier reports `canvas2d/measureText` etc. as NOT-IMPL."""
         moved_to_image_prelude = {

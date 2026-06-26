@@ -61,7 +61,7 @@ TEST_CASE("PluginScanner bundle detection", "[host][scanner]") {
 
 TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavour",
           "[host][scanner][issue-500]") {
-    // Regression for PR #531 / #500: `pulp scan` advertised `--format au`
+    // Regression for issue #500: `pulp scan` advertised `--format au`
     // and `--format auv3` as mutually-exclusive filters, but both values
     // set the same ScanOptions::scan_au flag, and PluginScanner::
     // scan_audio_units() returns mixed AU + AUv3 entries. The CLI now runs
@@ -199,7 +199,7 @@ TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail p
     fs::remove_all(tmp, ec);
 }
 
-// Issue #491 P2: scan_lv2_bundle must set unique_id to the plugin URI
+// Issue #491: scan_lv2_bundle must set unique_id to the plugin URI
 // parsed from manifest.ttl, not the filesystem stem. This keeps
 // graph_serializer rehydration stable across sessions even when two
 // LV2 bundles share a directory name.
@@ -270,7 +270,7 @@ TEST_CASE("PluginScanner LV2 bundle falls back to stem when manifest.ttl missing
     auto all = scanner.scan(opts);
     for (const auto& p : all) {
         if (p.path == tmp.string()) {
-            // Graceful fallback: same as pre-fix behaviour.
+            // Graceful fallback: use the display name when no manifest URI exists.
             REQUIRE(p.unique_id == p.name);
         }
     }
@@ -278,7 +278,7 @@ TEST_CASE("PluginScanner LV2 bundle falls back to stem when manifest.ttl missing
     fs::remove_all(tmp, ec);
 }
 
-// Issue #491 P2: scan_vst3_bundle must set unique_id to the VST3 FUID
+// Issue #491: scan_vst3_bundle must set unique_id to the VST3 FUID
 // (PClassInfo::cid serialized as 32-char lowercase hex) when the SDK
 // is available, not the display name. This walks any VST3 plugins
 // installed on the CI host; the check is a structural assertion —
@@ -302,7 +302,7 @@ TEST_CASE("PluginScanner VST3 bundle uses FUID as unique_id when SDK available",
         // unique_id must either:
         //  (a) equal the filesystem stem — fallback path when the
         //      bundle couldn't be opened or VST3 SDK wasn't linked,
-        //      matching the pre-fix best-effort contract; or
+        //      matching the best-effort fallback contract; or
         //  (b) be a 32-char lowercase hex FUID.
         // Anything else is a regression.
         if (p.unique_id == p.name) continue;
@@ -339,7 +339,7 @@ TEST_CASE("PluginSlot load returns nullptr for stub", "[host][slot]") {
 }
 
 TEST_CASE("PluginSlot load fails cleanly for invalid dispatch inputs",
-          "[host][slot][coverage][phase3]") {
+          "[host][slot][coverage]") {
     PluginInfo clap;
     clap.name = "MissingClap";
     clap.path = "/definitely/missing/Missing.clap";
@@ -934,7 +934,7 @@ TEST_CASE("ClapSlot restore_state supersedes cached host edits",
 }
 #endif
 
-// ── Phase 0B race-stress test ─────────────────────────────────────────────
+// ── SignalGraph hot-reload race-stress test ───────────────────────────────
 //
 // Exercises the snapshot-publish semantic: one thread runs process() in a
 // tight loop while another thread mutates the graph. No TSan assertion here

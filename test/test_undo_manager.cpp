@@ -43,7 +43,7 @@ TEST_CASE("UndoManager coalesce_window=0 disables window coalescing",
     REQUIRE(um.undo_count() == 2);
 }
 
-TEST_CASE("UndoManager coalesced perform clears redo stack (Codex P1 regression)",
+TEST_CASE("UndoManager coalesced perform clears redo stack (regression)",
           "[state][undo][time-coalesce][regression]") {
     UndoManager um;
     um.set_coalesce_window(std::chrono::milliseconds(200));
@@ -61,7 +61,7 @@ TEST_CASE("UndoManager coalesced perform clears redo stack (Codex P1 regression)
     REQUIRE_FALSE(um.can_redo());
 }
 
-TEST_CASE("UndoManager undo resets coalesce window timestamp (Codex P1 regression)",
+TEST_CASE("UndoManager undo resets coalesce window timestamp (regression)",
           "[state][undo][time-coalesce][regression]") {
     UndoManager um;
     um.set_coalesce_window(std::chrono::milliseconds(200));

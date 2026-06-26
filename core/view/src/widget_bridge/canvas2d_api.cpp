@@ -1034,7 +1034,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // Final gap closure
+    // Final Canvas2D API coverage
     // ═══════════════════════════════════════════════════════════════════
 
     // Canvas drawImage(canvasId, imagePath, dx, dy, dw, dh)
@@ -1067,7 +1067,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // Canvas2D API gap closures
+    // Canvas2D API coverage
     // ═══════════════════════════════════════════════════════════════════
 
     // canvasMeasureText(id, text, fontFamily, fontSize) →

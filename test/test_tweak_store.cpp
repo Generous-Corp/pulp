@@ -1,6 +1,5 @@
 // TweakStore + Inspector.applyTweak/listTweaks/clearTweaks/setBypass.
 // pulp-tweaks.json disk persistence + Inspector.load/save/setAutoSave.
-// See planning/2026-05-18-inspector-direct-manipulation-roadmap.md.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -226,7 +225,7 @@ TEST_CASE("TweakStore: bypass=false clears the overlay",
     REQUIRE_FALSE(s.bypass_for("anchor:a").has_value());
 }
 
-TEST_CASE("TweakStore: bypass=empty vector clears the overlay (per Codex spec)",
+TEST_CASE("TweakStore: bypass=empty vector clears the overlay for no active paths",
           "[inspect][tweak-store]") {
     TweakStore s;
     s.set_bypass("anchor:a", std::vector<std::string>{"x"});
@@ -342,9 +341,9 @@ TEST_CASE("TweakStore: from_json preserves existing locked anchors",
 }
 
 TEST_CASE("TweakStore: load_from_disk preserves a locked anchor absent from the file",
-          "[inspect][tweak-store][lock][disk][regression]") {
-    // #2432: importing a file that omits a currently-locked
-    // anchor must NOT delete that anchor's tweaks or lock state — the
+          "[inspect][tweak-store][lock][disk][regression][locked-anchor]") {
+    // Importing a file that omits a currently-locked anchor must NOT
+    // delete that anchor's tweaks or lock state — the
     // lock contract promises protection from re-import. This exercises
     // the real disk path (load_from_disk), not just from_json.
     TempTweaksDir tmp;
@@ -397,9 +396,9 @@ TEST_CASE("TweakStore: load_from_disk keeps in-memory tweaks for a locked anchor
 }
 
 TEST_CASE("TweakStore: clear preserves multiple locked anchors and drops all unlocked",
-          "[inspect][tweak-store][lock][regression]") {
-    // #2432: a global Inspector.clearTweaks routes through
-    // clear(). Locked anchors (tweaks + bypass + lock) must survive;
+          "[inspect][tweak-store][lock][regression][locked-anchor]") {
+    // Global Inspector.clearTweaks routes through clear(). Locked
+    // anchors (tweaks + bypass + lock) must survive;
     // every unlocked anchor must be erased.
     TweakStore s;
     s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(1), {});
@@ -731,13 +730,13 @@ TEST_CASE("Inspector.listTweaks / clearTweaks / setBypass without store error",
         R"({"anchorId":"a","value":true})")).is_error);
 }
 
-// Regression #2300: listTweaks must include anchors that
-// have ONLY a bypass (no tweak records). Otherwise setBypass on an
-// anchor with no entries — or one whose entries were later cleared
-// via clearTweaks — silently drops out of the protocol response and
-// the Phase 1 disk-persistence path loses the bypass state.
-TEST_CASE("Inspector.listTweaks includes bypass-only anchors (codex P2 #2300)",
-          "[inspect][protocol][listTweaks][regression]") {
+// listTweaks must include anchors that have ONLY a bypass (no tweak
+// records). Otherwise setBypass on an anchor with no entries — or one
+// whose entries were later cleared via clearTweaks — silently drops
+// out of the protocol response and the disk-persistence path loses the
+// bypass state.
+TEST_CASE("Inspector.listTweaks includes bypass-only anchors",
+          "[inspect][protocol][listTweaks][regression][bypass-only]") {
     Fixture f;
     // Anchor "a" has a tweak; anchor "b" has only a bypass.
     f.store.apply_tweak("a", "layout.padding",
@@ -757,8 +756,8 @@ TEST_CASE("Inspector.listTweaks includes bypass-only anchors (codex P2 #2300)",
 }
 
 TEST_CASE("Inspector.listTweaks reports bypass-only anchor after clearTweaks "
-          "removes its records (codex P2 #2300)",
-          "[inspect][protocol][listTweaks][regression]") {
+          "removes its records",
+          "[inspect][protocol][listTweaks][regression][bypass-only]") {
     // Tweak on anchor c + a path-bypass on the same anchor. Then
     // clearTweaks({anchorId: c}) wipes c's tweak entries but leaves
     // its bypass intact. listTweaks must still surface the bypass.
@@ -783,8 +782,8 @@ TEST_CASE("Inspector.listTweaks reports bypass-only anchor after clearTweaks "
 }
 
 TEST_CASE("TweakStore::bypassed_anchors enumerates every bypass entry "
-          "regardless of tweak presence (codex P2 #2300)",
-          "[inspect][tweak-store][regression]") {
+          "regardless of tweak presence",
+          "[inspect][tweak-store][regression][bypass-only]") {
     TweakStore s;
     s.apply_tweak("with-tweak", "x", choc::value::createInt32(1), {});
     s.set_bypass("with-tweak", true);
@@ -1162,7 +1161,7 @@ TEST_CASE("Inspector.setAutoSave with missing `enabled` errors cleanly",
 }
 
 TEST_CASE("Inspector.load/save/setAutoSave without a store error cleanly",
-          "[inspect][protocol][no-store][phase1]") {
+          "[inspect][protocol][no-store][persistence]") {
     DomainHandler h;  // no tweak store
     REQUIRE(h.handle(req(methods::kInspectorLoadTweaks, "{}")).is_error);
     REQUIRE(h.handle(req(methods::kInspectorSaveTweaks, "{}")).is_error);
@@ -1180,7 +1179,7 @@ TEST_CASE("Inspector.load/save/setAutoSave without a store error cleanly",
 // diff` CLI consume these.
 
 TEST_CASE("TweakStore::diff classifies every tweak against an anchor set",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("anchor-live-1", "paint.backgroundColor",
                       choc::value::createString("#ff0000"));
@@ -1206,7 +1205,7 @@ TEST_CASE("TweakStore::diff classifies every tweak against an anchor set",
 }
 
 TEST_CASE("TweakStore::diff with no drift reports clean and has_drift=false",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("a", "layout.width", choc::value::createInt32(100));
     store.apply_tweak("b", "layout.height", choc::value::createInt32(50));
@@ -1219,7 +1218,7 @@ TEST_CASE("TweakStore::diff with no drift reports clean and has_drift=false",
 }
 
 TEST_CASE("TweakStore::diff detects property-level drift via DesignSnapshot",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("card", "paint.backgroundColor",
                       choc::value::createString("#222"));
@@ -1246,7 +1245,7 @@ TEST_CASE("TweakStore::diff detects property-level drift via DesignSnapshot",
 }
 
 TEST_CASE("TweakStore::find_drifted lists orphans before drifted",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("survives", "layout.width",
                       choc::value::createInt32(80));
@@ -1273,7 +1272,7 @@ TEST_CASE("TweakStore::find_drifted lists orphans before drifted",
 }
 
 TEST_CASE("TweakStore::find_drifted is empty when nothing drifts",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("x", "layout.gap", choc::value::createInt32(4));
     auto drifted = store.find_drifted(std::vector<std::string>{"x"});
@@ -1281,14 +1280,14 @@ TEST_CASE("TweakStore::find_drifted is empty when nothing drifts",
 }
 
 TEST_CASE("TweakStore::find_drifted on an empty store returns nothing",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     auto drifted = store.find_drifted(std::vector<std::string>{"anything"});
     REQUIRE(drifted.empty());
 }
 
 TEST_CASE("TweakStore::drift_reason_str maps every enum value",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     REQUIRE(std::string(TweakStore::drift_reason_str(
                 TweakStore::DriftReason::anchor_not_found)) ==
             "anchor-not-found");
@@ -1298,7 +1297,7 @@ TEST_CASE("TweakStore::drift_reason_str maps every enum value",
 }
 
 TEST_CASE("TweakStore::drift_report_to_json round-trips clean + drift sets",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("kept", "layout.width",
                       choc::value::createInt32(120));
@@ -1329,7 +1328,7 @@ TEST_CASE("TweakStore::drift_report_to_json round-trips clean + drift sets",
 }
 
 TEST_CASE("TweakStore::diff ignores bypass overlay — bypassed tweaks still drift",
-          "[inspect][tweak-store][drift][phase2]") {
+          "[inspect][tweak-store][drift]") {
     TweakStore store;
     store.apply_tweak("ghost", "layout.width",
                       choc::value::createInt32(64));
@@ -1344,14 +1343,13 @@ TEST_CASE("TweakStore::diff ignores bypass overlay — bypassed tweaks still dri
 
 // ── apply_tweaks_batch — atomic multi-key write ─────────────────────────────
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md, Risk 6:
-// the drag-to-move gesture writes three tweaks (position/left/top); each
+// The drag-to-move gesture writes three tweaks (position/left/top); each
 // apply_tweak() auto-saves, so three calls flush disk three times and a
 // crash mid-sequence persists a partial move. apply_tweaks_batch takes the
 // lock once, writes all keys, and flushes EXACTLY once.
 
 TEST_CASE("TweakStore::apply_tweaks_batch writes all keys in one atomic flush",
-          "[inspect][tweak-store][batch][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TempTweaksDir tmp;
     TweakStore s;
     s.set_auto_save(true, tmp.file.string());
@@ -1397,7 +1395,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch writes all keys in one atomic flush",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch flushes disk exactly once",
-          "[inspect][tweak-store][batch][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TempTweaksDir tmp;
     TweakStore s;
     s.set_auto_save(true, tmp.file.string());
@@ -1429,7 +1427,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch flushes disk exactly once",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch with empty entries is a no-op",
-          "[inspect][tweak-store][batch][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TweakStore s;
     s.apply_tweak("a", "x", choc::value::createInt32(1));
     auto total = s.apply_tweaks_batch("a", {}, "noop");
@@ -1438,7 +1436,7 @@ TEST_CASE("TweakStore::apply_tweaks_batch with empty entries is a no-op",
 }
 
 TEST_CASE("TweakStore::apply_tweaks_batch overwrites existing keys",
-          "[inspect][tweak-store][batch][issue-wysiwyg-p2]") {
+          "[inspect][tweak-store][batch][atomic-write]") {
     TweakStore s;
     s.apply_tweak("a", "layout.left", choc::value::createFloat32(5.0f), "old");
     std::vector<TweakStore::BatchEntry> batch;

@@ -18,7 +18,7 @@ TEST_CASE("role_to_atk returns stable ATK role IDs", "[a11y][atk]") {
 }
 
 TEST_CASE("ATK mapping falls back for unknown role values",
-          "[a11y][atk][coverage][phase3]") {
+          "[a11y][atk][coverage]") {
     auto unknown = static_cast<View::AccessRole>(999);
     REQUIRE(role_to_atk(unknown) == kRoleUnknown);
 

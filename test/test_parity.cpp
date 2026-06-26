@@ -3,11 +3,10 @@
 // Measurement-paint parity harness. Asserts that
 // `TextShaper::prepare(text, family, size).total_width()` matches
 // what Skia's `SkFont::measureText` reports — the same metric the
-// painter walks. Pre-resolver these two paths could drift because
-// resolution went through different cascades; post-1.1.a both
-// converge on `FontResolver::resolve_family_list`, so the harness
-// asserts the architectural invariant the v2 plan calls "the
-// killer" gap: measure equals paint, every frame, every script.
+// painter walks. Separate measurement and paint resolution paths must
+// not drift: both should converge on `FontResolver::resolve_family_list`,
+// so the harness asserts the architectural invariant that measure
+// equals paint, every frame, every script.
 //
 // Current coverage is width parity over a hand-picked sample set
 // representative of the CHAIN INFO / CROSSOVER / MID-SIDE-WIDTH
@@ -47,7 +46,7 @@ constexpr Sample kSamples[] = {
     { "Hello world", "Inter", 14.0f, "Latin proportional regular" },
     { "Hello world", "IBM Plex Mono", 14.0f, "Latin monospace regular" },
 
-    // The original #2163 callbacks — the sizes that drove the
+    // Compact plugin-label samples — the sizes that drive the
     // empirical safety margin into TextShaper::measure_metrics.
     { "CROSSOVER",          "IBM Plex Mono", 7.0f,  "fontSize 7 section title (Chainer)" },
     { "MID / SIDE WIDTH",   "IBM Plex Mono", 7.0f,  "fontSize 7 section title (Chainer)" },
@@ -63,8 +62,8 @@ constexpr Sample kSamples[] = {
 
 } // namespace
 
-TEST_CASE("font v2 Slice 1.3 — measurement-paint width parity within 0.5px",
-          "[font][parity][issue-2163]") {
+TEST_CASE("font measurement-paint width parity within 0.5px",
+          "[font][parity][metrics]") {
 #ifndef PULP_HAS_SKIA
     SUCCEED("Skia not compiled — parity harness needs SkFont::measureText");
     return;
@@ -111,13 +110,13 @@ TEST_CASE("font v2 Slice 1.3 — measurement-paint width parity within 0.5px",
 #endif
 }
 
-TEST_CASE("font v2 Slice 1.3 — empty text reports zero width", "[font][parity]") {
+TEST_CASE("font measurement parity: empty text reports zero width", "[font][parity]") {
     auto& shaper = pulp::canvas::global_text_shaper();
     auto prepared = shaper.prepare("", "Inter", 14.0f);
     REQUIRE(prepared.total_width() == 0.0f);
 }
 
-TEST_CASE("font v2 Slice 1.3 — ascent + descent are both positive", "[font][parity]") {
+TEST_CASE("font measurement parity: ascent + descent are both positive", "[font][parity]") {
     // The TextShaper API contract documents that ascent/descent are
     // returned as POSITIVE distances above/below baseline (Skia's
     // fAscent is negative; we flip it). The painter and the Yoga

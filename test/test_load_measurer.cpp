@@ -231,7 +231,7 @@ TEST_CASE("AudioProcessLoadMeasurer reset clears pending timing state", "[audio]
 }
 
 TEST_CASE("AudioProcessLoadMeasurer publishes bounded overload telemetry",
-          "[audio][load][telemetry][phase2]") {
+          "[audio][load][telemetry]") {
     AudioProcessLoadMeasurer m;
     m.set_smoothing(1.0f);
     m.set_overload_threshold(0.05f);
@@ -271,7 +271,7 @@ TEST_CASE("AudioProcessLoadMeasurer publishes bounded overload telemetry",
 }
 
 TEST_CASE("Audio runtime overload policy classifies load severity",
-          "[audio][load][overload-policy][phase4]") {
+          "[audio][load][overload-policy]") {
     AudioProcessLoadSnapshot snapshot;
 
     auto report = evaluate_audio_runtime_overload(snapshot, 0);
@@ -308,7 +308,7 @@ TEST_CASE("Audio runtime overload policy classifies load severity",
 }
 
 TEST_CASE("Audio runtime overload policy escalates xrun and overload counters",
-          "[audio][load][overload-policy][phase4]") {
+          "[audio][load][overload-policy]") {
     AudioProcessLoadSnapshot snapshot;
 
     auto report = evaluate_audio_runtime_overload(snapshot, 1);
@@ -331,7 +331,7 @@ TEST_CASE("Audio runtime overload policy escalates xrun and overload counters",
 }
 
 TEST_CASE("Audio runtime overload policy honors custom validation thresholds",
-          "[audio][load][overload-policy][phase4]") {
+          "[audio][load][overload-policy]") {
     AudioProcessLoadSnapshot snapshot;
     snapshot.peak_load = 0.70f;
 
@@ -362,7 +362,7 @@ TEST_CASE("Audio runtime overload policy honors custom validation thresholds",
 }
 
 TEST_CASE("Audio runtime overload policy sanitizes invalid load thresholds",
-          "[audio][load][overload-policy][phase4]") {
+          "[audio][load][overload-policy]") {
     AudioRuntimeOverloadPolicy policy;
     policy.watch_load = -1.0f;
     policy.overload_load = 0.25f;
@@ -383,7 +383,7 @@ TEST_CASE("Audio runtime overload policy sanitizes invalid load thresholds",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer hot path and snapshot polling allocate zero times",
-          "[audio][load][telemetry][rt-safety][phase2]") {
+          "[audio][load][telemetry][rt-safety]") {
     AudioProcessLoadMeasurer m;
     m.set_smoothing(1.0f);
     m.set_overload_threshold(0.000001f);

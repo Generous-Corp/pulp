@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Generate the synthetic portion of the OfflineStretch test corpus.
 
-Plan: planning/Sampler-Offline-Stretch-Build-Plan.md §6 (test corpus).
-
 The corpus has two parts:
   - synthetic/  — deterministic fixtures generated here (sine, click train,
     log sweep, silence, DC, full-scale, and click-loops at 60/90/120/174 BPM

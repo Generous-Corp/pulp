@@ -89,6 +89,14 @@ struct StandaloneConfig {
     std::string audio_scope_trigger = "rising-zero";
     int audio_scope_channel = 0;
 
+    // Programmatic live capture-to-WAV over the same output-boundary probe ring.
+    // Writes a WAV the offline `pulp audio validate` verbs can read, then the
+    // one-shot exits. Only meaningful when PULP_ENABLE_AUDIO_PROBES is ON.
+    // `audio_capture_wav_frames` is the ring window in samples (0 = as much as the
+    // ring holds, clamped to the capture cap). Captures all output channels.
+    std::string audio_capture_wav_path;
+    int audio_capture_wav_frames = 0;
+
     // Built-in tempo source. The standalone host has no DAW providing
     // transport, so it acts as one: it surfaces `tempo_bpm` / time signature on
     // every ProcessContext block, and advances `position_beats` from

@@ -1647,7 +1647,7 @@ TEST_CASE("Tokens survive StateStore destruction without crashing",
     REQUIRE_FALSE(static_cast<bool>(orphan));
 }
 
-TEST_CASE("Queued Main callback is cancelled by token reset (Codex P1 PR#2270)",
+TEST_CASE("Queued Main callback is cancelled by token reset (PR#2270)",
           "[state][listener][token][thread]") {
     // Regression for PR #2270: a Main listener dispatched through the
     // EventLoop must NOT fire if the token is destroyed/reset between

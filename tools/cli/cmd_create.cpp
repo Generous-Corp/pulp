@@ -1,6 +1,7 @@
 // cmd_create.cpp — pulp create command
 
 #include "cli_common.hpp"
+#include "create_build_commands.hpp"
 #include "create_targets.hpp"
 #include "json_parser.hpp"
 #include "kit_commands.hpp"
@@ -888,10 +889,8 @@ int cmd_create(const std::vector<std::string>& args) {
             }
         }
 
-        std::string configure_cmd = "cmake -S " + out_dir.string()
-            + " -B " + (out_dir / "build").string()
-            + " -DCMAKE_BUILD_TYPE=" + (debug_build ? "Debug" : "Release")
-            + " -DCMAKE_PREFIX_PATH=" + sdk_dir.string();
+        std::string configure_cmd = pulp::cli::create_standalone_configure_command(
+            out_dir, out_dir / "build", debug_build, sdk_dir);
         append_windows_visual_studio_generator_args(configure_cmd);
         int rc = run_with_spinner(configure_cmd, "Configuring");
         if (rc != 0) {
@@ -909,9 +908,8 @@ int cmd_create(const std::vector<std::string>& args) {
         }
 
         log("\nRunning tests...\n");
-        rc = run("ctest --test-dir " + (out_dir / "build").string()
-                 + " -C " + pulp::cli::create_build_config(debug_build)
-                 + " --output-on-failure");
+        rc = run(pulp::cli::create_standalone_ctest_command(out_dir / "build",
+                                                            debug_build));
         if (rc != 0) {
             std::cerr << "Tests failed.\n";
             return rc;

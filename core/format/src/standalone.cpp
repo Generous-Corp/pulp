@@ -39,6 +39,7 @@
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_audio_capture_wav.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
@@ -208,8 +209,24 @@ bool StandaloneApp::start() {
     const int scope_capture_frames = config_.audio_scope_json_path.empty()
         ? 0
         : std::clamp(config_.audio_scope_window_samples, 1, kMaxScopeWindowSamples);
-    probe_capture.capture_frames = std::max(view::AudioWaveformView::kCapacity,
-                                            scope_capture_frames);
+    // capture-to-WAV shares the one probe ring; size it to whichever consumer
+    // (inspector display / scope / capture-wav) needs the most. A 0 capture-wav
+    // frame request means "as much as the ring holds" → the cap.
+    if (!config_.audio_capture_wav_path.empty()
+        && config_.audio_capture_wav_frames > detail::kMaxCaptureWindowSamples) {
+        runtime::log_info(
+            "Standalone: --audio-capture-frames {} exceeds the {}-sample cap; clamping",
+            config_.audio_capture_wav_frames, detail::kMaxCaptureWindowSamples);
+    }
+    const int capture_wav_frames = config_.audio_capture_wav_path.empty()
+        ? 0
+        : (config_.audio_capture_wav_frames > 0
+               ? std::clamp(config_.audio_capture_wav_frames, 1,
+                            detail::kMaxCaptureWindowSamples)
+               : detail::kMaxCaptureWindowSamples);
+    probe_capture.capture_frames = std::max({view::AudioWaveformView::kCapacity,
+                                             scope_capture_frames,
+                                             capture_wav_frames});
     output_probe_.prepare(config_.output_channels, max_callback_block_,
                           config_.sample_rate,
                           audio::AudioProbeStage::kStandaloneOutputBoundary,
@@ -747,6 +764,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto write_scope_json = [this, effective_config](const std::string& path) {
         detail::write_audio_scope_json_file(path, output_probe_, effective_config);
     };
+    auto write_capture_wav = [this, effective_config](const std::string& path) {
+        detail::write_audio_capture_wav_file(path, output_probe_, effective_config);
+    };
 #endif
 
     // ── Headless one-shot screenshot ────────────────────────────────────────
@@ -777,9 +797,10 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         cap.capture_fn = [host, editor_view, w, h
 #if PULP_ENABLE_AUDIO_PROBES
                           , audio_inspector_ptr, inspector_png_path,
-                          write_probe_json, write_scope_json,
+                          write_probe_json, write_scope_json, write_capture_wav,
                           probe_json_path = effective_config.audio_probe_json_path,
-                          scope_json_path = effective_config.audio_scope_json_path
+                          scope_json_path = effective_config.audio_scope_json_path,
+                          capture_wav_path = effective_config.audio_capture_wav_path
 #endif
         ] {
 #if PULP_ENABLE_AUDIO_PROBES
@@ -788,6 +809,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             // --audio-probe-json in a single headless run). No-op when unset.
             write_probe_json(probe_json_path);
             write_scope_json(scope_json_path);
+            write_capture_wav(capture_wav_path);
             // Side-effect: capture the inspector window's own surface at the
             // same frame, before the main window closes. capture_png() returns
             // empty on hosts without GPU capture — skip the write in that case.
@@ -877,6 +899,25 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info(
             "Standalone: audio-scope-json mode armed — will dump to {} after {} frames",
             effective_config.audio_scope_json_path, cap.delay);
+    }
+    else if (!effective_config.audio_capture_wav_path.empty()) {
+        auto* host = window.get();
+        detail::DelayedAction cap;
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        cap.action_fn = [write_capture_wav,
+                         path = effective_config.audio_capture_wav_path]() {
+            write_capture_wav(path);
+        };
+        cap.close_fn = [host] { host->request_close(); };
+        auto prior = pre_screenshot_idle;
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info(
+            "Standalone: audio-capture-wav mode armed — will dump to {} after {} frames",
+            effective_config.audio_capture_wav_path, cap.delay);
     }
 #endif
 

@@ -180,9 +180,9 @@ def check_single_backend(root: Path) -> list[str]:
                     if qualifier in SANCTIONED_ROUTED_EXECUTORS:
                         found_sanctioned = True
                         continue
-                    if in_executor_tu:
-                        continue  # out-of-line def in the sanctioned TU
-                    # `Other::process_routed(` outside the executor TU.
+                    # A non-sanctioned `Rival::process_routed(` is a second routing
+                    # engine WHEREVER it is defined — including inside the sanctioned
+                    # executor TU (a second engine must not hide in the same file).
                     rel = f.relative_to(root)
                     violations.append(
                         f"{rel}:{lineno}: a second routing engine — "
@@ -192,9 +192,13 @@ def check_single_backend(root: Path) -> list[str]:
                         f"one semantics). Route through GraphRuntimeExecutor."
                     )
                     continue
-                # Bare occurrence: an inline member decl/def, or an out-of-line
-                # def whose `Qualifier::` sits on the previous line. Allowed only
-                # inside the sanctioned executor TU.
+                # Bare occurrence: an inline member decl/def, or an out-of-line def
+                # whose `Qualifier::` sits on the previous line. Allowed only inside
+                # the sanctioned executor TU — where it is GraphRuntimeExecutor's own
+                # in-class declaration. (Residual blind spot: a rival class defined
+                # *inline* inside graph_runtime_executor.{hpp,cpp} with a bare
+                # process_routed member would pass; the realistic out-of-line
+                # `Rival::process_routed` form is caught above, in any file.)
                 if in_executor_tu:
                     found_sanctioned = True
                     continue
@@ -316,17 +320,28 @@ def check_parity_safety_net(root: Path) -> list[str]:
     if cmake_dir.is_dir():
         build_files.extend(sorted(cmake_dir.glob("*.cmake")))
 
-    registered = any(
-        basename in _strip_cmake_comments(_read(bf))
-        for bf in build_files
-        if bf.is_file()
-    )
+    # The basename must appear on a real build-registration line, not merely
+    # anywhere in the file — a dead `set(X test_..._parity.cpp)` or a mention in
+    # an unrelated target would otherwise satisfy a plain substring search while
+    # ctest never builds the test. Require it to share a non-comment line with a
+    # registration keyword.
+    REGISTRATION_MARKERS = ("pulp_add_test_suite", "add_executable", "target_sources", "SOURCES")
+    registered = False
+    for bf in build_files:
+        if not bf.is_file():
+            continue
+        for line in _strip_cmake_comments(_read(bf)).splitlines():
+            if basename in line and any(mk in line for mk in REGISTRATION_MARKERS):
+                registered = True
+                break
+        if registered:
+            break
     if not registered:
         violations.append(
-            f"parity-safety-net: {PARITY_TEST_SOURCE} exists but is not registered "
-            "(in a non-comment line) in test/CMakeLists.txt or test/cmake/*.cmake — "
-            "an unregistered test is never built or run by ctest, so the parity check "
-            "would silently stop gating."
+            f"parity-safety-net: {PARITY_TEST_SOURCE} exists but is not registered as a "
+            "built test (no SOURCES/add_executable/target_sources/pulp_add_test_suite line "
+            "names it) in test/CMakeLists.txt or test/cmake/*.cmake — an unregistered test "
+            "is never built or run by ctest, so the parity check would silently stop gating."
         )
     return violations
 
@@ -444,6 +459,14 @@ def selftest() -> int:
 
     case("multiline second engine fails", add_multiline_engine, "second routing engine")
 
+    def add_rival_in_executor_tu(root: Path) -> None:
+        # A second engine defined out-of-line INSIDE the sanctioned executor file
+        # must not escape via the TU filename.
+        p = root / "core/format/src/graph_runtime_executor.cpp"
+        p.write_text(p.read_text() + "Result RivalExecutor::process_routed(int x) {}\n")
+
+    case("second engine hiding in the executor TU fails", add_rival_in_executor_tu, "second routing engine")
+
     def delete_backend(root: Path) -> None:
         (root / "core/format/src/graph_runtime_executor.cpp").unlink()
 
@@ -499,6 +522,16 @@ def selftest() -> int:
         )
 
     case("comment-only parity registration fails", comment_only_parity, "not registered")
+
+    def dead_var_parity_mention(root: Path) -> None:
+        # The basename appears, but only in a dead variable — not a real test
+        # registration, so ctest never builds it.
+        (root / "test/cmake/sampler_runtime_tests.cmake").write_text(
+            "pulp_add_test_suite(pulp-test-other SOURCES test_other.cpp)\n"
+            "set(UNUSED_SRC test_graph_routing_differential_parity.cpp)\n"
+        )
+
+    case("dead-variable parity mention fails", dead_var_parity_mention, "not registered")
 
     def drop_parity_registration(root: Path) -> None:
         (root / "test/cmake/sampler_runtime_tests.cmake").write_text(

@@ -1,4 +1,4 @@
-//! Phase 4 integration tests — `pulp-rs projects list`.
+//! Integration tests for `pulp-rs projects list`.
 //!
 //! Covers both lanes:
 //!

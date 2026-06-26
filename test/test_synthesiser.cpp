@@ -156,7 +156,7 @@ TEST_CASE("Synthesiser note_on velocity 0 is a note-off", "[midi][synth]") {
 }
 
 TEST_CASE("Synthesiser sustain pedal defers note-off until CC64 is lifted",
-          "[midi][synth][sustain][phase3]") {
+          "[midi][synth][sustain]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
 
@@ -178,7 +178,7 @@ TEST_CASE("Synthesiser sustain pedal defers note-off until CC64 is lifted",
 }
 
 TEST_CASE("Synthesiser sustain pedal release is channel-scoped",
-          "[midi][synth][sustain][phase3]") {
+          "[midi][synth][sustain]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
     synth.note_on(1, 64, 100);
@@ -203,7 +203,7 @@ TEST_CASE("Synthesiser sustain pedal release is channel-scoped",
 }
 
 TEST_CASE("Synthesiser sostenuto pedal captures only currently held notes",
-          "[midi][synth][sostenuto][phase3]") {
+          "[midi][synth][sostenuto]") {
     Synthesiser<TestVoice> synth(3);
     synth.note_on(0, 60, 100);
 
@@ -233,7 +233,7 @@ TEST_CASE("Synthesiser sostenuto pedal captures only currently held notes",
 }
 
 TEST_CASE("Synthesiser sustain and sostenuto release independently",
-          "[midi][synth][sustain][sostenuto][phase3]") {
+          "[midi][synth][sustain][sostenuto]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
 
@@ -257,7 +257,7 @@ TEST_CASE("Synthesiser sustain and sostenuto release independently",
 }
 
 TEST_CASE("Synthesiser soft pedal metadata is channel-scoped",
-          "[midi][synth][soft-pedal][phase3]") {
+          "[midi][synth][soft-pedal]") {
     Synthesiser<TestVoice> synth(3);
     synth.cc(0, 67, 127);
 
@@ -352,7 +352,7 @@ TEST_CASE("Synthesiser Quietest steal evicts the lowest peak_level",
 }
 
 TEST_CASE("Synthesiser voice group choke releases matching held voices",
-          "[midi][synth][choke][phase3]") {
+          "[midi][synth][choke]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/1);
     synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/1,
@@ -369,7 +369,7 @@ TEST_CASE("Synthesiser voice group choke releases matching held voices",
 }
 
 TEST_CASE("Synthesiser voice group choke is channel-scoped",
-          "[midi][synth][choke][phase3]") {
+          "[midi][synth][choke]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/2);
     synth.note_on(1, 42, 100, /*priority=*/0, /*voice_group=*/2);
@@ -383,7 +383,7 @@ TEST_CASE("Synthesiser voice group choke is channel-scoped",
 }
 
 TEST_CASE("Synthesiser voice group without choke allows overlap",
-          "[midi][synth][choke][phase3]") {
+          "[midi][synth][choke]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/3);
     synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/3);
@@ -511,7 +511,7 @@ TEST_CASE("Synthesiser 32-voice polyphony stress without dropouts",
 }
 
 TEST_CASE("Synthesiser renders hundreds of voices without audio-thread allocation",
-          "[midi][synth][stress][rt-safety][phase3]") {
+          "[midi][synth][stress][rt-safety]") {
     constexpr std::size_t kVoices = 256;
     constexpr int kSamples = 128;
     Synthesiser<TestVoice> synth(kVoices);
@@ -581,7 +581,7 @@ TEST_CASE("Synthesiser process clamps event sample_offset above block size",
 }
 
 TEST_CASE("Synthesiser exposes voice-count telemetry",
-          "[midi][synth][telemetry][phase2]") {
+          "[midi][synth][telemetry]") {
     Synthesiser<TestVoice> synth(2);
     synth.set_steal_strategy(VoiceStealStrategy::Oldest);
 
@@ -616,7 +616,7 @@ TEST_CASE("Synthesiser exposes voice-count telemetry",
 }
 
 TEST_CASE("Synthesiser evaluates optional runtime budget from voice telemetry",
-          "[midi][synth][budget-policy][phase4]") {
+          "[midi][synth][budget-policy]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
     synth.note_on(0, 64, 100);
@@ -653,7 +653,7 @@ TEST_CASE("Synthesiser evaluates optional runtime budget from voice telemetry",
 }
 
 TEST_CASE("Synthesiser optional runtime budget has deterministic large-voice cost",
-          "[midi][synth][budget-policy][scale][phase4]") {
+          "[midi][synth][budget-policy][scale]") {
     constexpr std::size_t kVoices = 128;
     Synthesiser<TestVoice> synth(kVoices);
     for (std::size_t i = 0; i < kVoices; ++i) {
@@ -681,7 +681,7 @@ TEST_CASE("Synthesiser optional runtime budget has deterministic large-voice cos
 }
 
 TEST_CASE("Synthesiser voice telemetry path allocates zero times",
-          "[midi][synth][telemetry][rt-safety][phase2]") {
+          "[midi][synth][telemetry][rt-safety]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
     synth.note_on(0, 64, 100);

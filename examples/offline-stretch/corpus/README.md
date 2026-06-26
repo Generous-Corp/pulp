@@ -1,8 +1,8 @@
 # OfflineStretch test corpus
 
 Test material for the offline time-stretch / pitch engine
-(`pulp::signal::OfflineStretch`). See
-`planning/Sampler-Offline-Stretch-Build-Plan.md` §6.
+(`pulp::signal::OfflineStretch`). See `../INTEGRATION.md` and
+`../../../docs/guides/time-stretch.md`.
 
 ## Layout
 
@@ -34,8 +34,8 @@ onsets (`clicks_120bpm`), a broadband `logsweep_20_20k`, safety inputs
 ## musical/ — real loops, user-supplied
 
 Licensed musical audio cannot be generated or committed here. To exercise the
-quality metrics and listening checkpoints (plan §6), drop WAV/AIFF loops into
-`musical/` covering, at minimum:
+quality metrics and listening checkpoints, drop WAV/AIFF loops into `musical/`
+covering, at minimum:
 
 - acoustic drum loops — one sparse, one busy
 - an electronic loop with a long 808 tail (low-end phase coherence)

@@ -1,7 +1,7 @@
 # OfflineStretch + PulpTempoSampler — integration & status
 
-What this branch (`feature/offline-stretch-sampler`) delivers, how the pieces
-fit, and how to build/run them. Plan: `planning/Sampler-Offline-Stretch-Build-Plan.md`.
+What the current OfflineStretch + PulpTempoSampler integration provides, how the
+pieces fit, and how to build/run them.
 
 ## The engine — `pulp::signal::OfflineStretch`
 
@@ -22,8 +22,8 @@ const long out = pulp::signal::offline_stretch_output_frames(in_frames, o.time_r
 s.process(in, in_frames, out_ptrs, out, o, &err);   // distinct instance per render thread
 ```
 
-Ratio/routing math: `RATIO-AND-ROUTING.md`. Phase-1 baseline: `baseline-phase1.json`.
-Quality refinement gates: `PHASE3-DISPOSITION.md`.
+Ratio/routing math: `RATIO-AND-ROUTING.md`. Baseline capture:
+`baseline-phase1.json`. Quality refinement gates: `QUALITY-REFINEMENT-NOTES.md`.
 
 ## The instrument — `PulpTempoSampler`
 
@@ -63,11 +63,9 @@ cmake --build build --target pulp-test-offline-stretch pulp-tempo-sampler-test \
 # Dev CLI:      build/examples/offline-stretch/stretchcli in.wav out.wav --ratio 1.25 --quality 2
 ```
 
-## Phase 5 (Ink & Signal waveform UX) — disposition
+## Waveform UX Disposition
 
-Deferred to the parallel **design-system track** (`Design-System-Import-Plan.md`,
-owned by a separate agent/worktree): the Ink & Signal token foundation is that
-track's Phase 1, and theming `WaveformEditor` + the Skia screenshot-diff need the
-GPU/Skia build (this engine-focused build runs `-DPULP_ENABLE_GPU=OFF`). Keeping
-the token work on the design-system branch avoids a duplicate-preset merge
-collision. The sampler is the documented *pilot* consumer of those tokens.
+Waveform theming and screenshot-diff validation belong to the design-system /
+GPU track, not this engine harness. This example intentionally keeps the
+engine-focused build runnable with `-DPULP_ENABLE_GPU=OFF`; PulpTempoSampler is
+the pilot consumer for the waveform UI work when that design-system path lands.

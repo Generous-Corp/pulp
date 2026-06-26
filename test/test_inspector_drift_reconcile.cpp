@@ -50,7 +50,7 @@ bool canvas_has_text(const pulp::canvas::RecordingCanvas& canvas,
 }  // namespace
 
 TEST_CASE("InspectorOverlay: refresh_drift finds tweaks with no live anchor",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 500, 400});
 
@@ -79,7 +79,7 @@ TEST_CASE("InspectorOverlay: refresh_drift finds tweaks with no live anchor",
 }
 
 TEST_CASE("InspectorOverlay: no drift means no drawer and an empty list",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 500, 400});
     auto child = std::make_unique<View>();
@@ -105,7 +105,7 @@ TEST_CASE("InspectorOverlay: no drift means no drawer and an empty list",
 }
 
 TEST_CASE("InspectorOverlay: refresh_drift with no TweakStore is a safe no-op",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -115,7 +115,7 @@ TEST_CASE("InspectorOverlay: refresh_drift with no TweakStore is a safe no-op",
 }
 
 TEST_CASE("InspectorOverlay: drift drawer renders header and orphan rows",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 600, 500});
     auto child = std::make_unique<View>();
@@ -146,7 +146,7 @@ TEST_CASE("InspectorOverlay: drift drawer renders header and orphan rows",
 }
 
 TEST_CASE("InspectorOverlay: clicking the drift header toggles the drawer",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 600, 500});
     auto child = std::make_unique<View>();
@@ -188,7 +188,7 @@ TEST_CASE("InspectorOverlay: clicking the drift header toggles the drawer",
 }
 
 TEST_CASE("InspectorOverlay: collapsed drawer hides rows but keeps the header",
-          "[inspect][overlay][drift][phase2]") {
+          "[inspect][overlay][drift]") {
     View root;
     root.set_bounds({0, 0, 600, 500});
 
@@ -258,8 +258,8 @@ struct ReconcileScene {
 
 }  // namespace
 
-TEST_CASE("InspectorOverlay Phase 5.2: R toggles the reconciliation tab",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: R toggles the reconciliation tab",
+          "[inspect][overlay][reconcile]") {
     View root;
     root.set_bounds({0, 0, 600, 600});
     InspectorOverlay overlay(root);
@@ -277,8 +277,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: R toggles the reconciliation tab",
     REQUIRE_FALSE(overlay.reconcile_tab_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: R does nothing when inspector inactive",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: R does nothing when inspector inactive",
+          "[inspect][overlay][reconcile]") {
     View root;
     InspectorOverlay overlay(root);
     // Inspector not active — R must not flip the tab.
@@ -291,8 +291,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: R does nothing when inspector inactive",
     REQUIRE_FALSE(overlay.reconcile_tab_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report classifies all states",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconcile_report classifies all states",
+          "[inspect][overlay][reconcile]") {
     ReconcileScene scene;
     // Lock figma:5:a — promotes its tweak to "locked-to-source".
     scene.store.set_locked("figma:5:a", true);
@@ -319,8 +319,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report classifies all states",
             InspectorOverlay::ReconcileStatus::unresolvable);
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report preserves order within an anchor",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconcile_report preserves order within an anchor",
+          "[inspect][overlay][reconcile]") {
     View root;
     root.set_bounds({0, 0, 600, 600});
     auto node = std::make_unique<View>();
@@ -345,8 +345,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report preserves order within a
     REQUIRE(report.rows[2].property_path == "paint.opacity");
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: unlocked live tweak reads as drifted",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: unlocked live tweak reads as drifted",
+          "[inspect][overlay][reconcile]") {
     // Without an explicit lock, a tweak whose anchor resolves to a
     // live view is "drifted" — it lives only in the runtime layer and
     // would not survive a re-import.
@@ -358,8 +358,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: unlocked live tweak reads as drifted",
     REQUIRE(report.unresolvable_count == 1);
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: tab lays out a row per tweak",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconciliation tab lays out a row per tweak",
+          "[inspect][overlay][reconcile]") {
     ReconcileScene scene;
     scene.store.set_locked("figma:5:a", true);
     scene.overlay.toggle_reconcile_tab();
@@ -384,8 +384,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: tab lays out a row per tweak",
     REQUIRE(scene.overlay.reconcile_row_count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: tab renders cleanly with no tweaks",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconciliation tab renders cleanly with no tweaks",
+          "[inspect][overlay][reconcile]") {
     View root;
     root.set_bounds({0, 0, 600, 600});
     TweakStore store;  // empty
@@ -404,8 +404,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: tab renders cleanly with no tweaks",
     REQUIRE(report.total() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report empty without a store",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconcile_report empty without a store",
+          "[inspect][overlay][reconcile]") {
     // The inspector can run with no TweakStore wired (hand-authored
     // UIs). The reconciliation tab must degrade gracefully — empty
     // report, no crash, an explanatory line in the panel.
@@ -426,8 +426,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report empty without a store",
     REQUIRE(canvas_has_text(canvas, "No tweak store attached"));
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: orphaned tweak never crashes the tab",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: orphaned tweak never crashes the reconciliation tab",
+          "[inspect][overlay][reconcile]") {
     // A tweak whose anchor has no live view (e.g. after a destructive
     // re-import) must classify as unresolvable — not crash, not guess.
     View root;
@@ -453,8 +453,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: orphaned tweak never crashes the tab",
     REQUIRE(canvas_has_text(canvas, "orphan"));
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: reconcile_status_str maps every state",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: reconcile_status_str maps every state",
+          "[inspect][overlay][reconcile]") {
     using RS = InspectorOverlay::ReconcileStatus;
     REQUIRE(std::string(InspectorOverlay::reconcile_status_str(
                 RS::locked_to_source)) == "locked-to-source");
@@ -464,8 +464,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: reconcile_status_str maps every state",
                 RS::unresolvable)) == "unresolvable");
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: dismissing the inspector clears tab rows",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: dismissing the inspector clears reconciliation rows",
+          "[inspect][overlay][reconcile]") {
     ReconcileScene scene;
     scene.overlay.toggle_reconcile_tab();
 
@@ -480,8 +480,8 @@ TEST_CASE("InspectorOverlay Phase 5.2: dismissing the inspector clears tab rows"
     REQUIRE(scene.overlay.reconcile_tab_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 5.2: locking a tweak moves it out of drift",
-          "[inspect][overlay][reconcile][phase5.2]") {
+TEST_CASE("InspectorOverlay: locking a tweak moves it out of drift",
+          "[inspect][overlay][reconcile]") {
     // Locking an anchor is the explicit "promote to source" action.
     // The reconciliation tab must reflect that transition: a drifted
     // tweak becomes locked-to-source the moment its anchor is locked.

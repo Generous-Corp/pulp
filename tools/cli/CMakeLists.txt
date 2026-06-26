@@ -40,6 +40,7 @@ add_custom_command(
 add_executable(pulp-cli
     pulp_cli.cpp
     cli_common.cpp
+    shell_quote.cpp
     cli_sdk.cpp
     cli_doctor_helpers.cpp
     cmd_build.cpp
@@ -80,6 +81,7 @@ add_executable(pulp-cli
     cmd_inspect.cpp
     cmd_tweaks.cpp
     design_binding.cpp
+    create_build_commands.cpp
     create_targets.cpp
     package_registry.cpp
     package_analyzer_descriptors.cpp

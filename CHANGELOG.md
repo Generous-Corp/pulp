@@ -8,6 +8,66 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04990"></a>
+## [0.499.0] - 2026-06-26
+
+- feat(cli): pulp run --audio-capture-wav — dump the live output ring to a WAV ([#4921](https://github.com/danielraffel/pulp/pull/4921))
+- docs(view): refresh design provenance breadcrumbs ([#4919](https://github.com/danielraffel/pulp/pull/4919))
+- test(native-components): force allocation death-test path ([#4912](https://github.com/danielraffel/pulp/pull/4912))
+- docs(test): refresh cli coverage tags ([#4916](https://github.com/danielraffel/pulp/pull/4916))
+- docs(test): refresh ui widget coverage tags ([#4913](https://github.com/danielraffel/pulp/pull/4913))
+- docs(test): refresh audio coverage tags ([#4910](https://github.com/danielraffel/pulp/pull/4910))
+
+<a id="v04980"></a>
+## [0.498.0] - 2026-06-26
+
+- docs(hosting): note null-slot-plugin pass-through + universal eligibility ([#4908](https://github.com/danielraffel/pulp/pull/4908))
+- docs(test): refresh runtime coverage tags ([#4906](https://github.com/danielraffel/pulp/pull/4906))
+- docs(validation): align HostBench manifest version example ([#4905](https://github.com/danielraffel/pulp/pull/4905))
+- docs(test): refresh coverage phase tags ([#4904](https://github.com/danielraffel/pulp/pull/4904))
+- docs(audio): correct audio harness live inspector status ([#4902](https://github.com/danielraffel/pulp/pull/4902))
+- docs(test): refresh runtime state event labels ([#4901](https://github.com/danielraffel/pulp/pull/4901))
+- docs(examples): remove orphan animation demo page ([#4900](https://github.com/danielraffel/pulp/pull/4900))
+- docs(test): consolidate source comment hygiene batch ([#4898](https://github.com/danielraffel/pulp/pull/4898))
+- docs(cli): correct build configure guidance ([#4893](https://github.com/danielraffel/pulp/pull/4893))
+
+<a id="v04970"></a>
+## [0.497.0] - 2026-06-26
+
+- feat(host): route Custom nodes through the canonical executor ([#4894](https://github.com/danielraffel/pulp/pull/4894))
+
+<a id="v04961"></a>
+## [0.496.1] - 2026-06-26
+
+- fix(run): align Rust live audio flags ([#4883](https://github.com/danielraffel/pulp/pull/4883))
+- chore: adversarial-review follow-ups — atomic version writes, test rigor, comment accuracy ([#4891](https://github.com/danielraffel/pulp/pull/4891))
+
+<a id="v04960"></a>
+## [0.496.0] - 2026-06-25
+
+- feat(host): default to canonical-executor routing with per-node telemetry parity ([#4884](https://github.com/danielraffel/pulp/pull/4884))
+- docs: align doctor slash command ([#4880](https://github.com/danielraffel/pulp/pull/4880))
+
+<a id="v04953"></a>
+## [0.495.3] - 2026-06-25
+
+- fix(create): quote standalone build paths ([#4877](https://github.com/danielraffel/pulp/pull/4877))
+
+<a id="v04952"></a>
+## [0.495.2] - 2026-06-25
+
+- chore: harden one-backend series guards and parity tests (series review) ([#4867](https://github.com/danielraffel/pulp/pull/4867))
+
+<a id="v04951"></a>
+## [0.495.1] - 2026-06-25
+
+- fix(host): reuse AudioBufferList scratch in AU host slot (RT no-alloc) ([#4866](https://github.com/danielraffel/pulp/pull/4866))
+
+<a id="v04950"></a>
+## [0.495.0] - 2026-06-25
+
+- feat(host): bake a SignalGraph into a Processor ([#4864](https://github.com/danielraffel/pulp/pull/4864))
+
 <a id="v04940"></a>
 ## [0.494.0] - 2026-06-25
 
@@ -5172,6 +5232,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.499.0]: https://github.com/danielraffel/pulp/releases/tag/v0.499.0
+[0.498.0]: https://github.com/danielraffel/pulp/releases/tag/v0.498.0
+[0.497.0]: https://github.com/danielraffel/pulp/releases/tag/v0.497.0
+[0.496.1]: https://github.com/danielraffel/pulp/releases/tag/v0.496.1
+[0.496.0]: https://github.com/danielraffel/pulp/releases/tag/v0.496.0
+[0.495.3]: https://github.com/danielraffel/pulp/releases/tag/v0.495.3
+[0.495.2]: https://github.com/danielraffel/pulp/releases/tag/v0.495.2
+[0.495.1]: https://github.com/danielraffel/pulp/releases/tag/v0.495.1
+[0.495.0]: https://github.com/danielraffel/pulp/releases/tag/v0.495.0
 [0.494.0]: https://github.com/danielraffel/pulp/releases/tag/v0.494.0
 [0.493.1]: https://github.com/danielraffel/pulp/releases/tag/v0.493.1
 [0.493.0]: https://github.com/danielraffel/pulp/releases/tag/v0.493.0

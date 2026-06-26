@@ -53,7 +53,7 @@ TEST_CASE("FilterDesign allpass passes DC", "[signal][filter_design]") {
 }
 
 TEST_CASE("FilterDesign allpass keeps unity magnitude at Nyquist",
-          "[signal][filter_design][coverage][phase3]") {
+          "[signal][filter_design][coverage]") {
     auto c = FilterDesign::allpass(5000.0f, 0.9f, 48000.0f);
     require_finite(c);
     REQUIRE_THAT(std::abs(nyquist_gain(c)), WithinAbs(1.0f, 0.01f));
@@ -205,7 +205,7 @@ TEST_CASE("FilterDesign butterworth odd orders truncate to complete biquads",
 }
 
 TEST_CASE("FilterDesign near-Nyquist biquads remain finite",
-          "[signal][filter_design][coverage][phase3-large]") {
+          "[signal][filter_design][coverage][large]") {
     const float sample_rate = 48000.0f;
     const float near_nyquist = 0.49f * sample_rate;
 

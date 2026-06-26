@@ -1,17 +1,18 @@
 // stretchcli — development harness for pulp::signal::OfflineStretch.
 //
 // The only "app" for the offline engine: file in -> render -> file out, plus
-// --analyze for BPM/onset inspection. See
-// planning/Sampler-Offline-Stretch-Build-Plan.md §5/§7.
+// --analyze for BPM/onset inspection. The engine now renders through the live
+// OfflineStretch paths; material-adaptive windowing is automatic unless --fft /
+// --hop override the analysis geometry.
 //
 //   stretchcli in.wav out.wav [--ratio R] [--pitch S] [--formant MODE]
 //              [--formant-semitones X] [--repitch] [--quality Q]
-//              [--max-ratio M] [--max-pitch P]
+//              [--max-ratio M] [--max-pitch P] [--fft N] [--hop N]
+//              [--character clean|varispeed|phase_vocoder|granular]
+//              [--transient-sens X] [--stn|--no-stn]
+//              [--preset FILE] [--save-preset FILE]
 //   stretchcli in.wav --analyze            # JSON: sr, frames, bpm, onsets
 //   stretchcli in.wav out.wav --bpm-to T   # ratio chosen from detected BPM
-//
-// At Phase 0 the engine is a length-correct pass-through, so this exercises the
-// I/O + arg + analysis plumbing; the stretch quality arrives in Phase 1+.
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -43,7 +44,10 @@ void usage() {
         "usage:\n"
         "  stretchcli IN OUT [--ratio R] [--pitch S] [--formant follow|preserve|independent]\n"
         "                    [--formant-semitones X] [--repitch] [--quality 0..2]\n"
-        "                    [--max-ratio M] [--max-pitch P]\n"
+        "                    [--max-ratio M] [--max-pitch P] [--fft N] [--hop N]\n"
+        "                    [--character clean|varispeed|phase_vocoder|granular]\n"
+        "                    [--transient-sens X] [--stn|--no-stn]\n"
+        "                    [--preset FILE] [--save-preset FILE]\n"
         "  stretchcli IN --analyze            # JSON BPM + onsets\n"
         "  stretchcli IN OUT --bpm-to TARGET  # ratio = source_bpm / TARGET\n");
 }
@@ -177,7 +181,7 @@ int render(const std::string& in, const std::string& out,
 
     // Size the engine to the user-declared bounds (default [0.25x,4x] / +/-24 st).
     // These are a HARD cap: a --ratio/--pitch beyond them is REJECTED, not
-    // silently widened (plan §3.6). Raise --max-ratio / --max-pitch for extremes.
+    // silently widened. Raise --max-ratio / --max-pitch for extremes.
     pulp::signal::OfflineStretchOptions sizing;
     sizing.max_time_ratio = opts.max_time_ratio;
     sizing.max_pitch_semitones = opts.max_pitch_semitones;

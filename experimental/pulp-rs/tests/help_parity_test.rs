@@ -1,4 +1,4 @@
-//! Phase 6b integration tests — `pulp-rs help` + bare-invocation +
+//! Integration tests for `pulp-rs help`, bare invocation, and
 //! fuzzy "Did you mean...?" UX fixes.
 //!
 //! The reference file is `tests/fixtures/help/expected_cpp.txt`,

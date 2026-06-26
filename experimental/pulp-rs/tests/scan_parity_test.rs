@@ -1,9 +1,9 @@
-//! Phase 6b integration tests — `pulp-rs scan`.
+//! Integration tests for `pulp-rs scan`.
 //!
 //! The file-enumeration stub can't round-trip through real `pulp
 //! scan` output byte-for-byte (the C++ scanner reads CLAP / VST3 /
 //! AU factories to recover the plug-in's marketing name, which the
-//! Rust stub doesn't). So the parity bar for Phase 6b is:
+//! Rust stub doesn't). So the parity bar for the Rust scan path is:
 //!
 //! 1. **Shape** — `[FORMAT] N plugin(s)` header, one line per entry.
 //! 2. **Format filter** — `--format <f>` narrows the output to one

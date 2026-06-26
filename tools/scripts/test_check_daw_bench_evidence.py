@@ -35,7 +35,7 @@ def _manifest(**overrides: object) -> dict[str, object]:
         "date": "2026-06-12",
         "script": "06-reaper-vst3.md",
         "pulp_commit": "33dc6cfd1f1f",
-        "plugin_version": "0.395.0",
+        "plugin_version": "1.0.0",
         "result_markdown": "06-reaper-vst3.md",
         "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
         "capabilities": [
@@ -68,7 +68,8 @@ class DawBenchEvidenceTests(unittest.TestCase):
         _write(result_dir / "06-reaper-vst3.md",
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
-               "2026-06-12T12:00:00Z\tsession_start\n"
+               "2026-06-12T12:00:00Z\tsession_start\tpulp_bench_plugin=1.0.0\n"
+               "2026-06-12T12:00:00Z\tprocessor_construct\tplugin_version=1.0.0\n"
                "2026-06-12T12:00:00Z\tserialize_plugin_state\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         return tmp_ctx, root, result_dir
@@ -121,6 +122,38 @@ class DawBenchEvidenceTests(unittest.TestCase):
             )
             result = checker.validate_manifest(path, repo_root=root)
             self.assertEqual(result.errors, ())
+
+    def test_plugin_version_must_match_checked_in_logs(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "stale-plugin-version.daw-bench.json"
+            path.write_text(json.dumps(_manifest(plugin_version="2.0.0")), encoding="utf-8")
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertIn(
+                "plugin_version 2.0.0 must match all checked-in log version(s): 1.0.0",
+                errors,
+            )
+
+    def test_plugin_version_rejects_mixed_checked_in_log_versions(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            _write(
+                result_dir / "logs" / "Reaper-VST3-extra.log",
+                "2026-06-12T12:00:01Z\tprocessor_construct\tplugin_version=2.0.0\n",
+            )
+            path = result_dir / "mixed-plugin-version.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(logs=[
+                    "logs/Reaper-VST3-20260612T120000Z-pid42.log",
+                    "logs/Reaper-VST3-extra.log",
+                ])),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertIn(
+                "plugin_version 1.0.0 must match all checked-in log version(s): 1.0.0, 2.0.0",
+                errors,
+            )
 
     def test_preflight_report_is_optional_diagnostic_context(self) -> None:
         tmp_ctx, root, result_dir = self._repo()

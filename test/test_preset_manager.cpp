@@ -474,7 +474,7 @@ TEST_CASE("PresetManager load skips malformed parameter values", "[state][preset
 }
 
 TEST_CASE("PresetManager load skips parameter keys with missing value separators",
-          "[state][preset][coverage][phase3]") {
+          "[state][preset][coverage]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-missing-separator");
     StateStore store;
     setup_test_store(store);
@@ -494,7 +494,7 @@ TEST_CASE("PresetManager load skips parameter keys with missing value separators
 }
 
 TEST_CASE("PresetManager load accepts parameter values that end at EOF",
-          "[state][preset][coverage][phase3]") {
+          "[state][preset][coverage]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-terminal-value");
     StateStore store;
     setup_test_store(store);
@@ -762,7 +762,7 @@ TEST_CASE("PresetManager navigation on empty preset list returns false",
 }
 
 TEST_CASE("PresetManager saved file includes metadata and parameter entries",
-          "[state][preset][coverage][phase3-large]") {
+          "[state][preset][coverage][large]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-save-metadata");
     StateStore store;
     setup_test_store(store);
@@ -784,7 +784,7 @@ TEST_CASE("PresetManager saved file includes metadata and parameter entries",
 }
 
 TEST_CASE("PresetManager saving the same name overwrites the user preset",
-          "[state][preset][coverage][phase3-large]") {
+          "[state][preset][coverage][large]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-save-overwrite");
     StateStore store;
     setup_test_store(store);
@@ -804,7 +804,7 @@ TEST_CASE("PresetManager saving the same name overwrites the user preset",
 }
 
 TEST_CASE("PresetManager direct path load reports stem in callback",
-          "[state][preset][coverage][phase3-large]") {
+          "[state][preset][coverage][large]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-direct-load-callback");
     StateStore store;
     setup_test_store(store);
@@ -826,7 +826,7 @@ TEST_CASE("PresetManager direct path load reports stem in callback",
 }
 
 TEST_CASE("PresetManager import creates the user preset directory",
-          "[state][preset][coverage][phase3-large]") {
+          "[state][preset][coverage][large]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-import-creates-dir");
     StateStore store;
     setup_test_store(store);
@@ -852,7 +852,7 @@ TEST_CASE("PresetManager import creates the user preset directory",
 }
 
 TEST_CASE("PresetManager import of duplicate destination preserves existing preset",
-          "[state][preset][coverage][phase3]") {
+          "[state][preset][coverage]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-import-duplicate");
     StateStore store;
     setup_test_store(store);
@@ -884,7 +884,7 @@ TEST_CASE("PresetManager import of duplicate destination preserves existing pres
 }
 
 TEST_CASE("PresetManager rename failure leaves current preset unchanged",
-          "[state][preset][coverage][phase3-large]") {
+          "[state][preset][coverage][large]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-rename-missing-current");
     StateStore store;
     setup_test_store(store);

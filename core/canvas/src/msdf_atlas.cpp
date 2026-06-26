@@ -1,17 +1,11 @@
 // Multi-channel SDF atlas.
 //
-// This file implements an in-house median-of-three MSDF generator.
-// Each RGB texel stores three signed distances computed from three
-// slightly-offset reference shapes; at sample time the shader takes
-// `median(r, g, b)` to reconstruct the true edge — preserving corners
-// where single-channel SDF rounds them off.
-//
-// This is *not* Chlumsky's shape-decomposition algorithm (which emits
-// provably-orthogonal channels per edge). An msdfgen-backed implementation
-// can replace `generate_msdf_tile()` with true per-edge channel output; the
-// current generator is strong enough to exercise the MSDF sampler shader,
-// demonstrate sharper corners than plain SDF on simple primitives, and
-// validate the atlas packing + test pipeline.
+// This file implements the MSDF atlas scaffold: RGB/RGBA storage, glyph
+// packing, and the shape expected by the `median(r, g, b)` shader path.
+// Until msdfgen is vendored, the generator writes equal RGB placeholder
+// distances, so sampling degenerates to the single-channel SDF result.
+// An msdfgen-backed implementation can replace `fill_placeholder_tile()`
+// with true per-edge channel output while keeping the atlas/test plumbing.
 
 #include <pulp/canvas/msdf_atlas.hpp>
 

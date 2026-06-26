@@ -1,4 +1,4 @@
-//! Phase 6d parity tests — `dev`, `create`, `docs`, `design`, `tool`.
+//! Command-surface parity tests for `dev`, `create`, `docs`, `design`, `tool`.
 //!
 //! # Scope
 //!
@@ -113,6 +113,8 @@ fn create_help_lists_all_options() {
         "--in-tree",
         "--no-build",
         "--no-interactive",
+        "--pin",
+        "--debug",
     ] {
         assert!(
             stdout.contains(flag),

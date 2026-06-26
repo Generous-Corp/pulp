@@ -66,6 +66,13 @@ pulp_add_test_suite(pulp-test-signal-graph-executor-parity
 pulp_add_test_suite(pulp-test-signal-graph-offline-parity
     SOURCES test_signal_graph_offline_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# A SignalGraph baked into one shippable Processor (BakedGraphProcessor) drives a
+# frozen plan through the SAME GraphRuntimeExecutor::process_routed as the live
+# graph, so its output is bit-identical for the lowerable subset; non-lowerable
+# graphs are refused loudly.
+pulp_add_test_suite(pulp-test-baked-graph-processor-parity
+    SOURCES test_baked_graph_processor_parity.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Parallel SignalGraph plugin bindings must not share fallback MIDI/parameter
 # scratch when the routed executor runs same-level Plugin nodes concurrently.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch

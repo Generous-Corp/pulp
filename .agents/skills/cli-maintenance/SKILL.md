@@ -56,7 +56,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
 
-`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns both the model/bundle tooling (model/excerpt-find/read-bundle) AND the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin). `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` verbs. When adding a `validate` verb, update `cmd_audio_validate.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both the `audio-harness` and this skill.
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns both the model/bundle tooling (model/excerpt-find/read-bundle) AND the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin). `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` verbs. Keep the live/planned boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live ring-capture-to-WAV is landed under `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`; the rolling-ring variant for `doctor`/`compare`, and a scenario-driven `render` verb, remain planned). When adding a `validate` verb, update `cmd_audio_validate.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both the `audio-harness` and this skill.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
@@ -475,10 +475,16 @@ to the `print_help` text plus the `pulp run --help` shellout assertion in
 `test_cli_shellout.cpp` and the parser test in `test_cli_run_options.cpp`.
 The Audio Inspector flags follow this shape: `--audio-inspector` →
 `PULP_AUDIO_INSPECTOR=1` (does NOT imply headless); `--audio-probe-json <path>`
-→ `PULP_AUDIO_PROBE_JSON=<path>` (implies headless, like `--screenshot`). A
-bare `--audio-probe-json` run is headless but must NOT auto-assign a default
-screenshot PNG path — guard the headless-default branch on an empty probe-json
-path. See `docs/guides/audio-inspector.md`.
+→ `PULP_AUDIO_PROBE_JSON=<path>` (implies headless, like `--screenshot`);
+`--audio-scope-json <path>` → `PULP_AUDIO_SCOPE_JSON=<path>` (+ window/trigger/
+channel); `--audio-capture-wav <file>` → `PULP_AUDIO_CAPTURE_WAV=<file>` (+
+`--audio-capture-frames` → `PULP_AUDIO_CAPTURE_WAV_FRAMES`), which dumps the live
+output ring to a WAV for `pulp audio validate`, implies headless, and shares the
+single capture FIFO with `--audio-inspector` / `--audio-scope-json` (the three
+are mutually exclusive at parse time). A bare `--audio-probe-json` /
+`--audio-scope-json` / `--audio-capture-wav` run is headless but must NOT
+auto-assign a default screenshot PNG path — guard the headless-default branch on
+all three being empty. See `docs/guides/audio-inspector.md`.
 
 The live window also reads display-only waveform env vars:
 `PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero`, `PULP_AUDIO_INSPECTOR_GRID=0`, and
@@ -740,6 +746,13 @@ at create time. Both code paths print a discoverable post-create
 message about `pulp project pin` so users learn the opt-in command
 without hunting.
 
+The Rust-native `pulp create --ci` path is a scaffold-only fallback: it
+parses the full create flag inventory for help/parity, but full-path flags
+such as `--pin` and `--debug` only take effect through the delegated C++
+create path. Keep those flags modeled in `CreateArgs` so the native `--ci`
+path can warn when it ignores them instead of silently treating them like
+typos.
+
 ## `pulp pr` — shim over `shipyard pr`
 
 By default `pulp pr` delegates to `shipyard pr` (on PATH), forwarding argv.
@@ -878,11 +891,14 @@ honors `PULP_NO_MODIFY_PATH=1` (same opt-out as `install.sh`) and is idempotent
 profile-selection logic, keep it in sync with `tools/install/install.sh`'s PATH
 block so the two install surfaces agree.
 
-## `pulp run --headless / --screenshot / --frames / --watch`
+## `pulp run --headless / screenshot / live audio flags`
 
 `tools/cli/cmd_run.cpp` plus the shared parser in
 `tools/cli/cmd_run_parse.cpp` (`parse_run_options` / `assemble_launch_args`)
-expose four CI-friendly flags on top of the basic launch path:
+expose CI-friendly rendering flags and live-audio inspection flags on top of
+the basic launch path. The Rust front end mirrors this surface in
+`experimental/pulp-rs/src/cmd/run_parse.rs`; keep both parsers and forwarding
+orders in lockstep.
 
 - `--headless` — run the standalone offscreen (no window). Forwarded
   as `--headless` and as the `PULP_HEADLESS=1` env var so binaries
@@ -898,12 +914,25 @@ expose four CI-friendly flags on top of the basic launch path:
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
+- `--audio-inspector` — open the live Audio Inspector. Forwarded as
+  `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
+- `--audio-probe-json <path>` — write live probe metrics JSON and exit.
+  Implies `--headless`, but does not imply a screenshot artifact. Forwarded
+  as `--audio-probe-json <path>` and `PULP_AUDIO_PROBE_JSON=<path>`.
+- `--audio-scope-json <path>` — write versioned live Audio Scope JSON and
+  exit. It owns the acquisition flags `--audio-scope-window`,
+  `--audio-scope-trigger`, and `--audio-scope-channel`; those flags are only
+  valid with `--audio-scope-json`. Forward all four argv values plus
+  `PULP_AUDIO_SCOPE_JSON`, `PULP_AUDIO_SCOPE_WINDOW`,
+  `PULP_AUDIO_SCOPE_TRIGGER`, and `PULP_AUDIO_SCOPE_CHANNEL`.
 
 The CLI parser is unit-tested in `test/test_cli_run_options.cpp`
 (parse + forwarding contract) and end-to-end shell-out coverage lives
 in `test/test_cli_shellout.cpp`, which exercises
 the discover-binary → launch-with-flags → PNG-on-disk path against the
-fixture binary in `test/fixtures/cli_run_fixture.cpp`.
+fixture binary in `test/fixtures/cli_run_fixture.cpp`. Rust parser and
+orchestrator parity lives in `experimental/pulp-rs/src/cmd/run_parse.rs`
+and `experimental/pulp-rs/src/cmd/orchestrate.rs` tests.
 
 Gotchas:
 
@@ -922,6 +951,8 @@ Gotchas:
 - `--watch` is consumed by the CLI; it is NOT forwarded to the
   launched binary. The launched binary just sees the headless
   flags.
+- `--audio-scope-json` cannot be combined with `--audio-inspector` because
+  both consume the live capture FIFO.
 
 ## `pulp validate` — plugin-format validators
 
@@ -1718,26 +1749,36 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- Standalone `pulp create` configure/test shell commands live in
+  `tools/cli/create_build_commands.{hpp,cpp}` so path quoting is tested without
+  running a full scaffold build. Keep every path-bearing command argument
+  quoted via the shared `tools/cli/shell_quote.{hpp,cpp}` helper, including
+  `-S`, `-B`, `-DCMAKE_PREFIX_PATH=`, and `ctest --test-dir`; users can pass
+  `--output` paths with spaces.
 - **`pulp sdk available` + newer-SDK banner cache contract.** `pulp sdk available` shells out to curl for the GitHub `/releases?per_page=30` endpoint and parses `tag_name` entries — no JSON dep. `maybe_print_newer_sdk_banner(installed)` caches the latest release at `~/.pulp/cache/latest_release.txt` (line 1 = version, line 2 = Unix timestamp) with a 24h TTL and a 2s curl timeout. The cache is best-effort — if curl fails the banner just doesn't print this run. Wired into `pulp sdk status` only; `pulp build` and `pulp create` deliberately stay quiet on the hot path. To invalidate the cache: `rm ~/.pulp/cache/latest_release.txt`.
 - **`tools/cli/cli_doctor_helpers.cpp` owns doctor check bodies** (2026-05, R2-4). The 971-line doctor block moved out of `cli_common.cpp` into its own TU. Public API (`DoctorCheck` struct + `run_doctor_*` functions) stays in `cli_common.hpp`; no new public header was added (Codex risk callout: don't replace one catch-all surface with another). When adding a new doctor check, edit `cli_doctor_helpers.cpp` only.
 - **`pulp doctor list` + `--only <name>`** (2026-05, R2-8). `pulp doctor list` enumerates available checks; `pulp doctor --only <substring>` case-insensitive filter runs a subset. Works across modes (`pulp doctor android list`, `pulp doctor --only emulator`). Filter logic lives in `cmd_doctor.cpp`, not in the helpers TU — the `DoctorCheck` vector returned by `run_doctor_checks` already IS the registry. No new struct or registration step needed when adding a check.
 - **Validator commands must suppress editor hosts.** Any CLI path that shells out to `auval`, `pluginval`, `clap-validator`, or `vstvalidator` must run the command with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`. This is part of the launch-safety contract: validation should never open a native plugin editor or OS window on a user/agent machine.
 
-## Build type — repo/example builds default to Release (perf)
+## Build type — helper-backed tool builds default to Release (perf)
 
-`ensure_repo_build_configured` (`cli_common.cpp`, the `pulp build` configure
-path for repo/example plugins) now passes `-DCMAKE_BUILD_TYPE=Release` on a
-fresh configure. Previously it passed NO build type, so CMake configured with
-no optimization (no `-O`, no `NDEBUG`) — an unoptimized binary whose plugin
-editor/DSP feels sluggish in a DAW for the same reason a Debug build does
-(confirmed 2026-05-22: ChainerSynth AU laggy unoptimized, "super snappy" in
-Release). `pulp create` already defaults Release with a `--debug` opt-in.
+`ensure_repo_build_configured` (`cli_common.cpp`, currently used by the
+`pulp design` configure path in `cmd_design.cpp`) passes
+`-DCMAKE_BUILD_TYPE=Release` on a fresh configure. Previously it passed NO build
+type, so CMake configured with no optimization (no `-O`, no `NDEBUG`) — an
+unoptimized binary whose plugin editor/DSP feels sluggish in a DAW for the same
+reason a Debug build does (confirmed 2026-05-22: ChainerSynth AU laggy
+unoptimized, "super snappy" in Release). `pulp create` already defaults Release
+with a `--debug` opt-in.
+
+`pulp build` has its own configure path in `tools/cli/cmd_build.cpp`; do not
+assume changes to `ensure_repo_build_configured` affect `pulp build`.
 
 Notes for CLI maintenance:
-- Override per-build with `PULP_BUILD_TYPE=Debug pulp build` (read in
+- Override helper-backed fresh configures with `PULP_BUILD_TYPE=Debug` (read in
   `ensure_repo_build_configured`); it only applies on a FRESH configure — an
   existing `CMakeCache.txt` build type is left untouched (re-configure or wipe
-  `build/` to change it). `pulp build` prints `Build type: <type>`.
+  `build/` to change it). The helper prints `Build type: <type>`.
 - The `PULP_BUILD_TYPE` value is `shell_quote`'d before it goes into the cmake
   command (the configure runs via the shell), like every other interpolated
   value there. Never concatenate a raw env value into a shell command string —

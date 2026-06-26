@@ -138,7 +138,7 @@ component.
   "date": "2026-06-12",
   "script": "06-reaper-vst3.md",
   "pulp_commit": "33dc6cfd1f1f",
-  "plugin_version": "0.395.0",
+  "plugin_version": "1.0.0",
   "result_markdown": "06-reaper-vst3.md",
   "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
   "preflight_reports": ["preflight/logic-au-preflight.json"],
@@ -170,7 +170,9 @@ matrix column names after normalization, such as `load`, `params`, `midi`,
 `sidechain`, `multi-bus`, and `ara`. A promoted matrix cell must have a matching
 manifest for the host/format lane and a `Confirmed` capability entry. The
 validator cross-checks known capabilities against checked-in log events when
-logs are present.
+logs are present. When checked-in logs include `plugin_version=` or
+`pulp_bench_plugin=` fields, the validator also checks them against the
+manifest's `plugin_version`.
 
 `preflight_reports` is optional diagnostic context. Each entry must reference a
 checked-in JSON file emitted by `check_au_component_preflight.py --format json`.

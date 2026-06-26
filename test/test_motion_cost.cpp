@@ -278,7 +278,7 @@ TEST_CASE("CostSample zeroes render fields when no probe is wired",
 }
 
 TEST_CASE("Cost buffer sink tolerates a null destination",
-          "[motion-cost][coverage][phase3]") {
+          "[motion-cost][coverage]") {
     auto sink = make_cost_buffer_sink(nullptr);
 
     CostSample s;
@@ -382,7 +382,7 @@ TEST_CASE("CostSample JSONL serialization round-trips a stream", "[motion-cost]"
 }
 
 TEST_CASE("load_cost_stream rejects missing or unsupported headers",
-          "[motion-cost][coverage][phase3]") {
+          "[motion-cost][coverage]") {
     REQUIRE(load_cost_stream(unique_path("missing")).empty());
 
     const std::string no_header = unique_path("no-header");
@@ -427,14 +427,14 @@ TEST_CASE("serialize_cost_sample emits valid JSON shape", "[motion-cost]") {
     REQUIRE(line.find("\"source_kind\":\"css-transition\"") != std::string::npos);
 }
 
-// ── Motion-cost regression coverage ───────────────────────────────────
+// ── Motion-cost serialization hardening ────────────────────────────────
 
-// serialize_cost_sample used to emit raw doubles, so a single bad
-// render-stat tick (NaN / Inf) produced invalid JSON tokens (`nan` /
-// `inf`) that broke every downstream consumer. Match motion.cpp's
-// quoted-sentinel convention and round-trip them back.
+// serialize_cost_sample emits non-finite doubles as quoted sentinels so
+// a single bad render-stat tick (NaN / Inf) cannot produce invalid JSON
+// tokens (`nan` / `inf`) that break downstream consumers. Match
+// motion.cpp's quoted-sentinel convention and round-trip them back.
 TEST_CASE("serialize_cost_sample emits NaN/Inf as quoted sentinels",
-          "[motion-cost][bug-sweep]") {
+          "[motion-cost][serialization]") {
     CostSample s;
     s.frame = 7;
     s.t_seconds = std::nan("");
@@ -468,7 +468,7 @@ TEST_CASE("serialize_cost_sample emits NaN/Inf as quoted sentinels",
 // a literal `}` inside a source_file path is legal JSON and must not
 // truncate the entry or corrupt following provenance objects.
 TEST_CASE("load_cost_stream parses provenance objects whose strings contain '}'",
-          "[motion-cost][bug-sweep]") {
+          "[motion-cost][serialization]") {
     CostSample s;
     s.frame = 11;
     s.t_seconds = 0.5;
@@ -477,7 +477,7 @@ TEST_CASE("load_cost_stream parses provenance objects whose strings contain '}'"
     Provenance p1;
     p1.source_kind = "tween";
     p1.source_id = "card.opacity";
-    // The literal `}` here used to truncate the parser mid-string.
+    // The literal `}` here must stay inside the string token.
     p1.source_file = "weird/path}with-brace.cpp";
     p1.source_line = 42;
     Provenance p2;

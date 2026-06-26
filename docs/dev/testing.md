@@ -162,7 +162,7 @@ ctest --test-dir build-rtsan
 
 Currently annotated: the audio-thread `process()` paths in each format
 adapter. If RTSan reports an allocation in there, it's a real RT-safety
-bug (see #307 Codex P1 → PR #315 for a representative case).
+bug (see #307 → PR #315 for a representative case).
 
 ## Relation to #290
 

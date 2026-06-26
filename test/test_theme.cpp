@@ -80,7 +80,7 @@ TEST_CASE("Theme apply_overrides", "[view][theme]") {
 }
 
 TEST_CASE("Theme apply_overrides with empty theme preserves existing tokens",
-          "[view][theme][coverage][phase3]") {
+          "[view][theme][coverage]") {
     auto base = Theme::dark();
     const auto bg = base.color("bg.primary");
     const auto spacing = base.dimension("spacing.md");
@@ -272,7 +272,7 @@ TEST_CASE("Theme from_json maps malformed color strings to default color",
 }
 
 TEST_CASE("Theme from_json maps invalid hex digits to default color",
-          "[view][theme][coverage][phase3]") {
+          "[view][theme][coverage]") {
     auto theme = Theme::from_json(R"({
         "colors": {
             "bad.digit": "#12xx56",
@@ -287,7 +287,7 @@ TEST_CASE("Theme from_json maps invalid hex digits to default color",
 }
 
 TEST_CASE("Theme from_json maps overflowing hex colors to default color",
-          "[view][theme][coverage][phase3]") {
+          "[view][theme][coverage]") {
     auto theme = Theme::from_json(R"({
         "colors": {
             "bad.overflow": "#ffffffffffffffffffffffffffffffff"

@@ -627,13 +627,13 @@ TEST_CASE("InspectorOverlay: mouse selection and panel tree interactions", "[ins
     REQUIRE(overlay.selected_view() == second_ptr);
 }
 
-// Phase 3f — Alt-hover sibling distance (Figma-style spacing reveal).
+// Alt-hover sibling distance (Figma-style spacing reveal).
 // Click to select a node, then HOLD Alt while hovering another → overlay
 // renders a live distance line from selection to hovered target. Released
 // Alt clears the target. Distinct from the Alt+CLICK sticky-anchor mode
 // covered above.
 TEST_CASE("InspectorOverlay: Alt-hover reveals sibling distance line",
-          "[inspect][overlay][phase3f]") {
+          "[inspect][overlay][distance]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 500, 300});
@@ -704,7 +704,7 @@ TEST_CASE("InspectorOverlay: Alt-hover reveals sibling distance line",
 }
 
 TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
-          "[inspect][overlay][phase3f]") {
+          "[inspect][overlay][distance]") {
     // Edge case: holding Alt while hovering with no selected_ should
     // NOT set alt_hover_target_. Otherwise we'd render a line from
     // nullptr → confused diagnostics.
@@ -735,13 +735,13 @@ TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
     REQUIRE(after_alt_hover.command_count() == baseline_count);
 }
 
-// Phase 3 — selection-mode toggle. The `M` hotkey flips between
+// Selection-mode toggle. The `M` hotkey flips between
 // follows_focus (click-to-select; the default) and follows_mouse
 // (selection chases the pointer). The default must be follows_focus so
 // the inspector's historical behavior is unchanged until the user opts
 // in.
 TEST_CASE("InspectorOverlay: M hotkey toggles selection mode",
-          "[inspect][overlay][phase3]") {
+          "[inspect][overlay][selection-mode]") {
     View root;
     root.set_bounds({0, 0, 200, 200});
     InspectorOverlay overlay(root);
@@ -779,7 +779,7 @@ TEST_CASE("InspectorOverlay: M hotkey toggles selection mode",
 // only an explicit click does. This is the conservative default that
 // preserves the inspector's historical behavior.
 TEST_CASE("InspectorOverlay: follows_focus keeps selection pinned on hover",
-          "[inspect][overlay][phase3]") {
+          "[inspect][overlay][selection-mode]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 500, 300});
@@ -822,7 +822,7 @@ TEST_CASE("InspectorOverlay: follows_focus keeps selection pinned on hover",
 // (Figma-style "select on hover"). An explicit click still works the
 // same way.
 TEST_CASE("InspectorOverlay: follows_mouse re-selects the hovered view",
-          "[inspect][overlay][phase3]") {
+          "[inspect][overlay][selection-mode]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 500, 300});
@@ -884,8 +884,8 @@ TEST_CASE("InspectorOverlay: follows_mouse re-selects the hovered view",
 // to the wrong (or no-longer-valid) node. follows_focus mode is already
 // safe because it never chases the pointer; this guards follows_mouse.
 TEST_CASE("InspectorOverlay: follows_mouse hover does not move selection "
-          "during a field edit (codex P1 #2556 regression)",
-          "[inspect][overlay][phase3][regression]") {
+          "during a field edit (#2556 regression)",
+          "[inspect][overlay][selection-mode][regression]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 500, 300});
@@ -956,8 +956,8 @@ TEST_CASE("InspectorOverlay: follows_mouse hover does not move selection "
 // keeps drawing from selected_ to a view that's no longer under the
 // cursor.
 TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
-          "(codex P2 #2328 regression)",
-          "[inspect][overlay][phase3f][regression]") {
+          "(#2328 regression)",
+          "[inspect][overlay][distance][regression]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto a = std::make_unique<View>();
@@ -992,9 +992,9 @@ TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
 
     // Move cursor INTO the panel (root.bounds().width - panel_width_;
     // default panel_width_ = 300, so panel starts at x=300 for a 600-
-    // wide root). Pre-fix: alt_hover_target_ stays set, distance line
-    // still draws. Post-fix: alt_hover_target_ clears, distance line
-    // disappears, command count drops back to baseline.
+    // wide root). If alt_hover_target_ stays set, the distance line still
+    // draws. When the target clears, the line disappears and command count
+    // drops back to baseline.
     MouseEvent enter_panel;
     enter_panel.position = {450, 50};
     enter_panel.modifiers = kModAlt;
@@ -1006,7 +1006,7 @@ TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
     REQUIRE(after_panel_entry.command_count() < with_line_count);
 }
 
-// ── Phase 3e — 20× zoom loupe ─────────────────────────────────────────────
+// ── Zoom loupe ────────────────────────────────────────────────────────────
 //
 // The loupe is a magnified-pixel preview panel toggled with the Z key.
 // It samples the region under the cursor (via Canvas::read_pixels() when
@@ -1016,7 +1016,7 @@ TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
 // NOT implement read_pixels(), so they all run the fallback path.
 
 TEST_CASE("InspectorOverlay: Z toggles the zoom loupe on and off",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
@@ -1042,7 +1042,7 @@ TEST_CASE("InspectorOverlay: Z toggles the zoom loupe on and off",
 }
 
 TEST_CASE("InspectorOverlay: dismissing the inspector closes the loupe",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
@@ -1057,7 +1057,7 @@ TEST_CASE("InspectorOverlay: dismissing the inspector closes the loupe",
 }
 
 TEST_CASE("InspectorOverlay: zoom panel renders extra commands when active",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
@@ -1086,7 +1086,7 @@ TEST_CASE("InspectorOverlay: zoom panel renders extra commands when active",
 }
 
 TEST_CASE("InspectorOverlay: loupe readout reflects the hovered position",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     // Wide root so the test cursor positions land in the canvas area
     // (left of the 300px-wide props panel that hugs the right edge).
     View root;
@@ -1126,7 +1126,7 @@ TEST_CASE("InspectorOverlay: loupe readout reflects the hovered position",
 }
 
 TEST_CASE("InspectorOverlay: loupe falls back to resolved view color",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     // RecordingCanvas has no read_pixels() — exercises the graceful
     // no-readback path. With a background-colored view under the
     // cursor, the center-pixel readout should resolve to that color.
@@ -1167,12 +1167,12 @@ TEST_CASE("InspectorOverlay: loupe falls back to resolved view color",
 }
 
 TEST_CASE("InspectorOverlay: zoom factor is clamped to a sane range",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
     InspectorOverlay overlay(root);
-    REQUIRE(overlay.zoom_factor() == 20);  // roadmap default
+    REQUIRE(overlay.zoom_factor() == 20);  // default loupe magnification
 
     overlay.set_zoom_factor(8);
     REQUIRE(overlay.zoom_factor() == 8);
@@ -1186,7 +1186,7 @@ TEST_CASE("InspectorOverlay: zoom factor is clamped to a sane range",
 }
 
 TEST_CASE("InspectorOverlay: loupe clamps the sample window at canvas edges",
-          "[inspect][overlay][phase3e]") {
+          "[inspect][overlay][loupe]") {
     // #2464 — a loupe centered within kZoomGridCells/2 pixels
     // of a canvas edge used to push the cells×cells read rect
     // out of bounds, so read_pixels() rejected the WHOLE block and the
@@ -1270,7 +1270,7 @@ TEST_CASE("InspectorOverlay: loupe clamps the sample window at canvas edges",
     REQUIRE(c2.b == Catch::Approx(192.0f / 255.0f));
 }
 
-// ── Phase 0b PR-C-1: gesture-tweak emission via TweakStore ────────────────
+// ── Gesture-tweak emission via TweakStore ─────────────────────────────────
 #include <pulp/inspect/tweak_store.hpp>
 #include <choc/containers/choc_Value.h>
 
@@ -1398,7 +1398,7 @@ TEST_CASE("InspectorOverlay: tweak_store() round-trips set_tweak_store",
     REQUIRE(overlay.tweak_store() == nullptr);
 }
 
-// ── Phase 2.5 — tweak management panel (Photoshop-layers style) ───────────
+// ── Tweak management panel ────────────────────────────────────────────────
 //
 // A panel listing every tweak in the attached TweakStore, with three
 // per-tweak icon controls: bypass / lock / delete. Toggled with `T`.
@@ -1432,9 +1432,9 @@ struct TweakPanelScene {
 
 }  // namespace
 
-TEST_CASE("InspectorOverlay Phase 2.5: Shift+T toggles the tweak management "
-          "panel (bare T moved to the Text tool, P3)",
-          "[inspect][overlay][phase2.5][phase3]") {
+TEST_CASE("InspectorOverlay: Shift+T toggles the tweak management panel "
+          "(bare T selects the Text tool)",
+          "[inspect][overlay][tweak-panel][tools]") {
     View root;
     root.set_bounds({0, 0, 600, 600});
     InspectorOverlay overlay(root);
@@ -1442,7 +1442,7 @@ TEST_CASE("InspectorOverlay Phase 2.5: Shift+T toggles the tweak management "
 
     REQUIRE_FALSE(overlay.tweaks_panel_visible());
 
-    // P3 reconcile: bare T now selects the Text tool, NOT the tweak panel.
+    // Keyboard contract: bare T selects the Text tool, NOT the tweak panel.
     KeyEvent t;
     t.key = KeyCode::t;
     t.is_down = true;
@@ -1462,8 +1462,8 @@ TEST_CASE("InspectorOverlay Phase 2.5: Shift+T toggles the tweak management "
     REQUIRE_FALSE(overlay.tweaks_panel_visible());
 }
 
-TEST_CASE("InspectorOverlay Phase 2.5: panel lays out a row per tweak",
-          "[inspect][overlay][phase2.5]") {
+TEST_CASE("InspectorOverlay: tweak panel lays out a row per tweak",
+          "[inspect][overlay][tweak-panel]") {
     TweakPanelScene scene;
     scene.overlay.toggle_tweaks_panel();
     REQUIRE(scene.overlay.tweaks_panel_visible());
@@ -1482,8 +1482,8 @@ TEST_CASE("InspectorOverlay Phase 2.5: panel lays out a row per tweak",
     REQUIRE(scene.overlay.tweak_row_count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 2.5: panel renders cleanly with no tweaks",
-          "[inspect][overlay][phase2.5]") {
+TEST_CASE("InspectorOverlay: tweak panel renders cleanly with no tweaks",
+          "[inspect][overlay][tweak-panel]") {
     View root;
     root.set_bounds({0, 0, 600, 600});
     TweakStore store;  // empty
@@ -1543,8 +1543,8 @@ bool sweep_click_icon(InspectorOverlay& overlay, View& root,
 
 }  // namespace
 
-TEST_CASE("InspectorOverlay Phase 2.5: clicking the bypass icon toggles bypass",
-          "[inspect][overlay][phase2.5]") {
+TEST_CASE("InspectorOverlay: clicking the tweak-panel bypass icon toggles bypass",
+          "[inspect][overlay][tweak-panel]") {
     TweakPanelScene scene;
     scene.overlay.toggle_tweaks_panel();
 
@@ -1555,8 +1555,8 @@ TEST_CASE("InspectorOverlay Phase 2.5: clicking the bypass icon toggles bypass",
     REQUIRE(flipped);
 }
 
-TEST_CASE("InspectorOverlay Phase 2.5: clicking the lock icon toggles lock",
-          "[inspect][overlay][phase2.5]") {
+TEST_CASE("InspectorOverlay: clicking the tweak-panel lock icon toggles lock",
+          "[inspect][overlay][tweak-panel]") {
     TweakPanelScene scene;
     scene.overlay.toggle_tweaks_panel();
 
@@ -1566,8 +1566,8 @@ TEST_CASE("InspectorOverlay Phase 2.5: clicking the lock icon toggles lock",
     REQUIRE(flipped);
 }
 
-TEST_CASE("InspectorOverlay Phase 2.5: clicking the delete icon removes a tweak",
-          "[inspect][overlay][phase2.5]") {
+TEST_CASE("InspectorOverlay: clicking the tweak-panel delete icon removes a tweak",
+          "[inspect][overlay][tweak-panel]") {
     TweakPanelScene scene;
     scene.overlay.toggle_tweaks_panel();
 
@@ -1577,9 +1577,9 @@ TEST_CASE("InspectorOverlay Phase 2.5: clicking the delete icon removes a tweak"
     REQUIRE(removed);
 }
 
-TEST_CASE("InspectorOverlay Phase 2.5: panel icon clicks are ignored when "
+TEST_CASE("InspectorOverlay: tweak-panel icon clicks are ignored when "
           "the panel is hidden",
-          "[inspect][overlay][phase2.5]") {
+          "[inspect][overlay][tweak-panel]") {
     TweakPanelScene scene;
     // Panel stays hidden — paint to clear any stale rows.
     pulp::canvas::RecordingCanvas canvas;
@@ -1595,7 +1595,7 @@ TEST_CASE("InspectorOverlay Phase 2.5: panel icon clicks are ignored when "
     REQUIRE(scene.store.locked_anchors().empty());
 }
 
-// ── Phase 0b PR-C-2: property panel dot indicators ─────────────────────────
+// ── Property panel dot indicators ───────────────────────────────────────────
 //
 // When the selected view has tweaks in the TweakStore, the property
 // panel renders a small dot in the gutter LEFT of the label row. The
@@ -1605,7 +1605,7 @@ TEST_CASE("InspectorOverlay Phase 2.5: panel icon clicks are ignored when "
 // fill_circle per tweaked row).
 
 TEST_CASE("InspectorOverlay: property panel paints dot when tweak exists",
-          "[inspect][overlay][dot-indicator][phase0b-prc2]") {
+          "[inspect][overlay][dot-indicator]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -1644,7 +1644,7 @@ TEST_CASE("InspectorOverlay: property panel paints dot when tweak exists",
 }
 
 TEST_CASE("InspectorOverlay: dot indicator absent without a TweakStore",
-          "[inspect][overlay][dot-indicator][phase0b-prc2]") {
+          "[inspect][overlay][dot-indicator]") {
     // Inspector running without a TweakStore wired (e.g. unit-test
     // contexts) must not crash and must not paint dots — they have no
     // data to drive them.
@@ -1673,10 +1673,10 @@ TEST_CASE("InspectorOverlay: dot indicator absent without a TweakStore",
 }
 
 TEST_CASE("InspectorOverlay: bypassed tweak suppresses dot",
-          "[inspect][overlay][dot-indicator][phase0b-prc2]") {
-    // Phase 2.5 / Codex spec: a path-scoped or whole-anchor bypass
-    // marks a tweak as "inactive" but keeps it in the file. The dot
-    // indicator must reflect bypass — no dot on bypassed rows.
+          "[inspect][overlay][dot-indicator]") {
+    // A path-scoped or whole-anchor bypass marks a tweak as "inactive"
+    // but keeps it in the file. The dot indicator must reflect bypass —
+    // no dot on bypassed rows.
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -1712,9 +1712,9 @@ TEST_CASE("InspectorOverlay: bypassed tweak suppresses dot",
     REQUIRE(bypassed.command_count() < with_dot_count);
 }
 
-// ── Phase 3a: drag handles ────────────────────────────────────────────────
+// ── Drag handles ──────────────────────────────────────────────────────────
 
-TEST_CASE("InspectorOverlay: drag handles default OFF", "[inspect][overlay][phase3a]") {
+TEST_CASE("InspectorOverlay: drag handles default OFF", "[inspect][overlay][drag-handles]") {
     View root;
     InspectorOverlay overlay(root);
     REQUIRE_FALSE(overlay.dragging_enabled());
@@ -1725,7 +1725,7 @@ TEST_CASE("InspectorOverlay: drag handles default OFF", "[inspect][overlay][phas
 }
 
 TEST_CASE("InspectorOverlay: 'D' key toggles drag handles only when active",
-          "[inspect][overlay][phase3a]") {
+          "[inspect][overlay][drag-handles]") {
     View root;
     InspectorOverlay overlay(root);
 
@@ -1745,7 +1745,7 @@ TEST_CASE("InspectorOverlay: 'D' key toggles drag handles only when active",
 }
 
 TEST_CASE("InspectorOverlay: drag from SE handle resizes view and emits tweaks",
-          "[inspect][overlay][phase3a][drag]") {
+          "[inspect][overlay][drag-handles][drag]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -1804,7 +1804,7 @@ TEST_CASE("InspectorOverlay: drag from SE handle resizes view and emits tweaks",
 }
 
 TEST_CASE("InspectorOverlay: NW handle drag resizes from top-left",
-          "[inspect][overlay][phase3a][drag]") {
+          "[inspect][overlay][drag-handles][drag]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -1841,7 +1841,7 @@ TEST_CASE("InspectorOverlay: NW handle drag resizes from top-left",
 }
 
 TEST_CASE("InspectorOverlay: drag handle hit-test no-op without enabled mode",
-          "[inspect][overlay][phase3a][drag]") {
+          "[inspect][overlay][drag-handles][drag]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -1874,7 +1874,7 @@ TEST_CASE("InspectorOverlay: drag handle hit-test no-op without enabled mode",
 }
 
 TEST_CASE("InspectorOverlay: drag handles paint when enabled + selected",
-          "[inspect][overlay][phase3a][drag]") {
+          "[inspect][overlay][drag-handles][drag]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -2353,17 +2353,17 @@ TEST_CASE("InspectorOverlay clear_edit_history empties the undo history",
     REQUIRE(history.undo_count() == 0);
 }
 
-// ── WYSIWYG sweep P1 — Cmd+Z UAF on live SUBTREE rebuild ─────────────────────
+// ── WYSIWYG — Cmd+Z UAF on live SUBTREE rebuild ─────────────────────────────
 //
 // clear_edit_history() only fires at ROOT replacement; a live React SUBTREE
-// rebuild (which frees the edited/reparented view but keeps the root) does NOT
-// trigger it. The pre-fix text-edit / reparent EditHistory closures captured
-// raw View*, so Cmd+Z after such a rebuild dereferenced freed memory. The fix
-// resolves anchored targets by stable anchor at replay time (re-finding the
-// CURRENT live view, or a graceful no-op if it's gone), and for un-anchored
-// targets clears the history when the tracked raw view leaves the tree.
+// rebuild frees the edited/reparented view but keeps the root, so it does NOT
+// trigger clearing. EditHistory closures must not capture raw View* because
+// Cmd+Z after such a rebuild would dereference freed memory. They resolve
+// anchored targets by stable anchor at replay time (re-finding the CURRENT
+// live view, or a graceful no-op if it's gone), and clear history for
+// un-anchored targets when the tracked raw view leaves the tree.
 
-TEST_CASE("WYSIWYG sweep P1: anchored text-edit undo resolves by anchor after "
+TEST_CASE("WYSIWYG anchored text-edit undo resolves by anchor after "
           "a subtree rebuild",
           "[inspect][overlay][wysiwyg][undo][uaf][issue-1737]") {
     View root;
@@ -2396,7 +2396,7 @@ TEST_CASE("WYSIWYG sweep P1: anchored text-edit undo resolves by anchor after "
 
     // ── Simulate a live SUBTREE rebuild: the old label is FREED and a NEW
     // view with the SAME anchor is wired in. (clear_edit_history() is NOT
-    // called — this is the seam the minimal P4 guard never covered.)
+    // called — this is the seam root-replacement clearing does not cover.)
     {
         auto removed = root.remove_child(label_ptr);  // frees old label here
         (void)removed;
@@ -2423,7 +2423,7 @@ TEST_CASE("WYSIWYG sweep P1: anchored text-edit undo resolves by anchor after "
     REQUIRE(rebuilt_ptr->text() == "New");
 }
 
-TEST_CASE("WYSIWYG sweep P1: un-anchored text-edit undo no-ops after the view "
+TEST_CASE("WYSIWYG un-anchored text-edit undo no-ops after the view "
           "is freed (history cleared on rebuild)",
           "[inspect][overlay][wysiwyg][undo][uaf][issue-1737]") {
     View root;
@@ -2468,7 +2468,7 @@ TEST_CASE("WYSIWYG sweep P1: un-anchored text-edit undo no-ops after the view "
     REQUIRE_NOTHROW(history.undo());
 }
 
-TEST_CASE("WYSIWYG sweep P1: anchored reparent undo no-ops after the moved view "
+TEST_CASE("WYSIWYG anchored reparent undo no-ops after the moved view "
           "is freed by a subtree rebuild",
           "[inspect][overlay][wysiwyg][undo][uaf][reparent][issue-1737]") {
     View root;
@@ -6736,15 +6736,15 @@ TEST_CASE("InspectorWindow T1: hover over a tool button shows its tooltip",
     }
 }
 
-// ── WYSIWYG caret-x — T2 regression ─────────────────────────────────────────
+// ── WYSIWYG caret-x — inherited letter-spacing + alignment ──────────────────
 //
 // The inspector text-edit overlay must draw the caret + selection band on the
 // EXACT glyphs the Label paints. The painter resolves INHERITED letter-spacing
 // (a parent's value when the Label sets none) and shifts the draw origin for
-// center / right alignment. A pre-fix overlay re-measured with the Label's OWN
-// fields (spacing 0) and anchored at the box's left edge, so a letter-spaced,
-// center/right-aligned label drew the caret a glyph early and the band offset
-// from the text. Label::text_edit_metrics now factors the same resolver, so:
+// center / right alignment. The overlay must not re-measure with the Label's
+// OWN fields (spacing 0) or anchor at the box's left edge, because that draws
+// the caret a glyph early and offsets the band from the text.
+// Label::text_edit_metrics factors the same resolver, so:
 //
 //   - inherited letter-spacing widens caret_x_by_byte (end ≈ shaped width),
 //   - caret_x_by_byte is monotonic non-decreasing,
@@ -6834,8 +6834,8 @@ TEST_CASE("WYSIWYG caret: inherited letter-spacing + alignment shift the band",
 
         // The selection band is the translucent-accent fill_rect. Its x must be
         // the label's root x + the center-shifted text origin (146 here, since
-        // the label sits at root x=0). A left-anchored (pre-fix) overlay would
-        // draw it at x≈0.
+        // the label sits at root x=0). A left-anchored overlay would draw it
+        // at x≈0, which is the bug this guards.
         const float expected_left = (400.0f - expected_w) * 0.5f;
         bool found_band = false;
         for (const auto& c : canvas.commands()) {
@@ -6850,15 +6850,14 @@ TEST_CASE("WYSIWYG caret: inherited letter-spacing + alignment shift the band",
     }
 }
 
-// ── WYSIWYG caret-x — font-variant feature regression (sweep P2) ─────────────
+// ── WYSIWYG caret-x — font-variant feature shaping ──────────────────────────
 //
 // Label::paint() applies the CSS font-variant CSV as SkShaper OpenType feature
 // tags (tabular-nums → tnum, small-caps → smcp, …) so HarfBuzz uses the
-// alternate glyph advances. A pre-fix text_edit_metrics() set the font + letter-
-// spacing but NOT the features, so for a font-variant label the caret/selection
-// x was shaped from the DEFAULT advances and drifted from the rendered glyphs.
-// The fix factors the feature setup into a shared apply_font_features() that
-// BOTH paint() and text_edit_metrics() call.
+// alternate glyph advances. For a font-variant label, the caret/selection x
+// must not be shaped from the DEFAULT advances and drift from the rendered
+// glyphs. A shared apply_font_features() is called by BOTH paint() and
+// text_edit_metrics().
 //
 // We prove it with a feature-aware spy canvas: when font features are active the
 // per-glyph advance widens (mirroring how tabular-nums forces a wider, uniform
@@ -6956,9 +6955,10 @@ TEST_CASE("WYSIWYG caret: empty font-variant leaves features clear",
 //       `scale(s,s)` about the top-left origin, so a glyph at element-local x
 //       renders on screen at s*x (origin 0,0 → screen_local = s*local). The
 //       overlay computes caret_x_by_byte / local_text_left at the UNSCALED
-//       font and view_bounds_in_root returns UNSCALED bounds, so a pre-fix
-//       overlay drew the caret short by the scale factor — the maintainer's
-//       "caret lands a glyph or two short after enlarging the field" bug.
+//       font and view_bounds_in_root returns UNSCALED bounds. Without applying
+//       the target's effective scale, the overlay draws the caret short by the
+//       scale factor (the "caret lands a glyph or two short after enlarging the
+//       field" bug).
 //
 // The overlay must apply the target's effective scale (and transform-origin)
 // to the caret x, selection band x/width, and band y/height so both modes
@@ -7056,7 +7056,7 @@ TEST_CASE("WYSIWYG caret: tracks rendered text after resize and scale",
         // With origin (0,0), View::paint_all renders glyph-local x at kScale*x.
         // So the full-string selection band must span [0, kScale*shaped_w] and
         // the end caret must sit at kScale*shaped_w — NOT the unscaled
-        // shaped_w (the pre-fix short-caret bug).
+        // shaped_w (the short-caret bug this guards).
         const float scaled_w = kScale * shaped_w;
         auto bands = scan(canvas, scaled_w);
         REQUIRE(bands.found_band);

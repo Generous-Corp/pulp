@@ -35,7 +35,7 @@
 /// (figma_rest_export.py) bake recognition for the BUILT-IN library at capture
 /// time; accepting a user manifest in those lanes too is a follow-up.
 ///
-/// ── Never-silent-knob contract (P7) ──────────────────────────────────────────
+/// ── Never-silent-knob contract ───────────────────────────────────────────────
 /// A component instance the resolver does NOT match is left exactly as parsed —
 /// it is never guessed into a wrong kind. `apply_to_figma_plugin_ir` reports the
 /// unmatched-but-present component instances so they surface in the import
@@ -161,7 +161,7 @@ int apply_recognition_resolver(IRNode& root,
                                const RecognitionResolver& resolver,
                                std::vector<UnmatchedComponent>* unmatched_out = nullptr);
 
-// ── Installed-package custom-control source (the P8 merge half) ───────────────
+// ── Installed-package custom-control source ───────────────────────────────────
 // Gather every installed package's `design_controls` fragments into recognition
 // sources the resolver consumes. A package declares custom controls in its
 // registry entry under `design_controls`: an array of
@@ -203,7 +203,7 @@ PackageDesignControlSources discover_package_design_controls(
 // `recognitionFactoryId` (see apply_recognition_resolver), append a
 // `kind=custom` IRInteractiveElement carrying that `factory_id` so the native
 // materializer builds the registered overlay — or renders inert + diagnoses
-// when the factory is unregistered (P7 Tier-3, never a silent knob). Geometry
+// when the factory is unregistered (never a silent knob). Geometry
 // is taken from the node's own box; `source_node_id` is carried so the
 // inspector can map the control back to its design node.
 //

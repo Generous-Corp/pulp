@@ -251,7 +251,7 @@ int apply_recursive(IRNode& node,
                     ++wired;
                 }
             } else if (unmatched_out) {
-                // Never-silent-knob (P7): a present-but-unmatched component is
+                // Never-silent-knob: a present-but-unmatched component is
                 // surfaced, never guessed. Dedup by component_key when present,
                 // else by the identity name — a detached/local component carries
                 // only figmaMainComponentName, not a component_key, and must
@@ -280,7 +280,7 @@ int apply_recognition_resolver(IRNode& root,
     return apply_recursive(root, resolver, unmatched_out, unmatched_seen);
 }
 
-// ── Installed-package custom-control source (the P8 merge half) ───────────────
+// ── Installed-package custom-control source ───────────────────────────────────
 
 namespace {
 

@@ -1,9 +1,9 @@
 //! Reference no-op native DSP core proving the Pulp native-component C ABI from
-//! Rust. TEST FIXTURE ONLY — not a shipped crate, not the `pulp-rust-sys` the
-//! spec generates with bindgen for real cores. To stay self-contained (no
-//! libclang/bindgen build dependency in the opt-in test lane), it hand-mirrors
-//! the handful of `#[repr(C)]` structs it actually exposes and types every
-//! pass-through struct pointer as a raw pointer (identical ABI). The C++ side
+//! Rust. TEST FIXTURE ONLY — not a shipped crate or generated binding layer. To
+//! stay self-contained (no libclang/bindgen build dependency in the opt-in test
+//! lane), it hand-mirrors the handful of `#[repr(C)]` structs it actually
+//! exposes and types every pass-through struct pointer as a raw pointer
+//! (identical ABI). The C++ side
 //! validates the descriptor/param fields it reads, so any layout drift fails
 //! loudly rather than silently.
 //!

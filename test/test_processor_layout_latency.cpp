@@ -97,7 +97,7 @@ public:
 
 TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo "
           "matching the descriptor's bus count",
-          "[processor][bus-layout][item-3.7]") {
+          "[processor][bus-layout]") {
     StereoEffect p;
 
     // Matches descriptor (1 in / 1 out, both stereo).
@@ -118,7 +118,7 @@ TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo
 
 TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
           "non-mono/stereo channel counts and bus-count mismatches",
-          "[processor][bus-layout][item-3.7]") {
+          "[processor][bus-layout]") {
     StereoEffect p;
 
     // 6-channel (5.1) is out of scope for the default validator.
@@ -139,7 +139,7 @@ TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
 
 TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
           "linked-sidechain contract",
-          "[processor][bus-layout][item-3.7]") {
+          "[processor][bus-layout]") {
     LinkedSidechainEffect p;
 
     // Stereo main + stereo sidechain + stereo out — all linked.
@@ -205,7 +205,7 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
 // ── Additive multi-bus process surface ───────────────────────────────────
 
 TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     float main_in_l[8] = {};
     float main_in_r[8] = {};
     float sidechain_l[8] = {};
@@ -250,7 +250,7 @@ TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio"
 }
 
 TEST_CASE("BusBufferSet looks up indexed and named aux buses",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     float main_l[4] = {};
     float main_r[4] = {};
     float cue_l[4] = {};
@@ -291,7 +291,7 @@ TEST_CASE("BusBufferSet looks up indexed and named aux buses",
 }
 
 TEST_CASE("ProcessBuffers accepts inactive optional buses with empty views",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     float main_in_l[4] = {};
     float main_in_r[4] = {};
     float main_out_l[4] = {};
@@ -328,7 +328,7 @@ TEST_CASE("ProcessBuffers accepts inactive optional buses with empty views",
 }
 
 TEST_CASE("ProcessBuffers reports layout and storage mismatches before process",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     float left[4] = {};
     const float* missing_channel[2] = {left, nullptr};
     std::array<ProcessBusBufferView<const float>, 1> inputs{{
@@ -357,7 +357,7 @@ TEST_CASE("ProcessBuffers reports layout and storage mismatches before process",
 }
 
 TEST_CASE("Processor multi-bus overload projects to the legacy process callback",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     ProjectingProcessor processor;
     float in_l[4] = {2.0f, 0.0f, 0.0f, 0.0f};
     float in_r[4] = {};
@@ -404,7 +404,7 @@ TEST_CASE("Processor multi-bus overload projects to the legacy process callback"
 }
 
 TEST_CASE("Processor multi-bus overload no-ops when no active main output exists",
-          "[processor][process-buffers][phase2]") {
+          "[processor][process-buffers]") {
     ProjectingProcessor processor;
     float in_l[4] = {};
     const float* in_ptrs[1] = {in_l};
@@ -436,7 +436,7 @@ TEST_CASE("Processor multi-bus overload no-ops when no active main output exists
 // ── Runtime mode contract ─────────────────────────────────────────────────
 
 TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predicates",
-          "[processor][process-context][phase2]") {
+          "[processor][process-context]") {
     ProcessContext ctx;
 
     REQUIRE(ctx.process_mode == ProcessMode::Realtime);
@@ -463,7 +463,7 @@ TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predica
 }
 
 TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
-          "[processor][process-context][phase2]") {
+          "[processor][process-context]") {
     ProcessContext ctx;
 
     ctx.transport_jump = true;
@@ -488,7 +488,7 @@ TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
 
 TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "
           "yields exactly one consume per flag",
-          "[processor][latency][item-3.11]") {
+          "[processor][latency]") {
     StereoEffect p;
     REQUIRE_FALSE(p.consume_latency_changed_flag());
     p.flag_latency_changed();
@@ -499,7 +499,7 @@ TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "
 
 TEST_CASE("flag_tail_changed / consume_tail_changed_flag round-trip "
           "yields exactly one consume per flag",
-          "[processor][latency][item-3.11]") {
+          "[processor][latency]") {
     StereoEffect p;
     REQUIRE_FALSE(p.consume_tail_changed_flag());
     p.flag_tail_changed();
@@ -509,7 +509,7 @@ TEST_CASE("flag_tail_changed / consume_tail_changed_flag round-trip "
 
 TEST_CASE("latency_change_pending / tail_change_pending peek does not "
           "drain the flag",
-          "[processor][latency][item-3.11]") {
+          "[processor][latency]") {
     StereoEffect p;
     p.flag_latency_changed();
     p.flag_tail_changed();
@@ -527,7 +527,7 @@ TEST_CASE("latency_change_pending / tail_change_pending peek does not "
 
 TEST_CASE("flag_*_changed -> consume_*_changed_flag is data-race-free "
           "when the flag is set from one thread and drained from another",
-          "[processor][latency][item-3.11][threading]") {
+          "[processor][latency][threading]") {
     // Hammer the flag from an "audio" thread and drain from a "main"
     // thread. The contract: every drain that observes `true` corresponds
     // to at least one preceding set, and we never observe undefined

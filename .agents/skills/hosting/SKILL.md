@@ -137,9 +137,25 @@ predictable output, no MIDI.
   empty audio views for MIDI-only slots. Override the `ProcessBuffers` overload
   when a hosted format or fixture needs direct bus metadata for sidechains,
   auxes, surround, or multi-output products.
-- **Canonical-executor routing (opt-in, default OFF).** An eligible graph —
-  nodes only AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
-  carry a LIVE slot) / MidiInput / MidiOutput, connections audio (feedforward,
+- **Canonical-executor routing (DEFAULT ON; `set_canonical_executor_routing_enabled`
+  toggles it).** The routed executor is the primary inter-node backend for every
+  eligible graph; it is bit-identical to the legacy walk for that subset AND reports
+  the same per-node `node_loads()` telemetry (the executor times each node's work via
+  a per-binding `AudioProcessLoadMeasurer` wired from the host's persistent node-load
+  map), so the default-ON flip is behaviour-preserving where it takes effect. Force it
+  OFF to render the walk — the routed-vs-walk parity oracles (`run_legacy`,
+  `signal_graph_block`) do that so the walk stays an independent reference. **EVERY
+  node kind SignalGraph produces is now eligible** — the only remaining walk triggers
+  are an unprepared graph or a routed snapshot/pool BUILD failure (e.g. a topology past
+  `GraphRuntimeLimits`); the walk is the deliberate reference/fallback for those, the
+  independent parity oracle, and is NOT slated for deletion. An eligible graph —
+  nodes AudioInput / AudioOutput / Gain / Plugin (a Plugin with NO live slot routes as
+  pass-through-or-zero via `custom_binding(nullptr)`, exactly matching the walk's
+  missing-plugin behavior) / MidiInput / MidiOutput / **Custom** (`CustomNodeType`,
+  stateless `process` or stateful `process_instance`; routed via `custom_binding`,
+  an unresolved/shape-mismatch custom node pass-through-or-zeros exactly as the
+  walk does; custom output regions are pinned `persistent_output` like plugins so
+  a partial writer keeps its stale tail), connections audio (feedforward,
   one-block feedback, or sidechain — a sidechain edge routes as plain audio into
   a higher input port of the destination plugin), MIDI (connect_midi event
   edges), or parameter automation — sparse (connect_automation, two control
@@ -399,6 +415,41 @@ Gotchas:
 - Keep the executor/parallel/anticipation opt-ins OFF for partition-invariance
   fixtures — anticipation in particular is intentionally not block-size invariant.
 
+## Baking a graph to a `Processor` (`BakedGraphProcessor`)
+
+`core/host/baked_graph_processor.{hpp,cpp}` — `bake(const SignalGraph&)` freezes a
+prepared, fully-lowerable graph into one `pulp::format::Processor` that runs a frozen
+`GraphRuntimeSnapshot` through the SAME `GraphRuntimeExecutor::process_routed()` the
+live graph uses, so baked output is bit-identical to the live graph for the lowerable
+subset. The artifact is a *serialized fused plan* (data), not generated code — it
+reuses the one backend, so the baked Processor only CALLS `process_routed`, never
+defines a routing entry point.
+
+Gotchas:
+- **Lowerable subset is narrow by design.** Today: `AudioInput`/`AudioOutput`/`Gain`
+  only. `bake()` REFUSES loudly (null processor + a `LowerRejectReason`) for an
+  unprepared or executor-ineligible graph, a hosted `Plugin` node (opaque external
+  state — not self-contained), or a `Custom` node (lowering is a follow-up). The
+  node-kind refusals are checked BEFORE the eligibility predicate so a Plugin/Custom
+  graph reports its specific reason instead of a generic `NotExecutorEligible`.
+- **The baked Processor owns its Gain values.** `bake()` copies each Gain's value into
+  the Processor; `prepare()` seeds one heap-stable `atomic<float>` per Gain (a
+  `unique_ptr` vector, never a value vector) and resolves the routed Gain bindings to
+  those owned atomics — so the baked Processor is independent of the source graph's
+  live snapshot lifetime. A second `prepare()` clears the old snapshot/pool/atomics
+  before rebuilding, so binding pointers never dangle.
+- **Sizing mirrors live routing.** `prepare()` builds the snapshot via the same
+  `build_executor_snapshot()` the live routing uses and sizes the pool from
+  `buffer_slot_count()` × `max_buffer_size` plus the per-connection PDC rings, so
+  `process()` is allocation-free.
+- **bake() captures topology + gain values, not hot runtime state.** The baked
+  Processor builds fresh feedback/delay/scratch in `prepare()` and starts from zero;
+  a source graph that has already processed blocks does not transfer its feedback
+  history. The parity proof covers both directions — baked output is bit-exact to the
+  live graph's legacy WALK and to its routed executor (the test asserts the walk case
+  explicitly by forcing routing OFF, since canonical-executor routing is now ON by
+  default).
+
 ## Common tripwires
 
 - Building `pulp-host` without adding a new `.cpp` to `target_sources` —
@@ -431,6 +482,18 @@ Gotchas:
   or an un-capacity-limited `MidiBuffer` is outside the contract. No-alloc
   coverage lives in `test_host.cpp` ("ClapSlot::process is allocation-free
   after prepare() reserves"), gated on `PULP_TEST_CLAP_PATH`.
+- The AU slot (`plugin_slot_au.mm`) has the same rule for its output
+  `AudioBufferList`: `AuSlot::process` builds an ABL pointing at the caller's
+  channels every block. Size the backing `abl_storage_` once in `prepare()`
+  (`num_channels_`) via `au_internal::reserve_audio_buffer_list` and only
+  *refill* it per block (`fill_output_audio_buffer_list`) — never allocate a
+  fresh `std::vector` in `process()`. The ABL build lives in
+  `plugin_slot_au_internal.hpp` so its no-alloc invariant is unit-tested
+  (pointer-stable across thousands of refills) without a live AU;
+  `test_plugin_slot_au.mm` additionally drives a real system Apple effect AU
+  through `process()` (skips honestly when none is registered — headless CI
+  may surface no AUs). Do NOT assert `allocs==0` over `AudioUnitRender` itself
+  (Apple allocates internally); assert the reuse invariant on our buffer.
 - The VST3 slot has the same channel-vector issue *plus* extra per-block
   allocation inside the Steinberg helper containers it builds each block
   (`Vst::ParameterChanges` / `EventList` from `public.sdk/.../hosting`), so

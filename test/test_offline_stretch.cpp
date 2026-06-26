@@ -261,7 +261,7 @@ TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)",
     CHECK(std::sqrt(e / m) < 1e-7);
 }
 
-TEST_CASE("Phase 1 safety + determinism (tempo path)", "[offline-stretch]") {
+TEST_CASE("tempo path is safe and deterministic", "[offline-stretch]") {
     const double sr = 48000.0;
 
     SECTION("silence in -> silence out") {
@@ -582,7 +582,7 @@ TEST_CASE("varispeed: identity at ratio 1, exact length, tape EQ direction", "[o
     }
 }
 
-TEST_CASE("scaffold characters render valid output (clean fallback)", "[offline-stretch]") {
+TEST_CASE("reserved characters render valid output (clean fallback)", "[offline-stretch]") {
     using pulp::signal::StretchCharacter;
     const double sr = 48000.0; const long n = 12000;
     const auto in = sine(n, sr, 440.0, 0.5f);
