@@ -123,6 +123,17 @@ resample, no EQ) vs `--character clean` (time-stretch).
   limiter) without attenuating the whole buffer — so the make-up survives and the
   engine never emits |x|>1. Test: broadband RMS within ~0.02 dB of source across
   0.5–2x, peak ≤ 1.0, a sine NOT inflated.
+- **Onset soft-start** (`restore_onset_head`): the PV reconstructs a hard onset at
+  sample 0 from an EMPTY analysis history (the Hann edge is ~0), so the attack ramps
+  up over ~fft/2 samples (~10 ms percussive) — the first ~10 ms is too quiet. The
+  length-lock trim aligns input[0]→output[0] but does NOT remove the ramp, and
+  `detect_onsets` structurally misses a sample-0 attack (no flux RISE), so
+  `relocate_transients` can't fix it. Graft the input's leading attack over the head
+  (~10 ms, `kHeadMs`) with an equal-power crossfade (input[0] is the true sample — no
+  peak search needed). No-op when the input head is silent (a real fade-in,
+  `kHeadEps`) or the PV didn't lose the attack (`kHeadRatio`). Runs tempo_stretch →
+  relocate → **restore_onset_head** → match_spectral_rms (the make-up's interior-RMS
+  window excludes the head; its soft-clip bounds the grafted peak).
 
 ## Fine-tune + share a preset (`StretchPreset`)
 

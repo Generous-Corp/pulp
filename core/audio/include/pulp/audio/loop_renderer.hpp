@@ -25,6 +25,11 @@ public:
     void stop() noexcept;
 
     void set_playback_rate(double rate) noexcept;
+    // Change the loop playback mode in place, preserving the current position — so a
+    // sustaining voice can switch Forward<->OneShot without restarting (e.g. a LOOP
+    // toggle acting on already-held notes). Does not re-arm fades or reset position.
+    void set_playback_mode(LoopPlaybackMode mode) noexcept { region_.playback_mode = mode; }
+    LoopPlaybackMode playback_mode() const noexcept { return region_.playback_mode; }
     void set_start_fade_frames(std::uint64_t frames) noexcept { start_fade_frames_ = frames; }
     void set_stop_fade_frames(std::uint64_t frames) noexcept { stop_fade_frames_ = frames; }
 

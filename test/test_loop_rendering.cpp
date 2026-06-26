@@ -90,6 +90,35 @@ TEST_CASE("LoopRenderer renders forward and reverse loops",
     REQUIRE(output.channel(0)[4] == 3.0f);
 }
 
+TEST_CASE("LoopRenderer set_playback_mode flips Forward<->OneShot in place",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i + 1);  // 1,2,3,4
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::Forward;
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+
+    Buffer<float> out(1, 3);
+    auto r1 = renderer.render(input, out.view(), 3);  // 1,2,3 ; position now 3
+    REQUIRE_FALSE(r1.wrapped);
+    REQUIRE(out.channel(0)[2] == 3.0f);
+
+    // Flip to OneShot WITHOUT set_region: position must be preserved (no restart) and
+    // it must stop at the end instead of looping back.
+    renderer.set_playback_mode(LoopPlaybackMode::OneShot);
+    REQUIRE(renderer.playback_mode() == LoopPlaybackMode::OneShot);
+    auto r2 = renderer.render(input, out.view(), 3);
+    REQUIRE_FALSE(r2.wrapped);
+    REQUIRE(out.channel(0)[0] == 4.0f);  // continued from the preserved position, not restarted at 1
+    REQUIRE(out.channel(0)[1] == 0.0f);  // one-shot ended -> silence (did not wrap to the start)
+}
+
 TEST_CASE("LoopRenderer renders one-shots and fades deterministically",
           "[audio][loop][render]") {
     Buffer<float> source(1, 4);

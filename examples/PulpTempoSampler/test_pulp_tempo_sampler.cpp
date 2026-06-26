@@ -610,6 +610,46 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
     REQUIRE(f.proc->num_slices() > low);
 }
 
+// LOOP acts on currently-HELD notes: press a note, let its one-shot finish, then
+// engage LOOP (without re-pressing) and it loops; disengage LOOP while still held
+// and it stops. Natural expected behaviour.
+TEST_CASE("LOOP toggle engages/disengages a currently-held note",
+          "[tempo-sampler][issue-loop-held]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);                       // start one-shot
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Press + HOLD note 60 (slice 0); play the one-shot out until it goes silent.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double tail = 0.0;
+    for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        tail = block_energy(l); }
+    CHECK(tail < 1e-6);   // one-shot finished + silent, but the key is STILL held (no note-off)
+
+    // Engage LOOP while held -> it re-engages looping with no re-press.
+    f.store.set_value(kTempoLoop, 1.0f);
+    double looped = 0.0;
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        looped += block_energy(l); }
+    CHECK(looped > 1e-3);
+
+    // Disengage LOOP while still held -> looping stops (finishes the pass, then silent).
+    f.store.set_value(kTempoLoop, 0.0f);
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    double after = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);
+}
+
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
 // guard) and every cut snapped to a zero-crossing so slice edges don't click.
 TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",

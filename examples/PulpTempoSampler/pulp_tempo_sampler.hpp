@@ -1312,6 +1312,36 @@ public:
                 if (voice.active && voice.sustained) { voice.release(); voice.sustained = false; }
         sustain_prev_ = pedal;
 
+        // LOOP toggle acts on currently-HELD notes (the natural expectation): turning
+        // it ON engages looping for every held note — re-triggering even a finished
+        // one-shot so you don't have to re-press the key; turning it OFF switches
+        // active voices to OneShot so a held loop stops at the end of its current pass
+        // (no restart, no click). The held set is keyed by note-on/off, so a key still
+        // physically down is "held" even if its one-shot already played through.
+        if (params.loop != loop_prev_) {
+            if (params.loop) {
+                for (int n = 0; n < 128; ++n) {
+                    if (held_velocity_[static_cast<size_t>(n)] <= 0.0f) continue;
+                    bool has = false;
+                    for (auto& v : voices_)
+                        if (v.active && v.note == n && !v.released) {
+                            v.region.playback_mode = audio::LoopPlaybackMode::Forward;
+                            v.renderer.set_playback_mode(audio::LoopPlaybackMode::Forward);
+                            has = true;
+                        }
+                    if (!has && can_trigger)
+                        trigger_note(n, held_velocity_[static_cast<size_t>(n)], published, params);
+                }
+            } else {
+                for (auto& v : voices_)
+                    if (v.active) {
+                        v.region.playback_mode = audio::LoopPlaybackMode::OneShot;
+                        v.renderer.set_playback_mode(audio::LoopPlaybackMode::OneShot);
+                    }
+            }
+            loop_prev_ = params.loop;
+        }
+
         // Drain UI-injected notes (slice clicks / musical typing) at block start.
         while (auto n = ui_notes_.try_pop()) {
             if (n->on) {
@@ -1823,9 +1853,11 @@ private:
         // Buffer is already at host tempo -> play at native rate (1.0).
         target->start(note, velocity, 1.0, host_sample_rate_, sample, *region, sample.num_frames);
         last_note_ = note;  // most-recently-triggered note drives the playhead
+        if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = velocity;
     }
 
     void release_note(int note) {
+        if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
             if (voice.active && voice.note == note && !voice.released) {
@@ -1868,6 +1900,10 @@ private:
     static constexpr float kVibratoSemis = 0.4f;     // peak vibrato at full mod
     static constexpr float kVibratoHz = 5.5f;        // vibrato LFO rate
     bool sustain_prev_ = false;   // audio-thread-only: pedal falling-edge detect
+    bool loop_prev_ = false;      // audio-thread-only: LOOP-param edge detect
+    // Velocity of each currently-held MIDI note (0 = not held), keyed by note-on/off
+    // so a LOOP toggle can (re)engage looping on held keys. Audio-thread only.
+    float held_velocity_[128] = {};
     double mod_lfo_phase_ = 0.0;  // audio-thread-only: vibrato LFO phase (radians)
 
     // Raw loop + analysis (guarded by raw_mutex_)
