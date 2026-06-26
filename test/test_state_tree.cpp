@@ -55,7 +55,7 @@ TEST_CASE("StateTree typed getters keep defaults for mismatched property types",
 }
 
 TEST_CASE("StateTree typed getters fall back on mismatched property types",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto tree = StateTree::create("test");
     tree->set("bool_value", true);
     tree->set("int_value", int64_t(9));
@@ -153,7 +153,7 @@ TEST_CASE("StateTree child access and removal ignore invalid indexes",
 }
 
 TEST_CASE("StateTree child removal ignores invalid inputs and clears parent",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     auto child = StateTree::create("child");
     auto stranger = StateTree::create("stranger");
@@ -200,7 +200,7 @@ TEST_CASE("StateTree insert at end and missing child pointer removal are stable"
 }
 
 TEST_CASE("StateTree child insertion clamps invalid indexes and skips null children",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     root->add_child(nullptr);
     root->insert_child(10, nullptr);
@@ -215,7 +215,7 @@ TEST_CASE("StateTree child insertion clamps invalid indexes and skips null child
 }
 
 TEST_CASE("StateTree reparenting detaches children from the old parent",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto old_parent = StateTree::create("old");
     auto new_parent = StateTree::create("new");
     auto sibling = StateTree::create("sibling");
@@ -244,7 +244,7 @@ TEST_CASE("StateTree reparenting detaches children from the old parent",
 }
 
 TEST_CASE("StateTree insert reparents children at the requested new index",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto old_parent = StateTree::create("old");
     auto new_parent = StateTree::create("new");
     auto first = StateTree::create("first");
@@ -266,7 +266,7 @@ TEST_CASE("StateTree insert reparents children at the requested new index",
 }
 
 TEST_CASE("StateTree child insertion listeners observe clamped indexes",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     std::vector<int> indexes;
     std::vector<std::string> names;
@@ -390,7 +390,7 @@ TEST_CASE("StateTree child listener removal stops callbacks", "[state][tree]") {
 }
 
 TEST_CASE("StateTree removing missing listener ids is a no-op",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     auto child = StateTree::create("child");
 
@@ -454,7 +454,7 @@ TEST_CASE("StateTree remove listener", "[state][tree]") {
 }
 
 TEST_CASE("StateTree remove notifies listeners with cleared value",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto tree = StateTree::create("test");
     tree->set("gain", 0.75);
 
@@ -479,7 +479,7 @@ TEST_CASE("StateTree remove notifies listeners with cleared value",
 }
 
 TEST_CASE("StateTree skips empty listeners",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     int property_count = 0;
     int added_count = 0;
@@ -582,7 +582,7 @@ TEST_CASE("StateTree JSON round-trip", "[state][tree][json]") {
 }
 
 TEST_CASE("StateTree JSON round-trip preserves escaped strings",
-          "[state][tree][json][coverage]") {
+          "[state][tree][json]") {
     auto root = StateTree::create(R"(preset "A")");
     root->set(R"(display\name)", std::string("Line 1\nLine \"2\" \\ tail"));
 
@@ -652,7 +652,7 @@ TEST_CASE("StateTree from_json skips unsupported properties and child values",
 }
 
 TEST_CASE("StateTree from_json ignores malformed members and children",
-          "[state][tree][json][coverage]") {
+          "[state][tree][json]") {
     auto non_object = StateTree::from_json("[]");
     REQUIRE(non_object == nullptr);
 
@@ -684,7 +684,7 @@ TEST_CASE("StateTree from_json ignores malformed members and children",
 }
 
 TEST_CASE("StateTree JSON keeps integer values available as doubles",
-          "[state][tree][json][coverage]") {
+          "[state][tree][json]") {
     auto result = StateTree::from_json(R"({
         "type": "numbers",
         "properties": {
@@ -702,7 +702,7 @@ TEST_CASE("StateTree JSON keeps integer values available as doubles",
 }
 
 TEST_CASE("StateTree JSON serialization skips explicit null properties",
-          "[state][tree][json][coverage]") {
+          "[state][tree][json]") {
     auto tree = StateTree::create("root");
     tree->set("nullable", PropertyValue{});
     tree->set("name", std::string("kept"));
@@ -748,7 +748,7 @@ TEST_CASE("StateTree deep copy rewires child parent pointers",
 }
 
 TEST_CASE("StateTree deep copy does not copy listeners",
-          "[state][tree][coverage]") {
+          "[state][tree]") {
     auto root = StateTree::create("root");
     auto child = StateTree::create("child");
     root->add_child(child);
@@ -828,7 +828,7 @@ TEST_CASE("ObservableValue remove listener", "[state][observable]") {
 }
 
 TEST_CASE("ObservableValue removing a missing listener keeps active listeners",
-          "[state][observable][coverage]") {
+          "[state][observable]") {
     ObservableValue<int> val(1);
     int old_value = 0;
     int new_value = 0;
@@ -869,7 +869,7 @@ TEST_CASE("ObservableValue assignment operator emits one change",
     REQUIRE(count == 1);
 }
 
-TEST_CASE("ObservableValue skips empty listeners", "[state][observable][coverage]") {
+TEST_CASE("ObservableValue skips empty listeners", "[state][observable]") {
     ObservableValue<int> val(1);
     int count = 0;
 
@@ -885,7 +885,7 @@ TEST_CASE("ObservableValue skips empty listeners", "[state][observable][coverage
 }
 
 TEST_CASE("ObservableValue removing an unknown listener is a no-op",
-          "[state][observable][coverage]") {
+          "[state][observable]") {
     ObservableValue<int> val(1);
     int count = 0;
     val.add_listener([&](const int&, const int&) { ++count; });
@@ -953,7 +953,7 @@ TEST_CASE("CachedProperty unbound set only updates local cache", "[state][cached
 }
 
 TEST_CASE("CachedProperty move of unbound property preserves cached value",
-          "[state][cached][coverage]") {
+          "[state][cached]") {
     CachedProperty<int64_t> size;
     size.set(256);
 
@@ -964,7 +964,7 @@ TEST_CASE("CachedProperty move of unbound property preserves cached value",
 }
 
 TEST_CASE("CachedProperty unbound refresh leaves the local cache unchanged",
-          "[state][cached][coverage]") {
+          "[state][cached]") {
     CachedProperty<std::string> label;
 
     REQUIRE_FALSE(label.is_bound());
@@ -988,7 +988,7 @@ TEST_CASE("CachedProperty ignores mismatched external updates",
 }
 
 TEST_CASE("CachedProperty destruction removes its StateTree listener",
-          "[state][cached][coverage]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     tree->set("gain", 0.25);
 
@@ -1011,7 +1011,7 @@ TEST_CASE("CachedProperty destruction removes its StateTree listener",
 }
 
 TEST_CASE("CachedProperty bool ignores mismatched refresh values",
-          "[state][cached][coverage][large]") {
+          "[state][cached][large]") {
     auto tree = StateTree::create("params");
     tree->set("enabled", true);
     CachedProperty<bool> enabled(tree, "enabled", false);
@@ -1028,7 +1028,7 @@ TEST_CASE("CachedProperty bool ignores mismatched refresh values",
 }
 
 TEST_CASE("CachedProperty int64 move tracks later tree updates",
-          "[state][cached][coverage][large]") {
+          "[state][cached][large]") {
     auto tree = StateTree::create("params");
     tree->set("voices", int64_t(8));
     CachedProperty<int64_t> voices(tree, "voices", 1);
@@ -1041,7 +1041,7 @@ TEST_CASE("CachedProperty int64 move tracks later tree updates",
 }
 
 TEST_CASE("CachedProperty int refresh preserves cache on incompatible values",
-          "[state][cached][coverage]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     CachedProperty<int64_t> count(tree, "count", 4);
 
@@ -1106,7 +1106,7 @@ TEST_CASE("StateTreeSynchroniser attach replaces the previous tree",
     REQUIRE(std::get<std::string>(deltas[0].value) == "recorded");
 }
 
-TEST_CASE("StateTreeSynchroniser records property removals", "[state][sync][coverage]") {
+TEST_CASE("StateTreeSynchroniser records property removals", "[state][sync]") {
     auto tree = StateTree::create("root");
     tree->set("name", std::string("Lead"));
 
@@ -1125,7 +1125,7 @@ TEST_CASE("StateTreeSynchroniser records property removals", "[state][sync][cove
 }
 
 TEST_CASE("StateTreeSynchroniser preserves explicit null property sets",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto tree = StateTree::create("root");
 
     StateTreeSynchroniser sync;
@@ -1162,7 +1162,7 @@ TEST_CASE("StateTreeSynchroniser detach clears pending and stops recording", "[s
 }
 
 TEST_CASE("StateTreeSynchroniser attach nullptr detaches existing listeners",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto tree = StateTree::create("root");
     StateTreeSynchroniser sync;
     sync.attach(tree);
@@ -1244,7 +1244,7 @@ TEST_CASE("StateTreeSynchroniser decode keeps complete prefix on truncated batch
 }
 
 TEST_CASE("StateTreeSynchroniser preserves negative child indexes in encoding",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     std::vector<SyncDelta> deltas = {
         {SyncDeltaType::ChildAdd, "root", "child", {}, -1},
         {SyncDeltaType::ChildRemove, "root", "", {}, -1},
@@ -1259,7 +1259,7 @@ TEST_CASE("StateTreeSynchroniser preserves negative child indexes in encoding",
 }
 
 TEST_CASE("StateTreeSynchroniser decode treats unknown value types as null",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     SyncDelta delta{SyncDeltaType::PropertySet, "root", "mystery", {}, -1};
     auto encoded = StateTreeSynchroniser::encode({delta});
     REQUIRE_FALSE(encoded.empty());
@@ -1273,7 +1273,7 @@ TEST_CASE("StateTreeSynchroniser decode treats unknown value types as null",
 }
 
 TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     const std::vector<SyncDelta> cases = {
         {SyncDeltaType::PropertySet, "root", "name", std::string("Lead"), -1},
         {SyncDeltaType::PropertySet, "root", "count", int64_t(42), -1},
@@ -1292,7 +1292,7 @@ TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
 }
 
 TEST_CASE("StateTreeSynchroniser decode preserves negative child indexes",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     std::vector<SyncDelta> deltas = {
         {SyncDeltaType::ChildRemove, "root", "", {}, -1},
         {SyncDeltaType::ChildAdd, "root", "tail", {}, -2},
@@ -1309,7 +1309,7 @@ TEST_CASE("StateTreeSynchroniser decode preserves negative child indexes",
 }
 
 TEST_CASE("StateTreeSynchroniser decode rejects malformed delta framing",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto one_delta_prefix = [] {
         return std::vector<uint8_t>{1, 0, static_cast<uint8_t>(SyncDeltaType::PropertySet)};
     };
@@ -1371,7 +1371,7 @@ TEST_CASE("StateTreeSynchroniser decode rejects malformed delta framing",
 }
 
 TEST_CASE("StateTreeSynchroniser decode keeps available deltas when count is too large",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     SyncDelta delta{SyncDeltaType::PropertySet, "0", "gain", 0.75, -1};
     auto encoded = StateTreeSynchroniser::encode({delta});
     encoded[0] = 3;
@@ -1413,7 +1413,7 @@ TEST_CASE("StateTreeSynchroniser apply mutates properties and children", "[state
 }
 
 TEST_CASE("StateTreeSynchroniser apply skips malformed and unreachable paths",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto root = StateTree::create("root");
     auto child = StateTree::create("child");
     root->add_child(child);
@@ -1443,7 +1443,7 @@ TEST_CASE("StateTreeSynchroniser apply skips malformed and unreachable paths",
 }
 
 TEST_CASE("StateTreeSynchroniser observes descendants of newly added subtrees",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto root = StateTree::create("root");
     auto bank = StateTree::create("bank");
     auto voice = StateTree::create("voice");
@@ -1469,7 +1469,7 @@ TEST_CASE("StateTreeSynchroniser observes descendants of newly added subtrees",
 }
 
 TEST_CASE("StateTreeSynchroniser detaches removed subtrees before later mutations",
-          "[state][sync][coverage]") {
+          "[state][sync]") {
     auto root = StateTree::create("root");
     auto child = StateTree::create("child");
     auto grandchild = StateTree::create("grandchild");
