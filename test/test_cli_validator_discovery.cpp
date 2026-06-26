@@ -240,7 +240,7 @@ TEST_CASE("apply_fixes on user-owned broken copy actually removes the file",
     REQUIRE(outcome.auto_fixed == 1);
     REQUIRE_FALSE(fs::exists(fake));
     // After a successful fix the status should flip to Missing so the
-    // post-fix render advises reinstall.
+    // refreshed render advises reinstall.
     REQUIRE(reports.front().status == vd::ValidatorStatus::Missing);
     REQUIRE(reports.front().remediation.find("brew install") !=
             std::string::npos);
@@ -374,9 +374,9 @@ TEST_CASE("broken validator with unknown ownership requires manual sudo path",
 }
 
 TEST_CASE("apply_fixes preserves Broken status when fs::remove fails",
-          "[doctor][validators][issue-743][codex-p1]") {
-    // PR #749. If fs::remove fails (permission
-    // flip mid-doctor, sticky bit, racing process) we MUST NOT report
+          "[doctor][validators][issue-743]") {
+    // If fs::remove fails (permission flip mid-doctor, sticky bit,
+    // racing process) we MUST NOT report
     // success — the broken binary is still on disk and `pulp validate`
     // will keep aborting. The fix counts as still_missing, the report
     // stays Broken with an "auto-fix failed" reason, and auto_fixed
@@ -421,12 +421,11 @@ TEST_CASE("apply_fixes preserves Broken status when fs::remove fails",
 }
 
 TEST_CASE("discovery skips non-executable candidates and falls through to runnable paths",
-          "[doctor][validators][issue-743][codex-p2]") {
-    // PR #749. If a high-priority path exists
-    // but is not executable (zero-byte placeholder, world-writable
-    // text file someone left behind), discovery should skip it and
-    // continue scanning the priority list rather than picking a
-    // garbage file and reporting it as Healthy or Broken.
+          "[doctor][validators][issue-743]") {
+    // If a high-priority path exists but is not executable (zero-byte
+    // placeholder, world-writable text file someone left behind), discovery
+    // should skip it and continue scanning the priority list rather than
+    // picking a garbage file and reporting it as Healthy or Broken.
     StubEnv env;
     // pluginval: a stale non-exec file at the rip target, AND a
     // perfectly healthy cask bundle copy further down the list.
