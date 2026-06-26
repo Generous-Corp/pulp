@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05050"></a>
+## [0.505.0] - 2026-06-26
+
+- fix(signal): high-pass the transient graft (kills blown-out deep hits at stretch) ([#4969](https://github.com/danielraffel/pulp/pull/4969))
+- docs(test): refresh audio primitive selector tags ([#4962](https://github.com/danielraffel/pulp/pull/4962))
+- test: keep Cmajor edge tests Python 3.9 compatible ([#4964](https://github.com/danielraffel/pulp/pull/4964))
+
 <a id="v05040"></a>
 ## [0.504.0] - 2026-06-26
 
@@ -5282,6 +5289,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.505.0]: https://github.com/danielraffel/pulp/releases/tag/v0.505.0
 [0.504.0]: https://github.com/danielraffel/pulp/releases/tag/v0.504.0
 [0.503.0]: https://github.com/danielraffel/pulp/releases/tag/v0.503.0
 [0.502.0]: https://github.com/danielraffel/pulp/releases/tag/v0.502.0
