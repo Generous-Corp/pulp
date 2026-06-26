@@ -152,7 +152,7 @@ bool wait_for_predicate(Predicate&& predicate, std::chrono::milliseconds timeout
 // ── HighResolutionTimer ─────────────────────────────────────────────────
 
 TEST_CASE("HighResolutionTimer self-stop remains joinable for destruction",
-          "[runtime][timer][coverage]") {
+          "[runtime][timer]") {
     std::atomic<bool> stop_returned{false};
 
     {
@@ -173,7 +173,7 @@ TEST_CASE("HighResolutionTimer self-stop remains joinable for destruction",
 }
 
 TEST_CASE("HighResolutionTimer self-stop supports callback-owned destruction",
-          "[runtime][timer][coverage]") {
+          "[runtime][timer]") {
     std::atomic<bool> destroyed{false};
     auto timer = std::make_unique<HighResolutionTimer>();
 
@@ -192,7 +192,7 @@ TEST_CASE("HighResolutionTimer self-stop supports callback-owned destruction",
 // ── Identity ────────────────────────────────────────────────────────────
 
 TEST_CASE("Uuid parses canonical and compact forms",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     const auto canonical = std::string("12345678-90ab-4def-8123-456789abcdef");
     const auto compact = std::string("1234567890ab4def8123456789abcdef");
 
@@ -206,7 +206,7 @@ TEST_CASE("Uuid parses canonical and compact forms",
 }
 
 TEST_CASE("Uuid parser rejects malformed hex and dash placement",
-          "[runtime][identity][coverage]") {
+          "[runtime][identity]") {
     REQUIRE(Uuid::from_string("").is_nil());
     REQUIRE(Uuid::from_string("1234567890ab4def8123456789abcdez").is_nil());
     REQUIRE(Uuid::from_string("12345678-90ab-4def-8123-456789abcdez").is_nil());
@@ -217,7 +217,7 @@ TEST_CASE("Uuid parser rejects malformed hex and dash placement",
 // ── ScopeGuard ─────────────────────────────────────────────────────────
 
 TEST_CASE("ScopeGuard runs once on scope exit and can be dismissed",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -233,7 +233,7 @@ TEST_CASE("ScopeGuard runs once on scope exit and can be dismissed",
 }
 
 TEST_CASE("ScopeGuard move transfers ownership and disables source",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto first = make_scope_guard([&] { ++calls; });
@@ -247,7 +247,7 @@ TEST_CASE("ScopeGuard move transfers ownership and disables source",
 }
 
 TEST_CASE("ScopeGuard move transfers the active cleanup",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -258,7 +258,7 @@ TEST_CASE("ScopeGuard move transfers the active cleanup",
 }
 
 TEST_CASE("PULP_ON_SCOPE_EXIT macro creates independent guards",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         PULP_ON_SCOPE_EXIT(++calls;);
@@ -269,7 +269,7 @@ TEST_CASE("PULP_ON_SCOPE_EXIT macro creates independent guards",
 }
 
 TEST_CASE("PULP_ON_SCOPE_EXIT macro captures local state",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int value = 0;
     {
         PULP_ON_SCOPE_EXIT(value += 7;);
@@ -281,7 +281,7 @@ TEST_CASE("PULP_ON_SCOPE_EXIT macro captures local state",
 // ── ScopedNoAlloc ───────────────────────────────────────────────────────
 
 TEST_CASE("ScopedNoAlloc tracks nested scope depth on the current thread",
-          "[runtime][scoped_no_alloc][coverage]") {
+          "[runtime][scoped_no_alloc]") {
     REQUIRE(no_alloc_scope_depth() == 0);
     REQUIRE_FALSE(is_in_no_alloc_scope());
 
@@ -320,7 +320,7 @@ TEST_CASE("ScopedNoAlloc tracks nested scope depth on the current thread",
 }
 
 TEST_CASE("ScopedNoAlloc state is thread-local",
-          "[runtime][scoped_no_alloc][coverage]") {
+          "[runtime][scoped_no_alloc]") {
     ScopedNoAlloc main_scope;
 
     int worker_initial_depth = -1;
@@ -393,7 +393,7 @@ TEST_CASE("TemporaryFile move semantics", "[runtime][temp_file]") {
 }
 
 TEST_CASE("TemporaryFile normalizes extensions without leading dots",
-          "[runtime][temp_file][issue-641]") {
+          "[runtime][temp_file]") {
     TemporaryFile tmp("raw");
     REQUIRE(tmp.path().extension() == ".raw");
     REQUIRE(tmp.path_string() == tmp.path().string());
@@ -401,7 +401,7 @@ TEST_CASE("TemporaryFile normalizes extensions without leading dots",
 }
 
 TEST_CASE("TemporaryFile supports extensionless paths",
-          "[runtime][temp_file][coverage]") {
+          "[runtime][temp_file]") {
     std::filesystem::path path;
     {
         TemporaryFile tmp;
@@ -415,7 +415,7 @@ TEST_CASE("TemporaryFile supports extensionless paths",
 }
 
 TEST_CASE("TemporaryFile treats separator characters as extension text",
-          "[runtime][temp_file][coverage]") {
+          "[runtime][temp_file]") {
     TemporaryFile tmp("nested/name\\raw");
 
     REQUIRE(tmp.path().filename().string().find('/') == std::string::npos);
@@ -425,7 +425,7 @@ TEST_CASE("TemporaryFile treats separator characters as extension text",
 }
 
 TEST_CASE("TemporaryFile move assignment removes the previous active file",
-          "[runtime][temp_file][issue-641]") {
+          "[runtime][temp_file]") {
     std::filesystem::path old_path;
     std::filesystem::path new_path;
     {
@@ -444,7 +444,7 @@ TEST_CASE("TemporaryFile move assignment removes the previous active file",
 }
 
 TEST_CASE("TemporaryFile self move assignment preserves ownership",
-          "[runtime][temp_file][issue-641]") {
+          "[runtime][temp_file]") {
     std::filesystem::path path;
     {
         TemporaryFile tmp(".self");
@@ -459,7 +459,7 @@ TEST_CASE("TemporaryFile self move assignment preserves ownership",
 }
 
 TEST_CASE("ScopeGuard dismiss and move control destructor execution",
-          "[runtime][scope_guard][coverage]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -517,7 +517,7 @@ TEST_CASE("MemoryMappedFile move semantics", "[runtime][mmap]") {
 }
 
 TEST_CASE("MemoryMappedFile reopen closes the previous mapping",
-          "[runtime][mmap][issue-641]") {
+          "[runtime][mmap]") {
     TemporaryFile first(".bin");
     TemporaryFile second(".bin");
     {
@@ -539,7 +539,7 @@ TEST_CASE("MemoryMappedFile reopen closes the previous mapping",
 }
 
 TEST_CASE("MemoryMappedFile ReadWrite mode persists byte edits",
-          "[runtime][mmap][coverage][issue-641]") {
+          "[runtime][mmap]") {
     TemporaryFile tmp(".bin");
     {
         std::ofstream f(tmp.path(), std::ios::binary);
@@ -564,7 +564,7 @@ TEST_CASE("MemoryMappedFile ReadWrite mode persists byte edits",
 }
 
 TEST_CASE("MemoryMappedFile open failure clears an existing mapping",
-          "[runtime][mmap][coverage][issue-641]") {
+          "[runtime][mmap]") {
     TemporaryFile mapped(".bin");
     {
         std::ofstream f(mapped.path(), std::ios::binary);
@@ -585,7 +585,7 @@ TEST_CASE("MemoryMappedFile open failure clears an existing mapping",
 }
 
 TEST_CASE("MemoryMappedFile read-write maps persist and move assignment closes old map",
-          "[runtime][mmap][coverage][issue-656]") {
+          "[runtime][mmap]") {
     TemporaryFile first(".bin");
     TemporaryFile second(".bin");
     {
@@ -620,7 +620,7 @@ TEST_CASE("MemoryMappedFile read-write maps persist and move assignment closes o
 }
 
 TEST_CASE("MemoryMappedFile self move assignment preserves the active map",
-          "[runtime][mmap][coverage]") {
+          "[runtime][mmap]") {
     TemporaryFile tmp(".bin");
     {
         std::ofstream f(tmp.path(), std::ios::binary);
@@ -642,7 +642,7 @@ TEST_CASE("MemoryMappedFile self move assignment preserves the active map",
 }
 
 TEST_CASE("MemoryMappedFile rejects empty files and close is idempotent",
-          "[runtime][mmap][coverage][issue-656]") {
+          "[runtime][mmap]") {
     TemporaryFile tmp(".bin");
 
     MemoryMappedFile mmap;
@@ -656,7 +656,7 @@ TEST_CASE("MemoryMappedFile rejects empty files and close is idempotent",
 }
 
 TEST_CASE("MemoryMappedFile self move assignment preserves mapping",
-          "[runtime][mmap][coverage]") {
+          "[runtime][mmap]") {
     TemporaryFile tmp(".bin");
     {
         std::ofstream f(tmp.path(), std::ios::binary);
@@ -675,7 +675,7 @@ TEST_CASE("MemoryMappedFile self move assignment preserves mapping",
 
 #ifndef _WIN32
 TEST_CASE("MemoryMappedFile rejects directory paths after opening",
-          "[runtime][mmap][coverage]") {
+          "[runtime][mmap]") {
     TemporaryFile marker(".dir");
     const auto dir = marker.path();
     marker.release();
@@ -721,7 +721,7 @@ TEST_CASE("DynamicLibrary fails on nonexistent", "[runtime][dynlib]") {
 }
 
 TEST_CASE("DynamicLibrary closed lookup is null and close is idempotent",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE_FALSE(lib.is_open());
     REQUIRE(lib.find_symbol(system_library_symbol()) == nullptr);
@@ -730,7 +730,7 @@ TEST_CASE("DynamicLibrary closed lookup is null and close is idempotent",
 }
 
 TEST_CASE("DynamicLibrary missing symbol lookup records an error",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE(lib.open(system_library_path()));
 
@@ -739,7 +739,7 @@ TEST_CASE("DynamicLibrary missing symbol lookup records an error",
 }
 
 TEST_CASE("DynamicLibrary move construction transfers the handle",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.find_symbol(system_library_symbol()) != nullptr);
@@ -751,7 +751,7 @@ TEST_CASE("DynamicLibrary move construction transfers the handle",
 }
 
 TEST_CASE("DynamicLibrary move assignment closes target and transfers source",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary target;
     DynamicLibrary source;
     REQUIRE(target.open(system_library_path()));
@@ -765,7 +765,7 @@ TEST_CASE("DynamicLibrary move assignment closes target and transfers source",
 }
 
 TEST_CASE("DynamicLibrary self move assignment preserves open handle",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.is_open());
@@ -779,7 +779,7 @@ TEST_CASE("DynamicLibrary self move assignment preserves open handle",
 }
 
 TEST_CASE("DynamicLibrary failed reopen clears a previously loaded handle",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.is_open());
@@ -790,7 +790,7 @@ TEST_CASE("DynamicLibrary failed reopen clears a previously loaded handle",
 }
 
 TEST_CASE("DynamicLibrary missing symbol records an error while staying open",
-          "[runtime][dynlib][coverage]") {
+          "[runtime][dynlib]") {
     DynamicLibrary lib;
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.is_open());
@@ -820,7 +820,7 @@ TEST_CASE("InterProcessLock double lock succeeds", "[runtime][ipc_lock]") {
 }
 
 TEST_CASE("InterProcessLock unlock is idempotent and permits reacquire",
-          "[runtime][ipc_lock][coverage][issue-641]") {
+          "[runtime][ipc_lock]") {
     InterProcessLock lock("test_lock_reacquire");
     REQUIRE_FALSE(lock.is_locked());
 
@@ -839,7 +839,7 @@ TEST_CASE("InterProcessLock unlock is idempotent and permits reacquire",
 }
 
 TEST_CASE("InterProcessLock competing instance waits for release",
-          "[runtime][ipc_lock][coverage]") {
+          "[runtime][ipc_lock]") {
     const auto name = "test_lock_competing";
     InterProcessLock first(name);
     InterProcessLock second(name);
@@ -853,7 +853,7 @@ TEST_CASE("InterProcessLock competing instance waits for release",
 }
 
 TEST_CASE("InterProcessLock reports open failure for missing parent paths",
-          "[runtime][ipc_lock][coverage]") {
+          "[runtime][ipc_lock]") {
     TemporaryFile marker(".lock-parent");
     const auto unique = marker.path().filename().string();
     marker.release();
@@ -899,7 +899,7 @@ TEST_CASE("run_process captures exit code", "[runtime][child_process]") {
 }
 
 TEST_CASE("run_process captures stderr separately",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
 #ifdef _WIN32
     auto result = run_process("powershell", {"-NoProfile", "-Command", "[Console]::Error.WriteLine('bad-news'); exit 7"});
 #else
@@ -911,7 +911,7 @@ TEST_CASE("run_process captures stderr separately",
 }
 
 TEST_CASE("run_process captures stdout and stderr from one child",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
 #ifdef _WIN32
     auto result = run_process("powershell",
         {"-NoProfile", "-Command",
@@ -927,7 +927,7 @@ TEST_CASE("run_process captures stdout and stderr from one child",
 }
 
 TEST_CASE("run_process preserves output beyond the platform child default cap",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
     constexpr auto expected_size = (1u << 20) + 4096u;
 
 #ifdef _WIN32
@@ -949,7 +949,7 @@ TEST_CASE("run_process preserves output beyond the platform child default cap",
 }
 
 TEST_CASE("run_process honors working directory and preserves spaced arguments",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
     TemporaryFile marker(".cwd");
     const auto dir = marker.path();
     marker.release();
@@ -981,7 +981,7 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
 }
 
 TEST_CASE("run_process rejects missing working directories",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
     TemporaryFile marker(".missing-working-dir");
     const auto missing_path = marker.path();
@@ -1014,7 +1014,7 @@ TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
 }
 
 TEST_CASE("run_process terminates POSIX children on timeout",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
 #if defined(_WIN32) || defined(__ANDROID__)
     SUCCEED("POSIX timeout termination is covered on macOS/Linux");
 #else
@@ -1030,7 +1030,7 @@ TEST_CASE("run_process terminates POSIX children on timeout",
 }
 
 TEST_CASE("run_process preserves POSIX output captured before timeout",
-          "[runtime][child_process][coverage]") {
+          "[runtime][child_process]") {
 #if defined(_WIN32) || defined(__ANDROID__)
     SUCCEED("POSIX timeout output preservation is covered on macOS/Linux");
 #else
@@ -1046,7 +1046,7 @@ TEST_CASE("run_process preserves POSIX output captured before timeout",
 // ── Stream ──────────────────────────────────────────────────────────────
 
 TEST_CASE("MemoryStream rejects nonzero null buffers",
-          "[runtime][stream][coverage]") {
+          "[runtime][stream]") {
     MemoryStream stream({1, 2, 3});
 
     auto read_result = stream.read(nullptr, 1);
@@ -1064,7 +1064,7 @@ TEST_CASE("MemoryStream rejects nonzero null buffers",
 }
 
 TEST_CASE("FileStream rejects nonzero null buffers",
-          "[runtime][stream][coverage]") {
+          "[runtime][stream]") {
     TemporaryFile tmp(".bin");
 
     FileStream writer(tmp.path_string(), FileStream::Mode::Write);
@@ -1111,7 +1111,7 @@ TEST_CASE("base64 decode invalid", "[runtime][base64]") {
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64][issue-641]") {
+TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64]") {
     REQUIRE_FALSE(base64_decode("A").has_value());
     REQUIRE_FALSE(base64_decode("YQ=").has_value());
     REQUIRE_FALSE(base64_decode("Y=Q=").has_value());
@@ -1120,13 +1120,13 @@ TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64][issue-64
     REQUIRE_FALSE(base64_decode("====").has_value());
 }
 
-TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime][base64][issue-641]") {
+TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime][base64]") {
     auto decoded = base64_decode(" YQ = = \n");
     REQUIRE(decoded.has_value());
     REQUIRE(std::string(decoded->begin(), decoded->end()) == "a");
 }
 
-TEST_CASE("base64 decode handles whitespace and unpadded tail groups", "[runtime][base64][issue-641]") {
+TEST_CASE("base64 decode handles whitespace and unpadded tail groups", "[runtime][base64]") {
     auto empty = base64_decode(" \n\r\t");
     REQUIRE(empty.has_value());
     REQUIRE(empty->empty());
@@ -1144,7 +1144,7 @@ TEST_CASE("base64 decode handles whitespace and unpadded tail groups", "[runtime
     REQUIRE(std::string(with_whitespace->begin(), with_whitespace->end()) == "Hello");
 }
 
-TEST_CASE("base64 decode rejects non-ascii bytes", "[runtime][base64][issue-641]") {
+TEST_CASE("base64 decode rejects non-ascii bytes", "[runtime][base64]") {
     std::string encoded = "YQ";
     encoded.push_back(static_cast<char>(0x80));
     REQUIRE_FALSE(base64_decode(encoded).has_value());
@@ -1159,7 +1159,7 @@ TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
 }
 
 TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
-          "[runtime][base64][coverage][issue-641]") {
+          "[runtime][base64]") {
     REQUIRE(base64_encode(nullptr, 0) == "");
     REQUIRE(base64_encode(nullptr, 3) == "");
 
@@ -1178,7 +1178,7 @@ TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
 }
 
 TEST_CASE("base64 rejects URL-safe alphabet and misplaced padding across whitespace",
-          "[runtime][base64][coverage][large]") {
+          "[runtime][base64][large]") {
     REQUIRE_FALSE(base64_decode("SGVsbG8-").has_value());
     REQUIRE_FALSE(base64_decode("SGVsbG8_").has_value());
     REQUIRE_FALSE(base64_decode("YQ=\n=Z").has_value());
@@ -1192,7 +1192,7 @@ TEST_CASE("base64 rejects URL-safe alphabet and misplaced padding across whitesp
 // ── IP address helpers ─────────────────────────────────────────────────
 
 TEST_CASE("IPv4 validation accepts boundary octets",
-          "[runtime][ip][coverage]") {
+          "[runtime][ip]") {
     REQUIRE(is_valid_ipv4("0.0.0.0"));
     REQUIRE(is_valid_ipv4("127.0.0.1"));
     REQUIRE(is_valid_ipv4("192.168.1.20"));
@@ -1200,7 +1200,7 @@ TEST_CASE("IPv4 validation accepts boundary octets",
 }
 
 TEST_CASE("IPv4 validation rejects malformed octet counts",
-          "[runtime][ip][coverage]") {
+          "[runtime][ip]") {
     REQUIRE_FALSE(is_valid_ipv4(""));
     REQUIRE_FALSE(is_valid_ipv4("127.0.0"));
     REQUIRE_FALSE(is_valid_ipv4("127.0.0.1.2"));
@@ -1208,7 +1208,7 @@ TEST_CASE("IPv4 validation rejects malformed octet counts",
 }
 
 TEST_CASE("IPv4 validation rejects out-of-range and signed octets",
-          "[runtime][ip][coverage]") {
+          "[runtime][ip]") {
     REQUIRE_FALSE(is_valid_ipv4("256.0.0.1"));
     REQUIRE_FALSE(is_valid_ipv4("1.2.3.-4"));
     REQUIRE_FALSE(is_valid_ipv4("+1.2.3.4"));
@@ -1216,7 +1216,7 @@ TEST_CASE("IPv4 validation rejects out-of-range and signed octets",
 }
 
 TEST_CASE("IPv4 validation rejects whitespace-padded addresses",
-          "[runtime][ip][coverage]") {
+          "[runtime][ip]") {
     REQUIRE_FALSE(is_valid_ipv4(" 127.0.0.1"));
     REQUIRE_FALSE(is_valid_ipv4("127.0.0.1 "));
     REQUIRE_FALSE(is_valid_ipv4("127.0.0.1\n"));
@@ -1224,7 +1224,7 @@ TEST_CASE("IPv4 validation rejects whitespace-padded addresses",
 }
 
 TEST_CASE("base64 decodes final quantum without padding",
-          "[runtime][base64][coverage]") {
+          "[runtime][base64]") {
     auto one = base64_decode("TQ");
     REQUIRE(one.has_value());
     REQUIRE(*one == std::vector<uint8_t>{'M'});
@@ -1235,7 +1235,7 @@ TEST_CASE("base64 decodes final quantum without padding",
 }
 
 TEST_CASE("base64 decodes mixed full quartets and unpadded tails",
-          "[runtime][base64][coverage]") {
+          "[runtime][base64]") {
     auto one_tail = base64_decode("TWFuYQ");
     REQUIRE(one_tail.has_value());
     REQUIRE(std::string(one_tail->begin(), one_tail->end()) == "Mana");
@@ -1246,7 +1246,7 @@ TEST_CASE("base64 decodes mixed full quartets and unpadded tails",
 }
 
 TEST_CASE("base64 covers full alphabet and padded binary tails",
-          "[runtime][base64][coverage][large]") {
+          "[runtime][base64][large]") {
     const uint8_t alphabet_bytes[] = {
         0x00, 0x10, 0x83, 0x10, 0x51, 0x87, 0x20, 0x92,
         0x8b, 0x30, 0xd3, 0x8f, 0x41, 0x14, 0x93, 0x51,
@@ -1270,7 +1270,7 @@ TEST_CASE("base64 covers full alphabet and padded binary tails",
 }
 
 TEST_CASE("base64 decode tolerates whitespace inside unpadded input",
-          "[runtime][base64][coverage][large]") {
+          "[runtime][base64][large]") {
     auto decoded = base64_decode("\n Y W J \t j Z A \r");
     REQUIRE(decoded.has_value());
     REQUIRE(std::string(decoded->begin(), decoded->end()) == "abcd");
@@ -1279,7 +1279,7 @@ TEST_CASE("base64 decode tolerates whitespace inside unpadded input",
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
-          "[runtime][expression][coverage][issue-641]") {
+          "[runtime][expression]") {
     auto value = evaluate("2 + 3 * 4 ^ 2");
     REQUIRE(value.has_value());
     REQUIRE(*value == Catch::Approx(50.0));
@@ -1294,7 +1294,7 @@ TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
 }
 
 TEST_CASE("Expression evaluator handles constants, functions, and scientific notation",
-          "[runtime][expression][coverage][issue-641]") {
+          "[runtime][expression]") {
     auto trig = evaluate("sin(pi / 2) + cos(0)");
     REQUIRE(trig.has_value());
     REQUIRE(*trig == Catch::Approx(2.0));
@@ -1309,7 +1309,7 @@ TEST_CASE("Expression evaluator handles constants, functions, and scientific not
 }
 
 TEST_CASE("Expression evaluator covers remaining built-in math functions",
-          "[runtime][expression][codecov]") {
+          "[runtime][expression]") {
     auto builtins = evaluate("tan(0) + sqrt(9) + abs(-4) + log(e) + log10(100) + exp(0) + floor(2.9) + ceil(2.1) + round(2.5)");
     REQUIRE(builtins.has_value());
     REQUIRE(*builtins == Catch::Approx(19.0));
@@ -1332,7 +1332,7 @@ TEST_CASE("Expression evaluator covers remaining built-in math functions",
 }
 
 TEST_CASE("Expression evaluator covers built-in math function variants",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto value = evaluate("abs(-3) + floor(1.9) + ceil(2.1) + round(2.6)");
     REQUIRE(value.has_value());
     REQUIRE(*value == Catch::Approx(10.0));
@@ -1347,7 +1347,7 @@ TEST_CASE("Expression evaluator covers built-in math function variants",
 }
 
 TEST_CASE("Expression evaluator treats division by zero as silent zero",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto direct = evaluate("12 / 0");
     REQUIRE(direct.has_value());
     REQUIRE(*direct == Catch::Approx(0.0));
@@ -1358,7 +1358,7 @@ TEST_CASE("Expression evaluator treats division by zero as silent zero",
 }
 
 TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs",
-          "[runtime][expression][coverage][issue-641]") {
+          "[runtime][expression]") {
     auto variable = evaluate("gain * 2 + offset", {{"gain", 0.75}, {"offset", 0.25}});
     REQUIRE(variable.has_value());
     REQUIRE(*variable == Catch::Approx(1.75));
@@ -1376,7 +1376,7 @@ TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs"
 }
 
 TEST_CASE("Expression evaluator rejects malformed decimal tokens",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     REQUIRE_FALSE(evaluate(".").has_value());
     REQUIRE_FALSE(evaluate("1..2").has_value());
     REQUIRE_FALSE(evaluate("1.2.3").has_value());
@@ -1384,7 +1384,7 @@ TEST_CASE("Expression evaluator rejects malformed decimal tokens",
 }
 
 TEST_CASE("Expression evaluator handles unary plus division by zero and identifiers",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto value = evaluate("+gain_1 / zero", {{"gain_1", 12.0}, {"zero", 0.0}});
     REQUIRE(value.has_value());
     REQUIRE(*value == Catch::Approx(0.0));
@@ -1394,7 +1394,7 @@ TEST_CASE("Expression evaluator handles unary plus division by zero and identifi
 }
 
 TEST_CASE("ExpressionEvaluator stores variables and clears them",
-          "[runtime][expression][coverage][issue-641]") {
+          "[runtime][expression]") {
     ExpressionEvaluator evaluator;
     evaluator.set("x", 4.0);
     evaluator.set("y", 2.5);
@@ -1412,7 +1412,7 @@ TEST_CASE("ExpressionEvaluator stores variables and clears them",
 }
 
 TEST_CASE("ExpressionEvaluator dispatches registered unary functions",
-          "[runtime][expression][coverage][issue-641]") {
+          "[runtime][expression]") {
     ExpressionEvaluator evaluator;
     evaluator.register_function("db_to_gain", [](double db) {
         return std::pow(10.0, db / 20.0);
@@ -1426,7 +1426,7 @@ TEST_CASE("ExpressionEvaluator dispatches registered unary functions",
 }
 
 TEST_CASE("ExpressionEvaluator rejects extra arguments for custom unary functions",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     ExpressionEvaluator evaluator;
     evaluator.register_function("double_it", [](double value) {
         return value * 2.0;
@@ -1440,7 +1440,7 @@ TEST_CASE("ExpressionEvaluator rejects extra arguments for custom unary function
 }
 
 TEST_CASE("Expression evaluator handles binary math functions",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto minimum = evaluate("min(9, 4)");
     REQUIRE(minimum.has_value());
     REQUIRE(*minimum == Catch::Approx(4.0));
@@ -1455,14 +1455,14 @@ TEST_CASE("Expression evaluator handles binary math functions",
 }
 
 TEST_CASE("Expression evaluator tolerates whitespace around tokens",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto value = evaluate("  ( 1 + 2 ) *\t3  ");
     REQUIRE(value.has_value());
     REQUIRE(*value == Catch::Approx(9.0));
 }
 
 TEST_CASE("ExpressionEvaluator replaces registered unary functions",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     ExpressionEvaluator evaluator;
     evaluator.register_function("shape", [](double x) { return x + 1.0; });
     REQUIRE(*evaluator.evaluate("shape(4)") == Catch::Approx(5.0));
@@ -1472,7 +1472,7 @@ TEST_CASE("ExpressionEvaluator replaces registered unary functions",
 }
 
 TEST_CASE("ExpressionEvaluator variables can be overwritten",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     ExpressionEvaluator evaluator;
     evaluator.set("amount", 1.5);
     REQUIRE(*evaluator.evaluate("amount + 1") == Catch::Approx(2.5));
@@ -1483,21 +1483,21 @@ TEST_CASE("ExpressionEvaluator variables can be overwritten",
 }
 
 TEST_CASE("Expression evaluator rejects trailing operators",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     REQUIRE_FALSE(evaluate("1 +").has_value());
     REQUIRE_FALSE(evaluate("2 *").has_value());
     REQUIRE_FALSE(evaluate("pow(2,)").has_value());
 }
 
 TEST_CASE("Expression evaluator handles nested function calls",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto value = evaluate("max(min(10, 4), abs(-7))");
     REQUIRE(value.has_value());
     REQUIRE(*value == Catch::Approx(7.0));
 }
 
 TEST_CASE("Expression evaluator covers multi-argument builtins",
-          "[runtime][expression][coverage][large]") {
+          "[runtime][expression][large]") {
     REQUIRE(evaluate("min(5, 3)") == Catch::Approx(3.0));
     REQUIRE(evaluate("max(5, 3)") == Catch::Approx(5.0));
     REQUIRE(evaluate("pow(2, 5)") == Catch::Approx(32.0));
@@ -1506,7 +1506,7 @@ TEST_CASE("Expression evaluator covers multi-argument builtins",
 }
 
 TEST_CASE("Expression evaluator rejects incomplete multi-argument calls",
-          "[runtime][expression][coverage][large]") {
+          "[runtime][expression][large]") {
     REQUIRE_FALSE(evaluate("min(1)").has_value());
     REQUIRE_FALSE(evaluate("max(1)").has_value());
     REQUIRE_FALSE(evaluate("pow(2)").has_value());
@@ -1516,7 +1516,7 @@ TEST_CASE("Expression evaluator rejects incomplete multi-argument calls",
 // ── ScopeGuard ─────────────────────────────────────────────────────────
 
 TEST_CASE("ScopeGuard dismiss and move transfer ownership",
-          "[runtime][scope_guard][coverage][large]") {
+          "[runtime][scope_guard][large]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -1533,7 +1533,7 @@ TEST_CASE("ScopeGuard dismiss and move transfer ownership",
 }
 
 TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
-          "[runtime][scope_guard][coverage][large]") {
+          "[runtime][scope_guard][large]") {
     int value = 0;
     {
         PULP_ON_SCOPE_EXIT(value = 42);
@@ -1543,7 +1543,7 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
 }
 
 TEST_CASE("Expression evaluator treats chained powers as right associative",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto chained = evaluate("2 ^ 3 ^ 2");
     REQUIRE(chained.has_value());
     REQUIRE(*chained == Catch::Approx(512.0));
@@ -1558,7 +1558,7 @@ TEST_CASE("Expression evaluator treats chained powers as right associative",
 }
 
 TEST_CASE("Expression evaluator handles unary plus and division by zero",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     auto positive = evaluate(" \t +e + +2 ");
     REQUIRE(positive.has_value());
     REQUIRE(*positive == Catch::Approx(4.718281828459045));
@@ -1571,7 +1571,7 @@ TEST_CASE("Expression evaluator handles unary plus and division by zero",
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
-          "[runtime][http][url][issue-641]") {
+          "[runtime][http][url]") {
     const auto get_response = http_get("ftp://example.com/file", 1);
     REQUIRE(get_response.status_code == 0);
     REQUIRE(get_response.error == "Invalid URL");
@@ -1584,7 +1584,7 @@ TEST_CASE("HTTP helpers reject malformed URLs without transport work",
 }
 
 TEST_CASE("HTTP helpers reject invalid numeric URL ports",
-          "[runtime][http][url][issue-641]") {
+          "[runtime][http][url]") {
     const auto zero_port = http_get("http://example.com:0/path", 1);
     REQUIRE(zero_port.status_code == 0);
     REQUIRE(zero_port.error == "Invalid URL");
@@ -1598,7 +1598,7 @@ TEST_CASE("HTTP helpers reject invalid numeric URL ports",
     REQUIRE(too_large_port.error == "Invalid URL");
 }
 
-TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url][coverage][issue-656]") {
+TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url]") {
     HttpResponse response;
     response.status_code = 199;
     REQUIRE_FALSE(response.ok());
@@ -1613,7 +1613,7 @@ TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url]
 }
 
 TEST_CASE("HTTP helpers reject malformed URL hosts and schemes",
-          "[runtime][http][url][coverage][issue-656]") {
+          "[runtime][http][url]") {
     REQUIRE(http_get("https://:443/path", 1).error == "Invalid URL");
     REQUIRE(http_get("http://example.com:not-a-port/path", 1).error == "Invalid URL");
     REQUIRE(http_post("file://example.com/path", "body", "text/plain", 1).error == "Invalid URL");
@@ -1621,14 +1621,14 @@ TEST_CASE("HTTP helpers reject malformed URL hosts and schemes",
 }
 
 TEST_CASE("HTTP helpers accept case-insensitive URL schemes during parsing",
-          "[runtime][http][url][coverage]") {
+          "[runtime][http][url]") {
     const auto response = http_get("HTTP://127.0.0.1:1/path", 1);
     REQUIRE(response.status_code == 0);
     REQUIRE(response.error != "Invalid URL");
 }
 
 TEST_CASE("HTTP helpers report POST transport failures",
-          "[runtime][http][url][coverage]") {
+          "[runtime][http][url]") {
     const auto response = http_post("http://127.0.0.1:1/closed",
                                     "body",
                                     "text/plain",
@@ -1638,7 +1638,7 @@ TEST_CASE("HTTP helpers report POST transport failures",
 }
 
 TEST_CASE("HTTP helpers expose error responses without downloading bodies",
-          "[runtime][http][url][coverage]") {
+          "[runtime][http][url]") {
     httplib::Server server;
     server.Get("/missing", [](const httplib::Request&, httplib::Response& response) {
         response.status = 404;
@@ -1685,7 +1685,7 @@ TEST_CASE("HTTP helpers expose error responses without downloading bodies",
 }
 
 TEST_CASE("HTTP helpers round-trip against a loopback server",
-          "[runtime][http][url][coverage]") {
+          "[runtime][http][url]") {
     httplib::Server server;
     server.Get("/", [](const httplib::Request&, httplib::Response& response) {
         response.set_content("root", "text/plain");
@@ -1762,7 +1762,7 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
 }
 
 TEST_CASE("HTTP helpers copy successful GET status body and headers",
-          "[runtime][http][coverage]") {
+          "[runtime][http]") {
     auto exchange = serve_one_http_response("GET", "/status?ok=1");
 
     REQUIRE(exchange.accepted);
@@ -1776,7 +1776,7 @@ TEST_CASE("HTTP helpers copy successful GET status body and headers",
 }
 
 TEST_CASE("HTTP helpers copy successful POST request bodies",
-          "[runtime][http][coverage]") {
+          "[runtime][http]") {
     auto exchange = serve_one_http_response("POST", "/submit", R"({"value":7})");
 
     REQUIRE(exchange.accepted);
@@ -1789,7 +1789,7 @@ TEST_CASE("HTTP helpers copy successful POST request bodies",
 }
 
 TEST_CASE("HTTP download writes successful response bodies",
-          "[runtime][http][coverage]") {
+          "[runtime][http]") {
     TemporaryFile output(".http-body");
     auto exchange = serve_one_http_response("DOWNLOAD", "/artifact.bin", output.path_string());
 
@@ -1805,7 +1805,7 @@ TEST_CASE("HTTP download writes successful response bodies",
 }
 
 TEST_CASE("HTTP download reports unwritable output paths after successful fetch",
-          "[runtime][http][coverage]") {
+          "[runtime][http]") {
     TemporaryFile marker(".missing-http-dir");
     const auto missing_dir = marker.path();
     marker.release();
@@ -1826,7 +1826,7 @@ TEST_CASE("HTTP download reports unwritable output paths after successful fetch"
 }
 
 TEST_CASE("local IPv4 helpers return usable fallback values",
-          "[runtime][ip][coverage]") {
+          "[runtime][ip]") {
     const auto primary = local_ipv4_address();
     REQUIRE(is_valid_ipv4(primary));
 
@@ -1840,7 +1840,7 @@ TEST_CASE("local IPv4 helpers return usable fallback values",
 // ── Primes ──────────────────────────────────────────────────────────────
 
 TEST_CASE("prime helpers cover small values composites and sieve output",
-          "[runtime][primes][coverage]") {
+          "[runtime][primes]") {
     REQUIRE_FALSE(is_prime(0));
     REQUIRE_FALSE(is_prime(1));
     REQUIRE(is_prime(2));
@@ -1855,7 +1855,7 @@ TEST_CASE("prime helpers cover small values composites and sieve output",
 }
 
 TEST_CASE("generate_prime rejects impossible bit sizes and returns bounded primes",
-          "[runtime][primes][coverage]") {
+          "[runtime][primes]") {
     REQUIRE(generate_prime(0) == 0);
     REQUIRE(generate_prime(1) == 0);
     REQUIRE(generate_prime(63) == 0);
@@ -1868,14 +1868,14 @@ TEST_CASE("generate_prime rejects impossible bit sizes and returns bounded prime
 
 // ── Text Diff ────────────────────────────────────────────────────────────
 
-TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff][issue-641]") {
+TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff]") {
     auto diff = text_diff("", "");
     REQUIRE(diff.empty());
     REQUIRE(format_diff(diff).empty());
 }
 
 TEST_CASE("text_diff formats unchanged lines as context",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("alpha\nbeta", "alpha\nbeta");
 
     REQUIRE(diff.size() == 2);
@@ -1889,7 +1889,7 @@ TEST_CASE("text_diff formats unchanged lines as context",
 }
 
 TEST_CASE("text_diff reports pure inserts and deletes",
-          "[runtime][text-diff][issue-641]") {
+          "[runtime][text-diff]") {
     auto inserted = text_diff("", "one\ntwo");
     REQUIRE(inserted.size() == 2);
     REQUIRE(inserted[0].op == DiffOp::Insert);
@@ -1906,7 +1906,7 @@ TEST_CASE("text_diff reports pure inserts and deletes",
 }
 
 TEST_CASE("text_diff preserves equal lines across replacements and appends",
-          "[runtime][text-diff][issue-641]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("alpha\nbeta\ngamma\n",
                           "alpha\ndelta\ngamma\nomega");
 
@@ -1931,7 +1931,7 @@ TEST_CASE("text_diff preserves equal lines across replacements and appends",
 }
 
 TEST_CASE("text_diff keeps repeated-line matches stable",
-          "[runtime][text-diff][coverage][issue-641]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("same\nkeep\nsame\nremove\nsame",
                           "same\nkeep\nsame\ninsert\nsame");
 
@@ -1951,7 +1951,7 @@ TEST_CASE("text_diff keeps repeated-line matches stable",
 }
 
 TEST_CASE("text_diff treats identical multiline inputs as equal entries",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("one\ntwo\nthree", "one\ntwo\nthree");
     REQUIRE(diff.size() == 3);
     for (const auto& entry : diff) {
@@ -1961,7 +1961,7 @@ TEST_CASE("text_diff treats identical multiline inputs as equal entries",
 }
 
 TEST_CASE("text_diff preserves leading and trailing empty lines",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("\nbody\n", "\nbody\nnext\n");
     REQUIRE(diff.size() == 3);
     REQUIRE(diff[0].op == DiffOp::Equal);
@@ -1973,7 +1973,7 @@ TEST_CASE("text_diff preserves leading and trailing empty lines",
 }
 
 TEST_CASE("text_diff handles replacement ties and empty line formatting",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("old-a\n\nold-b", "new-a\nnew-b");
 
     REQUIRE(diff.size() == 5);
@@ -1997,7 +1997,7 @@ TEST_CASE("text_diff handles replacement ties and empty line formatting",
 }
 
 TEST_CASE("text_diff treats missing terminal newlines equivalently",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("one\ntwo", "one\ntwo\n");
 
     REQUIRE(diff.size() == 2);
@@ -2011,7 +2011,7 @@ TEST_CASE("text_diff treats missing terminal newlines equivalently",
 }
 
 TEST_CASE("format_diff handles manually constructed operation order",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     std::vector<DiffEntry> diff{
         {DiffOp::Equal, "context"},
         {DiffOp::Insert, "added"},
@@ -2025,7 +2025,7 @@ TEST_CASE("format_diff handles manually constructed operation order",
 }
 
 TEST_CASE("text_diff tie-breaks replacements as delete before insert",
-          "[runtime][text-diff][coverage][large]") {
+          "[runtime][text-diff][large]") {
     auto diff = text_diff("left\nmiddle\nright",
                           "left\ncenter\nright");
 
@@ -2041,7 +2041,7 @@ TEST_CASE("text_diff tie-breaks replacements as delete before insert",
 }
 
 TEST_CASE("text_diff preserves blank lines as diff entries",
-          "[runtime][text-diff][coverage][large]") {
+          "[runtime][text-diff][large]") {
     auto diff = text_diff("alpha\n\nomega",
                           "alpha\ninserted\n\nomega");
 
@@ -2057,7 +2057,7 @@ TEST_CASE("text_diff preserves blank lines as diff entries",
 }
 
 TEST_CASE("format_diff keeps empty inserted and deleted lines visible",
-          "[runtime][text-diff][coverage][large]") {
+          "[runtime][text-diff][large]") {
     const std::vector<DiffEntry> diff{
         {DiffOp::Equal, "context"},
         {DiffOp::Delete, ""},
@@ -2071,7 +2071,7 @@ TEST_CASE("format_diff keeps empty inserted and deleted lines visible",
 }
 
 TEST_CASE("text_diff treats trailing newline as no synthetic blank line",
-          "[runtime][text-diff][coverage][large]") {
+          "[runtime][text-diff][large]") {
     auto diff = text_diff("alpha\nbeta\n", "alpha\nbeta");
 
     REQUIRE(diff.size() == 2);
@@ -2085,7 +2085,7 @@ TEST_CASE("text_diff treats trailing newline as no synthetic blank line",
 }
 
 TEST_CASE("text_diff chooses deletions first for single-line replacements",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("left", "right");
 
     REQUIRE(diff.size() == 2);
@@ -2097,7 +2097,7 @@ TEST_CASE("text_diff chooses deletions first for single-line replacements",
 }
 
 TEST_CASE("text_diff ignores trailing empty line fragments",
-          "[runtime][text-diff][coverage]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("same\n", "same");
 
     REQUIRE(diff.size() == 1);
@@ -2148,7 +2148,7 @@ TEST_CASE("Range constrain", "[runtime][range]") {
 }
 
 TEST_CASE("Range constrain handles empty and reversed integer ranges",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     REQUIRE(IntRange(5, 5).constrain(100) == 5);
     REQUIRE(IntRange(10, 5).constrain(-100) == 10);
     REQUIRE(IntRange(-3, -1).constrain(9) == -2);
@@ -2162,7 +2162,7 @@ TEST_CASE("Range from_start_length", "[runtime][range]") {
 }
 
 TEST_CASE("Range covers containment and equality edge paths",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     IntRange outer(0, 10);
 
     REQUIRE(outer.contains(IntRange(0, 10)));
@@ -2176,7 +2176,7 @@ TEST_CASE("Range covers containment and equality edge paths",
 }
 
 TEST_CASE("Range expands empty and non-empty intervals",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     REQUIRE(IntRange(5, 5).expanded(8) == IntRange(8, 9));
     REQUIRE(IntRange(3, 7).expanded(10) == IntRange(3, 11));
     REQUIRE(IntRange(3, 7).expanded(-2) == IntRange(-2, 7));
@@ -2184,7 +2184,7 @@ TEST_CASE("Range expands empty and non-empty intervals",
 }
 
 TEST_CASE("Range union handles empty operands",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     REQUIRE(IntRange().enclosing_union(IntRange(4, 9)) == IntRange(4, 9));
     REQUIRE(IntRange(4, 9).enclosing_union(IntRange()) == IntRange(4, 9));
     REQUIRE(IntRange().enclosing_union(IntRange()) == IntRange());
@@ -2197,7 +2197,7 @@ TEST_CASE("FloatRange", "[runtime][range]") {
 }
 
 TEST_CASE("Range constrain preserves floating half-open upper bound",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     FloatRange floats(0.0f, 1.0f);
     auto constrained_float = floats.constrain(2.0f);
     REQUIRE(constrained_float < 1.0f);
@@ -2213,7 +2213,7 @@ TEST_CASE("Range constrain preserves floating half-open upper bound",
 }
 
 TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     DoubleRange a(0.25, 2.75);
     DoubleRange b(1.5, 4.0);
 
@@ -2227,7 +2227,7 @@ TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
 }
 
 TEST_CASE("SizeRange and FloatRange cover containment and expansion helpers",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     SizeRange bytes = SizeRange::from_start_length(4u, 8u);
     REQUIRE(bytes.start == 4u);
     REQUIRE(bytes.end == 12u);
@@ -2249,7 +2249,7 @@ TEST_CASE("SizeRange and FloatRange cover containment and expansion helpers",
 }
 
 TEST_CASE("Floating Range constrain clamps to contained upper bound",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     FloatRange unit(0.0f, 1.0f);
     REQUIRE_THAT(unit.constrain(-2.0f), Catch::Matchers::WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(unit.constrain(0.25f), Catch::Matchers::WithinAbs(0.25f, 1e-6f));
@@ -2263,7 +2263,7 @@ TEST_CASE("Floating Range constrain clamps to contained upper bound",
 }
 
 TEST_CASE("Range boundary touch points remain non-intersections",
-          "[runtime][range][coverage][issue-641]") {
+          "[runtime][range]") {
     REQUIRE_FALSE(IntRange(0, 10).intersects(IntRange(10, 20)));
     REQUIRE(IntRange(0, 10).intersection(IntRange(10, 20)).empty());
     REQUIRE(IntRange(10, 20).intersection(IntRange(0, 10)).empty());
@@ -2274,7 +2274,7 @@ TEST_CASE("Range boundary touch points remain non-intersections",
 }
 
 TEST_CASE("Range intersection is commutative for overlapping integer ranges",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     IntRange a(-4, 8);
     IntRange b(3, 12);
     REQUIRE(a.intersection(b) == IntRange(3, 8));
@@ -2282,7 +2282,7 @@ TEST_CASE("Range intersection is commutative for overlapping integer ranges",
 }
 
 TEST_CASE("Range enclosing union keeps reversed ranges isolated",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     IntRange reversed(8, 3);
     IntRange normal(1, 4);
     REQUIRE(reversed.empty());
@@ -2291,7 +2291,7 @@ TEST_CASE("Range enclosing union keeps reversed ranges isolated",
 }
 
 TEST_CASE("Range expansion handles negative domains",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     IntRange range(-10, -4);
     REQUIRE(range.expanded(-12) == IntRange(-12, -4));
     REQUIRE(range.expanded(-1) == IntRange(-10, 0));
@@ -2299,7 +2299,7 @@ TEST_CASE("Range expansion handles negative domains",
 }
 
 TEST_CASE("FloatRange constrain clamps fractional values",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     FloatRange range(-1.0f, 3.0f);
     REQUIRE_THAT(range.constrain(-2.5f), Catch::Matchers::WithinAbs(-1.0f, 1e-6f));
     REQUIRE_THAT(range.constrain(0.25f), Catch::Matchers::WithinAbs(0.25f, 1e-6f));
@@ -2308,7 +2308,7 @@ TEST_CASE("FloatRange constrain clamps fractional values",
 }
 
 TEST_CASE("DoubleRange empty constrain returns start",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     DoubleRange empty(4.5, 4.5);
     REQUIRE(empty.empty());
     REQUIRE_THAT(empty.constrain(-100.0), Catch::Matchers::WithinAbs(4.5, 1e-12));
@@ -2316,7 +2316,7 @@ TEST_CASE("DoubleRange empty constrain returns start",
 }
 
 TEST_CASE("Range expanded covers negative fractional values",
-          "[runtime][range][coverage]") {
+          "[runtime][range]") {
     DoubleRange empty(2.0, 2.0);
     auto seeded = empty.expanded(-1.5);
     REQUIRE_THAT(seeded.start, Catch::Matchers::WithinAbs(-1.5, 1e-12));
