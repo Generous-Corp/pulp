@@ -457,7 +457,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship validates option parser errors before side effects",
-                 "[cli][shellout][ship][coverage][phase3]") {
+                 "[cli][shellout][ship][coverage]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("parser-errors", true);
 
