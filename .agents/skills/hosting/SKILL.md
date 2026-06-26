@@ -192,6 +192,19 @@ predictable output, no MIDI.
   and built into the same per-node event queue. A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
+  - **Where the walk lives.** The legacy serial reference walk is no longer
+    inline in `process_impl`; it lives in
+    `core/host/src/signal_graph_reference_walk.cpp` and is entered via
+    `SignalGraph::run_reference_walk_` when no routed path takes a block. It is
+    kept deliberately INDEPENDENT of `signal_graph_executor_routing.{hpp,cpp}`
+    — do not share or merge its gather / PDC / feedback / MIDI / automation
+    execution with the executor. The MIDI-block helpers shared by both the
+    routed dispatch and the walk (`clear_midi_block`, `midi_block_has_drops`,
+    `copy_midi_block`) live in the shared header
+    `core/host/src/signal_graph_internal.hpp`. The dual-maintenance rule still
+    applies: any audio-output-affecting edit to the walk must be mirrored in the
+    executor (and vice versa), guarded by `test_graph_routing_differential_parity`,
+    `test_signal_graph_executor_parity`, and `test_signal_graph_offline_parity`.
 - **Transport-aware `process()`.** Alongside the no-transport
   `process(out, in, n)` there is an additive
   `process(out, in, n, const format::ProcessContext& transport)` overload. Both

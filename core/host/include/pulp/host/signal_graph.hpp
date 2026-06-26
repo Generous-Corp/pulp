@@ -975,6 +975,15 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    // Legacy serial reference walk — the hand-maintained, bit-exact inter-node
+    // DSP oracle and fallback for process_impl(). Lives in its own translation
+    // unit (signal_graph_reference_walk.cpp) but stays a member so it can name
+    // the private nested CompiledGraph / NodeRuntime types without promotion.
+    // process_impl() invokes it when no routed path takes a block.
+    void run_reference_walk_(audio::BufferView<float>& output,
+                             const audio::BufferView<const float>& input,
+                             int num_samples,
+                             CompiledGraph* cg);
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
