@@ -564,6 +564,7 @@ pub fn run_cmd<S: Spawner>(
         && opts.screenshot_path.is_empty()
         && opts.audio_probe_json_path.is_empty()
         && opts.audio_scope_json_path.is_empty()
+        && opts.audio_capture_wav_path.is_empty()
     {
         let base = if opts.target_name.is_empty() {
             "pulp-run".to_owned()
@@ -661,7 +662,8 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n\
                 [--watch] [--audio-inspector] [--audio-probe-json <file>]\n\
                 [--audio-scope-json <file>] [--audio-scope-window <n>]\n\
-                [--audio-scope-trigger <mode>] [--audio-scope-channel <n>] [-- args...]\n\n\
+                [--audio-scope-trigger <mode>] [--audio-scope-channel <n>]\n\
+                [--audio-capture-wav <file>] [--audio-capture-frames <n>] [-- args...]\n\n\
          If no target is specified, finds the first standalone binary in the\n\
          active project build. Arguments after `--` are passed to the launched\n\
          application.\n\n\
@@ -683,6 +685,9 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          --audio-scope-json <file>\n                          \
          Write live Audio Scope JSON, then exit. Use --audio-scope-window,\n                          \
          --audio-scope-trigger, and --audio-scope-channel to control acquisition.\n  \
+         --audio-capture-wav <file>\n                          \
+         Capture the live output to a WAV file after rendering, then exit.\n                          \
+         Use --audio-capture-frames <n> to set the ring window.\n  \
          PULP_RUN_AUDIO_NOTICE=0\n                          \
          Suppress the pre-launch notice that the standalone may activate\n                          \
          system audio output.\n  \
@@ -1944,6 +1949,8 @@ mod tests {
         assert!(help.contains("--audio-inspector"));
         assert!(help.contains("--audio-probe-json"));
         assert!(help.contains("--audio-scope-json"));
+        assert!(help.contains("--audio-capture-wav"));
+        assert!(help.contains("--audio-capture-frames"));
         assert!(help.contains("PULP_RUN_AUDIO_NOTICE=0"));
     }
 
@@ -2084,6 +2091,49 @@ mod tests {
         ] {
             assert!(call.envs.contains(&(pair.0.to_owned(), pair.1.to_owned())));
         }
+    }
+
+    #[test]
+    fn run_cmd_forwards_audio_capture_wav_without_default_screenshot() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        make_run_binary(&proj, "capture-app");
+        let spawner = RecordingSpawner::with_codes(vec![0]);
+        let mut out = Vec::new();
+        let args = parse_run_args(&[
+            "capture-app".to_owned(),
+            "--audio-capture-wav".to_owned(),
+            "capture.wav".to_owned(),
+            "--audio-capture-frames=2048".to_owned(),
+        ]);
+
+        let rc = run_cmd(td.path(), &args, &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        let call = &calls[0];
+        assert_eq!(
+            call.args,
+            vec![
+                "--headless".to_owned(),
+                "--audio-capture-wav".to_owned(),
+                "capture.wav".to_owned(),
+                "--audio-capture-frames".to_owned(),
+                "2048".to_owned(),
+            ]
+        );
+        for pair in [
+            ("PULP_HEADLESS", "1"),
+            ("PULP_AUDIO_CAPTURE_WAV", "capture.wav"),
+            ("PULP_AUDIO_CAPTURE_WAV_FRAMES", "2048"),
+        ] {
+            assert!(call.envs.contains(&(pair.0.to_owned(), pair.1.to_owned())));
+        }
+        assert!(!call.envs.iter().any(|(key, _)| key == "PULP_SCREENSHOT"));
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("Launching capture-app (headless)"));
+        assert!(!stdout.contains(".png"));
     }
 
     #[test]
