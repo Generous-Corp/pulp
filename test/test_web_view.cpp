@@ -183,18 +183,18 @@ TEST_CASE("WebView offline helpers rewrite embedded assets to data URIs", "[view
             "</head><body>"
             "<script src=\"./app.js\"></script>"
             "</body></html>";
-        static const uint8_t js_data[] = "console.log('phase7');";
+        static const uint8_t js_data[] = "console.log('webview');";
         static const uint8_t css_data[] = "body{background:#123456;}";
 
-        assets.register_embedded("phase7_page_html", html_data, sizeof(html_data) - 1);
-        assets.register_embedded("phase7_app_js", js_data, sizeof(js_data) - 1);
-        assets.register_embedded("phase7_styles_css", css_data, sizeof(css_data) - 1);
+        assets.register_embedded("webview_page_html", html_data, sizeof(html_data) - 1);
+        assets.register_embedded("webview_app_js", js_data, sizeof(js_data) - 1);
+        assets.register_embedded("webview_styles_css", css_data, sizeof(css_data) - 1);
 
         const auto offline = make_webview_offline_html_from_embedded(
-            "phase7_page_html",
+            "webview_page_html",
             {
-                { "app.js", "phase7_app_js", "" },
-                { "styles.css", "phase7_styles_css", "" },
+                { "app.js", "webview_app_js", "" },
+                { "styles.css", "webview_styles_css", "" },
             });
 
         REQUIRE_FALSE(offline.empty());
@@ -211,19 +211,19 @@ TEST_CASE("WebView offline helpers rewrite embedded assets to data URIs", "[view
             "</head><body>"
             "<script src=\"app.js\"></script>"
             "</body></html>";
-        static const uint8_t js_data[] = "window.phase7 = 'ready';";
+        static const uint8_t js_data[] = "window.webviewFixture = 'ready';";
         static const uint8_t json_data[] =
             "{\"label\":\"caf" "\xC3\xA9" "\",\"kanji\":\"" "\xE9\x9F\xB3" "\"}";
 
-        assets.register_embedded("phase7_fetch_html", html_data, sizeof(html_data) - 1);
-        assets.register_embedded("phase7_fetch_js", js_data, sizeof(js_data) - 1);
-        assets.register_embedded("phase7_fetch_json", json_data, sizeof(json_data) - 1);
+        assets.register_embedded("webview_fetch_html", html_data, sizeof(html_data) - 1);
+        assets.register_embedded("webview_fetch_js", js_data, sizeof(js_data) - 1);
+        assets.register_embedded("webview_fetch_json", json_data, sizeof(json_data) - 1);
 
         const auto fetch = make_webview_embedded_resource_fetcher(
-            "phase7_fetch_html",
+            "webview_fetch_html",
             {
-                { "app.js", "phase7_fetch_js", "" },
-                { "data/config.json", "phase7_fetch_json", "" },
+                { "app.js", "webview_fetch_js", "" },
+                { "data/config.json", "webview_fetch_json", "" },
             });
 
         REQUIRE(fetch);
@@ -250,13 +250,13 @@ TEST_CASE("WebView offline helpers rewrite embedded assets to data URIs", "[view
     SECTION("directory resource fetcher serves files and blocks parent traversal") {
         namespace fs = std::filesystem;
 
-        const auto temp_root = fs::temp_directory_path() / "pulp_phase7_webview_files";
+        const auto temp_root = fs::temp_directory_path() / "pulp_webview_files";
         fs::remove_all(temp_root);
         fs::create_directories(temp_root / "data");
 
         {
             std::ofstream html(temp_root / "index.html", std::ios::binary);
-            html << "<!doctype html><html><body>phase7</body></html>";
+            html << "<!doctype html><html><body>webview</body></html>";
         }
         {
             std::ofstream json(temp_root / "data" / "config.json", std::ios::binary);
@@ -269,7 +269,7 @@ TEST_CASE("WebView offline helpers rewrite embedded assets to data URIs", "[view
         const auto root = fetch("/");
         REQUIRE(root.has_value());
         REQUIRE(root->mime_type == "text/html");
-        REQUIRE(std::string(root->data.begin(), root->data.end()).find("phase7") != std::string::npos);
+        REQUIRE(std::string(root->data.begin(), root->data.end()).find("webview") != std::string::npos);
 
         const auto json = fetch("/data/config.json");
         REQUIRE(json.has_value());
@@ -448,7 +448,7 @@ window.pingNative = function() {
 TEST_CASE("WebViewPanel can attach to a WindowHost native content view", "[view][webview][window]") {
     View root;
     WindowOptions window_options;
-    window_options.title = "Phase 7 WebView Host";
+    window_options.title = "Pulp WebView Host";
     window_options.width = 360;
     window_options.height = 240;
 
@@ -500,7 +500,7 @@ TEST_CASE("WebViewPanel can attach to a WindowHost native content view", "[view]
 <body>
 <script>
 )HTML") + make_webview_bridge_bootstrap_script() + R"HTML(
-window.phase7Attached = function() {
+window.webviewAttached = function() {
   const response = window.pulp.postMessage('attached-ready', { state: 'ok' }, 'attached-1');
   return response && response.ok === true;
 };
@@ -512,14 +512,14 @@ window.phase7Attached = function() {
     panel->set_html(html);
 
     auto ready = await_eval(*panel,
-        "typeof window.phase7Attached === 'function'",
+        "typeof window.webviewAttached === 'function'",
         std::chrono::milliseconds(5000));
     if (!ready.second.empty() || ready.first != "true") {
         host->detach_native_child_view(panel->native_handle());
         SKIP("Attached WebView never reached callback-ready state");
     }
 
-    auto ping = await_eval(*panel, "window.phase7Attached()");
+    auto ping = await_eval(*panel, "window.webviewAttached()");
     REQUIRE(ping.second.empty());
     REQUIRE(ping.first == "true");
     REQUIRE(last_message_type == "attached-ready");
