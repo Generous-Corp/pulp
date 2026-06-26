@@ -675,7 +675,7 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| ARA | `ara.hpp` | Audio Random Access document controller (stub) |
+| ARA | `ara.hpp` | Audio Random Access document-controller scaffold and SDK-gated companion-factory hooks |
 | Host Detection | `host_type.hpp` | `detect_host_type()` → Logic, Reaper, Ableton, etc. |
 | Settings Panel | `settings_panel.hpp` | Audio/MIDI device selector with test signal and meters |
 | ViewBridge | `view_bridge.hpp` | Editor-view lifecycle: `create_view()`, `on_view_{opened,closed,resized}`, multi-view attach (editor + inspector + remote). See `docs/guides/view-bridge.md`. |

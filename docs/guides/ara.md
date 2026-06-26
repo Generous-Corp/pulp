@@ -9,17 +9,26 @@ Pulp's ARA support is being built out under production-readiness workstream 06.
 This page documents what ships today, how to enable what's available, and what
 to expect as the workstream lands.
 
-## Current state (2026-04-14)
+## Current state
 
 - `core/format/include/pulp/format/ara.hpp` defines the plugin-side interface
   (`AraDocumentController`, `AraRole`, `host_supports_ara()`).
-- `core/format/src/ara.cpp` is a minimal stub. No format adapter wires ARA
-  through to a host yet.
+- `core/format/src/ara.cpp` keeps non-SDK builds conservative:
+  `host_supports_ara()` returns false and `ara_companion_factory_for()` returns
+  `nullptr` when `PULP_HAS_ARA` is absent.
+- `core/format/src/ara_factory.cpp` builds an ABI-valid ARA factory when
+  `PULP_ENABLE_ARA=ON` and `PULP_ARA_SDK_DIR` points at a valid SDK, but its
+  document-controller callbacks are scaffold no-ops today.
+- Format adapter hooks exist for CLAP (`kClapAraFactoryExtension`), AUv3
+  (`audioUnitARAFactory`), and VST3 (`kVst3AraFactoryContextKey`). The CLAP
+  path is the exercised smoke-test path used by `examples/ara-pitch-tracker/`.
 - Status in `docs/status/support-matrix.yaml` → `plugin_extensions.ara`:
   `experimental`.
 
-Do not build production ARA plugins on Pulp today. The interface is a
-placeholder for the shape that will land during workstream 06.
+Do not build production ARA plugins on Pulp today. The SDK-gated adapter hooks
+are present for smoke testing, but real controller behavior, content readers,
+playback/edit rendering, and per-plugin factory/controller ownership are still
+workstream 06 follow-up.
 
 ## Scope for v1 (when it ships)
 
@@ -71,16 +80,17 @@ directory before compiling any ARA-dependent translation unit.
 Work merges in small, named slices on `develop/prod-readiness` feature
 branches. The progression:
 
-1. Scaffolding — `core/format/include/pulp/format/ara/` subdirectory, SDK
-   gate, build flag, DEPENDENCIES.md + NOTICE.md entries.
+1. Scaffolding — SDK gate, build flag, dependency/license docs, and the
+   plugin-side `AraDocumentController` interface.
 2. Document controller — concrete `AraDocumentController` implementation with
    source, modification, context, region, and region-sequence management.
-3. Format adapters — VST3 companion factory first, then AU, then CLAP
-   (`CLAP_EXT_ARA`).
+3. Format adapters — companion-factory hooks now exist for VST3, AUv3, and
+   CLAP; remaining work is live host validation and per-plugin controller
+   ownership.
 4. Roles — Playback Renderer, then Editor Renderer, then Editor View.
 5. Content readers — notes, tempo, tuning, key.
 6. Validation — Logic + Cubase + Studio One smoke against `PulpGain` and a
-   small ARA-aware example plugin.
+   small ARA-aware example plugin such as `examples/ara-pitch-tracker`.
 
 Each slice is tracked in `planning/production-readiness/06-ara.md` (private
 submodule) and lands via PR with a `Workstream 06 slice <N.M>` title.
@@ -90,13 +100,12 @@ submodule) and lands via PR with a `Workstream 06 slice <N.M>` title.
 - ARA SDK: Celemony license; registration required; redistribution of
   compiled plugins permitted.
 - Pulp: MIT. No bundling of ARA SDK source or binaries in the Pulp repo.
-- DEPENDENCIES.md and NOTICE.md will carry an ARA entry once the scaffolding
-  slice lands; until then the SDK is explicitly a developer responsibility.
+- `DEPENDENCIES.md` records the ARA SDK as developer-supplied and out-of-tree.
 
 ## Related
 
-- Current stub: `core/format/include/pulp/format/ara.hpp`,
-  `core/format/src/ara.cpp`.
+- Current scaffold: `core/format/include/pulp/format/ara.hpp`,
+  `core/format/src/ara.cpp`, `core/format/src/ara_factory.cpp`.
 - Workstream spec: `planning/production-readiness/06-ara.md`.
 - Matrix entry: `docs/status/support-matrix.yaml` →
   `plugin_extensions.ara`.

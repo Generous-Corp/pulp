@@ -61,12 +61,15 @@ plugin_extensions:
   ara:
     status: experimental
     notes: >
-      Interface stubs in core/format/include/pulp/format/ara.{hpp,cpp}; impl
-      returns false. No format adapter wires the host-query path yet.
-      Tracked under production-readiness workstream 06.
+      SDK-gated companion-factory hooks are present for CLAP
+      (`kClapAraFactoryExtension`), AUv3 (`audioUnitARAFactory`), and VST3
+      (`kVst3AraFactoryContextKey`). `host_supports_ara()` still returns false,
+      and the published factory's document-controller callbacks are scaffold
+      no-ops until the production ARA workstream wires real controller behavior.
+      Celemony's ARA SDK is developer-supplied.
     limitations:
-      - "AraDocumentController is a stub — playback renderer not implemented."
-      - "VST3, CLAP, AU adapters do not declare ARA extension support."
+      - "AraDocumentController callback surface is scaffolded; playback renderer and content readers are not implemented."
+      - "The SDK-built companion factory is process-global today; per-plugin AraDocumentController ownership/gating is not fully honored yet."
       - "Celemony ARA SDK is developer-supplied; not bundled."
   native_components:
     status: experimental
@@ -976,12 +979,14 @@ widgets:
 
 # Plugin formats beyond audio host integration.
 ara:
-  status: planned
+  status: experimental
   notes: >
-    Interface stub exists in core/format/{include,src}/pulp/format/ara.{hpp,cpp};
-    host_supports_ara() returns false. No format adapter integration yet.
-    Production-readiness workstream 06 tracks the ARA 2.x implementation
-    across VST3 + AU + CLAP.
+    SDK-gated companion-factory hooks exist in CLAP, AUv3, and VST3. Without
+    PULP_ENABLE_ARA, ara_companion_factory_for() returns nullptr and hosts treat
+    plugins as non-ARA. With the SDK enabled, the published factory is an
+    ABI-valid scaffold with no-op document-controller callbacks while
+    production-readiness workstream 06 finishes real ARA 2.x behavior across
+    VST3 + AU + CLAP.
   tracked_in: "planning/production-readiness/06-ara.md"
 
 # Accessibility feature coverage (beyond platform bridge existence). This is
