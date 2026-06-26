@@ -133,6 +133,28 @@ necessary, not sufficient — they repeatedly mislead on subtle artifacts; confi
 by ear.** To compare against Rubber Band (GPL, NOT bundled), render with your own
 `rubberband` and pass `--reference <file>`.
 
+## Tuning methodology (when metrics lie)
+
+Subtle transient/phase artifacts (smear, "wobble", blown-out deep hits) are often
+INVISIBLE to peak/RMS/clip/AM metrics — output can sit at ~0.8 full-scale and read
+"clean" while clearly wrong by ear. Tune by ear, with discipline:
+
+1. **Level-match before listening.** Normalize every render to the SOURCE's RMS
+   first. The engine can render a few dB quieter than a reference (a known energy
+   leak), and loudness alone decides a blind A/B — match it or your ears lie.
+2. **Bisect by ear: isolate ONE variable per render.** Don't compare "old vs new
+   everything." Render variants that differ in a single knob and listen to the
+   exact moment that sounds wrong — e.g. graft on / off / different crossover, or a
+   parameter sweep (180/300/500/800). The first clean one is the answer. This is how
+   the high-pass-graft crossover and the refractory window were found.
+3. **Reproduce the real path.** The sampler renders with `--relocate` (verbatim
+   graft); a no-`--relocate` A/B tests a DIFFERENT signal path and can read "great"
+   while the app blows out. Match the flags the product uses.
+4. **After the ear picks, guard the INVARIANT, not the sound.** Land a regression
+   test for the property the fix establishes — "stretch preserves a tone's f0",
+   "the graft doesn't alter the low band (<2% energy)", "a hit resets once not N
+   times", "output never clips" — never a golden-audio compare (too brittle).
+
 ## Gotchas
 
 - Don't trust harmonic-clarity (peak/valley) or autocorr-f0-on-drums — both misled
