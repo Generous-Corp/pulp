@@ -809,6 +809,13 @@ PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
     return it->second.get();
 }
 
+const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->custom_processors.find(id);
+    if (it == live_->custom_processors.end()) return nullptr;
+    return &it->second;
+}
+
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_;  // aliases the live CompiledGraph as an opaque keepalive
 }
@@ -1181,7 +1188,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 return it == cgr.plugins.end() ? nullptr : it->second.get();
             },
             cg->routing_plugin_ctx, cg->routing_plugin_scratch,
-            cg->routing_snapshot, /*parallel_safe=*/false, load_for);
+            cg->routing_snapshot, /*parallel_safe=*/false, load_for,
+            &cg->routing_custom_ctx,
+            [&cgr](NodeId id) -> const CustomNodeProcessFn* {
+                auto it = cgr.custom_processors.find(id);
+                return it == cgr.custom_processors.end() ? nullptr : &it->second;
+            });
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
         if (cg->routing_valid && max_block_size > 0) {
@@ -1248,7 +1260,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                     return it == cgr.plugins.end() ? nullptr : it->second.get();
                 },
                 cg->routing_plugin_ctx_parallel, cg->routing_plugin_scratch,
-                cg->routing_snapshot_parallel, /*parallel_safe=*/true, load_for);
+                cg->routing_snapshot_parallel, /*parallel_safe=*/true, load_for,
+                &cg->routing_custom_ctx_parallel,
+                [&cgr](NodeId id) -> const CustomNodeProcessFn* {
+                    auto it = cgr.custom_processors.find(id);
+                    return it == cgr.custom_processors.end() ? nullptr : &it->second;
+                });
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
                     cg->routing_snapshot_parallel.plan());

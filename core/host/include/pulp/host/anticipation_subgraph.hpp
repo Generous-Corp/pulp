@@ -19,9 +19,12 @@ struct Connection;
 // on its own channel. The interior GraphNodes are COPIED verbatim (plugin slots,
 // gain, ports preserved), so the same plugin instances render here — ownership of
 // those instances across the ahead/live boundary is the renderer's concern, not
-// this extraction's. NOTE: this does not check interior executor-eligibility (a
-// Custom or null-slot Plugin interior node would make build_executor_snapshot
-// reject the sub-graph); that gate belongs to the renderer slice.
+// this extraction's. NOTE: this does not check interior executor-eligibility. A
+// null-slot Plugin interior node is executor-ineligible, and a Custom interior
+// node — though executor-eligible in general — would make the anticipation
+// renderer's build_executor_snapshot call reject the sub-graph because that call
+// passes no Custom-binding storage; either way that gate belongs to the renderer
+// slice.
 struct AnticipationSubgraph {
     std::vector<GraphNode> nodes;         // interior nodes, then the one sink
     std::vector<Connection> connections;  // internal edges, then source->sink edges

@@ -13,10 +13,12 @@ LowerResult bake(const SignalGraph& graph) {
     LowerResult result;
 
     // Lowerability gate. Order matters: the Plugin/Custom node-kind refusals are
-    // checked BEFORE the executor-eligibility predicate because a Custom node (and
-    // a Plugin node with no live slot) is itself executor-ineligible — without the
-    // explicit kind check those graphs would be refused as NotExecutorEligible
-    // and lose the specific, actionable reason.
+    // checked BEFORE the executor-eligibility predicate. A Plugin node with no
+    // live slot is executor-ineligible; a Custom node now IS executor-eligible
+    // (it routes), but neither can be baked — a hosted plugin and a custom
+    // instance both hold opaque state a frozen topology cannot capture. The
+    // explicit kind checks give those graphs a specific, actionable reason
+    // instead of a generic NotExecutorEligible.
     if (!graph.is_prepared()) {
         result.reason = LowerRejectReason::NotPrepared;
         result.message = "graph is not prepared; call prepare() before bake()";

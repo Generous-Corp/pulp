@@ -75,6 +75,14 @@ struct CustomNodeType {
     // runs on the audio thread and must be real-time-safe. As with plugin
     // state, call save_state/load_state from non-audio control paths (graph not
     // live, or after invalidate + re-prepare).
+    //
+    // Parallel routing concurrency: the framework owns one DISTINCT instance per
+    // node, so two nodes of the same type never share instance state. But under
+    // levelized parallel routing, process_instance for sibling nodes in a level
+    // may run on different worker threads at once — so a callback that touches
+    // state SHARED across nodes (e.g. a captured global, not the per-instance
+    // pointer) must itself be concurrent-safe, or that graph must not enable
+    // parallel routing. The per-instance `void*` is always single-threaded.
     std::function<void*()> create;
     std::function<void(void* /*instance*/)> destroy;
     std::function<void(void* /*instance*/, double /*sample_rate*/, int /*max_block*/)> prepare;
@@ -420,6 +428,11 @@ public:
     // Same lifetime contract as live_gain_atomic: valid only while
     // live_snapshot_handle() is retained and no re-prepare has occurred.
     PluginSlot* live_plugin_slot(NodeId id) const noexcept;
+    // The live compiled snapshot's resolved process callback for a Custom node,
+    // or nullptr when the node is unresolved (unregistered type / shape
+    // mismatch). The pointee is the snapshot's own callback (which keeps any
+    // stateful instance alive); same lifetime contract as live_plugin_slot.
+    const CustomNodeProcessFn* live_custom_processor(NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
@@ -741,11 +754,14 @@ private:
         MidiBlockSnapshot midi_publish_scratch;
 
         // Immutable canonical-executor routing for this snapshot, built in
-        // compile_() when the topology is eligible (only AudioInput/AudioOutput/
-        // Gain, plain audio connections). Empty/invalid otherwise. Its Gain
-        // bindings reference this snapshot's own `runtime[id].gain` atomics, so
-        // it carries no keepalive — it lives and dies exactly with this
-        // CompiledGraph, published atomically with it via live_raw_.
+        // compile_() when the topology is executor-eligible (see
+        // signal_graph_topology_executor_eligible). Empty/invalid otherwise. Its
+        // Gain bindings reference this snapshot's own `runtime[id].gain` atomics,
+        // its Plugin/Custom bindings invoke this snapshot's own slots/callbacks,
+        // so it carries no keepalive — it lives and dies exactly with this
+        // CompiledGraph, published atomically with it via live_raw_. The legacy
+        // walk remains the reference/fallback path for ineligible or
+        // routing-failed graphs, not a retired one.
         format::GraphRuntimeSnapshot routing_snapshot;
         bool routing_valid = false;
         // Per-snapshot scratch pool driving the routed path, sized in compile_()
@@ -764,6 +780,12 @@ private:
         // lifetime).
         std::vector<PluginBindingContext> routing_plugin_ctx;
         PluginRoutingScratch routing_plugin_scratch;
+        // Custom-binding storage for the routed path, owned per-snapshot like
+        // routing_plugin_ctx. Reserved in compile_() to the custom-node count so
+        // each Custom binding's user_data points at a stable element; each holds a
+        // COPY of this snapshot's resolved process callback (its own keepalive on
+        // any captured instance, same cg lifetime as `custom_processors`).
+        std::vector<CustomBindingContext> routing_custom_ctx;
         // Per-node MIDI buffers for the routed path's event edges, owned
         // per-snapshot like exec_pool. Empty (node_count 0) for graphs with no
         // MIDI. The routed dispatch bridges the SignalGraph MIDI mailboxes to
@@ -799,6 +821,11 @@ private:
         format::GraphRuntimeBufferPool exec_pool_parallel;
         graph::GraphRuntimeLevelization routing_levelization;
         std::vector<PluginBindingContext> routing_plugin_ctx_parallel;
+        // Parallel snapshot's Custom bindings' stable user_data (mirrors
+        // routing_plugin_ctx_parallel; the parallel and serial Custom callbacks
+        // are independent copies, but a custom node is stateless on the audio
+        // thread w.r.t. concurrency here — only the snapshot wiring differs).
+        std::vector<CustomBindingContext> routing_custom_ctx_parallel;
         bool routing_parallel_valid = false;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
@@ -842,10 +869,10 @@ private:
     // for every eligible graph and is bit-identical to the legacy walk for that
     // subset (proven by the routed-vs-walk parity suite) AND now reports the same
     // per-node node_loads() telemetry, so the default-ON flip is behaviour-
-    // preserving where it takes effect. Ineligible graphs (Custom/Utility nodes,
-    // or per-node automation past the executor's fixed capacity) still fall back
-    // to the legacy walk, which remains the reference oracle the parity tests pin
-    // OFF explicitly. One long-lived executor whose telemetry survives re-prepare;
+    // preserving where it takes effect. Ineligible graphs (per-node automation
+    // past the executor's fixed capacity, or a Plugin node with no live slot)
+    // still fall back to the legacy walk, which remains the reference oracle the
+    // parity tests pin OFF explicitly. One long-lived executor whose telemetry survives re-prepare;
     // it is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
     // pool as arguments) and prepare() never mutates it, so the single audio
     // thread is its only writer (relaxed stat counters). The mutable scratch pool
