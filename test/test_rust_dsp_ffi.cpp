@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <new>
 #include <string_view>
 
 #include <sys/wait.h>
@@ -106,13 +107,15 @@ TEST_CASE("C++ allocation inside a no-alloc scope also traps (death test)",
     REQUIRE(pid >= 0);
     if (pid == 0) {
         test::RtNoAllocScope guard;
-        // C++ heap allocation routes through the overridden operator new.
-        volatile int* leak = new int(7);
-        (void)leak;
+        // Explicitly call the replaceable global operator new so this death
+        // test cannot be optimized into a non-allocating unused `new int`.
+        void* leak = ::operator new(sizeof(int));
+        *static_cast<volatile int*>(leak) = 7;
         _exit(0);
     }
     int status = 0;
     REQUIRE(::waitpid(pid, &status, 0) == pid);
+    INFO("child status=" << status);
     REQUIRE(WIFSIGNALED(status));
     REQUIRE((WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGTRAP));
 }
