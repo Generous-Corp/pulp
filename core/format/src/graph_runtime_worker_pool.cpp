@@ -1,6 +1,9 @@
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
 #include <cassert>
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <intrin.h>
+#endif
 
 namespace pulp::format {
 namespace {
@@ -19,6 +22,16 @@ Range range_for(std::uint32_t worker_index, std::uint32_t workers,
     const std::uint32_t end =
         static_cast<std::uint32_t>(c * (worker_index + 1) / workers);
     return {begin, end};
+}
+
+void cpu_relax() noexcept {
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+    _mm_pause();
+#elif defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm64__)
+    __asm__ __volatile__("yield");
+#endif
 }
 
 } // namespace
@@ -106,11 +119,7 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     std::uint32_t spins = 0;
     while (completed_.load(std::memory_order_acquire) < target) {
         if (++spins < 1024) {
-#if defined(__x86_64__) || defined(_M_X64)
-            __builtin_ia32_pause();
-#elif defined(__aarch64__)
-            __asm__ __volatile__("yield");
-#endif
+            cpu_relax();
         } else {
             std::this_thread::yield();
             spins = 0;
@@ -139,11 +148,7 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         while ((e = epoch_.load(std::memory_order_acquire)) == local_epoch) {
             if (stopping_.load(std::memory_order_acquire)) return;
             if (++spins < 1024) {
-#if defined(__x86_64__) || defined(_M_X64)
-                __builtin_ia32_pause();
-#elif defined(__aarch64__)
-                __asm__ __volatile__("yield");
-#endif
+                cpu_relax();
             } else {
                 std::this_thread::yield();
                 spins = 0;
