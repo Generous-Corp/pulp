@@ -302,7 +302,15 @@ dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
   (the three are mutually exclusive). NOTE: this dumps the **earliest** window
   after the stream starts (int16), which is robust for `validate summarize` /
   `assert` (presence / level / clip / NaN); steady-state `doctor` (THD/response)
-  and `compare` want the rolling-ring follow-up.
+  and `compare` want `--audio-capture-rolling` instead.
+- `--audio-capture-rolling <file>` — capture the live output to a **float** WAV
+  after the frame delay, then exit. Unlike `--audio-capture-wav`, this keeps the
+  **last** (steady-state) window — the window `validate doctor`/`compare` want —
+  with no int16 quantization floor. `--audio-capture-rolling-frames <n>` sets the
+  window (0 = as much as the ring holds). Implies `--headless` but still launches
+  the live audio device. The standalone runs one capture mode per invocation, so
+  this is mutually exclusive with `--audio-inspector`, `--audio-scope-json`, and
+  `--audio-capture-wav`.
 
 Display-only waveform controls:
 

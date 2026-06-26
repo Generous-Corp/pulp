@@ -134,7 +134,8 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
     }
 }
 
-bool write_wav_file(const std::string& path, const AudioFileData& data) {
+bool write_wav_file(const std::string& path, const AudioFileData& data,
+                    WavBitDepth bit_depth) {
     if (data.sample_rate == 0) return false;
     if (!has_consistent_channel_lengths(data)) return false;
     if (data.num_channels() > std::numeric_limits<uint16_t>::max()) return false;
@@ -145,7 +146,9 @@ bool write_wav_file(const std::string& path, const AudioFileData& data) {
         choc::audio::AudioFileProperties props;
         props.sampleRate = data.sample_rate;
         props.numChannels = data.num_channels();
-        props.bitDepth = choc::audio::BitDepth::int16;
+        props.bitDepth = bit_depth == WavBitDepth::Float32
+                             ? choc::audio::BitDepth::float32
+                             : choc::audio::BitDepth::int16;
 
         auto writer = wav.createWriter(std::filesystem::path(path), props);
         if (!writer) return false;
@@ -163,6 +166,10 @@ bool write_wav_file(const std::string& path, const AudioFileData& data) {
     } catch (...) {
         return false;
     }
+}
+
+bool write_wav_file(const std::string& path, const AudioFileData& data) {
+    return write_wav_file(path, data, WavBitDepth::Int16);
 }
 
 } // namespace pulp::audio

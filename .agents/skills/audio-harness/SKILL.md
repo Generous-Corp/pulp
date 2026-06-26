@@ -255,15 +255,32 @@ The block stepper is a deliberate, callback-driven parallel to
 the core renderer directly); a block-partition-invariance test guards the two
 against drift.
 
+## Live capture-to-WAV — two modes, both LANDED
+
+`pulp run` taps the standalone's output boundary into a WAV the offline `pulp
+audio validate` verbs read, then exits. Pick the mode by which window you need:
+
+- **`--audio-capture-wav <file>` (earliest, int16).** Dumps the EARLIEST window
+  after the stream starts (drop-on-full FIFO). Robust for `validate summarize` /
+  `assert` (presence / level / clip / NaN); the wrong window for steady-state
+  `doctor` and quantization-limited for `compare`. `--audio-capture-frames <n>`
+  sets the window.
+- **`--audio-capture-rolling <file>` (last-N, float).** Keeps the LAST
+  (steady-state) window in a `RollingAudioCaptureBuffer` and writes a **float**
+  WAV (no int16 floor) — the window `doctor` (THD/response) and `compare`
+  (sub-−96 dBFS residuals) actually want. `--audio-capture-rolling-frames <n>`
+  sets the window. Uses the hold protocol so the off-RT materialize is safe while
+  the audio thread is still appending. One capture mode per invocation (mutually
+  exclusive with `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
+
+Float WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth::Float32)`.
+
 ## Roadmap
 
-- **Live capture-to-WAV — LANDED (earliest-window).** `pulp run
-  --audio-capture-wav <file>` taps the standalone's output-boundary probe ring
-  and dumps it to a WAV the offline `pulp audio validate` verbs read. It captures
-  the EARLIEST window after the stream starts (int16, drop-on-full FIFO), so it is
-  robust for `validate summarize` / `assert` (presence / level / clip / NaN) but
-  is the wrong window for steady-state `doctor` (THD/response) and is
-  quantization-limited for `compare`.
-- **Planned (do NOT instruct using this until it lands):** the rolling-ring
-  capture variant (true last-N + float/24-bit WAV, lifting the doctor/compare
-  caveat above), the steady-state window `validate doctor`/`compare` want.
+The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
+render` (offline plugin render), `pulp run --audio-capture-wav` (earliest-window
+int16), and `pulp run --audio-capture-rolling` (last-N float). The live realtime
+output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
+inspection* above). Remaining ideas are additive — e.g. a 24-bit-int capture
+alongside the float WAV, and sample-accurate (not block-quantized) `--param`
+automation in `render`.

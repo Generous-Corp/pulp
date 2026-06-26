@@ -30,6 +30,8 @@ constexpr const char* kAudioScopeTriggerEnv = "PULP_AUDIO_SCOPE_TRIGGER";
 constexpr const char* kAudioScopeChannelEnv = "PULP_AUDIO_SCOPE_CHANNEL";
 constexpr const char* kAudioCaptureWavEnv = "PULP_AUDIO_CAPTURE_WAV";
 constexpr const char* kAudioCaptureWavFramesEnv = "PULP_AUDIO_CAPTURE_WAV_FRAMES";
+constexpr const char* kAudioCaptureRollingEnv = "PULP_AUDIO_CAPTURE_ROLLING";
+constexpr const char* kAudioCaptureRollingFramesEnv = "PULP_AUDIO_CAPTURE_ROLLING_FRAMES";
 constexpr const char* kAudioNoticeEnv    = "PULP_RUN_AUDIO_NOTICE";
 
 void print_help() {
@@ -72,8 +74,14 @@ void print_help() {
            "                          analyze it. --audio-capture-frames <n> sets the ring\n"
            "                          window. Implies --headless but still uses the live\n"
            "                          audio device. NOTE: captures the earliest window\n"
-           "                          after start (int16) — best for summarize/assert;\n"
-           "                          doctor/compare want the rolling-ring follow-up.\n"
+           "                          after start (int16) — best for summarize/assert.\n"
+           "  --audio-capture-rolling <file>\n"
+           "                          Capture the live output to a float WAV after\n"
+           "                          rendering, then exit. Unlike --audio-capture-wav this\n"
+           "                          keeps the LAST (steady-state) window — the window\n"
+           "                          doctor/compare want — with no int16 floor.\n"
+           "                          --audio-capture-rolling-frames <n> sets the window.\n"
+           "                          Implies --headless but still uses the live device.\n"
            "  PULP_RUN_AUDIO_NOTICE=0\n"
            "                          Suppress the pre-launch notice that the\n"
            "                          standalone may activate system audio output.\n"
@@ -161,7 +169,8 @@ int cmd_run(const std::vector<std::string>& args) {
     if (opts.headless && opts.screenshot_path.empty()
         && opts.audio_probe_json_path.empty()
         && opts.audio_scope_json_path.empty()
-        && opts.audio_capture_wav_path.empty()) {
+        && opts.audio_capture_wav_path.empty()
+        && opts.audio_capture_rolling_path.empty()) {
         std::string base = opts.target_name.empty() ? "pulp-run" : opts.target_name;
         opts.screenshot_path = (build_dir / (base + ".png")).string();
     }
@@ -301,6 +310,12 @@ int cmd_run(const std::vector<std::string>& args) {
         set_env(kAudioCaptureWavEnv, opts.audio_capture_wav_path);
         if (opts.audio_capture_frames > 0)
             set_env(kAudioCaptureWavFramesEnv, std::to_string(opts.audio_capture_frames));
+    }
+    if (!opts.audio_capture_rolling_path.empty()) {
+        set_env(kAudioCaptureRollingEnv, opts.audio_capture_rolling_path);
+        if (opts.audio_capture_rolling_frames > 0)
+            set_env(kAudioCaptureRollingFramesEnv,
+                    std::to_string(opts.audio_capture_rolling_frames));
     }
 
     auto launch_args = assemble_launch_args(opts);
