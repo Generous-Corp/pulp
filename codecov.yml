@@ -138,6 +138,7 @@ ignore:
   - "**/plugin_view_host_win.cpp"
   - "**/plugin_view_host_linux.cpp"
   - "**/drag_drop_mac.mm"
+  - "**/coreaudio_device.mm"
   - "**/sdl_window_host.cpp"
   - "**/scanner_clap.cpp"
   - "**/au_v2_adapter.cpp"

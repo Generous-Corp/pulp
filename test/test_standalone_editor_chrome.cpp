@@ -374,10 +374,10 @@ TEST_CASE("SettingsPanel applies audio and MIDI selections",
     auto* sample_rate_combo = combos[2];
     auto* buffer_size_combo = combos[3];
 
-    REQUIRE(output_combo->items().size() == 2);
+    REQUIRE(output_combo->items().size() == 3);
     REQUIRE(input_combo->items().size() == 2);
 
-    output_combo->set_selected(1);
+    output_combo->set_selected(2);
     REQUIRE(applied.audio_device_id == "usb-out");
     REQUIRE(applied.sample_rate == 48000.0);
     REQUIRE(applied.buffer_size == 256);
@@ -432,7 +432,7 @@ TEST_CASE("SettingsPanel set_current_config prefers explicit output over default
 
     auto combos = descendants<ComboBox>(*audio_tab);
     REQUIRE(combos.size() >= 4);
-    REQUIRE(combos[0]->selected() == 1);
+    REQUIRE(combos[0]->selected() == 2);
     REQUIRE(combos[2]->items().size() == 2);
     REQUIRE(combos[2]->selected() == 1);
     REQUIRE(combos[3]->items().size() == 2);
@@ -484,13 +484,13 @@ TEST_CASE("SettingsPanel preserves audio selections across apply rebind",
     auto* sample_rate_combo = combos[2];
     auto* buffer_size_combo = combos[3];
 
-    output_combo->set_selected(1);
+    output_combo->set_selected(2);
     REQUIRE(applied.audio_device_id == "usb-out");
     REQUIRE(applied.sample_rate == 44100.0);
     REQUIRE(applied.buffer_size == 64);
 
     panel.bind_systems(&audio, nullptr);
-    REQUIRE(output_combo->selected() == 1);
+    REQUIRE(output_combo->selected() == 2);
     REQUIRE(sample_rate_combo->items().size() == 2);
     REQUIRE(buffer_size_combo->items().size() == 2);
 
@@ -500,7 +500,7 @@ TEST_CASE("SettingsPanel preserves audio selections across apply rebind",
     REQUIRE(applied.buffer_size == 512);
 
     panel.bind_systems(&audio, nullptr);
-    REQUIRE(output_combo->selected() == 1);
+    REQUIRE(output_combo->selected() == 2);
     REQUIRE(sample_rate_combo->selected() == 1);
     REQUIRE(buffer_size_combo->selected() == 1);
     REQUIRE(sample_rate_combo->selected_text() == "48000 Hz");
@@ -613,7 +613,7 @@ TEST_CASE("SettingsPanel constrains audio choices for fixed-rate instruments",
     REQUIRE(combos[3]->items()[0].find("64 samples") == 0);
     REQUIRE(combos[3]->selected() == 0);
 
-    combos[0]->set_selected(1);
+    combos[0]->set_selected(2);
     REQUIRE(apply_calls == 1);
     REQUIRE(applied.audio_device_id == "usb-out");
     REQUIRE(applied.sample_rate == 48000.0);
@@ -719,7 +719,7 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
     REQUIRE(lists.size() == 1);
     REQUIRE(audio.enumerate_calls == 2);
     REQUIRE(midi.enumerate_calls == 2);
-    REQUIRE(combos[0]->items().size() == 2);
+    REQUIRE(combos[0]->items().size() == 3);
     REQUIRE(lists[0]->items().size() == 2);
 
     TestSignalConfig last_signal;
@@ -789,7 +789,7 @@ TEST_CASE("SettingsPanel uses fallback rate and buffer choices without output de
 
     auto combos = descendants<ComboBox>(*audio_tab);
     REQUIRE(combos.size() >= 4);
-    REQUIRE(combos[0]->items().empty());
+    REQUIRE(combos[0]->items().size() == 1);  // "System Default (follow)" entry
     REQUIRE(combos[1]->items().size() == 2);
     REQUIRE(combos[2]->items().size() >= 6);
     REQUIRE(combos[3]->items().size() >= 7);
