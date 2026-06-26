@@ -3017,7 +3017,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE(no_perf.params_json.find("false") != std::string::npos);
 }
 
-// ─── StateInspector ListenerToken migration (Slice 3) ───────────────────────
+// ─── StateInspector ListenerToken migration ─────────────────────────────────
 
 TEST_CASE("StateInspector records parameter changes after subscribing",
           "[inspect][state][listener]") {
@@ -3067,7 +3067,7 @@ TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
     REQUIRE_THAT(store.get_value(1), Catch::Matchers::WithinAbs(0.75, 0.001));
 }
 
-// ─── Performance.setRepaintFlash (Tier A Slice 6) ───────────────────────────
+// ─── Performance.setRepaintFlash ────────────────────────────────────────────
 
 #include <pulp/render/dirty_tracker.hpp>
 
@@ -3119,7 +3119,7 @@ TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
     REQUIRE(set_resp.is_error);
 }
 
-// ─── LiveConstant RPC (Tier A Slice 13) ─────────────────────────────────────
+// ─── LiveConstant RPC ───────────────────────────────────────────────────────
 
 #include <pulp/view/live_constant_editor.hpp>
 

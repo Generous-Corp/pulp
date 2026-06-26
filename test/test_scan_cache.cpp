@@ -111,7 +111,7 @@ TEST_CASE("JSON round-trip preserves all fields", "[scan_cache]") {
     REQUIRE(e.info.format == PluginFormat::VST3);
 }
 
-TEST_CASE("JSON round-trip preserves workstream 03 slice 3.7 metadata",
+TEST_CASE("JSON round-trip preserves rich plugin metadata",
           "[scan_cache][metadata]") {
     // Covers the additive richer-metadata fields on PluginInfo —
     // scan_cache.hpp's doc promises "older cache blobs that don't

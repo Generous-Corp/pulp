@@ -45,16 +45,16 @@ namespace {
 // Build a root + child where the child carries an explicit background
 // color (so the resolved-style fallback has something to sample) and
 // an anchor (so the eyedropper tweak can land in the store).
-struct Phase3cScene {
+struct EyedropperScene {
     View root;
     View* child = nullptr;
     TweakStore store;
     InspectorOverlay overlay{root};
 
-    explicit Phase3cScene(Color child_bg = Color::rgba8(0x33, 0x66, 0xcc)) {
+    explicit EyedropperScene(Color child_bg = Color::rgba8(0x33, 0x66, 0xcc)) {
         root.set_bounds({0, 0, 500, 400});
         auto c = std::make_unique<View>();
-        c->set_anchor_id("figma:3c:1");
+        c->set_anchor_id("figma:eyedropper:1");
         c->set_bounds({40, 40, 120, 80});
         c->set_background_color(child_bg);
         child = c.get();
@@ -132,7 +132,7 @@ TEST_CASE("InspectorOverlay eyedropper: 'E' key toggles eyedropper only when act
 
 TEST_CASE("InspectorOverlay eyedropper: mouse-move samples color under cursor",
           "[inspect][overlay][eyedropper]") {
-    Phase3cScene s(Color::rgba8(0x12, 0xab, 0x5f));
+    EyedropperScene s(Color::rgba8(0x12, 0xab, 0x5f));
     s.overlay.set_eyedropper_active(true);
     REQUIRE_FALSE(s.overlay.eyedropper_has_sample());
 
@@ -147,7 +147,7 @@ TEST_CASE("InspectorOverlay eyedropper: mouse-move samples color under cursor",
 
 TEST_CASE("InspectorOverlay eyedropper: click captures color and emits tweak",
           "[inspect][overlay][eyedropper]") {
-    Phase3cScene s(Color::rgba8(0xff, 0x80, 0x00));
+    EyedropperScene s(Color::rgba8(0xff, 0x80, 0x00));
     s.overlay.set_eyedropper_active(true);
 
     // Hover to sample, then click to apply.
@@ -160,7 +160,7 @@ TEST_CASE("InspectorOverlay eyedropper: click captures color and emits tweak",
 
     // The tweak landed in the store under the selection's anchor.
     REQUIRE(s.store.count() == 1);
-    auto v = s.store.lookup("figma:3c:1", "style.background_color");
+    auto v = s.store.lookup("figma:eyedropper:1", "style.background_color");
     REQUIRE(v.has_value());
     REQUIRE(std::string(v->getString()) == "#ff8000");
 }
@@ -170,23 +170,23 @@ TEST_CASE("InspectorOverlay eyedropper: click without prior move still picks",
     // Resolved-style sampling is synchronous, so a click with no
     // preceding mouse-move still captures a real color (covers
     // scripted / fast-click use).
-    Phase3cScene s(Color::rgba8(0x40, 0x40, 0x40));
+    EyedropperScene s(Color::rgba8(0x40, 0x40, 0x40));
     s.overlay.set_eyedropper_active(true);
 
     bool consumed = s.overlay.handle_mouse_event(make_click(100, 90));
     REQUIRE(consumed);
     REQUIRE(s.store.count() == 1);
-    auto v = s.store.lookup("figma:3c:1", "style.background_color");
+    auto v = s.store.lookup("figma:eyedropper:1", "style.background_color");
     REQUIRE(v.has_value());
     REQUIRE(std::string(v->getString()) == "#404040");
 }
 
 TEST_CASE("InspectorOverlay eyedropper: click refreshes stale hover sample",
           "[inspect][overlay][eyedropper][regression]") {
-    Phase3cScene s(Color::rgba8(0xff, 0x00, 0x00));
+    EyedropperScene s(Color::rgba8(0xff, 0x00, 0x00));
 
     auto second = std::make_unique<View>();
-    second->set_anchor_id("figma:3c:2");
+    second->set_anchor_id("figma:eyedropper:2");
     second->set_bounds({40, 150, 120, 80});
     second->set_background_color(Color::rgba8(0x00, 0x66, 0xff));
     s.root.add_child(std::move(second));
@@ -205,7 +205,7 @@ TEST_CASE("InspectorOverlay eyedropper: click refreshes stale hover sample",
     bool consumed = s.overlay.handle_mouse_event(make_click(90, 170));
     REQUIRE(consumed);
 
-    auto v = s.store.lookup("figma:3c:1", "style.background_color");
+    auto v = s.store.lookup("figma:eyedropper:1", "style.background_color");
     REQUIRE(v.has_value());
     REQUIRE(std::string(v->getString()) == "#0066ff");
 }
@@ -219,7 +219,7 @@ TEST_CASE("InspectorOverlay eyedropper: click never commits a stale sample",
     // When the click lands where the resolved-style fallback finds no
     // background-colored view, the resample fails — and the pick must
     // no-op rather than commit the stale color from the old position.
-    Phase3cScene s(Color::rgba8(0xff, 0x00, 0x00));
+    EyedropperScene s(Color::rgba8(0xff, 0x00, 0x00));
     s.overlay.set_eyedropper_active(true);
 
     // Seed a stale sample by hovering over the colored child.
@@ -242,12 +242,12 @@ TEST_CASE("InspectorOverlay eyedropper: click never commits a stale sample",
 
 TEST_CASE("InspectorOverlay eyedropper: retargeting writes a different property",
           "[inspect][overlay][eyedropper]") {
-    Phase3cScene s(Color::rgba8(0x00, 0x99, 0xff));
+    EyedropperScene s(Color::rgba8(0x00, 0x99, 0xff));
     s.overlay.set_eyedropper_target("style.border_color");
     s.overlay.set_eyedropper_active(true);
 
     s.overlay.handle_mouse_event(make_click(80, 70));
-    auto v = s.store.lookup("figma:3c:1", "style.border_color");
+    auto v = s.store.lookup("figma:eyedropper:1", "style.border_color");
     REQUIRE(v.has_value());
     REQUIRE(std::string(v->getString()) == "#0099ff");
 
@@ -259,10 +259,10 @@ TEST_CASE("InspectorOverlay eyedropper: retargeting writes a different property"
 TEST_CASE("InspectorOverlay eyedropper: sample_color_at hex round-trips alpha",
           "[inspect][overlay][eyedropper]") {
     // A semi-transparent background encodes as 8-digit "#rrggbbaa".
-    Phase3cScene s(Color::rgba8(0x20, 0x30, 0x40, 0x80));
+    EyedropperScene s(Color::rgba8(0x20, 0x30, 0x40, 0x80));
     s.overlay.set_eyedropper_active(true);
     s.overlay.handle_mouse_event(make_click(80, 70));
-    auto v = s.store.lookup("figma:3c:1", "style.background_color");
+    auto v = s.store.lookup("figma:eyedropper:1", "style.background_color");
     REQUIRE(v.has_value());
     REQUIRE(std::string(v->getString()) == "#20304080");
 }
@@ -271,7 +271,7 @@ TEST_CASE("InspectorOverlay eyedropper: eyedropper yields to the panel",
           "[inspect][overlay][eyedropper]") {
     // A click inside the inspector panel must NOT be eaten by the
     // eyedropper — the user still needs tree / field interaction.
-    Phase3cScene s;
+    EyedropperScene s;
     s.overlay.set_eyedropper_active(true);
 
     // Panel occupies the right 300px of the 500px-wide root.
@@ -308,7 +308,7 @@ TEST_CASE("InspectorOverlay eyedropper: pick no-ops without a selection anchor",
 
 TEST_CASE("InspectorOverlay eyedropper: deactivating inspector clears eyedropper",
           "[inspect][overlay][eyedropper]") {
-    Phase3cScene s;
+    EyedropperScene s;
     s.overlay.set_eyedropper_active(true);
     s.overlay.handle_mouse_event(make_move(80, 70));
     REQUIRE(s.overlay.eyedropper_has_sample());
@@ -323,7 +323,7 @@ TEST_CASE("InspectorOverlay eyedropper: paint draws swatch when armed",
     // The cursor swatch must paint without crashing once a sample
     // exists; RecordingCanvas has no pixel readback so this exercises
     // the resolved-style path + the swatch chrome.
-    Phase3cScene s;
+    EyedropperScene s;
     s.overlay.set_eyedropper_active(true);
     s.overlay.handle_mouse_event(make_move(80, 70));
     REQUIRE(s.overlay.eyedropper_has_sample());

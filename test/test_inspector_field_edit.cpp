@@ -48,16 +48,16 @@ using namespace pulp::inspect;
 namespace {
 
 // Build a small root + child with an anchor for tweak-emission tests.
-struct Phase3bScene {
+struct FieldEditScene {
     View root;
     View* child = nullptr;
     TweakStore store;
     InspectorOverlay overlay{root};
 
-    Phase3bScene() {
+    FieldEditScene() {
         root.set_bounds({0, 0, 500, 400});
         auto c = std::make_unique<View>();
-        c->set_anchor_id("figma:3b:1");
+        c->set_anchor_id("figma:field-edit:1");
         c->set_bounds({10, 10, 80, 40});
         c->flex().padding = 8;
         c->flex().margin = 4;
@@ -89,7 +89,7 @@ KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
 
 TEST_CASE("InspectorOverlay field edit: begin_field_edit sets editing state",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     REQUIRE(s.overlay.selected_view() == s.child);
     REQUIRE_FALSE(s.overlay.is_editing());
 
@@ -114,7 +114,7 @@ TEST_CASE("InspectorOverlay field edit: begin_field_edit refuses without selecti
 
 TEST_CASE("InspectorOverlay field edit: typing digits extends edit buffer",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     REQUIRE(s.overlay.begin_field_edit("layout.padding", 8.0f));
     REQUIRE(s.overlay.edit_buffer() == "8");
 
@@ -133,7 +133,7 @@ TEST_CASE("InspectorOverlay field edit: typing digits extends edit buffer",
 
 TEST_CASE("InspectorOverlay field edit: backspace trims buffer",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     s.overlay.handle_key_event(make_key(KeyCode::num5));
     REQUIRE(s.overlay.edit_buffer() == "85");
@@ -145,7 +145,7 @@ TEST_CASE("InspectorOverlay field edit: backspace trims buffer",
 
 TEST_CASE("InspectorOverlay field edit: Enter commits tweak to TweakStore",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Type "5" → buffer is "85"
     s.overlay.handle_key_event(make_key(KeyCode::num5));
@@ -156,7 +156,7 @@ TEST_CASE("InspectorOverlay field edit: Enter commits tweak to TweakStore",
     // Edit mode exited, tweak persisted, View reflects committed value.
     REQUIRE_FALSE(s.overlay.is_editing());
     REQUIRE(s.store.count() == 1);
-    auto v = s.store.lookup("figma:3b:1", "layout.padding");
+    auto v = s.store.lookup("figma:field-edit:1", "layout.padding");
     REQUIRE(v.has_value());
     // Value stored as float32 — round-trip equality at integer values
     // is safe.
@@ -166,7 +166,7 @@ TEST_CASE("InspectorOverlay field edit: Enter commits tweak to TweakStore",
 
 TEST_CASE("InspectorOverlay field edit: Esc cancels and reverts",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Bump to "85" — real-time preview mutates the View.
     s.overlay.handle_key_event(make_key(KeyCode::num5));
@@ -180,7 +180,7 @@ TEST_CASE("InspectorOverlay field edit: Esc cancels and reverts",
 
 TEST_CASE("InspectorOverlay field edit: Up arrow increments by 1",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
     REQUIRE(s.overlay.handle_key_event(make_key(KeyCode::up)));
@@ -194,7 +194,7 @@ TEST_CASE("InspectorOverlay field edit: Up arrow increments by 1",
 
 TEST_CASE("InspectorOverlay field edit: Down arrow decrements by 1",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
     REQUIRE(s.overlay.handle_key_event(make_key(KeyCode::down)));
@@ -204,7 +204,7 @@ TEST_CASE("InspectorOverlay field edit: Down arrow decrements by 1",
 
 TEST_CASE("InspectorOverlay field edit: Shift+Up nudges by 10",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
     REQUIRE(s.overlay.handle_key_event(make_key(KeyCode::up, true, kModShift)));
@@ -217,7 +217,7 @@ TEST_CASE("InspectorOverlay field edit: Shift+Up nudges by 10",
 
 TEST_CASE("InspectorOverlay field edit: Cmd+Up nudges by 100 (Figma semantics)",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
 
 #ifdef __APPLE__
@@ -232,7 +232,7 @@ TEST_CASE("InspectorOverlay field edit: Cmd+Up nudges by 100 (Figma semantics)",
 
 TEST_CASE("InspectorOverlay field edit: Tab commits and moves to next field",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     // Paint once so editable_fields_ is populated with the panel's
     // tab order.
     pulp::canvas::RecordingCanvas canvas;
@@ -244,7 +244,7 @@ TEST_CASE("InspectorOverlay field edit: Tab commits and moves to next field",
     REQUIRE(s.overlay.handle_key_event(make_key(KeyCode::tab)));
     // The previous field's edit was committed (tweak in store).
     REQUIRE(s.store.count() == 1);
-    REQUIRE(s.store.lookup("figma:3b:1", "layout.padding").has_value());
+    REQUIRE(s.store.lookup("figma:field-edit:1", "layout.padding").has_value());
     // We're now editing a different field (whatever follows padding
     // in the panel's draw order).
     REQUIRE(s.overlay.is_editing());
@@ -253,7 +253,7 @@ TEST_CASE("InspectorOverlay field edit: Tab commits and moves to next field",
 
 TEST_CASE("InspectorOverlay field edit: clicking a numeric value enters edit mode",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     // Paint to populate editable_fields_ (the panel-side hit rects).
     pulp::canvas::RecordingCanvas canvas;
     s.overlay.paint(canvas);
@@ -295,7 +295,7 @@ TEST_CASE("InspectorOverlay field edit: clicking a numeric value enters edit mod
 
 TEST_CASE("InspectorOverlay field edit: editing layout.width writes to preferred_width",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.width", s.child->flex().preferred_width);
     REQUIRE(s.overlay.edit_buffer() == "80");
 
@@ -304,14 +304,14 @@ TEST_CASE("InspectorOverlay field edit: editing layout.width writes to preferred
     REQUIRE(s.child->flex().preferred_width == 805.0f);
 
     s.overlay.handle_key_event(make_key(KeyCode::enter));
-    auto v = s.store.lookup("figma:3b:1", "layout.width");
+    auto v = s.store.lookup("figma:field-edit:1", "layout.width");
     REQUIRE(v.has_value());
     REQUIRE(v->getFloat32() == 805.0f);
 }
 
 TEST_CASE("InspectorOverlay field edit: editing style.opacity round-trips",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.child->set_opacity(0.5f);
     s.overlay.begin_field_edit("style.opacity", 0.5f);
 
@@ -324,13 +324,13 @@ TEST_CASE("InspectorOverlay field edit: editing style.opacity round-trips",
     REQUIRE(s.child->opacity() == 1.0f);
     s.overlay.handle_key_event(make_key(KeyCode::enter));
 
-    auto v = s.store.lookup("figma:3b:1", "style.opacity");
+    auto v = s.store.lookup("figma:field-edit:1", "style.opacity");
     REQUIRE(v.has_value());
 }
 
 TEST_CASE("InspectorOverlay field edit: cancel_field_edit on inactive is no-op",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     REQUIRE_FALSE(s.overlay.is_editing());
     s.overlay.cancel_field_edit();  // must not crash
     REQUIRE_FALSE(s.overlay.is_editing());
@@ -340,7 +340,7 @@ TEST_CASE("InspectorOverlay field edit: cancel_field_edit on inactive is no-op",
 TEST_CASE("InspectorOverlay field edit: commit_field_edit with empty buffer "
           "exits edit without emitting tweak",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     // Backspace twice to empty the buffer ("8" → "")
     s.overlay.handle_key_event(make_key(KeyCode::backspace));
@@ -353,7 +353,7 @@ TEST_CASE("InspectorOverlay field edit: commit_field_edit with empty buffer "
 
 TEST_CASE("InspectorOverlay field edit: caret moves with Left/Right/Home/End",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 80.0f);
     REQUIRE(s.overlay.edit_buffer() == "80");
     REQUIRE(s.overlay.edit_caret_pos() == 2);
@@ -373,7 +373,7 @@ TEST_CASE("InspectorOverlay field edit: caret moves with Left/Right/Home/End",
 
 TEST_CASE("InspectorOverlay field edit: deactivating inspector cancels active edit",
           "[inspect][overlay][field-edit]") {
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     s.overlay.handle_key_event(make_key(KeyCode::num5));
     REQUIRE(s.child->flex().padding == 85.0f);
@@ -392,7 +392,7 @@ TEST_CASE("InspectorOverlay field edit: Esc while editing does NOT exit inspecto
     // with nothing selected is a NO-OP — Esc never exits the inspector (Cmd+I /
     // the window close button does that). The inspector stays active throughout
     // so hover + click keep working without a Cmd+I cycle.
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     REQUIRE(s.overlay.is_active());
     // The scene selected `child` (a direct child of root).
@@ -418,7 +418,7 @@ TEST_CASE("InspectorOverlay field edit: Tab without paint does nothing extra",
     // Tab consults the editable_fields_ list populated by the last
     // paint. If we Tab without ever painting, commit happens but no
     // next-field move occurs (gracefully).
-    Phase3bScene s;
+    FieldEditScene s;
     s.overlay.begin_field_edit("layout.padding", 8.0f);
     s.overlay.handle_key_event(make_key(KeyCode::num5));
 

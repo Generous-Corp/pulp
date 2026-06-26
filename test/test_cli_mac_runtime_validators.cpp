@@ -141,14 +141,11 @@ TEST_CASE("standalone validator: surfaces non-zero exit",
     REQUIRE(r.summary.find("Library not loaded") != std::string::npos);
 }
 
-// Regression: PR #3005. The smoke command must pass
-// PULP_SCREENSHOT alongside PULP_HEADLESS so `run_with_editor` doesn't
-// early-fail on the missing screenshot path (see
-// core/format/src/standalone.cpp:264). Without PULP_SCREENSHOT, every
-// healthy standalone bundle would report a false failure.
+// The smoke command must pass PULP_SCREENSHOT alongside PULP_HEADLESS so
+// `run_with_editor` does not early-fail on the missing screenshot path. Without
+// PULP_SCREENSHOT, every healthy standalone bundle would report a false failure.
 TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
-          "PULP_HEADLESS so the binary actually smoke-runs "
-          "(regression: PR #3005 review)",
+          "PULP_HEADLESS so the binary actually smoke-runs",
           "[cli][mac-validators][issue-3005]") {
     StubEnv s;
     fs::path bundle = "/tmp/Synth.app";
@@ -170,14 +167,11 @@ TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
     REQUIRE(cmd.find("PULP_HEADLESS=1") != std::string::npos);
 }
 
-// Regression: PR #3005. A `.app` bundle that exists but has no
-// runnable binary inside is a packaging regression. Previously this
-// returned `skip` (exit 0 unless --strict), letting malformed standalone
-// artifacts sneak past `pulp validate --target standalone`. Now it
-// returns `fail` so the gate actually gates.
+// A `.app` bundle that exists but has no runnable binary inside is a packaging
+// regression. It must fail so malformed standalone artifacts cannot pass
+// `pulp validate --target standalone`.
 TEST_CASE("standalone validator fails (not skips) on a malformed "
-          ".app bundle with no runnable binary "
-          "(regression: PR #3005 review)",
+          ".app bundle with no runnable binary",
           "[cli][mac-validators][issue-3005]") {
     StubEnv s;
     fs::path bundle = "/tmp/Headless.app";
