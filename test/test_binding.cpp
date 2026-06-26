@@ -63,7 +63,7 @@ TEST_CASE("Binding normalized", "[binding]") {
 }
 
 TEST_CASE("Binding unknown parameter operations stay inert",
-          "[binding][coverage][issue-646]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store,999);
     int call_count = 0;
@@ -82,7 +82,7 @@ TEST_CASE("Binding unknown parameter operations stay inert",
 }
 
 TEST_CASE("Binding set_normalized clamps and quantizes through store",
-          "[binding][coverage][issue-646]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store,1); // range -60..24, step 0.1
 
@@ -124,7 +124,7 @@ TEST_CASE("Binding on_change fires", "[binding]") {
 }
 
 TEST_CASE("Binding on_change callbacks fire in registration order",
-          "[binding][coverage][issue-646]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store,1);
     std::vector<int> calls;
@@ -163,7 +163,7 @@ TEST_CASE("Binding on_change does not fire for same value", "[binding]") {
 }
 
 TEST_CASE("Binding skips empty change callbacks and reports clamped values",
-          "[binding][codecov]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 1);
 
@@ -183,7 +183,7 @@ TEST_CASE("Binding skips empty change callbacks and reports clamped values",
 }
 
 TEST_CASE("Binding to unknown parameter is inert but remains store-bound",
-          "[binding][codecov]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 999);
 
@@ -234,7 +234,7 @@ TEST_CASE("Binding poll reports non-zero default once", "[binding]") {
 }
 
 TEST_CASE("create_bindings preserves parameter order and metadata",
-          "[binding][codecov]") {
+          "[binding]") {
     auto store = make_store();
     auto bindings = create_bindings(*store);
 
@@ -359,7 +359,7 @@ TEST_CASE("create_bindings for all params", "[binding]") {
 }
 
 TEST_CASE("create_bindings returns empty for an empty store",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     StateStore store;
 
     auto bindings = create_bindings(store);
@@ -368,7 +368,7 @@ TEST_CASE("create_bindings returns empty for an empty store",
 }
 
 TEST_CASE("Binding edit history can be detached before gesture end",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 1);
     EditHistory history;
@@ -385,7 +385,7 @@ TEST_CASE("Binding edit history can be detached before gesture end",
 }
 
 TEST_CASE("Binding set suppresses notifications within epsilon",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 1);
     int call_count = 0;
@@ -398,7 +398,7 @@ TEST_CASE("Binding set suppresses notifications within epsilon",
 }
 
 TEST_CASE("Binding set after clamping compares against clamped store value",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 1);
     int call_count = 0;
@@ -412,7 +412,7 @@ TEST_CASE("Binding set after clamping compares against clamped store value",
 }
 
 TEST_CASE("Binding poll updates baseline after the first notification",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     auto store = make_store();
     Binding b(*store, 1);
     int call_count = 0;
@@ -429,7 +429,7 @@ TEST_CASE("Binding poll updates baseline after the first notification",
 }
 
 TEST_CASE("Binding move construction preserves store and callbacks",
-          "[binding][coverage][phase3-github]") {
+          "[binding]") {
     auto store = make_store();
     Binding original(*store, 1);
     std::vector<float> values;
@@ -446,7 +446,7 @@ TEST_CASE("Binding move construction preserves store and callbacks",
 }
 
 TEST_CASE("Binding move assignment replaces destination binding",
-          "[binding][coverage][phase3-github]") {
+          "[binding]") {
     auto store = make_store();
     Binding destination(*store, 2);
     Binding source(*store, 1);
@@ -462,7 +462,7 @@ TEST_CASE("Binding move assignment replaces destination binding",
 }
 
 TEST_CASE("Binding copies retain store identity and callback state",
-          "[binding][coverage][phase3-large]") {
+          "[binding]") {
     auto store = make_store();
     Binding original(*store, 1);
     std::vector<float> original_values;

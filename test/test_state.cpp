@@ -185,7 +185,7 @@ TEST_CASE("ParameterEventQueue is available from state",
 }
 
 TEST_CASE("ParameterEventQueue enforces capacity and preserves stable sort order",
-          "[state][params][events][coverage][phase3]") {
+          "[state][params][events]") {
     ParameterEventQueue queue;
 
     REQUIRE(queue.capacity() == ParameterEventQueue::kCapacity);
@@ -219,7 +219,7 @@ TEST_CASE("ParameterEventQueue enforces capacity and preserves stable sort order
 }
 
 TEST_CASE("ParamCursor ignores unregistered events but honors explicit snapshots",
-          "[state][params][cursor][coverage][phase3]") {
+          "[state][params][cursor]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
     store.set_value(1, 0.5f);
@@ -247,7 +247,7 @@ TEST_CASE("ParamCursor ignores unregistered events but honors explicit snapshots
 }
 
 TEST_CASE("ParamCursor is monotonic and null event queues fall back to StateStore",
-          "[state][params][cursor][coverage][phase3]") {
+          "[state][params][cursor]") {
     StateStore store;
     store.add_parameter(make_param_info(7, "Mix", "", {-1.0f, 1.0f, 0.0f}));
     store.set_value(7, 0.25f);
@@ -455,7 +455,7 @@ TEST_CASE("ParamCursor clamps ramp targets and treats non-positive durations as 
 }
 
 TEST_CASE("ParameterEventQueue exposes mutable and const iteration over active events",
-          "[state][params][events][coverage][phase3-state]") {
+          "[state][params][events]") {
     ParameterEventQueue queue;
 
     REQUIRE(queue.empty());
@@ -490,7 +490,7 @@ TEST_CASE("ParameterEventQueue exposes mutable and const iteration over active e
 }
 
 TEST_CASE("ParamCursor updates duplicate snapshots and ignores late unknown events",
-          "[state][params][cursor][coverage][phase3-state]") {
+          "[state][params][cursor]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
     store.set_value(1, 0.5f);
@@ -538,7 +538,7 @@ TEST_CASE("ParamRange with step", "[state][range]") {
 }
 
 TEST_CASE("ParamRange clamps normalized conversions at range boundaries",
-          "[state][range][coverage][issue-646]") {
+          "[state][range]") {
     ParamRange range{-10.0f, 30.0f, 5.0f, 0.0f};
 
     REQUIRE_THAT(range.normalize(-100.0f), WithinAbs(0.0, 0.001));
@@ -548,7 +548,7 @@ TEST_CASE("ParamRange clamps normalized conversions at range boundaries",
 }
 
 TEST_CASE("ParamRange zero-width ranges normalize safely",
-          "[state][range][coverage][issue-646]") {
+          "[state][range]") {
     ParamRange range{7.0f, 7.0f, 7.0f, 0.0f};
 
     REQUIRE_THAT(range.normalize(7.0f), WithinAbs(0.0, 0.001));
@@ -557,7 +557,7 @@ TEST_CASE("ParamRange zero-width ranges normalize safely",
     REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(7.0, 0.001));
 }
 
-TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range][codecov]") {
+TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range]") {
     ParamRange range{-10.0f, 10.0f, 0.0f, 0.0f};
 
     REQUIRE_THAT(range.normalize(-100.0f), WithinAbs(0.0, 0.001));
@@ -571,7 +571,7 @@ TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range][cod
 }
 
 TEST_CASE("ParamValue tracks modulation and copy move state",
-          "[state][value][codecov]") {
+          "[state][value]") {
     ParamRange range{-1.0f, 1.0f, 0.0f, 0.5f};
     ParamValue value(0.25f);
 
@@ -671,7 +671,7 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
 }
 
 TEST_CASE("StateStore duplicate parameter ids resolve to latest registration",
-          "[state][store][coverage][phase3-github]") {
+          "[state][store]") {
     StateStore store;
     store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f}));
     store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f}));
@@ -764,7 +764,7 @@ TEST_CASE("StateStore serialization", "[state][serialize]") {
 }
 
 TEST_CASE("StateStore serialization records header fields and rejects future versions",
-          "[state][serialize][coverage][issue-646]") {
+          "[state][serialize]") {
     StateStore store;
     auto p1 = make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f});
     auto p2 = make_param_info(20, "Tone", "", {-1.0f, 1.0f, 0.0f});
@@ -793,7 +793,7 @@ TEST_CASE("StateStore serialization records header fields and rejects future ver
 }
 
 TEST_CASE("StateStore serialization honors explicit current schema version",
-          "[state][serialize][coverage][phase3]") {
+          "[state][serialize]") {
     StateStore source;
     auto p = make_param_info(7, "Shape", "", {0.0f, 1.0f, 0.25f});
     source.add_parameter(p);
@@ -811,7 +811,7 @@ TEST_CASE("StateStore serialization honors explicit current schema version",
 }
 
 TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
-          "[state][store][coverage][issue-646]") {
+          "[state][store]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Steps", "", {0.0f, 10.0f, 5.0f, 2.0f}));
 
@@ -829,7 +829,7 @@ TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
 }
 
 TEST_CASE("StateStore deserialize clamps values to current ranges",
-          "[state][serialize][codecov]") {
+          "[state][serialize]") {
     StateStore source;
     source.add_parameter(make_param_info(1, "Wide", "", {0.0f, 100.0f, 50.0f}));
     source.set_value(1, 80.0f);
@@ -843,7 +843,7 @@ TEST_CASE("StateStore deserialize clamps values to current ranges",
 }
 
 TEST_CASE("StateStore deserialize rejects bad magic and future versions",
-          "[state][serialize][codecov]") {
+          "[state][serialize]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
     store.set_value(1, -12.0f);
@@ -865,7 +865,7 @@ TEST_CASE("StateStore deserialize rejects bad magic and future versions",
 }
 
 TEST_CASE("StateStore deserialize rejects corrupted CRC without changing values",
-          "[state][serialize][coverage]") {
+          "[state][serialize]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
     store.set_value(1, -6.0f);
@@ -894,7 +894,7 @@ TEST_CASE("StateStore change listener", "[state][listener]") {
     REQUIRE_THAT(changed_value, WithinAbs(0.8, 0.001));
 }
 
-TEST_CASE("StateStore skips empty change listeners", "[state][listener][codecov]") {
+TEST_CASE("StateStore skips empty change listeners", "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
 
@@ -911,7 +911,7 @@ TEST_CASE("StateStore skips empty change listeners", "[state][listener][codecov]
 }
 
 TEST_CASE("StateStore ignores unknown value writes without notifying listeners",
-          "[state][listener][coverage]") {
+          "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Known", "", {0.0f, 1.0f, 0.5f}));
 
@@ -994,7 +994,7 @@ TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state
 }
 
 TEST_CASE("StateStore preserves parameter display conversion callbacks",
-          "[state][store][coverage][phase3]") {
+          "[state][store]") {
     StateStore store;
     ParamInfo info = make_param_info(7, "Frequency", "Hz", {20.0f, 20000.0f, 440.0f});
     info.to_string = [](float value) {
@@ -1014,7 +1014,7 @@ TEST_CASE("StateStore preserves parameter display conversion callbacks",
 }
 
 TEST_CASE("StateStore unknown modulation writes are no-ops",
-          "[state][store][coverage][phase3]") {
+          "[state][store]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
 
@@ -1031,7 +1031,7 @@ TEST_CASE("StateStore unknown modulation writes are no-ops",
 }
 
 TEST_CASE("ParamRange ignores negative step and still clamps output",
-          "[state][range][coverage][phase3-large]") {
+          "[state][range]") {
     ParamRange range{0.0f, 10.0f, 5.0f, -2.0f};
 
     REQUIRE_THAT(range.denormalize(0.25f), WithinAbs(2.5, 0.001));
@@ -1040,7 +1040,7 @@ TEST_CASE("ParamRange ignores negative step and still clamps output",
 }
 
 TEST_CASE("ParamRange quantization clamps non-divisible upper steps",
-          "[state][range][coverage][phase3-large]") {
+          "[state][range]") {
     ParamRange range{0.0f, 10.0f, 0.0f, 3.0f};
 
     REQUIRE_THAT(range.denormalize(0.14f), WithinAbs(0.0, 0.001));
@@ -1050,7 +1050,7 @@ TEST_CASE("ParamRange quantization clamps non-divisible upper steps",
 }
 
 TEST_CASE("ParamValue copy and assignment reset modulation offset",
-          "[state][value][coverage][phase3-large]") {
+          "[state][value]") {
     ParamValue source(2.0f);
     source.set_mod_offset(3.0f);
 
@@ -1065,7 +1065,7 @@ TEST_CASE("ParamValue copy and assignment reset modulation offset",
 }
 
 TEST_CASE("StateStore listener snapshot defers newly added listeners",
-          "[state][listener][coverage][phase3-large]") {
+          "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
 
@@ -1090,7 +1090,7 @@ TEST_CASE("StateStore listener snapshot defers newly added listeners",
 }
 
 TEST_CASE("StateStore gesture callbacks can be replaced and cleared",
-          "[state][store][coverage][phase3-large]") {
+          "[state][store]") {
     StateStore store;
     std::vector<ParamID> began;
     std::vector<ParamID> ended;
@@ -1110,7 +1110,7 @@ TEST_CASE("StateStore gesture callbacks can be replaced and cleared",
 }
 
 TEST_CASE("Binding handles unbound and polled parameter changes",
-          "[state][binding][coverage][phase3-large]") {
+          "[state][binding]") {
     Binding empty;
     REQUIRE_FALSE(empty.is_bound());
     REQUIRE(empty.id() == 0);
@@ -1156,7 +1156,7 @@ TEST_CASE("Binding handles unbound and polled parameter changes",
 }
 
 TEST_CASE("Binding gesture end records undoable parameter edits",
-          "[state][binding][coverage][phase3-large]") {
+          "[state][binding]") {
     StateStore store;
     store.add_parameter(make_param_info(9, "Mix", "%", {0.0f, 100.0f, 50.0f}));
 
@@ -1187,7 +1187,7 @@ TEST_CASE("Binding gesture end records undoable parameter edits",
 }
 
 TEST_CASE("Binding normalized writes notify only when the stored value changes",
-          "[state][binding][coverage][phase3-large]") {
+          "[state][binding]") {
     StateStore store;
     store.add_parameter(make_param_info(12, "Pan", "", {-1.0f, 1.0f, 0.0f}));
 
@@ -1234,7 +1234,7 @@ TEST_CASE("Binding normalized writes notify only when the stored value changes",
 }
 
 TEST_CASE("Binding handles unregistered parameters without mutating the store",
-          "[state][binding][coverage][phase3-large]") {
+          "[state][binding]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 6.0f, -12.0f}));
 
@@ -1260,7 +1260,7 @@ TEST_CASE("Binding handles unregistered parameters without mutating the store",
 }
 
 TEST_CASE("create_bindings mirrors StateStore parameter registration order",
-          "[state][binding][coverage][phase3-large]") {
+          "[state][binding]") {
     StateStore empty;
     auto empty_bindings = create_bindings(empty);
     REQUIRE(empty_bindings.empty());
@@ -1288,7 +1288,7 @@ TEST_CASE("create_bindings mirrors StateStore parameter registration order",
 }
 
 TEST_CASE("EditHistory trims depth clears redo and toggles coalescing",
-          "[state][edit-history][coverage][phase3-large]") {
+          "[state][edit-history]") {
     EditHistory history(2);
     int value = 0;
 
@@ -1322,7 +1322,7 @@ TEST_CASE("EditHistory trims depth clears redo and toggles coalescing",
 }
 
 TEST_CASE("EditHistory coalesces matching descriptions and clamps max depth",
-          "[state][edit-history][coverage][phase3-large]") {
+          "[state][edit-history]") {
     EditHistory history(4);
     int value = 0;
 
@@ -1343,7 +1343,7 @@ TEST_CASE("EditHistory coalesces matching descriptions and clamps max depth",
 }
 
 TEST_CASE("EditHistory exposes empty descriptions, redo counts, and inert callbacks",
-          "[state][edit-history][coverage][phase3-state]") {
+          "[state][edit-history]") {
     struct BlankAction final : EditAction {
         explicit BlankAction(int& target) : value(&target) {}
 
@@ -1377,7 +1377,7 @@ TEST_CASE("EditHistory exposes empty descriptions, redo counts, and inert callba
 }
 
 TEST_CASE("StateStore unknown modulation and reset calls are inert",
-          "[state][store][coverage][phase3-github]") {
+          "[state][store]") {
     StateStore store;
     store.add_parameter(make_param_info(3, "Depth", "", {0.0f, 1.0f, 0.25f}));
 
@@ -1391,7 +1391,7 @@ TEST_CASE("StateStore unknown modulation and reset calls are inert",
 }
 
 TEST_CASE("StateStore deserialize rejects short declared count payloads",
-          "[state][serialize][coverage][phase3-large]") {
+          "[state][serialize]") {
     StateStore source;
     auto p1 = make_param_info(1, "One", "", {0.0f, 1.0f, 0.0f});
     source.add_parameter(p1);
@@ -1411,7 +1411,7 @@ TEST_CASE("StateStore deserialize rejects short declared count payloads",
 }
 
 TEST_CASE("StateStore empty serialization round-trips as a minimum frame",
-          "[state][serialize][coverage][phase3]") {
+          "[state][serialize]") {
     StateStore source;
 
     auto data = source.serialize();
@@ -1428,7 +1428,7 @@ TEST_CASE("StateStore empty serialization round-trips as a minimum frame",
 }
 
 TEST_CASE("StateStore deserialize rejects trailing payload extensions",
-          "[state][serialize][coverage][phase3-large]") {
+          "[state][serialize]") {
     StateStore source;
     auto p1 = make_param_info(1, "One", "", {0.0f, 1.0f, 0.0f});
     source.add_parameter(p1);
@@ -1527,7 +1527,7 @@ TEST_CASE("ListenerToken is move-only and transfers ownership",
 }
 
 TEST_CASE("ListenerToken self move-assignment keeps the subscription",
-          "[state][listener][token][coverage][phase3]") {
+          "[state][listener][token]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
 
@@ -1719,7 +1719,7 @@ TEST_CASE("Queued Main callback is cancelled by token reset (PR#2270)",
 }
 
 TEST_CASE("StateStore reset all defaults notifies each registered parameter",
-          "[state][store][coverage][phase3-large]") {
+          "[state][store]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "A", "", {0.0f, 10.0f, 1.0f}));
     store.add_parameter(make_param_info(2, "B", "", {-1.0f, 1.0f, 0.0f}));
@@ -1738,7 +1738,7 @@ TEST_CASE("StateStore reset all defaults notifies each registered parameter",
 }
 
 TEST_CASE("StateStore custom state version is serialized and accepted",
-          "[state][serialize][coverage][phase3-large]") {
+          "[state][serialize]") {
     StateStore source;
     source.set_state_version(3);
     source.add_parameter(make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f}));
@@ -1756,7 +1756,7 @@ TEST_CASE("StateStore custom state version is serialized and accepted",
 }
 
 TEST_CASE("StateStore serializes custom state version",
-          "[state][serialize][coverage][phase3-large]") {
+          "[state][serialize]") {
     StateStore store;
     store.set_state_version(7);
     store.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
@@ -1855,7 +1855,7 @@ TEST_CASE("StateStore migrations are scoped to each store instance",
 }
 
 TEST_CASE("StateStore can copy registered migrations to a restore probe",
-          "[state][serialize][migration][coverage][phase3-large]") {
+          "[state][serialize][migration]") {
     StateStore saved;
     saved.set_state_version(8);
     saved.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
@@ -1941,7 +1941,7 @@ TEST_CASE("StateStore rejects corrupt source blobs before migration callbacks",
 }
 
 TEST_CASE("StateMigrationRegistry rejects invalid and duplicate registrations",
-          "[state][serialize][migration][coverage][phase3]") {
+          "[state][serialize][migration]") {
     StateMigrationRegistry registry;
     auto migration = [](std::span<const uint8_t>, std::vector<uint8_t>&) {
         return true;
@@ -1957,7 +1957,7 @@ TEST_CASE("StateMigrationRegistry rejects invalid and duplicate registrations",
 }
 
 TEST_CASE("StateMigrationRegistry copies current-version blobs and rejects bad sources",
-          "[state][serialize][migration][coverage][phase3]") {
+          "[state][serialize][migration]") {
     StateStore source;
     source.set_state_version(4);
     source.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
@@ -1984,7 +1984,7 @@ TEST_CASE("StateMigrationRegistry copies current-version blobs and rejects bad s
 }
 
 TEST_CASE("StateMigrationRegistry applies multi-hop migrations in order",
-          "[state][serialize][migration][coverage][phase3]") {
+          "[state][serialize][migration]") {
     StateStore source;
     source.set_state_version(1);
     source.add_parameter(make_param_info(7, "Mix", "", {0.0f, 1.0f, 0.25f}));
@@ -2022,7 +2022,7 @@ TEST_CASE("StateMigrationRegistry applies multi-hop migrations in order",
 }
 
 TEST_CASE("StateMigrationRegistry rejects broken migration callbacks",
-          "[state][serialize][migration][coverage][phase3]") {
+          "[state][serialize][migration]") {
     StateStore source;
     source.set_state_version(1);
     source.add_parameter(make_param_info(3, "Drive", "", {0.0f, 1.0f, 0.5f}));
@@ -2073,7 +2073,7 @@ TEST_CASE("StateMigrationRegistry rejects broken migration callbacks",
 }
 
 TEST_CASE("StateStore reset_all_to_defaults notifies in registration order",
-          "[state][listener][coverage][phase3-large]") {
+          "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {-60.0f, 12.0f, 0.0f}));
     store.add_parameter(make_param_info(2, "Mix", "", {0.0f, 100.0f, 50.0f}));
@@ -2212,7 +2212,7 @@ TEST_CASE("set_value_rt clamps and the RT queue is lossy under overflow",
 }
 
 TEST_CASE("StateStore exposes RT listener queue telemetry",
-          "[state][listener][rt][telemetry][phase2]") {
+          "[state][listener][rt][telemetry]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
 
@@ -2247,7 +2247,7 @@ TEST_CASE("StateStore exposes RT listener queue telemetry",
 }
 
 TEST_CASE("StateStore RT listener telemetry hot path allocates zero times",
-          "[state][listener][rt][telemetry][rt-safety][phase2]") {
+          "[state][listener][rt][telemetry][rt-safety]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
 

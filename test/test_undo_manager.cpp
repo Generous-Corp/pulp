@@ -94,7 +94,7 @@ TEST_CASE("UndoManager perform and undo", "[state][undo]") {
     REQUIRE_FALSE(um.can_undo());
 }
 
-TEST_CASE("UndoManager empty undo and redo are no-ops", "[state][undo][coverage][phase3]") {
+TEST_CASE("UndoManager empty undo and redo are no-ops", "[state][undo]") {
     UndoManager um;
     int changes = 0;
     um.on_state_changed = [&] { ++changes; };
@@ -218,7 +218,7 @@ TEST_CASE("UndoManager max_history trims oldest", "[state][undo]") {
 }
 
 TEST_CASE("UndoManager zero max history performs without retaining undo",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     um.set_max_history(0);
     int state_changes = 0;
@@ -238,7 +238,7 @@ TEST_CASE("UndoManager zero max history performs without retaining undo",
 }
 
 TEST_CASE("UndoManager lowering max_history trims existing history",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int v = 0;
 
@@ -265,7 +265,7 @@ TEST_CASE("UndoManager lowering max_history trims existing history",
 }
 
 TEST_CASE("UndoManager zero and negative max_history disable retention",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int v = 0;
 
@@ -375,7 +375,7 @@ TEST_CASE("UndoManager add_without_executing", "[state][undo]") {
 }
 
 TEST_CASE("UndoManager add_without_executing participates in transactions",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int x = 10;
     int y = 20;
@@ -409,7 +409,7 @@ TEST_CASE("UndoManager add_without_executing participates in transactions",
 }
 
 TEST_CASE("UndoManager add_without_executing mixes with performed transaction actions",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     std::vector<int> values;
     values.push_back(1);
@@ -436,7 +436,7 @@ TEST_CASE("UndoManager add_without_executing mixes with performed transaction ac
 }
 
 TEST_CASE("UndoManager committed transaction after undo clears redo history",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int value = 0;
 
@@ -467,7 +467,7 @@ TEST_CASE("UndoManager committed transaction after undo clears redo history",
 }
 
 TEST_CASE("UndoManager add_without_executing outside transaction clears redo history",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int value = 0;
 
@@ -496,7 +496,7 @@ TEST_CASE("UndoManager add_without_executing outside transaction clears redo his
 }
 
 TEST_CASE("UndoManager open transaction publishes history only when ended",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     int value = 0;
     int state_changes = 0;
@@ -524,7 +524,7 @@ TEST_CASE("UndoManager open transaction publishes history only when ended",
 }
 
 TEST_CASE("UndoManager max history trims whole transactions",
-          "[state][undo][coverage][phase3]") {
+          "[state][undo]") {
     UndoManager um;
     um.set_max_history(2);
     int value = 0;
@@ -568,7 +568,7 @@ TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
 }
 
 TEST_CASE("UndoManager transaction redo preserves action order",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     UndoManager um;
     std::vector<int> events;
 
@@ -593,7 +593,7 @@ TEST_CASE("UndoManager transaction redo preserves action order",
 }
 
 TEST_CASE("UndoManager clear notifies even when history is empty",
-          "[state][undo][coverage][phase3-large]") {
+          "[state][undo]") {
     UndoManager um;
     int changes = 0;
     um.on_state_changed = [&] { ++changes; };
