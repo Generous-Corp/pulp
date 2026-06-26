@@ -66,7 +66,7 @@ Pulp has two explicit creation/build modes:
 
 When a newer Pulp release is available, use `pulp upgrade` to update
 the installed CLI/SDK tool. Then, from an SDK-mode project, use
-`pulp project bump` to move that project's `pulp.toml` `sdk_version`
+`pulp project pin` to move that project's `pulp.toml` `sdk_version`
 and `find_package(Pulp ...)` pin together. This does not change the
 project's own `project(... VERSION ...)` product version.
 

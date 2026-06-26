@@ -392,7 +392,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
 
     // Honor update.bump_projects after a successful CLI upgrade.
     // The just-installed binary must own any future automatic
-    // `pulp project bump --all` execution, so this command only emits
+    // `pulp project pin --all` execution, so this command only emits
     // the post-upgrade nudge.
     //
     //   prompt (default) → print the hint; let the user run it
@@ -400,7 +400,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     //   off              → stay quiet
     //
     // The full "end-to-end silent" flow from the design doc needs the
-    // replaced binary to be the one running `project bump`, which is
+    // replaced binary to be the one running `project pin`, which is
     // the NEXT invocation. This command deliberately stops at printing
     // the nudge.
     {
@@ -408,7 +408,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (bp.empty()) bp = "prompt";
         if (bp != "off") {
             std::cout << "\n  Pin projects to the new CLI version:\n"
-                      << "    pulp project bump --all" << "\n";
+                      << "    pulp project pin --all" << "\n";
         }
     }
 

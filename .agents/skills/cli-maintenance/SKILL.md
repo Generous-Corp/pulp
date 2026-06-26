@@ -725,6 +725,11 @@ When adding a new project subcommand, add the canonical name AND keep
 any old alias for one minor release — existing scripts and skill examples
 break otherwise.
 
+The Rust user-facing CLI must mirror the same surface in
+`experimental/pulp-rs/src/cmd/project.rs`, `experimental/pulp-rs/src/main.rs`,
+and `experimental/pulp-rs/src/help.rs`. Do not update only the C++ command:
+`pin`, `bump`, `unpin`, and `undo` all need Rust parser/help coverage too.
+
 `pulp project unpin` rewrites `pulp.toml`'s `sdk_version` to `"latest"`
 in-place (single-line value swap, preserving surrounding TOML
 structure and comments). Do NOT delete the field — downstream tooling
@@ -1249,9 +1254,10 @@ Gotchas:
   (`\bpulp_add_[A-Za-z0-9_]+\s*\(`). Matches any `pulp_add_*` macro
   the SDK introduces without requiring a new entry here.
 
-## `pulp project bump` / `pulp project undo`
+## `pulp project pin` / `pulp project bump` / `pulp project unpin` / `pulp project undo`
 
-`pulp project bump` and `pulp project undo` live in
+`pulp project pin` (plus deprecated alias `bump`), `pulp project unpin`,
+and `pulp project undo` live in
 `tools/cli/cmd_project.cpp` and delegate to the pure-logic core in
 `tools/cli/project_bump.{hpp,cpp}`. Behavior summary:
 
@@ -1266,6 +1272,8 @@ Gotchas:
   rewrites it atomically, records an undo batch, and prints migration
   notes for the hop.
 - `--all` iterates `~/.pulp/projects.json`.
+- `unpin` rewrites standalone `pulp.toml` `sdk_version` to `"latest"`
+  without deleting the field; that is the floating-SDK marker.
 - Undo reads `bump-undo-<timestamp>.json` and reverts each bumped
   entry's recorded edits. New undo files may contain multiple edits
   across `pulp.toml` and `CMakeLists.txt`; legacy one-edit files are
@@ -1285,8 +1293,8 @@ Gotchas:
   `refuse_dynamic_pin()` returns true for anything that isn't
   semver-after-optional-`v`. Status ends up as `"skipped"` with a
   human-readable reason in `failure_reason`. Do not rewrite these.
-- **Do not bump the Pulp source checkout with this command.**
-  `pulp project bump` is for consumer projects. From the Pulp source
+- **Do not pin the Pulp source checkout with this command.**
+  `pulp project pin` is for consumer projects. From the Pulp source
   tree, use `pulp version bump` and the normal release/PR workflow.
 - **Standalone mode's source of truth is `pulp.toml` `sdk_version`.**
   If a standalone project has `project(NAME VERSION ...)`, that is the
@@ -1321,12 +1329,12 @@ Gotchas:
   bump-all test cases to "bump all ..." instead of "--all ...".
 - **Post-upgrade hook respects `update.bump_projects`.**
   `cmd_upgrade.cpp` reads the key (default `prompt`) and either
-  prints the `pulp project bump --all` hint or stays quiet on `off`.
+  prints the `pulp project pin --all` hint or stays quiet on `off`.
   `auto` is accepted for config compatibility but must not claim
   automatic execution until a new-binary follow-up actually runs the bump.
   If automatic execution is added later, it must run from the
   just-installed binary on a later invocation; the old Windows process
-  must not try to spawn `project bump` while `pulp.exe` is still being
+  must not try to spawn `project pin` while `pulp.exe` is still being
   replaced.
 - **Git-clean gate uses `git -C <proj> status --porcelain`.** If
   git isn't on PATH, `cmake_is_dirty()` returns false — we refuse
@@ -1617,7 +1625,7 @@ Gotchas specific to Slice 5:
   (a) `cmd_config` on mode change (as a clear) and (b) the
   `/upgrade` Claude skill on explicit decline. Nowhere else.
 - **`update.bump_projects` is consumed after successful upgrade.**
-  `prompt` and `auto` print the `pulp project bump --all` hint, while
+  `prompt` and `auto` print the `pulp project pin --all` hint, while
   `off` stays quiet. Keep
   `cmd_config` validation, the `cmd_upgrade` hook, `docs/reference/cli.md`,
   and shell-out coverage in sync.

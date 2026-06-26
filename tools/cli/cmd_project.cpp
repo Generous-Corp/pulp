@@ -12,7 +12,7 @@
 //
 //   pulp project pin / bump   Pin the project's SDK version
 //   pulp project unpin        Switch back to floating-SDK mode
-//   pulp project undo         Revert a previous bump batch
+//   pulp project undo         Revert a previous pin/bump batch
 
 #include "cmd_project_internal.hpp"
 

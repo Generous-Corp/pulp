@@ -335,10 +335,10 @@ commands:
 
   - name: project
     status: usable
-    summary: Per-project SDK pin management — bump standalone `pulp.toml` sdk_version + find_package(Pulp ...) pins, or legacy CMake pins, and undo the last batch.
+    summary: Per-project SDK pin management — pin standalone `pulp.toml` sdk_version + find_package(Pulp ...) mirrors, unpin to floating SDK mode, or undo the last pin batch.
     subcommands:
-      - name: bump
-        summary: Bump the pinned Pulp SDK version (CWD by default; `--all` iterates the registry)
+      - name: pin
+        summary: Pin the Pulp SDK version (CWD by default; `--all` iterates the registry)
         args:
           - name: version
             kind: positional
@@ -371,13 +371,59 @@ commands:
           - name: --allow-redundant
             kind: flag
             required: false
-            description: Permit bump when origin/main already pins target-or-newer
+            description: Permit pin when origin/main already pins target-or-newer
           - name: --verify-builds
             kind: flag
             required: false
-            description: Build each project after bump; roll back the pin on failure
+            description: Build each project after pin; roll back the pin on failure
+      - name: bump
+        summary: Deprecated alias for `pulp project pin`
+        args:
+          - name: version
+            kind: positional
+            required: false
+            description: Target semver (alias for --to). Defaults to the CLI's own version.
+          - name: --to
+            kind: value
+            required: false
+            description: Target semver (e.g. 0.32.0). Rejects pre-release suffixes.
+          - name: --all
+            kind: flag
+            required: false
+            description: Iterate ~/.pulp/projects.json instead of the current directory
+          - name: --dry-run
+            kind: flag
+            required: false
+            description: Show plan without writing; never mutates anything
+          - name: --force-dirty
+            kind: flag
+            required: false
+            description: Skip the git-clean check on pin-bearing files
+          - name: --allow-downgrade
+            kind: flag
+            required: false
+            description: Permit target older than current pin
+          - name: --allow-cli-skew
+            kind: flag
+            required: false
+            description: Permit target newer than the installed Pulp CLI
+          - name: --allow-redundant
+            kind: flag
+            required: false
+            description: Permit pin when origin/main already pins target-or-newer
+          - name: --verify-builds
+            kind: flag
+            required: false
+            description: Build each project after pin; roll back the pin on failure
+      - name: unpin
+        summary: Switch a standalone project to floating SDK mode by setting `sdk_version = "latest"`
+        args:
+          - name: --dry-run
+            kind: flag
+            required: false
+            description: Show the `sdk_version = "latest"` rewrite without writing
       - name: undo
-        summary: Revert the newest `pulp project bump` batch (or a specific one by timestamp)
+        summary: Revert the newest `pulp project pin` / `bump` batch (or a specific one by timestamp)
         args:
           - name: timestamp
             kind: positional

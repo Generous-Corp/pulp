@@ -1,9 +1,10 @@
-//! Integration tests for `pulp-rs project bump / undo`.
+//! Integration tests for `pulp-rs project pin / bump / unpin / undo`.
 //!
 //! The test fixtures under `tests/fixtures/project/` each hold one
 //! `CMakeLists.txt` with a specific pin shape. Each test copies the
 //! fixture into a tempdir (so the repo-checked-in fixture stays
-//! immutable), runs `pulp-rs project bump --to <target>`, and
+//! immutable), runs `pulp-rs project pin --to <target>` (or the
+//! deprecated `bump` alias for compatibility coverage), and
 //! asserts the post-bump file content + exit code.
 
 use std::fs;
@@ -27,7 +28,12 @@ fn plant(src_fixture: &str, dst_dir: &Path) -> PathBuf {
     dst_dir.to_path_buf()
 }
 
-fn run_bump(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Output {
+fn run_project(
+    cwd: &Path,
+    pulp_home: &Path,
+    subcommand: &str,
+    extra: &[&str],
+) -> std::process::Output {
     let mut cmd = Command::cargo_bin("pulp").expect("binary");
     cmd.current_dir(cwd);
     cmd.env("PULP_HOME", pulp_home);
@@ -41,9 +47,21 @@ fn run_bump(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Outpu
     // bump-to-a-real-version.
     cmd.env("PULP_RS_CLI_VERSION", "99.99.99");
     cmd.arg("project");
-    cmd.arg("bump");
+    cmd.arg(subcommand);
     cmd.args(extra);
     cmd.output().expect("run")
+}
+
+fn run_bump(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Output {
+    run_project(cwd, pulp_home, "bump", extra)
+}
+
+fn run_pin(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Output {
+    run_project(cwd, pulp_home, "pin", extra)
+}
+
+fn run_unpin(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Output {
+    run_project(cwd, pulp_home, "unpin", extra)
 }
 
 #[test]
@@ -70,6 +88,44 @@ fn bump_rewrites_fetch_content_pin() {
         .filter(|e| e.file_name().to_string_lossy().starts_with("bump-undo-"))
         .collect();
     assert_eq!(files.len(), 1, "expected one undo file");
+}
+
+#[test]
+fn pin_alias_rewrites_fetch_content_pin() {
+    let td = tempfile::tempdir().unwrap();
+    let project = plant("fetch_content_pin", &td.path().join("proj"));
+    let home = td.path().join("pulp-home");
+    fs::create_dir_all(&home).unwrap();
+    let output = run_pin(&project, &home, &["--to", "0.40.0"]);
+    assert!(
+        output.status.success(),
+        "pin failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let src = fs::read_to_string(project.join("CMakeLists.txt")).unwrap();
+    assert!(
+        src.contains("GIT_TAG v0.40.0"),
+        "expected pinned version, got:\n{src}"
+    );
+}
+
+#[test]
+fn pin_without_version_uses_cli_version() {
+    let td = tempfile::tempdir().unwrap();
+    let project = plant("fetch_content_pin", &td.path().join("proj"));
+    let home = td.path().join("pulp-home");
+    fs::create_dir_all(&home).unwrap();
+    let output = run_pin(&project, &home, &[]);
+    assert!(
+        output.status.success(),
+        "pin failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let src = fs::read_to_string(project.join("CMakeLists.txt")).unwrap();
+    assert!(
+        src.contains("GIT_TAG v99.99.99"),
+        "expected no-arg pin to use the CLI version, got:\n{src}"
+    );
 }
 
 #[test]
@@ -218,7 +274,9 @@ fn project_bare_help_exits_one() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("pulp project — manage"));
+    assert!(stdout.contains("pin"));
     assert!(stdout.contains("bump"));
+    assert!(stdout.contains("unpin"));
     assert!(stdout.contains("undo"));
 }
 
@@ -232,6 +290,38 @@ fn project_help_exits_zero() {
         .output()
         .expect("run");
     assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("pulp project pin"));
+    assert!(stdout.contains("pulp project unpin"));
+    assert!(stdout.contains("deprecated alias"));
+}
+
+#[test]
+fn project_pin_bump_and_unpin_help_exit_zero() {
+    let td = tempfile::tempdir().unwrap();
+    let home = td.path().join("pulp-home");
+    fs::create_dir_all(&home).unwrap();
+
+    let pin = run_pin(td.path(), &home, &["--help"]);
+    assert!(pin.status.success());
+    let pin_stdout = String::from_utf8(pin.stdout).unwrap();
+    assert!(pin_stdout.contains("pulp project pin"));
+    assert!(pin_stdout.contains("alias: `pulp project bump`"));
+    assert!(pin_stdout.contains("pulp.toml sdk_version"));
+    assert!(pin_stdout.contains("pulp project unpin"));
+
+    let bump = run_bump(td.path(), &home, &["--help"]);
+    assert!(bump.status.success());
+    let bump_stdout = String::from_utf8(bump.stdout).unwrap();
+    assert!(bump_stdout.contains("pulp project pin"));
+    assert!(bump_stdout.contains("alias: `pulp project bump`"));
+
+    let unpin = run_unpin(td.path(), &home, &["--help"]);
+    assert!(unpin.status.success());
+    let unpin_stdout = String::from_utf8(unpin.stdout).unwrap();
+    assert!(unpin_stdout.contains("pulp project unpin"));
+    assert!(unpin_stdout.contains("floating SDK mode"));
+    assert!(unpin_stdout.contains("pulp project pin"));
 }
 
 #[test]
@@ -246,6 +336,80 @@ fn project_unknown_subcommand_exits_two() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("unknown subcommand"));
+}
+
+#[test]
+fn unpin_switches_standalone_project_to_latest() {
+    let td = tempfile::tempdir().unwrap();
+    let project = td.path().join("standalone");
+    let home = td.path().join("pulp-home");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        project.join("pulp.toml"),
+        "name = \"Demo\"\nsdk_version = \"0.45.0\" # sdk pin\n",
+    )
+    .unwrap();
+
+    let before = fs::read_to_string(project.join("pulp.toml")).unwrap();
+    let dry_run = run_unpin(&project, &home, &["--dry-run"]);
+    assert!(
+        dry_run.status.success(),
+        "unpin dry-run failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    let dry_stdout = String::from_utf8(dry_run.stdout).unwrap();
+    assert!(dry_stdout.contains("would set sdk_version = \"latest\""));
+    assert_eq!(
+        fs::read_to_string(project.join("pulp.toml")).unwrap(),
+        before,
+        "unpin dry-run must not rewrite pulp.toml"
+    );
+
+    let output = run_unpin(&project, &home, &[]);
+    assert!(
+        output.status.success(),
+        "unpin failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("now floating"));
+    assert!(stdout.contains("pulp project pin"));
+    let toml = fs::read_to_string(project.join("pulp.toml")).unwrap();
+    assert!(
+        toml.contains("sdk_version = \"latest\" # sdk pin"),
+        "expected sdk_version to switch to latest while preserving layout, got:\n{toml}"
+    );
+
+    let second = run_unpin(&project, &home, &[]);
+    assert!(
+        second.status.success(),
+        "second unpin failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8(second.stdout).unwrap();
+    assert!(
+        second_stdout.contains("already floating"),
+        "expected idempotent already-floating message; got:\n{second_stdout}"
+    );
+}
+
+#[test]
+fn unpin_rejects_unknown_argument_before_project_lookup() {
+    let td = tempfile::tempdir().unwrap();
+    let home = td.path().join("pulp-home");
+    fs::create_dir_all(&home).unwrap();
+    let output = run_unpin(td.path(), &home, &["--bogus"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("pulp project unpin: unknown argument '--bogus'"),
+        "expected unknown-argument parse error; got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("not inside a Pulp project"),
+        "parser error should happen before project-root lookup; got: {stderr}"
+    );
 }
 
 #[test]

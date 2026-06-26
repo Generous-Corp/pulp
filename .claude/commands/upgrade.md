@@ -59,7 +59,7 @@ from its stdout and forward it to step 3 explicitly. Relying on the
 
 Pass `--to "$LATEST"` (captured in step 2) explicitly so the notes
 surface sees the real hop even when the background cache refresh has
-not yet landed (#583 Codex P1 / wave-4 sweep):
+not yet refreshed:
 
 ```bash
 if [ -n "$LATEST" ]; then
@@ -131,18 +131,18 @@ Use AskUserQuestion with the relevant options below. Prefer the first
 three when an active project is present; offer the registry-wide option
 only when the user asked for all projects.
 
-- **"Upgrade CLI + bump this project SDK"** — runs `pulp upgrade`,
-  then proposes `pulp project bump` in the active project resolved by
+- **"Upgrade CLI + pin this project SDK"** — runs `pulp upgrade`,
+  then proposes `pulp project pin` in the active project resolved by
   `doctor --versions`. This changes the project's pinned Pulp SDK,
   not the app/plugin product version.
 - **"Upgrade CLI only"** — runs `pulp upgrade` only. No project changes.
-- **"Bump this project SDK only"** — skips `pulp upgrade`; proposes
-  `pulp project bump` inside the active project. Useful when the CLI is
+- **"Pin this project SDK only"** — skips `pulp upgrade`; proposes
+  `pulp project pin` inside the active project. Useful when the CLI is
   already current but `project_sdk.raw` is behind.
-- **"Bump all registered project SDKs"** — only offer this when the
+- **"Pin all registered project SDKs"** — only offer this when the
   user explicitly wants registry-wide changes; propose
-  `pulp project bump --all --dry-run` first, then a real
-  `pulp project bump --all` after review.
+  `pulp project pin --all --dry-run` first, then a real
+  `pulp project pin --all` after review.
 - **"Dismiss"** — no action. Remind the user they can re-run `/upgrade`
   or `pulp doctor --versions` at any time.
 
@@ -160,20 +160,20 @@ error, the CLI restores the pre-upgrade binary from `<path>.bak` — if
 the swap step failed partway, tell the user to check for a stale
 `.bak` file.
 
-For "Bump project SDK" paths, do not execute the bump until the user
+For "Pin project SDK" paths, do not execute the pin until the user
 has seen the target project and target SDK version. Start with a dry
 run unless the user already gave explicit permission:
 
 ```bash
-pulp project bump --dry-run
-pulp project bump
+pulp project pin --dry-run
+pulp project pin
 ```
 
 If the user wants the global CLI and the active project SDK moved in
 one flow, run `pulp upgrade` first, then re-run `pulp doctor --versions`
-and propose `pulp project bump --to <post-upgrade-cli-version>`. If
+and propose `pulp project pin --to <post-upgrade-cli-version>`. If
 they are inside the Pulp source checkout, do not run `pulp project
-bump`; that checkout uses the release/version workflow.
+pin`; that checkout uses the release/version workflow.
 
 ## 7. After-upgrade follow-up
 
@@ -194,4 +194,3 @@ execute the grep eagerly — wait for explicit consent.
 - Skill: `.agents/skills/upgrade/SKILL.md` (full decision tree, common patterns, bypass trailers)
 - CLI: `tools/cli/cmd_upgrade.cpp` (`--notes --json` output)
 - Design: `planning/release-discovery-ux-design-2026-04-20.md` Section C + Slice 4
-- Issue: #549 (parent #499)

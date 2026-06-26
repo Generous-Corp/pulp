@@ -1,4 +1,4 @@
-//! `pulp-rs project …` — per-project SDK pin `bump` / `undo`.
+//! `pulp-rs project …` — per-project SDK pin `pin` / `unpin` / `undo`.
 //!
 //! # Scope
 //!
@@ -6,22 +6,25 @@
 //! stays small enough to read in one sitting. The subcommands this
 //! module exposes:
 //!
-//! - `pulp-rs project bump` — update the CWD project's pin to the
-//!   CLI's own version.
-//! - `pulp-rs project bump <version>` / `--to <version>` — explicit
+//! - `pulp-rs project pin` — update the CWD project's pin to the CLI's
+//!   own version.
+//! - `pulp-rs project pin <version>` / `--to <version>` — explicit
 //!   target.
-//! - `pulp-rs project bump --all` — iterate every entry in
+//! - `pulp-rs project pin --all` — iterate every entry in
 //!   `~/.pulp/projects.json`.
-//! - `pulp-rs project bump --dry-run` — show the plan without
+//! - `pulp-rs project pin --dry-run` — show the plan without
 //!   rewriting anything.
-//! - `pulp-rs project bump --force-dirty` — skip the git-clean gate.
-//! - `pulp-rs project bump --allow-downgrade` — permit an older
+//! - `pulp-rs project pin --force-dirty` — skip the git-clean gate.
+//! - `pulp-rs project pin --allow-downgrade` — permit an older
 //!   target.
-//! - `pulp-rs project bump --verify-builds` — run a CMake configure
+//! - `pulp-rs project pin --verify-builds` — run a CMake configure
 //!   + build after each bump, roll back on failure.
+//! - `pulp-rs project bump` — deprecated alias for `pin`.
+//! - `pulp-rs project unpin` — switch CWD project back to floating
+//!   SDK mode (`sdk_version = "latest"`).
 //! - `pulp-rs project undo [<timestamp>]` — revert the newest (or
 //!   named) batch using the `bump-undo-*.json` files written by
-//!   `bump`.
+//!   `pin` / `bump`.
 //!
 //! # Divergences from C++
 //!
@@ -77,6 +80,8 @@ pub enum Sub {
     Help,
     /// `pulp-rs project bump …` (opts parsed in [`BumpArgs`]).
     Bump(BumpArgs),
+    /// `pulp-rs project unpin [--dry-run]`.
+    Unpin(UnpinArgs),
     /// `pulp-rs project undo [<timestamp>]`.
     Undo(UndoArgs),
 }
@@ -113,6 +118,15 @@ pub struct BumpArgs {
     pub help: bool,
 }
 
+/// Parsed flags for `pulp-rs project unpin`.
+#[derive(Debug, Default, Clone)]
+pub struct UnpinArgs {
+    /// `--dry-run` — plan only, no writes.
+    pub dry_run: bool,
+    /// `--help` — print the unpin help and exit 0.
+    pub help: bool,
+}
+
 /// Parsed flags for `pulp-rs project undo`.
 #[derive(Debug, Default, Clone)]
 pub struct UndoArgs {
@@ -134,7 +148,8 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
     };
     match head.as_str() {
         "help" | "--help" | "-h" => Ok(Sub::Help),
-        "bump" => Ok(Sub::Bump(parse_bump(&args[1..])?)),
+        "pin" | "bump" => Ok(Sub::Bump(parse_bump(&args[1..])?)),
+        "unpin" => Ok(Sub::Unpin(parse_unpin(&args[1..])?)),
         "undo" => Ok(Sub::Undo(parse_undo(&args[1..]))),
         _ => Err(CliError::UnknownSubcommand),
     }
@@ -158,7 +173,7 @@ fn parse_bump(args: &[String]) -> Result<BumpArgs> {
             "--to" => {
                 i += 1;
                 let v = args.get(i).map_or("", String::as_str);
-                if v.is_empty() {
+                if v.is_empty() || v.starts_with('-') {
                     return Err(CliError::BadUsage(
                         "pulp project bump: --to requires a version argument".to_owned(),
                     ));
@@ -176,9 +191,9 @@ fn parse_bump(args: &[String]) -> Result<BumpArgs> {
             }
             _ if !a.starts_with('-') => positional.push(a),
             _ => {
-                // Unknown flags produce a warning in the C++ CLI but
-                // don't abort. Mirror that.
-                eprintln!("pulp project bump: ignoring unknown argument '{a}'");
+                return Err(CliError::BadUsage(format!(
+                    "pulp project bump: unknown argument '{a}'"
+                )))
             }
         }
         i += 1;
@@ -186,6 +201,31 @@ fn parse_bump(args: &[String]) -> Result<BumpArgs> {
     if out.to_version.is_empty() {
         if let Some(first) = positional.first() {
             out.to_version = (*first).to_owned();
+            if let Some(extra) = positional.get(1) {
+                return Err(CliError::BadUsage(format!(
+                    "pulp project bump: unexpected extra version argument '{extra}'"
+                )));
+            }
+        }
+    } else if let Some(extra) = positional.first() {
+        return Err(CliError::BadUsage(format!(
+            "pulp project bump: unexpected extra version argument '{extra}'"
+        )));
+    }
+    Ok(out)
+}
+
+fn parse_unpin(args: &[String]) -> Result<UnpinArgs> {
+    let mut out = UnpinArgs::default();
+    for a in args {
+        match a.as_str() {
+            "--help" | "-h" | "help" => out.help = true,
+            "--dry-run" => out.dry_run = true,
+            _ => {
+                return Err(CliError::BadUsage(format!(
+                    "pulp project unpin: unknown argument '{a}'"
+                )));
+            }
         }
     }
     Ok(out)
@@ -222,7 +262,7 @@ pub fn write_project_help(out: &mut impl Write) -> Result<()> {
     writeln!(out, "Usage:").map_err(io)?;
     writeln!(
         out,
-        "  pulp project bump [<version>] [--to=X] [--all] [--dry-run]"
+        "  pulp project pin [<version>] [--to=X] [--all] [--dry-run]"
     )
     .map_err(io)?;
     writeln!(
@@ -236,13 +276,24 @@ pub fn write_project_help(out: &mut impl Write) -> Result<()> {
     )
     .map_err(io)?;
     writeln!(out, "                    [--verify-builds]").map_err(io)?;
+    writeln!(out, "  pulp project unpin [--dry-run]").map_err(io)?;
     writeln!(out, "  pulp project undo [<timestamp>]\n").map_err(io)?;
     writeln!(
         out,
-        "Run `pulp project bump --help` or `pulp project undo --help`"
+        "Pulp #2087: `pin` is the primary command. `bump` remains a"
     )
     .map_err(io)?;
-    writeln!(out, "for command-specific details.").map_err(io)?;
+    writeln!(out, "deprecated alias for one minor release.\n").map_err(io)?;
+    writeln!(
+        out,
+        "Run `pulp project pin --help`, `pulp project unpin --help`, or"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "`pulp project undo --help` for command-specific details."
+    )
+    .map_err(io)?;
     Ok(())
 }
 
@@ -250,31 +301,32 @@ fn write_bump_help(out: &mut impl Write) -> Result<()> {
     let io = |e: std::io::Error| CliError::io("<stdout>", e);
     writeln!(
         out,
-        "pulp project bump — update the pinned Pulp SDK version\n"
+        "pulp project pin — pin the project's Pulp SDK to a specific version"
     )
     .map_err(io)?;
+    writeln!(out, "                  (alias: `pulp project bump`)\n").map_err(io)?;
     writeln!(out, "Usage:").map_err(io)?;
     writeln!(
         out,
-        "  pulp project bump                     Bump CWD to the CLI's own version"
+        "  pulp project pin                      Pin CWD to the CLI's own version"
     )
     .map_err(io)?;
     writeln!(
         out,
-        "  pulp project bump <version>           Bump CWD to <version> (positional)"
+        "  pulp project pin <version>            Pin CWD to <version> (positional)"
     )
     .map_err(io)?;
     writeln!(
         out,
-        "  pulp project bump --to=<version>      Bump CWD to <version> (named)"
+        "  pulp project pin --to=<version>       Pin CWD to <version> (named)"
     )
     .map_err(io)?;
     writeln!(
         out,
-        "  pulp project bump --all               Iterate ~/.pulp/projects.json"
+        "  pulp project pin --all                Iterate ~/.pulp/projects.json"
     )
     .map_err(io)?;
-    writeln!(out, "  pulp project bump --all --to=<version>\n").map_err(io)?;
+    writeln!(out, "  pulp project pin --all --to=<version>\n").map_err(io)?;
     writeln!(out, "Flags:").map_err(io)?;
     writeln!(
         out,
@@ -303,7 +355,63 @@ fn write_bump_help(out: &mut impl Write) -> Result<()> {
     .map_err(io)?;
     writeln!(
         out,
-        "  --verify-builds      Build each project post-bump; roll back on failure"
+        "  --verify-builds      Build each project post-pin; roll back on failure"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "\nStandalone SDK-mode projects update pulp.toml sdk_version plus a"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "versioned find_package(Pulp ...) line. `project(... VERSION ...)`"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "remains the plugin/app version and is not treated as the SDK pin.\n"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "To return to floating-SDK mode, run `pulp project unpin`."
+    )
+    .map_err(io)?;
+    Ok(())
+}
+
+fn write_unpin_help(out: &mut impl Write) -> Result<()> {
+    let io = |e: std::io::Error| CliError::io("<stdout>", e);
+    writeln!(
+        out,
+        "pulp project unpin — remove the SDK pin so the project tracks latest\n"
+    )
+    .map_err(io)?;
+    writeln!(out, "Usage:").map_err(io)?;
+    writeln!(
+        out,
+        "  pulp project unpin             Switch CWD project to floating SDK mode"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "  pulp project unpin --dry-run   Show plan without rewriting\n"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "After unpin, the project's resolved SDK is the newest installed"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "version under ~/.pulp/sdk/<x.y.z>/, picked up on every rebuild."
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "Re-pin with `pulp project pin <version>` (or `pulp project bump`)."
     )
     .map_err(io)?;
     Ok(())
@@ -313,7 +421,7 @@ fn write_undo_help(out: &mut impl Write) -> Result<()> {
     let io = |e: std::io::Error| CliError::io("<stdout>", e);
     writeln!(
         out,
-        "pulp project undo — revert a previous `pulp project bump`\n"
+        "pulp project undo — revert a previous project pin/bump batch\n"
     )
     .map_err(io)?;
     writeln!(out, "Usage:").map_err(io)?;
@@ -408,6 +516,13 @@ pub fn run_with(sub: Sub, env: &Env, out: &mut impl Write) -> Result<i32> {
                 return Ok(0);
             }
             do_bump(&args, env, out)
+        }
+        Sub::Unpin(args) => {
+            if args.help {
+                write_unpin_help(out)?;
+                return Ok(0);
+            }
+            do_unpin(&args, env, out)
         }
         Sub::Undo(args) => {
             if args.help {
@@ -556,6 +671,103 @@ fn do_bump(args: &BumpArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+fn do_unpin(args: &UnpinArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
+    let io = |e: std::io::Error| CliError::io("<stdout>", e);
+    let (target, found_pulp_source) = find_unpin_project_root_from(&env.cwd);
+    if found_pulp_source {
+        return Err(CliError::Other(
+            "pulp project unpin: refusing to run inside the Pulp source checkout.".to_owned(),
+        ));
+    }
+    let target = target.ok_or_else(|| {
+        CliError::Other(
+            "pulp project unpin: not inside a Pulp project (expected pulp.toml)".to_owned(),
+        )
+    })?;
+
+    let toml = target.join("pulp.toml");
+    let body = std::fs::read_to_string(&toml).map_err(|_| {
+        CliError::Other(format!(
+            "pulp project unpin: no pulp.toml at {}",
+            toml.display()
+        ))
+    })?;
+    if body.is_empty() {
+        return Err(CliError::Other(format!(
+            "pulp project unpin: could not read {}",
+            toml.display()
+        )));
+    }
+
+    let site = bump::find_toml_pin_site(&body, "sdk_version", PinKind::PulpTomlSdkVersion);
+    let current = site.current_pin.clone();
+    let project_name = target
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    if current.is_empty() || current == "latest" {
+        writeln!(
+            out,
+            "pulp project unpin: {project_name} is already floating (sdk_version = \"latest\")."
+        )
+        .map_err(io)?;
+        return Ok(0);
+    }
+
+    if args.dry_run {
+        writeln!(
+            out,
+            "[dry-run] would set sdk_version = \"latest\" in {} (was \"{current}\")",
+            toml.display()
+        )
+        .map_err(io)?;
+        return Ok(0);
+    }
+
+    let rewritten = bump::rewrite_pin(&body, &site, "latest", false).ok_or_else(|| {
+        CliError::Other("pulp project unpin: could not stage sdk_version rewrite".to_owned())
+    })?;
+    write_text_atomic(&toml, &rewritten).map_err(|e| {
+        CliError::Other(format!(
+            "pulp project unpin: write failed at {}: {e}",
+            toml.display()
+        ))
+    })?;
+
+    writeln!(
+        out,
+        "{}unpinned{} {project_name}  was {current} -> now floating (tracks latest)",
+        color::green(),
+        color::reset()
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "\nThe project will resolve its SDK at command time to the newest"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "installed version under ~/.pulp/sdk/. Re-pin any time with"
+    )
+    .map_err(io)?;
+    writeln!(out, "`pulp project pin <version>`.").map_err(io)?;
+    Ok(0)
+}
+
+fn find_unpin_project_root_from(start: &Path) -> (Option<PathBuf>, bool) {
+    for dir in start.ancestors() {
+        if is_pulp_source_checkout(dir) {
+            return (None, true);
+        }
+        if is_standalone_project(dir) {
+            return (Some(dir.to_path_buf()), false);
+        }
+    }
+    (None, false)
 }
 
 type VerifyFn = fn(&Path) -> Result<()>;
@@ -1195,8 +1407,7 @@ fn do_undo(args: &UndoArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
                     true
                 };
                 if !current_matches {
-                    skip_reason =
-                        Some("current value no longer matches bumped value".to_owned());
+                    skip_reason = Some("current value no longer matches bumped value".to_owned());
                     break;
                 }
                 let restored_value = {
@@ -1207,12 +1418,9 @@ fn do_undo(args: &UndoArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
                         normalized_old
                     }
                 };
-                let Some(restored) = bump::rewrite_pin(
-                    &body,
-                    &site,
-                    &restored_value,
-                    edit.old_value_style_has_v,
-                ) else {
+                let Some(restored) =
+                    bump::rewrite_pin(&body, &site, &restored_value, edit.old_value_style_has_v)
+                else {
                     failure_reason = Some("rewrite failed".to_owned());
                     break;
                 };
@@ -1413,9 +1621,9 @@ fn print_report(batch: &UndoBatch, dry_run: bool, out: &mut impl Write) -> Resul
         "\n{}{} target={}{}",
         color::bold(),
         if dry_run {
-            "pulp project bump (dry run)"
+            "pulp project pin (dry run)"
         } else {
-            "pulp project bump"
+            "pulp project pin"
         },
         batch.target_version,
         color::reset()
@@ -1532,6 +1740,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_sub_accepts_pin_alias_and_unpin() {
+        let pin = vec!["pin".to_owned(), "--dry-run".to_owned()];
+        assert!(matches!(parse_sub(&pin).unwrap(), Sub::Bump(args) if args.dry_run));
+
+        let unpin = vec!["unpin".to_owned(), "--dry-run".to_owned()];
+        assert!(matches!(parse_sub(&unpin).unwrap(), Sub::Unpin(args) if args.dry_run));
+    }
+
+    #[test]
     fn parse_bump_accepts_positional_version() {
         let args = vec!["0.40.0".to_owned()];
         let b = parse_bump(&args).unwrap();
@@ -1561,6 +1778,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_bump_rejects_missing_to_before_next_flag() {
+        let args = vec!["--to".to_owned(), "--dry-run".to_owned()];
+        let err = parse_bump(&args).unwrap_err();
+        assert!(err.to_string().contains("--to requires a version"));
+    }
+
+    #[test]
+    fn parse_bump_rejects_unknown_and_extra_args() {
+        let unknown = parse_bump(&["--bogus".to_owned()]).unwrap_err();
+        assert!(unknown.to_string().contains("unknown argument '--bogus'"));
+
+        let extra = parse_bump(&["1.2.3".to_owned(), "2.3.4".to_owned()]).unwrap_err();
+        assert!(extra
+            .to_string()
+            .contains("unexpected extra version argument '2.3.4'"));
+    }
+
+    #[test]
     fn parse_bump_collects_flag_switches() {
         let args = vec![
             "--all".to_owned(),
@@ -1575,6 +1810,12 @@ mod tests {
         assert!(b.force_dirty);
         assert!(b.allow_downgrade);
         assert!(b.verify_builds);
+    }
+
+    #[test]
+    fn parse_unpin_rejects_unknown_args() {
+        let err = parse_unpin(&["--bogus".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("unknown argument '--bogus'"));
     }
 
     #[test]
@@ -1795,6 +2036,96 @@ mod tests {
             msg.contains("source checkout"),
             "expected source-checkout refusal, got: {msg}"
         );
+    }
+
+    #[test]
+    fn do_unpin_switches_sdk_version_to_latest() {
+        let td = tempfile::tempdir().unwrap();
+        let project = td.path().join("consumer");
+        std::fs::create_dir_all(&project).unwrap();
+        write(
+            &project.join("pulp.toml"),
+            "# keep me\nsdk_version = \"0.40.0\" # sdk pin\nname = \"consumer\"\n",
+        );
+        write(&project.join("CMakeLists.txt"), "project(Consumer)\n");
+        let home = td.path().join("home");
+        let env = Env {
+            cwd: project.clone(),
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let mut out = Vec::new();
+        let rc = run_with(
+            Sub::Unpin(UnpinArgs {
+                dry_run: false,
+                help: false,
+            }),
+            &env,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(rc, 0);
+        let toml = std::fs::read_to_string(project.join("pulp.toml")).unwrap();
+        assert!(toml.contains("# keep me"));
+        assert!(toml.contains("sdk_version = \"latest\" # sdk pin"));
+        assert!(toml.contains("name = \"consumer\""));
+        assert!(String::from_utf8(out).unwrap().contains("now floating"));
+    }
+
+    #[test]
+    fn do_unpin_dry_run_leaves_sdk_version_pinned() {
+        let td = tempfile::tempdir().unwrap();
+        let project = td.path().join("consumer");
+        std::fs::create_dir_all(&project).unwrap();
+        let original = "sdk_version = \"0.40.0\"\n";
+        write(&project.join("pulp.toml"), original);
+        write(&project.join("CMakeLists.txt"), "project(Consumer)\n");
+        let home = td.path().join("home");
+        let env = Env {
+            cwd: project.clone(),
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let mut out = Vec::new();
+        let rc = run_with(
+            Sub::Unpin(UnpinArgs {
+                dry_run: true,
+                help: false,
+            }),
+            &env,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(rc, 0);
+        assert_eq!(
+            std::fs::read_to_string(project.join("pulp.toml")).unwrap(),
+            original
+        );
+        assert!(String::from_utf8(out).unwrap().contains("[dry-run]"));
+    }
+
+    #[test]
+    fn do_unpin_refuses_inside_nested_pulp_source_checkout() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("fake-pulp-source");
+        std::fs::create_dir_all(src.join("core")).unwrap();
+        std::fs::create_dir_all(src.join("tools/cli")).unwrap();
+        std::fs::create_dir_all(src.join("core/view")).unwrap();
+        std::fs::write(src.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        std::fs::write(src.join("tools/shipyard.toml"), "version = 0\n").unwrap();
+
+        let home = td.path().join("home");
+        let env = Env {
+            cwd: src.join("core/view"),
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let mut out = Vec::new();
+        let err = run_with(Sub::Unpin(UnpinArgs::default()), &env, &mut out).unwrap_err();
+        assert!(err.to_string().contains("source checkout"));
     }
 
     #[test]
@@ -2287,7 +2618,12 @@ mod tests {
             ..BumpArgs::default()
         };
         let bump_rc = run_with(Sub::Bump(bump_args), &env, &mut bump_out).unwrap();
-        assert_eq!(bump_rc, 0, "bump failed: {:?}", String::from_utf8_lossy(&bump_out));
+        assert_eq!(
+            bump_rc,
+            0,
+            "bump failed: {:?}",
+            String::from_utf8_lossy(&bump_out)
+        );
         assert!(std::fs::read_to_string(project.join("pulp.toml"))
             .unwrap()
             .contains("0.41.0"));
@@ -2299,7 +2635,8 @@ mod tests {
         let mut undo_out = Vec::new();
         let undo_rc = do_undo(&UndoArgs::default(), &env, &mut undo_out).unwrap();
         assert_eq!(
-            undo_rc, 0,
+            undo_rc,
+            0,
             "undo non-zero: {:?}",
             String::from_utf8_lossy(&undo_out)
         );

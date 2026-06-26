@@ -145,7 +145,7 @@ void print_bump_help() {
 
 void print_undo_help() {
     std::cout <<
-        "pulp project undo — revert a previous `pulp project bump`\n\n"
+        "pulp project undo — revert a previous project pin/bump batch\n\n"
         "Usage:\n"
         "  pulp project undo              Revert the newest batch\n"
         "  pulp project undo <timestamp>  Revert a specific batch (e.g. 2026-04-21T14-30-00Z)\n"

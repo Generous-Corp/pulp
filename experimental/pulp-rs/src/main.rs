@@ -47,7 +47,7 @@ enum Command {
     /// Manage the `~/.pulp/projects.json` registry.
     Projects(ProjectsArgs),
 
-    /// Per-project SDK pin: `bump`, `undo`.
+    /// Per-project SDK pin: `pin`, `unpin`, `undo`.
     Project(ProjectArgs),
 
     /// Scan system paths for VST3 / AU / CLAP / LV2 plug-ins using
@@ -420,7 +420,7 @@ fn real_main() -> Result<(), ExitCode> {
             let sub = cmd::project::parse_sub(&args.tail).map_err(|e| match e {
                 CliError::UnknownSubcommand => {
                     eprintln!("pulp-rs project: unknown subcommand");
-                    eprintln!("  supported: bump, undo, help");
+                    eprintln!("  supported: pin, bump, unpin, undo, help");
                     ExitCode::from(2)
                 }
                 CliError::BadUsage(msg) => {

@@ -139,7 +139,7 @@ int usage() {
     std::cout << "  update.check_interval_hours   default: 24\n";
     std::cout << "  update.channel                stable | beta                 (default: stable)\n";
     std::cout << "  update.bump_projects          prompt | auto | off           (default: prompt)\n";
-    std::cout << "                                controls post-upgrade project bump nudge\n";
+    std::cout << "                                controls post-upgrade project pin nudge\n";
     std::cout << "\nSupported keys (import_design section):\n";
     std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
     std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";
