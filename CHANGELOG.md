@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04990"></a>
+## [0.499.0] - 2026-06-26
+
+- feat(cli): pulp run --audio-capture-wav — dump the live output ring to a WAV ([#4921](https://github.com/danielraffel/pulp/pull/4921))
+- docs(view): refresh design provenance breadcrumbs ([#4919](https://github.com/danielraffel/pulp/pull/4919))
+- test(native-components): force allocation death-test path ([#4912](https://github.com/danielraffel/pulp/pull/4912))
+- docs(test): refresh cli coverage tags ([#4916](https://github.com/danielraffel/pulp/pull/4916))
+- docs(test): refresh ui widget coverage tags ([#4913](https://github.com/danielraffel/pulp/pull/4913))
+- docs(test): refresh audio coverage tags ([#4910](https://github.com/danielraffel/pulp/pull/4910))
+
 <a id="v04980"></a>
 ## [0.498.0] - 2026-06-26
 
@@ -5222,6 +5232,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.499.0]: https://github.com/danielraffel/pulp/releases/tag/v0.499.0
 [0.498.0]: https://github.com/danielraffel/pulp/releases/tag/v0.498.0
 [0.497.0]: https://github.com/danielraffel/pulp/releases/tag/v0.497.0
 [0.496.1]: https://github.com/danielraffel/pulp/releases/tag/v0.496.1
