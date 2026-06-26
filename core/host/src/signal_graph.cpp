@@ -1851,6 +1851,17 @@ void SignalGraph::process(audio::BufferView<float>& output,
             // terminal whenever it is) — REQUIRED for safety: the parallel and
             // legacy paths run every node, including any interior the producer
             // owns, so they must never execute while anticipation is active.
+            // Observability for a SILENT degradation the parity test cannot see:
+            // when a routed path is ELIGIBLE (enabled + a valid routed snapshot +
+            // the pool fits) but its dispatch returns false, control falls through
+            // to the legacy walk. Because the walk is BOTH the oracle and the
+            // fallback, that produces no divergence — so an eligible graph that
+            // stopped routing would be invisible. Flag it: count it (relaxed,
+            // RT-safe) and warn in debug builds. A normal fallback (routing
+            // disabled, ineligible, or build failure → routing_valid false) does
+            // NOT set this, so the counter isolates the should-have-routed case.
+            bool routed_eligible_dispatch_failed = false;
+
             if (parallel_routing_enabled_.load(std::memory_order_relaxed) &&
                 cg->routing_parallel_valid && worker_pool_.running() &&
                 cg->exec_pool_parallel.fits(cg->routing_snapshot_parallel, frames32)) {
@@ -1863,6 +1874,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     })) {
                     return;
                 }
+                routed_eligible_dispatch_failed = true;  // eligible but did not route
             }
 
             if (canonical_executor_routing_enabled_.load(std::memory_order_relaxed) &&
@@ -1876,6 +1888,21 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     })) {
                     return;
                 }
+                routed_eligible_dispatch_failed = true;  // eligible but did not route
+            }
+
+            if (routed_eligible_dispatch_failed) {
+                const std::uint64_t prev =
+                    routed_walk_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+#ifndef NDEBUG
+                // Warn ONCE per graph (the counter carries the full tally) — the
+                // log path is not RT-safe, so don't repeat it every block.
+                if (prev == 0) {
+                    runtime::log_warn(
+                        "SignalGraph: routed dispatch failed for an eligible graph; "
+                        "falling back to the legacy walk (see routed_walk_fallbacks())");
+                }
+#endif
             }
         }
         // Any setup failure / disabled path falls through to the legacy walk.

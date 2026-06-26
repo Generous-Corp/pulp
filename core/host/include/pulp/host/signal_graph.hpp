@@ -495,6 +495,18 @@ public:
         return executor_.stats();
     }
 
+    // Count of blocks where a routed path was ELIGIBLE (canonical/parallel routing
+    // enabled, a valid routed snapshot, and the pool fit the block) yet routed
+    // dispatch returned failure, so process() silently fell back to the legacy
+    // walk. The walk is BOTH the reference oracle and the fallback, so this
+    // degradation is invisible to the routed-vs-walk parity test — this counter is
+    // the only signal that an eligible graph stopped routing. Stays 0 in healthy
+    // operation; a non-zero value means the routed path is failing for graphs it
+    // should handle. Relaxed-atomic, written only by the audio thread.
+    std::uint64_t routed_walk_fallbacks() const noexcept {
+        return routed_walk_fallbacks_.load(std::memory_order_relaxed);
+    }
+
     // Opt into ANTICIPATIVE RENDERING for eligible graphs (default OFF). When
     // enabled + the canonical-executor routing is eligible + the graph has an
     // anticipation-eligible latent interior (no live input / feedback / sidechain
@@ -891,6 +903,9 @@ private:
     // reentrant call degrades to a no-op instead of corrupting the lane's
     // unsynchronized executor/pool/scratch + interior plugin state.
     std::atomic<bool> anticipation_pump_busy_{false};
+    // See routed_walk_fallbacks(): incremented when an eligible routed path failed
+    // dispatch and process() fell back to the walk. Audio-thread writer only.
+    std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
     std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access

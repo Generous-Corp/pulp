@@ -148,7 +148,13 @@ predictable output, no MIDI.
   node kind SignalGraph produces is now eligible** — the only remaining walk triggers
   are an unprepared graph or a routed snapshot/pool BUILD failure (e.g. a topology past
   `GraphRuntimeLimits`); the walk is the deliberate reference/fallback for those, the
-  independent parity oracle, and is NOT slated for deletion. An eligible graph —
+  independent parity oracle, and is NOT slated for deletion. **`routed_walk_fallbacks()`**
+  counts blocks where a routed path was ELIGIBLE but its dispatch returned failure so
+  process() silently fell back to the walk — that degradation is invisible to the parity
+  test (the walk is both oracle and fallback), so this counter (plus a once-per-graph
+  debug warning) is the only signal an eligible graph stopped routing. It stays 0 in
+  healthy operation; a normal fallback (routing disabled / ineligible / walk-by-choice)
+  does NOT increment it. An eligible graph —
   nodes AudioInput / AudioOutput / Gain / Plugin (a Plugin with NO live slot routes as
   pass-through-or-zero via `custom_binding(nullptr)`, exactly matching the walk's
   missing-plugin behavior) / MidiInput / MidiOutput / **Custom** (`CustomNodeType`,
