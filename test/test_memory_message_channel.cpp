@@ -30,7 +30,7 @@ public:
 } // namespace
 
 TEST_CASE("MessageChannel default text send uses binary send",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     BinaryOnlyMessageChannel channel;
     MessageChannel& base = channel;
 
@@ -80,7 +80,7 @@ TEST_CASE("MemoryMessageChannel delivers text payloads and as_text views",
 }
 
 TEST_CASE("MemoryMessageChannel delivers empty text and binary messages",
-          "[runtime][message_channel][codecov]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     std::vector<Message> received;
@@ -116,7 +116,7 @@ TEST_CASE("MemoryMessageChannel replaces message callbacks",
 }
 
 TEST_CASE("MemoryMessageChannel clears message callbacks",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int deliveries = 0;
@@ -139,7 +139,7 @@ TEST_CASE("MemoryMessageChannel send succeeds without peer callback",
 }
 
 TEST_CASE("MemoryMessageChannel delivers zero-length binary and text payloads",
-          "[runtime][message_channel][coverage][issue-641]") {
+          "[runtime][message_channel][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     std::vector<Message> received;
@@ -160,7 +160,7 @@ TEST_CASE("MemoryMessageChannel delivers zero-length binary and text payloads",
 }
 
 TEST_CASE("MemoryMessageChannel rejects nonempty null binary sends",
-          "[runtime][message_channel][codecov]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int deliveries = 0;
@@ -175,7 +175,7 @@ TEST_CASE("MemoryMessageChannel rejects nonempty null binary sends",
 }
 
 TEST_CASE("MemoryMessageChannel accepts empty null binary sends",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     std::vector<Message> received;
@@ -194,7 +194,7 @@ TEST_CASE("MemoryMessageChannel accepts empty null binary sends",
 }
 
 TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
-          "[runtime][message_channel][coverage][issue-641]") {
+          "[runtime][message_channel][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int calls = 0;
@@ -210,7 +210,7 @@ TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
 }
 
 TEST_CASE("MemoryMessageChannel text views preserve embedded NUL bytes",
-          "[runtime][message_channel][coverage][issue-641]") {
+          "[runtime][message_channel][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     std::string text = "prefix";
@@ -254,7 +254,7 @@ TEST_CASE("MemoryMessageChannel close is peer-wide and idempotent",
 }
 
 TEST_CASE("MemoryMessageChannel replaces close callbacks and leaves error inert",
-          "[runtime][message_channel][codecov]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int first_left_closed = 0;
@@ -294,7 +294,7 @@ TEST_CASE("MemoryMessageChannel peer destruction closes the survivor",
 }
 
 TEST_CASE("MemoryMessageChannel close callback can send no further messages",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int left_closed = 0;
@@ -313,7 +313,7 @@ TEST_CASE("MemoryMessageChannel close callback can send no further messages",
 }
 
 TEST_CASE("MemoryMessageChannel sender observes peer callback replacement during delivery",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int first_calls = 0;
@@ -333,7 +333,7 @@ TEST_CASE("MemoryMessageChannel sender observes peer callback replacement during
 }
 
 TEST_CASE("MemoryMessageChannel supports reentrant replies during delivery",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> seen;
@@ -350,7 +350,7 @@ TEST_CASE("MemoryMessageChannel supports reentrant replies during delivery",
 }
 
 TEST_CASE("MemoryMessageChannel self close does not invoke a late replacement callback",
-          "[runtime][message_channel][coverage]") {
+          "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
 
     int closed = 0;

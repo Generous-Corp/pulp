@@ -51,7 +51,7 @@ TEST_CASE("Analytics disabled doesn't log", "[runtime][analytics]") {
 }
 
 TEST_CASE("Analytics exposes enabled state toggles",
-          "[runtime][analytics][coverage][phase3-batch742]") {
+          "[runtime][analytics]") {
     auto& a = Analytics::instance();
 
     a.set_enabled(false);
@@ -136,7 +136,7 @@ TEST_CASE("FileAnalyticsDestination writes JSON", "[runtime][analytics]") {
     REQUIRE(line.find("\"key\":\"value\"") != std::string::npos);
 }
 
-TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics][coverage][issue-656]") {
+TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics][issue-656]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -160,7 +160,7 @@ TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics]
 }
 
 TEST_CASE("FileAnalyticsDestination escapes each special JSON character",
-          "[runtime][analytics][coverage][issue-656]") {
+          "[runtime][analytics][issue-656]") {
     struct Case {
         std::string input;
         std::string expected;
@@ -192,7 +192,7 @@ TEST_CASE("FileAnalyticsDestination escapes each special JSON character",
 }
 
 TEST_CASE("FileAnalyticsDestination escapes non-printable JSON control bytes",
-          "[runtime][analytics][coverage][phase3]") {
+          "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -217,7 +217,7 @@ TEST_CASE("FileAnalyticsDestination escapes non-printable JSON control bytes",
 }
 
 TEST_CASE("FileAnalyticsDestination escapes special JSON property keys and values",
-          "[runtime][analytics][coverage][issue-656]") {
+          "[runtime][analytics][issue-656]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -240,7 +240,8 @@ TEST_CASE("FileAnalyticsDestination escapes special JSON property keys and value
     REQUIRE(line.find("\"tab\\tkey\":\"tab\\tvalue\"") != std::string::npos);
 }
 
-TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][coverage][issue-656]") {
+TEST_CASE("FileAnalyticsDestination empty flush after released temp does not create output",
+          "[runtime][analytics][issue-656]") {
     TemporaryFile tmp(".jsonl");
     auto path = tmp.path();
     tmp.release();
@@ -252,7 +253,7 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
 }
 
 TEST_CASE("FileAnalyticsDestination keeps buffered events when open fails",
-          "[runtime][analytics][coverage][phase3-batch742]") {
+          "[runtime][analytics]") {
     auto root = std::filesystem::temp_directory_path() / "pulp_analytics_missing_parent_742";
     auto path = root / "events.jsonl";
     std::filesystem::remove_all(root);
@@ -318,7 +319,7 @@ TEST_CASE("FileAnalyticsDestination appends multiple flushes", "[runtime][analyt
 }
 
 TEST_CASE("FileAnalyticsDestination omits props object for empty properties",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -337,7 +338,7 @@ TEST_CASE("FileAnalyticsDestination omits props object for empty properties",
 }
 
 TEST_CASE("FileAnalyticsDestination buffers below auto flush threshold",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -363,7 +364,7 @@ TEST_CASE("FileAnalyticsDestination buffers below auto flush threshold",
 }
 
 TEST_CASE("FileAnalyticsDestination second flush does not duplicate events",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
 
@@ -382,7 +383,7 @@ TEST_CASE("FileAnalyticsDestination second flush does not duplicate events",
 }
 
 TEST_CASE("FileAnalyticsDestination retains buffered events after open failure",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     auto dir = std::filesystem::temp_directory_path() / "pulp_analytics_dir_dest";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directory(dir);
@@ -420,7 +421,7 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
 }
 
 TEST_CASE("FileAnalyticsDestination failed flush leaves no file at directory path",
-          "[runtime][analytics][coverage]") {
+          "[runtime][analytics]") {
     auto dir = std::filesystem::temp_directory_path() / "pulp-analytics-dir-dest";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
@@ -487,7 +488,7 @@ TEST_CASE("WidgetTracker forwards expected event names and properties",
 }
 
 TEST_CASE("Analytics forwards simple log with empty property map",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     auto events = std::make_shared<std::vector<AnalyticsEvent>>();
     auto flushes = std::make_shared<int>(0);
 
@@ -502,7 +503,7 @@ TEST_CASE("Analytics forwards simple log with empty property map",
 }
 
 TEST_CASE("Analytics ignores null destinations",
-          "[runtime][analytics][coverage][phase3]") {
+          "[runtime][analytics]") {
     auto events = std::make_shared<std::vector<AnalyticsEvent>>();
     auto flushes = std::make_shared<int>(0);
 
@@ -520,7 +521,7 @@ TEST_CASE("Analytics ignores null destinations",
 }
 
 TEST_CASE("Analytics disabled widget tracker calls skip destinations",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     auto events = std::make_shared<std::vector<AnalyticsEvent>>();
     auto flushes = std::make_shared<int>(0);
 
@@ -537,7 +538,7 @@ TEST_CASE("Analytics disabled widget tracker calls skip destinations",
 }
 
 TEST_CASE("WidgetTracker preserves empty identifiers and values",
-          "[runtime][analytics][coverage][phase3-large]") {
+          "[runtime][analytics]") {
     auto events = std::make_shared<std::vector<AnalyticsEvent>>();
     auto flushes = std::make_shared<int>(0);
 
