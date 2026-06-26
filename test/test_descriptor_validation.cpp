@@ -85,7 +85,7 @@ TEST_CASE("DescriptorValidation: non-reverse-DNS bundle_id produces a warning on
 }
 
 TEST_CASE("DescriptorValidation: reverse-DNS bundle_id requires at least three segments",
-          "[format][descriptor-validation][coverage][phase3]") {
+          "[format][descriptor-validation][coverage]") {
     auto d = well_formed_effect();
     d.bundle_id = "com.plugin";
 
@@ -232,7 +232,7 @@ TEST_CASE("DescriptorValidation: supports_mpe without accepts_midi warns",
 }
 
 TEST_CASE("DescriptorValidation: MPE and UMP sidecars share one warning on audio effects",
-          "[format][descriptor-validation][coverage][phase3]") {
+          "[format][descriptor-validation][coverage]") {
     auto d = well_formed_effect();
     d.supports_mpe = true;
     d.supports_ump = true;
@@ -308,7 +308,7 @@ TEST_CASE("DescriptorValidation: MidiEffect without audio output is valid",
 }
 
 TEST_CASE("DescriptorValidation: MidiEffect ignores zero-channel audio output",
-          "[format][descriptor-validation][coverage][phase3]") {
+          "[format][descriptor-validation][coverage]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::MidiEffect;
     d.accepts_midi = true;
@@ -372,7 +372,7 @@ TEST_CASE("DescriptorValidation: MIDI sidecar capabilities are warning-only with
 }
 
 TEST_CASE("descriptor_is_valid treats warnings as valid and any error as invalid",
-          "[format][descriptor-validation][coverage][phase3]") {
+          "[format][descriptor-validation][coverage]") {
     REQUIRE(descriptor_is_valid({}));
     REQUIRE(descriptor_is_valid({
         {DescriptorIssueSeverity::Warning, "bundle_id", "warning"},

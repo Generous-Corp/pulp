@@ -855,7 +855,7 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
 }
 
 TEST_CASE("CLAP latency and tail extensions report processor runtime contract",
-          "[clap][latency][tail][phase2]") {
+          "[clap][latency][tail]") {
     g_pending_latency_samples = 256;
     g_pending_tail_samples = 4096;
     Harness finite(make_latency_tail);
@@ -983,7 +983,7 @@ TEST_CASE("CLAP parameter modulation applies for one block then resets",
 }
 
 TEST_CASE("CLAP parameter modulation projects to the typed global lane",
-          "[clap][params][modulation][lane][phase3]") {
+          "[clap][params][modulation][lane]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     Harness h(make_capturing);
@@ -1082,7 +1082,7 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
 }
 
 TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer surface",
-          "[clap][audio][process-buffers][phase2]") {
+          "[clap][audio][process-buffers]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     Harness h(make_process_buffers_capturing);
@@ -1186,7 +1186,7 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
 }
 
 TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",
-          "[clap][transport][reset][phase2]") {
+          "[clap][transport][reset]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     Harness h(make_capturing);
@@ -1267,12 +1267,12 @@ TEST_CASE("CLAP item-1.3 transport extensions land on ProcessContext",
     REQUIRE_FALSE(ctx.transport_changed);
 }
 
-// Regression: #2963 — the CLAP adapter never
-// reset `self->playhead_prev` across lifecycle transitions, so the first
+// Regression coverage: the CLAP adapter must reset `self->playhead_prev` across
+// lifecycle transitions, so the first
 // block after a deactivate / reactivate (or reset) diff'd against stale
 // transport data from the previous activation and spuriously raised
 // tempo_changed / time_sig_changed / transport_changed.
-TEST_CASE("CLAP playhead snapshot is reset on activate / deactivate / reset (#2963)",
+TEST_CASE("CLAP playhead snapshot is reset on activate / deactivate / reset",
           "[clap][transport][item-13][issue-2963]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
@@ -2153,8 +2153,8 @@ TEST_CASE("Mixed CLAP_EVENT_MIDI2 + NOTE_ON: both reach UMP sidecar",
     // a separate co-delivered CLAP_EVENT_NOTE_ON on a different note.
     // Both must appear in the UMP sidecar after process() returns. An
     // earlier shape of this test asserted the synthesis was skipped, but
-    // the assumption from PR #627 silently dropped real-world note streams.
-    // Inverted to pin the corrected behaviour.
+    // assuming synthesis could be skipped silently dropped real-world note
+    // streams. This pins the corrected behaviour.
     g_pending_opts_mpe = false;
     g_pending_opts_ump = true;
     Harness h(make_capturing);
@@ -2401,7 +2401,6 @@ TEST_CASE("midi_out empty sysex payload is skipped on CLAP out_events",
 
 TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
           "[clap][midi][issue-pending]") {
-    // Covers the PR #627 two-cursor merge for ordered out_events.
     // CLAP's out_events contract requires events pushed in ascending
     // sample-time order across event types; the earlier two-pass shape
     // (all shorts, then all sysex) violated it whenever a sysex

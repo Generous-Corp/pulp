@@ -7,7 +7,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
     processor_->prepare(context);
     // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
     // on the unused fallback buffers never reallocates on the RT thread. The
-    // audio-only slice presents no real events, so a small reservation is
+    // audio-only binding presents no real events, so a small reservation is
     // enough to keep capacity stable across blocks.
     const int midi_hint = context.resource_limits.max_midi_events;
     const auto reserve = static_cast<std::size_t>(midi_hint > 0 ? midi_hint : 1);
@@ -44,7 +44,7 @@ bool ProcessorNode::process_binding(ProcessBlock& block,
     local_block.block_index = block.block_index;
     local_block.transport = block.transport;
     local_block.buses = &local_buses;
-    // Audio-only slice: no EventBlock, no BlockScratch. The bridge falls back to
+    // Audio-only binding: no EventBlock, no BlockScratch. The bridge falls back to
     // its scratch MIDI sinks and a null parameter queue.
     if (!local_block.validate()) return false;
 

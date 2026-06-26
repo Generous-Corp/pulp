@@ -173,7 +173,7 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
 }
 
 TEST_CASE("format registry stores and replaces the processor factory",
-          "[format][registry][coverage][phase3]") {
+          "[format][registry][coverage]") {
     const auto previous = pulp::format::registered_factory();
     {
         ScopedFactoryRegistration scoped(create_test_gain);
@@ -249,7 +249,7 @@ TEST_CASE("HeadlessHost forwards prepare context and release",
 }
 
 TEST_CASE("HeadlessHost try_prepare enforces processor resource budgets",
-          "[headless][prepare-budget][phase2]") {
+          "[headless][prepare-budget]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(last_processor != nullptr);
     auto* processor = last_processor;
@@ -284,7 +284,7 @@ TEST_CASE("HeadlessHost try_prepare enforces processor resource budgets",
 }
 
 TEST_CASE("HeadlessHost failed budget prepare preserves active render context",
-          "[headless][prepare-budget][phase2]") {
+          "[headless][prepare-budget]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(last_processor != nullptr);
     auto* processor = last_processor;
@@ -319,7 +319,7 @@ TEST_CASE("HeadlessHost failed budget prepare preserves active render context",
 }
 
 TEST_CASE("HeadlessHost try_prepare reports channel and voice budget failures",
-          "[headless][prepare-budget][phase2]") {
+          "[headless][prepare-budget]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(last_processor != nullptr);
     auto* processor = last_processor;
@@ -364,7 +364,7 @@ TEST_CASE("HeadlessHost fills default process context",
 }
 
 TEST_CASE("HeadlessHost defaults non-positive context fields",
-          "[headless][coverage][phase3]") {
+          "[headless][coverage]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(88200.0, 512);
 
@@ -427,7 +427,7 @@ TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {
                  Catch::Matchers::WithinRel(static_cast<double>(expected), 0.01));
 }
 
-TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping", "[headless][phase12]") {
+TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
 
@@ -458,7 +458,7 @@ TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping"
 }
 
 TEST_CASE("HeadlessHost forwards explicit runtime mode maintenance flags",
-          "[headless][runtime-mode][phase2]") {
+          "[headless][runtime-mode]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
 
@@ -495,7 +495,7 @@ TEST_CASE("HeadlessHost forwards explicit runtime mode maintenance flags",
 }
 
 TEST_CASE("HeadlessHost renders deterministic offline AudioFileData blocks",
-          "[headless][offline][advanced][phase3]") {
+          "[headless][offline][advanced]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 4);
     host.state().set_value(1, 6.0f);
@@ -536,7 +536,7 @@ TEST_CASE("HeadlessHost renders deterministic offline AudioFileData blocks",
 }
 
 TEST_CASE("HeadlessHost offline render matches direct process for stateless effects",
-          "[headless][offline][parity][advanced][phase3]") {
+          "[headless][offline][parity][advanced]") {
     pulp::format::HeadlessHost direct_host(create_test_gain);
     direct_host.prepare(48000.0, 3);
     direct_host.state().set_value(1, -3.0f);
@@ -696,7 +696,7 @@ TEST_CASE("HeadlessHost forwards explicit parameter-event queues",
 }
 
 TEST_CASE("HeadlessHost forwards MIDI, parameter events, and explicit context together",
-          "[headless][params][coverage][phase3]") {
+          "[headless][params][coverage]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
     REQUIRE(last_processor != nullptr);

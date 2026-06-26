@@ -228,7 +228,7 @@ TEST_CASE("plugin_state_io round-trips parameter and plugin-owned state",
 }
 
 TEST_CASE("plugin_state_io envelope encodes payload sizes and CRC",
-          "[format][plugin-state][coverage][phase3]") {
+          "[format][plugin-state][coverage]") {
     TestRig source;
     source.store.set_value(1, -2.5f);
     source.processor.plugin_state = "layout=full";
@@ -263,7 +263,7 @@ TEST_CASE("plugin_state_io envelope encodes payload sizes and CRC",
 }
 
 TEST_CASE("plugin_state_io preserves binary plugin-owned payload bytes",
-          "[format][plugin-state][coverage][phase3]") {
+          "[format][plugin-state][coverage]") {
     TestRig source;
     source.store.set_value(1, -3.0f);
     source.processor.plugin_state.assign(
@@ -487,7 +487,7 @@ TEST_CASE("plugin_state_io migrates old envelopes before parsing payloads",
 }
 
 TEST_CASE("plugin_state_io rejects invalid envelope migration registrations",
-          "[format][plugin-state][coverage][phase3]") {
+          "[format][plugin-state][coverage]") {
     using pulp::format::plugin_state_io::current_envelope_version;
     using pulp::format::plugin_state_io::register_envelope_migration;
 

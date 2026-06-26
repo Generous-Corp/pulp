@@ -167,11 +167,10 @@ TEST_CASE("AU v2 effect: System message status byte reassembles SDK split",
     // decoder as inStatus=0xF0, inChannel=0x08; the decoder must
     // reassemble (top | low) = 0xF8.
     //
-    // The previous fixture passed `inStatus=0xF8` directly (the wire-
-    // format byte, NOT the post-split top nibble), so the buggy "is_system
-    // → return inStatus unchanged" branch ALSO returned 0xF8 and the
-    // test passed by coincidence. PR #638 review caught that the fixture
-    // didn't model the SDK contract; this version does.
+    // A regression fixture that passes the wire-format byte directly would
+    // also return 0xF8 from a buggy "is_system -> return inStatus unchanged"
+    // branch. Model the SDK contract instead: the status arrives split into
+    // the 0xF0 top nibble plus the low-nibble channel field.
     SECTION("0xF8 — timing clock") {
         const auto ev = decode_midi_event(/*inStatus=*/0xF0,
                                           /*inChannel=*/0x08,
@@ -214,7 +213,7 @@ TEST_CASE("AU v2 effect: sysex routing lands in MidiBuffer's sysex sidecar",
 }
 
 TEST_CASE("AU v2 render context is explicit realtime for effects and instruments",
-          "[au][au-v2][runtime-mode][phase2]")
+          "[au][au-v2][runtime-mode]")
 {
     const auto ctx = pulp::format::au::make_render_process_context(
         /*sample_rate=*/48000.0, /*num_samples=*/128);
