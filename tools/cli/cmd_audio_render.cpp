@@ -258,6 +258,18 @@ int cmd_audio_render(const std::vector<std::string>& args) {
                      "(per-block queue capacity exceeded)\n",
                      stats.params_dropped);
     }
+    if (stats.params_out_of_range > 0) {
+        std::fprintf(stderr,
+                     "pulp audio render: warning: %u parameter event(s) scheduled at or "
+                     "beyond the render duration were ignored\n",
+                     stats.params_out_of_range);
+    }
+    if (stats.midi_out_of_range > 0) {
+        std::fprintf(stderr,
+                     "pulp audio render: warning: %u MIDI event(s) scheduled at or beyond "
+                     "the render duration were ignored\n",
+                     stats.midi_out_of_range);
+    }
 
     // Write the WAV (int16).
     audio::AudioFileData data;

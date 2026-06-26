@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <optional>
 #include <string>

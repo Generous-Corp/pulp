@@ -129,6 +129,35 @@ TEST_CASE("audio render stepper: event windowing, incl. exactly on a block bound
     REQUIRE(midi_frames == std::vector<std::uint64_t>{256});
     REQUIRE(st.params_dispatched == 3);
     REQUIRE(st.midi_dispatched == 1);
+    REQUIRE(st.params_out_of_range == 0);
+    REQUIRE(st.midi_out_of_range == 0);
+}
+
+TEST_CASE("audio render stepper: out-of-range events are counted", "[audio-render]") {
+    const std::uint64_t frames = 512;
+
+    state::ParameterEvent p;
+    p.param_id = 7;
+    p.value = 1.0f;
+    std::vector<ar::TimedParam> params{{511, p}, {512, p}, {1024, p}};
+    std::vector<ar::TimedMidi> midi{
+        {512, midi::MidiEvent::note_on(0, 60, 100)},
+        {1024, midi::MidiEvent::note_off(0, 60)}};
+
+    ar::StepEvents events;
+    events.params = params;
+    events.midi = midi;
+
+    audio::Buffer<float> out;
+    ar::StepStats st;
+    audio::BufferView<const float> no_input;
+    REQUIRE(ar::render_blocks(spec_for(128, frames), no_input, events, out, st,
+                              passthrough()));
+
+    REQUIRE(st.params_dispatched == 1);
+    REQUIRE(st.params_out_of_range == 2);
+    REQUIRE(st.midi_dispatched == 0);
+    REQUIRE(st.midi_out_of_range == 2);
 }
 
 TEST_CASE("audio render stepper: short input is silence-padded", "[audio-render]") {

@@ -61,6 +61,8 @@ struct StepStats {
     std::uint32_t midi_dispatched = 0;
     std::uint32_t params_dispatched = 0;
     std::uint32_t params_dropped = 0;
+    std::uint32_t midi_out_of_range = 0;
+    std::uint32_t params_out_of_range = 0;
     bool input_truncated = false;
 };
 
@@ -205,6 +207,13 @@ bool render_blocks(const StepSpec& spec,
         stats.frames_rendered += n;
         ++stats.blocks_rendered;
     }
+
+    stats.midi_out_of_range = static_cast<std::uint32_t>(
+        std::min<std::size_t>(events.midi.size() - midi_index,
+                              std::numeric_limits<std::uint32_t>::max()));
+    stats.params_out_of_range = static_cast<std::uint32_t>(
+        std::min<std::size_t>(events.params.size() - param_index,
+                              std::numeric_limits<std::uint32_t>::max()));
 
     return true;
 }
