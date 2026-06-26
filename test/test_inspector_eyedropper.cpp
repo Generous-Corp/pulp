@@ -95,8 +95,8 @@ KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
 
 } // namespace
 
-TEST_CASE("InspectorOverlay Phase 3c: eyedropper defaults OFF",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: eyedropper defaults OFF",
+          "[inspect][overlay][eyedropper]") {
     View root;
     InspectorOverlay overlay(root);
     REQUIRE_FALSE(overlay.eyedropper_active());
@@ -109,8 +109,8 @@ TEST_CASE("InspectorOverlay Phase 3c: eyedropper defaults OFF",
     REQUIRE_FALSE(overlay.eyedropper_active());
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: 'E' key toggles eyedropper only when active",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: 'E' key toggles eyedropper only when active",
+          "[inspect][overlay][eyedropper]") {
     View root;
     InspectorOverlay overlay(root);
 
@@ -130,8 +130,8 @@ TEST_CASE("InspectorOverlay Phase 3c: 'E' key toggles eyedropper only when activ
     REQUIRE_FALSE(overlay.eyedropper_active());
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: mouse-move samples color under cursor",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: mouse-move samples color under cursor",
+          "[inspect][overlay][eyedropper]") {
     Phase3cScene s(Color::rgba8(0x12, 0xab, 0x5f));
     s.overlay.set_eyedropper_active(true);
     REQUIRE_FALSE(s.overlay.eyedropper_has_sample());
@@ -145,8 +145,8 @@ TEST_CASE("InspectorOverlay Phase 3c: mouse-move samples color under cursor",
     REQUIRE(c.b8() == 0x5f);
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: click captures color and emits tweak",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: click captures color and emits tweak",
+          "[inspect][overlay][eyedropper]") {
     Phase3cScene s(Color::rgba8(0xff, 0x80, 0x00));
     s.overlay.set_eyedropper_active(true);
 
@@ -165,8 +165,8 @@ TEST_CASE("InspectorOverlay Phase 3c: click captures color and emits tweak",
     REQUIRE(std::string(v->getString()) == "#ff8000");
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: click without prior move still picks",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: click without prior move still picks",
+          "[inspect][overlay][eyedropper]") {
     // Resolved-style sampling is synchronous, so a click with no
     // preceding mouse-move still captures a real color (covers
     // scripted / fast-click use).
@@ -181,8 +181,8 @@ TEST_CASE("InspectorOverlay Phase 3c: click without prior move still picks",
     REQUIRE(std::string(v->getString()) == "#404040");
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: click refreshes stale hover sample",
-          "[inspect][overlay][phase3c][regression]") {
+TEST_CASE("InspectorOverlay eyedropper: click refreshes stale hover sample",
+          "[inspect][overlay][eyedropper][regression]") {
     Phase3cScene s(Color::rgba8(0xff, 0x00, 0x00));
 
     auto second = std::make_unique<View>();
@@ -210,8 +210,8 @@ TEST_CASE("InspectorOverlay Phase 3c: click refreshes stale hover sample",
     REQUIRE(std::string(v->getString()) == "#0066ff");
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: click never commits a stale sample",
-          "[inspect][overlay][phase3c][regression]") {
+TEST_CASE("InspectorOverlay eyedropper: click never commits a stale sample",
+          "[inspect][overlay][eyedropper][regression]") {
     // Regression cover for #2434: pressing E and clicking on empty canvas must
     // not write a stale color into the tweak store. A prior sample can be left
     // behind by an earlier hover, or by paint_eyedropper_cursor sampling from
@@ -240,8 +240,8 @@ TEST_CASE("InspectorOverlay Phase 3c: click never commits a stale sample",
     REQUIRE_FALSE(s.overlay.eyedropper_has_sample());
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: retargeting writes a different property",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: retargeting writes a different property",
+          "[inspect][overlay][eyedropper]") {
     Phase3cScene s(Color::rgba8(0x00, 0x99, 0xff));
     s.overlay.set_eyedropper_target("style.border_color");
     s.overlay.set_eyedropper_active(true);
@@ -256,8 +256,8 @@ TEST_CASE("InspectorOverlay Phase 3c: retargeting writes a different property",
     REQUIRE(s.overlay.eyedropper_target() == "style.border_color");
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: sample_color_at hex round-trips alpha",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: sample_color_at hex round-trips alpha",
+          "[inspect][overlay][eyedropper]") {
     // A semi-transparent background encodes as 8-digit "#rrggbbaa".
     Phase3cScene s(Color::rgba8(0x20, 0x30, 0x40, 0x80));
     s.overlay.set_eyedropper_active(true);
@@ -267,8 +267,8 @@ TEST_CASE("InspectorOverlay Phase 3c: sample_color_at hex round-trips alpha",
     REQUIRE(std::string(v->getString()) == "#20304080");
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: eyedropper yields to the panel",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: eyedropper yields to the panel",
+          "[inspect][overlay][eyedropper]") {
     // A click inside the inspector panel must NOT be eaten by the
     // eyedropper — the user still needs tree / field interaction.
     Phase3cScene s;
@@ -283,8 +283,8 @@ TEST_CASE("InspectorOverlay Phase 3c: eyedropper yields to the panel",
     REQUIRE(s.store.count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: pick no-ops without a selection anchor",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: pick no-ops without a selection anchor",
+          "[inspect][overlay][eyedropper]") {
     // Hand-authored view with no anchor — the eyedropper still
     // disables (the click was a deliberate spend) but emits nothing.
     View root;
@@ -306,8 +306,8 @@ TEST_CASE("InspectorOverlay Phase 3c: pick no-ops without a selection anchor",
     REQUIRE(store.count() == 0);
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: deactivating inspector clears eyedropper",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: deactivating inspector clears eyedropper",
+          "[inspect][overlay][eyedropper]") {
     Phase3cScene s;
     s.overlay.set_eyedropper_active(true);
     s.overlay.handle_mouse_event(make_move(80, 70));
@@ -318,8 +318,8 @@ TEST_CASE("InspectorOverlay Phase 3c: deactivating inspector clears eyedropper",
     REQUIRE_FALSE(s.overlay.eyedropper_has_sample());
 }
 
-TEST_CASE("InspectorOverlay Phase 3c: paint draws swatch when armed",
-          "[inspect][overlay][phase3c]") {
+TEST_CASE("InspectorOverlay eyedropper: paint draws swatch when armed",
+          "[inspect][overlay][eyedropper]") {
     // The cursor swatch must paint without crashing once a sample
     // exists; RecordingCanvas has no pixel readback so this exercises
     // the resolved-style path + the swatch chrome.
