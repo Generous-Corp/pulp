@@ -2,7 +2,7 @@
 //
 // Verifies register_font_url(...) returns a future that resolves to
 // the expected FontState for each URL scheme:
-//   * `http://` / `https://` → immediately Failed (until 2.1.b lands).
+//   * `http://` / `https://` → immediately Failed.
 //   * `file://` and bare absolute paths → dispatched async,
 //     resolves to Loaded for a valid font, Failed for a missing path.
 //   * empty input → Failed.
@@ -52,7 +52,7 @@ TEST_CASE("register_font_url: empty URL → Failed", "[font][async][issue-2163]"
     REQUIRE(fut.get() == FontState::Failed);
 }
 
-TEST_CASE("register_font_url: http(s) scheme not yet supported → Failed",
+TEST_CASE("register_font_url: http(s) scheme resolves to Failed",
           "[font][async][issue-2163]") {
     {
         auto fut = register_font_url("https://example.com/font.ttf");
@@ -199,7 +199,7 @@ TEST_CASE("register_font_url: dropping the future does not block the caller",
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
 
     // A reasonable bound: even on a slow CI host, decoupling from the
-    // worker thread should take well under 100ms. Pre-fix, this would
+    // worker thread should take well under 100ms. A joining future would
     // have blocked for the full register_font_file duration.
     REQUIRE(elapsed.count() < 100);
 
