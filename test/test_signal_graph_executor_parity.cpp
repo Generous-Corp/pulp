@@ -283,21 +283,24 @@ TEST_CASE("SignalGraph::process opt-in executor path matches the legacy walk",
     }
 }
 
-TEST_CASE("SignalGraph::process opt-in falls back to legacy for ineligible graphs",
+TEST_CASE("SignalGraph::process routes a graph carrying a Custom node",
           "[host][graph][executor][routing]") {
-    // A stray Custom node makes the graph ineligible; with the opt-in ON,
-    // process() must fall back to the legacy walk and still produce in*gain.
+    // A Custom node no longer disqualifies the routed path: even an UNRESOLVED
+    // custom node (unregistered type) is eligible, because its binding falls back
+    // to pass-through-or-zero exactly as the legacy walk does. Here the custom
+    // node is disconnected, so the routed output is the same in*gain the walk
+    // produces — proving the routed path handles the custom node without diverging.
     SignalGraph g;
     const auto in = g.add_input_node(1, "In");
     const auto a = g.add_gain_node("A");
     const auto out = g.add_output_node(1, "Out");
-    (void)g.add_unresolved_custom_node("test.custom", 1, 1, 1, "Custom");  // ineligible type
+    (void)g.add_unresolved_custom_node("test.custom", 1, 1, 1, "Custom");  // unresolved
     REQUIRE(g.connect(in, 0, a, 0));
     REQUIRE(g.connect(a, 0, out, 0));
     REQUIRE(g.set_node_gain(a, 0.5f));
     g.set_canonical_executor_routing_enabled(true);
     REQUIRE(g.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(g));  // Custom node disqualifies
+    CHECK(signal_graph_executor_eligible(g));  // Custom node no longer disqualifies
 
     const auto x = ramp(kFrames, 0.8f);
     std::vector<float> xi = x, yo(kFrames, 0.0f);
@@ -461,7 +464,9 @@ TEST_CASE("Executor eligibility rejects unprepared and non-eligible graphs",
     CHECK_FALSE(build_signal_graph_executor_routing(unprepared, routing));
     CHECK_FALSE(routing.valid);
 
-    // A Custom node is outside the eligible subset even when prepared.
+    // A Custom node is now inside the eligible subset (audio-only): even an
+    // unresolved type is eligible because its binding pass-through-or-zeros like
+    // the walk, so a prepared custom graph routes and its routing build succeeds.
     SignalGraph custom;
     const auto cin = custom.add_input_node(1, "In");
     const auto cnode = custom.add_unresolved_custom_node("test.custom", 1, 1, 1, "Custom");
@@ -469,7 +474,10 @@ TEST_CASE("Executor eligibility rejects unprepared and non-eligible graphs",
     REQUIRE(custom.connect(cin, 0, cnode, 0));
     REQUIRE(custom.connect(cnode, 0, cout, 0));
     REQUIRE(custom.prepare(kSr, kFrames));
-    CHECK_FALSE(signal_graph_executor_eligible(custom));
+    CHECK(signal_graph_executor_eligible(custom));
+    SignalGraphExecutorRouting custom_routing;
+    CHECK(build_signal_graph_executor_routing(custom, custom_routing));
+    CHECK(custom_routing.valid);
 }
 
 TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible graphs",
@@ -1974,4 +1982,245 @@ TEST_CASE("Golden: parallel multi-sink stateful graph renders identically run-to
     // determinism over the full stateful session, not just one block).
     const auto legacy = render_session(/*parallel=*/false, kBlocks);
     expect_equal(run1, legacy);
+}
+
+// ── Custom-node routing parity ───────────────────────────────────────────────
+// Custom (CustomNodeType) nodes route through the canonical executor by default,
+// just like Plugin nodes. These prove the routed Custom binding is bit-identical
+// to SignalGraph's own walk for the three cases that matter: a stateful custom
+// node (state advanced per instance across blocks), a stateless one, and an
+// unresolved one (the binding's pass-through-or-zero matching the walk).
+namespace {
+
+// A stateful custom node: its opaque instance carries a one-pole accumulator
+// across blocks, so a routed render that double-ran or skipped state would
+// diverge from the walk. Each graph gets its OWN instance (register + add per
+// graph), so the walk-graph and routed-graph advance independent state.
+struct CustomAccum { float state = 0.0f; };
+pulp::host::CustomNodeType make_accum_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.accum";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Accum";
+    t.create = []() -> void* { return new CustomAccum(); };
+    t.destroy = [](void* p) { delete static_cast<CustomAccum*>(p); };
+    t.reset = [](void* p) { static_cast<CustomAccum*>(p)->state = 0.0f; };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto* s = static_cast<CustomAccum*>(p);
+        for (int i = 0; i < n; ++i) {
+            s->state = s->state * 0.75f + in.channel_ptr(0)[i];
+            out.channel_ptr(0)[i] = s->state;
+        }
+    };
+    return t;
+}
+
+// A stateless custom node: a fixed scale, no instance.
+pulp::host::CustomNodeType make_scale_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.scale";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Scale";
+    t.process = [](pulp::audio::BufferView<float>& out,
+                   const pulp::audio::BufferView<const float>& in, int n) {
+        for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * 0.625f;
+    };
+    return t;
+}
+
+// A PARTIAL-writing custom node: writes only the first half of each block and
+// leaves the tail untouched. A node that does not fully overwrite its output
+// relies on a persistent per-node output buffer — the untouched tail must carry
+// the PREVIOUS block's samples. Exercises the persistent-output contract for
+// custom nodes (regression guard: without it the routed tail would be a recycled
+// or zeroed slot while the walk keeps the stale tail).
+pulp::host::CustomNodeType make_partial_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.partial";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Partial";
+    t.process = [](pulp::audio::BufferView<float>& out,
+                   const pulp::audio::BufferView<const float>& in, int n) {
+        for (int i = 0; i < n / 2; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * 0.5f;
+        // [n/2, n) deliberately left untouched — persists across blocks.
+    };
+    return t;
+}
+
+}  // namespace
+
+TEST_CASE("Translated routing matches SignalGraph: stateful custom node parity",
+          "[host][graph][executor][routing][parity][custom]") {
+    // Two identical graphs over the same per-block input — one forced onto the
+    // legacy walk, one routed by default — must agree sample-for-sample across
+    // many blocks, proving the routed Custom binding advances the same per-
+    // instance state the walk does.
+    auto build = [](SignalGraph& g, bool route_executor) {
+        REQUIRE(g.register_custom_node_type(make_accum_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.accum", "Accum");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph walk, routed;
+    build(walk, /*route_executor=*/false);
+    build(routed, /*route_executor=*/true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+
+    for (int blk = 0; blk < 6; ++blk) {
+        CAPTURE(blk);
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        std::vector<float> wi = x, ri = x, wo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 1> wic{wi.data()}, ric{ri.data()};
+        std::array<float*, 1> woc{wo.data()}, roc{ro.data()};
+        pulp::audio::BufferView<const float> wiv(wic.data(), 1, kFrames),
+            riv(ric.data(), 1, kFrames);
+        pulp::audio::BufferView<float> wov(woc.data(), 1, kFrames),
+            rov(roc.data(), 1, kFrames);
+        walk.process(wov, wiv, kFrames);
+        routed.process(rov, riv, kFrames);
+        for (int i = 0; i < kFrames; ++i)
+            REQUIRE(wo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Parallel routing matches SignalGraph: wide stateful custom level",
+          "[host][graph][executor][routing][parity][custom][parallel]") {
+    // A wide level of independent stateful custom nodes forces the levelized
+    // parallel executor to run multiple process_instance callbacks on worker
+    // threads at once. Each node owns a distinct instance, so the per-instance
+    // state must advance exactly as the single-threaded walk does — proving the
+    // custom binding is parallel-safe (and, under TSan, race-free).
+    constexpr int kWidth = 6;
+    auto build = [](SignalGraph& g, bool parallel) {
+        REQUIRE(g.register_custom_node_type(make_accum_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto out = g.add_output_node(1, "Out");
+        for (int i = 0; i < kWidth; ++i) {
+            const auto node = g.add_custom_node("pulp.test.accum", "Accum");
+            REQUIRE(node != 0);
+            REQUIRE(g.connect(in, 0, node, 0));
+            REQUIRE(g.connect(node, 0, out, 0));  // fan-in mix at the output
+        }
+        // Reference runs the legacy walk; the test graph routes across worker
+        // threads. Bit-exact agreement proves both the routed Custom binding AND
+        // its parallel dispatch match the walk.
+        g.set_canonical_executor_routing_enabled(parallel);
+        g.set_parallel_routing_enabled(parallel);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph walk, routed;
+    build(walk, /*parallel=*/false);    // legacy walk (independent reference)
+    build(routed, /*parallel=*/true);   // levelized parallel routed
+
+    for (int blk = 0; blk < 6; ++blk) {
+        CAPTURE(blk);
+        const auto x = ramp(kFrames, 0.3f + 0.08f * static_cast<float>(blk));
+        std::vector<float> wi = x, ri = x, wo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 1> wic{wi.data()}, ric{ri.data()};
+        std::array<float*, 1> woc{wo.data()}, roc{ro.data()};
+        pulp::audio::BufferView<const float> wiv(wic.data(), 1, kFrames),
+            riv(ric.data(), 1, kFrames);
+        pulp::audio::BufferView<float> wov(woc.data(), 1, kFrames),
+            rov(roc.data(), 1, kFrames);
+        walk.process(wov, wiv, kFrames);
+        routed.process(rov, riv, kFrames);
+        for (int i = 0; i < kFrames; ++i)
+            REQUIRE(wo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Translated routing matches SignalGraph: partial-writing custom node persists its tail",
+          "[host][graph][executor][routing][parity][custom]") {
+    // A custom node that overwrites only the first half of its output must, on
+    // the routed path, keep the untouched tail from the previous block — exactly
+    // as the walk's persistent per-node buffer does. Bit-exact across blocks
+    // guards the custom persistent_output contract.
+    auto build = [](SignalGraph& g, bool route_executor) {
+        REQUIRE(g.register_custom_node_type(make_partial_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.partial", "Partial");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+    SignalGraph walk, routed;
+    build(walk, /*route_executor=*/false);
+    build(routed, /*route_executor=*/true);
+
+    for (int blk = 0; blk < 6; ++blk) {
+        CAPTURE(blk);
+        const auto x = ramp(kFrames, 0.5f + 0.09f * static_cast<float>(blk));
+        std::vector<float> wi = x, ri = x, wo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 1> wic{wi.data()}, ric{ri.data()};
+        std::array<float*, 1> woc{wo.data()}, roc{ro.data()};
+        pulp::audio::BufferView<const float> wiv(wic.data(), 1, kFrames),
+            riv(ric.data(), 1, kFrames);
+        pulp::audio::BufferView<float> wov(woc.data(), 1, kFrames),
+            rov(roc.data(), 1, kFrames);
+        walk.process(wov, wiv, kFrames);
+        routed.process(rov, riv, kFrames);
+        for (int i = 0; i < kFrames; ++i)
+            REQUIRE(wo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("Translated routing matches SignalGraph: stateless custom node parity",
+          "[host][graph][executor][routing][parity][custom]") {
+    SignalGraph g;
+    REQUIRE(g.register_custom_node_type(make_scale_type()));
+    const auto in = g.add_input_node(1, "In");
+    const auto node = g.add_custom_node("pulp.test.scale", "Scale");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(node != 0);
+    REQUIRE(g.connect(in, 0, node, 0));
+    REQUIRE(g.connect(node, 0, out, 0));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.8f)};
+    expect_equal(run_legacy(g, kFrames, input, 1),
+                 run_routed(exec, routing, kFrames, input, 1));
+}
+
+TEST_CASE("Translated routing matches SignalGraph: unresolved custom node pass-through",
+          "[host][graph][executor][routing][parity][custom]") {
+    // An unresolved custom type (never registered) routes via the binding's
+    // pass-through-or-zero, exactly as SignalGraph's walk handles it: input
+    // copied straight to output. Both paths must be bit-identical.
+    SignalGraph g;
+    const auto in = g.add_input_node(1, "In");
+    const auto node = g.add_unresolved_custom_node("test.unregistered", 1, 1, 1, "Custom");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(node != 0);
+    REQUIRE(g.connect(in, 0, node, 0));
+    REQUIRE(g.connect(node, 0, out, 0));
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(signal_graph_executor_eligible(g));
+
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(g, routing));
+    REQUIRE(routing.valid);
+    pulp::format::GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.7f)};
+    expect_equal(run_legacy(g, kFrames, input, 1),
+                 run_routed(exec, routing, kFrames, input, 1));
 }

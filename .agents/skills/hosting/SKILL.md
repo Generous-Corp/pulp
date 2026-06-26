@@ -146,9 +146,15 @@ predictable output, no MIDI.
   OFF to render the walk — the routed-vs-walk parity oracles (`run_legacy`,
   `signal_graph_block`) do that so the walk stays an independent reference. Ineligible
   graphs (Custom/Utility nodes, or per-node automation past the executor's fixed
-  capacity) still fall back to the walk. An eligible graph —
-  nodes only AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
-  carry a LIVE slot) / MidiInput / MidiOutput, connections audio (feedforward,
+  capacity) still fall back to the walk. **The walk is the deliberate
+  reference/fallback path — independent parity oracle + safety fallback — NOT
+  slated for deletion.** An eligible graph —
+  nodes AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
+  carry a LIVE slot) / MidiInput / MidiOutput / **Custom** (`CustomNodeType`,
+  stateless `process` or stateful `process_instance`; routed via `custom_binding`,
+  an unresolved/shape-mismatch custom node pass-through-or-zeros exactly as the
+  walk does; custom output regions are pinned `persistent_output` like plugins so
+  a partial writer keeps its stale tail), connections audio (feedforward,
   one-block feedback, or sidechain — a sidechain edge routes as plain audio into
   a higher input port of the destination plugin), MIDI (connect_midi event
   edges), or parameter automation — sparse (connect_automation, two control

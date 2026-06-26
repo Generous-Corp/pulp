@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <vector>
 
@@ -115,6 +116,41 @@ bool plugin_binding(fmt::ProcessBlock&,
     return true;
 }
 
+// Custom binding: invoke the node's resolved process callback exactly as
+// SignalGraph's Custom node does — over the node's mono input/output slots
+// (ctx.node_inputs gathered from upstream, ctx.node_outputs the assigned
+// scratch). Custom nodes are audio-only (no MIDI/automation/latency), so unlike
+// plugin_binding there is no bus/MIDI/parameter marshaling. When the context's
+// process callback is empty (an unresolved custom type or a shape mismatch — the
+// same condition SignalGraph checks with custom_type_matches_node_shape), this
+// reproduces SignalGraph's pass_through_or_zero: copy min(in,out) channels
+// straight through, then zero any extra output channels, so the routed output is
+// bit-identical to the walk either way. RT-safe: the BufferView copies are
+// lightweight views (no allocation), and the std::function copy that may
+// allocate happened off the audio thread at snapshot-build time.
+bool custom_binding(fmt::ProcessBlock&,
+                    const fmt::GraphRuntimeNodeProcessContext& ctx,
+                    void* user_data) noexcept {
+    const auto* cctx = static_cast<const CustomBindingContext*>(user_data);
+    const auto in = ctx.node_inputs;
+    auto out = ctx.node_outputs;
+    const std::size_t frames = out.num_samples();
+    if (cctx != nullptr && cctx->process) {
+        cctx->process(out, in, static_cast<int>(frames));
+        return true;
+    }
+    const std::size_t in_ch = in.num_channels();
+    const std::size_t out_ch = out.num_channels();
+    const std::size_t chs = std::min(in_ch, out_ch);
+    for (std::size_t c = 0; c < chs; ++c) {
+        std::memcpy(out.channel_ptr(c), in.channel_ptr(c), sizeof(float) * frames);
+    }
+    for (std::size_t c = chs; c < out_ch; ++c) {
+        std::memset(out.channel_ptr(c), 0, sizeof(float) * frames);
+    }
+    return true;
+}
+
 gr::GraphRuntimeNodeKind map_kind(NodeType type) noexcept {
     switch (type) {
         case NodeType::AudioInput: return gr::GraphRuntimeNodeKind::AudioInput;
@@ -144,6 +180,13 @@ bool node_eligible(const GraphNode& node) noexcept {
             // per-connection delay compensation as the legacy walk, derived from
             // the node's latency_samples carried into the plan.
             return node.plugin != nullptr;
+        case NodeType::Custom:
+            // Always eligible: a resolved custom node routes through its process
+            // callback, and an unresolved one (unregistered type / shape
+            // mismatch) routes through the binding's pass-through-or-zero — which
+            // is exactly what SignalGraph's walk does for an unresolved custom
+            // node — so the routed output matches the walk in either case.
+            return true;
         default:
             return false;
     }
@@ -213,18 +256,27 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              fmt::GraphRuntimeSnapshot& out,
                              bool parallel_safe,
                              const std::function<audio::AudioProcessLoadMeasurer*(NodeId)>&
-                                 load_for) {
+                                 load_for,
+                             std::vector<CustomBindingContext>* custom_ctx,
+                             const std::function<const CustomNodeProcessFn*(NodeId)>&
+                                 custom_for) {
     out.clear();
     plugin_ctx.clear();
+    if (custom_ctx != nullptr) custom_ctx->clear();
     if (!signal_graph_topology_executor_eligible(nodes, connections)) return false;
 
     // Reserve plugin contexts to the exact count so push_back never reallocates;
     // the bindings' user_data points at &plugin_ctx[k] and must stay valid.
     std::size_t plugin_count = 0;
+    std::size_t custom_count = 0;
     for (const auto& node : nodes) {
         if (node.type == NodeType::Plugin) ++plugin_count;
+        else if (node.type == NodeType::Custom) ++custom_count;
     }
     plugin_ctx.reserve(plugin_count);
+    // Same stable-address contract as plugin_ctx: reserve to the custom-node
+    // count so &custom_ctx->back() stays valid for every binding's user_data.
+    if (custom_ctx != nullptr) custom_ctx->reserve(custom_count);
 
     // Whether this graph carries any MIDI. Only then do nodes declare event
     // ports (one in + one out, port 0 — connect_midi routes the whole per-node
@@ -260,7 +312,15 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             spec.event_input_ports = 1;
             spec.event_output_ports = 1;
         }
-        spec.persistent_output = node.type == NodeType::Plugin;
+        // Pin a persistent output region for any node that may NOT fully
+        // overwrite its output each block, so a partial writer keeps its own
+        // stale tail across blocks instead of a recycled slot's data — matching
+        // SignalGraph's per-node persistent output buffer. Hosted plugins and
+        // Custom callbacks both qualify (neither is contractually required to
+        // write every output sample); the walk reuses an uncleared per-node
+        // buffer for both.
+        spec.persistent_output =
+            node.type == NodeType::Plugin || node.type == NodeType::Custom;
         // Carry the node's reported latency so the buffer assignment can derive
         // per-connection delay compensation. Resolve it from the SAME slot the
         // legacy walk's latency pass uses (plugin_for == the compiled snapshot's
@@ -361,6 +421,21 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             plugin_ctx.push_back(std::move(ctx));
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, plugin_binding, &plugin_ctx.back(), /*required=*/true});
+        } else if (src->type == NodeType::Custom) {
+            // No storage for the binding context means this caller's subset is
+            // not expected to carry Custom nodes — fail closed to the walk rather
+            // than route without a stable user_data slot.
+            if (custom_ctx == nullptr) return false;
+            // Resolve the live process callback; null = unresolved type / shape
+            // mismatch, stored as an empty function so the binding pass-through-
+            // or-zeros (matching SignalGraph). The stored copy is the binding's
+            // own keepalive on any captured instance (mirrors PluginBindingContext
+            // holding its slot). required=false: the pass-through covers a null
+            // callback, so a missing resolution never disqualifies the snapshot.
+            const CustomNodeProcessFn* fn = custom_for ? custom_for(id) : nullptr;
+            custom_ctx->push_back(CustomBindingContext{fn ? *fn : CustomNodeProcessFn{}});
+            bindings.push_back(fmt::GraphRuntimeNodeBinding{
+                id, custom_binding, &custom_ctx->back(), /*required=*/false});
         } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null
             // binding: AudioInput/AudioOutput are executor kind dispatch, and
             // MidiInput/MidiOutput run as no-op nodes (the executor's MIDI gather
@@ -393,7 +468,9 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
             graph.nodes(), graph.connections(),
             [&graph](NodeId id) { return graph.live_gain_atomic(id); },
             [&graph](NodeId id) { return graph.live_plugin_slot(id); },
-            out.plugin_ctx, out.plugin_scratch, out.snapshot)) {
+            out.plugin_ctx, out.plugin_scratch, out.snapshot, /*parallel_safe=*/false,
+            /*load_for=*/{}, &out.custom_ctx,
+            [&graph](NodeId id) { return graph.live_custom_processor(id); })) {
         return false;
     }
 
