@@ -144,13 +144,14 @@ predictable output, no MIDI.
   a per-binding `AudioProcessLoadMeasurer` wired from the host's persistent node-load
   map), so the default-ON flip is behaviour-preserving where it takes effect. Force it
   OFF to render the walk — the routed-vs-walk parity oracles (`run_legacy`,
-  `signal_graph_block`) do that so the walk stays an independent reference. Ineligible
-  graphs (Custom/Utility nodes, or per-node automation past the executor's fixed
-  capacity) still fall back to the walk. **The walk is the deliberate
-  reference/fallback path — independent parity oracle + safety fallback — NOT
-  slated for deletion.** An eligible graph —
-  nodes AudioInput / AudioOutput / Gain / Plugin (every Plugin node must
-  carry a LIVE slot) / MidiInput / MidiOutput / **Custom** (`CustomNodeType`,
+  `signal_graph_block`) do that so the walk stays an independent reference. **EVERY
+  node kind SignalGraph produces is now eligible** — the only remaining walk triggers
+  are an unprepared graph or a routed snapshot/pool BUILD failure (e.g. a topology past
+  `GraphRuntimeLimits`); the walk is the deliberate reference/fallback for those, the
+  independent parity oracle, and is NOT slated for deletion. An eligible graph —
+  nodes AudioInput / AudioOutput / Gain / Plugin (a Plugin with NO live slot routes as
+  pass-through-or-zero via `custom_binding(nullptr)`, exactly matching the walk's
+  missing-plugin behavior) / MidiInput / MidiOutput / **Custom** (`CustomNodeType`,
   stateless `process` or stateful `process_instance`; routed via `custom_binding`,
   an unresolved/shape-mismatch custom node pass-through-or-zeros exactly as the
   walk does; custom output regions are pinned `persistent_output` like plugins so
