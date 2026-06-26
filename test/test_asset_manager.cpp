@@ -173,7 +173,7 @@ TEST_CASE("AssetManager replacing cached shader keeps cache usage accurate",
 }
 
 TEST_CASE("AssetManager replacing cached shader keeps cache accounting stable",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     const auto old_max = mgr.max_cache_size();
     mgr.clear_cache();
@@ -242,7 +242,7 @@ TEST_CASE("AssetManager embedded shader loads into shader cache", "[view][assets
 }
 
 TEST_CASE("AssetManager embedded shader loader returns cached source on repeat",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.clear_cache();
 
@@ -262,7 +262,7 @@ TEST_CASE("AssetManager embedded shader loader returns cached source on repeat",
 }
 
 TEST_CASE("AssetManager shader lookup finds cached file shader by path",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.clear_cache();
 
@@ -345,7 +345,7 @@ TEST_CASE("AssetManager fallback skips families without embedded data", "[view][
 }
 
 TEST_CASE("AssetManager embedded font loader populates and reuses cache",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.clear_cache();
 
@@ -367,7 +367,7 @@ TEST_CASE("AssetManager embedded font loader populates and reuses cache",
 }
 
 TEST_CASE("AssetManager missing family without fallback returns invalid font",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.set_font_fallback({});
 
@@ -431,7 +431,7 @@ TEST_CASE("AssetManager load image from embedded", "[view][assets]") {
 }
 
 TEST_CASE("AssetManager embedded image loader reuses cached decode",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.clear_cache();
 
@@ -596,7 +596,7 @@ TEST_CASE("AssetManager blob from embedded", "[view][assets]") {
 }
 
 TEST_CASE("AssetManager embedded blob loader returns cached bytes",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     mgr.clear_cache();
 
@@ -616,7 +616,7 @@ TEST_CASE("AssetManager embedded blob loader returns cached bytes",
 }
 
 TEST_CASE("AssetManager shrinking cache budget trims existing entries",
-          "[view][assets][coverage][phase3]") {
+          "[view][assets][coverage]") {
     auto& mgr = AssetManager::instance();
     const auto old_max = mgr.max_cache_size();
     mgr.clear_cache();

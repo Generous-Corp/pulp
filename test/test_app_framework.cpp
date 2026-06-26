@@ -107,7 +107,7 @@ TEST_CASE("KeyShortcut parses named keys and rejects invalid function keys",
 }
 
 TEST_CASE("KeyShortcut parses modifiers independent of their order",
-          "[view][keys][coverage][phase3]") {
+          "[view][keys][coverage]") {
     auto ks = KeyShortcut::from_string("Shift+Meta+Cmd+A");
     REQUIRE(ks.key == KeyCode::a);
     REQUIRE((ks.modifiers & kModShift) != 0);
@@ -513,7 +513,7 @@ TEST_CASE("AppSettings invalid typed values return null or false",
 }
 
 TEST_CASE("AppSettings numeric getters reject partial parses",
-          "[view][settings][coverage][phase3-large]") {
+          "[view][settings][coverage][large]") {
     AppSettings settings("PulpTest");
     settings.set_string("int_suffix", "256samples");
     settings.set_string("int_decimal", "256.5");
@@ -614,7 +614,7 @@ TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
 }
 
 TEST_CASE("AppSettings load clears stale values from an empty settings file",
-          "[view][settings][coverage][phase3]") {
+          "[view][settings][coverage]") {
     auto root = make_temp_root("pulp-app-settings-empty");
 
 #if defined(_WIN32)
@@ -643,7 +643,7 @@ TEST_CASE("AppSettings load clears stale values from an empty settings file",
 }
 
 TEST_CASE("AppSettings load clears stale values before partial parse",
-          "[view][settings][coverage][phase3]") {
+          "[view][settings][coverage]") {
     auto root = make_temp_root("pulp-app-settings-partial");
 
 #if defined(_WIN32)
