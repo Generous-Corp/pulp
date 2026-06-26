@@ -1,10 +1,10 @@
 // SDF effects showcase.
 //
-// For each design-token preset (subtle shadow, outline, glow, pressed
-// bevel) renders the same "PULP" text via the software reference
-// renderer and writes one PGM file per effect. A later iteration swaps
-// the software path for the SkSL effects shader once SkiaCanvas grows
-// a draw_sdf_text() call-site; the host-side API surface stays
+// Enumerates each design-token preset (subtle shadow, outline, glow,
+// pressed bevel), renders the same "PULP" baseline through the software
+// reference renderer, and writes one PGM per preset. A later iteration
+// swaps the software path for the SkSL effects shader once SkiaCanvas
+// grows a draw_sdf_text() call-site; the host-side API surface stays
 // identical because `SdfEffectParams` already mirrors the shader
 // uniforms.
 

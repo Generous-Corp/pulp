@@ -244,10 +244,11 @@ comments:
 
 - `core/canvas/shaders/sdf_text.sksl` — single-channel SDF, edge AA
   via `fwidth`, gamma correction.
-- `core/canvas/shaders/msdf_text.sksl` — multi-channel SDF for sharper
-  corners.
+- `core/canvas/shaders/msdf_text.sksl` — multi-channel SDF sampler
+  contract for sharper corners once true MSDF atlas generation is wired.
 - `core/canvas/shaders/sdf_text_effects.sksl` — outline, glow, drop
-  shadow built on the same atlas.
+  shadow effect shader; host presets exist, but the visible draw path is
+  still being wired.
 
 If you are writing a new shader, copy one of these as a starting point
 — they encode the uniform-naming conventions, the

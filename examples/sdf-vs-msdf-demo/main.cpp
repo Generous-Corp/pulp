@@ -1,4 +1,4 @@
-// SDF vs MSDF text quality demo.
+// SDF vs MSDF atlas scaffold dump.
 //
 // Builds both atlases for a short alphanumeric range and writes the
 // pixel buffers to disk so they can be inspected side-by-side:
@@ -6,10 +6,11 @@
 //   /tmp/pulp-sdf-atlas.pgm     — single-channel (grayscale)
 //   /tmp/pulp-msdf-atlas.ppm    — three-channel (RGB)
 //
-// A follow-up iteration connects these atlases to the runtime sampler
-// shaders (core/canvas/shaders/{sdf,msdf}_text.sksl) and renders a
-// side-by-side preview window via pulp::view. The atlases are the
-// hard part; the render side is mechanical.
+// Until msdfgen is wired, the MSDF atlas uses equal RGB placeholder
+// distances, so this proves atlas shape and file output rather than
+// final sharp-corner rendering quality. A follow-up iteration connects
+// true MSDF atlas generation to the runtime sampler shaders and renders
+// a side-by-side preview window via pulp::view.
 
 #include <pulp/canvas/msdf_atlas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>

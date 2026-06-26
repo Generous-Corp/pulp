@@ -22,12 +22,18 @@ glyph → SkFont rasterize → EDT (Felzenszwalb) → SDF tile → atlas → GPU
 | Variant | Channels | Status | Strength |
 | ------- | -------- | ------ | -------- |
 | SDF     | 1 (A8)   | working | simple, cheap, small atlas |
-| MSDF    | 3 (RGB)  | planned | sharp corners, crisp thin strokes |
+| MSDF    | 3 (RGB)  | scaffold | intended for sharp corners once `msdfgen` supplies true channel-separated distances |
 | PSDF    | 1        | planned | cheaper-to-generate alternative for simple geometry |
 
 Multi-channel SDF (Chlumsky 2015) encodes three distance signals and
 recovers the true edge via `median(R, G, B)` in the shader. This keeps
 corners sharp where single-channel SDF rounds them off.
+
+Pulp's current `MsdfAtlas` is a structural scaffold: it packs RGB/RGBA
+atlas tiles and exercises the `median(R, G, B)` sampler contract, but
+the generator writes equal RGB placeholder distances until `msdfgen` is
+integrated. The current MSDF atlas therefore validates plumbing, not
+the final sharp-corner quality target.
 
 ## Sampling shader
 
@@ -76,15 +82,18 @@ The sampler shader is unchanged regardless of policy.
 
 ## Effects
 
-A reusable effects layer — `glow`, `shadow`, `outline`, `bevel` — is
-exposed via `SdfEffectParams` in `<pulp/canvas/sdf_effects.hpp>` and
-backed by the `sdf_text_effects.sksl` shader. Design-token presets
-(`preset_subtle_shadow()`, `preset_outline()`, `preset_glow()`,
-`preset_pressed_bevel()`) compose onto any SDF or MSDF atlas without
-extra geometry — outline and glow are shader-space ring sweeps and
-bevel is a `dFdx`/`dFdy` light dot product. See
-`examples/sdf-effects-demo/` for a runnable showcase of the four
-presets plus a plain baseline.
+The host-side effects contract is exposed via `SdfEffectParams` in
+`<pulp/canvas/sdf_effects.hpp>` and mirrored by the
+`sdf_text_effects.sksl` shader for `glow`, `shadow`, `outline`, and
+`bevel`. Design-token presets (`preset_subtle_shadow()`,
+`preset_outline()`, `preset_glow()`, `preset_pressed_bevel()`) define
+the intended uniform payload.
+
+The visible effect rendering path is still pending: the current
+`examples/sdf-effects-demo/` enumerates the presets and writes
+software-rendered baseline files, but the software renderer does not
+interpret `SdfEffectParams`. The presets become visible once the SkSL
+effects shader is wired into an SDF text draw call.
 
 ## Runtime atlas management
 
@@ -110,6 +119,6 @@ emits the `128 == edge` field the SDF samplers expect.
 
 - `planning/next-features-plan.md` § Feature 4 — full phase plan
 - `examples/sdf-text-demo/` — runtime SDF text rendering and bloom demo
-- `examples/sdf-vs-msdf-demo/` — console SDF/MSDF atlas comparison
-- `examples/sdf-effects-demo/` — effects showcase across presets
+- `examples/sdf-vs-msdf-demo/` — console SDF/MSDF atlas scaffold dump
+- `examples/sdf-effects-demo/` — host preset enumeration plus software baseline files
 - `docs/reference/modules.md` — module index
