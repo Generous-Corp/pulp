@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05010"></a>
+## [0.501.0] - 2026-06-26
+
+- fix(sampler+audio): transient relocation + standalone device-follow, test-tone, slice-race (M1 feedback) ([#4924](https://github.com/danielraffel/pulp/pull/4924))
+- docs(audio): align audio harness render guidance ([#4937](https://github.com/danielraffel/pulp/pull/4937))
+- feat(host): observe silent routed-to-walk fallback for eligible graphs ([#4920](https://github.com/danielraffel/pulp/pull/4920))
+- docs(examples): align screenshot helper contract ([#4935](https://github.com/danielraffel/pulp/pull/4935))
+
 <a id="v05000"></a>
 ## [0.500.0] - 2026-06-26
 
@@ -5245,6 +5253,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.501.0]: https://github.com/danielraffel/pulp/releases/tag/v0.501.0
 [0.500.0]: https://github.com/danielraffel/pulp/releases/tag/v0.500.0
 [0.499.1]: https://github.com/danielraffel/pulp/releases/tag/v0.499.1
 [0.499.0]: https://github.com/danielraffel/pulp/releases/tag/v0.499.0
