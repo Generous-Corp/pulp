@@ -1168,7 +1168,7 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 // count is zero; under the old behaviour it would happily enumerate every
 // user/system CLAP on the dev's machine.
 TEST_CASE("PluginScanner::scan honors only_extra_paths",
-          "[host][scanner][issue-545][codex-545]") {
+          "[host][scanner][issue-545]") {
     using pulp::host::PluginScanner;
     using pulp::host::ScanOptions;
 

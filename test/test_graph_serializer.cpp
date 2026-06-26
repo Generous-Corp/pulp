@@ -1690,7 +1690,7 @@ TEST_CASE("GraphSerializer serializes audio-rate modulation connection fields",
     REQUIRE(dst.connections().empty());
 }
 
-// Issue #491 P2 bonus: when graph_serializer rehydrates a graph with a
+// Issue #491: when graph_serializer rehydrates a graph with a
 // plugin that can't be resolved, it creates a "placeholder" Plugin node
 // with a null slot. Without an explicit branch in SignalGraph::process()
 // the node's output scratch kept stale data across blocks. The fix

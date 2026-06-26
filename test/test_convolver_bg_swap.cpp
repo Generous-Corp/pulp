@@ -233,7 +233,7 @@ TEST_CASE("PartitionedConvolver: try_swap_ir on an unloaded convolver",
     REQUIRE_FALSE(swapper.has_retired());
 }
 
-TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly (Codex #2881 P1)",
+TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly (#2881)",
           "[signal][convolver][bg-swap][regression]") {
     // The earlier impl used a single-slot retired_ atomic. Two swaps
     // between drain_old() calls meant the displaced IR fell back to

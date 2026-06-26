@@ -355,7 +355,7 @@ TEST_CASE("read_project_cli_min_version ignores an empty project root",
 // matching, so the commented line is silently ignored and
 // `read_project_cli_min_version` returns empty.
 TEST_CASE("read_project_cli_min_version ignores commented-out examples",
-          "[version-diag][issue-499][codex-546]") {
+          "[version-diag][issue-499][issue-546]") {
     TempDir tmp;
     auto toml = tmp.path / "pulp.toml";
     write_file(toml,
@@ -371,7 +371,7 @@ TEST_CASE("read_project_cli_min_version ignores commented-out examples",
 // substring must not alias onto the real key. Guards against the
 // substring-aliasing half of the #546 finding.
 TEST_CASE("read_project_cli_min_version ignores substring-matching keys",
-          "[version-diag][issue-499][codex-546]") {
+          "[version-diag][issue-499][issue-546]") {
     TempDir tmp;
     auto toml = tmp.path / "pulp.toml";
     write_file(toml,
@@ -385,7 +385,7 @@ TEST_CASE("read_project_cli_min_version ignores substring-matching keys",
 // Real entry still reads correctly when it follows comments and
 // unrelated keys — proves the fix didn't break the happy path.
 TEST_CASE("read_project_cli_min_version still reads through comments",
-          "[version-diag][issue-499][codex-546]") {
+          "[version-diag][issue-499][issue-546]") {
     TempDir tmp;
     auto toml = tmp.path / "pulp.toml";
     write_file(toml,

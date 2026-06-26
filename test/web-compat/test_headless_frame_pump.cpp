@@ -143,7 +143,7 @@ TEST_CASE("headless load loop repeatedly services chained rAF callbacks",
 // animation frames before `load_demo` returns and skew initial capture
 // state. This test pins the post-ready drain to `pump_message_loop()` only.
 TEST_CASE("post-ready microtask drain must not render rAF frames",
-          "[view][widget-bridge][issue-542][codex-553]") {
+          "[view][widget-bridge][issue-542][issue-553]") {
     Env env;
 
     // Arm a self-rearming rAF chain. Each tick increments a counter and

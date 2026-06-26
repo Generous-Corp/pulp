@@ -507,7 +507,7 @@ TEST_CASE("Version comparison pads and orders long mixed versions",
     REQUIRE(compare_versions("2026.05.15", "2026.5.14") == 1);
 }
 
-// #295 P0 regression: sign_file_ed25519 MUST NOT silently return an
+// #295 regression: sign_file_ed25519 MUST NOT silently return an
 // empty signature. It must return std::nullopt so callers can hard-
 // fail instead of emitting `edSignature=""` into an appcast.
 // When the real implementation lands, this test flips to asserting
@@ -516,7 +516,7 @@ TEST_CASE("sign_file_ed25519 never silently returns empty", "[ship][sign][issue-
     auto result = sign_file_ed25519("/nonexistent/path", "invalid-key");
     // Today: nullopt (no impl linked).
     // Tomorrow: Some(sig) on valid inputs, nullopt on invalid.
-    // Either way, never Some("") — that's the #295 P0 regression.
+    // Either way, never Some("") — that's the #295 regression.
     if (result.has_value()) {
         REQUIRE_FALSE(result->empty());
     }

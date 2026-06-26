@@ -153,7 +153,7 @@ TEST_CASE("MidiMessageCollector survives concurrent producer / consumer",
     REQUIRE(observed == kEvents);
 }
 
-TEST_CASE("MidiMessageCollector deferred-future event stays in pending slot (Codex #2843 P1)",
+TEST_CASE("MidiMessageCollector deferred-future event stays in pending slot (#2843)",
           "[midi][collector][regression]") {
     MidiMessageCollector<32> collector;
     REQUIRE(collector.push_now(note_on(0, 60, 100), /*ts=*/1.000));
@@ -184,7 +184,7 @@ TEST_CASE("MidiMessageCollector deferred-future event stays in pending slot (Cod
     REQUIRE(b3[0].sample_offset == 48); // (1.000 - 0.999) * 48000
 }
 
-TEST_CASE("MidiMessageCollector drains queue even when pending holds a far-future event (Codex #2845 P1)",
+TEST_CASE("MidiMessageCollector drains queue even when pending holds a far-future event (#2845)",
           "[midi][collector][regression]") {
     MidiMessageCollector<32> collector;
 
@@ -255,7 +255,7 @@ TEST_CASE("MidiMessageCollector pending ring handles multiple out-of-order futur
     REQUIRE(b4[0].message.getNoteNumber() == 60);
 }
 
-TEST_CASE("MidiMessageCollector absorbs realistic future bursts within pending ring (Codex #2853 P1)",
+TEST_CASE("MidiMessageCollector absorbs realistic future bursts within pending ring (#2853)",
           "[midi][collector][regression]") {
     MidiMessageCollector<128> collector;
     // Push 24 events all in the future — well within the 64-slot
@@ -289,7 +289,7 @@ TEST_CASE("MidiMessageCollector absorbs realistic future bursts within pending r
     REQUIRE(collector.dropped_future() == 0);
 }
 
-TEST_CASE("MidiMessageCollector keeps draining queue for in-block events even after a stash (Codex #2856 P1)",
+TEST_CASE("MidiMessageCollector keeps draining queue for in-block events even after a stash (#2856)",
           "[midi][collector][regression]") {
     MidiMessageCollector<128> collector;
 

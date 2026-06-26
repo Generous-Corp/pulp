@@ -318,7 +318,7 @@ TEST_CASE("SkiaCanvas::round_rect renders 4 distinct corner radii",
 // position. With kExtend_AddPathMode, the connect-via-lineTo behavior
 // is restored.
 TEST_CASE("SkiaCanvas::ellipse with rotation extends current contour (no gap)",
-          "[canvas][skia][issue-1556][codex-p1][!mayfail]") {
+          "[canvas][skia][issue-1556][!mayfail]") {
     const int W = 200, H = 200;
     // STROKE (not fill) the path so the bridge segment between the
     // initial move_to and the rotated ellipse's start point is
