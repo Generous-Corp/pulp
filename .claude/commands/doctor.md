@@ -21,11 +21,15 @@ pulp doctor
 Options:
 - `pulp doctor --fix` — auto-fix issues where possible
 - `pulp doctor --ci` — CI mode, exit codes only
-- `pulp doctor --dry-run` — show what --fix would do
-- `pulp doctor --validators` — verify auval / pluginval / clap-validator are installed and have intact code signatures
-- `pulp doctor --validators --fix` — also remove broken user-owned validator copies; root-owned breakage prints a sudo one-liner
+- `pulp doctor --dry-run` — show what `--fix` would do
+- `pulp doctor android` / `pulp doctor ios` — run mobile development environment checks
+- `pulp doctor --versions [--scan-parents] [--json]` — diagnose CLI / SDK / plugin version skew
+- `pulp doctor --validators [--fix] [--dry-run]` — verify auval / pluginval / clap-validator install and code-signature health
+- `pulp doctor --caches [--fix] [--dry-run] [--json]` — audit and heal the FetchContent shared-source cache
+- `pulp doctor --host-quirks` / `pulp doctor quirks` — show the runtime DAW host-quirks policy and enforced accommodations
 - `pulp doctor --au-cache --dry-run` — preview macOS AudioComponentRegistrar refresh after AU metadata changes
+- `pulp doctor list` / `pulp doctor --only "<name>"` — enumerate checks or run one targeted probe
 
-Checks include: CMake version, C++ compiler, git-lfs, Skia binaries, VST3 SDK, AudioUnit SDK, platform-specific dependencies (ALSA on Linux, Xcode CLI tools on macOS).
+Default checks include C++20 compiler availability, CMake, git/git-lfs, LFS-backed Skia binaries when present, VST3/AudioUnit SDKs where relevant, optional AAX setup, package/platform alignment, Cmajor when used, build configuration, and pulp-mcp availability. Mobile subcommands add Android SDK/NDK/adb/emulator and iOS/Xcode/Simulator checks.
 
-Run this first when builds fail unexpectedly or on a new machine. Run `pulp doctor --validators` if `pulp validate` aborts with "broken code signature" — the doctor will surface the exact path and remediation.
+Run this first when builds fail unexpectedly or on a new machine. Run `pulp doctor --validators` if `pulp validate` aborts with "broken code signature", `pulp doctor --caches` if build/test reports FetchContent cache drift, and `pulp doctor --host-quirks` when DAW accommodations or host-specific runtime behavior look suspicious.
