@@ -2445,7 +2445,7 @@ int main(int argc, char* argv[]) {
     // resolvable third-party keys leaves behavior exactly as before (the built-in
     // library path stays authoritative; an already-stamped audio_widget is never
     // overridden). Unmatched-but-present component instances are surfaced as an
-    // import diagnostic — never guessed into a wrong kind (P7).
+    // import diagnostic — never guessed into a wrong kind.
     if (*source == DesignSource::figma_plugin || *source == DesignSource::figma) {
         auto resolver = pulp::view::RecognitionResolver::with_builtin_library();
         if (!recognition_manifest_path.empty()) {
@@ -2466,7 +2466,7 @@ int main(int argc, char* argv[]) {
             resolver.add_source(std::move(*user_source));
         }
 
-        // Installed-package custom controls (P8): gather each installed
+        // Installed-package custom controls: gather each installed
         // package's `design_controls` fragment and add it as its own source,
         // MERGED OVER the built-in library and the user manifest. With no
         // custom-control package installed this contributes nothing, so behavior
