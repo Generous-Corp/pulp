@@ -388,7 +388,12 @@ void SettingsPanel::rebuild_device_lists() {
     }
 
     if (output_device_combo_) {
+        // Index 0 is a synthetic "System Default (follow)" entry — selecting it keeps
+        // audio_device_id empty so the app TRACKS the system default output live
+        // (switch to AirPods/headphones and audio moves without relaunch). The real
+        // devices follow, one-based.
         std::vector<std::string> names;
+        names.push_back("System Default (follow)");
         for (auto& d : output_devices_)
             names.push_back(d.name + (d.is_default_output ? " (Default)" : ""));
         output_device_combo_->set_items(std::move(names));
@@ -439,7 +444,10 @@ void SettingsPanel::rebuild_rate_and_buffer_lists() {
     available_rates_.clear();
     available_buffers_.clear();
 
-    int sel = output_device_combo_ ? output_device_combo_->selected() : -1;
+    // Combo index 0 is "System Default (follow)" — real devices are one-based, so a
+    // selection of 0 (follow) uses the generic fallback rates/buffers below (the
+    // actual device follows live and DefaultOutput sample-rate-converts).
+    int sel = output_device_combo_ ? (output_device_combo_->selected() - 1) : -1;
     if (sel >= 0 && sel < static_cast<int>(output_devices_.size())) {
         auto& dev = output_devices_[static_cast<size_t>(sel)];
         available_rates_ = dev.sample_rates;
@@ -490,21 +498,13 @@ void SettingsPanel::rebuild_rate_and_buffer_lists() {
 }
 
 int SettingsPanel::current_output_device_index() const {
-    if (output_devices_.empty()) return -1;
-
-    if (!current_config_.audio_device_id.empty()) {
-        for (size_t i = 0; i < output_devices_.size(); ++i) {
-            if (output_devices_[i].id == current_config_.audio_device_id)
-                return static_cast<int>(i);
-        }
-    }
-
+    // Index 0 = "System Default (follow)"; real devices are one-based.
+    if (current_config_.audio_device_id.empty()) return 0;  // following the default
     for (size_t i = 0; i < output_devices_.size(); ++i) {
-        if (output_devices_[i].is_default_output)
-            return static_cast<int>(i);
+        if (output_devices_[i].id == current_config_.audio_device_id)
+            return static_cast<int>(i) + 1;
     }
-
-    return 0;
+    return 0;  // a pinned device that's gone -> fall back to following the default
 }
 
 int SettingsPanel::current_sample_rate_index() const {
@@ -555,9 +555,13 @@ void SettingsPanel::apply_config() {
 
     StandaloneConfig cfg = current_config_;
 
+    // Index 0 = "System Default (follow)" -> empty id (live-follow); real devices
+    // are one-based and pin.
     int out_idx = output_device_combo_ ? output_device_combo_->selected() : -1;
-    if (out_idx >= 0 && out_idx < static_cast<int>(output_devices_.size()))
-        cfg.audio_device_id = output_devices_[static_cast<size_t>(out_idx)].id;
+    if (out_idx <= 0)
+        cfg.audio_device_id = "";
+    else if ((out_idx - 1) < static_cast<int>(output_devices_.size()))
+        cfg.audio_device_id = output_devices_[static_cast<size_t>(out_idx - 1)].id;
 
     int in_idx = input_device_combo_ ? input_device_combo_->selected() : 0;
     if (!cfg.supports_audio_input) {
