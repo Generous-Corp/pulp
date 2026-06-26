@@ -1384,7 +1384,7 @@ TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
 }
 
 TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",
-          "[view][live-constant][coverage][phase3]") {
+          "[view][live-constant][coverage]") {
     auto& registry = LiveConstantRegistry::instance();
     registry.on_change = {};
 
@@ -1429,7 +1429,7 @@ TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",
 }
 
 TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
-          "[view][live-constant][coverage][phase3]") {
+          "[view][live-constant][coverage]") {
     auto& registry = LiveConstantRegistry::instance();
     registry.register_constant(
         "phase3.live.editor", "test_view.cpp", 303, 5.0f, 0.0f, 10.0f);

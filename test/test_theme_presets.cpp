@@ -151,7 +151,7 @@ TEST_CASE("theme_from_preset applies variant-specific overrides",
 }
 
 TEST_CASE("derive_theme maps semantic colors to alpha and blend tokens",
-          "[view][presets][derive][coverage][phase3]") {
+          "[view][presets][derive][coverage]") {
     SemanticColors colors{
         color_from_hex(0x102030),
         color_from_hex(0xE0D0C0),

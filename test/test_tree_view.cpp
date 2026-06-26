@@ -155,7 +155,7 @@ TEST_CASE("TreeView ignores mouse up and misses", "[view][tree]") {
 }
 
 TEST_CASE("TreeView skips selection callback for non-selectable rows",
-          "[view][tree][coverage][phase3]") {
+          "[view][tree][coverage]") {
     TreeView tree;
     auto& header = tree.root().add_child("Header");
     header.selectable = false;
