@@ -39,6 +39,7 @@
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_audio_capture_rolling_wav.hpp>
 #include <pulp/format/detail/standalone_audio_capture_wav.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
@@ -233,6 +234,28 @@ bool StandaloneApp::start() {
                           probe_capture);
     output_probe_ptrs_.assign(static_cast<size_t>(std::max(config_.output_channels, 0)),
                               nullptr);
+
+    // Rolling last-N capture is independent of the probe FIFO above: its own
+    // float-storage ring, fed from the same audio-thread output tap. Sized to the
+    // requested window (0 = the shared capture cap). Gated so the audio thread
+    // does zero extra work when --audio-capture-rolling is off.
+    rolling_capture_active_ = !config_.audio_capture_rolling_path.empty();
+    if (rolling_capture_active_) {
+        const int rolling_frames = config_.audio_capture_rolling_frames > 0
+            ? std::clamp(config_.audio_capture_rolling_frames, 1,
+                         detail::kMaxCaptureWindowSamples)
+            : detail::kMaxCaptureWindowSamples;
+        if (config_.audio_capture_rolling_frames > detail::kMaxCaptureWindowSamples) {
+            runtime::log_info(
+                "Standalone: --audio-capture-rolling-frames {} exceeds the {}-sample cap; clamping",
+                config_.audio_capture_rolling_frames, detail::kMaxCaptureWindowSamples);
+        }
+        audio::RollingAudioCaptureBufferConfig rolling_config;
+        rolling_config.num_channels =
+            static_cast<std::uint32_t>(std::max(config_.output_channels, 0));
+        rolling_config.max_frames = static_cast<std::uint64_t>(rolling_frames);
+        rolling_capture_active_ = rolling_capture_.prepare(rolling_config);
+    }
 #endif
 
     // Set up MIDI input (optional)
@@ -321,8 +344,15 @@ bool StandaloneApp::start() {
             for (size_t c = 0; c < out_ch && c < output_probe_ptrs_.size(); ++c)
                 output_probe_ptrs_[c] = output.channel_ptr(c);
             const size_t probe_ch = std::min(out_ch, output_probe_ptrs_.size());
-            output_probe_.analyze_output(audio::BufferView<const float>(
-                output_probe_ptrs_.data(), probe_ch, output.num_samples()));
+            const audio::BufferView<const float> out_view(
+                output_probe_ptrs_.data(), probe_ch, output.num_samples());
+            output_probe_.analyze_output(out_view);
+            // Same tap feeds the rolling last-N capture (RT-safe append).
+            if (rolling_capture_active_) {
+                rolling_capture_.append(out_view, output.num_samples());
+                rolling_capture_channels_.store(static_cast<int>(probe_ch),
+                                                std::memory_order_relaxed);
+            }
         };
 #endif
 
@@ -767,6 +797,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto write_capture_wav = [this, effective_config](const std::string& path) {
         detail::write_audio_capture_wav_file(path, output_probe_, effective_config);
     };
+    auto write_capture_rolling = [this, effective_config](const std::string& path) {
+        detail::write_audio_capture_rolling_wav_file(
+            path, rolling_capture_, effective_config,
+            rolling_capture_channels_.load(std::memory_order_relaxed));
+    };
 #endif
 
     // ── Headless one-shot screenshot ────────────────────────────────────────
@@ -798,9 +833,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 #if PULP_ENABLE_AUDIO_PROBES
                           , audio_inspector_ptr, inspector_png_path,
                           write_probe_json, write_scope_json, write_capture_wav,
+                          write_capture_rolling,
                           probe_json_path = effective_config.audio_probe_json_path,
                           scope_json_path = effective_config.audio_scope_json_path,
-                          capture_wav_path = effective_config.audio_capture_wav_path
+                          capture_wav_path = effective_config.audio_capture_wav_path,
+                          capture_rolling_path = effective_config.audio_capture_rolling_path
 #endif
         ] {
 #if PULP_ENABLE_AUDIO_PROBES
@@ -810,6 +847,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             write_probe_json(probe_json_path);
             write_scope_json(scope_json_path);
             write_capture_wav(capture_wav_path);
+            write_capture_rolling(capture_rolling_path);
             // Side-effect: capture the inspector window's own surface at the
             // same frame, before the main window closes. capture_png() returns
             // empty on hosts without GPU capture — skip the write in that case.
@@ -918,6 +956,25 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info(
             "Standalone: audio-capture-wav mode armed — will dump to {} after {} frames",
             effective_config.audio_capture_wav_path, cap.delay);
+    }
+    else if (!effective_config.audio_capture_rolling_path.empty()) {
+        auto* host = window.get();
+        detail::DelayedAction cap;
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        cap.action_fn = [write_capture_rolling,
+                         path = effective_config.audio_capture_rolling_path]() {
+            write_capture_rolling(path);
+        };
+        cap.close_fn = [host] { host->request_close(); };
+        auto prior = pre_screenshot_idle;
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info(
+            "Standalone: audio-capture-rolling mode armed — will dump to {} after {} frames",
+            effective_config.audio_capture_rolling_path, cap.delay);
     }
 #endif
 

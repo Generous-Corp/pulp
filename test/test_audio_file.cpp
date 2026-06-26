@@ -631,6 +631,43 @@ TEST_CASE("Write and read WAV file", "[audio][file]") {
     std::filesystem::remove(tmp_path);
 }
 
+TEST_CASE("Float32 WAV preserves precision below the int16 floor", "[audio][file]") {
+    auto f32_path = std::filesystem::temp_directory_path() / "pulp_test_audio_f32.wav";
+    auto i16_path = std::filesystem::temp_directory_path() / "pulp_test_audio_i16.wav";
+
+    // A tiny signal well below the int16 quantization step (~3.05e-5). Int16
+    // collapses it toward zero; float32 must keep it.
+    AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels.resize(1);
+    data.channels[0] = {1.0e-6f, -2.0e-6f, 5.0e-7f, 3.0e-6f, -1.5e-6f};
+
+    REQUIRE(write_wav_file(f32_path.string(), data, WavBitDepth::Float32));
+    REQUIRE(write_wav_file(i16_path.string(), data, WavBitDepth::Int16));
+
+    auto f32 = read_audio_file(f32_path.string());
+    auto i16 = read_audio_file(i16_path.string());
+    REQUIRE(f32.has_value());
+    REQUIRE(i16.has_value());
+
+    // Float32 round-trips the sub-int16 values exactly; int16 quantizes them to 0.
+    for (size_t i = 0; i < data.channels[0].size(); ++i) {
+        REQUIRE(std::abs(f32->channels[0][i] - data.channels[0][i]) < 1.0e-9f);
+        REQUIRE(i16->channels[0][i] == 0.0f);
+    }
+
+    // Default overload is int16 (backward-compatible).
+    auto default_path = std::filesystem::temp_directory_path() / "pulp_test_audio_def.wav";
+    REQUIRE(write_wav_file(default_path.string(), data));
+    auto def = read_audio_file(default_path.string());
+    REQUIRE(def.has_value());
+    REQUIRE(def->channels[0][0] == 0.0f);
+
+    std::filesystem::remove(f32_path);
+    std::filesystem::remove(i16_path);
+    std::filesystem::remove(default_path);
+}
+
 TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     auto result = read_audio_file("/nonexistent/path.wav");
     REQUIRE_FALSE(result.has_value());
