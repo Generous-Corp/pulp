@@ -387,7 +387,7 @@ TEST_CASE("clause matcher honors the fingerprint vocabulary", "[cli][import-dete
 }
 
 TEST_CASE("clause matcher handles filename regex flags and invalid patterns",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::InputSnapshot snap;
     snap.filename = "DESIGN.md";
     snap.directory_basenames = {"DESIGN.md"};
@@ -405,7 +405,7 @@ TEST_CASE("clause matcher handles filename regex flags and invalid patterns",
 }
 
 TEST_CASE("clause matcher rejects empty filename and script clauses",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::InputSnapshot snap;
     det::FingerprintClause c;
 
@@ -423,7 +423,7 @@ TEST_CASE("clause matcher rejects empty filename and script clauses",
 }
 
 TEST_CASE("clause matcher covers frontmatter fence and required key clauses",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::InputSnapshot snap;
     snap.has_frontmatter_fence = true;
     snap.frontmatter_keys = {"name", "colors", "typography"};
@@ -442,7 +442,7 @@ TEST_CASE("clause matcher covers frontmatter fence and required key clauses",
 }
 
 TEST_CASE("clause matcher covers frontmatter any-of keys",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::InputSnapshot snap;
     snap.has_frontmatter_fence = true;
     snap.frontmatter_keys = {"tokens", "spacing"};
@@ -457,7 +457,7 @@ TEST_CASE("clause matcher covers frontmatter any-of keys",
 }
 
 TEST_CASE("detect enforces all-of formats before considering a match",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "design-md";
@@ -497,7 +497,7 @@ TEST_CASE("detect enforces all-of formats before considering a match",
 }
 
 TEST_CASE("detect enforces minimum confidence thresholds",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "threshold";
@@ -541,7 +541,7 @@ TEST_CASE("detect enforces minimum confidence thresholds",
 }
 
 TEST_CASE("detect prefers higher confidence when match counts tie",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "tie";
@@ -576,7 +576,7 @@ TEST_CASE("detect prefers higher confidence when match counts tie",
 }
 
 TEST_CASE("snapshot_input extracts Markdown frontmatter only from markdown files",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-phase3-frontmatter";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -1444,7 +1444,7 @@ TEST_CASE("report-new-format diffs unknown tokens against the closest match",
 }
 
 TEST_CASE("report-new-format caps token suggestions at twenty entries",
-          "[cli][import-detect][coverage][phase3-large]") {
+          "[cli][import-detect][coverage][large]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "stitch";
