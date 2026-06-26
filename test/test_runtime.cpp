@@ -632,7 +632,7 @@ TEST_CASE("SpscQueue cross-thread", "[runtime][spsc]") {
     REQUIRE(sum.load() == expected);
 }
 
-TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage][phase3]") {
+TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage]") {
     SpscQueue<std::string, 2> q;
 
     REQUIRE(q.try_push(std::string("alpha")));
@@ -645,7 +645,7 @@ TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage][phase3]"
 }
 
 TEST_CASE("SpscQueue preserves moved string payload order",
-          "[runtime][spsc][coverage][phase3]") {
+          "[runtime][spsc][coverage]") {
     SpscQueue<std::string, 3> q;
 
     std::string alpha = "alpha";
@@ -736,7 +736,7 @@ TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]
 }
 
 TEST_CASE("ScopeGuard dismiss after move suppresses transferred cleanup",
-          "[runtime][scope_guard][coverage][phase3]") {
+          "[runtime][scope_guard][coverage]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -757,7 +757,7 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
 }
 
 TEST_CASE("ScopeGuard move preserves dismissed state",
-          "[runtime][scope_guard][coverage][phase3]") {
+          "[runtime][scope_guard][coverage]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -872,7 +872,7 @@ TEST_CASE("Runtime GMT helper handles leap-day timestamps",
     REQUIRE(tm.tm_sec == 56);
 }
 
-TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system][coverage][phase3]") {
+TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system][coverage]") {
     auto tm = localtime_local(static_cast<std::time_t>(0));
     REQUIRE(tm.tm_mon >= 0);
     REQUIRE(tm.tm_mon <= 11);
@@ -912,7 +912,7 @@ TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone"
 }
 
 TEST_CASE("Runtime C string copy writes terminator for empty sources",
-          "[runtime][system][coverage][phase3]") {
+          "[runtime][system][coverage]") {
     std::array<char, 4> buffer{'x', 'y', 'z', 'w'};
 
     copy_c_string(buffer.data(), buffer.size(), "");
@@ -950,7 +950,7 @@ TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]
 }
 
 TEST_CASE("Runtime system info convenience helpers mirror cached info",
-          "[runtime][system][coverage][phase3]") {
+          "[runtime][system][coverage]") {
     const auto& info = get_system_info();
     REQUIRE_FALSE(info.os_name.empty());
     REQUIRE_FALSE(info.arch.empty());
@@ -1014,7 +1014,7 @@ TEST_CASE("TemporaryFile move assignment cleans previous file", "[runtime][tempo
 }
 
 TEST_CASE("TemporaryFile self move assignment leaves file ownership intact",
-          "[runtime][temporary_file][coverage][phase3]") {
+          "[runtime][temporary_file][coverage]") {
     std::filesystem::path path;
     {
         TemporaryFile file(".self");
@@ -1066,7 +1066,7 @@ TEST_CASE("DynamicLibrary move keeps failed handles closed", "[runtime][dynamic_
     REQUIRE_FALSE(second.error().empty());
 }
 
-TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library][coverage][phase3]") {
+TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library][coverage]") {
     DynamicLibrary original;
 #ifdef __APPLE__
     REQUIRE(original.open("/usr/lib/libSystem.B.dylib"));
@@ -1133,7 +1133,7 @@ TEST_CASE("DynamicLibrary failed reopen closes the previous handle",
 }
 
 TEST_CASE("HighResolutionTimer starts stops and reports running state",
-          "[runtime][timer][coverage][phase3]") {
+          "[runtime][timer][coverage]") {
     HighResolutionTimer timer;
     std::atomic<int> calls{0};
 
@@ -1160,7 +1160,7 @@ TEST_CASE("HighResolutionTimer starts stops and reports running state",
 }
 
 TEST_CASE("HighResolutionTimer restart replaces callback",
-          "[runtime][timer][coverage][phase3]") {
+          "[runtime][timer][coverage]") {
     HighResolutionTimer timer;
     std::atomic<int> first{0};
     std::atomic<int> second{0};
@@ -1187,7 +1187,7 @@ TEST_CASE("HighResolutionTimer restart replaces callback",
 }
 
 TEST_CASE("HighResolutionTimer can stop from its own callback",
-          "[runtime][timer][coverage][phase3]") {
+          "[runtime][timer][coverage]") {
     HighResolutionTimer timer;
     std::atomic<int> calls{0};
 
@@ -1208,7 +1208,7 @@ TEST_CASE("HighResolutionTimer can stop from its own callback",
 }
 
 TEST_CASE("runtime logging wrappers accept formatted payloads",
-          "[runtime][log][coverage][phase3]") {
+          "[runtime][log][coverage]") {
     REQUIRE_NOTHROW(log_info("info {} {}", "message", 1));
     REQUIRE_NOTHROW(log_warn("warn {}", 2));
     REQUIRE_NOTHROW(log_error("error {}", 3));

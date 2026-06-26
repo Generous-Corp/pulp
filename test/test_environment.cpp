@@ -614,7 +614,7 @@ TEST_CASE("Environment: snapshot is consistent with last publish",
 }
 
 TEST_CASE("Environment: publish without listeners still updates snapshot",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     auto state = make_state(ColorScheme::dark, 1.25f, 48.0f);
     state.lifecycle = LifecycleState::background;
@@ -629,7 +629,7 @@ TEST_CASE("Environment: publish without listeners still updates snapshot",
 }
 
 TEST_CASE("Environment: multiple listeners receive the same change snapshot",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int second_calls = 0;
@@ -665,7 +665,7 @@ TEST_CASE("Environment: multiple listeners receive the same change snapshot",
 }
 
 TEST_CASE("Environment: default token reset is inert",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     Environment::Token token;
     REQUIRE_FALSE(token.valid());
@@ -678,7 +678,7 @@ TEST_CASE("Environment: default token reset is inert",
 }
 
 TEST_CASE("Environment: token self move assignment preserves subscription",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -694,7 +694,7 @@ TEST_CASE("Environment: token self move assignment preserves subscription",
 }
 
 TEST_CASE("Environment: move assigning an empty token unsubscribes existing listener",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     int calls = 0;
     auto token = Environment::instance().subscribe(
@@ -711,7 +711,7 @@ TEST_CASE("Environment: move assigning an empty token unsubscribes existing list
 }
 
 TEST_CASE("Environment: listener subscribed during dispatch waits for next publish",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     int first_calls = 0;
     int late_calls = 0;
@@ -741,7 +741,7 @@ TEST_CASE("Environment: listener subscribed during dispatch waits for next publi
 }
 
 TEST_CASE("Environment: reset restores defaults after published state",
-          "[environment][coverage][phase3]") {
+          "[environment][coverage]") {
     Environment::reset_for_test();
     auto state = make_state(ColorScheme::dark, 3.0f, 240.0f);
     state.safe_area.bottom = 12.0f;
