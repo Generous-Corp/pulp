@@ -1125,7 +1125,7 @@ public:
         // Root = octave (C-2..C8). Octave granularity keeps the dropdown short
         // enough to fit + flip above when needed (a 121-note chromatic list was
         // taller than the window and got clipped). idx -> MIDI note idx*12.
-        label(20, 320, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        label(20, 324, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
@@ -1151,7 +1151,7 @@ public:
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(124, 320, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
@@ -1179,11 +1179,11 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(256, 320, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        label(344, 324, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 306, 322, 86, 16);
+            place(*fader, 396, 322, 86, 16);
             fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
                                                               : effective_bpm()));
             fader->on_change = [this, norm_to_bpm](float v) {
@@ -1200,16 +1200,18 @@ public:
             live->text = [this] {
                 return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
             };
-            place(*live, 398, 320, 64, 18);
+            place(*live, 488, 320, 64, 18);
             root->add_child(std::move(live));
         }
 
-        // Live slice count (updates after a drop or a sensitivity change).
+        // Live slice count, in green and sitting RIGHT OF THE SENS fader (which
+        // drives it) — mirroring how the BPM readout sits right of the TEMPO fader.
         {
             auto live = std::make_unique<LiveText>();
             live->font_family = mono;
+            live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 468, 320, 84, 18);
+            place(*live, 252, 320, 84, 18);
             root->add_child(std::move(live));
         }
 
