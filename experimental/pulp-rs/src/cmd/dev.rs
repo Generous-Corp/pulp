@@ -243,6 +243,7 @@ pub fn run<S: Spawner>(
 mod tests {
     use super::*;
     use crate::proc::testing::RecordingSpawner;
+    use crate::test_support::EnvVarGuard;
 
     #[test]
     fn parse_collects_build_flags_into_tail() {
@@ -291,6 +292,7 @@ mod tests {
 
     #[test]
     fn run_errors_when_not_in_project() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let rec = RecordingSpawner::ok();
         let mut buf = Vec::new();
@@ -359,6 +361,7 @@ mod tests {
 
     #[test]
     fn run_dispatches_validate_message_when_flag_set() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         write_standalone_fixture(td.path());
         let rec = RecordingSpawner::ok();
@@ -375,6 +378,7 @@ mod tests {
 
     #[test]
     fn run_dispatches_ctest_with_filter_when_test_flag_set() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         write_standalone_fixture(td.path());
         let rec = RecordingSpawner::ok();
@@ -398,6 +402,7 @@ mod tests {
 
     #[test]
     fn run_emits_watch_loop_stub_when_no_launch_target() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         write_standalone_fixture(td.path());
         let rec = RecordingSpawner::ok();

@@ -380,6 +380,12 @@ fields or subcommands to `tool_registry.cpp` must be mirrored in
 `experimental/pulp-rs/src/tool_registry.rs` and
 `experimental/pulp-rs/src/cmd/tool.rs`; otherwise Rust `pulp tool <subcommand>`
 can reject a command that the C++ delegate and tests already support.
+Keep managed-install layout parity here too: C++ npm-package tools install
+under `$PULP_HOME/tools/npm-packages/<id>/run.{sh,bat}`, so Rust
+`locate_tool` and `uninstall_tool` must check/remove that wrapper directory
+alongside binary-download and python-env installs. Otherwise Rust-native
+`pulp tool info`, `path`, `run`, `doctor`, and `uninstall` can disagree with
+tools installed by the delegated C++ install path.
 
 ### Package suggestion and analyzer metadata commands
 

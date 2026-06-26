@@ -540,39 +540,8 @@ pub(crate) fn registry_at(p: &std::path::Path) -> Result<ToolRegistry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
+    use crate::test_support::EnvVarGuard;
     use std::fs;
-    use std::sync::MutexGuard;
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::ENV_LOCK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self {
-                key,
-                previous,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
 
     fn plant_project(body: &str) -> tempfile::TempDir {
         let td = tempfile::tempdir().unwrap();
@@ -706,6 +675,8 @@ mod tests {
     #[test]
     fn info_renders_json_metadata() {
         let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
         let rc = info(&reg, "video-proof", true, &mut buf).unwrap();
@@ -729,6 +700,8 @@ mod tests {
     #[test]
     fn info_renders_text_metadata() {
         let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
         let rc = info(&reg, "video-proof", false, &mut buf).unwrap();
