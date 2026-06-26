@@ -5,9 +5,12 @@
 // the stream state, so a failed/partial write of an important persisted file
 // (here CMakeLists.txt's project(VERSION) line and CHANGELOG.md) is reported
 // as a successful bump. write_text_file_checked() is the shared primitive
-// behind both write sites in tools/cli/cmd_version.cpp; these tests pin its
-// failure contract. Pure-logic, hermetic, no shellout — same isolation
-// contract as test_cli_version_diag.cpp.
+// behind both write sites in tools/cli/cmd_version.cpp. It is an ATOMIC
+// temp+rename writer (matching the core/state writers), so these tests pin
+// both its failure contract AND the atomicity guarantee: a failed write
+// leaves any existing destination unchanged and never leaves a temp orphan.
+// Pure-logic, hermetic, no shellout — same isolation contract as
+// test_cli_version_diag.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -40,6 +43,20 @@ struct TempDir {
     }
 };
 
+std::string read_all(const fs::path& p) {
+    std::ifstream in(p);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// The atomic writer stages a sibling "<path>.pulp-tmp"; assert it's cleaned up
+// (renamed away on success, removed on failure) so no orphan is ever left.
+bool temp_orphan_exists(const fs::path& target) {
+    fs::path tmp = target;
+    tmp += ".pulp-tmp";
+    std::error_code ec;
+    return fs::exists(tmp, ec);
+}
+
 }  // namespace
 
 TEST_CASE("write_text_file_checked writes content and reports success",
@@ -50,31 +67,27 @@ TEST_CASE("write_text_file_checked writes content and reports success",
 
     REQUIRE(write_text_file_checked(target, body));
     REQUIRE(fs::exists(target));
-
-    std::ifstream in(target);
-    std::string round{std::istreambuf_iterator<char>(in),
-                      std::istreambuf_iterator<char>()};
-    REQUIRE(round == body);
+    REQUIRE(read_all(target) == body);
+    REQUIRE_FALSE(temp_orphan_exists(target));  // temp renamed away, not orphaned
 }
 
-TEST_CASE("write_text_file_checked truncates an existing file",
+TEST_CASE("write_text_file_checked atomically replaces an existing file",
           "[version-write][issue-290]") {
     TempDir dir;
     auto target = dir.path / "CMakeLists.txt";
     REQUIRE(write_text_file_checked(target, "project(Demo VERSION 9.9.9)\n"));
     REQUIRE(write_text_file_checked(target, "project(Demo VERSION 1.0.0)\n"));
 
-    std::ifstream in(target);
-    std::string round{std::istreambuf_iterator<char>(in),
-                      std::istreambuf_iterator<char>()};
-    REQUIRE(round == "project(Demo VERSION 1.0.0)\n");
+    REQUIRE(read_all(target) == "project(Demo VERSION 1.0.0)\n");
+    REQUIRE_FALSE(temp_orphan_exists(target));
 }
 
 TEST_CASE("write_text_file_checked returns false when the parent is a file",
           "[version-write][issue-290]") {
-    // A regular file standing where a directory component is expected makes
-    // the destination path unopenable. This is the reachable failure the old
-    // code reported as a successful version bump.
+    // A regular file standing where a directory component is expected makes the
+    // staging temp ("<bad_target>.pulp-tmp") unopenable, so the write fails
+    // before any rename. This is the reachable failure the old unchecked code
+    // reported as a successful version bump.
     TempDir dir;
     auto blocker = dir.path / "not-a-dir";
     {
@@ -87,11 +100,24 @@ TEST_CASE("write_text_file_checked returns false when the parent is a file",
     REQUIRE_FALSE(write_text_file_checked(bad_target, "project(Demo VERSION 1.2.3)\n"));
 }
 
-TEST_CASE("write_text_file_checked returns false for a directory destination",
+TEST_CASE("write_text_file_checked fails atomically on an undeletable destination",
           "[version-write][issue-290]") {
-    // Opening a directory for writing fails to open the stream; the writer
-    // must surface that as false rather than silently succeeding.
+    // Destination is an existing DIRECTORY: the staging temp opens fine, but the
+    // final rename-over-a-directory fails. The writer must (a) return false,
+    // (b) leave the original destination UNCHANGED (here: still a directory —
+    // the atomicity guarantee, i.e. no truncation of the prior contents), and
+    // (c) clean up its staging temp rather than orphaning it.
     TempDir dir;
-    REQUIRE(fs::is_directory(dir.path));
-    REQUIRE_FALSE(write_text_file_checked(dir.path, "project(Demo VERSION 1.2.3)\n"));
+    auto target = dir.path / "live-dir";
+    fs::create_directories(target);
+    {
+        std::ofstream sentinel(target / "keep.txt");
+        sentinel << "untouched";
+    }
+
+    REQUIRE_FALSE(write_text_file_checked(target, "project(Demo VERSION 1.2.3)\n"));
+
+    REQUIRE(fs::is_directory(target));                 // original unchanged
+    REQUIRE(read_all(target / "keep.txt") == "untouched");
+    REQUIRE_FALSE(temp_orphan_exists(target));         // staging temp removed
 }

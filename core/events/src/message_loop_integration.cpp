@@ -44,7 +44,13 @@ MainLoopKind MessageLoopIntegration::active_kind() {
     // as a separate step done after register_backend(). In that case the
     // loop genuinely exists but its kind is unknown. Report Custom (a
     // caller-registered loop) rather than None so the documented
-    // equivalence `available() == (active_kind() != None)` holds.
+    // equivalence `available() == (active_kind() != None)` holds for a
+    // single-threaded / quiescent observer. (It is NOT atomic across a
+    // concurrent unregister_backend(): has_backend() and this registry use
+    // separate mutexes, so a backend torn down between the check above and
+    // this read can momentarily leave active_kind()==Custom while
+    // available()==false. That two-mutex window is pre-existing and inherent
+    // to the split-registry design, not introduced by the Custom fallback.)
     if (r.active == MainLoopKind::None) {
         return MainLoopKind::Custom;
     }
