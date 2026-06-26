@@ -40,6 +40,7 @@ To add coverage for a new effect, copy the nearest contract fixture in
 and adjust the expectations — don't hand-roll sample loops. For a captured WAV or
 an `audio-run/` bundle, reach for the `pulp audio validate` verbs above.
 
-> Live in-app inspection (the Audio Inspector window) and a scenario-driven
-> `render` verb are planned phases of the harness; until they land, use the
-> fixtures and the `validate` verbs above.
+> Live in-app inspection has landed in `/audio-inspect` and
+> `pulp run --audio-inspector`. The still-planned harness slices are live
+> ring-capture-to-WAV and a scenario-driven `render` verb; until those land,
+> use the fixtures, Audio Scope, and the `validate` verbs above.
