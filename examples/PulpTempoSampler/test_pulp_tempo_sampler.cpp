@@ -448,6 +448,45 @@ TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
     SUCCEED();
 }
 
+// #race-2: changing tempo/slices while voices are sounding must NOT leave the
+// trigger mapping pointing past the live buffer. The re-render publishes
+// generation-safely and may SKIP the publish while a held voice still occupies a
+// store slot; the slice map is now refreshed only AFTER a successful publish, so a
+// skipped publish keeps the OLD (still-consistent) slices instead of stranding
+// every note on silence until the next render. Sweep tempo under sustained voices,
+// then a fresh trigger must still produce audio.
+TEST_CASE("tempo sweep under held voices keeps fresh triggers audible",
+          "[tempo-sampler][issue-race]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    const int root = 60;
+    // Hold two distinct slice notes (different store generations as renders land),
+    // and sweep host tempo so the worker keeps re-rendering / re-publishing.
+    process_block(*f.proc, 100.0, true, root, l, r);       // voice A on
+    for (int b = 0; b < 30; ++b) {
+        const double tempo = 70.0 + (b % 12) * 10.0;        // re-renders fire
+        const bool on = (b == 4);                           // voice B on mid-sweep
+        process_block(*f.proc, tempo, on, root + 1, l, r);
+        for (float v : l) REQUIRE(std::isfinite(v));
+    }
+
+    // A fresh trigger after all that churn must still map to a slice and sound.
+    double energy = 0.0;
+    for (int b = 0; b < 12; ++b) {
+        process_block(*f.proc, 120.0, b == 0, root + 2, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // not stranded on silence by a skipped-publish slice update
+}
+
 TEST_CASE("drop replaces the loaded sample", "[tempo-sampler]") {
     Fixture f;
     auto a = sine(440.0, 48000.0, 24000); // 0.5 s

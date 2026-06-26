@@ -1476,23 +1476,16 @@ private:
         const long pub_frames =
             std::min<long>(out_frames, static_cast<long>(SamplerSampleStore::kMaxFrames));
 
-        // Refresh the slice boundaries into the stretched buffer FIRST, before the
-        // audio re-publish below. A sensitivity-only re-slice keeps the same
-        // time-ratio + audio, so these boundaries are valid for the CURRENT
-        // published buffer — and updating here means the keyboard trigger mapping
-        // follows the SENS slider even when the re-publish is skipped because a
-        // held voice still occupies the store slot (the bug: `if (!ok) return`
-        // used to bail before this update). region_for_note clamps any boundary
-        // past the live buffer length to silence, so a deferred-publish tempo
-        // change degrades safely rather than reading stale regions.
-        {
-            std::vector<long> scaled;
-            scaled.reserve(slices.size());
-            for (long s : slices)
-                scaled.push_back(std::min<long>(pub_frames, static_cast<long>(std::llround(s * R))));
-            std::lock_guard<std::mutex> lock(slice_mutex_);
-            slices_stretched_ = std::move(scaled);
-        }
+        // NOTE: slices_stretched_ is refreshed AFTER a successful publish below, not
+        // here. The slice boundaries are scaled by the time-ratio R, so they only
+        // match the buffer that was rendered at that same R. If the re-publish is
+        // SKIPPED (a held voice still occupies a store slot, ok == false), updating
+        // the slices early would point the trigger mapping at the new R while the
+        // live buffer is still the old R — every note maps past the buffer and goes
+        // silent until a later render lands (the "adjust tempo -> sampler stops
+        // triggering, adjust again -> fixed" bug). Keeping the old slices until the
+        // matching audio is actually published keeps the sampler playable through a
+        // skipped publish; the new tempo/slicing applies once the slot frees.
 
         std::vector<std::vector<float>> stretched(static_cast<size_t>(ch),
                                                   std::vector<float>(static_cast<size_t>(out_frames)));
@@ -1536,8 +1529,18 @@ private:
                                                 host_sample_rate_, gen);
         }
         if (!ok) return;
-        // slices_stretched_ already refreshed above (before the publish), so a
-        // skipped re-publish never leaves the trigger mapping stale.
+
+        // Publish succeeded — NOW refresh the slice boundaries so they always match
+        // the buffer that was just published at this R. (On a skipped publish we
+        // returned above with the old, still-consistent slices intact.)
+        {
+            std::vector<long> scaled;
+            scaled.reserve(slices.size());
+            for (long s : slices)
+                scaled.push_back(std::min<long>(pub_frames, static_cast<long>(std::llround(s * R))));
+            std::lock_guard<std::mutex> lock(slice_mutex_);
+            slices_stretched_ = std::move(scaled);
+        }
     }
 
     // ── Background worker ──
