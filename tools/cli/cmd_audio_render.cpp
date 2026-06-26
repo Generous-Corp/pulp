@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -106,8 +107,8 @@ audio::Buffer<float> materialize_input(const ParseAudioRenderResult& req, bool& 
         const auto copy_ch = std::min<std::size_t>(channels, decoded->channels.size());
         for (std::size_t ch = 0; ch < copy_ch; ++ch) {
             auto dst = buf.channel(ch);
-            std::copy(decoded->channels[ch].begin(), decoded->channels[ch].end(),
-                      dst.begin());
+            const auto& src = decoded->channels[ch];
+            std::copy_n(src.begin(), std::min(src.size(), dst.size()), dst.begin());
         }
         return buf;
     }
@@ -117,7 +118,7 @@ audio::Buffer<float> materialize_input(const ParseAudioRenderResult& req, bool& 
     buf.clear();
     if (req.input_kind == AudioRenderInputKind::Sine && frames > 0) {
         const double amp = std::pow(10.0, req.sine_dbfs / 20.0);
-        const double w = 2.0 * M_PI * req.sine_hz / req.sample_rate;
+        const double w = 2.0 * std::numbers::pi_v<double> * req.sine_hz / req.sample_rate;
         for (std::size_t ch = 0; ch < channels; ++ch) {
             auto dst = buf.channel(ch);
             for (std::size_t n = 0; n < frames; ++n)
