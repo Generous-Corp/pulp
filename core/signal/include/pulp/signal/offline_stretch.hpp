@@ -682,11 +682,48 @@ private:
     // nominal position, then PEAK-ALIGN the original attack onto it. Equal-power
     // edge crossfades keep the seam click-free; only the short attack is replaced,
     // so the stretched sustain (and exact out_frames length) is intact.
+    // RBJ 2nd-order high-pass (one channel) into dst — same biquad family as the
+    // recommend_window low-band probe, complementary coefficients.
+    static void rbj_highpass(const float* src, float* dst, long n, double sr, double f0) {
+        const double q = 0.7071;
+        const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+        const double b0 = (1.0 + cw) * 0.5, b1 = -(1.0 + cw), b2 = (1.0 + cw) * 0.5;
+        const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+        const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+        double z1 = 0.0, z2 = 0.0;
+        for (long i = 0; i < n; ++i) {
+            const double in_s = src[static_cast<size_t>(i)];
+            const double out_s = nb0 * in_s + z1;
+            z1 = nb1 * in_s - na1 * out_s + z2;
+            z2 = nb2 * in_s - na2 * out_s;
+            dst[static_cast<size_t>(i)] = static_cast<float>(out_s);
+        }
+    }
+
     void relocate_transients(const float* const* in, long in_frames,
                              float* const* out, long out_frames, double ratio) const {
         if (in_frames <= 0 || out_frames <= 0) return;
         const long W = kReloAttack;        // grafted half-window each side of the peak
         const long xf = std::min<long>(kReloXfade, W);
+        // Graft only the HIGH band of each attack. The phase vocoder smears the
+        // high-frequency transient (the click/crack) but reconstructs sustained LOW
+        // frequencies cleanly and CONTINUOUSLY. Grafting the full-band original
+        // re-injects low-frequency energy whose phase cannot match the PV body
+        // across the short (~1 ms) seam — and a deep kick's fundamental period
+        // (~15 ms) is longer than the whole graft window, so the seam can't bridge
+        // it. That low-frequency discontinuity is the "blown-out deep hit" at
+        // stretch. High-passing both sides and swapping only the high band leaves
+        // the kick body entirely to the continuous PV low end (no seam there) while
+        // still restoring the attack's high-frequency punch.
+        std::vector<std::vector<float>> hp_in(static_cast<size_t>(channels_));
+        std::vector<std::vector<float>> hp_out(static_cast<size_t>(channels_));
+        for (int c = 0; c < channels_; ++c) {
+            hp_in[static_cast<size_t>(c)].resize(static_cast<size_t>(in_frames));
+            hp_out[static_cast<size_t>(c)].resize(static_cast<size_t>(out_frames));
+            rbj_highpass(in[c], hp_in[static_cast<size_t>(c)].data(), in_frames, sample_rate_, kReloHpHz);
+            rbj_highpass(out[c], hp_out[static_cast<size_t>(c)].data(), out_frames, sample_rate_, kReloHpHz);
+        }
         // Search +/- a fraction of the STRETCHED onset spacing for the output
         // transient peak: wide enough to cover the PV's ratio-dependent latency
         // offset, but never so wide it locks onto a neighbouring transient (which
@@ -716,10 +753,14 @@ private:
                 const long si = ip + k, di = op + k;
                 if (si < 0 || si >= in_frames || di < 0 || di >= out_frames) continue;
                 const long ak = std::llabs(k);
-                float w = 1.0f;                                  // weight for the ORIGINAL
+                float w = 1.0f;                                  // weight for the ORIGINAL high band
                 if (ak > W - xf) w = static_cast<float>(W - ak) / static_cast<float>(xf);
+                // Swap the high band only: out += w*(hp_in - hp_out) makes the center
+                // (w=1) carry the PV low band + the original high band, with the seam
+                // crossfade acting only on the high band (short periods -> clean).
                 for (int c = 0; c < channels_; ++c)
-                    out[c][di] = w * in[c][si] + (1.0f - w) * out[c][di];
+                    out[c][di] += w * (hp_in[static_cast<size_t>(c)][static_cast<size_t>(si)] -
+                                       hp_out[static_cast<size_t>(c)][static_cast<size_t>(di)]);
             }
         }
     }
@@ -800,6 +841,7 @@ private:
     static constexpr long kReloXfade = 64;           // ~1.3 ms linear edge crossfade
     static constexpr long kReloBack = 768;           // input-peak search look-back (onset lags the peak)
     static constexpr long kReloSearch = 1536;        // +/- ~32 ms output-peak search
+    static constexpr double kReloHpHz = 300.0;       // graft only the high band above this (low end stays on the clean PV)
     RealtimePitchTimeProcessor engine_;
     RealtimePitchTimeProcessor pitch_engine_;
     double latency_anchor_ = 0.0;

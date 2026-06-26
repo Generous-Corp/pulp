@@ -277,6 +277,60 @@ TEST_CASE("transient refractory gate collapses a hit's decay to one reset",
     CHECK(gated <= legacy / 2);         // refractory collapses the decay re-fires
 }
 
+TEST_CASE("verbatim relocation grafts only the high band (low end stays clean PV)",
+          "[offline-stretch][transient]") {
+    // The transient graft re-injects only the HIGH-frequency attack; the low end is
+    // left to the continuous phase vocoder. (Grafting full-band low frequencies onto
+    // the phase-mismatched PV body across the short seam blew out deep kicks at
+    // stretch.) Guard it: relocate-on vs relocate-off must differ ONLY above the
+    // crossover — their low-passed outputs should be nearly identical.
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0;
+    const long n = 48000;
+    // Low sustained tone (80 Hz, below the graft crossover) + periodic broadband
+    // clicks (fire the onset detector so the graft runs).
+    std::vector<float> in(static_cast<size_t>(n), 0.0f);
+    for (long i = 0; i < n; ++i)
+        in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * pi * 80.0 * i / sr));
+    for (long c = 0; c < n; c += 8000) {                 // clicks every ~167 ms
+        if (c < n) in[static_cast<size_t>(c)] += 0.9f;
+        if (c + 1 < n) in[static_cast<size_t>(c + 1)] -= 0.8f;
+    }
+    const float* inp[1] = {in.data()};
+
+    const long m = offline_stretch_output_frames(n, 1.5);
+    auto render = [&](bool relocate) {
+        OfflineStretch s; s.prepare(sr, 1);
+        OfflineStretchOptions o; o.time_ratio = 1.5; o.relocate_transients = relocate;
+        std::vector<float> out(static_cast<size_t>(m));
+        float* outp[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, outp, m, o, &err));
+        return out;
+    };
+    const std::vector<float> on = render(true);
+    const std::vector<float> off = render(false);
+
+    // Low-pass the difference at 150 Hz (below the 300 Hz graft crossover). A graft
+    // that touched the low band would leave low-frequency residue here.
+    std::vector<float> diff(static_cast<size_t>(m));
+    for (long i = 0; i < m; ++i) diff[static_cast<size_t>(i)] = on[static_cast<size_t>(i)] - off[static_cast<size_t>(i)];
+    const double f0 = 150.0, q = 0.7071, w0 = 2.0 * pi * f0 / sr;
+    const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+    const double b0 = (1.0 - cw) * 0.5, b1 = 1.0 - cw, b2 = (1.0 - cw) * 0.5;
+    const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+    const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+    double z1 = 0.0, z2 = 0.0, lo_diff = 0.0, tot = 0.0;
+    for (long i = 0; i < m; ++i) {
+        const double x = diff[static_cast<size_t>(i)];
+        const double y = nb0 * x + z1; z1 = nb1 * x - na1 * y + z2; z2 = nb2 * x - na2 * y;
+        lo_diff += y * y;
+        tot += static_cast<double>(off[static_cast<size_t>(i)]) * off[static_cast<size_t>(i)];
+    }
+    // The low band of the graft's effect is negligible vs the signal energy.
+    CHECK(std::sqrt(lo_diff / (tot + 1e-12)) < 0.02);
+}
+
 TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
     constexpr double pi = 3.14159265358979323846;
     const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;
