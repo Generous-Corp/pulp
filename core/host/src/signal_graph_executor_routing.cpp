@@ -173,13 +173,16 @@ bool node_eligible(const GraphNode& node) noexcept {
         case NodeType::MidiOutput:
             return true;
         case NodeType::Plugin:
-            // A Plugin node only routes bit-exactly when its slot is live (the
-            // binding invokes it; a missing/placeholder slot would take
-            // SignalGraph's pass-through-or-zero branch instead). A reported
-            // latency is fine: the executor's gather applies the same
-            // per-connection delay compensation as the legacy walk, derived from
-            // the node's latency_samples carried into the plan.
-            return node.plugin != nullptr;
+            // Always eligible: a live slot routes through plugin_binding, and a
+            // null slot (an unresolved/placeholder node — e.g. GraphSerializer
+            // rehydration of a missing plugin) routes through the binding's
+            // pass-through-or-zero, which is exactly what SignalGraph's walk does
+            // for a slot-less Plugin node — so the routed output matches the walk
+            // in either case (mirroring the Custom case below). A reported latency
+            // is fine: the executor's gather applies the same per-connection delay
+            // compensation as the legacy walk, derived from the node's
+            // latency_samples carried into the plan.
+            return true;
         case NodeType::Custom:
             // Always eligible: a resolved custom node routes through its process
             // callback, and an unresolved one (unregistered type / shape
@@ -403,24 +406,35 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                 id, gain_binding, atomic, /*required=*/true});
         } else if (src->type == NodeType::Plugin) {
             PluginSlot* slot = plugin_for ? plugin_for(id) : nullptr;
-            // Eligibility required a live slot; a missing one here means the
-            // resolver and the topology disagree — fail closed to the walk.
-            if (slot == nullptr) return false;
-            PluginBindingContext ctx;
-            ctx.slot = slot;
-            if (parallel_safe) {
-                try {
-                    ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();
-                } catch (...) {
-                    return false;
-                }
-                ctx.scratch = ctx.owned_scratch.get();
+            if (slot == nullptr) {
+                // A slot-less Plugin node (unresolved/placeholder — e.g. a
+                // GraphSerializer rehydration of a missing plugin) routes as
+                // pass-through-or-zero, matching SignalGraph's walk. custom_binding
+                // with a null user_data is exactly that: copy min(in,out) channels,
+                // zero-fill the rest. No plugin_ctx entry is pushed (the binding
+                // needs no context), and required=false because the pass-through
+                // covers the missing slot. Latency stays 0 (the spec's latency
+                // resolve already guarded on a non-null slot); persistent_output is
+                // harmless since pass-through fully writes every output channel.
+                bindings.push_back(fmt::GraphRuntimeNodeBinding{
+                    id, custom_binding, nullptr, /*required=*/false});
             } else {
-                ctx.scratch = &scratch;
+                PluginBindingContext ctx;
+                ctx.slot = slot;
+                if (parallel_safe) {
+                    try {
+                        ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();
+                    } catch (...) {
+                        return false;
+                    }
+                    ctx.scratch = ctx.owned_scratch.get();
+                } else {
+                    ctx.scratch = &scratch;
+                }
+                plugin_ctx.push_back(std::move(ctx));
+                bindings.push_back(fmt::GraphRuntimeNodeBinding{
+                    id, plugin_binding, &plugin_ctx.back(), /*required=*/true});
             }
-            plugin_ctx.push_back(std::move(ctx));
-            bindings.push_back(fmt::GraphRuntimeNodeBinding{
-                id, plugin_binding, &plugin_ctx.back(), /*required=*/true});
         } else if (src->type == NodeType::Custom) {
             // No storage for the binding context means this caller's subset is
             // not expected to carry Custom nodes — fail closed to the walk rather

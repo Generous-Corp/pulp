@@ -12,6 +12,7 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 
 #include <array>
 #include <cstdint>
@@ -1717,6 +1718,9 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
     REQUIRE_FALSE(result.missing_plugins.empty());
 
     REQUIRE(dst.prepare(48000.0, 64));
+    // The placeholder Plugin node is now executor-eligible: it routes through the
+    // canonical executor's pass-through-or-zero, matching the legacy walk.
+    REQUIRE(pulp::host::signal_graph_executor_eligible(dst));
 
     const int num_samples = 64;
     std::vector<float> in_l(num_samples), in_r(num_samples);

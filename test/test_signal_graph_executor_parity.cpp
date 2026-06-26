@@ -951,22 +951,56 @@ TEST_CASE("Translated routing matches SignalGraph: non-full-writing plugin persi
     }
 }
 
-TEST_CASE("Executor eligibility rejects a Plugin node with no live slot",
-          "[host][graph][executor][routing][eligibility][plugin]") {
-    SignalGraph g;
-    const auto in = g.add_input_node(2, "In");
-    // An unresolved plugin node carries metadata but no slot.
-    const auto p = g.add_unresolved_plugin_node(test_plugin_info(2, 2), 2, 2, "Missing");
-    const auto out = g.add_output_node(2, "Out");
-    for (int c = 0; c < 2; ++c) {
-        REQUIRE(g.connect(in, c, p, c));
-        REQUIRE(g.connect(p, c, out, c));
+TEST_CASE("Translated routing routes a Plugin node with no live slot as pass-through",
+          "[host][graph][executor][routing][parity][plugin]") {
+    // An unresolved/placeholder Plugin node (metadata, no live slot — e.g. a
+    // GraphSerializer rehydration of a missing plugin) is eligible and routes
+    // through the binding's pass-through-or-zero, exactly as SignalGraph's walk
+    // does for a slot-less plugin node. Prove bit-exact parity on BOTH arms of
+    // pass_through_or_zero: the channel-matched copy and the zero-fill of an
+    // extra output channel.
+
+    // Channel-matched (2 in -> 2 out): both channels copied straight through.
+    {
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_unresolved_plugin_node(test_plugin_info(2, 2), 2, 2, "Missing");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        REQUIRE(g.prepare(kSr, kFrames));
+        REQUIRE(signal_graph_executor_eligible(g));
+        SignalGraphExecutorRouting routing;
+        REQUIRE(build_signal_graph_executor_routing(g, routing));
+        REQUIRE(routing.valid);
+        pulp::format::GraphRuntimeExecutor exec;
+        const std::vector<std::vector<float>> input{ramp(kFrames, 0.8f), ramp(kFrames, 0.6f)};
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
     }
-    REQUIRE(g.prepare(kSr, kFrames));
-    REQUIRE_FALSE(signal_graph_executor_eligible(g));
-    SignalGraphExecutorRouting routing;
-    REQUIRE_FALSE(build_signal_graph_executor_routing(g, routing));
-    REQUIRE_FALSE(routing.valid);
+
+    // Channel-mismatched (1 in -> 2 out): pass-through copies ch0, then zero-fills
+    // the extra output channel — exercising the zero-fill arm.
+    {
+        SignalGraph g;
+        const auto in = g.add_input_node(1, "In");
+        const auto p = g.add_unresolved_plugin_node(test_plugin_info(1, 2), 1, 2, "Missing");
+        const auto out = g.add_output_node(2, "Out");
+        REQUIRE(g.connect(in, 0, p, 0));
+        REQUIRE(g.connect(p, 0, out, 0));
+        REQUIRE(g.connect(p, 1, out, 1));
+        REQUIRE(g.prepare(kSr, kFrames));
+        REQUIRE(signal_graph_executor_eligible(g));
+        SignalGraphExecutorRouting routing;
+        REQUIRE(build_signal_graph_executor_routing(g, routing));
+        REQUIRE(routing.valid);
+        pulp::format::GraphRuntimeExecutor exec;
+        const std::vector<std::vector<float>> input{ramp(kFrames, 0.8f)};
+        expect_equal(run_legacy(g, kFrames, input, 2),
+                     run_routed(exec, routing, kFrames, input, 2));
+    }
 }
 
 TEST_CASE("SignalGraph::process plugin executor path does not allocate on the audio thread",

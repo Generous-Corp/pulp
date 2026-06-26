@@ -89,13 +89,15 @@ struct SignalGraphExecutorRouting {
 
 // True iff `nodes`/`connections` are in the subset the executor reproduces
 // bit-exactly:
-//   - nodes only AudioInput / AudioOutput / Gain / live Plugin / MidiInput /
+//   - nodes only AudioInput / AudioOutput / Gain / Plugin / MidiInput /
 //     MidiOutput / Custom. Gain is the fixed 2-in/2-out built-in utility and
-//     always fully writes. Every Plugin node
-//     must carry a live slot; its output region is pinned persistent so a plugin
-//     that does not fully write matches SignalGraph's persistent per-node buffer;
-//     a reported latency is fine because its delay compensation is replicated on
-//     the routed path. A Custom node is audio-only (no MIDI/automation/latency);
+//     always fully writes. A Plugin node with a live slot invokes it; its output
+//     region is pinned persistent so a plugin that does not fully write matches
+//     SignalGraph's persistent per-node buffer, and a reported latency is fine
+//     because its delay compensation is replicated on the routed path. A Plugin
+//     node with no live slot (unresolved/placeholder) routes as
+//     pass-through-or-zero, exactly as SignalGraph's walk does for a slot-less
+//     plugin node. A Custom node is audio-only (no MIDI/automation/latency);
 //     its binding invokes the resolved process callback, or — for an unresolved
 //     type / shape mismatch — pass-through-or-zero, so it matches the walk either
 //     way;
@@ -117,10 +119,11 @@ bool signal_graph_executor_eligible(const SignalGraph& graph);
 // `plugin_ctx` (cleared first, then reserved to the plugin count so the bindings'
 // user_data stays valid) and reference `scratch`. Shared by the live-graph
 // translation and by SignalGraph::compile_ (which embeds the snapshot in the
-// compiled graph, resolving from its own runtime/plugins). Returns false (and
-// leaves `out` empty) if the topology is not eligible, a Gain atomic or Plugin
-// slot is missing, or the canonical plan/snapshot cannot be built under its
-// limits. Does NOT size a pool or set a keepalive — the caller owns those.
+// compiled graph, resolving from its own runtime/plugins). A Plugin node whose
+// `plugin_for` yields null still routes: its binding reproduces SignalGraph's
+// pass-through-or-zero, matching the walk. Returns false (and leaves `out`
+// empty) if the topology is not eligible, a Gain atomic is missing, or the
+// canonical plan/snapshot cannot be built under its limits. Does NOT size a pool or set a keepalive — the caller owns those.
 // `parallel_safe` builds the snapshot's buffer assignment without slot reuse so
 // it can drive GraphRuntimeExecutor::process_parallel (concurrent same-level
 // nodes never alias a recycled slot); default false = the compact serial layout.
