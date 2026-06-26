@@ -103,6 +103,19 @@ resample, no EQ) vs `--character clean` (time-stretch).
   PV. Crossover tuned by ear on a real break (180 Hz still blew out; 300 Hz clean +
   punchy). This artifact is INVISIBLE to peak/clip/wobble metrics (output stays
   ~0.8 full-scale) — found only via a graft-on/off vs PV-only listening A/B.
+- **Spectral output conditioning** (`match_spectral_rms`): a stretch reconstructs
+  BROADBAND material ~3-4 dB QUIET (the WOLA is unity for COHERENT overlap — proven
+  by the spectral-engine tests — but the incoherent broadband residual loses the
+  `sqrt(8/3)` Hann figure; tonal/peak-locked energy stays at level). Do NOT add a
+  constant at the normalization site (breaks the coherent-unity tests). Instead the
+  spectral paths (tempo / pitch / R+S; NOT identity / repitch / varispeed, which are
+  already level-correct) **make up the interior RMS to the input** (make-up only)
+  then **soft-clip** (transparent below 0.9, tanh shoulder to 0.999). The soft-clip
+  (not a whole-buffer peak-scale) is load-bearing: it also tames the verbatim graft's
+  ADDITIVE overshoot (raw peak ~1.2, previously hidden by the sampler's master
+  limiter) without attenuating the whole buffer — so the make-up survives and the
+  engine never emits |x|>1. Test: broadband RMS within ~0.02 dB of source across
+  0.5–2x, peak ≤ 1.0, a sine NOT inflated.
 
 ## Fine-tune + share a preset (`StretchPreset`)
 
