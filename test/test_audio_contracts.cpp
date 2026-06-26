@@ -2,7 +2,7 @@
 // example plugins (PulpGain effect + PulpTone instrument here; PulpEffect
 // lives in test_audio_contracts_effect.cpp because pulp_gain.hpp and
 // pulp_effect.hpp define colliding unscoped enumerators — same reason the
-// golden suites are split). Slice 3 acceptance: a new effect copies one of
+// golden suites are split). Acceptance: a new effect copies one of
 // these fixtures; failures name the contract that broke.
 //
 // Analyzer Determinism Contract (uniform for every contract in this TU):

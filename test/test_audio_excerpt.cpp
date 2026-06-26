@@ -286,7 +286,7 @@ TEST_CASE("AudioSubsectionReader zero-length ranges retain source shape",
 }
 
 TEST_CASE("AudioSubsectionReader ignores invalid read destinations",
-          "[audio][subsection][codecov]") {
+          "[audio][subsection]") {
     AudioFileData audio;
     audio.sample_rate = 48000;
     audio.channels = {{0.0f, 0.5f}, {1.0f, 1.5f}};
@@ -301,7 +301,7 @@ TEST_CASE("AudioSubsectionReader ignores invalid read destinations",
 }
 
 TEST_CASE("AudioSubsectionReader zero-fills ragged source channels",
-          "[audio][subsection][codecov]") {
+          "[audio][subsection]") {
     AudioFileData audio;
     audio.sample_rate = 48000;
     audio.channels = {

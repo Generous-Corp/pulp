@@ -993,7 +993,7 @@ TEST_CASE("MemoryMappedAudioReader rejects invalid destinations before decoding"
 }
 
 TEST_CASE("MemoryMappedAudioReader reopens files and clamps destination channels",
-          "[audio][file][mmap][codecov]") {
+          "[audio][file][mmap]") {
     auto stereo_path = unique_temp_audio_path("_mmap_reopen_stereo.wav");
     auto mono_path = unique_temp_audio_path("_mmap_reopen_mono.wav");
     std::filesystem::remove(stereo_path);
@@ -1521,7 +1521,7 @@ TEST_CASE("FormatRegistry rejects malformed compressed files through built-in re
 }
 
 TEST_CASE("FormatRegistry reads a valid MP3 fixture through the built-in reader",
-          "[audio][file][registry][codecov]") {
+          "[audio][file][registry]") {
     auto mp3_path = unique_temp_audio_path("_valid.MP3");
     write_base64_audio_fixture(
         mp3_path,
@@ -1796,7 +1796,7 @@ TEST_CASE("FormatRegistry dispatches custom readers and writers through normaliz
 }
 
 TEST_CASE("FormatRegistry keeps the first custom handler for duplicate extensions",
-          "[audio][file][registry][codecov]") {
+          "[audio][file][registry]") {
     auto& registry = FormatRegistry::instance();
     auto first = std::make_shared<RegistryProbeState>();
     auto second = std::make_shared<RegistryProbeState>();

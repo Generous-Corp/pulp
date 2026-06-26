@@ -321,11 +321,7 @@ TEST_CASE("AudioThumbnailCache keeps distinct samples-per-peak entries",
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// WaveformView integration smoke
-// ─────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────
-// On-disk persistence (item 6.12 follow-up)
+// On-disk persistence
 // ─────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -439,7 +435,7 @@ TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
                                         wrong_version.size()).has_value());
 }
 
-TEST_CASE("AudioPeak clamps serialized display ranges", "[audio][thumbnail][coverage]") {
+TEST_CASE("AudioPeak clamps serialized display ranges", "[audio][thumbnail]") {
     const auto clipped = AudioPeak::from_range(-2.0f, 2.0f);
     REQUIRE(clipped.min_q7 == -127);
     REQUIRE(clipped.max_q7 == 127);
@@ -454,7 +450,7 @@ TEST_CASE("AudioPeak clamps serialized display ranges", "[audio][thumbnail][cove
 }
 
 TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windows",
-          "[audio][thumbnail][coverage]") {
+          "[audio][thumbnail]") {
     auto data = make_sine(48000, 8, 1, 100.0);
     REQUIRE(AudioThumbnail::build_from_buffer(data, 0).empty());
 
@@ -473,7 +469,7 @@ TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windo
 }
 
 TEST_CASE("AudioThumbnail::render_min_max guards empty and folded requests",
-          "[audio][thumbnail][coverage]") {
+          "[audio][thumbnail]") {
     AudioThumbnail empty;
     float scratch[4] = {};
     REQUIRE(empty.best_level_for(128) == 0);
@@ -500,7 +496,7 @@ TEST_CASE("AudioThumbnail::render_min_max guards empty and folded requests",
 }
 
 TEST_CASE("deserialize_thumbnail rejects malformed structural headers",
-          "[audio][thumbnail][persist][coverage]") {
+          "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 1024, 1, 110.0);
     auto thumbnail = AudioThumbnail::build_from_buffer(data, 64);
     const auto valid = serialize_thumbnail(thumbnail);
@@ -528,7 +524,7 @@ TEST_CASE("deserialize_thumbnail rejects malformed structural headers",
 }
 
 TEST_CASE("AudioThumbnailCache handles zero capacity, null inserts, and replacement",
-          "[audio][thumbnail][cache][coverage]") {
+          "[audio][thumbnail][cache]") {
     AudioThumbnailCache cache(0);
     REQUIRE(cache.capacity() == 1);
     REQUIRE(cache.size() == 0);

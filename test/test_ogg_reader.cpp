@@ -149,7 +149,7 @@ TEST_CASE("OggReader rejects missing and malformed files",
 }
 
 TEST_CASE("OggReader reports metadata for a valid Vorbis stream",
-          "[audio][ogg][coverage]") {
+          "[audio][ogg]") {
     auto reader = pulp::audio::create_ogg_reader();
     TempDir temp;
     auto path = temp.path / "tiny.ogg";
@@ -167,7 +167,7 @@ TEST_CASE("OggReader reports metadata for a valid Vorbis stream",
 }
 
 TEST_CASE("OggReader decodes a valid Vorbis stream into deinterleaved channels",
-          "[audio][ogg][coverage]") {
+          "[audio][ogg]") {
     auto reader = pulp::audio::create_ogg_reader();
     TempDir temp;
     auto path = temp.path / "tiny.oga";
@@ -194,7 +194,7 @@ TEST_CASE("OggReader decodes a valid Vorbis stream into deinterleaved channels",
 }
 
 TEST_CASE("FormatRegistry routes OGG metadata and decode through the built-in reader",
-          "[audio][ogg][coverage]") {
+          "[audio][ogg]") {
     TempDir temp;
     auto path = temp.path / "registry.ogg";
     auto uppercase_path = temp.path / "registry-uppercase.OGA";
