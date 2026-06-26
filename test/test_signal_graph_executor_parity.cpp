@@ -1941,6 +1941,11 @@ TEST_CASE("SignalGraph::process parallel path routes large per-node automation c
             expect_equal(run_legacy(legacy, frames, input, 2),
                          run_graph_process(par, frames, input, 2));
         }
+        // Guard the test's premise: the worker path must have actually dispatched
+        // a parallel level (4 plugins at one level), so this stays a parallel-vs-
+        // walk check and can't silently degrade to serial if a default/threshold
+        // changes.
+        REQUIRE(par.routing_executor_stats().parallel_levels_dispatched > 0);
     }
 }
 
