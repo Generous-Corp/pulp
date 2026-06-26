@@ -332,13 +332,18 @@ public:
             if ((opts.transient_mode == StretchTransientMode::verbatim_relocate ||
                  opts.relocate_transients) && opts.time_ratio != 1.0)
                 relocate_transients(in, in_frames, out, out_frames, opts.time_ratio);
+            match_spectral_rms(in, in_frames, out, out_frames);  // restore the PV energy loss
             return true;
         }
 
         // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
-        if (opts.time_ratio == 1.0)
-            return pitch_shift(in, in_frames, out, out_frames,
-                               opts.pitch_semitones, opts.formant_mode, opts.formant_semitones);
+        if (opts.time_ratio == 1.0) {
+            if (!pitch_shift(in, in_frames, out, out_frames,
+                             opts.pitch_semitones, opts.formant_mode, opts.formant_semitones))
+                return false;
+            match_spectral_rms(in, in_frames, out, out_frames);
+            return true;
+        }
 
         // Independent R+S (time_ratio != 1 AND pitch != 0).
         const int ch = channels_;
@@ -359,6 +364,7 @@ public:
                 for (long j = 0; j < out_frames; ++j)
                     out[c][j] = sample_sinc6(inter[static_cast<size_t>(c)].data(), inter_len,
                                              static_cast<double>(j) * P);
+            match_spectral_rms(in, in_frames, out, out_frames);
             return true;
         }
 
@@ -376,10 +382,79 @@ public:
             return fail(err, "pitch stage failed");
         std::vector<const float*> cp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) cp[c] = inter[static_cast<size_t>(c)].data();
-        return tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio);
+        if (!tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio)) return false;
+        match_spectral_rms(in, in_frames, out, out_frames);
+        return true;
     }
 
 private:
+    // Condition the spectral output: (1) make up the phase-vocoder energy loss and
+    // (2) hard-guard the peak so the engine never emits a sample past full scale.
+    //
+    // (1) The WOLA normalization is unity for COHERENT overlap-add (a pure tone
+    // reconstructs at full level — proven by the spectral-engine tests), but a
+    // time-stretch overlaps phase-propagated frames of BROADBAND material partially
+    // INcoherently, so the reconstructed level sits ~3-4 dB below the source. Match
+    // the output's interior RMS back to the input with a single make-up gain
+    // (make-up only — never attenuates the body), pre-capped so the make-up alone
+    // can't push the current peak past full scale.
+    //
+    // (2) A final hard peak-limit catches ANY residual overshoot in the buffer —
+    // notably the verbatim-relocation graft, which re-injects an original attack
+    // additively and can sum a transient above full scale on its own. Guarantees
+    // |out| <= kCeiling for every downstream consumer (the engine output is clean
+    // even without a host limiter). Near-identity on coherent/tonal material; the
+    // ratio==1 identity path never reaches here.
+    float peak_abs(const float* const* b, long n) const noexcept {
+        float peak = 0.0f;
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < n; ++i) peak = std::max(peak, std::fabs(b[c][i]));
+        return peak;
+    }
+    void match_spectral_rms(const float* const* in, long in_frames,
+                            float* const* out, long out_frames) const noexcept {
+        auto interior_rms = [this](const float* const* b, long n) {
+            const long lo = std::min<long>(n / 8, 4096), hi = n - lo;
+            if (hi <= lo) return 0.0;
+            double s = 0.0; long cnt = 0;
+            for (int c = 0; c < channels_; ++c)
+                for (long i = lo; i < hi; ++i) { const double v = b[c][i]; s += v * v; ++cnt; }
+            return cnt > 0 ? std::sqrt(s / static_cast<double>(cnt)) : 0.0;
+        };
+        // (1) RMS make-up. The soft-clip below bounds peaks, so the make-up is the
+        // full RMS target (no whole-buffer peak cap, which would attenuate the body
+        // and undo the make-up whenever a single transient overshoots).
+        const double ri = interior_rms(in, in_frames);
+        const double ro = interior_rms(out, out_frames);
+        if (ri > 1e-9 && ro > 1e-9) {
+            const double g = ri / ro;
+            if (g > 1.0 + 1e-4) {
+                const float gf = static_cast<float>(g);
+                for (int c = 0; c < channels_; ++c)
+                    for (long i = 0; i < out_frames; ++i) out[c][i] *= gf;
+            }
+        }
+        // (2) Soft-clip every sample: transparent below the knee, smoothly bounded to
+        // +/-kCeiling above it. Tames the make-up peaks AND the verbatim-graft
+        // overshoot (an attack re-injected additively can exceed full scale) WITHOUT
+        // scaling the whole buffer down — so the RMS make-up survives and only the
+        // few overshooting transient samples are rounded.
+        if (peak_abs(out, out_frames) > kKnee) {
+            for (int c = 0; c < channels_; ++c)
+                for (long i = 0; i < out_frames; ++i) out[c][i] = soft_clip(out[c][i]);
+        }
+    }
+
+    // Transparent below +/-kKnee, smooth tanh shoulder to a hard +/-kCeiling ceiling.
+    static constexpr float kKnee = 0.9f;
+    static constexpr float kCeiling = 0.999f;
+    static float soft_clip(float x) noexcept {
+        const float a = std::fabs(x);
+        if (a <= kKnee) return x;
+        const float s = x < 0.0f ? -1.0f : 1.0f;
+        return s * (kKnee + (kCeiling - kKnee) * std::tanh((a - kKnee) / (kCeiling - kKnee)));
+    }
+
     // 6-point Blackman-Harris windowed-sinc read of `x` at fractional position
     // `pos`; out-of-range taps read as silence (edge zero-pad). Exact identity
     // when pos is integral.

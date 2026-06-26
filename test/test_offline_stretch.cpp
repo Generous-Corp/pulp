@@ -331,6 +331,59 @@ TEST_CASE("verbatim relocation grafts only the high band (low end stays clean PV
     CHECK(std::sqrt(lo_diff / (tot + 1e-12)) < 0.02);
 }
 
+TEST_CASE("tempo-stretch makes up the PV energy loss without clipping",
+          "[offline-stretch][energy]") {
+    const double sr = 48000.0;
+    const long n = 48000;
+    auto rms = [](const float* x, long lo, long hi) {
+        double s = 0.0; for (long i = lo; i < hi; ++i) s += static_cast<double>(x[i]) * x[i];
+        return hi > lo ? std::sqrt(s / static_cast<double>(hi - lo)) : 0.0;
+    };
+
+    // Broadband material (deterministic LCG noise) — the phase vocoder's incoherent
+    // overlap loses the most energy here, so the make-up has the most to restore.
+    std::vector<float> noise(static_cast<size_t>(n));
+    unsigned long st = 99991UL;
+    for (long i = 0; i < n; ++i) {
+        st = st * 1103515245UL + 12345UL;
+        noise[static_cast<size_t>(i)] = (static_cast<float>((st >> 16) & 0x7fff) / 16384.0f - 1.0f) * 0.4f;
+    }
+    const float* inp[1] = {noise.data()};
+    const double ri = rms(noise.data(), 8000, n - 8000);
+    for (double R : {0.75, 1.5, 2.0}) {
+        OfflineStretch s; s.prepare(sr, 1);
+        OfflineStretchOptions o; o.time_ratio = R;
+        const long m = offline_stretch_output_frames(n, R);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* op[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, op, m, o, &err));
+        const double ro = rms(out.data(), 8000, m - 8000);
+        const double db = 20.0 * std::log10(ro / ri);
+        INFO("ratio " << R << " RMS " << db << " dB vs source");
+        CHECK(std::abs(db) < 1.5);                 // energy restored to ~source (was -3..-4 dB)
+        float peak = 0.0f; for (float v : out) peak = std::max(peak, std::fabs(v));
+        CHECK(peak <= 1.0f);                        // never clips (soft-clip ceiling)
+    }
+
+    // Coherent material (pure sine) reconstructs at full level already, so the make-up
+    // must be ~unity — it must NOT inflate a tonal signal.
+    std::vector<float> sine(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        sine[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * i / sr));
+    const float* sp[1] = {sine.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+    OfflineStretchOptions o; o.time_ratio = 1.5;
+    const long m = offline_stretch_output_frames(n, 1.5);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(sp, n, op, m, o, &err));
+    const double rs_in = rms(sine.data(), 8000, n - 8000);
+    const double rs_out = rms(out.data(), 8000, m - 8000);
+    CHECK(std::abs(20.0 * std::log10(rs_out / rs_in)) < 1.5);  // tonal level preserved, not inflated
+}
+
 TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
     constexpr double pi = 3.14159265358979323846;
     const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;
