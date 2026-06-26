@@ -1492,19 +1492,55 @@ private:
         const int target = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));  // 1..kMaxSlices
         const int keep = std::max(0, target - 1);  // number of cut points
 
+        // Minimum slice length (~40 ms) so dense onsets never produce a sliver clip
+        // — worst at high sensitivity, and at the FIRST slice [0, first cut) which
+        // OnsetDetector's inter-onset spacing doesn't guard. Snap radius (~5 ms) so
+        // each cut lands on a zero-crossing: a slice boundary is shared by the end
+        // of one slice and the start of the next, so snapping it declicks BOTH edges.
+        const long kMinSlice = std::max<long>(256, std::lround(0.040 * raw_sr_));
+        const long kSnap = std::max<long>(32, std::lround(0.005 * raw_sr_));
+        auto sum_at = [&](long i) {
+            float v = 0.0f;
+            for (int c = 0; c < raw_channels_; ++c) v += raw_[c][static_cast<size_t>(i)];
+            return v;
+        };
+        auto snap_zc = [&](long f) {
+            const long lo = std::max(1L, f - kSnap), hi = std::min(raw_frames_ - 1, f + kSnap);
+            long best = f, bestd = kSnap + 1;
+            for (long i = lo; i <= hi; ++i)
+                if ((sum_at(i - 1) <= 0.0f) != (sum_at(i) <= 0.0f)) {
+                    const long d = std::llabs(i - f);
+                    if (d < bestd) { bestd = d; best = i; }
+                }
+            return best;
+        };
+
         std::vector<audio::OnsetMarker> cand;
         for (const auto& m : onsets.markers)
             if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
                 cand.push_back(m);
         std::sort(cand.begin(), cand.end(),
                   [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-        if (static_cast<int>(cand.size()) > keep) cand.resize(static_cast<std::size_t>(keep));
+
+        // Greedily accept the highest-confidence cuts (preserving the
+        // sensitivity->count mapping) that keep EVERY slice — including the first
+        // and last — at least kMinSlice long, snapping each to a zero-crossing.
+        std::vector<long> cuts;
+        for (const auto& m : cand) {
+            if (static_cast<int>(cuts.size()) >= keep) break;
+            const long f = snap_zc(static_cast<long>(m.frame));
+            if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
+            bool ok = true;
+            for (long c : cuts)
+                if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
+            if (ok) cuts.push_back(f);
+        }
+        std::sort(cuts.begin(), cuts.end());
 
         slices_orig_.clear();
         slices_orig_.push_back(0);
-        for (const auto& m : cand) slices_orig_.push_back(static_cast<long>(m.frame));
+        for (long c : cuts) slices_orig_.push_back(c);
         slices_orig_.push_back(raw_frames_);
-        std::sort(slices_orig_.begin(), slices_orig_.end());
         slices_orig_.erase(std::unique(slices_orig_.begin(), slices_orig_.end()), slices_orig_.end());
     }
 

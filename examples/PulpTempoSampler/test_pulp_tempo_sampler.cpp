@@ -610,6 +610,43 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
     REQUIRE(f.proc->num_slices() > low);
 }
 
+// Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
+// guard) and every cut snapped to a zero-crossing so slice edges don't click.
+TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",
+          "[tempo-sampler][issue-slicing]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);  // dense onsets to stress short slices
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.store.set_value(kOnsetSens, 1.0f);     // max slices — where slivers appeared
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 3; }));
+
+    std::vector<float> mono; float sr = 0.0f; std::vector<long> slices;
+    REQUIRE(f.proc->snapshot_for_view(mono, sr, slices));
+    REQUIRE(slices.size() >= 4);             // 0, >=2 interior cuts, end
+
+    // (a) every slice — including the first [0,cut) and last [cut,end) — is at least
+    // ~30 ms long (no sliver). The internal floor is 40 ms; assert a safe lower bound.
+    const long min_len = static_cast<long>(0.030 * sr);
+    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+        INFO("slice " << i << " [" << slices[i] << "," << slices[i + 1] << ")");
+        CHECK(slices[i + 1] - slices[i] >= min_len);
+    }
+    // (b)+(c) each INTERIOR boundary is a zero-crossing (sign change), so both the
+    // end of the previous slice and the start of the next begin at zero — no click.
+    for (std::size_t i = 1; i + 1 < slices.size(); ++i) {
+        const long b = slices[i];
+        REQUIRE(b > 0); REQUIRE(b < static_cast<long>(mono.size()));
+        const bool sign_change = (mono[static_cast<size_t>(b - 1)] <= 0.0f) !=
+                                 (mono[static_cast<size_t>(b)] <= 0.0f);
+        INFO("boundary " << b << " prev=" << mono[static_cast<size_t>(b - 1)]
+                         << " cur=" << mono[static_cast<size_t>(b)]);
+        CHECK(sign_change);
+    }
+}
+
 // Item A: the footer TEMPO box drives a target-tempo override. Engaging it pins
 // the render denominator R = loop_bpm / target, so the published (tempo-matched)
 // buffer length is round(in * loop / target) — a faster target shortens it.
