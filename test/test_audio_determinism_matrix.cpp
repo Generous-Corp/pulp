@@ -90,7 +90,7 @@ std::vector<float> process_blocked(pulp::format::HeadlessHost& host,
 // ── PulpGain: unity-gain pass-through is bit-exact at every cell ──────
 
 TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR x block",
-          "[audio][matrix][determinism][issue-356]") {
+          "[audio][matrix][determinism]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {
             CAPTURE(sr);
@@ -121,7 +121,7 @@ TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR x block",
 // ── PulpGain: silent input stays silent at every cell ────────────────
 
 TEST_CASE("Audio matrix: PulpGain silent-in -> silent-out across SR x block",
-          "[audio][matrix][silence][issue-356]") {
+          "[audio][matrix][silence]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {
             CAPTURE(sr);
@@ -144,7 +144,7 @@ TEST_CASE("Audio matrix: PulpGain silent-in -> silent-out across SR x block",
 // ── Block-size invariance: same input, same state, different block ──
 
 TEST_CASE("Audio matrix: PulpGain block-size invariance at unity",
-          "[audio][matrix][determinism][issue-356]") {
+          "[audio][matrix][determinism]") {
     constexpr double sr = 48000.0;
     constexpr int total = 8192;
 
@@ -173,7 +173,7 @@ TEST_CASE("Audio matrix: PulpGain block-size invariance at unity",
 // ── SR change via re-prepare() is clean ──────────────────────────────
 
 TEST_CASE("Audio matrix: PulpGain re-prepare at a new SR does not leak state",
-          "[audio][matrix][prepare][issue-356]") {
+          "[audio][matrix][prepare]") {
     pulp::format::HeadlessHost host(pulp::examples::create_pulp_gain);
 
     host.prepare(44100.0, 256);
@@ -201,7 +201,7 @@ TEST_CASE("Audio matrix: PulpGain re-prepare at a new SR does not leak state",
 // ── PulpTone instrument: no MIDI ⇒ silent at every cell ─────────────
 
 TEST_CASE("Audio matrix: PulpTone silence invariant across SR x block",
-          "[audio][matrix][instrument][silence][issue-356]") {
+          "[audio][matrix][instrument][silence]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {
             CAPTURE(sr);

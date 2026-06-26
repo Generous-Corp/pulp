@@ -1,8 +1,7 @@
-// #302: NetworkServiceDiscovery core dispatches through an installed
-// Backend. Without one, every op is an honest no-op — browse() does
-// NOT fake-success (the pre-#302 stub did), register_service()
-// returns false, notify_service_found doesn't arrive because no
-// backend is running.
+// NetworkServiceDiscovery core dispatches through an installed Backend.
+// Without one, every op is an honest no-op: browse() does not report a
+// fake running state, register_service() returns false, and
+// notify_service_found cannot arrive because no backend is running.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/events/service_discovery.hpp>
@@ -28,11 +27,11 @@ using pulp::events::ServicePublisher;
 using namespace std::chrono_literals;
 
 TEST_CASE("NSD without backend is honest no-op, not fake-success",
-          "[events][service-discovery][issue-302]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     REQUIRE_FALSE(nsd.has_backend());
 
-    // browse() with no backend must NOT set running_ — pre-#302 bug.
+    // browse() with no backend must NOT set running_.
     nsd.browse("_http._tcp");
 
     // register_service() returns false explicitly.
@@ -86,7 +85,7 @@ public:
 } // namespace
 
 TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
-          "[events][service-discovery][issue-302]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -111,7 +110,7 @@ TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
 }
 
 TEST_CASE("NSD can browse again after stop",
-          "[events][service-discovery][codecov]") {
+          "[events][service-discovery][coverage]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -127,7 +126,7 @@ TEST_CASE("NSD can browse again after stop",
 }
 
 TEST_CASE("NSD unregister after backend removal is a no-op",
-          "[events][service-discovery][codecov]") {
+          "[events][service-discovery][coverage]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -142,7 +141,7 @@ TEST_CASE("NSD unregister after backend removal is a no-op",
 }
 
 TEST_CASE("NSD browse backend can publish through the dispatcher",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -173,7 +172,7 @@ TEST_CASE("NSD browse backend can publish through the dispatcher",
 }
 
 TEST_CASE("NSD forwards discovered services via on_service_found",
-          "[events][service-discovery][issue-302]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -208,7 +207,7 @@ TEST_CASE("NSD forwards discovered services via on_service_found",
 }
 
 TEST_CASE("NSD preserves backend failure and no-callback discovery paths",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -243,10 +242,10 @@ TEST_CASE("NSD preserves backend failure and no-callback discovery paths",
     REQUIRE(nsd.discovered().empty());
 }
 
-// #310: re-announces with changed metadata must refresh
-// the cached entry and fire on_service_found, not silently drop.
+// Re-announces with changed metadata must refresh the cached entry and
+// fire on_service_found, not silently drop.
 TEST_CASE("NSD refreshes cached entries when metadata changes on re-announce",
-          "[events][service-discovery][issue-310]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -278,12 +277,12 @@ TEST_CASE("NSD refreshes cached entries when metadata changes on re-announce",
     REQUIRE(nsd.discovered().front().address == "10.0.0.2");
 }
 
-// #310: swapping backends must clear the cache so a
-// stale discovery from the previous backend doesn't leak into
-// queries against the new one. on_service_lost should fire for
-// each evicted entry so subscribers can react.
+// Swapping backends must clear the cache so a stale discovery from the
+// previous backend doesn't leak into queries against the new one.
+// on_service_lost should fire for each evicted entry so subscribers can
+// react.
 TEST_CASE("NSD clears discoveries and fires on_service_lost when swapping backends",
-          "[events][service-discovery][issue-310]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -306,11 +305,11 @@ TEST_CASE("NSD clears discoveries and fires on_service_lost when swapping backen
     REQUIRE((lost[0] == "alpha" || lost[0] == "beta"));
 }
 
-// #314: if a subscriber's on_service_lost
-// handler re-enters the NSD API during a backend swap, it must see
-// the NEW backend state — not the torn-down old one.
+// If a subscriber's on_service_lost handler re-enters the NSD API
+// during a backend swap, it must see the NEW backend state — not the
+// torn-down old one.
 TEST_CASE("NSD install_backend: on_service_lost re-entry sees the new backend",
-          "[events][service-discovery][issue-314]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -358,7 +357,7 @@ TEST_CASE("NSD removing backend stops old backend and evicts discoveries",
 }
 
 TEST_CASE("NSD caches same-name services separately by type",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -384,7 +383,7 @@ TEST_CASE("NSD caches same-name services separately by type",
 }
 
 TEST_CASE("NSD install_backend nullptr without discoveries only stops old backend",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -404,7 +403,7 @@ TEST_CASE("NSD install_backend nullptr without discoveries only stops old backen
 }
 
 TEST_CASE("NSD stop forwards to backend even before browsing",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -418,7 +417,7 @@ TEST_CASE("NSD stop forwards to backend even before browsing",
 }
 
 TEST_CASE("NSD discovery stores entries when callbacks are absent",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -437,7 +436,7 @@ TEST_CASE("NSD discovery stores entries when callbacks are absent",
 }
 
 TEST_CASE("LockingAsyncUpdater trigger_and_wait handles every call synchronously",
-          "[events][service-discovery][locking-updater][issue-642]") {
+          "[events][service-discovery][locking-updater]") {
     RecordingLockingUpdater updater;
 
     updater.trigger_and_wait();
@@ -448,7 +447,7 @@ TEST_CASE("LockingAsyncUpdater trigger_and_wait handles every call synchronously
 }
 
 TEST_CASE("NSD backend swap clears discoveries without lost callback",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -470,7 +469,7 @@ TEST_CASE("NSD backend swap clears discoveries without lost callback",
 }
 
 TEST_CASE("NSD removing backend with no lost handler still clears cache",
-          "[events][service-discovery][lifecycle][issue-642]") {
+          "[events][service-discovery][lifecycle]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -491,7 +490,7 @@ TEST_CASE("NSD removing backend with no lost handler still clears cache",
 }
 
 TEST_CASE("NSD keys discoveries and loss by service name plus type",
-          "[events][service-discovery][issue-642]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -528,7 +527,7 @@ TEST_CASE("NSD keys discoveries and loss by service name plus type",
 }
 
 TEST_CASE("NSD routes register and unregister to the current backend after swaps",
-          "[events][service-discovery][codecov]") {
+          "[events][service-discovery][coverage]") {
     NetworkServiceDiscovery nsd;
     auto first = std::make_unique<FakeBackend>();
     auto first_log = first->log;
@@ -555,7 +554,7 @@ TEST_CASE("NSD routes register and unregister to the current backend after swaps
 }
 
 TEST_CASE("NSD loss matching ignores services with the same type but different name",
-          "[events][service-discovery][codecov]") {
+          "[events][service-discovery][coverage]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -604,7 +603,7 @@ TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
 }
 
 TEST_CASE("MountedVolumeListChangeDetector stop before start is idempotent",
-          "[events][volume][lifecycle][issue-642]") {
+          "[events][volume][lifecycle]") {
     MountedVolumeListChangeDetector detector;
 
     REQUIRE_FALSE(detector.is_running());
@@ -642,7 +641,7 @@ TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
 }
 
 TEST_CASE("MountedVolumeListChangeDetector stop wakes a long poll promptly",
-          "[events][volume][lifecycle][codecov]") {
+          "[events][volume][lifecycle][coverage]") {
 #ifdef _WIN32
     SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
     return;

@@ -151,7 +151,7 @@ TEST_CASE("XmlDocument load_file failure clears prior state and save_file report
 }
 
 TEST_CASE("XmlDocument empty document queries are inert",
-          "[runtime][xml][coverage][issue-641]") {
+          "[runtime][xml][coverage]") {
     XmlDocument doc;
 
     REQUIRE_FALSE(doc.is_valid());
@@ -168,7 +168,7 @@ TEST_CASE("XmlDocument empty document queries are inert",
 }
 
 TEST_CASE("XmlDocument move construction and assignment preserve parsed state",
-          "[runtime][xml][coverage][issue-641]") {
+          "[runtime][xml][coverage]") {
     XmlDocument original;
     REQUIRE(original.parse(R"(<root name="first"><child>value</child></root>)"));
 
@@ -206,7 +206,7 @@ TEST_CASE("xml_generate creates document", "[runtime][xml]") {
 }
 
 TEST_CASE("xml_generate handles empty and repeated elements",
-          "[runtime][xml][coverage][issue-641]") {
+          "[runtime][xml][coverage]") {
     auto xml = xml_generate("metadata", {
         {"tag", "alpha"},
         {"tag", "beta"},
@@ -387,7 +387,7 @@ TEST_CASE("deflate compression levels round-trip edge settings",
 }
 
 TEST_CASE("zip helpers reject malformed deflate and zlib input",
-          "[runtime][zip][coverage][phase3-large]") {
+          "[runtime][zip][coverage][large]") {
     const uint8_t malformed[] = {0xde, 0xad, 0xbe, 0xef};
     const std::vector<uint8_t> malformed_raw = {0xff, 0x00, 0x7a, 0x13, 0x42};
     REQUIRE_FALSE(deflate_decompress(malformed, sizeof(malformed)).has_value());
@@ -396,7 +396,7 @@ TEST_CASE("zip helpers reject malformed deflate and zlib input",
 }
 
 TEST_CASE("deflate empty payload round-trips through raw helpers",
-          "[runtime][zip][coverage][phase3-large]") {
+          "[runtime][zip][coverage][large]") {
     auto compressed = deflate_compress(nullptr, 0);
     REQUIRE(compressed.has_value());
 
@@ -418,7 +418,7 @@ TEST_CASE("deflate_decompress rejects truncated raw streams",
 }
 
 TEST_CASE("deflate_decompress rejects empty raw streams without growth",
-          "[runtime][zip][coverage][phase3]") {
+          "[runtime][zip][coverage]") {
     REQUIRE_FALSE(deflate_decompress(nullptr, 0).has_value());
 
     const uint8_t unused = 0;
@@ -523,7 +523,7 @@ TEST_CASE("gzip_decompress rejects suffixes that start like partial members",
 // gzip_compress() must emit a real RFC 1952 stream — magic bytes, deflate
 // CM, valid CRC32 and ISIZE trailer — not a zlib (RFC 1950) stream wearing
 // the "gzip" name.
-TEST_CASE("gzip_compress emits RFC 1952 magic bytes and deflate CM", "[runtime][zip][issue-468]") {
+TEST_CASE("gzip_compress emits RFC 1952 magic bytes and deflate CM", "[runtime][zip][rfc1952]") {
     std::string original = "RFC 1952 compliance check — magic bytes 0x1f 0x8b, CM=8, valid trailer.";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -535,7 +535,7 @@ TEST_CASE("gzip_compress emits RFC 1952 magic bytes and deflate CM", "[runtime][
     CHECK(((*compressed)[3] & 0xE0) == 0);
 }
 
-TEST_CASE("gzip_decompress accepts external RFC 1952 input", "[runtime][zip][issue-468]") {
+TEST_CASE("gzip_decompress accepts external RFC 1952 input", "[runtime][zip][rfc1952]") {
     // A real gzip stream produced by Python's `gzip.compress(b"hello\n", mtime=0)`,
     // matching what `printf "hello\n" | gzip -n` would emit on a typical
     // Unix host. Header: 1f 8b 08 00 00 00 00 00 02 ff  (FLG=0, MTIME=0,
@@ -550,7 +550,7 @@ TEST_CASE("gzip_decompress accepts external RFC 1952 input", "[runtime][zip][iss
     REQUIRE(*out == "hello\n");
 }
 
-TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer CRC", "[runtime][zip][issue-468]") {
+TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer CRC", "[runtime][zip][rfc1952]") {
     std::string original = "deterministic CRC check payload";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -561,7 +561,7 @@ TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer CRC", "[runti
     REQUIRE_FALSE(out.has_value());
 }
 
-TEST_CASE("gzip_decompress still accepts legacy zlib input (back-compat)", "[runtime][zip][issue-468]") {
+TEST_CASE("gzip_decompress still accepts legacy zlib input (back-compat)", "[runtime][zip][back-compat]") {
     // A pre-baked zlib (RFC 1950) stream produced by `printf "hello\n" |
     // pigz --zlib -c` (and verified to round-trip through Python's
     // zlib.decompress). The point is to exercise the zlib lane via input
@@ -581,7 +581,7 @@ TEST_CASE("gzip_decompress still accepts legacy zlib input (back-compat)", "[run
     REQUIRE(*out == "hello\n");
 }
 
-TEST_CASE("gzip_decompress rejects truncated header", "[runtime][zip][issue-468]") {
+TEST_CASE("gzip_decompress rejects truncated header", "[runtime][zip][rfc1952]") {
     static constexpr uint8_t kPartial[] = {0x1f, 0x8b, 0x08};  // missing rest of fixed header
     auto out = gzip_decompress(kPartial, sizeof(kPartial));
     REQUIRE_FALSE(out.has_value());
@@ -641,7 +641,7 @@ TEST_CASE("gzip_decompress rejects reserved RFC 1952 flag bits", "[runtime][zip]
     REQUIRE_FALSE(out.has_value());
 }
 
-TEST_CASE("gzip_decompress rejects malformed RFC 1952 optional headers", "[runtime][zip][issue-641]") {
+TEST_CASE("gzip_decompress rejects malformed RFC 1952 optional headers", "[runtime][zip][rfc1952]") {
     auto header = [](uint8_t flags) {
         return std::vector<uint8_t>{
             0x1f, 0x8b, 0x08, flags,
@@ -678,7 +678,7 @@ TEST_CASE("gzip_decompress rejects malformed RFC 1952 optional headers", "[runti
     }
 }
 
-TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer ISIZE", "[runtime][zip][issue-641]") {
+TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer ISIZE", "[runtime][zip][rfc1952]") {
     std::string original = "deterministic ISIZE check payload";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -690,7 +690,7 @@ TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer ISIZE", "[run
 }
 
 TEST_CASE("gzip_decompress rejects truncated member trailers and empty members",
-          "[runtime][zip][coverage][phase3]") {
+          "[runtime][zip][coverage]") {
     const std::string original = "truncated gzip trailer payload";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -717,7 +717,7 @@ TEST_CASE("gzip_decompress rejects truncated member trailers and empty members",
 // each member and concatenate the outputs, not treat the whole input as
 // one member.
 TEST_CASE("gzip_decompress handles concatenated RFC 1952 members",
-          "[runtime][zip][issue-468]") {
+          "[runtime][zip][rfc1952]") {
     using namespace pulp::runtime;
     const std::string a = "first member payload\n";
     const std::string b = "second member payload\n";
@@ -743,7 +743,7 @@ TEST_CASE("gzip_decompress handles concatenated RFC 1952 members",
 }
 
 TEST_CASE("gzip_decompress rejects trailing garbage after the last member",
-          "[runtime][zip][issue-468]") {
+          "[runtime][zip][rfc1952]") {
     using namespace pulp::runtime;
     auto g = gzip_compress(std::string{"hello\n"});
     REQUIRE(g.has_value());
