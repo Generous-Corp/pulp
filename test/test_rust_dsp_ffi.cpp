@@ -117,7 +117,7 @@ TEST_CASE("C++ allocation inside a no-alloc scope also traps (death test)",
     REQUIRE((WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGTRAP));
 }
 
-TEST_CASE("parity-harness skeleton exposes the reference matrix",
+TEST_CASE("parity harness declares the reference matrix",
           "[rust-dsp][parity]") {
     // This only declares the matrix; per-format execution is wired separately.
     REQUIRE(std::size(test::kReferenceProcessors) == 3);

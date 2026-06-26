@@ -160,7 +160,7 @@ fn upgrade_notes_lane_emits_from_to_json() {
 
 #[test]
 fn upgrade_install_dry_run_plants_pending_marker() {
-    // Phase 8: the install path now downloads + replaces both
+    // The install path downloads and replaces both
     // binaries (Rust pulp + sibling pulp-cpp). Cargo runs us under
     // `target/` so the build-artifact guard would refuse the swap
     // anyway, but we set the explicit dry-run env var so the
@@ -184,7 +184,7 @@ fn upgrade_install_dry_run_plants_pending_marker() {
     assert!(home.path().join("pending-upgrade").exists());
 }
 
-/// Phase 8: integration-level coverage for the build-artifact guard.
+/// Integration-level coverage for the build-artifact guard.
 /// `pulp upgrade --install` invoked from cargo's target/ tree
 /// must refuse to clobber the running binary unless the user opts
 /// into the live path explicitly.

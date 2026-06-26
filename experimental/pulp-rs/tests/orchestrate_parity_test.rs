@@ -1,4 +1,4 @@
-//! Parity tests for the Phase 6 orchestrator ports.
+//! Parity tests for the Rust orchestrator ports.
 //!
 //! # What parity means here
 //!
@@ -51,9 +51,8 @@ fn sdk_status_reports_empty_state_with_canonical_prefix() {
         .expect("run");
     assert!(out.status.success(), "exit: {:?}", out.status);
     let s = String::from_utf8_lossy(&out.stdout);
-    // These three lines are the C++ CLI's idle output since #499.
-    // Byte-for-byte match with the fixture captured from the live
-    // C++ binary on 2026-04-23.
+    // These three lines are the C++ CLI's idle output.
+    // Byte-for-byte match with the fixture captured from the live C++ binary.
     let expected = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/sdk/empty/expected.txt"

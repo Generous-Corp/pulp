@@ -107,7 +107,7 @@ fn version_human_lane_prints_cli_and_plugin() {
     let output = cmd.output().unwrap();
     assert!(output.status.success());
     let s = String::from_utf8(output.stdout).unwrap();
-    // Phase 8 binary swap (#767): banner is now `pulp v…` (was `pulp-rs v… (prototype)`).
+    // The human lane emits the public `pulp v...` banner.
     assert!(s.contains("pulp v0.37.0"));
     assert!(s.contains("Claude plugin: v0.12.0"));
 }

@@ -1,4 +1,4 @@
-//! Phase 6c integration tests — `pulp-rs add / remove / list / search /
+//! Integration tests for `pulp-rs add / remove / list / search /
 //! update / suggest / target / audit`.
 //!
 //! These exercise the public library surface
