@@ -214,7 +214,7 @@ TEST_CASE("pulp-scan-worker emits JSON for a manifest-free VST3 bundle",
 }
 
 TEST_CASE("pulp-scan-worker reports VST3 moduleinfo identity and booleans",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker][coverage]") {
     ScratchDir scratch("vst3-moduleinfo");
     auto bundle = scratch.path / "ModuleInfoProbe.vst3";
     fs::create_directories(bundle / "Contents" / "Resources");
@@ -244,7 +244,7 @@ TEST_CASE("pulp-scan-worker reports VST3 moduleinfo identity and booleans",
 }
 
 TEST_CASE("pulp-scan-worker filters sibling bundles from the same directory",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker][coverage]") {
     ScratchDir scratch("vst3-siblings");
     auto target = scratch.path / "Target.vst3";
     auto sibling = scratch.path / "Sibling.vst3";
@@ -264,7 +264,7 @@ TEST_CASE("pulp-scan-worker filters sibling bundles from the same directory",
 }
 
 TEST_CASE("pulp-scan-worker emits fallback JSON for unreadable CLAP bundles",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker][coverage]") {
     ScratchDir scratch("clap-fallback");
     auto bundle = scratch.path / "Fallback.clap";
     write_file(bundle, "not a dynamic library");
@@ -283,7 +283,7 @@ TEST_CASE("pulp-scan-worker emits fallback JSON for unreadable CLAP bundles",
 }
 
 TEST_CASE("pulp-scan-worker preserves fallback JSON fields for spaced CLAP paths",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker][coverage]") {
     ScratchDir scratch("spaced-clap");
     auto bundle = scratch.path / "Space Name.clap";
     write_file(bundle, "not a dynamic library");
