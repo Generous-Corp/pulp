@@ -2,7 +2,7 @@
 //
 // Verifies register_font_url(...) returns a future that resolves to
 // the expected FontState for each URL scheme:
-//   * `http://` / `https://` → immediately Failed (until 2.1.b lands).
+//   * `http://` / `https://` → immediately Failed.
 //   * `file://` and bare absolute paths → dispatched async,
 //     resolves to Loaded for a valid font, Failed for a missing path.
 //   * empty input → Failed.
@@ -46,14 +46,14 @@ std::string write_temp_dummy_font_bytes() {
 
 } // namespace
 
-TEST_CASE("register_font_url: empty URL → Failed", "[font][async][issue-2163]") {
+TEST_CASE("register_font_url: empty URL → Failed", "[font][async][failure]") {
     auto fut = register_font_url("");
     REQUIRE(fut.wait_for(2s) == std::future_status::ready);
     REQUIRE(fut.get() == FontState::Failed);
 }
 
-TEST_CASE("register_font_url: http(s) scheme not yet supported → Failed",
-          "[font][async][issue-2163]") {
+TEST_CASE("register_font_url: http(s) scheme resolves to Failed",
+          "[font][async][failure]") {
     {
         auto fut = register_font_url("https://example.com/font.ttf");
         REQUIRE(fut.wait_for(2s) == std::future_status::ready);
@@ -67,14 +67,14 @@ TEST_CASE("register_font_url: http(s) scheme not yet supported → Failed",
 }
 
 TEST_CASE("register_font_url: missing file path → Failed",
-          "[font][async][issue-2163]") {
+          "[font][async][failure]") {
     auto fut = register_font_url("/no/such/path/font.ttf");
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
     REQUIRE(fut.get() == FontState::Failed);
 }
 
 TEST_CASE("register_font_url: file:// URL with invalid bytes → Failed",
-          "[font][async][issue-2163]") {
+          "[font][async][failure]") {
     std::string path = write_temp_dummy_font_bytes();
     auto fut = register_font_url("file://" + path);
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
@@ -110,7 +110,7 @@ TEST_CASE("register_font_url: bare file: scheme uses the following path",
 }
 
 TEST_CASE("register_font_url: bare absolute path with invalid bytes → Failed",
-          "[font][async][issue-2163]") {
+          "[font][async][failure]") {
     std::string path = write_temp_dummy_font_bytes();
     auto fut = register_font_url(path);
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
@@ -144,7 +144,7 @@ TEST_CASE("register_font_url: unsupported schemes are treated as plain paths",
 // test SUCCEEDs without exercising the throw — the cross-platform
 // CI matrix will still hit the case on at least one OS.
 TEST_CASE("register_font_url: detached worker survives allocation throw",
-          "[font][async][issue-2308]") {
+          "[font][async][worker][allocation]") {
     namespace fs = std::filesystem;
     auto tmp = fs::temp_directory_path() / "pulp_font_async_huge_sparse.bin";
     std::error_code ec;
@@ -179,7 +179,7 @@ TEST_CASE("register_font_url: detached worker survives allocation throw",
 // that scheduling a registration and then dropping the future does not
 // block the caller; the worker may still be running in the background.
 TEST_CASE("register_font_url: dropping the future does not block the caller",
-          "[font][async][issue-2246]") {
+          "[font][async][detach]") {
     namespace fs = std::filesystem;
     std::string path = write_temp_dummy_font_bytes();
 
@@ -199,7 +199,7 @@ TEST_CASE("register_font_url: dropping the future does not block the caller",
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
 
     // A reasonable bound: even on a slow CI host, decoupling from the
-    // worker thread should take well under 100ms. Pre-fix, this would
+    // worker thread should take well under 100ms. A joining future would
     // have blocked for the full register_font_file duration.
     REQUIRE(elapsed.count() < 100);
 

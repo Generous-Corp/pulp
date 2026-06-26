@@ -1,4 +1,4 @@
-//! Phase 6b integration tests — `pulp-rs project bump / undo`.
+//! Integration tests for `pulp-rs project bump / undo`.
 //!
 //! The test fixtures under `tests/fixtures/project/` each hold one
 //! `CMakeLists.txt` with a specific pin shape. Each test copies the
@@ -32,10 +32,10 @@ fn run_bump(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Outpu
     cmd.current_dir(cwd);
     cmd.env("PULP_HOME", pulp_home);
     cmd.env_remove("NO_COLOR");
-    // pulp#740 Slice A: pin the CLI's self-reported version to a
+    // CLI-skew safety rail: pin the CLI's self-reported version to a
     // value that dominates any plausible `--to` target in these
-    // fixtures (0.40.x, 0.41.x, etc.) so the new CLI-skew gate
-    // (added in the same slice) doesn't fire on parity-test
+    // fixtures (0.40.x, 0.41.x, etc.) so the CLI-skew gate
+    // does not fire on parity-test
     // targets. The test CLI's actual version is
     // CARGO_PKG_VERSION=0.0.1 which would otherwise refuse every
     // bump-to-a-real-version.

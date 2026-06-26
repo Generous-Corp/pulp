@@ -1,4 +1,4 @@
-//! Phase 6d parity tests — `dev`, `create`, `docs`, `design`, `tool`.
+//! Command-surface parity tests for `dev`, `create`, `docs`, `design`, `tool`.
 //!
 //! # Scope
 //!
