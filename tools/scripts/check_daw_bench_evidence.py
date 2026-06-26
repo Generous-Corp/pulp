@@ -15,6 +15,7 @@ bench evidence.
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as _dt
 import json
 import pathlib
@@ -46,6 +47,7 @@ PLACEHOLDER_RE = re.compile(r"(?:^|\b)(?:TBD|TODO|FIXME|<[^>]+>|paste here)(?:\b
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 FLAG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 LOG_LINE_RE = re.compile(r"^[^\t]+\t(?P<event>[A-Za-z_][A-Za-z0-9_]*)")
+LOG_PLUGIN_VERSION_KEYS = {"plugin_version", "pulp_bench_plugin"}
 
 FLAG_LOG_EVENTS: dict[str, tuple[str, ...]] = {
     "clamp_latency_to_nonneg": ("prepare",),
@@ -202,6 +204,47 @@ def _events_in_log(path: pathlib.Path) -> set[str]:
     except OSError:
         return events
     return events
+
+
+def _plugin_versions_in_log(path: pathlib.Path) -> set[str]:
+    versions: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as f:
+            for row in csv.reader(f, delimiter="\t"):
+                for field in row[2:]:
+                    key, sep, value = field.partition("=")
+                    if sep and key in LOG_PLUGIN_VERSION_KEYS and value.strip():
+                        versions.add(value.strip())
+    except OSError:
+        return versions
+    return versions
+
+
+def _validate_log_plugin_version(
+    data: dict[str, Any],
+    log_paths: list[pathlib.Path],
+) -> list[str]:
+    manifest_version = data.get("plugin_version")
+    if (
+        not log_paths
+        or not isinstance(manifest_version, str)
+        or not manifest_version.strip()
+        or _is_placeholder(manifest_version)
+    ):
+        return []
+
+    observed_versions: set[str] = set()
+    for path in log_paths:
+        observed_versions.update(_plugin_versions_in_log(path))
+
+    if not observed_versions or observed_versions == {manifest_version}:
+        return []
+
+    return [
+        "plugin_version "
+        f"{manifest_version} must match all checked-in log version(s): "
+        f"{', '.join(sorted(observed_versions))}"
+    ]
 
 
 def _validate_claimed_log_events(
@@ -401,6 +444,7 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
 
     errors.extend(_validate_quirks(data))
     errors.extend(_validate_capabilities(data))
+    errors.extend(_validate_log_plugin_version(data, log_paths))
     errors.extend(_validate_claimed_log_events(data, log_paths))
     return ValidationResult(path, tuple(errors))
 
