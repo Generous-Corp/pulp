@@ -36,7 +36,7 @@ pulp build --target pulp-ui-preview
 Capture a headless screenshot for visual regression:
 
 ```bash
-./build/examples/ui-preview/pulp-ui-preview --script examples/showcase/showcase.js --screenshot
+./build/examples/ui-preview/pulp-ui-preview --script examples/showcase/showcase.js --screenshot /tmp/pulp-showcase.png
 # Output: /tmp/pulp-showcase.png
 ```
 

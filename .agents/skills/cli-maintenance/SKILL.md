@@ -925,6 +925,13 @@ orders in lockstep.
   valid with `--audio-scope-json`. Forward all four argv values plus
   `PULP_AUDIO_SCOPE_JSON`, `PULP_AUDIO_SCOPE_WINDOW`,
   `PULP_AUDIO_SCOPE_TRIGGER`, and `PULP_AUDIO_SCOPE_CHANNEL`.
+- `--audio-capture-wav <path>` — write the live output ring to a WAV and
+  exit. It owns `--audio-capture-frames`, implies `--headless`, does not
+  imply a screenshot artifact, and shares the single live capture FIFO with
+  `--audio-inspector` / `--audio-scope-json`. Forward the argv pair plus
+  `PULP_AUDIO_CAPTURE_WAV`; forward `PULP_AUDIO_CAPTURE_WAV_FRAMES` only when
+  the frames option is explicitly positive. Keep the C++ parser, Rust parser,
+  C++ help, Rust help, docs/status entry, and skill text in sync.
 
 The CLI parser is unit-tested in `test/test_cli_run_options.cpp`
 (parse + forwarding contract) and end-to-end shell-out coverage lives
@@ -932,7 +939,8 @@ in `test/test_cli_shellout.cpp`, which exercises
 the discover-binary → launch-with-flags → PNG-on-disk path against the
 fixture binary in `test/fixtures/cli_run_fixture.cpp`. Rust parser and
 orchestrator parity lives in `experimental/pulp-rs/src/cmd/run_parse.rs`
-and `experimental/pulp-rs/src/cmd/orchestrate.rs` tests.
+and `experimental/pulp-rs/src/cmd/orchestrate.rs` tests; update these in the
+same PR whenever the C++ run parser gains a user-facing flag.
 
 Gotchas:
 

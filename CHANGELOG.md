@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04991"></a>
+## [0.499.1] - 2026-06-26
+
+- fix(cli): port run audio capture flags to rust ([#4925](https://github.com/danielraffel/pulp/pull/4925))
+- docs(test): refresh stale review severity labels ([#4923](https://github.com/danielraffel/pulp/pull/4923))
+- docs(webview): remove phase-era wording ([#4918](https://github.com/danielraffel/pulp/pull/4918))
+
 <a id="v04990"></a>
 ## [0.499.0] - 2026-06-26
 
@@ -5232,6 +5239,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.499.1]: https://github.com/danielraffel/pulp/releases/tag/v0.499.1
 [0.499.0]: https://github.com/danielraffel/pulp/releases/tag/v0.499.0
 [0.498.0]: https://github.com/danielraffel/pulp/releases/tag/v0.498.0
 [0.497.0]: https://github.com/danielraffel/pulp/releases/tag/v0.497.0
