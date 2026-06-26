@@ -49,9 +49,9 @@ Pulp wraps a single `Processor` subclass and exposes it through multiple plugin 
 |---|---|---|---|---|
 | VST3 effect | usable | [format](modules.md#format) | [getting-started](../guides/getting-started.md) | pulp-gain, pulp-effect, pulp-compressor |
 | VST3 instrument | usable | [format](modules.md#format) | | PulpTone, PulpPluck |
-| Audio Unit v2 effect | usable | [format](modules.md#format) | [getting-started](../guides/getting-started.md) | pulp-gain, pulp-effect |
+| Audio Unit v2 effect | usable | [format](modules.md#format) | [getting-started](../guides/getting-started.md) | pulp-gain, pulp-effect, pulp-compressor |
 | Audio Unit v2 instrument | usable | [format](modules.md#format) | | PulpTone, PulpPluck |
-| CLAP effect | usable | [format](modules.md#format) | | pulp-gain, pulp-effect |
+| CLAP effect | usable | [format](modules.md#format) | | pulp-gain, pulp-effect, pulp-compressor |
 | CLAP instrument | usable | [format](modules.md#format) | | PulpSynth |
 | Standalone app | usable | [format](modules.md#format) | | pulp-gain |
 | Headless host | usable | [format](modules.md#format) | [testing](../guides/testing.md) | |
