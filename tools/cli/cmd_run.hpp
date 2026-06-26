@@ -31,6 +31,8 @@ struct ParseRunResult {
     int audio_scope_window = 2048;      ///< --audio-scope-window <samples>
     std::string audio_scope_trigger = "rising-zero"; ///< --audio-scope-trigger <mode>
     int audio_scope_channel = 0;        ///< --audio-scope-channel <index>
+    std::string audio_capture_wav_path; ///< --audio-capture-wav <file>; implies --headless
+    int audio_capture_frames = 0;       ///< --audio-capture-frames <n>, 0 = ring default
 
     /// Args explicitly forwarded by the user with `-- ...`, plus any
     /// unknown flags (legacy permissive behaviour).

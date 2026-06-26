@@ -52,6 +52,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     ParseRunResult r;
     bool after_separator = false;
     bool audio_scope_acquisition_option_seen = false;
+    bool audio_capture_frames_option_seen = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& a = args[i];
@@ -239,6 +240,45 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
 
+        if (a == "--audio-capture-wav") {
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                r.error = "--audio-capture-wav requires a path argument";
+                return r;
+            }
+            r.audio_capture_wav_path = args[++i];
+            r.headless = true;
+            continue;
+        }
+        if (a.rfind("--audio-capture-wav=", 0) == 0) {
+            r.audio_capture_wav_path = a.substr(std::string("--audio-capture-wav=").size());
+            if (r.audio_capture_wav_path.empty()) {
+                r.error = "--audio-capture-wav= requires a non-empty path";
+                return r;
+            }
+            r.headless = true;
+            continue;
+        }
+        if (a == "--audio-capture-frames") {
+            audio_capture_frames_option_seen = true;
+            if (i + 1 >= args.size() || !parse_frame_count(args[i + 1], r.audio_capture_frames)
+                || r.audio_capture_frames <= 0) {
+                r.error = "--audio-capture-frames requires a positive integer";
+                return r;
+            }
+            ++i;
+            continue;
+        }
+        if (a.rfind("--audio-capture-frames=", 0) == 0) {
+            audio_capture_frames_option_seen = true;
+            if (!parse_frame_count(a.substr(std::string("--audio-capture-frames=").size()),
+                                   r.audio_capture_frames)
+                || r.audio_capture_frames <= 0) {
+                r.error = "--audio-capture-frames requires a positive integer";
+                return r;
+            }
+            continue;
+        }
+
         if (r.target_name.empty() && !a.empty() && a[0] != '-') {
             r.target_name = a;
             continue;
@@ -254,6 +294,15 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     if (audio_scope_acquisition_option_seen && r.audio_scope_json_path.empty()) {
         r.error = "--audio-scope-window, --audio-scope-trigger, and "
                   "--audio-scope-channel require --audio-scope-json";
+    }
+    // --audio-capture-wav is the third single-consumer of the one probe FIFO.
+    if (!r.audio_capture_wav_path.empty()
+        && (r.audio_inspector || !r.audio_scope_json_path.empty())) {
+        r.error = "--audio-capture-wav cannot be combined with --audio-inspector or "
+                  "--audio-scope-json; they share the one live capture FIFO";
+    }
+    if (audio_capture_frames_option_seen && r.audio_capture_wav_path.empty()) {
+        r.error = "--audio-capture-frames requires --audio-capture-wav";
     }
 
     return r;
@@ -288,6 +337,14 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
         out.push_back(opts.audio_scope_trigger);
         out.push_back("--audio-scope-channel");
         out.push_back(std::to_string(opts.audio_scope_channel));
+    }
+    if (!opts.audio_capture_wav_path.empty()) {
+        out.push_back("--audio-capture-wav");
+        out.push_back(opts.audio_capture_wav_path);
+        if (opts.audio_capture_frames > 0) {
+            out.push_back("--audio-capture-frames");
+            out.push_back(std::to_string(opts.audio_capture_frames));
+        }
     }
     for (const auto& a : opts.user_pass_through) {
         out.push_back(a);

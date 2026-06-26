@@ -294,6 +294,15 @@ dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
 - `--audio-scope-window <samples>` / `--audio-scope-trigger <none|raw|off|rising-zero>` /
   `--audio-scope-channel <index>` — acquisition controls for
   `--audio-scope-json`.
+- `--audio-capture-wav <file>` — capture the live output to a WAV after the frame
+  delay, then exit, so the offline `pulp audio validate` verbs can analyze it.
+  `--audio-capture-frames <n>` sets the ring window (0 = as much as the ring
+  holds). Implies `--headless` but still launches the live audio device, and
+  shares the single capture FIFO with `--audio-inspector` / `--audio-scope-json`
+  (the three are mutually exclusive). NOTE: this dumps the **earliest** window
+  after the stream starts (int16), which is robust for `validate summarize` /
+  `assert` (presence / level / clip / NaN); steady-state `doctor` (THD/response)
+  and `compare` want the rolling-ring follow-up.
 
 Display-only waveform controls:
 

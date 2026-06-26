@@ -231,7 +231,16 @@ entry has a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`,
 tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
 ...). The `/audio-harness` slash command documents these verbs.
 
-## Roadmap (planned — do NOT instruct using this until it lands)
+## Roadmap
 
-- **Live ring-capture-to-WAV** (`pulp audio validate` over a running plugin's
-  tapped output) and a scenario-driven `render` verb are later Phase-7 slices.
+- **Live capture-to-WAV — LANDED (earliest-window).** `pulp run
+  --audio-capture-wav <file>` taps the standalone's output-boundary probe ring
+  and dumps it to a WAV the offline `pulp audio validate` verbs read. It captures
+  the EARLIEST window after the stream starts (int16, drop-on-full FIFO), so it is
+  robust for `validate summarize` / `assert` (presence / level / clip / NaN) but
+  is the wrong window for steady-state `doctor` (THD/response) and is
+  quantization-limited for `compare`.
+- **Planned (do NOT instruct using these until they land):** the rolling-ring
+  capture variant (true last-N + float/24-bit WAV, lifting the doctor/compare
+  caveat above), and a scenario-driven `render` verb (`pulp audio render
+  --plugin <bundle> ...`) that renders a plugin offline from declarative flags.

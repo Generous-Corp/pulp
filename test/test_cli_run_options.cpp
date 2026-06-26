@@ -469,6 +469,47 @@ TEST_CASE("pulp run rejects invalid audio scope options and inspector contention
     REQUIRE_FALSE(contention.error.empty());
 }
 
+TEST_CASE("pulp run --audio-capture-wav implies headless and forwards the path",
+          "[cli][run][audio-capture-wav]") {
+    auto r = parse_run_options({"--audio-capture-wav", "/tmp/cap.wav",
+                                "--audio-capture-frames", "1024"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_capture_wav_path == "/tmp/cap.wav");
+    REQUIRE(r.audio_capture_frames == 1024);
+    REQUIRE(r.headless);
+    auto args = assemble_launch_args(r);
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-wav") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "/tmp/cap.wav") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-frames") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "1024") != args.end());
+
+    auto eq = parse_run_options({"--audio-capture-wav=/tmp/cap2.wav"});
+    REQUIRE(eq.error.empty());
+    REQUIRE(eq.audio_capture_wav_path == "/tmp/cap2.wav");
+    REQUIRE(eq.headless);
+    // Frames default to 0 (ring default) → not forwarded.
+    auto eq_args = assemble_launch_args(eq);
+    REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-frames")
+            == eq_args.end());
+}
+
+TEST_CASE("pulp run rejects invalid audio-capture-wav options and FIFO contention",
+          "[cli][run][audio-capture-wav]") {
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-wav="}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-frames", "0",
+                                     "--audio-capture-wav", "/tmp/c.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-frames=-1",
+                                     "--audio-capture-wav", "/tmp/c.wav"}).error.empty());
+    // --audio-capture-frames requires --audio-capture-wav.
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-frames", "512"}).error.empty());
+    // Shares the one capture FIFO with inspector + scope-json.
+    REQUIRE_FALSE(parse_run_options({"--audio-inspector",
+                                     "--audio-capture-wav", "/tmp/c.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-json", "/tmp/s.json",
+                                     "--audio-capture-wav", "/tmp/c.wav"}).error.empty());
+}
+
 TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
           "[cli][run][coverage]") {
     auto r = parse_run_options({"--standalone", "demo"});

@@ -92,6 +92,18 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
     if (!config.audio_scope_json_path.empty())
         config.headless = true;
 
+    if (auto capture_wav = runtime::get_env("PULP_AUDIO_CAPTURE_WAV");
+        capture_wav && config.audio_capture_wav_path.empty()) {
+        config.audio_capture_wav_path = *capture_wav;
+    }
+    if (auto frames = runtime::get_env("PULP_AUDIO_CAPTURE_WAV_FRAMES")) {
+        int parsed = 0;
+        if (parse_positive_frame_delay(*frames, parsed))
+            config.audio_capture_wav_frames = parsed;
+    }
+    if (!config.audio_capture_wav_path.empty())
+        config.headless = true;
+
     if (!config.screenshot_path.empty())
         config.headless = true;
 
@@ -104,6 +116,7 @@ inline bool standalone_headless_requires_screenshot(const StandaloneConfig& conf
 #if PULP_ENABLE_AUDIO_PROBES
     if (!config.audio_probe_json_path.empty()) return false;
     if (!config.audio_scope_json_path.empty()) return false;
+    if (!config.audio_capture_wav_path.empty()) return false;
 #endif
     return true;
 }
@@ -115,7 +128,8 @@ inline bool standalone_probe_json_requested_but_disabled(
     return false;
 #else
     return !config.audio_probe_json_path.empty()
-        || !config.audio_scope_json_path.empty();
+        || !config.audio_scope_json_path.empty()
+        || !config.audio_capture_wav_path.empty();
 #endif
 }
 
