@@ -525,7 +525,7 @@ TEST_CASE("pulp cache usage and parser errors are deterministic",
 }
 
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
-          "[cli][shellout][codex-562]") {
+          "[cli][shellout][issue-562]") {
     // #562: `pulp config foo` previously
     // fell through to usage() which returned 0, so scripts/CI could
     // not detect a typo'd subcommand. The new behaviour returns

@@ -5938,6 +5938,7 @@ add_executable(pulp-test-web-demos test_web_demos.cpp)
 target_link_libraries(pulp-test-web-demos PRIVATE pulp::format Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-demos PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/web-demos
+    ${CMAKE_SOURCE_DIR}/examples/pulp-pluck
 )
 catch_discover_tests(pulp-test-web-demos)
 

@@ -414,7 +414,7 @@ TEST_CASE("WidgetBridge install_runtime_import_handlers is idempotent",
 // one, an error from a previous import attempt would silently leak into
 // the next aggregation and surface as a false-positive failure.
 TEST_CASE("__pulpRuntimeImport__ clears all transient error globals before each call",
-          "[view][bridge][runtime-import][codex-p1-1856]") {
+          "[view][bridge][runtime-import][issue-1856]") {
     ScriptEngine engine;
     View root;
     StateStore store;

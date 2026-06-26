@@ -62,7 +62,7 @@ add_subdirectory(offline-stretch)
 # PulpTempoSampler — tempo-matching sampler built on the offline stretch engine
 add_subdirectory(PulpTempoSampler)
 
-# PulpPluck: Karplus-Strong synth that runs native and WASM
+# PulpPluck: Karplus-Strong synth reused by the WAM web demo
 add_subdirectory(pulp-pluck)
 
 # FAUST DSL examples: offline codegen to Processor

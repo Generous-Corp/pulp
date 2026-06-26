@@ -69,13 +69,12 @@ AudioWorkletProcessor  ──────►  wam_init(sampleRate, blockSize)
   getDescriptor        ──────►  wam_descriptor() → JSON
 ```
 
-The C++ side uses `WamProcessorBridge` which wraps a standard Pulp `Processor` — the same Processor that runs as VST3, AU, or CLAP on the desktop. Same DSP code, different format adapter.
+The C++ side uses `WamProcessorBridge` which wraps a standard Pulp `Processor`. PulpPluck reuses the native example processor source that runs as VST3, AU v2, or CLAP on the desktop; PulpGain and PulpChorus use the same adapter shape for their web-demo processors.
 
 ## File Structure
 
 ```
 web-demos/
-├── pulp_pluck.hpp          # PulpPluck Processor (Karplus-Strong synth)
 ├── pulp_chorus.hpp         # PulpChorus Processor (stereo chorus)
 ├── web_demos.cpp           # Registry include
 ├── CMakeLists.txt          # Native build (for testing)
@@ -85,6 +84,9 @@ web-demos/
     ├── pulp_gain_wasm.cpp  # PulpGain WASM entry point
     ├── pulp_pluck_wasm.cpp # PulpPluck WASM entry point
     └── pulp_chorus_wasm.cpp # PulpChorus WASM entry point
+
+../pulp-pluck/
+└── pulp_pluck.hpp          # Shared PulpPluck processor source
 ```
 
 ## Running Tests

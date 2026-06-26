@@ -170,7 +170,7 @@ TEST_CASE("range-1899 (#5): style.height > style.width also flips to vertical",
 // and width inline-explicit before comparing, so a horizontal slider
 // whose width comes from flex layout stays horizontal; `hasH && !hasW`
 // alone must not flip it vertical.
-TEST_CASE("range-1917 (P1): inline height without inline width stays HORIZONTAL",
+TEST_CASE("range-1917: inline height without inline width stays HORIZONTAL",
           "[input][range][issue-1917][regression]") {
     TestEnvironment env(400, 200);
     env.eval(R"JS(
@@ -197,7 +197,7 @@ TEST_CASE("range-1917 (P1): inline height without inline width stays HORIZONTAL"
 // when no `color` is set.
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_CASE("svg-1917 (P1): stroke=currentColor resolves to inline style.color",
+TEST_CASE("svg-1917: stroke=currentColor resolves to inline style.color",
           "[svg][currentColor][issue-1917]") {
     TestEnvironment env(400, 200);
     env.eval(R"JS(
@@ -225,7 +225,7 @@ TEST_CASE("svg-1917 (P1): stroke=currentColor resolves to inline style.color",
     REQUIRE(c.b < 0.05f);                  // 0x00
 }
 
-TEST_CASE("svg-1917 (P1): stroke=currentColor with no cascade defaults to black",
+TEST_CASE("svg-1917: stroke=currentColor with no cascade defaults to black",
           "[svg][currentColor][issue-1917]") {
     TestEnvironment env(400, 200);
     env.eval(R"JS(

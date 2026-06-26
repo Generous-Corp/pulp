@@ -303,7 +303,7 @@ TEST_CASE("StagingBufferPool clear() drops all tracked buffers",
 }
 
 TEST_CASE("StagingBufferPool::discard drops in_flight slot without recycling",
-          "[render][gpu][pool][codex-560]") {
+          "[render][gpu][pool][issue-560]") {
     // On MapAsync timeout, the caller cannot hand the buffer back via
     // release() (the GPU may still be mapping it) but must drop the
     // pool's reference so subsequent acquires don't grow in_flight_

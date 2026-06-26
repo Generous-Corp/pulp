@@ -1,5 +1,5 @@
 # PulpPluck — Karplus-Strong plucked-string synthesizer
-# Same Processor runs as AU v2, VST3, CLAP (native) and WASM (browser)
+# Processor source is reused by AU v2, VST3, CLAP, and the WAM browser demo
 
 pulp_add_plugin(PulpPluck
     FORMATS         VST3 AU CLAP

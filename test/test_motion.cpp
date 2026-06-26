@@ -1242,7 +1242,7 @@ TEST_CASE("assert_matches aligns events by stable IDs, not position",
 // ── NaN/Inf round-trip through fixture ───────────────────────────────
 
 TEST_CASE("Fixture round-trips NaN and Inf component values",
-          "[motion][fixture][codex-p1]") {
+          "[motion][fixture]") {
     Fixture fx;
     const auto path = tmp_fixture_path("nonfinite");
     Coordinator::instance().add_sink(make_fixture_sink(path));

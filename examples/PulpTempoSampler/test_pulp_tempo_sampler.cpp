@@ -811,19 +811,22 @@ TEST_CASE("QWERTY typing maps every key to a unique chromatic slice (no doubling
           "[tempo-sampler][issue-typing-double]") {
     Fixture f;
 
-    // Capture the slice index each physical key resolves to through the real path:
-    // SamplerEditorRoot key event -> typing controller -> keyboard_play_on(note).
+    // Drive the REAL path that carried the doubling bug: SamplerEditorRoot key event
+    // -> typing controller -> keyboard_play_on -> ui_note_on(trigger). Read the actual
+    // trigger note keyboard_play_on fired (not the controller's note) so a remap that
+    // collapsed two keys onto one slice would be caught.
     SamplerEditorRoot root;
     root.current_root_note = [] { return 60; };
     root.keyboard_window_visible = [] { return true; };
-    int last_slice = -1;
-    root.typing.on_note_on = [&](int n, float) { last_slice = f.proc->slice_index_for_note_test(n); };
+    root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
+    root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
     auto key = [](view::KeyCode k, bool down) { view::KeyEvent e; e.key = k; e.is_down = down; return e; };
     auto slice_of = [&](view::KeyCode k) {
-        last_slice = -1;
         root.on_key_event(key(k, true));
+        const auto trig = f.proc->held_trigger_notes_for_test();
+        const int slice = trig.empty() ? -1 : f.proc->slice_index_for_note_test(trig.back());
         root.on_key_event(key(k, false));
-        return last_slice;
+        return slice;
     };
 
     // White row -> white notes: a,s,d,f,g,h,j,k = slices 0,2,4,5,7,9,11,12.
@@ -927,6 +930,49 @@ TEST_CASE("re-slice preserves tempo; new load re-detects it", "[tempo-sampler][i
     const float* ch2[1] = {loop2.data()};
     REQUIRE(f.proc->load_loop(ch2, 1, 24000, 48000.0));
     CHECK(f.proc->load_generation() != load0);
+}
+
+TEST_CASE("QWERTY note-off releases the original slice after root changes",
+          "[tempo-sampler][issue-home-row]") {
+    Fixture f;
+    auto buf = sine(220.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.store.set_value(kTempoLoop, 1.0f);      // loop so a missed note-off is audible
+    f.store.set_value(kTempoRelease, 5.0f);   // fast decay once the right voice releases
+    f.store.set_value(kTempoSustain, 100.0f);
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    int root_note = 60;
+    SamplerEditorRoot root;
+    root.current_root_note = [&] { return root_note; };
+    root.keyboard_window_visible = [] { return true; };
+    root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
+    root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
+    auto key = [](view::KeyCode k, bool down) {
+        view::KeyEvent e; e.key = k; e.is_down = down; return e;
+    };
+
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));  // physical note 60 -> trigger 60
+    double held = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); held += block_energy(l); }
+    REQUIRE(held > 1e-3);
+
+    // Note-off must release the trigger note captured on key-down, not recompute it
+    // from the (now-changed) ROOT. The held set records each key's trigger at press
+    // time so the release always matches the voice that was started.
+    root_note = 72;
+    f.store.set_value(kRootNote, 72.0f);
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));
+    CHECK(f.proc->held_notes_for_test().empty());
+
+    for (int b = 0; b < 24; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    double tail = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); tail += block_energy(l); }
+    CHECK(tail < held * 0.05);
 }
 
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {

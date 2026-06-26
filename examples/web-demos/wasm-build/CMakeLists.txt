@@ -27,6 +27,7 @@ set(PULP_INCLUDES
     ${PULP_ROOT}/core/signal/include
     ${PULP_ROOT}/examples/web-demos
     ${PULP_ROOT}/examples/pulp-gain
+    ${PULP_ROOT}/examples/pulp-pluck
 )
 
 # CHOC headers (for MIDI)

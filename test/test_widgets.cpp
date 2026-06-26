@@ -2024,8 +2024,8 @@ struct FontFeatureSpyCanvas : pulp::canvas::RecordingCanvas {
 };
 }
 
-TEST_CASE("Label::paint always ends with clear_font_features (Codex P1 on #1791)",
-          "[view][widget][issue-1737][issue-1791-codex-p1]") {
+TEST_CASE("Label::paint always ends with clear_font_features (#1791)",
+          "[view][widget][issue-1737][issue-1791]") {
     Label label("hello");
     label.set_bounds({0, 0, 120, 24});
 

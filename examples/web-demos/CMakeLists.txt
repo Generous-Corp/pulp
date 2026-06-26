@@ -9,4 +9,7 @@ add_library(pulp-web-demos STATIC
 )
 
 target_link_libraries(pulp-web-demos PUBLIC pulp::format)
-target_include_directories(pulp-web-demos PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(pulp-web-demos PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pulp-pluck
+)

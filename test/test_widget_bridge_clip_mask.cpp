@@ -439,7 +439,7 @@ TEST_CASE("setBoxSizing border-box / content-box round-trips onto FlexStyle",
 // `html { box-sizing: border-box }` + descendants `* { box-sizing: inherit }`
 // that gets imported from web designs.
 TEST_CASE("setBoxSizing 'inherit' resolves to parent's box_sizing",
-          "[view][bridge][css][issue-1538][codex-p1]") {
+          "[view][bridge][css][issue-1538]") {
     ScriptEngine engine;
     View root;
     StateStore store;

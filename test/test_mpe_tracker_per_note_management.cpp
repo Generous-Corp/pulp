@@ -152,7 +152,7 @@ TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state (item 8.5b)",
     REQUIRE(tracker.find(1, 60)->pitch_bend_semitones > 0.0f);
 }
 
-TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state (Codex #2860 P1)",
+TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state (#2860)",
           "[midi][mpe][per-note-management][regression]") {
     // Per the MIDI 2.0 UMP spec § Per-Note Management, when both detach
     // and reset bits are set, detach takes effect on the currently
