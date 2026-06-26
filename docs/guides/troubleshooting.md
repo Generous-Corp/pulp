@@ -191,10 +191,12 @@ ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup
 
 **Fix:**
 ```bash
-pulp build
-pulp validate    # verify plugin loads correctly
-pulp install     # copy to system plugin folders
+pulp build --install  # macOS: validate, then copy AU/VST3/CLAP bundles
 ```
+
+`pulp build --install` refuses to copy bundles when validation fails. Run
+`pulp validate` separately when you need the full validator output before
+retrying the install.
 
 Then rescan in your DAW. System plugin folders:
 - **AU:** `~/Library/Audio/Plug-Ins/Components/`
