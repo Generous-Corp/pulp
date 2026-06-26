@@ -1,0 +1,79 @@
+#pragma once
+
+// pulp audio render — offline scenario render of a plugin bundle.
+//
+// Sibling of `pulp audio validate` (which keeps its no-plugin contract): render
+// loads an explicit `--plugin <bundle>` through pulp::host::PluginSlot, drives it
+// offline from declarative flags, and writes a WAV plus the same metrics JSON
+// emitted by `pulp audio validate summarize --json`, with no DAW and no audio
+// device.
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace pulp::cli {
+
+// ── Parsed render request (separated from execution so it is unit-testable) ──
+
+enum class AudioRenderInputKind { Silence, Sine, Wav };
+
+// A `--param <id>=<value>[@frame]` request. `value` is in the PLAIN parameter
+// domain (the parameter's native min..max), matching PluginSlot::set_parameter
+// and ParameterEvent::value — NOT normalized [0,1]. (The base-class arg is
+// misleadingly named `normalized_value`, but every loader treats it as plain:
+// VST3 converts plain→normalized internally, LV2/CLAP store the plain value.)
+struct AudioRenderParam {
+    std::uint32_t id = 0;
+    float value = 0.0f;
+    std::uint64_t frame = 0;  ///< Absolute render frame the change takes effect.
+};
+
+// A `--midi note:<note>,<vel>,<on_frame>[,<off_frame>]` request.
+struct AudioRenderMidi {
+    std::uint8_t channel = 0;
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+    std::uint64_t on_frame = 0;
+    bool has_off = false;
+    std::uint64_t off_frame = 0;
+};
+
+struct ParseAudioRenderResult {
+    bool ok = false;
+    bool help = false;
+    int exit_code = 0;
+    std::string error;  ///< Human-readable; caller prints to stderr.
+
+    std::string plugin_path;
+    std::string format = "clap";
+    std::string unique_id;
+    double sample_rate = 48000.0;
+    std::uint32_t block = 512;
+    std::uint32_t in_channels = 2;
+    std::uint32_t out_channels = 2;
+    std::uint64_t duration_frames = 0;  ///< Resolved from --duration-ms / --duration-frames.
+
+    AudioRenderInputKind input_kind = AudioRenderInputKind::Silence;
+    std::string input_wav;
+    double sine_hz = 0.0;
+    double sine_dbfs = -6.0;
+
+    std::vector<AudioRenderParam> params;
+    std::vector<AudioRenderMidi> midi;
+
+    std::string out_wav;
+    std::string manifest_path;
+    bool json = false;
+};
+
+// Parse `pulp audio render` arguments. Never touches the filesystem or loads a
+// plugin — pure string handling so the grammar is unit-testable. On a usage
+// error, returns {ok=false, exit_code=2, error=...}; `--help`/`-h` returns
+// {help=true, exit_code=0}.
+ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& args);
+
+}  // namespace pulp::cli
+
+// Entry point wired into `cmd_audio` dispatch.
+int cmd_audio_render(const std::vector<std::string>& args);

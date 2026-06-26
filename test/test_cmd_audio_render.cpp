@@ -1,0 +1,303 @@
+// Tests for `pulp audio render` — the pure block stepper and the arg parser.
+// Both are device-free: the stepper is exercised with a fake process callback
+// (no PluginSlot, no audio device), and the parser is pure string handling.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "../tools/cli/cmd_audio_render.hpp"
+#include "../tools/cli/cmd_audio_render_step.hpp"
+
+#include <pulp/audio/buffer.hpp>
+#include <pulp/midi/buffer.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
+
+#include <cstdint>
+#include <vector>
+
+using namespace pulp;
+using namespace pulp::cli;
+namespace ar = pulp::cli::audio_render;
+
+namespace {
+
+// A passthrough callback: out[ch][i] = in[ch][i]. Time-invariant, so its output
+// must be identical regardless of how the render is partitioned into blocks.
+auto passthrough() {
+    return [](audio::BufferView<float>& out, const audio::BufferView<const float>& in,
+              const midi::MidiBuffer&, midi::MidiBuffer&,
+              const state::ParameterEventQueue&, int n) {
+        const auto chans = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t ch = 0; ch < chans; ++ch) {
+            auto o = out.channel(ch);
+            auto i = in.channel(ch);
+            for (int s = 0; s < n; ++s) o[s] = i[s];
+        }
+    };
+}
+
+audio::Buffer<float> ramp(std::uint32_t channels, std::uint64_t frames) {
+    audio::Buffer<float> b(channels, static_cast<std::size_t>(frames));
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        auto c = b.channel(ch);
+        for (std::uint64_t n = 0; n < frames; ++n)
+            c[n] = static_cast<float>(n) + static_cast<float>(ch) * 0.25f;
+    }
+    return b;
+}
+
+ar::StepSpec spec_for(std::uint32_t block, std::uint64_t frames) {
+    ar::StepSpec s;
+    s.input_channels = 2;
+    s.output_channels = 2;
+    s.max_block_frames = block;
+    s.block_frames = block;
+    s.frame_count = frames;
+    return s;
+}
+
+}  // namespace
+
+TEST_CASE("audio render stepper: block-partition invariance", "[audio-render][parity]") {
+    const std::uint64_t frames = 2000;
+    const auto input = ramp(2, frames);
+
+    audio::Buffer<float> out_small, out_large;
+    ar::StepStats st_small, st_large;
+    ar::StepEvents none;
+
+    REQUIRE(ar::render_blocks(spec_for(64, frames), input.view(), none, out_small,
+                              st_small, passthrough()));
+    REQUIRE(ar::render_blocks(spec_for(512, frames), input.view(), none, out_large,
+                              st_large, passthrough()));
+
+    REQUIRE(out_small.num_channels() == 2);
+    REQUIRE(out_small.num_samples() == frames);
+    REQUIRE(out_large.num_samples() == frames);
+
+    // Bit-identical across block sizes, and equal to the input (passthrough).
+    for (std::size_t ch = 0; ch < 2; ++ch) {
+        for (std::uint64_t n = 0; n < frames; ++n) {
+            REQUIRE(out_small.channel(ch)[n] == out_large.channel(ch)[n]);
+            REQUIRE(out_small.channel(ch)[n] == input.channel(ch)[n]);
+        }
+    }
+    REQUIRE(st_small.frames_rendered == frames);
+    REQUIRE(st_large.frames_rendered == frames);
+}
+
+TEST_CASE("audio render stepper: event windowing, incl. exactly on a block boundary",
+          "[audio-render]") {
+    const std::uint32_t block = 256;
+    const std::uint64_t frames = 1024;
+
+    // Param events at frames 0, 256 (exactly on a boundary), 300; MIDI at 256.
+    std::vector<ar::TimedParam> params;
+    for (std::uint64_t f : {std::uint64_t{0}, std::uint64_t{256}, std::uint64_t{300}}) {
+        state::ParameterEvent e;
+        e.param_id = 7;
+        e.value = static_cast<float>(f);
+        params.push_back({f, e});
+    }
+    std::vector<ar::TimedMidi> midi{
+        {256, midi::MidiEvent::note_on(0, 60, 100)}};
+
+    ar::StepEvents events;
+    events.params = params;
+    events.midi = midi;
+
+    // Reconstruct absolute frames inside the callback from a running block start.
+    std::vector<std::uint64_t> param_frames, midi_frames;
+    std::uint64_t running = 0;
+    auto capture = [&](audio::BufferView<float>&, const audio::BufferView<const float>&,
+                       const midi::MidiBuffer& mi, midi::MidiBuffer&,
+                       const state::ParameterEventQueue& pq, int n) {
+        for (const auto& e : pq.events())
+            param_frames.push_back(running + static_cast<std::uint64_t>(e.sample_offset));
+        for (const auto& e : mi)
+            midi_frames.push_back(running + static_cast<std::uint64_t>(e.sample_offset));
+        running += static_cast<std::uint64_t>(n);
+    };
+
+    audio::Buffer<float> out;
+    ar::StepStats st;
+    audio::BufferView<const float> no_input;
+    REQUIRE(ar::render_blocks(spec_for(block, frames), no_input, events, out, st, capture));
+
+    // Every event lands at its requested absolute frame — the frame-256 event in
+    // the block that STARTS at 256 (offset 0), not the prior block.
+    REQUIRE(param_frames == std::vector<std::uint64_t>{0, 256, 300});
+    REQUIRE(midi_frames == std::vector<std::uint64_t>{256});
+    REQUIRE(st.params_dispatched == 3);
+    REQUIRE(st.midi_dispatched == 1);
+    REQUIRE(st.params_out_of_range == 0);
+    REQUIRE(st.midi_out_of_range == 0);
+}
+
+TEST_CASE("audio render stepper: out-of-range events are counted", "[audio-render]") {
+    const std::uint64_t frames = 512;
+
+    state::ParameterEvent p;
+    p.param_id = 7;
+    p.value = 1.0f;
+    std::vector<ar::TimedParam> params{{511, p}, {512, p}, {1024, p}};
+    std::vector<ar::TimedMidi> midi{
+        {512, midi::MidiEvent::note_on(0, 60, 100)},
+        {1024, midi::MidiEvent::note_off(0, 60)}};
+
+    ar::StepEvents events;
+    events.params = params;
+    events.midi = midi;
+
+    audio::Buffer<float> out;
+    ar::StepStats st;
+    audio::BufferView<const float> no_input;
+    REQUIRE(ar::render_blocks(spec_for(128, frames), no_input, events, out, st,
+                              passthrough()));
+
+    REQUIRE(st.params_dispatched == 1);
+    REQUIRE(st.params_out_of_range == 2);
+    REQUIRE(st.midi_dispatched == 0);
+    REQUIRE(st.midi_out_of_range == 2);
+}
+
+TEST_CASE("audio render stepper: short input is silence-padded", "[audio-render]") {
+    const std::uint64_t input_frames = 100;
+    const std::uint64_t render_frames = 300;
+    const auto input = ramp(2, input_frames);
+
+    audio::Buffer<float> out;
+    ar::StepStats st;
+    ar::StepEvents none;
+    REQUIRE(ar::render_blocks(spec_for(128, render_frames), input.view(), none, out, st,
+                              passthrough()));
+
+    REQUIRE(out.num_samples() == render_frames);
+    REQUIRE(st.input_truncated);
+    for (std::size_t ch = 0; ch < 2; ++ch) {
+        for (std::uint64_t n = 0; n < input_frames; ++n)
+            REQUIRE(out.channel(ch)[n] == input.channel(ch)[n]);
+        for (std::uint64_t n = input_frames; n < render_frames; ++n)
+            REQUIRE(out.channel(ch)[n] == 0.0f);
+    }
+}
+
+TEST_CASE("audio render stepper: invalid spec / unsorted events rejected", "[audio-render]") {
+    audio::Buffer<float> out;
+    ar::StepStats st;
+    ar::StepEvents none;
+    audio::BufferView<const float> no_input;
+
+    // block_frames > max_block_frames.
+    ar::StepSpec bad;
+    bad.output_channels = 2;
+    bad.max_block_frames = 128;
+    bad.block_frames = 256;
+    bad.frame_count = 512;
+    REQUIRE_FALSE(ar::render_blocks(bad, no_input, none, out, st, passthrough()));
+
+    // Unsorted parameter events.
+    std::vector<ar::TimedParam> unsorted;
+    state::ParameterEvent e;
+    e.param_id = 1;
+    unsorted.push_back({100, e});
+    unsorted.push_back({10, e});
+    ar::StepEvents bad_events;
+    bad_events.params = unsorted;
+    REQUIRE_FALSE(ar::render_blocks(spec_for(64, 256), no_input, bad_events, out, st,
+                                    passthrough()));
+}
+
+TEST_CASE("audio render parser: minimal valid request", "[audio-render]") {
+    const auto r = parse_audio_render_args(
+        {"--plugin", "p.clap", "--out", "o.wav", "--duration-frames", "480"});
+    REQUIRE(r.ok);
+    REQUIRE(r.plugin_path == "p.clap");
+    REQUIRE(r.out_wav == "o.wav");
+    REQUIRE(r.duration_frames == 480);
+    REQUIRE(r.format == "clap");
+    REQUIRE(r.sample_rate == 48000.0);
+    REQUIRE(r.block == 480);  // clamped down to the duration
+    REQUIRE(r.input_kind == AudioRenderInputKind::Silence);
+}
+
+TEST_CASE("audio render parser: zero input channels are instrument-only",
+          "[audio-render]") {
+    const auto instrument = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0"});
+    REQUIRE(instrument.ok);
+    REQUIRE(instrument.in_channels == 0);
+
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0", "--input-signal", "sine:440"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "128",
+         "--in-channels", "0", "--input", "i.wav"}).ok);
+}
+
+TEST_CASE("audio render parser: --duration-ms resolves against sample rate", "[audio-render]") {
+    const auto r = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--sample-rate", "48000", "--duration-ms", "100"});
+    REQUIRE(r.ok);
+    REQUIRE(r.duration_frames == 4800);
+}
+
+TEST_CASE("audio render parser: required + mutually-exclusive flags", "[audio-render]") {
+    REQUIRE_FALSE(parse_audio_render_args({"--out", "o", "--duration-frames", "10"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args({"--plugin", "p", "--duration-frames", "10"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args({"--plugin", "p", "--out", "o"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-ms", "10", "--duration-frames", "10"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10",
+         "--input", "i.wav", "--input-signal", "silence"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10", "--bogus"}).ok);
+
+    const auto help = parse_audio_render_args({"--help"});
+    REQUIRE(help.help);
+    REQUIRE(help.exit_code == 0);
+}
+
+TEST_CASE("audio render parser: --param grammar (plain domain, optional @frame)",
+          "[audio-render]") {
+    const auto r = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "1000",
+         "--param", "3=1.5@128", "--param", "4=-12.0"});
+    REQUIRE(r.ok);
+    REQUIRE(r.params.size() == 2);
+    REQUIRE(r.params[0].id == 3);
+    REQUIRE(r.params[0].value == 1.5f);
+    REQUIRE(r.params[0].frame == 128);
+    REQUIRE(r.params[1].id == 4);
+    REQUIRE(r.params[1].value == -12.0f);
+    REQUIRE(r.params[1].frame == 0);
+
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10", "--param", "3"}).ok);
+}
+
+TEST_CASE("audio render parser: --midi and --input-signal grammars + = forms",
+          "[audio-render]") {
+    const auto r = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "9600",
+         "--midi", "note:60,100,0,4800", "--midi", "note:64,90,1000",
+         "--input-signal", "sine:440,-6", "--sample-rate=44100"});
+    REQUIRE(r.ok);
+    REQUIRE(r.sample_rate == 44100.0);
+    REQUIRE(r.input_kind == AudioRenderInputKind::Sine);
+    REQUIRE(r.sine_hz == 440.0);
+    REQUIRE(r.sine_dbfs == -6.0);
+    REQUIRE(r.midi.size() == 2);
+    REQUIRE(r.midi[0].note == 60);
+    REQUIRE(r.midi[0].velocity == 100);
+    REQUIRE(r.midi[0].on_frame == 0);
+    REQUIRE(r.midi[0].has_off);
+    REQUIRE(r.midi[0].off_frame == 4800);
+    REQUIRE(r.midi[1].has_off == false);
+
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10",
+         "--input-signal", "noise"}).ok);
+}

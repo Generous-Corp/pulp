@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05000"></a>
+## [0.500.0] - 2026-06-26
+
+- feat(cli): pulp audio render — offline scenario render of a plugin bundle ([#4922](https://github.com/danielraffel/pulp/pull/4922))
+- docs(format): list compressor capability examples ([#4931](https://github.com/danielraffel/pulp/pull/4931))
+
 <a id="v04991"></a>
 ## [0.499.1] - 2026-06-26
 
@@ -5239,6 +5245,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.500.0]: https://github.com/danielraffel/pulp/releases/tag/v0.500.0
 [0.499.1]: https://github.com/danielraffel/pulp/releases/tag/v0.499.1
 [0.499.0]: https://github.com/danielraffel/pulp/releases/tag/v0.499.0
 [0.498.0]: https://github.com/danielraffel/pulp/releases/tag/v0.498.0

@@ -1343,6 +1343,7 @@ pulp audio validate summarize <file.wav> [--json]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
+pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
 
 **Subcommands**:
@@ -1359,10 +1360,13 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
+| `render` | Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load `--plugin`, drive it from declarative flags, write a WAV, and emit metrics JSON matching `validate summarize --json` |
 
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
+
+`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix block-quantizes the change to the block containing that frame. Parameters are delivered block-quantized via `set_parameter` (sample-accurate parameter automation is a follow-up; MIDI is already sample-accurate). The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use

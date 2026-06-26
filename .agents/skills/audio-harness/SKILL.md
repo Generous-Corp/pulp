@@ -231,6 +231,29 @@ entry has a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`,
 tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
 ...). The `/audio-harness` slash command documents these verbs.
 
+## Offline plugin render (`pulp audio render`)
+
+`pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> |
+--duration-frames <n>)` is the scenario-driven counterpart to `validate`: it
+loads an explicit plugin bundle through `pulp::host::PluginSlot` (the generic CLI
+has no registered factory, so a bundle is the only offline render source),
+drives it block-by-block from declarative flags, writes an int16 WAV, and emits
+the same `pulp::audio-analysis` metrics JSON as `validate summarize --json`
+(`--manifest <file>` / `--json`). No DAW, no audio device. Drive it with
+`--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is
+at `--sample-rate` — no resampling), `--param <id>=<value>[@frame]`, and
+`--midi note:<note>,<vel>,<on>[,<off>]`.
+
+**`--param` values are PLAIN domain** (the parameter's native `min..max`), **not
+normalized `[0,1]`** — matching `PluginSlot::set_parameter` /
+`ParameterEvent::value`. Parameters are delivered block-quantized via
+`set_parameter` (forwarding the per-block queue too would double-apply each
+change on loaders that honor sample-accurate events); MIDI stays sample-accurate.
+The block stepper is a deliberate, callback-driven parallel to
+`OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse
+the core renderer directly); a block-partition-invariance test guards the two
+against drift.
+
 ## Roadmap
 
 - **Live capture-to-WAV — LANDED (earliest-window).** `pulp run
@@ -240,7 +263,6 @@ tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
   robust for `validate summarize` / `assert` (presence / level / clip / NaN) but
   is the wrong window for steady-state `doctor` (THD/response) and is
   quantization-limited for `compare`.
-- **Planned (do NOT instruct using these until they land):** the rolling-ring
+- **Planned (do NOT instruct using this until it lands):** the rolling-ring
   capture variant (true last-N + float/24-bit WAV, lifting the doctor/compare
-  caveat above), and a scenario-driven `render` verb (`pulp audio render
-  --plugin <bundle> ...`) that renders a plugin offline from declarative flags.
+  caveat above), the steady-state window `validate doctor`/`compare` want.

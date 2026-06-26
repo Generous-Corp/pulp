@@ -1562,6 +1562,56 @@ commands:
             kind: option
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
+      - name: render
+        summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
+        args:
+          - name: --plugin
+            kind: option
+            required: true
+          - name: --out
+            kind: option
+            required: true
+          - name: --duration-ms
+            kind: option
+            required: false
+          - name: --duration-frames
+            kind: option
+            required: false
+          - name: --format
+            kind: option
+            required: false
+          - name: --id
+            kind: option
+            required: false
+          - name: --sample-rate
+            kind: option
+            required: false
+          - name: --block
+            kind: option
+            required: false
+          - name: --in-channels
+            kind: option
+            required: false
+          - name: --out-channels
+            kind: option
+            required: false
+          - name: --input
+            kind: option
+            required: false
+          - name: --input-signal
+            kind: option
+            required: false
+          - name: --param
+            kind: option
+            required: false
+          - name: --midi
+            kind: option
+            required: false
+          - name: --manifest
+            kind: option
+            required: false
+          - name: --json
+            kind: flag
     docs: reference/cli.md#audio
 
   - name: sdk

@@ -10,9 +10,10 @@
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
 #include <atomic>
-#include <thread>
+#include <chrono>
 #include <cstdint>
 #include <numeric>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -30,6 +31,15 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
     auto* c = static_cast<SquareCtx*>(ctx);
     c->out[i] = i * i;
     c->runs.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (counter.load(std::memory_order_relaxed) == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return counter.load(std::memory_order_relaxed) > 0;
 }
 
 } // namespace
@@ -168,7 +178,9 @@ TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-
             batches.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    for (int i = 0; i < 100; ++i) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (batches.load(std::memory_order_relaxed) == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
         (void)pool.running();
         (void)pool.worker_count();
         std::this_thread::yield();
@@ -200,8 +212,7 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    for (int i = 0; i < 200; ++i) std::this_thread::yield();
+    CHECK(wait_for_progress(blocks));
     stop.store(true, std::memory_order_relaxed);
     driver.join();
-    CHECK(blocks.load() > 0);
 }

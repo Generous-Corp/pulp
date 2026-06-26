@@ -1115,11 +1115,11 @@ endif()
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
 pulp_add_test_suite(pulp-test-audio-focus LIBRARIES pulp::audio)
-
+# `pulp audio render` arg grammar + the device-free block stepper (no PluginSlot).
+pulp_add_test_suite(pulp-test-cmd-audio-render SOURCES test_cmd_audio_render.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cmd_audio_render_parse.cpp LIBRARIES pulp::audio pulp::midi pulp::state)
 # #244: zero-fill helper for the Oboe input-frame-read short-read path.
 # Header-only math, so no library link required beyond Catch2.
 pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
-
 # #3327 L4: MonotonicMidiClock — seconds-since-open MIDI input timestamps,
 # the cross-platform helper that replaced ALSA's hardcoded 0.0 stamps.
 pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)

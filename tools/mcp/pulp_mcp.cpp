@@ -119,7 +119,7 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_audio_read_bundle","description":"Read an excerpt-find artifact bundle and return parsed manifest/result summary.","inputSchema":{"type":"object","required":["bundle_path"],"properties":{"bundle_path":{"type":"string","description":"Path to an excerpt-find bundle directory"}}}},)JSON";
     out += R"JSON({"name":"pulp_audio_probe_json","description":"Run a standalone through `pulp run --audio-probe-json` and return live output-boundary probe metrics JSON. This uses the existing pulp-mcp server as a one-shot wrapper; it does not start a second MCP server or persistent live socket.","inputSchema":{"type":"object","properties":{"target":{"type":"string","description":"Optional standalone target name to pass to `pulp run`"},"frames":{"type":"integer","description":"Frame delay before reading the probe snapshot (default 90)"}}}},)JSON";
     out += R"JSON({"name":"pulp_audio_scope","description":"Return versioned audio scope JSON from a live standalone target or a speakerless offline WAV input. Live target mode opens the audio device; input_wav mode does not emit sound.","inputSchema":{"type":"object","properties":{"target":{"type":"string","description":"Optional standalone target name to pass to `pulp audio scope` for live capture"},"input_wav":{"type":"string","description":"Optional WAV path for speakerless offline scope analysis"},"png_path":{"type":"string","description":"Optional PNG artifact path for offline WAV scope traces"},"frames":{"type":"integer","description":"Frame delay before reading the live scope window (default 90)"},"window":{"type":"integer","description":"Acquisition window in samples (default 2048)"},"trigger":{"type":"string","description":"Trigger mode: none, raw, off, rising-zero"},"channel":{"type":"integer","description":"Source channel index"}}}},)JSON";
-    out += R"JSON({"name":"pulp_screenshot","description":"Render a plugin UI to PNG (base64). Use --demo for a built-in demo or --script for a JS file.","inputSchema":{"type":"object","properties":{"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},)JSON";
+    out += R"JSON({"name":"pulp_screenshot","description":"Render a built-in demo or JavaScript UI file to PNG (base64). Use --demo for the built-in demo or --script for a JS file.","inputSchema":{"type":"object","properties":{"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},)JSON";
     out += R"JSON({"name":"pulp_simulate_click","description":"Simulate a mouse click at coordinates on a demo UI and return the view tree JSON","inputSchema":{"type":"object","properties":{"x":{"type":"number","description":"X coordinate"},"y":{"type":"number","description":"Y coordinate"}}}},)JSON";
     out += R"JSON({"name":"pulp_get_view_tree","description":"Get the view tree as JSON for a demo UI","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_create","description":"Scaffold a new plugin project from templates","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Plugin name"},"type":{"type":"string","enum":["effect","instrument"],"description":"Plugin type"},"manufacturer":{"type":"string","description":"Manufacturer name"}}}},)JSON";
@@ -142,7 +142,7 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_motion_pause","description":"Pause fixture playback via Motion.pause. Returns {playing:false, playhead_frame}. Always safe — no-op when not playing.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_enable_cost","description":"Enable the cost-attribution channel via Motion.enableCost. Motion.cost events begin broadcasting per frame. Off by default — opt in per session.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_disable_cost","description":"Disable the cost-attribution channel via Motion.disableCost. Stops Motion.cost broadcasts. Safe to call when cost is already disabled.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew (#2070).","inputSchema":{"type":"object","properties":{}}})JSON";
+    out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
     return out;
 }
@@ -176,10 +176,10 @@ static std::string handle_request_raw(const std::string& json) {
     if (id.empty()) id = "null";
 
     if (method == "initialize") {
-        // serverInfo.version tracks the SDK/CLI release (#2067), wired
-        // to PROJECT_VERSION via tools/mcp/pulp_mcp_version.h.in so
-        // doctor/launcher can see
-        // real drift between an old installed pulp-mcp and a newer plugin.
+        // serverInfo.version tracks the SDK/CLI release. It is wired to
+        // PROJECT_VERSION via tools/mcp/pulp_mcp_version.h.in so
+        // doctor/launcher can see real drift between an old installed
+        // pulp-mcp and a newer plugin.
         std::string payload =
             std::string(R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"pulp-mcp","version":")JSON")
             + PULP_MCP_SERVER_VERSION
@@ -214,11 +214,11 @@ static std::string handle_request_raw(const std::string& json) {
             }
         }
 
-        // Per-tool feature detection (#2070). If the tool declares a
-        // min_sdk floor and the project pins an older SDK, return a
-        // structured error result with `isError: true` so the LLM gets
-        // actionable upgrade guidance instead of silently running the
-        // newer behavior. `pulp_compat` is exempt — clients invoke it
+        // Per-tool feature detection. If the tool declares a min_sdk floor
+        // and the project pins an older SDK, return a structured error result
+        // with `isError: true` so the LLM gets actionable upgrade guidance
+        // instead of silently running the newer behavior. `pulp_compat` is
+        // exempt — clients invoke it
         // *to* discover skew and must always be able to read the
         // matrix. Tools left out of the table default to "0.0.0" so
         // existing behavior is unchanged.
@@ -231,10 +231,9 @@ static std::string handle_request_raw(const std::string& json) {
                     return json_result(
                         id, compat_error_payload(name, min_sdk, project_sdk));
                 }
-                // If we couldn't resolve the project SDK at all, fall
-                // open (#2070). The launcher has already started;
-                // gating on "no project root" would
-                // make pulp-mcp unusable from `/tmp` or similar.
+                // If we couldn't resolve the project SDK at all, fall open.
+                // The launcher has already started; gating on "no project
+                // root" would make pulp-mcp unusable from `/tmp` or similar.
             }
         }
 

@@ -3913,4 +3913,53 @@ TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
     }
 }
 
+TEST_CASE("SignalGraph routed_walk_fallbacks() stays zero for routed + walk-by-choice graphs",
+          "[host][graph][telemetry][fallback]") {
+    // routed_walk_fallbacks() must count ONLY the silent degradation case — an
+    // eligible graph whose routed dispatch failed — not the ordinary fallbacks
+    // (routing disabled, or a graph that simply runs the walk by choice). This
+    // pins the discrimination so the counter is a trustworthy "a graph stopped
+    // routing" signal.
+    constexpr int kFrames = 64;
+    constexpr int kBlocks = 4;
+    std::vector<float> l(kFrames, 0.4f), r(kFrames, 0.4f);
+    std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+    std::array<const float*, 2> in_ch{l.data(), r.data()};
+    std::array<float*, 2> out_ch{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+
+    SECTION("an eligible routed graph never silently falls back") {
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto gn = g.add_gain_node("G");
+        const auto out = g.add_output_node(2, "Out");
+        REQUIRE(g.connect(in, 0, gn, 0));
+        REQUIRE(g.connect(in, 1, gn, 1));
+        REQUIRE(g.connect(gn, 0, out, 0));
+        REQUIRE(g.connect(gn, 1, out, 1));
+        REQUIRE(g.set_node_gain(gn, 0.5f));
+        REQUIRE(g.prepare(48000.0, kFrames));  // canonical routing ON by default
+        REQUIRE(signal_graph_executor_eligible(g));
+        for (int b = 0; b < kBlocks; ++b) g.process(out_view, in_view, kFrames);
+        REQUIRE(g.routed_walk_fallbacks() == 0);  // routed the whole time
+    }
+
+    SECTION("running the walk by choice is not counted as a fallback") {
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto gn = g.add_gain_node("G");
+        const auto out = g.add_output_node(2, "Out");
+        REQUIRE(g.connect(in, 0, gn, 0));
+        REQUIRE(g.connect(in, 1, gn, 1));
+        REQUIRE(g.connect(gn, 0, out, 0));
+        REQUIRE(g.connect(gn, 1, out, 1));
+        REQUIRE(g.set_node_gain(gn, 0.5f));
+        g.set_canonical_executor_routing_enabled(false);  // force the walk
+        REQUIRE(g.prepare(48000.0, kFrames));
+        for (int b = 0; b < kBlocks; ++b) g.process(out_view, in_view, kFrames);
+        REQUIRE(g.routed_walk_fallbacks() == 0);  // walk-by-choice is normal, not a failure
+    }
+}
+
 // ── Phase 3 GraphSerializer round-trip ──────────────────────────────────
