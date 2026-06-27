@@ -72,6 +72,8 @@ def map_onsets(
     pairs: list[tuple[float, float]] = []
     j0 = 0
     for s in src_onsets:
+        if j0 >= len(cand_onsets):
+            break  # ran out of candidate onsets — remaining source onsets are unmatched
         sn = s / sd
         best_j, best_d = j0, None
         for j in range(j0, len(cand_onsets)):
@@ -81,5 +83,5 @@ def map_onsets(
             elif cand_onsets[j] / cd - sn > 0 and d > best_d:
                 break
         pairs.append((s, cand_onsets[best_j]))
-        j0 = best_j  # keep monotonic
+        j0 = best_j + 1  # strict advance — never reuse a candidate onset
     return pairs

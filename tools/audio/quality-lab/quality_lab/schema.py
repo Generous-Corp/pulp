@@ -67,10 +67,24 @@ class DetectorResult:
     unit: str
     fired: bool
     time_domain: str  # "aligned" | "source-time" | "raw-output"
+    measured: int = 0  # onset pairs the detector actually scored
+    expected: int = 0  # onset pairs offered by the alignment layer
     curve: list[tuple[float, float]] = field(default_factory=list)
     worst_regions: list[WorstRegion] = field(default_factory=list)
     tolerance_class: str = ""
     notes: str = ""
+
+    # Below this fraction, a "clean" verdict is untrustworthy — the detector simply
+    # didn't see enough (boundary skips, failed matches). Surfaced, never hidden.
+    MIN_COVERAGE = 0.5
+
+    @property
+    def coverage(self) -> float:
+        return self.measured / self.expected if self.expected else 0.0
+
+    @property
+    def low_coverage(self) -> bool:
+        return self.expected > 0 and self.coverage < self.MIN_COVERAGE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +93,10 @@ class DetectorResult:
             "unit": self.unit,
             "fired": bool(self.fired),
             "time_domain": self.time_domain,
+            "coverage": round(self.coverage, 3),
+            "measured": self.measured,
+            "expected": self.expected,
+            "low_coverage": self.low_coverage,
             "tolerance_class": self.tolerance_class,
             "curve": [[round(t, 4), round(v, 6)] for t, v in self.curve],
             "worst_regions": [w.to_dict() for w in self.worst_regions],
@@ -94,18 +112,18 @@ def build_report(
     verdict: str,
 ) -> dict[str, Any]:
     """Assemble the canonical report envelope (§7). JSON-serializable; the same shape
-    every later layer (perceptual models, listening infra, LLM reviewer) extends."""
-    worst = sorted(
-        (w for d in detectors for w in d.worst_regions),
-        key=lambda w: w.severity,
-        reverse=True,
-    )
+    every later layer (perceptual models, listening infra, LLM reviewer) extends.
+
+    Top-level `worst_regions` is each detector's own #1 region (already sorted within a
+    detector, in that detector's unit). We deliberately do NOT cross-sort by raw
+    severity — `ms` and `deficit_0to1` are not comparable numbers."""
+    top = [d.worst_regions[0].to_dict() for d in detectors if d.worst_regions and d.fired]
     return {
         "schema_version": SCHEMA_VERSION,
         "case": case.to_dict(),
         "verdict": verdict,
         "detectors": [d.to_dict() for d in detectors],
-        "worst_regions": [w.to_dict() for w in worst[:5]],
+        "worst_regions": top,
         "determinism": determinism,
         "provenance": provenance,
     }

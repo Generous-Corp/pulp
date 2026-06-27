@@ -10,14 +10,16 @@ from typing import Any
 import numpy as np
 
 from . import align, audio_io, generate, provenance
-from .detectors import onset_drift, transient_sharpness
+from .detectors import transient_sharpness
 from .schema import QualityCase, build_report
 
-# Registry: detector tag -> (module, kwargs). New detectors plug in here; the pipeline
-# stays detector-agnostic (the §14.4 boundary).
+# Registry: detector tag -> detect fn. New detectors plug in here; the pipeline stays
+# detector-agnostic (the §14.4 boundary). onset_drift was prototyped and DEFERRED — a
+# body-correlation timing measure cannot resolve a few-ms drift against a tonal kick's
+# periodic body (it cannot tell identity from a 7 ms drift); it needs a better timing
+# method before it can be trusted. See the README "Deferred detectors" note.
 _DETECTORS = {
     "transient_sharpness": transient_sharpness.detect,
-    "onset_drift": onset_drift.detect,
 }
 
 P0A_CASE = QualityCase(
@@ -25,13 +27,9 @@ P0A_CASE = QualityCase(
     family="time-stretch",
     reference_policy="frozen-reference",
     alignment_policy="onset-map",
-    detector_tags=["transient_sharpness", "onset_drift"],
+    detector_tags=["transient_sharpness"],
     params={"ratio": 1.5, "sr": 48000, "bpm": 120.0, "seed": 0},
 )
-
-# Onset indices jittered by the "drift" degradation (signed ms), for localization tests.
-_DRIFT_MAP = {2: 7.0, 6: -6.0}
-
 
 def make_signals(
     degradation: str,
@@ -41,7 +39,7 @@ def make_signals(
 ) -> tuple[np.ndarray, np.ndarray, int, list[float]]:
     """Build (reference, candidate, sr, injected_onsets) for a degradation.
 
-    degradation: "identity" (negative control) | "smear" | "drift".
+    degradation: "identity" (negative control) | "smear".
     reference  = transient-preserving stretch to `ratio` (sharp, on-grid).
     candidate  = reference + degradation + `latency_ms` delay (so alignment is required).
     injected_onsets = reference onset times shifted by the latency: the ground-truth
@@ -56,9 +54,6 @@ def make_signals(
     if degradation == "smear":
         candidate = generate.smear_transients(reference, ref_onsets, sr, smear_ms)
         injected_idx = list(range(len(ref_onsets)))
-    elif degradation == "drift":
-        candidate = generate.jitter_transients(reference, ref_onsets, sr, _DRIFT_MAP)
-        injected_idx = list(_DRIFT_MAP.keys())
     else:  # identity
         candidate = reference.copy()
         injected_idx = []
@@ -114,7 +109,20 @@ def run(
         "latency_ms": latency_ms,
         "seed": case.params["seed"],
     }
-    verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
+    # A "clean" verdict is only trustworthy if the detectors actually saw enough
+    # onsets. Low coverage (boundary skips, failed matches) reads UNCERTAIN, not CLEAN
+    # — a detector that measured nothing must never masquerade as a pass.
+    if any(r.fired for r in results):
+        verdict = "FIRED"
+    elif any(r.low_coverage for r in results):
+        verdict = "UNCERTAIN"
+    else:
+        verdict = "CLEAN"
+    determinism["onset_match"] = {
+        "ref_onsets": len(ref_onsets),
+        "cand_onsets": len(cand_onsets),
+        "matched_pairs": len(pairs),
+    }
     return build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
 
 

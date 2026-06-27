@@ -57,8 +57,33 @@ in later phases.
 | `quality_lab/generate.py` | deterministic, self-labeling drum-break + smear degradation |
 | `quality_lab/align.py` | onset detection + onset-map (alignment runs before detectors) |
 | `quality_lab/detectors/` | one detector = one small module (`transient_sharpness.py`) |
+| `quality_lab/dsp.py` | shared primitives (high-band, smoothed envelope, normalized local-align) |
+| `quality_lab/reference_pv.py` | an INDEPENDENT textbook phase vocoder for non-circular credibility tests |
 | `quality_lab/provenance.py` | re-derivable provenance block (§7.1) |
 | `quality_lab/pipeline.py` | pure stages: generate → level-match → align → detect → report |
 | `quality_lab/cli.py` | parse + dispatch only |
+
+## Credibility — why this isn't circular
+
+A detector validated only against a degradation written by the same author is
+self-fulfilling. So `transient_sharpness` is also tested against the output of an
+**independent textbook phase vocoder** (`reference_pv.py`) — which smears attacks
+through genuine STFT resynthesis with no knowledge of the detector. The detector
+fires hard (scalar ≈ 1.0) on that real PV smear, and stays clean comparing a PV
+render to itself. That is the evidence it catches the *real* documented artifact,
+not just a matched kernel. (`tests/test_real_pv_evidence.py`.)
+
+Detectors also report **coverage** (onsets actually measured / offered); a "clean"
+verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+
+## Deferred detectors (honest status)
+
+- **onset_drift** — prototyped and **deferred**. A body-correlation timing measure
+  cannot resolve a few-millisecond drift against a *tonal* hit's quasi-periodic body
+  (a ~45 Hz kick cycle-slips; the detector could not distinguish a faithful render
+  from a 7 ms drift). It needs a better timing method (e.g. a matched filter on the
+  body's noise component, or sub-band envelope timing) before it can be trusted. The
+  harness *surfacing* this — rather than shipping a detector that fails its own
+  negative control — is the point of the P0a discipline.
 
 See `NOTICE.md` for third-party attribution and the license fence.

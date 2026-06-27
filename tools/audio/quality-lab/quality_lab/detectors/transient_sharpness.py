@@ -86,6 +86,8 @@ def detect(
         unit="deficit_0to1",
         fired=scalar >= fire_threshold,
         time_domain="raw-output",
+        measured=len(curve),
+        expected=len(onset_pairs),
         curve=curve,
         worst_regions=worst[:3],
         tolerance_class=TOLERANCE_CLASS,

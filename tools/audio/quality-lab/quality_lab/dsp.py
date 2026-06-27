@@ -29,6 +29,23 @@ def smooth_energy_env(seg: np.ndarray, sr: int, hop_s: float = 0.00025, smooth_s
     return env, hop
 
 
+def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:
+    """Sliding normalized cross-correlation of `short` within `long` (values in ~[-1,1]).
+
+    Normalizing by the local window energy stops a loud body/tail from outscoring the
+    actual attack match — the bias an unnormalized `np.correlate` has on real material.
+    The peak value doubles as a match-confidence score.
+    """
+    long = np.asarray(long, dtype=np.float64)
+    short = np.asarray(short, dtype=np.float64)
+    L = len(short)
+    if len(long) < L or L == 0:
+        return np.zeros(0)
+    xc = np.correlate(long, short, mode="valid")
+    sliding = np.sqrt(np.convolve(long * long, np.ones(L), mode="valid")[: len(xc)]) + 1e-12
+    return xc / (sliding * (np.linalg.norm(short) + 1e-12))
+
+
 def local_align(
     reference: np.ndarray,
     candidate: np.ndarray,
@@ -59,8 +76,10 @@ def local_align(
     cwin = candidate[c0:c1]
     if len(cwin) < len(ref_seg):
         return None, None, 0
-    xc = np.correlate(highband(cwin), highband(ref_seg), mode="valid")
-    best = int(np.argmax(xc))
+    ncc = normalized_correlate(highband(cwin), highband(ref_seg))
+    if ncc.size == 0:
+        return None, None, 0
+    best = int(np.argmax(ncc))
     cand_seg = cwin[best : best + len(ref_seg)]
     if len(cand_seg) != len(ref_seg):
         return None, None, 0
