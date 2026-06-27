@@ -8,6 +8,7 @@
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <clap/ext/preset-load.h>
 #include <algorithm>
 #include <array>
@@ -212,6 +213,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     auto num_samples = process->frames_count;
     if (num_samples == 0) return CLAP_PROCESS_CONTINUE;
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
 
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();

@@ -16,6 +16,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
 #include <cstring>
@@ -390,6 +391,12 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         }
         return noErr;
     }
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
 
     // Max-frames contract guard (generic — protects EVERY Pulp AU plugin). The
     // Processor and all its scratch buffers were sized in prepare() to

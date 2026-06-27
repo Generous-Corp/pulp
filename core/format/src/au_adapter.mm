@@ -61,6 +61,7 @@
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/log.hpp>
@@ -646,6 +647,13 @@ static thread_local bool g_au_v3_host_writing = false;
         if (frameCount > bridge->max_frames) {
             return kAudioUnitErr_TooManyFramesToProcess;
         }
+
+        // Flush denormals to zero for the whole render-block body so quiet
+        // tails in recursive filter/reverb/feedback state can't stall the
+        // host's audio thread, then restore its prior FP mode on scope exit.
+        // See docs/guides/dsp-threading.md "Numeric mode".
+        pulp::signal::ScopedFlushDenormals flush_denormals;
+
         bridge->param_events.clear();
 
         UInt32 outChans = std::min(outputData->mNumberBuffers,

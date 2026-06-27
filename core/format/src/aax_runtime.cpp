@@ -4,6 +4,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <AAX_CEffectParameters.h>
 #include <AAX_CParameter.h>
@@ -669,6 +670,12 @@ int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
 void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
                                    const void* instances_end)
 {
+    // Flush denormals to zero for the whole render callback so quiet tails in
+    // recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
+
     const AlgorithmContext* const* current = instances_begin;
     const AlgorithmContext* const* end = static_cast<const AlgorithmContext* const*>(instances_end);
     while (current != end) {

@@ -13,6 +13,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
 #include <cstring>
@@ -279,6 +280,12 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     (void)inTimeStamp;
 
     if (!processor_) return noErr;
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
 
     // No Globals->store pull: GetParameter/SetParameter are store-backed, so
     // host automation already landed in the store and process() reads it below.

@@ -11,6 +11,7 @@
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
@@ -355,6 +356,12 @@ uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
 
 tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (!processor_) return kInternalError;
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
 
     param_events_.clear();
 

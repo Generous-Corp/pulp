@@ -36,6 +36,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #if PULP_CLAP_PROCESS_RT_TRAP_TESTS
@@ -202,6 +203,7 @@ public:
     mutable int prepare_count = 0;
     mutable int release_count = 0;
     mutable int process_count = 0;
+    mutable bool flushed_during_process = false;
     mutable int captured_input_channels = 0;
     mutable int captured_output_channels = 0;
     mutable int captured_num_samples = 0;
@@ -249,6 +251,7 @@ public:
                  midi::MidiBuffer&,
                  const ProcessContext& context) override {
         ++process_count;
+        flushed_during_process = pulp::signal::denormals_are_flushed();
         captured_context = context;
         captured_input_channels = static_cast<int>(audio_input.num_channels());
         captured_output_channels = static_cast<int>(audio_output.num_channels());
@@ -906,6 +909,37 @@ TEST_CASE("CLAP zero-frame process block returns without touching processor stat
                          0, nullptr) == CLAP_PROCESS_CONTINUE);
     REQUIRE(g_capturing->process_count == 0);
     REQUIRE(g_capturing->captured_midi.empty());
+}
+
+// The adapter wraps the whole audio callback in a flush-to-zero scope so quiet
+// recursive DSP tails can't stall the host's audio thread, then restores the
+// host's prior FP mode on exit. This proves both halves on the real
+// clap_process() path: flush is active while the Processor runs, and the
+// shared host thread is left exactly as it was found.
+TEST_CASE("CLAP process flushes denormals during the callback and restores host FP mode",
+          "[clap][process][denormal][numeric-mode]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+    REQUIRE(g_capturing != nullptr);
+
+    // Drive the call from a known FP mode. denormals_are_flushed() reads the
+    // live register; capture it so the restore assertion holds whether the
+    // test process started flushing or not.
+    const bool host_mode_before = pulp::signal::denormals_are_flushed();
+
+    InputEventList events;
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == 1);
+
+    if constexpr (pulp::signal::kHardwareFlushSupported) {
+        // The Processor ran with the hardware flush bit set.
+        REQUIRE(g_capturing->flushed_during_process);
+    } else {
+        SUCCEED("hardware flush-to-zero not available on this target");
+    }
+    // Regardless of platform, the host thread's FP mode is exactly restored.
+    REQUIRE(pulp::signal::denormals_are_flushed() == host_mode_before);
 }
 
 #if PULP_CLAP_PROCESS_RT_TRAP_TESTS
