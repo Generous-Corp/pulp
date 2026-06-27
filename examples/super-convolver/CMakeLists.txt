@@ -13,7 +13,8 @@ if(PULP_BUILD_TESTS)
     # link time — so the view/canvas libs are a link-only dependency here.
     add_executable(super-convolver-test test_super_convolver.cpp super_convolver_view.cpp)
     target_link_libraries(super-convolver-test
-        PRIVATE pulp::format pulp::signal pulp::view pulp::canvas Catch2::Catch2WithMain)
+        PRIVATE pulp::format pulp::signal pulp::gpu-audio pulp::view pulp::canvas
+                Catch2::Catch2WithMain)
     target_include_directories(super-convolver-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(super-convolver-test)
 endif()
@@ -23,7 +24,7 @@ endif()
 if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
     add_executable(super-convolver-shot screenshot.cpp super_convolver_view.cpp)
     target_link_libraries(super-convolver-shot PRIVATE
-        pulp::format pulp::audio pulp::signal pulp::view pulp::canvas)
+        pulp::format pulp::audio pulp::signal pulp::gpu-audio pulp::view pulp::canvas)
     target_include_directories(super-convolver-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
@@ -43,7 +44,7 @@ pulp_add_plugin(SuperConvolver
 # The processor's create_view() pulls in the view + canvas stack.
 if(TARGET SuperConvolver_Core)
     target_include_directories(SuperConvolver_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(SuperConvolver_Core PUBLIC pulp::view pulp::canvas)
+    target_link_libraries(SuperConvolver_Core PUBLIC pulp::gpu-audio pulp::view pulp::canvas)
 endif()
 
 # Make the GPU bundles self-contained (the @loader_path fix) AND fail the build

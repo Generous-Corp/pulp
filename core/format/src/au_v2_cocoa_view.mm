@@ -81,7 +81,22 @@ struct PulpAUEditorOwnership {
         // the host's destructor then dereferences a dangling `root_`
         // reference, crashing AU v2 editor close. Don't reintroduce
         // the explicit close in this dealloc path.
-        delete _ownership;
+        //
+        // Teardown MUST run on the main thread. The GPU host's CVDisplayLink
+        // idle pump (make_scripted_idle_pump) is dispatched to the MAIN queue
+        // and dereferences the bridge. If Logic's AU XPC tears the view down on
+        // a background thread, destroying host+bridge here races a main-queue
+        // idle block already past its liveness check → the pump touches a freed
+        // bridge (SIGSEGV/PAC fault in display_link_callback). Serializing the
+        // delete onto the main thread makes teardown and the idle block mutually
+        // exclusive (both on the main queue), closing that race.
+        PulpAUEditorOwnership* owned = _ownership;
+        _ownership = nullptr;
+        if ([NSThread isMainThread]) {
+            delete owned;
+        } else {
+            dispatch_sync(dispatch_get_main_queue(), ^{ delete owned; });
+        }
     }
     [super dealloc];
 }

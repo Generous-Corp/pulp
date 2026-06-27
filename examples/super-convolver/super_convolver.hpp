@@ -16,6 +16,16 @@
 // audio thread through the lock-free signal::ConvolverIrSwapper — process()
 // never allocates or runs an FFT plan.
 //
+// An optional, default-OFF GPU engine (the Engine knob) routes the same
+// fixed-block convolution through the real GPU audio runtime
+// (gpu_audio::GpuConvolver driven by gpu_audio::GpuAudioTransport) instead of
+// the CPU PartitionedConvolver. The transport runs the GPU FFT on its own
+// non-RT worker and hands the audio thread a fixed-latency, lock-free result;
+// if no GPU device is present (or the transport fails to prepare) the processor
+// transparently falls back to the CPU engine so the plugin always works. The
+// engine is chosen once at prepare() (not per block) so the reported latency is
+// stable. See gpu_engine_active().
+//
 // The native GPU front-end (live IR waveform + frequency display + controls,
 // rendered through canvas/Skia/Dawn) is in super_convolver_ui.hpp.
 
@@ -23,6 +33,11 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+
+#include <memory>
 
 #include <array>
 #include <atomic>
@@ -43,6 +58,7 @@ enum SuperConvolverParams : state::ParamID {
     kSize    = 2,  // IR length, seconds
     kGain    = 3,  // output gain, dB
     kBypass  = 4,
+    kEngine  = 5,  // 0 = CPU (default), 1 = GPU
 };
 
 // Live wet-output magnitude spectrum (dB), published lock-free from the audio
@@ -98,12 +114,32 @@ public:
                              .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // Engine: 0 = CPU PartitionedConvolver (default), 1 = GPU runtime.
+        // CPU is the default — the live GPU path is opt-in by governance.
+        store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
     }
 
-    int latency_samples() const override { return static_cast<int>(kInternalBlock); }
+    // The active engine's total latency, chosen once at prepare(): the re-block
+    // FIFO adds kInternalBlock; the GPU transport adds its own (latency_blocks *
+    // kInternalBlock) on top. Stable for the prepared lifetime so the host's PDC
+    // stays correct and dry/wet stay phase-aligned.
+    int latency_samples() const override { return latency_samples_; }
+
+    /// True when the live audio path is actually the GPU engine (Engine=GPU was
+    /// requested AND a GPU device was available AND the transport prepared). If
+    /// the GPU was requested but unavailable, this is false — the processor fell
+    /// back to the CPU engine. Read after prepare().
+    bool gpu_engine_active() const { return gpu_engine_active_; }
 
     void prepare(const format::PrepareContext& ctx) override {
         stop_worker();
+        // Tear down any previous GPU engine before re-selecting (transport first,
+        // it holds a pointer into the node).
+        gpu_transport_.release();
+        gpu_node_.reset();
+        gpu_engine_active_ = false;
+
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
             ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 512;
@@ -114,19 +150,40 @@ public:
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             in_buf_[ch].assign(cap, 0.0f);   in_len_[ch] = 0;
             out_buf_[ch].assign(cap, 0.0f);  out_len_[ch] = kInternalBlock;  // primed: B zeros
-            dry_ring_[ch].assign(kInternalBlock, 0.0f); dry_pos_[ch] = 0;
             // Drop any IR a previous lifecycle's worker staged but the audio
             // thread never consumed (it was built at the old block size).
             while (swapper_[ch].try_consume()) { /* freed here, off the audio thread */ }
         }
         wet_.assign(kInternalBlock, 0.0f);
 
-        rebuild_ir_inline(current_size());   // first IR loaded synchronously
+        rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
+
+        // Choose the engine ONCE (not per-block) so the reported latency is
+        // stable. The live GPU path is opt-in; if it can't initialize we fall
+        // back to the CPU engine so the plugin always produces audio.
+        if (state().get_value(kEngine) >= 0.5f)
+            try_enable_gpu_engine();
+
+        // Total latency = re-block FIFO (kInternalBlock) + (GPU only) the
+        // transport's fixed delay. The dry path is delayed to match so dry/wet
+        // stay phase-coherent under either engine.
+        latency_samples_ = static_cast<int>(kInternalBlock);
+        if (gpu_engine_active_)
+            latency_samples_ += static_cast<int>(gpu_transport_.latency_samples());
+        const std::size_t dry_delay = static_cast<std::size_t>(latency_samples_);
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            dry_ring_[ch].assign(dry_delay, 0.0f);
+            dry_pos_[ch] = 0;
+        }
+
         start_worker();
     }
 
     void release() override {
         stop_worker();
+        gpu_transport_.release();   // transport before node (it points at the node)
+        gpu_node_.reset();
+        gpu_engine_active_ = false;
         for (auto& c : conv_) c.reset();
     }
 
@@ -164,47 +221,31 @@ public:
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
 
-        // Block-boundary IR handoff: pick up anything the worker staged. RT-safe
-        // (two atomic pointer ops, no alloc, no free).
-        for (std::size_t ch = 0; ch < conv_.size(); ++ch)
-            conv_[ch].try_swap_ir(swapper_[ch]);
-
-        // Tell the worker the currently-requested IR length (atomic store).
-        requested_size_.store(current_size(), std::memory_order_relaxed);
-
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
         const float gain = std::pow(10.0f, state().get_value(kGain) / 20.0f);
 
-        for (std::size_t ch = 0; ch < ch_count && ch < input.num_channels() && ch < kChannels; ++ch) {
-            const float* in = input.channel(ch).data();
+        // Fill the per-channel wet output FIFO via the active engine. Both engines
+        // re-block the host stream into fixed kInternalBlock chunks; only the
+        // convolution itself (CPU PartitionedConvolver vs GPU transport) differs.
+        if (gpu_engine_active_)
+            fill_wet_gpu(input, n);
+        else
+            fill_wet_cpu(input, n);
+
+        // Emit n samples per channel: wet from the primed output FIFO, dry
+        // delayed by the active engine's total latency so they stay aligned.
+        for (std::size_t ch = 0; ch < ch_count && ch < kChannels; ++ch) {
+            const float* in =
+                ch < input.num_channels() ? input.channel(ch).data() : nullptr;
             float* out = output.channel(ch).data();
-
-            // 1. Append the host block to the input FIFO.
-            std::memcpy(in_buf_[ch].data() + in_len_[ch], in, n * sizeof(float));
-            in_len_[ch] += n;
-
-            // 2. Drain full internal blocks through the convolver. The conv runs
-            //    only on exactly kInternalBlock samples, so overlap-save state
-            //    advances coherently regardless of the host block size.
-            while (in_len_[ch] >= kInternalBlock) {
-                conv_[ch].process(in_buf_[ch].data(), wet_.data(), kInternalBlock);
-                std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
-                             (in_len_[ch] - kInternalBlock) * sizeof(float));
-                in_len_[ch] -= kInternalBlock;
-                std::memcpy(out_buf_[ch].data() + out_len_[ch], wet_.data(),
-                            kInternalBlock * sizeof(float));
-                out_len_[ch] += kInternalBlock;
-            }
-
-            // 3. Emit n samples: wet from the primed output FIFO (delayed by
-            //    kInternalBlock), dry delayed by the same amount to stay aligned.
             const std::size_t avail = out_len_[ch];
+            const std::size_t delay = dry_ring_[ch].size();
             for (std::size_t i = 0; i < n; ++i) {
                 const float wet_i = i < avail ? out_buf_[ch][i] : 0.0f;
                 const float dry_i = dry_ring_[ch][dry_pos_[ch]];
-                dry_ring_[ch][dry_pos_[ch]] = in[i];
-                dry_pos_[ch] = (dry_pos_[ch] + 1) % kInternalBlock;
+                dry_ring_[ch][dry_pos_[ch]] = in ? in[i] : 0.0f;
+                dry_pos_[ch] = (dry_pos_[ch] + 1) % delay;
                 out[i] = (1.0f - mix) * dry_i + mix * gain * wet_i;
             }
             const std::size_t consumed = n < avail ? n : avail;
@@ -218,6 +259,93 @@ public:
 
 private:
     static constexpr std::size_t kChannels = 2;
+
+    // CPU engine: append the host block and drain full internal blocks through
+    // the per-channel PartitionedConvolver into the output FIFO. RT-safe.
+    void fill_wet_cpu(const audio::BufferView<const float>& input, std::size_t n) {
+        // Block-boundary IR handoff: pick up anything the worker staged. RT-safe
+        // (two atomic pointer ops, no alloc, no free).
+        for (std::size_t ch = 0; ch < conv_.size(); ++ch)
+            conv_[ch].try_swap_ir(swapper_[ch]);
+        // Tell the worker the currently-requested IR length (atomic store).
+        requested_size_.store(current_size(), std::memory_order_relaxed);
+
+        for (std::size_t ch = 0; ch < input.num_channels() && ch < kChannels; ++ch) {
+            const float* in = input.channel(ch).data();
+            std::memcpy(in_buf_[ch].data() + in_len_[ch], in, n * sizeof(float));
+            in_len_[ch] += n;
+            while (in_len_[ch] >= kInternalBlock) {
+                conv_[ch].process(in_buf_[ch].data(), wet_.data(), kInternalBlock);
+                std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
+                             (in_len_[ch] - kInternalBlock) * sizeof(float));
+                in_len_[ch] -= kInternalBlock;
+                std::memcpy(out_buf_[ch].data() + out_len_[ch], wet_.data(),
+                            kInternalBlock * sizeof(float));
+                out_len_[ch] += kInternalBlock;
+            }
+        }
+    }
+
+    // GPU engine: same fixed re-blocking, but each B-block is processed as ONE
+    // stereo block through the GPU transport (RT-safe by contract — the GPU FFT
+    // runs on the transport's non-RT worker; on a worker miss the node's
+    // PassthroughDry policy fills the block). Both channels advance in lockstep
+    // (the same n is appended every call), so in_len_[0] gates the drain.
+    void fill_wet_gpu(const audio::BufferView<const float>& input, std::size_t n) {
+        const std::size_t in_ch = input.num_channels();
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            if (ch < in_ch)
+                std::memcpy(in_buf_[ch].data() + in_len_[ch],
+                            input.channel(ch).data(), n * sizeof(float));
+            else
+                std::memset(in_buf_[ch].data() + in_len_[ch], 0, n * sizeof(float));
+            in_len_[ch] += n;
+        }
+        while (in_len_[0] >= kInternalBlock) {
+            const float* in_ptrs[kChannels] = {in_buf_[0].data(), in_buf_[1].data()};
+            float* out_ptrs[kChannels] = {gpu_wet_[0].data(), gpu_wet_[1].data()};
+            audio::BufferView<const float> iv(in_ptrs, kChannels, kInternalBlock);
+            audio::BufferView<float> ov(out_ptrs, kChannels, kInternalBlock);
+            gpu_transport_.process(iv, ov, static_cast<uint32_t>(kInternalBlock));
+            for (std::size_t ch = 0; ch < kChannels; ++ch) {
+                std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
+                             (in_len_[ch] - kInternalBlock) * sizeof(float));
+                in_len_[ch] -= kInternalBlock;
+                std::memcpy(out_buf_[ch].data() + out_len_[ch], gpu_wet_[ch].data(),
+                            kInternalBlock * sizeof(float));
+                out_len_[ch] += kInternalBlock;
+            }
+        }
+    }
+
+    // Build + start the GPU engine. On any failure (no GPU device, transport
+    // prepare rejected) leaves gpu_engine_active_ == false so process() uses CPU.
+    void try_enable_gpu_engine() {
+        auto ir = make_reverb_ir(ir_length_for(current_size()));
+        gpu_node_ = std::make_unique<gpu_audio::GpuConvolver>(
+            static_cast<uint32_t>(kChannels), static_cast<uint32_t>(kInternalBlock),
+            static_cast<uint32_t>(sample_rate_), std::move(ir));
+        bool ok = gpu_node_->prepare() && gpu_node_->gpu_available();
+        if (ok) {
+            gpu_audio::GpuAudioTransport::Config cfg;
+            cfg.ring_blocks = 8;
+            cfg.run_worker_thread = true;
+            ok = gpu_transport_.prepare(gpu_node_.get(), cfg);
+        }
+        if (ok) {
+            for (std::size_t ch = 0; ch < kChannels; ++ch)
+                gpu_wet_[ch].assign(kInternalBlock, 0.0f);
+            gpu_engine_active_ = true;
+        } else {
+            runtime::log_info(
+                "SuperConvolver: GPU engine requested but unavailable "
+                "(gpu_available={}); falling back to CPU convolution.",
+                gpu_node_ ? gpu_node_->gpu_available() : false);
+            gpu_transport_.release();
+            gpu_node_.reset();
+            gpu_engine_active_ = false;
+        }
+    }
 
     // Accumulate the output into a ring; once per block run a windowed FFT and
     // publish a 256-bin dB magnitude spectrum. RT-safe: the Fft is preallocated
@@ -320,6 +448,16 @@ private:
 
     std::array<signal::PartitionedConvolver, kChannels> conv_{};
     std::array<signal::ConvolverIrSwapper, kChannels> swapper_{};
+
+    // Optional GPU engine (default OFF). Chosen once at prepare(); the transport
+    // points into the node, so node must outlive (and prepare before) it and the
+    // transport must be released before the node. gpu_wet_ is the per-channel
+    // B-sized scratch the transport writes each stereo block into.
+    std::unique_ptr<gpu_audio::GpuConvolver> gpu_node_;
+    gpu_audio::GpuAudioTransport gpu_transport_;
+    std::array<std::vector<float>, kChannels> gpu_wet_{};
+    bool gpu_engine_active_ = false;
+    int latency_samples_ = static_cast<int>(kInternalBlock);
 
     // Worker / live-IR-swap state.
     std::thread worker_;

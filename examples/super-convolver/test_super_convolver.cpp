@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/headless.hpp>
+#include <pulp/midi/buffer.hpp>
+#include <pulp/state/store.hpp>
 
 #include "super_convolver.hpp"
 
@@ -225,4 +227,98 @@ TEST_CASE("SuperConvolver convolves correctly under variable host blocks",
     const double corr = sxy / std::sqrt(sxx * syy + 1e-30);
     INFO("variable-block corr=" << corr);
     REQUIRE(corr > 0.9999);   // reverb is the IR even though host blocks != prepared block
+}
+
+// Proves the GPU engine path is genuinely wired: with Engine=GPU the live audio
+// path runs through gpu_audio::GpuConvolver driven by GpuAudioTransport (GPU FFT
+// on the transport's non-RT worker), and the convolved output still reproduces
+// the IR. We drive the processor directly (not through HeadlessHost) so we can
+// read gpu_engine_active() and detect a no-GPU environment.
+//
+// Determinism: the transport's worker thread polls the input ring and produces
+// asynchronously, so after each process() we sleep a few ms to let the worker
+// catch up before the next block is read. With Engine=GPU the total latency is
+// kInternalBlock (re-block FIFO) + transport latency, so we peak-align before
+// scoring — and GPU f32 FFT diverges more than the CPU path, so the bar is 0.99.
+TEST_CASE("SuperConvolver GPU engine convolves through the GPU transport",
+          "[gpu][superconvolver]") {
+    using P = SuperConvolverProcessor;
+    constexpr std::size_t BLOCK = P::kInternalBlock;  // one host block == one B-block
+    constexpr double SR = 48000.0;
+    constexpr float SIZE = 0.05f;  // short IR for a fast test
+    const std::size_t len = static_cast<std::size_t>(SIZE * SR);
+
+    P proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, SIZE);
+    store.set_value(kMix, 100.0f);   // fully wet → output == convolution
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 1.0f);  // request the GPU engine
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    if (!proc.gpu_engine_active()) {
+        // No Metal/GPU device in this environment (common in headless CI): the
+        // processor correctly fell back to the CPU engine. Nothing to prove
+        // about the GPU path here — skip rather than fail.
+        WARN("GPU engine unavailable in this environment — skipping GPU path test "
+             "(processor fell back to CPU). The CPU golden tests still cover audio.");
+        proc.release();
+        return;
+    }
+
+    // The GPU path is real (a device was found and the transport prepared).
+    const int total_latency = proc.latency_samples();
+    INFO("GPU latency_samples=" << total_latency);
+    REQUIRE(total_latency > static_cast<int>(BLOCK));  // re-block + transport delay
+
+    const std::vector<float> ir = make_reverb_ir(len);
+    const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 16;  // + slack to flush
+
+    std::vector<float> out_all;
+    std::vector<float> in_l(BLOCK), in_r(BLOCK), out_l(BLOCK), out_r(BLOCK);
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = SR;
+    pctx.num_samples = static_cast<int>(BLOCK);
+
+    for (int b = 0; b < nblocks; ++b) {
+        std::fill(in_l.begin(), in_l.end(), 0.0f);
+        std::fill(in_r.begin(), in_r.end(), 0.0f);
+        if (b == 0) { in_l[0] = 1.0f; in_r[0] = 1.0f; }  // impulse
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+        pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+        proc.process(ov, iv, midi_in, midi_out, pctx);
+        // Let the transport's non-RT worker produce the next delayed block.
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        out_all.insert(out_all.end(), out_l.begin(), out_l.end());
+    }
+    proc.release();
+
+    // Peak-align (the IR's onset is its unit first sample) and score against the
+    // reference IR via normalized cross-correlation.
+    std::size_t lag = 0; float peak = 0.0f;
+    for (std::size_t i = 0; i < out_all.size(); ++i)
+        if (std::abs(out_all[i]) > peak) { peak = std::abs(out_all[i]); lag = i; }
+    REQUIRE(peak > 0.5f);  // a real convolved onset survived (not a miss/silence)
+
+    double sxy = 0, sxx = 0, syy = 0;
+    std::size_t scored = 0;
+    for (std::size_t i = 0; i < len && lag + i < out_all.size(); ++i) {
+        const double x = out_all[lag + i], y = ir[i];
+        sxy += x * y; sxx += x * x; syy += y * y; ++scored;
+    }
+    const double corr = sxy / std::sqrt(sxx * syy + 1e-30);
+    INFO("GPU corr=" << corr << " scored=" << scored << " lag=" << lag);
+    REQUIRE(corr > 0.99);   // GPU f32 FFT reproduces the IR (looser bar than CPU)
 }
