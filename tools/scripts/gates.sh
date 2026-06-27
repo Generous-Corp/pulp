@@ -9,7 +9,7 @@
 # `--mode=report`:
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
-#   - compat-sync (when compat.json is touched, requires matching test coverage)
+#   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
