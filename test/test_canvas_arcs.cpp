@@ -1,4 +1,4 @@
-// pulp #1521 — native arc / arcTo / ellipse / roundRect cluster.
+// Native arc / arcTo / ellipse / roundRect coverage cluster.
 //
 // Two contiguous sub-clusters under the same arc/path-primitive
 // theme:
@@ -34,7 +34,7 @@
 
 using namespace pulp::canvas;
 
-// ── pulp #1521 — native arc / arcTo / ellipse / roundRect ─────────────────
+// ── Native arc / arcTo / ellipse / roundRect ──────────────────────────────
 //
 // The four canvas2d arc-as-path catalog entries were DIVERGE because the JS
 // shim approximated each via cubic-bezier or polyline. These tests exercise
@@ -136,7 +136,7 @@ TEST_CASE("RecordingCanvas captures round_rect with 4 distinct corner radii",
 }
 
 #ifdef PULP_HAS_SKIA
-// ── Skia rasterization fixtures ───────────────────────────────────────────
+// ── Skia rasterization fixtures for arc-path primitives ───────────────────
 //
 // Each test compares the bytes the SkiaCanvas paints (filling a black arc
 // on a white surface) to a "reference" path built directly from the same

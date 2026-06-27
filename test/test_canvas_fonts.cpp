@@ -1,9 +1,9 @@
 // Font tests that share Skia font-manager fixtures:
 //
-//   - pulp #932 — bundled-font (Inter-Regular, JetBrainsMono-Regular)
-//     registration with SkFontMgr + bundled_blobs() table.
-//   - pulp #1150 — public `register_font(path)` API + the SkFontMgr
-//     fallback chain through match_bundled_typeface.
+//   - Bundled-font (Inter-Regular, JetBrainsMono-Regular) registration with
+//     SkFontMgr + bundled_blobs() table.
+//   - Public `register_font(path)` API + the SkFontMgr fallback chain through
+//     match_bundled_typeface.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -34,7 +34,7 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 
-// ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
+// ── Bundled-font registration with SkFontMgr ──────────────────────────────
 
 // pulp_add_binary_data wires Inter-Regular.ttf and JetBrainsMono-Regular.ttf
 // into pulp-canvas at build time. This test asserts the C++ side of #932:
@@ -221,7 +221,7 @@ TEST_CASE("SkiaCanvas::measure_text_with_font picks up bundled "
     REQUIRE(b.width > a.width);
 }
 
-// ── pulp #1150 — public font-registration API ───────────────────────────────
+// ── Public font-registration API ──────────────────────────────────────────
 // The public `register_font` / `register_font_file` / `is_font_registered`
 // surface declared in `pulp/canvas/bundled_fonts.hpp` is the path plugin
 // authors take to make their own bundled .ttf resolve through
