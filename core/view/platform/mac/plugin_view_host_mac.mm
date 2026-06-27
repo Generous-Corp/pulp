@@ -761,6 +761,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
+    // Accept dragged files/text so the editor's drop targets work when hosted in a
+    // DAW (the NSDraggingDestination behavior lives in drag_drop_mac.mm). Without
+    // this, drag-drop worked only in the standalone PulpView.
+    if (self.window)
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
     [self setNeedsDisplay:YES];
 }
 
@@ -1396,6 +1401,10 @@ private:
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
+    // Accept dragged files/text when hosted in a DAW (drop dispatch lives in
+    // drag_drop_mac.mm) — same as the CPU host above and the standalone PulpView.
+    if (self.window)
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
 }
 
 - (void)viewDidChangeBackingProperties {

@@ -914,6 +914,27 @@ public:
     // loop live and the slice regions refit. Off-audio-thread (UI) entry point.
     static constexpr double kTargetBpmMin = 20.0;
     static constexpr double kTargetBpmMax = 400.0;
+
+    // A clean loop is an integer number of BEATS, but the analyzer reports an
+    // INTEGER bpm — and a loop's true tempo is usually fractional, so stretching to
+    // the rounded value makes the loop tile slightly short/long ("ends a bit early",
+    // worse when slowed). Use the rough bpm only to infer the beat COUNT, then derive
+    // the exact tempo that makes the file an exact musical length, so it loops
+    // perfectly at ANY host tempo. Only snaps when the file is already close to a
+    // whole-beat length (a real loop); otherwise keeps the raw estimate so non-loop
+    // one-shots aren't distorted. Pure + static so it is unit-testable in isolation.
+    static double bar_snap_bpm(double rough_bpm, long frames, double sr) {
+        if (rough_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return rough_bpm;
+        const double dur_sec = static_cast<double>(frames) / sr;
+        if (dur_sec <= 0.0) return rough_bpm;
+        const double beats = dur_sec * rough_bpm / 60.0;
+        const double nearest = std::round(beats);
+        if (nearest < 1.0) return rough_bpm;                      // too short to be a loop
+        if (std::abs(beats - nearest) > 0.25) return rough_bpm;   // not a clean whole-beat loop
+        const double exact = nearest * 60.0 / dur_sec;            // tempo that tiles exactly
+        if (exact < kTargetBpmMin || exact > kTargetBpmMax) return rough_bpm;
+        return exact;
+    }
     void set_target_bpm(double bpm) {
         const double clamped = std::clamp(bpm, kTargetBpmMin, kTargetBpmMax);
         tempo_override_.store(clamped, std::memory_order_relaxed);
@@ -1618,6 +1639,18 @@ private:
     }
 
     // ── Analysis (under raw_mutex_) ──
+    // A clean loop is an integer number of BEATS, but the analyzer reports an
+    // INTEGER bpm — and a loop's true tempo is usually fractional, so stretching to
+    // the rounded value makes the loop tile slightly short/long ("ends a bit early",
+    // and the error scales when slowed). Use the rough bpm only to infer the beat
+    // COUNT, then derive the exact tempo that makes the file an exact musical length,
+    // so it loops perfectly at ANY host tempo. Only snaps when the file is already
+    // close to a whole-beat length (a real loop); otherwise keeps the raw estimate
+    // so non-loop one-shots aren't distorted. raw_mutex_ is held by analyze_locked.
+    double snap_loop_bpm(double rough_bpm) const {
+        return bar_snap_bpm(rough_bpm, raw_frames_, raw_sr_);
+    }
+
     void analyze_locked() {
         std::array<const float*, 2> ptrs{raw_[0].data(), raw_[1].data()};
         audio::BufferView<const float> view(ptrs.data(), static_cast<std::size_t>(raw_channels_),
@@ -1627,7 +1660,7 @@ private:
         kc.source_sample_rate = raw_sr_;
         kc.channels = static_cast<std::uint32_t>(raw_channels_);
         const auto kr = kt.analyze(view, kc);
-        loop_bpm_.store(kr.tempo_bpm, std::memory_order_relaxed);
+        loop_bpm_.store(snap_loop_bpm(kr.tempo_bpm), std::memory_order_relaxed);
 
         // Collect a generous candidate set, then keep the strongest cuts by
         // confidence so sensitivity maps DIRECTLY to a slice COUNT (predictable
