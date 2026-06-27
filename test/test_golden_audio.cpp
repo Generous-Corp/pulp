@@ -12,7 +12,7 @@
 // for known inputs and parameter settings.
 //
 // Signal generation and RMS/peak measurement use the shared harness
-// helpers (test/support/) — harness PR 1B conversion.
+// helpers (test/support/).
 
 #include <pulp/audio/analysis/audio_metrics.hpp>
 #include "support/audio_test_signals.hpp"

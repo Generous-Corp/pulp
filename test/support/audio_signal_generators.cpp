@@ -1,6 +1,6 @@
-// audio_signal_generators.cpp — deterministic stimulus generators
-// (harness PR 2). Each generator's determinism contract is documented in
-// the header; keep expressions here in lock-step with those docs.
+// audio_signal_generators.cpp — deterministic stimulus generators.
+// Each generator's determinism contract is documented in the header; keep
+// expressions here in lock-step with those docs.
 
 #include "audio_signal_generators.hpp"
 

@@ -41,7 +41,9 @@
 
 # ── Free plugin set (canonical) ────────────────────────────────────────────
 #
-# Fixture-pinning status, as of the 2026-05-26 4.2 follow-up:
+# Runnable pinned fixtures use archives the scaffold can unpack without
+# running vendor installers; installer-only pinned rows skip cleanly, and
+# rows still marked TBD are not yet pinned.
 #
 # - Surge XT 1.3.4 (GitHub release) — pinned. The "pluginsonly" variants
 #   for Linux/Windows are intentionally chosen over the full installers

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file audio_test_signals.hpp
-/// Shared deterministic test-signal generators (harness PR 1B).
+/// Shared deterministic test-signal generators.
 ///
 /// Replaces the per-TU `make_sine` / `make_sine_vec` helpers that were
 /// duplicated across the golden and determinism-matrix suites. The exact
