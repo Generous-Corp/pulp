@@ -2247,7 +2247,7 @@ TEST_CASE("Label paints with TextAlign::left when textAlign='auto' (LTR fallback
 //   - widgets.cpp Label::paint — paint-time parent-chain walk
 
 TEST_CASE("setTextAlign accepts match-parent on a Label",
-          "[view][bridge][css][issue-1434][coverage]") {
+          "[view][bridge][css][issue-1434]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -2262,7 +2262,7 @@ TEST_CASE("setTextAlign accepts match-parent on a Label",
 }
 
 TEST_CASE("Label with textAlign='match-parent' adopts parent's resolved value (center)",
-          "[view][widget][css][issue-1434][coverage]") {
+          "[view][widget][css][issue-1434]") {
     // Parent View carries an inheritable text-align (center = 1). Label
     // child set to match-parent should paint with TextAlign::center.
     View parent;
@@ -2288,7 +2288,7 @@ TEST_CASE("Label with textAlign='match-parent' adopts parent's resolved value (c
 }
 
 TEST_CASE("Label with textAlign='match-parent' falls back to left when no ancestor set a value",
-          "[view][widget][css][issue-1434][coverage]") {
+          "[view][widget][css][issue-1434]") {
     // CSS spec: `text-align` defaults to `start` (≡ left under LTR) when
     // no value is inherited. A match-parent Label with no parent (or a
     // parent chain that never called set_inheritable_text_align) must
@@ -2315,7 +2315,7 @@ TEST_CASE("Label with textAlign='match-parent' falls back to left when no ancest
 // value upstream. A chain like grandparent=center → parent=match-parent →
 // label=match-parent should resolve to center, not fall back to left.
 TEST_CASE("Label with match-parent walks past intermediate match-parent ancestor",
-          "[view][widget][css][issue-1434][issue-1879][coverage]") {
+          "[view][widget][css][issue-1434][issue-1879]") {
     // Build: grandparent(center) → parent(match-parent) → label(match-parent).
     View grandparent;
     grandparent.set_bounds({0, 0, 600, 200});
@@ -2353,7 +2353,7 @@ TEST_CASE("Label with match-parent walks past intermediate match-parent ancestor
 }
 
 TEST_CASE("Label with match-parent through chain of all match-parent ancestors falls back to left",
-          "[view][widget][css][issue-1434][issue-1879][coverage]") {
+          "[view][widget][css][issue-1434][issue-1879]") {
     // Pathological case: every ancestor in the chain has match-parent.
     // CSS spec says fall back to `start` (≡ left under LTR).
     View root;
@@ -2387,7 +2387,7 @@ TEST_CASE("Label with match-parent through chain of all match-parent ancestors f
 }
 
 TEST_CASE("setTextAlign on a container View accepts match-parent (encoded as 5)",
-          "[view][bridge][css][issue-1434][coverage]") {
+          "[view][bridge][css][issue-1434]") {
     // Non-Label Views store the alignment in the inheritable slot so
     // descendant Labels pick it up. The match-parent encoding (5) must
     // round-trip through inheritable_text_align().
@@ -2456,7 +2456,7 @@ TEST_CASE("setCursor maps the full CSS keyword set",
 // keywords (`wait` / `help` / `progress` / `cell`) stay collapsed to `default_`
 // because macOS has no native cursor for them. Pin both halves.
 TEST_CASE("setCursor wires 5 macOS-backed keywords to dedicated CursorStyle slots",
-          "[view][bridge][issue-1550][coverage]") {
+          "[view][bridge][issue-1550]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -2905,7 +2905,7 @@ TEST_CASE("setListStyleType unknown keyword falls back to disc (issue-1514)",
 // storage-only round-trips; paint-side glyph rendering is a separate gap. The
 // bridge stores each keyword on its own View::ListStyleType slot.
 TEST_CASE("setListStyleType maps counter-style keywords to enum slots (issue-1514)",
-          "[view][bridge][css][issue-1514][coverage]") {
+          "[view][bridge][css][issue-1514]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -2939,7 +2939,7 @@ TEST_CASE("setListStyleType maps counter-style keywords to enum slots (issue-151
 // silently dropped). Regression guard for the `lsTypes` table in
 // web-compat-style-decl.js.
 TEST_CASE("listStyle shorthand routes counter-style keywords (issue-1514)",
-          "[view][bridge][css][issue-1514][coverage]") {
+          "[view][bridge][css][issue-1514]") {
     ScriptEngine engine;
     View root;
     StateStore store;

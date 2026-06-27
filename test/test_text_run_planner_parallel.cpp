@@ -102,7 +102,7 @@ TEST_CASE("shape_batch: parallel + serial paths produce equivalent output",
 }
 
 TEST_CASE("shape_batch: duplicate inputs preserve duplicate outputs",
-          "[font][parallel][coverage]") {
+          "[font][parallel]") {
     auto opts = make_opts("Inter", 12.0f);
     std::vector<std::pair<std::string, FontOptions>> inputs = {
         {"duplicate", opts},

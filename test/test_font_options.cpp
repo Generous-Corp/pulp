@@ -46,7 +46,7 @@ FontOptions rich_options() {
 } // namespace
 
 TEST_CASE("FontOptions hash includes full resolver cache key",
-          "[canvas][font][options][coverage]") {
+          "[canvas][font][options]") {
     const FontOptions base = rich_options();
     REQUIRE(base == rich_options());
     REQUIRE(std::hash<FontOptions>{}(base) == std::hash<FontOptions>{}(rich_options()));
@@ -83,7 +83,7 @@ TEST_CASE("FontOptions hash includes full resolver cache key",
 }
 
 TEST_CASE("FontOptions hash includes scalar style and render policy fields",
-          "[canvas][font][options][coverage]") {
+          "[canvas][font][options]") {
     const FontOptions base = rich_options();
 
     auto changed = base;
@@ -153,7 +153,7 @@ TEST_CASE("FontOptions hash includes scalar style and render policy fields",
 }
 
 TEST_CASE("FontOptions hash canonicalizes signed zero on float members",
-          "[canvas][font][options][coverage][issue-2169]") {
+          "[canvas][font][options][issue-2169]") {
     // Regression for #2169: `FontOptions::operator==` is `= default`
     // (per-member float comparison). IEEE-754 reports `+0.0f == -0.0f` as
     // true, so two FontOptions whose only difference is a signed-zero float
@@ -191,7 +191,7 @@ TEST_CASE("FontOptions hash canonicalizes signed zero on float members",
 }
 
 TEST_CASE("Font tag helpers pack OpenType tags in byte order",
-          "[canvas][font][options][coverage]") {
+          "[canvas][font][options]") {
     REQUIRE(make_font_feature_tag('k', 'e', 'r', 'n') == 0x6B65726Eu);
     REQUIRE(make_font_feature_tag('t', 'n', 'u', 'm') == 0x746E756Du);
     REQUIRE(make_variation_axis_tag('w', 'g', 'h', 't') == 0x77676874u);
@@ -200,7 +200,7 @@ TEST_CASE("Font tag helpers pack OpenType tags in byte order",
 }
 
 TEST_CASE("FontScope factories and generations isolate plugin and view scopes",
-          "[canvas][font][scope][coverage]") {
+          "[canvas][font][scope]") {
     auto plugin_id = 728042u;
     auto view_id = 728043u;
 
@@ -235,7 +235,7 @@ TEST_CASE("FontScope factories and generations isolate plugin and view scopes",
 }
 
 TEST_CASE("Font resolver trace names cover every fallback origin",
-          "[canvas][font][resolver][coverage]") {
+          "[canvas][font][resolver]") {
     REQUIRE(std::string(to_string(FallbackOrigin::ScopeView)) == "scope-view");
     REQUIRE(std::string(to_string(FallbackOrigin::ScopePlugin)) == "scope-plugin");
     REQUIRE(std::string(to_string(FallbackOrigin::ScopeGlobal)) == "scope-global");
@@ -247,7 +247,7 @@ TEST_CASE("Font resolver trace names cover every fallback origin",
 }
 
 TEST_CASE("ResolvedFont default state is unresolved without a typeface",
-          "[canvas][font][resolver][coverage]") {
+          "[canvas][font][resolver]") {
     ResolvedFont font;
     REQUIRE_FALSE(font.has_typeface());
     REQUIRE_FALSE(font.resolved());
@@ -262,7 +262,7 @@ TEST_CASE("ResolvedFont default state is unresolved without a typeface",
 
 #ifndef PULP_HAS_SKIA
 TEST_CASE("FontResolver non-Skia path returns scoped NotFound results",
-          "[canvas][font][resolver][coverage]") {
+          "[canvas][font][resolver]") {
     auto& resolver = FontResolver::instance();
     resolver.clear_cache();
 
@@ -292,7 +292,7 @@ TEST_CASE("FontResolver non-Skia path returns scoped NotFound results",
 }
 
 TEST_CASE("Font registry non-Skia stubs reject registrations but validate bytes",
-          "[canvas][font][registry][coverage]") {
+          "[canvas][font][registry]") {
     const std::uint8_t bytes[] = {0x00, 0x01, 0x02, 0x03};
 
     REQUIRE_FALSE(register_font(bytes, sizeof(bytes), "StubFont"));
@@ -311,7 +311,7 @@ TEST_CASE("Font registry non-Skia stubs reject registrations but validate bytes"
 }
 
 TEST_CASE("Font cluster_step non-Skia skeleton skips UTF-8 continuation bytes",
-          "[canvas][font][registry][coverage]") {
+          "[canvas][font][registry]") {
     const std::string text = std::string("A") + "\xC3\xA9"
                            + "\xF0\x9F\x99\x82" + "Z";
 
@@ -330,7 +330,7 @@ TEST_CASE("Font cluster_step non-Skia skeleton skips UTF-8 continuation bytes",
 #endif
 
 TEST_CASE("TextRunPlanner skeleton maps UTF-8 scalars and line breaks",
-          "[canvas][font][planner][coverage]") {
+          "[canvas][font][planner]") {
     auto& planner = TextRunPlanner::instance();
     planner.clear_cache();
 
@@ -362,7 +362,7 @@ TEST_CASE("TextRunPlanner skeleton maps UTF-8 scalars and line breaks",
 }
 
 TEST_CASE("TextRunPlanner captures scope generation and RTL base direction",
-          "[canvas][font][planner][coverage]") {
+          "[canvas][font][planner]") {
     auto& planner = TextRunPlanner::instance();
     planner.clear_cache();
 
@@ -396,7 +396,7 @@ TEST_CASE("TextRunPlanner captures scope generation and RTL base direction",
 }
 
 TEST_CASE("TextRunPlanner handles empty text, cache hits, and ASCII breaks",
-          "[canvas][font][planner][coverage]") {
+          "[canvas][font][planner]") {
     auto& planner = TextRunPlanner::instance();
     planner.clear_cache();
 
@@ -436,7 +436,7 @@ TEST_CASE("TextRunPlanner handles empty text, cache hits, and ASCII breaks",
 }
 
 TEST_CASE("ShapedText value types report default metrics and emptiness",
-          "[canvas][font][shaped-text][coverage]") {
+          "[canvas][font][shaped-text]") {
     RunMetrics metrics;
     REQUIRE(metrics.line_height() == 0.0f);
     metrics.ascent = 9.0f;

@@ -71,7 +71,7 @@ TEST_CASE("sort_by falls back to text when numeric keys are mixed",
 }
 
 TEST_CASE("sort_by preserves insertion order for equal sort keys",
-          "[ui][table-model][coverage]") {
+          "[ui][table-model]") {
     TableModel m;
     m.add_column({"Name"});
     m.add_column({"Rank"});
@@ -87,7 +87,7 @@ TEST_CASE("sort_by preserves insertion order for equal sort keys",
 }
 
 TEST_CASE("sort_by None records state without reordering rows",
-          "[ui][table-model][coverage]") {
+          "[ui][table-model]") {
     auto m = make_preset_table();
 
     m.sort_by(0, TableSortOrder::None);
@@ -121,7 +121,7 @@ TEST_CASE("switching sort column resets to ascending",
 }
 
 TEST_CASE("sort_by none records state without reordering rows",
-          "[ui][table-model][coverage]") {
+          "[ui][table-model]") {
     auto m = make_preset_table();
 
     m.sort_by(0, TableSortOrder::None);
@@ -140,7 +140,7 @@ TEST_CASE("sort_by none records state without reordering rows",
 }
 
 TEST_CASE("sort_by keeps equal keys stable across sort directions",
-          "[ui][table-model][coverage]") {
+          "[ui][table-model]") {
     TableModel m;
     m.add_column({"Name"});
     m.add_column({"Score"});
@@ -240,7 +240,7 @@ TEST_CASE("add_column pads existing rows", "[ui][table-model][issue-493]") {
 }
 
 TEST_CASE("adding a column after short rows preserves padded cells",
-          "[ui][table-model][coverage]") {
+          "[ui][table-model]") {
     TableModel m;
     m.add_column({"Name"});
     m.add_column({"Author"});

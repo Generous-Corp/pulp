@@ -1217,7 +1217,7 @@ static pulp::canvas::Color outline_stroke_color_from(
 }
 
 TEST_CASE("outline currentColor resolves to Label own text color in painted stroke",
-          "[issue-1728][rn][outlineColor][coverage]") {
+          "[issue-1728][rn][outlineColor]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
     ScriptEngine engine;
@@ -1251,7 +1251,7 @@ TEST_CASE("outline currentColor resolves to Label own text color in painted stro
 }
 
 TEST_CASE("outline explicit color overrides currentColor resolution in painted stroke",
-          "[issue-1728][rn][outlineColor][coverage]") {
+          "[issue-1728][rn][outlineColor]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
     ScriptEngine engine;
@@ -1284,7 +1284,7 @@ TEST_CASE("outline explicit color overrides currentColor resolution in painted s
 }
 
 TEST_CASE("outline currentColor with no color set falls back to theme text.primary",
-          "[issue-1728][rn][outlineColor][coverage]") {
+          "[issue-1728][rn][outlineColor]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
     ScriptEngine engine;
@@ -1328,7 +1328,7 @@ TEST_CASE("outline currentColor with no color set falls back to theme text.prima
 }
 
 TEST_CASE("outline currentColor follows dynamic Label color update across repaints",
-          "[issue-1728][rn][outlineColor][coverage]") {
+          "[issue-1728][rn][outlineColor]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
     ScriptEngine engine;

@@ -64,13 +64,13 @@ TEST_CASE("Min contrast thresholds are correct", "[view][contrast]") {
 }
 
 TEST_CASE("Unknown contrast levels fall back to AA normal",
-          "[view][contrast][coverage]") {
+          "[view][contrast]") {
     auto invalid = static_cast<ContrastLevel>(99);
     REQUIRE_THAT(min_contrast_for_level(invalid), WithinAbs(4.5, 0.01));
 }
 
 TEST_CASE("Contrast helpers clamp channel inputs",
-          "[view][contrast][coverage][issue-651]") {
+          "[view][contrast][issue-651]") {
     auto below_black = Color::rgba(-1.0f, -0.5f, -0.25f);
     auto above_white = Color::rgba(2.0f, 1.5f, 1.25f);
 
@@ -96,7 +96,7 @@ TEST_CASE("Auto contrast picks black on light background", "[view][contrast]") {
 }
 
 TEST_CASE("Auto contrast fallback chooses the higher ratio color",
-          "[view][contrast][coverage]") {
+          "[view][contrast]") {
     auto background = Color::rgba8(128, 128, 128);
     auto fg = auto_contrast_foreground(background, ContrastLevel::aaa_normal);
 
@@ -120,7 +120,7 @@ TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
 }
 
 TEST_CASE("Auto contrast falls back to the higher-ratio endpoint",
-          "[view][contrast][coverage]") {
+          "[view][contrast]") {
     auto background = Color::rgba8(120, 120, 120);
     REQUIRE_FALSE(meets_contrast(Color::rgba8(255, 255, 255),
                                  background,
@@ -137,7 +137,7 @@ TEST_CASE("Auto contrast falls back to the higher-ratio endpoint",
 }
 
 TEST_CASE("Adjust for contrast preserves already compliant colors",
-          "[view][contrast][coverage]") {
+          "[view][contrast]") {
     auto foreground = Color::rgba8(255, 255, 255, 128);
     auto background = Color::rgba8(0, 0, 0);
 
@@ -155,7 +155,7 @@ TEST_CASE("Adjust for contrast preserves already compliant colors",
 }
 
 TEST_CASE("Adjust for contrast returns nullopt when threshold is impossible",
-          "[view][contrast][coverage]") {
+          "[view][contrast]") {
     auto background = Color::rgba8(128, 128, 128);
     auto foreground = Color::rgba8(128, 128, 128);
 
@@ -194,7 +194,7 @@ TEST_CASE("Shift hue wraps around", "[view][contrast][hsl]") {
 }
 
 TEST_CASE("Shift hue wraps negative and alpha is preserved",
-          "[view][contrast][hsl][coverage][issue-651]") {
+          "[view][contrast][hsl][issue-651]") {
     auto color = Color::rgba8(0, 255, 0, 96);
     auto shifted = shift_hue(color, -240.0f);
     auto hsl = rgb_to_hsl(shifted);
@@ -292,7 +292,7 @@ TEST_CASE("Auto-fix contrast produces valid theme", "[view][contrast][theme]") {
 }
 
 TEST_CASE("Theme contrast validation skips missing pairs and reports failures",
-          "[view][contrast][theme][coverage][issue-651]") {
+          "[view][contrast][theme][issue-651]") {
     Theme partial;
     partial.colors["bg.primary"] = Color::rgba8(255, 255, 255);
     partial.colors["text.primary"] = Color::rgba8(200, 200, 200);
@@ -311,7 +311,7 @@ TEST_CASE("Theme contrast validation skips missing pairs and reports failures",
 }
 
 TEST_CASE("Auto-fix leaves unresolved contrast issues unchanged",
-          "[view][contrast][theme][coverage]") {
+          "[view][contrast][theme]") {
     Theme bad;
     bad.colors["bg.primary"] = Color::rgba8(128, 128, 128);
     bad.colors["text.primary"] = Color::rgba8(128, 128, 128);

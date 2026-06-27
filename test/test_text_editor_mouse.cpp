@@ -301,7 +301,7 @@ TEST_CASE("TextEditor mouse triple-click selects the current multiline row",
 }
 
 TEST_CASE("TextEditor ignores wheel input in single-line mode",
-          "[view][text_editor][coverage]") {
+          "[view][text_editor]") {
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("abcdef");
@@ -318,7 +318,7 @@ TEST_CASE("TextEditor ignores wheel input in single-line mode",
 }
 
 TEST_CASE("TextEditor multi-line wheel clamps scroll offset before hit testing",
-          "[view][text_editor][coverage]") {
+          "[view][text_editor]") {
     TextEditor editor;
     editor.multi_line = true;
     editor.set_text("one\ntwo\nthree\nfour");

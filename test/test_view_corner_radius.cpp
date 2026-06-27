@@ -163,7 +163,7 @@ TEST_CASE("pulp #1731 P1 — px radius still wins when pct is 0 (default)",
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST_CASE("pulp #1731 cov — effective_corner_radius uniform pct math",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     pulp::view::View v;
 
     SECTION("50% on 100x60 → 30 (50% × min(100,60))") {
@@ -216,7 +216,7 @@ TEST_CASE("pulp #1731 cov — effective_corner_radius uniform pct math",
 }
 
 TEST_CASE("pulp #1731 cov — effective_corner_radius_* per-corner pct math",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     pulp::view::View v;
     v.set_bounds({0, 0, 100, 60});
 
@@ -276,7 +276,7 @@ TEST_CASE("pulp #1731 cov — effective_corner_radius_* per-corner pct math",
 }
 
 TEST_CASE("pulp #1731 cov — uniform percent reflows when bounds change",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     // Same View, two different bounds — pct stays the same but resolved
     // px differs because min(w,h) differs.
     pulp::view::View v;
@@ -296,7 +296,7 @@ TEST_CASE("pulp #1731 cov — uniform percent reflows when bounds change",
 }
 
 TEST_CASE("pulp #1731 cov — per-corner pct paints as cubic_to with resolved px",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     // Per-corner percent forces View::paint_all into the per-corner path
     // builder (build_per_corner_rounded_rect_path), which emits cubic_to
     // commands whose end-points encode each effective radius.
@@ -338,7 +338,7 @@ TEST_CASE("pulp #1731 cov — per-corner pct paints as cubic_to with resolved px
 }
 
 TEST_CASE("pulp #1731 cov — box-shadow path reads the percent-resolved radius",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     // View::paint_all draws outset box-shadow before the background,
     // and the shadow's rounded-rect corner is computed from
     // effective_corner_radius(...). A 50% pct on a 200x200 view should
@@ -387,7 +387,7 @@ TEST_CASE("pulp #1731 cov — box-shadow path reads the percent-resolved radius"
 }
 
 TEST_CASE("pulp #1731 cov — Panel::paint reads pct via effective_corner_radius",
-          "[issue-1731][rn][borderRadius][coverage]") {
+          "[issue-1731][rn][borderRadius]") {
     // widgets.cpp:1774 — Panel reads effective_corner_radius for its
     // own fill_rounded_rect. Pin the pct path explicitly.
     pulp::view::Panel p;
