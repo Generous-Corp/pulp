@@ -370,8 +370,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -389,8 +389,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -412,8 +412,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup \u2014 animation-name resolution + direction enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
@@ -431,8 +431,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -454,8 +454,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup \u2014 fill-mode enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
@@ -473,8 +473,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -492,8 +492,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -529,8 +529,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -697,7 +697,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View",
+        "test/test_widget_bridge_css_misc.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat \u2014 the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup \u2014 partial \u2192 supported (no unsupported values listed; wired through web-compat-style-decl.js).",
@@ -1648,8 +1648,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1667,8 +1667,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1686,8 +1686,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1705,8 +1705,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1724,8 +1724,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1743,8 +1743,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1762,8 +1762,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1781,8 +1781,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1800,8 +1800,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -2096,7 +2096,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2167,7 +2167,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2183,7 +2183,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2199,7 +2199,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2618,7 +2618,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2691,7 +2691,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2706,7 +2706,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2721,7 +2721,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -3210,8 +3210,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3232,8 +3232,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3254,8 +3254,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3276,8 +3276,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3298,8 +3298,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
