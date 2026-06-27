@@ -709,7 +709,7 @@ QualityScore compute_quality(const PackageDescriptor& pkg) {
     if (verdict == LicenseVerdict::allowed) q.license = 25;
     else if (verdict == LicenseVerdict::review_required) q.license = 10;
 
-    // Platforms (0-25): 5 points per supported primary platform
+    // Platforms (0-25): 8 points per supported primary platform
     int plat_count = 0;
     for (auto& [name, ps] : pkg.platforms) {
         if (name == "macOS" || name == "Windows" || name == "Linux")
@@ -726,11 +726,10 @@ QualityScore compute_quality(const PackageDescriptor& pkg) {
     if (total_count > 0)
         q.verification = 25 * pass_count / total_count;
 
-    // Maintenance (0-25): based on verification date freshness
+    // Maintenance (0-15): verified packages receive a static score
     if (!pkg.verification.last_verified.empty()) {
-        // Simple heuristic: verified at all = 15 points, recent = 25
         q.maintenance = 15;
-        // Could parse date and compare, but for now a static score
+        // Static score: verification recency is not factored into the tier.
     }
 
     q.total = q.license + q.platforms + q.verification + q.maintenance;

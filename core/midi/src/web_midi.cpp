@@ -43,7 +43,7 @@ public:
 
                 if (input) {
                     input.onmidimessage = function(msg) {
-                        // Forward to C++: status, data1, data2, timestamp
+                        // Forward to C++: status, data1, data2.
                         var d = msg.data;
                         Module._pulp_web_midi_message(
                             d.length > 0 ? d[0] : 0,
@@ -88,7 +88,7 @@ public:
         } else if ((status & 0xF0) == 0xB0) {
             event = MidiEvent::cc(status & 0x0F, data1, data2);
         } else {
-            return; // Unsupported message type for now
+            return; // Unsupported message type; not forwarded.
         }
 
         callback_(event);

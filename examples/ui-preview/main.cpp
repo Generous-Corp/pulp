@@ -484,8 +484,8 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--view-tree-out") == 0 && i + 1 < argc) {
             view_tree_path = argv[++i];
         } else if (starts_with(argv[i], "--label-audit")) {
-            // pulp #2163 — programmatic label-fit audit. After layout,
-            // walk the view tree and for every Label compute the
+            // Programmatic label-fit audit. After layout, walk the view tree
+            // and for every Label compute the
             // expected glyph extent (real ascent + descent from
             // SkFontMetrics) and compare against the Yoga-assigned
             // box height. Emits one JSON object per Label to stdout.
@@ -499,11 +499,11 @@ int main(int argc, char* argv[]) {
             label_audit_enabled = true;
             if (eq && eq[1] != '\0') label_audit_path = eq + 1;
         } else if (std::strcmp(argv[i], "--font") == 0 && i + 1 < argc) {
-            // pulp #2163 — `--font "Family Name=/path/to/font.ttf"` registers
-            // a TTF/OTF before the JS bridge starts, so imported designs
-            // that reference a host-uninstalled family render with the
-            // requested face instead of falling back to the system default
-            // (which often lacks Unicode arrows/dashes → tofu boxes).
+            // `--font "Family Name=/path/to/font.ttf"` registers a TTF/OTF
+            // before the JS bridge starts, so imported designs that reference
+            // a host-uninstalled family render with the requested face instead
+            // of falling back to the system default (which often lacks Unicode
+            // arrows/dashes → tofu boxes).
             // Repeatable: pass --font once per family/variant.
             std::string spec = argv[++i];
             auto eq = spec.find('=');
@@ -522,9 +522,9 @@ int main(int argc, char* argv[]) {
                           << spec << ")\n";
             }
         } else if (starts_with(argv[i], "--font-probe=")) {
-            // pulp #2163 — programmatic verification that a font is
-            // resolvable AND has a given glyph. Spec is `FAMILY:HEX[,HEX...]`
-            // where HEX is a Unicode codepoint (with or without 0x prefix).
+            // Programmatic verification that a font is resolvable AND has a
+            // given glyph. Spec is `FAMILY:HEX[,HEX...]` where HEX is a
+            // Unicode codepoint (with or without 0x prefix).
             // Example:
             //   --font-probe="IBM Plex Mono:2192,2191"
             // Prints one JSON line per (family, codepoint) and exits with
@@ -584,12 +584,11 @@ int main(int argc, char* argv[]) {
             return all_ok ? 0 : 1;
 #endif // PULP_HAS_SKIA
         } else if (starts_with(argv[i], "--font-dir=")) {
-            // pulp #2163 — `--font-dir=/path/to/fonts` walks a directory and
-            // registers every .ttf / .otf under it. The font family name
-            // is parsed from the file's name table (via Skia) rather than
-            // from the filename, so `IBMPlexMono-Regular.ttf` resolves
-            // under its declared family "IBM Plex Mono" without any
-            // mapping work from the caller.
+            // `--font-dir=/path/to/fonts` walks a directory and registers
+            // every .ttf / .otf under it. The font family name is parsed from
+            // the file's name table (via Skia) rather than from the filename,
+            // so `IBMPlexMono-Regular.ttf` resolves under its declared family
+            // "IBM Plex Mono" without any mapping work from the caller.
             std::filesystem::path dir{argv[i] + 11};
             std::error_code ec;
             if (!std::filesystem::is_directory(dir, ec)) {
@@ -634,15 +633,15 @@ int main(int argc, char* argv[]) {
         if (const char* env_path = std::getenv("PULP_VIEW_TREE_OUT")) view_tree_path = env_path;
     }
 
-    // pulp #2163 — co-located-fonts convention. When the imported script
-    // lives in a directory, recursively register every .ttf / .otf in
-    // that directory and its descendants. Lets a developer drop their
-    // JSX + a folder of TTFs side by side (e.g.
-    // `~/Desktop/Chainer/ChainerInstrument.jsx` + `~/Desktop/Chainer/IBM_Plex_Mono/...`)
-    // and get the requested fonts loaded automatically without any
-    // explicit `--font` flag. Family names are read from the OpenType
-    // `name` table so common naming variants (`IBMPlexMono-Regular.ttf`
-    // resolving to family "IBM Plex Mono") just work.
+    // Co-located-fonts convention. When the imported script lives in a
+    // directory, recursively register every .ttf / .otf in that directory
+    // and its descendants. Lets a developer drop their JSX + a folder of
+    // TTFs side by side (e.g. `~/Desktop/Chainer/ChainerInstrument.jsx` +
+    // `~/Desktop/Chainer/IBM_Plex_Mono/...`) and get the requested fonts
+    // loaded automatically without any explicit `--font` flag. Family names
+    // are read from the OpenType `name` table so common naming variants
+    // (`IBMPlexMono-Regular.ttf` resolving to family "IBM Plex Mono") just
+    // work.
     //
     // Set PULP_PREVIEW_NO_AUTO_FONTS=1 to opt out.
     if (!script_path.empty() && !std::getenv("PULP_PREVIEW_NO_AUTO_FONTS")) {
@@ -681,12 +680,10 @@ int main(int argc, char* argv[]) {
     root.set_theme(Theme::dark());
     root.set_frame_clock(&clock);
     root.flex().direction = FlexDirection::column;
-    // Demo defaults applied ONLY when no --script. Imported scripts
-    // (pulp import-design --from jsx output, etc.) manage their own
-    // layout — bleeding `padding: 16; gap: 12` into a script's root
-    // pushes content inward and offsets every absolute-positioned child.
-    // Per user UX feedback 2026-05-17: "no default views end up loaded
-    // when a person is simply trying to import their own stuff."
+    // Imported scripts manage their own layout, so demo padding/gap is
+    // applied only when no --script is given. Bleeding `padding: 16; gap: 12`
+    // into a script's root pushes content inward and offsets every
+    // absolute-positioned child.
     if (script_path.empty()) {
         root.flex().padding = 16;
         root.flex().gap = 12;
@@ -697,10 +694,10 @@ int main(int argc, char* argv[]) {
     WidgetBridge bridge(engine, root, store);
 
     // Install runtime-import handlers so imported React/JSX bundles
-    // (pulp import-design --from jsx output, etc.) can register +
-    // drain useEffect / requestAnimationFrame / setTimeout callbacks.
-    // Matches pulp-screenshot's setup — pulp #1899. Without this the
-    // bundle's React mount never finishes and the window stays empty.
+    // (pulp import-design --from jsx output, etc.) can register + drain
+    // useEffect / requestAnimationFrame / setTimeout callbacks. Matches
+    // pulp-screenshot's setup; without this the bundle's React mount never
+    // finishes and the window stays empty.
     bridge.install_runtime_import_handlers();
 
     // Build UI — from script file or built-in demo
@@ -768,10 +765,9 @@ int main(int argc, char* argv[]) {
                       << result.getWithDefault(std::string("(empty)")) << "\n";
             std::cout.flush();
 
-            // (Probe 2 removed: had a JS syntax error that crashed the
-            // run after settle. Replaced by C++-side native-event
-            // instrumentation in window_host_mac.mm + widget_bridge.cpp,
-            // gated on PULP_DEBUG_POINTER=1.)
+            // Native-event instrumentation lives in window_host_mac.mm +
+            // widget_bridge.cpp and is explicitly gated on
+            // PULP_DEBUG_POINTER=1.
 
             // Programmatic click probe (PULP_JSX_CLICKPROBE=1). Fires a
             // simulate_drag on the root view at a knob coordinate after
@@ -809,11 +805,6 @@ int main(int argc, char* argv[]) {
                           << "(delta=" << (static_cast<long>(png2.size()) - static_cast<long>(png0.size())) << ")\n";
                 std::cout.flush();
             }
-
-            // (Periodic stats dump removed — required std::thread / std::this_thread
-            // which weren't in scope. Replaced by an explicit JS-side log inside
-            // the __dispatch__ bypass using __spectrLog when available, so each
-            // bypass fires a line to stderr directly.)
 
             // Surface shim log + error
             try {
@@ -1114,9 +1105,9 @@ int main(int argc, char* argv[]) {
         inspector.set_active(true);
     }
 
-    // pulp #2163 — run label-fit audit BEFORE screenshot_only short-
-    // circuits so headless audit runs work without launching a window.
-    // Layout is already done; the audit is a tree walk + arithmetic.
+    // Run label-fit audit BEFORE screenshot_only short-circuits so headless
+    // audit runs work without launching a window. Layout is already done; the
+    // audit is a tree walk + arithmetic.
     auto run_label_audit = [&](int width, int height) -> int {
         root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
         root.layout_children();
@@ -1298,9 +1289,9 @@ int main(int argc, char* argv[]) {
         std::cout.flush();
     }
 
-    // pulp #2163 — label-fit audit. Walks the laid-out tree, computes
-    // expected glyph extent per Label, flags labels whose glyphs would
-    // clip given Yoga-assigned box height. JSON output for tooling.
+    // Label-fit audit. Walks the laid-out tree, computes expected glyph
+    // extent per Label, flags labels whose glyphs would clip given
+    // Yoga-assigned box height. JSON output for tooling.
     if (label_audit_enabled) {
         std::ostream* audit_out = &std::cout;
         std::ofstream audit_file;
@@ -1483,8 +1474,8 @@ int main(int argc, char* argv[]) {
     auto* inspector_view_ptr = inspector_view.get();
     View* inspector_selected = nullptr;
 
-    // #2611 — feed the inspector's Performance tab a live RenderPassManager
-    // carrying whole-recording GPU render time, sampled from the main window's
+    // Feed the inspector's Performance tab a live RenderPassManager carrying
+    // whole-recording GPU render time, sampled from the main window's
     // SkiaSurface each idle tick (see the idle callback below). The number is
     // produced by Skia Graphite's GpuStats(kElapsedTime); WindowHost forwards
     // it via gpu_render_time_ms()/gpu_render_timing_available().
@@ -1705,8 +1696,8 @@ int main(int argc, char* argv[]) {
             if (window) window->repaint();
         }
         if (inspector_window) {
-            // #2611 — sample the main window's GPU render time and hand it to
-            // the Performance tab's RenderPassManager before refreshing.
+            // Sample the main window's GPU render time and hand it to the
+            // Performance tab's RenderPassManager before refreshing.
             inspector_rpm.set_gpu_render_time_ms(
                 static_cast<float>(window->gpu_render_time_ms()),
                 window->gpu_render_timing_available());

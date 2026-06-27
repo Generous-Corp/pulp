@@ -17,14 +17,14 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
         target_link_options(pulp-threejs-native-demo PRIVATE -Wl,-z,stacksize=16777216)
     endif()
 
-    # #542: Headless `--capture` must not hang at `status: 'starting'`. This
+    # Headless `--capture` must not hang at `status: 'starting'`. This
     # test runs the cube demo with --capture and asserts the binary exits
     # within a bounded time (i.e. does NOT hang). When V8 is actually linked
     # and a native Dawn adapter is available, the test additionally asserts
     # that a non-empty PNG was written. On builds without V8 (or without a
     # Dawn adapter), the binary prints an explanatory banner and exits 1 —
     # the test script tolerates that case explicitly so every CI node still
-    # exercises the no-hang path that regressed in #542.
+    # exercises the no-hang capture path.
     if(PULP_BUILD_TESTS)
         add_test(
             NAME threejs_native_demo_capture_no_hang
@@ -52,8 +52,8 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
             LABELS "threejs;gpu;headless;gltf;texture"
         )
 
-        # pulp #30: strict (no skip-pass) V8 provider-identity + cube-coexistence
-        # gate. Opt-in via PULP_VALIDATE_V8_PROVIDER_STRICT so the default Pulp
+        # Strict (no skip-pass) V8 provider-identity + cube-coexistence gate.
+        # Opt in via PULP_VALIDATE_V8_PROVIDER_STRICT so the default Pulp
         # CI lane (which may build without V8) is unaffected. Asserts the sealed
         # v8-builder seal is the linked runtime and that V8 coexists with
         # Dawn/Skia in the real app by writing a non-empty cube PNG.

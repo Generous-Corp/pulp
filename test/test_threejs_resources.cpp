@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// test_threejs_resources.cpp — iOS-D.3b Slice 2.
+// test_threejs_resources.cpp — Three.js IIFE bundle lookup contract.
 //
 // Verifies the platform contract of
 // `pulp::view::threejs_iife_source()`:
@@ -17,7 +17,7 @@
 // (iOS bundles are flat — the subdirectory mirrors the runtime
 // `[bundle pathForResource:ofType:inDirectory:@"threejs"]` lookup,
 // NOT a macOS `Contents/Resources/` layout). That fixture is created
-// on demand; we do NOT ship a pre-staged copy because slice 2's
+// on demand; we do NOT ship a pre-staged copy because the generated
 // bundle output may differ per upstream Three.js pin.
 
 #include <catch2/catch_test_macros.hpp>

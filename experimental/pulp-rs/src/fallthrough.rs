@@ -35,8 +35,9 @@
 //! # Opt-outs
 //!
 //! - `PULP_RS_NO_FALLTHROUGH=1` — disable delegation globally. The
-//!   Rust binary prints its "not ported" message and exits 2 as it
-//!   does in Rust-only sandboxes.
+//!   Rust binary prints its "not ported" message and returns a usage
+//!   error, which the CLI maps to exit code 2 as it does in Rust-only
+//!   sandboxes.
 //! - `PULP_DEBUG=1` — print the resolved child + argv on stderr
 //!   before exec.
 
@@ -217,7 +218,7 @@ pub fn delegate_with<R: BinaryResolver, S: Spawner>(
 
 /// Helper for the "stubbed" branches in `cmd::*`: try to fall through
 /// to `pulp-cpp`; if that's unavailable or opted-out, render the
-/// provided pre-6e message on stderr and exit 2.
+/// provided stub message on stderr and return a usage error.
 ///
 /// # Errors
 ///

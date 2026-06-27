@@ -793,9 +793,9 @@ TEST_CASE("Skinned Fader honours derived thin track width",
     fader.paint(rc);
     // Rect geometry is in f[0..3] = x, y, w, h. The track is the FIRST
     // full-height rounded rect (drawn before fill + thumb). Assert it is the
-    // derived thin width (~5 px) and centred — NOT a fraction of the 28-px box
-    // (the old skinned heuristic would have drawn 28*0.18 ≈ 5 here by accident,
-    // so make the box wide enough that 0.18*box would clearly differ).
+    // derived thin width (~5 px) and centred — NOT a fraction of the 60-px box
+    // (the old skinned heuristic would have drawn 60*0.18 ≈ 11 here, so make
+    // the box wide enough that 0.18*box clearly differs).
     auto rects = commands_of(rc, DrawCommand::Type::fill_rounded_rect);
     bool found_thin_track = false;
     for (const auto& r : rects) {

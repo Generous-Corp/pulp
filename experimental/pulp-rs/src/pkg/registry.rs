@@ -56,8 +56,9 @@
 //!
 //! # Portability notes for future callers
 //!
-//! - `serde_json`'s `preserve_order` feature is enabled crate-wide so
-//!   the `packages` map is stable-ordered.
+//! - `serde_json`'s `preserve_order` feature is enabled crate-wide for
+//!   parsing, but registry and lock-file maps are exposed as `BTreeMap`
+//!   values so CLI iteration and serialization are byte-deterministic.
 //! - Unknown top-level fields in either file are *ignored* (forward-
 //!   compatible): the reader only reaches for the keys it knows, and
 //!   missing-field defaults are safe defaults (empty vec, `false`,
@@ -77,10 +78,9 @@ use crate::error::{CliError, Result};
 
 /// Parsed registry.
 ///
-/// Map keys preserve insertion order thanks to `serde_json`'s
-/// `preserve_order` feature + `IndexMap` at the top level, but we expose
-/// a `BTreeMap` so the CLI's iteration order is byte-deterministic
-/// across platforms.
+/// Parsing preserves JSON object order internally; the exposed `BTreeMap`
+/// re-sorts package keys so CLI iteration is byte-deterministic across
+/// platforms.
 #[derive(Debug, Clone, Default)]
 pub struct Registry {
     /// Bumped by the C++ side when the schema changes. Unused in the
@@ -166,9 +166,9 @@ pub struct LockFile {
     /// Schema version tag. Bumped by the writer when the layout changes.
     #[serde(default = "default_lock_version")]
     pub lockfile_version: i64,
-    /// Package id → locked details. Keys are sorted by `serde_json`
-    /// with the `preserve_order` feature disabled for this struct —
-    /// we explicitly sort at serialize time via `BTreeMap`.
+    /// Package id → locked details. Keys stay sorted because this is a
+    /// `BTreeMap`, so serialization is deterministic regardless of
+    /// crate-wide `serde_json` object ordering.
     #[serde(default)]
     pub packages: BTreeMap<String, LockedPackage>,
 }
@@ -388,7 +388,7 @@ fn atomic_write(path: &Path, body: &[u8]) -> Result<()> {
 
 /// Ranked fuzzy search over a [`Registry`]. Matches the C++
 /// `search(reg, query)` ordering — exact id > partial id > name > category
-/// > tags > provides > description.
+/// > tags/provides (equal weight) > description.
 #[must_use]
 pub fn search<'r>(reg: &'r Registry, query: &str) -> Vec<&'r PackageDescriptor> {
     let q = query.to_ascii_lowercase();

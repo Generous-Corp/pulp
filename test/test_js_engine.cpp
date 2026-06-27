@@ -658,7 +658,7 @@ TEST_CASE("JsEngine native promise functions resolve through captured callbacks"
     END_FOR_EACH_ENGINE
 }
 
-TEST_CASE("JsEngine Phase 13 smoke can assemble browser-style GPU bridge primitives", "[js_engine][phase13]") {
+TEST_CASE("JsEngine smoke can assemble browser-style GPU bridge primitives", "[js_engine][gpu-bridge]") {
     auto engines_ = available_engines();
     REQUIRE_FALSE(engines_.empty());
 
@@ -668,7 +668,7 @@ TEST_CASE("JsEngine Phase 13 smoke can assemble browser-style GPU bridge primiti
             auto& engine = script.engine();
 
             if (!engine.supports_host_objects() || !engine.supports_promises()) {
-                SUCCEED("phase13 smoke intentionally unsupported on this backend");
+                SUCCEED("GPU bridge smoke intentionally unsupported on this backend");
                 continue;
             }
 
@@ -749,7 +749,7 @@ TEST_CASE("JsEngine multiple native functions", "[js_engine]") {
     END_FOR_EACH_ENGINE
 }
 
-// pulp #3206 — QuickJS unhandled-promise-rejection tracker.
+// QuickJS unhandled-promise-rejection tracker.
 //
 // QuickJS doesn't call JS-side `addEventListener("unhandledrejection", ...)`
 // handlers, so without a host hook a rejected promise with no `.catch` is
@@ -759,7 +759,7 @@ TEST_CASE("JsEngine multiple native functions", "[js_engine]") {
 // reaches stderr and that the engine survives the unhandled rejection +
 // continues to evaluate.
 
-TEST_CASE("QuickJS unhandled-rejection tracker logs PULP_QJS marker (#3206)",
+TEST_CASE("QuickJS unhandled-rejection tracker logs PULP_QJS marker",
           "[js_engine][quickjs][issue-3206]") {
     if (!is_engine_available(JsEngineType::quickjs)) return;
     auto engine = create_js_engine(JsEngineType::quickjs);
@@ -779,7 +779,7 @@ TEST_CASE("QuickJS unhandled-rejection tracker logs PULP_QJS marker (#3206)",
     REQUIRE(captured.find("PULP_QJS_UNHANDLED_REJECTION_STACK") != std::string::npos);
 }
 
-TEST_CASE("QuickJS unhandled-rejection tracker does not crash on non-Error reasons (#3206)",
+TEST_CASE("QuickJS unhandled-rejection tracker does not crash on non-Error reasons",
           "[js_engine][quickjs][issue-3206]") {
     if (!is_engine_available(JsEngineType::quickjs)) return;
     auto engine = create_js_engine(JsEngineType::quickjs);
@@ -801,7 +801,7 @@ TEST_CASE("QuickJS unhandled-rejection tracker does not crash on non-Error reaso
     REQUIRE(result.getWithDefault<int>(0) == 2);
 }
 
-TEST_CASE("QuickJS unhandled-rejection tracker logs exactly once per rejection (#3206)",
+TEST_CASE("QuickJS unhandled-rejection tracker logs exactly once per rejection",
           "[js_engine][quickjs][issue-3206]") {
     if (!is_engine_available(JsEngineType::quickjs)) return;
     auto engine = create_js_engine(JsEngineType::quickjs);
@@ -824,7 +824,7 @@ TEST_CASE("QuickJS unhandled-rejection tracker logs exactly once per rejection (
     REQUIRE(second == std::string::npos);
 }
 
-TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-pattern (#3206)",
+TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-pattern",
           "[js_engine][quickjs][issue-3206]") {
     if (!is_engine_available(JsEngineType::quickjs)) return;
     auto engine = create_js_engine(JsEngineType::quickjs);
@@ -845,7 +845,7 @@ TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-patt
     REQUIRE(captured.find("inner-async-throw") != std::string::npos);
 }
 
-// pulp #3206 — JSC NSException bridge in js_jsc_engine.mm.
+// JSC NSException bridge in js_jsc_engine.mm.
 //
 // `[JSContext evaluateScript:]` can throw an NSException for malformed
 // scripts. Without `@try`/`@catch(NSException*)`, the exception unwinds
@@ -859,7 +859,7 @@ TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-patt
 // into its check_exception() helper.
 
 #if __APPLE__
-TEST_CASE("JSC evaluate surfaces NSException via std::runtime_error (#3206)",
+TEST_CASE("JSC evaluate surfaces NSException via std::runtime_error",
           "[js_engine][jsc][issue-3206]") {
     if (!is_engine_available(JsEngineType::jsc)) return;
     auto engine = create_js_engine(JsEngineType::jsc);

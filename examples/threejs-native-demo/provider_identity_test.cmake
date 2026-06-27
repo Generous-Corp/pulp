@@ -1,7 +1,7 @@
-# Strict V8 provider-identity + cube-coexistence CTest for pulp #30.
+# Strict V8 provider-identity + cube-coexistence CTest.
 #
 # Unlike capture_test.cmake (which tolerates "no V8 / no Dawn" as a pass to
-# guard only against the #542 hang), this test has NO skip-pass: it asserts the
+# guard only against capture hangs), this test has NO skip-pass: it asserts the
 # sealed v8-builder seal is actually the linked runtime AND that V8 coexists
 # with Dawn/Skia in the real app by producing a non-empty cube PNG. It is gated
 # on PULP_VALIDATE_V8_PROVIDER_STRICT and only added when the v8-builder

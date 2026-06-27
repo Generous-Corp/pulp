@@ -1,5 +1,5 @@
 /// @file test_motion_input_replay.cpp
-/// Catch2 tests for Phase 10 input recording + replay. Records a
+/// Catch2 tests for input recording + replay. Records a
 /// hover -> click -> drag sequence against a synthetic view tree, then
 /// replays the same fixture against a fresh tree and asserts the
 /// motion stream that emerges is identical.

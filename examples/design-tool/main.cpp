@@ -387,12 +387,12 @@ int main(int argc, char* argv[]) {
         }
         opts.title = title;
     }
-    // pulp #59/#63/#64/#65 — design-viewport metadata (see
-    // WindowHost::set_design_viewport). Spectr's editor.js is authored
-    // at 1320x860 with chains of position:absolute+inset:0 children
-    // that Yoga can't size into a fill, so per-child scale and JS
-    // canvas-refit both fail. The window host instead pins the root
-    // at design size and applies an aspect-correct paint-time fit.
+    // Design-viewport metadata (see WindowHost::set_design_viewport).
+    // Spectr's editor.js is authored at 1320x860 with chains of
+    // position:absolute+inset:0 children that Yoga can't size into a
+    // fill, so per-child scale and JS canvas-refit both fail. The
+    // window host instead pins the root at design size and applies an
+    // aspect-correct paint-time fit.
     //
     // Auto-measure / metadata-driven viewport priority order (first match wins):
     //   1. CLI flag --design-width / --design-height (operator override)
@@ -608,21 +608,21 @@ int main(int argc, char* argv[]) {
     opts.use_gpu = true;
     opts.initially_hidden = no_show_window;
 
-    // pulp #1899 — clamp any oversize absolute-positioned descendants
-    // to the design viewport before first layout, so runtime-imported
-    // trees with hardcoded oversize roots don't lay their bottom-
-    // anchored children off-screen.
+    // Clamp any oversize absolute-positioned descendants to the design
+    // viewport before first layout, so runtime-imported trees with
+    // hardcoded oversize roots don't lay their bottom-anchored children
+    // off-screen.
     pulp::view::reconcile_oversize_absolute_subtree(
         root,
         static_cast<uint32_t>(kDesignWidth),
         static_cast<uint32_t>(kDesignHeight));
 
-    // pulp #2128 follow-up — bridge auto-registers in
-    // WidgetBridge::all_bridges_ via its ctor, and the platform key
-    // paths (window_host_mac.mm keyDown:/performKeyEquivalent:) call
-    // WidgetBridge::dispatch_global_key, so any registerShortcut
-    // callback or window.addEventListener('keydown', ...) listener in
-    // the loaded ui.js fires without an explicit on_global_key lambda.
+    // The bridge auto-registers in WidgetBridge::all_bridges_ via its
+    // ctor, and the platform key paths (window_host_mac.mm
+    // keyDown:/performKeyEquivalent:) call
+    // WidgetBridge::dispatch_global_key, so any registerShortcut callback
+    // or window.addEventListener('keydown', ...) listener in the loaded
+    // ui.js fires without an explicit on_global_key lambda.
 
     auto window = WindowHost::create(root, opts);
     // Pin root at the probe-measured natural size and let paint
@@ -717,8 +717,8 @@ int main(int argc, char* argv[]) {
             // values (the user may have resized since launch). Without
             // this, a hot-reloaded script with
             // oversize absolute roots regresses to the same off-screen
-            // layout that the cold-start reconcile call (line ~295)
-            // exists to prevent.
+            // layout that the cold-start reconcile call above exists to
+            // prevent.
             if (window) {
                 const auto sz = window->get_content_size();
                 if (sz.width > 0 && sz.height > 0) {

@@ -39,10 +39,9 @@ void FontScope::bump_generation() {
 
 bool FontScope::register_font(const std::uint8_t* data, std::size_t size,
                               const std::string& family_override) {
-    // The Global scope delegates to the existing
-    // `pulp::canvas::register_font` free function in bundled_fonts.cpp.
-    // Plugin and View scopes record the family name but still use the
-    // global typeface path until scope-isolated storage is available.
+    // All scopes use the global typeface path so the font is loadable,
+    // then record the family name in this scope. Typeface storage is
+    // not scope-isolated yet.
     bool ok = false;
     if (id_.kind == FontScopeId::Kind::Global) {
         ok = ::pulp::canvas::register_font(data, size, family_override);
@@ -75,18 +74,12 @@ bool FontScope::is_registered(const std::string& family) const {
     return impl_->registered_families.find(family) != impl_->registered_families.end();
 }
 
-// The budget caps three cache pressures: (a) FontResolver's typeface
-// cache entries scoped to this scope, (b) TextShaper's segment-width
-// cache (cleared on overage, then rebuilt lazily), and (c) Skia's
-// global strike cache (a process-wide cache).
-//
-// Eviction model: on each register_*() / set_memory_budget() call, if
-// the scope is over budget, prune the resolver cache for this scope
-// down to <budget. We approximate per-entry memory as
-// `sizeof(ResolvedFont) + estimated_typeface_bytes`. Without a
-// platform-portable typeface-size accessor, we use a conservative
-// fixed estimate (256 KB per typeface) — enough to give the budget
-// teeth without false-evicting under low pressure.
+// Memory budget for this scope's font caches. A non-zero budget is a
+// hint, not a hard cap. The only eviction performed today happens when
+// set_memory_budget() runs: prune_to_budget() then clears the entire
+// FontResolver cache (see below). register_*() does not prune. Per-entry
+// accounting and the TextShaper / Skia strike caches are not yet
+// factored in. A budget of 0 disables eviction.
 void FontScope::set_memory_budget(std::size_t bytes) {
     memory_budget_.store(bytes, std::memory_order_release);
     prune_to_budget();
@@ -164,8 +157,8 @@ void release_view_scope(std::uint64_t view_id) {
 
 std::uint64_t merged_generation_for(FontScopeId requesting) {
     // Always consult the global scope. Plugin/view requests additionally
-    // mix in their own scope's generation. The merge is a saturating sum;
-    // monotonicity holds because every input is monotonic.
+    // mix in their own scope's generation. The merge is a plain 64-bit sum;
+    // wraparound is unreachable in practice for these generation counters.
     std::uint64_t total = global_scope().generation();
     if (requesting.kind == FontScopeId::Kind::Plugin) {
         total += plugin_scope(requesting.id).generation();

@@ -8,9 +8,7 @@
 //
 // Until msdfgen is wired, the MSDF atlas uses equal RGB placeholder
 // distances, so this proves atlas shape and file output rather than
-// final sharp-corner rendering quality. A follow-up iteration connects
-// true MSDF atlas generation to the runtime sampler shaders and renders
-// a side-by-side preview window via pulp::view.
+// final sharp-corner rendering quality.
 
 #include <pulp/canvas/msdf_atlas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>

@@ -54,8 +54,8 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cout << "Options:\n";
             std::cout << "  --check-only   Report the latest available version and exit.\n";
             std::cout << "                 Reads the update cache; does not download.\n";
-            std::cout << "  --cli-only     Update CLI only; skip SDK install. Pre-#2087 behavior.\n";
-            std::cout << "                 Default since #2087: also fetch the matching SDK.\n";
+            std::cout << "  --cli-only     Update CLI only; skip SDK install.\n";
+            std::cout << "                 Default behavior also fetches the matching SDK.\n";
             std::cout << "  --notes        Print migration notes for the upgrade hop and exit.\n";
             std::cout << "                 No binary swap. Reads the embedded migration index.\n";
             std::cout << "  --notes --json Same, but emit a stable-shape JSON document instead\n";
@@ -66,7 +66,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cout << "If no version is specified, upgrades to the latest release.\n";
             std::cout << "Requires curl (macOS/Linux) or Invoke-WebRequest (Windows).\n";
             std::cout << "\n";
-            std::cout << "Project pinning (#2087): if pulp upgrade is run from inside a project\n";
+            std::cout << "Project pinning: if pulp upgrade is run from inside a project\n";
             std::cout << "whose pulp.toml pins an explicit SDK version, the SDK swap leaves that\n";
             std::cout << "pin alone — pinning is sacred. Run `pulp project unpin` first to track\n";
             std::cout << "latest, or `pulp project pin <new>` to migrate the pin.\n";
@@ -182,7 +182,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (!url.empty()) std::cout << "Notes:      " << url << "\n";
         if (uc::is_newer(installed, latest)) {
             std::cout << "\nA newer release is available. Run `pulp upgrade` to install it.\n";
-            std::cout << "Slice 5 (#499) will add auto/prompt/manual/off enforcement.\n";
+            std::cout << "Automatic update-policy enforcement is not yet wired.\n";
         } else {
             std::cout << "\nYou're on the latest release.\n";
         }

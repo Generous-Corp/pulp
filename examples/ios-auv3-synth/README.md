@@ -5,7 +5,6 @@ frequency and level parameter plus a gate opened by MIDI note-on events.
 The point of the example is end-to-end packaging (App Extension + host
 container) rather than a musically useful synth.
 
-**Workstream:** 05 — AUv3 & iOS mobile (slice 5.1)
 **Tracks:** docs/guides/ios-auv3-guidance.md
 
 ## Build (iOS Simulator)
@@ -68,10 +67,10 @@ redirect the whole surface with `PermissionsOverride` — no real prompt.
 ## Known follow-ups
 
 - `pulp_add_ios_auv3()` builds the `.appex` today; host-app target
-  generation is follow-on. For now, copy `templates/ios-auv3/HostApp/`
+  generation is follow-on. Copy `templates/ios-auv3/HostApp/`
   (SwiftUI `ContentView.swift` + `PulpHostApp.swift`) into your Xcode
   project as the App Store container.
 - No presets yet — the `state::PresetManager` hook is wired but the
   example doesn't ship presets.
-- Metal GPU path is still gated by slice 5.4 (`PULP_HAS_SKIA` on iOS);
-  see #330 and #249 for the render-loop and on-device validation work.
+- Metal GPU path is still gated by `PULP_HAS_SKIA` on iOS; the render-loop
+  and on-device validation work are tracked separately.

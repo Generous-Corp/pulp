@@ -76,7 +76,7 @@
 
         const eyebrow = document.createElement('span');
         eyebrow.id = 'pulp-threejs-demo-eyebrow';
-        eyebrow.textContent = 'Phase 13 / Native Dawn Bridge';
+        eyebrow.textContent = 'Native Dawn Bridge';
         eyebrow.style.color = '#7dd3fc';
         eyebrow.style.fontSize = '12px';
         sceneColumn.appendChild(eyebrow);

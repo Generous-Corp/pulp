@@ -38,9 +38,9 @@ namespace {
 
 /// RAII fixture: resets the singleton coordinator, enables tracing,
 /// binds a fresh FrameClock, and installs two sinks — one that
-/// excludes the Phase 7 one-shot `TraceStarted` events (the default
-/// `buffer`, preserving pre-Phase-7 test assertions), and one that
-/// keeps every event (`full_buffer`, for Phase 7 tests that need to
+/// excludes the one-shot `TraceStarted` events (the default
+/// `buffer`, preserving data-event-only test assertions), and one that
+/// keeps every event (`full_buffer`, for tests that need to
 /// see registration events).
 class Fixture {
 public:
@@ -87,7 +87,7 @@ const SampleEvent* first_of(const std::vector<SampleEvent>& b,
 }
 
 /// Number of data + framing events excluding the one-shot TraceStarted
-/// emission (Phase 7). Pre-Phase-7 tests assumed buffer.size() never
+/// emission. Earlier tests assumed buffer.size() never
 /// counted a registration event.
 std::size_t data_event_count(const std::vector<SampleEvent>& b) {
     std::size_t n = 0;
@@ -1060,10 +1060,10 @@ TEST_CASE("final_value returns the last sample's value",
     REQUIRE(final_value(s) == Approx(0.95));
 }
 
-// ── Phase 7: TraceStarted + stable IDs + Provenance ──────────────────
+// ── TraceStarted + stable IDs + Provenance ───────────────────────────
 
 TEST_CASE("TraceStarted emits exactly once with provenance",
-          "[motion][phase7]") {
+          "[motion][trace-started]") {
     Fixture fx;
     Provenance prov;
     prov.source_kind = "tween";
@@ -1099,7 +1099,7 @@ TEST_CASE("TraceStarted emits exactly once with provenance",
 }
 
 TEST_CASE("Sample events carry stable trace_id/metric_id/burst_id",
-          "[motion][phase7]") {
+          "[motion][trace-started]") {
     Fixture fx;
     double v = 0.0;
     auto handle = Coordinator::instance().trace("V", { 60 })
@@ -1130,9 +1130,9 @@ TEST_CASE("Sample events carry stable trace_id/metric_id/burst_id",
 }
 
 TEST_CASE("Fixture round-trip preserves trace_id, metric_id, burst_id, and provenance",
-          "[motion][phase7][fixture]") {
+          "[motion][trace-started][fixture]") {
     Fixture fx;
-    const auto path = tmp_fixture_path("phase7");
+    const auto path = tmp_fixture_path("trace-started");
     Coordinator::instance().add_sink(make_fixture_sink(path));
 
     Provenance prov;
@@ -1170,7 +1170,7 @@ TEST_CASE("Fixture round-trip preserves trace_id, metric_id, burst_id, and prove
 }
 
 TEST_CASE("load_fixture rejects v1 schema (only v2 accepted)",
-          "[motion][phase7][fixture]") {
+          "[motion][trace-started][fixture]") {
     const auto path = tmp_fixture_path("v1reject");
     {
         std::ofstream f(path, std::ios::trunc);
@@ -1185,7 +1185,7 @@ TEST_CASE("load_fixture rejects v1 schema (only v2 accepted)",
 }
 
 TEST_CASE("assert_matches aligns events by stable IDs, not position",
-          "[motion][phase7][fixture]") {
+          "[motion][trace-started][fixture]") {
     // Two identical fixtures, but the second one has events shuffled
     // (within burst order is preserved; across-burst order is not).
     Fixture fx;

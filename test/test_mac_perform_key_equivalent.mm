@@ -1,4 +1,4 @@
-// pulp #2128 follow-up — pin the macOS performKeyEquivalent: route.
+// Pin the macOS performKeyEquivalent: route.
 //
 // Without the override added in window_host_mac.mm, every Cmd-modified
 // shortcut chord (Cmd+,, Cmd+S, Cmd+?) is consumed by NSResponder's
@@ -155,8 +155,8 @@ TEST_CASE("performKeyEquivalent: routes Cmd-modified chord to rootView->on_globa
     REQUIRE(g_script_hits == 1);
     REQUIRE(last_is_down == true);
     REQUIRE((last_mods & kModCmd) != 0);
-    // Comma's W3C key form. The bridge translates keyCode==',' (ASCII 44)
-    // by the same path, but here we only assert the rootView callback
+    // Comma's W3C key form. The bridge translates the ',' character
+    // (ASCII 44) by the same path, but here we only assert the rootView callback
     // received the chord — the forward_key_event → JS dispatch chain is
     // covered by test_platform_key_wireup.cpp.
 }

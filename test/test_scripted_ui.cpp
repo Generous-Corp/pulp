@@ -461,8 +461,7 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     fs::remove_all(temp_dir);
 }
 
-// ── Phase iOS-D.3b Slice 1: ScriptedUiSession::attach_gpu_surface ──────────
-// planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1
+// ── ScriptedUiSession::attach_gpu_surface ──────────────────────────────────
 //
 // Pins the late-attach plumbing that lets format adapters hand a host's
 // live GpuSurface to the JS-side widget bridge AFTER the bridge has been
@@ -470,7 +469,7 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
 // stay on mocks and 3D scenes (Three.js, raw WebGPU) render black.
 
 TEST_CASE("ScriptedUiSession::attach_gpu_surface forwards to bridge",
-          "[scripted_ui][gpu-surface-plumbing][issue-ios-d3b-slice1]") {
+          "[scripted_ui][gpu-surface-plumbing]") {
     auto tmp_dir = make_temp_dir("scripted-ui-gpu-surface");
     auto script_path = tmp_dir / "ui.js";
     {
@@ -500,8 +499,8 @@ TEST_CASE("ScriptedUiSession::attach_gpu_surface forwards to bridge",
     // Attach a test (non-null) surface. The contract being pinned here is "the
     // session forwards the pointer to its bridge AND remembers it for the next
     // hot-reload-triggered rebuild". A live Dawn surface is not required for
-    // this contract — the live counterpart
-    // belongs in slice 3's [jsc][navigator-gpu][live] case.
+    // this contract; the live counterpart belongs in the
+    // [jsc][navigator-gpu][live] coverage.
     TestGpuSurface mock_surface(test_gpu_info());
     session.attach_gpu_surface(&mock_surface);
     REQUIRE(session.gpu_surface() == &mock_surface);

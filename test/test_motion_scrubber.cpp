@@ -309,13 +309,13 @@ TEST_CASE("MotionScrubber sink removal and pause keep state deterministic",
     std::remove(path.c_str());
 }
 
-// ── Bug-sweep regressions (pre-merge sweep #2142) ────────────────────
+// ── Bug-sweep regressions ─────────────────────────────────────────────
 
 // Re-emission used to drop SampleEvent::Kind::Input entirely — the
 // switch fell through to "?", the method routed to kMotionSample, and
-// input_kind / view_id were not serialized at all. Phase 10 fixtures
+// input_kind / view_id were not serialized at all. Input-replay fixtures
 // stayed silent on scrub.
-TEST_CASE("MotionScrubber re-emits Phase 10 Input events with input_kind + view_id",
+TEST_CASE("MotionScrubber re-emits Input events with input_kind + view_id",
           "[motion-scrubber][bug-sweep]") {
     FrameClock clock;
     const auto path = tmp_fixture_path("input-replay");
@@ -489,7 +489,7 @@ TEST_CASE("Non-scrubber Motion.* methods still route to MotionInspector",
     REQUIRE(resp.params_json.find("motion inspector") != std::string::npos);
 }
 
-// ── FixtureFileSink double-registration regression (bug #2151) ───────
+// ── FixtureFileSink double-registration regression ────────────────────
 //
 // `make_fixture_sink(path)` returns a Sink that owns a shared
 // `FixtureFileSink` state (file handle + header_written flag). If the
@@ -498,8 +498,7 @@ TEST_CASE("Non-scrubber Motion.* methods still route to MotionInspector",
 // writes to the underlying `std::ofstream` — header gets emitted
 // twice, or a body line gets cut in half by another thread's line.
 //
-// Pre-#2151 the sink had no internal synchronization. Post-fix, the
-// sink takes a `std::mutex` around the open + header-write + body-
+// The sink takes a `std::mutex` around the open + header-write + body-
 // write sequence. This test drives N threads invoking the SAME sink
 // in parallel and asserts the resulting file parses cleanly: exactly
 // one header line, every body line a valid JSON event.

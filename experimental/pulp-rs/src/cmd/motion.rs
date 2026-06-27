@@ -36,14 +36,13 @@
 //!
 //! # Reachability gate (off-by-default ergonomics)
 //!
-//! Every verb runs a quick `TcpStream::connect` against
+//! Inspector-bound verbs run a quick `TcpStream::connect` against
 //! `127.0.0.1:<port>` first (default 9147, override via
-//! `PULP_INSPECTOR_PORT`). If nothing is listening we print a clear
-//! "no inspector running — start with `PULP_MOTION_SERVER=1
-//! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
-//! This catches the most common user mistake (forgetting to launch
-//! the host) without making the user wait for the C++ binary's own
-//! discovery + connect cycle to fail.
+//! `PULP_INSPECTOR_PORT`). If nothing is listening, we print a
+//! `no inspector listening on port ...` hint and exit 1. This catches
+//! the most common user mistake (forgetting to
+//! launch the host) without making the user wait for the C++ binary's
+//! own discovery + connect cycle to fail.
 
 use std::io::Write;
 use std::net::TcpStream;
@@ -110,16 +109,16 @@ pub struct RecordArgs {
     pub view_name: String,
     /// Requested `--out <PATH>` for an on-disk JSONL fixture. The inspector
     /// itself does not write fixtures — the CLI prints a sidecar
-    /// hint pointing the user at `make_fixture_sink` for now (the
+    /// hint pointing the user at `make_fixture_sink` (the
     /// trace itself is started normally).
     pub out: Option<PathBuf>,
     /// Optional sample-rate hint forwarded to
-    /// `Motion.startTrace.params.fps`. Defaults to 30 (matches the
-    /// quick-start example in `docs/guides/motion-observability.md`).
+    /// `Motion.startTrace.params.fps`. Omitted when unset; the inspector
+    /// applies its own default (30 in the quick-start docs).
     pub fps: Option<u32>,
     /// Inline metrics spec. Each item is one
     /// `"kind:name:node_id[:prop1,prop2,...][:space][:source]"`
-    /// triple; this surface is intentionally narrow so users
+    /// spec; this surface is intentionally narrow so users
     /// reaching for richer probes can drop down to `pulp inspect
     /// --command Motion.startTrace --params '{...}'` directly. The
     /// MCP wrapper accepts the full JSON shape — we mirror the
@@ -236,10 +235,8 @@ fn parse_record(args: &[String]) -> Result<Sub> {
         // fixture share an identity.
         r.view_name = format!("motion-{}", default_timestamp());
     }
-    // Default geometry probe so the user can `pulp motion record
-    // --view Card` against any node id of "card" without typing the
-    // full --metrics spec. Empty stays empty when the user passed
-    // their own --metrics.
+    // Metrics stay exactly as parsed; build_start_trace_params injects
+    // the default geometry probe when the user passed no --metrics.
     Ok(Sub::Record(r))
 }
 
@@ -311,8 +308,8 @@ fn parse_cost(args: &[String]) -> Result<Sub> {
 /// Best-effort timestamp suffix for the default fixture name. We
 /// don't pull a calendar crate in for this — seconds since epoch is
 /// sufficient to disambiguate concurrent runs. Falls back to `0` on
-/// the impossible "clock pre-1970" case so tests don't blow up if
-/// they mock the env in weird ways.
+/// the impossible "clock pre-1970" case so unusual clock shims don't
+/// break tests.
 fn default_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -320,7 +317,7 @@ fn default_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
-/// Translate a [`Sub`] + [`GlobalFlags`] into the inspector call
+/// Translate a [`Sub`] into the inspector call
 /// surface — `(method, params_json)`. Pure function: easy to unit
 /// test without spawning anything.
 #[must_use]
@@ -388,8 +385,8 @@ fn build_start_trace_params(r: &RecordArgs) -> String {
         buf.push_str(&metric_spec_to_json(spec));
     }
     if first {
-        // No --metrics passed. Default to a presentation-space
-        // geometry probe on a node id matching the view_name — the
+        // No --metrics passed. Default to a presentation-source
+        // geometry probe in window space on a node id matching view_name — the
         // most common shape the quick-start docs show. Users who
         // want a different probe can pass --metrics or drop to
         // `pulp inspect --command Motion.startTrace --params '...'`.
@@ -534,11 +531,9 @@ impl InspectorTalker for SystemInspector {
 /// Resolve the inspect-capable binary. Preference order:
 ///
 /// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
-/// 2. The Rust `pulp` binary on `$PATH` *only if* it can fall
-///    through to `pulp-cpp` via fallthrough. The Rust binary
-///    itself doesn't implement `inspect` natively yet, so we don't
-///    pick `target/release/pulp` here — that would just bounce back
-///    through unknown-subcommand fallthrough.
+/// 2. Local in-tree dev-build candidates under `build/`.
+/// 3. `pulp` on `$PATH` as a last resort, relying on its inspect
+///    fallthrough route when available.
 fn resolve_inspect_binary() -> Option<PathBuf> {
     if let Some(p) = crate::proc::which("pulp-cpp") {
         return Some(p);
@@ -574,8 +569,7 @@ pub fn inspector_reachable(port: u16) -> bool {
     TcpStream::connect_timeout(&parsed, Duration::from_millis(250)).is_ok()
 }
 
-/// The clear "no inspector" hint string — surfaced both on
-/// reachability failure and in `pulp motion` help text.
+/// The clear "no inspector" hint string surfaced on reachability failure.
 fn no_inspector_hint(port: u16) -> String {
     format!(
         "pulp motion: no inspector listening on port {port}.\n\

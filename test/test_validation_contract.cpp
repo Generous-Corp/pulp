@@ -1,4 +1,4 @@
-// Tests for the Phase 1 validation report contract schema.
+// Tests for the validation report contract schema.
 // Verifies the JSON schema is well-formed and that example payloads
 // match the expected structure documented in validation-report-v1.schema.json.
 
@@ -48,7 +48,7 @@ static std::filesystem::path find_project_root() {
     return {};
 }
 
-TEST_CASE("Validation schema file exists and is well-formed JSON", "[contract][phase1]") {
+TEST_CASE("Validation schema file exists and is well-formed JSON", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -68,7 +68,7 @@ TEST_CASE("Validation schema file exists and is well-formed JSON", "[contract][p
     REQUIRE(json_contains_key(content, "$defs"));
 }
 
-TEST_CASE("Schema defines all required report types", "[contract][phase1]") {
+TEST_CASE("Schema defines all required report types", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -83,7 +83,7 @@ TEST_CASE("Schema defines all required report types", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "test_suite"));
 }
 
-TEST_CASE("Schema defines screenshot metadata fields", "[contract][phase1]") {
+TEST_CASE("Schema defines screenshot metadata fields", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -96,7 +96,7 @@ TEST_CASE("Schema defines screenshot metadata fields", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "backend"));
 }
 
-TEST_CASE("Schema defines diff metrics fields", "[contract][phase1]") {
+TEST_CASE("Schema defines diff metrics fields", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -111,7 +111,7 @@ TEST_CASE("Schema defines diff metrics fields", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "diff_bounds"));
 }
 
-TEST_CASE("Schema defines validator result fields", "[contract][phase1]") {
+TEST_CASE("Schema defines validator result fields", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -126,7 +126,7 @@ TEST_CASE("Schema defines validator result fields", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "exit_code"));
 }
 
-TEST_CASE("Schema defines sanitizer metadata fields", "[contract][phase1]") {
+TEST_CASE("Schema defines sanitizer metadata fields", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -136,11 +136,11 @@ TEST_CASE("Schema defines sanitizer metadata fields", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "asan"));
     REQUIRE(json_contains_key(content, "tsan"));
     REQUIRE(json_contains_key(content, "ubsan"));
-    // RTSan added in Phase 2
+    // RTSan is part of the available sanitizer set.
     REQUIRE(content.find("\"rtsan\"") != std::string::npos);
 }
 
-TEST_CASE("Schema defines inspector payload fields", "[contract][phase1]") {
+TEST_CASE("Schema defines inspector payload fields", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -151,7 +151,7 @@ TEST_CASE("Schema defines inspector payload fields", "[contract][phase1]") {
     REQUIRE(json_contains_key(content, "view_count"));
 }
 
-TEST_CASE("Reality snapshot YAML exists and covers all subsystems", "[contract][phase1]") {
+TEST_CASE("Reality snapshot YAML exists and covers all subsystems", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -175,12 +175,12 @@ TEST_CASE("Reality snapshot YAML exists and covers all subsystems", "[contract][
     REQUIRE(content.find("webgpu_compute_audio:") != std::string::npos);
     REQUIRE(content.find("offline_video:") != std::string::npos);
 
-    // Phase dependency map
+    // Dependency map
     REQUIRE(content.find("phases:") != std::string::npos);
     REQUIRE(content.find("depends_on:") != std::string::npos);
 }
 
-TEST_CASE("Reality snapshot does not overclaim", "[contract][phase1]") {
+TEST_CASE("Reality snapshot does not overclaim", "[contract][validation-report]") {
     auto root = find_project_root();
     REQUIRE_FALSE(root.empty());
 
@@ -191,7 +191,7 @@ TEST_CASE("Reality snapshot does not overclaim", "[contract][phase1]") {
     REQUIRE(content.find("backend: jsc") == std::string::npos);
     REQUIRE(content.find("backend: v8") == std::string::npos);
 
-    // RTSan is now integrated (Phase 2) — it should appear in the available list
+    // RTSan should appear in the available list.
     auto rtsan_pos = content.find("rtsan");
     REQUIRE(rtsan_pos != std::string::npos);
     // It should be in the "available:" list, not "not_integrated:"

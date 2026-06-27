@@ -1,8 +1,9 @@
-// Zero-copy benchmark perf-counter unit tests (Slice 0 of #516).
+// Zero-copy benchmark perf-counter unit tests.
 //
 // Hammers the atomic accumulators from multiple writer threads to
-// verify that fetch_add on std::atomic<double> coalesces correctly and
-// that `snapshot_and_reset` doesn't drop samples in the exchange.
+// verify that fetch_add on std::atomic<double> coalesces correctly,
+// `snapshot_and_reset` doesn't drop samples in the exchange, and the
+// JS→GPU upload counters report the fields the demo emits.
 //
 // Counters are tooling-only, so the entire test is gated on
 // PULP_BENCHMARK via test/CMakeLists.txt.
@@ -91,12 +92,9 @@ TEST_CASE("PerfCounters now_us advances monotonically on the same thread",
     REQUIRE(t1 >= t0);
 }
 
-// Slice 0.5 coverage (#516): new JS→GPU upload counters added to
-// capture the real workload path exercised by
-// examples/threejs-native-demo --benchmark-seconds. The Decision 1
-// re-evaluation hinges on these three fields being wired correctly,
-// so assert them explicitly (in the spirit of CLAUDE.md's "tests ship
-// with fixes" rule).
+// JS→GPU upload counters capture the real workload path exercised by
+// examples/threejs-native-demo --benchmark-seconds. Assert the three
+// fields explicitly.
 
 TEST_CASE("PerfCounters base64_decode + upload_count accumulate + reset",
           "[bench][perf-counters][issue-516]") {

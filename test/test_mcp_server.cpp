@@ -663,8 +663,8 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
 TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
           "[mcp][tools][issue-1997]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":40,"method":"tools/list"})JSON");
-    // The full set of tools advertised today (18 names). Keep this list
-    // sorted alphabetically so additions are obvious in a diff.
+    // Keep the advertised tool list sorted alphabetically so additions are
+    // obvious in a diff.
     const auto expected = {
         "pulp_audio_excerpt_find",
         "pulp_audio_model_activate",

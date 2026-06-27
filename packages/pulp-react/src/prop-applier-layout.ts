@@ -68,9 +68,10 @@ export function applyLayoutProp(
         // RN/React-style `flexDirection` (camelCase) is the canonical
         // key in JSX. Without this case the prop falls through
         // as unknown, leaving Yoga's column default in place and
-        // collapsing CSS-imported flex rows into vertical stacks. Maps
-        // to the same setFlex(direction, …) dispatch as the `direction`
-        // case for the flex-direction subset of values. Normalizes
+        // collapsing CSS-imported flex rows into vertical stacks. Uses
+        // the bridge's same flex `direction` slot as the overloaded
+        // `direction` case for the flex-direction subset of values, and
+        // normalizes
         // `col` / `col-reverse` aliases to `column` / `column-reverse`
         // for the bridge's expected vocabulary.
         case 'flexDirection': {
@@ -239,11 +240,11 @@ export function applyLayoutProp(
         case 'alignContent':    call('setFlex', id, 'align_content', value as string); return true;
         case 'justifyContent':  call('setFlex', id, 'justify_content', value as string); return true;
         // aspectRatio routes through setFlex like the other flex props.
-        // Accepts a finite positive number (RN-style); strings
-        // ("16/9", "auto") are NOT accepted at the JSX surface — those
-        // belong to the CSS shim path (web-compat-style-decl.js). A value
-        // of 0 / NaN clears the slot on the bridge side; null/undefined
-        // are no-op'd by the dispatcher before this handler runs.
+        // The intended React Native surface is a finite positive number;
+        // string forms ("16/9", "auto") belong to the CSS shim path
+        // (web-compat-style-decl.js). A value of 0 / NaN clears the slot
+        // on the bridge side; null/undefined are no-op'd by the dispatcher
+        // before this handler runs.
         case 'aspectRatio':     call('setFlex', id, 'aspect_ratio', value as number); return true;
 
         // `display: 'flex' | 'none'`. RN exports and imported design-tool
@@ -343,7 +344,7 @@ export function applyLayoutProp(
         // RN's CSS-spec-equivalent logical-flow props. LTR-only fast
         // path: Start -> Left, End -> Right, inset shorthand expands to
         // top/right/bottom/left, insetBlock -> top+bottom, insetInline
-        // -> left+right (LTR). True RTL bidi requires a future direction
+        // -> left+right (LTR). True RTL bidi requires direction-aware
         // system; the catalog documents this LTR-only caveat.
         case 'marginStart': {
             call('setFlex', id, 'margin_left', value as number | string);

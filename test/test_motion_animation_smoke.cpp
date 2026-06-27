@@ -146,7 +146,7 @@ TEST_CASE("End-to-end: real Tween → publish_value → fixture → assertion he
 
     // ── Stable IDs survived the round trip ───────────────────────
     for (const auto& e : events) {
-        // Publish channel uses trace_id = 0 (reserved) per Phase 7.
+        // Publish channel uses trace_id = 0 (reserved for live samples).
         REQUIRE(e.trace_id == 0);
         REQUIRE(e.metric_id == 0);
         if (e.kind == SampleEvent::Kind::Start ||

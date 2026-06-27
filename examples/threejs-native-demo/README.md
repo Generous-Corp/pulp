@@ -182,14 +182,13 @@ Expected evidence:
 
 ## Why This Example Exists
 
-This is the first visible native Three.js proof for the original Phase 13
-bridge plan:
+This is the first visible native Three.js proof for the native bridge plan:
 
 - real `THREE.WebGPURenderer`
 - native `GPUCanvasContext`
 - shared Dawn device between the bridge and the visible GPU host
 - hybrid 2D+3D composition on the native widget/layout path
-- four real audio-reactive Phase 13 examples via `VisualizationBridge`
+- four real audio-reactive examples via `VisualizationBridge`
   (spectrum + particle visualizer + waveform ribbon + room reverb)
 - live redraw through the host frame loop (not just a one-shot frame)
 - native pointer/input events reaching the Three.js canvas path

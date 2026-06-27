@@ -4,9 +4,9 @@
 
 std::string shell_quote(const std::string& s) {
 #ifdef _WIN32
-    // pulp #776: on Windows, MSVCRT argv parsing treats backslashes
-    // literally unless they immediately precede a double quote. Unix-
-    // style escaping (`\` -> `\\`) breaks file paths: `git clone
+    // On Windows, MSVCRT argv parsing treats backslashes literally unless they
+    // immediately precede a double quote. Unix-style escaping (`\` -> `\\`)
+    // breaks file paths: `git clone
     // "C:\\Users\\foo\\origin.git" feature` writes the doubled-backslash
     // URL into feature/.git/config; the next `git fetch origin main`
     // looks up a path that doesn't exist, fails, and `bump_one` skips

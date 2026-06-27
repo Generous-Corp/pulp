@@ -43,8 +43,9 @@ pub struct DevArgs {
     pub run_validate: bool,
     /// `--run TARGET` — launch TARGET after a successful build.
     pub launch_target: Option<String>,
-    /// `--design SCRIPT` — sets `launch_target` to `pulp-design-tool`
-    /// and prepends SCRIPT to `launch_args`.
+    /// `--design SCRIPT` — enqueues `--target pulp-design-tool` onto
+    /// `build_args`; `run()` then launches `pulp-design-tool` when no
+    /// `--run` target is set, passing SCRIPT as its first argument.
     pub design_script: Option<String>,
     /// Tail passed to the launched binary (after `--`).
     pub launch_args: Vec<String>,
@@ -62,18 +63,18 @@ pub struct DevArgs {
 pub fn print_help(out: &mut impl Write) -> Result<()> {
     let body = "pulp dev — unified development loop\n\n\
         Usage: pulp dev [options] [-- launch-args...]\n\n\
-        Watches source files for changes and rebuilds automatically.\n\
-        Optionally runs tests, validates plugins, and manages a launched app.\n\n\
+        Runs one build pass, optionally followed by tests, validation, and launch.\n\
+        Use the C++ binary for watch/live-reload workflows.\n\n\
         Options:\n\
         \x20 --test, -t             Run tests after each successful build\n\
         \x20 --test-filter=PATTERN  Run only tests matching PATTERN\n\
-        \x20 --validate             Run quick plugin validation (dlopen) after build\n\
-        \x20 --run TARGET           Launch TARGET from build dir, relaunch on rebuild\n\
-        \x20 --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n\
+        \x20 --validate             Request plugin validation after build\n\
+        \x20 --run TARGET           Launch TARGET from build dir after build\n\
+        \x20 --design SCRIPT        Launch design tool with SCRIPT after build\n\
         \x20 --target T             Pass --target T to cmake --build\n\
         \x20 -- args...             Arguments passed to the launched app\n\n\
-        Note: pulp-rs does not yet implement the watch loop. A single\n\
-        build pass runs; use the C++ binary for live-reload workflows.\n";
+        Note: pulp-rs does not yet implement the watch loop or validators. A single\n\
+        build pass runs; use the C++ binary for live-reload and validation workflows.\n";
     out.write_all(body.as_bytes())
         .map_err(|e| CliError::io("<stdout>", e))
 }

@@ -264,7 +264,7 @@ public:
         const int num_in = bus_layout_.num_inputs;
         const int num_out = bus_layout_.num_outputs;
 
-        // FAUST expects float** — build arrays on stack for small channel counts
+        // FAUST expects float** — build pointer arrays for the current channel counts.
         std::vector<float*> in_ptrs(num_in);
         std::vector<float*> out_ptrs(num_out);
 
@@ -279,7 +279,7 @@ public:
     }
 
     void release() override {
-        // FAUST DSP doesn't have a release, but we could instanceClear if needed
+        // FAUST DSP has no release hook; nothing to do here.
     }
 
     bool has_editor() const override { return false; } // No custom UI for FAUST plugins

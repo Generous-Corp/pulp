@@ -3,6 +3,8 @@
 // kit_commands.cpp — metadata-only Pulp package/kit commands.
 // This file intentionally performs no package execution: no CMake, JS,
 // scripts, dylibs, or tool hooks are invoked while validating or inspecting.
+// The explicit `verify --execute-screenshots` path is the only opt-in exception:
+// it runs exported UI entries through the local pulp-screenshot tool.
 
 #include "kit_commands.hpp"
 
@@ -637,7 +639,7 @@ void validate_realtime(KitValidationResult& result,
     if (!rt) {
         if (requires_rt_contract) {
             add_issue(result, "error", "missing-rt-contract",
-                      "Phase 4 native/graph kits must declare a `realtime` contract");
+                      "Native/graph kits must declare a `realtime` contract");
         }
         return;
     }

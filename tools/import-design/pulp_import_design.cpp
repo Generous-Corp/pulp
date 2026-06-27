@@ -421,7 +421,7 @@ DefaultSelection resolve_import_design_defaults(ArtifactEmit cli_emit,
         auto parsed = parse_artifact_emit_pref(raw);
         if (!parsed) {
             out.error = "invalid import-design default emit '" + raw + "' from " + source
-                + " (expected js, ir-json, or cpp)";
+                + " (expected js, ir-json, cpp, or swiftui)";
             return false;
         }
         out.emit = *parsed;
@@ -798,7 +798,7 @@ CppOutputPaths resolve_cpp_output_paths(const std::string& output_file) {
 }
 
 // Tailwind formats re-parse DESIGN.md for section context, so they are gated to
-// `--from designmd` (generalizing them to any source is Workstream A2). Callers
+// `--from designmd`. Callers
 // must reject these before reaching the theme-only exporter below.
 bool is_tailwind_format(const std::string& format) {
     return format == "tailwind" || format == "json-tailwind" ||
@@ -843,8 +843,8 @@ SwiftOutputPaths resolve_swift_output_paths(const std::string& output_file) {
     paths.root_view_name = paths.view.stem().string();
     if (paths.root_view_name.empty()) paths.root_view_name = "ImportedPulpView";
     // Theme artifact + type are derived per-view (`<RootView>Theme`) so two
-    // SwiftUI imports never clobber a shared PulpTheme.swift on disk nor emit a
-    // duplicate `enum PulpTheme` / dynamic-color symbol when compiled into one
+    // SwiftUI imports never clobber a legacy shared theme file on disk nor emit
+    // a duplicate theme enum / dynamic-color symbol when compiled into one
     // Swift target. The theme file (<RootView>Theme.swift) is
     // always distinct from the view (<RootView>.swift), so no path collision.
     paths.theme_type_name = paths.root_view_name + "Theme";
@@ -878,9 +878,9 @@ static void print_usage() {
     std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
     std::cout << "                    Primary artifact kind (built-in default: js). cpp and\n";
     std::cout << "                    swiftui are baked-only; swiftui emits native SwiftUI\n";
-    std::cout << "                    (a View + PulpTheme.swift + binding manifest)\n";
+    std::cout << "                    (a View + <RootView>Theme.swift + binding manifest)\n";
     std::cout << "  --mode {live|baked}\n";
-    std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
+    std::cout << "                    Runtime model (built-in default: live; baked emits IR, C++, or SwiftUI artifacts)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
     std::cout << "                    JSX baked snapshot policy (default: fail)\n";
     std::cout << "  --allow-network-fetch\n";
@@ -922,8 +922,8 @@ static void print_usage() {
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
     std::cout << "  --classnames <path>     Output classname → style map (default: classnames.json,\n";
-    std::cout << "                          only emitted for --from claude — pulp #1035)\n";
-    std::cout << "  --emit classnames       Legacy sidecar: force-emit classnames.json (claude)\n";
+    std::cout << "                          only emitted for --from claude)\n";
+    std::cout << "  --emit classnames       Legacy sidecar: enable classnames.json (claude)\n";
     std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
     std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
     std::cout << "  --no-import-shortcuts   Skip keyboard shortcut auto-import (default: import)\n";
@@ -946,7 +946,7 @@ static void print_usage() {
     std::cout << "Preferences:\n";
     std::cout << "  Built-in default is --mode live --emit js (live runtime import).\n";
     std::cout << "  Persistent defaults: pulp config set import_design.default_mode live|baked\n";
-    std::cout << "                       pulp config set import_design.default_emit js|ir-json|cpp\n";
+    std::cout << "                       pulp config set import_design.default_emit js|ir-json|cpp|swiftui\n";
     std::cout << "  Environment overrides: PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
     std::cout << "  Each CLI flag overrides its matching preference. If only default_mode=baked is set, default_emit\n";
     std::cout << "  becomes ir-json unless explicitly configured.\n\n";
@@ -1661,7 +1661,7 @@ int main(int argc, char* argv[]) {
     std::string export_format = "w3c";
     std::string reference_image;     // --reference: PNG of source design for validation
     std::string diff_output;         // --diff: output path for visual diff image
-    std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
+    std::string import_report_path;  // --import-report: write the resolution report JSON here
     bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
     bool dry_run = false;
     bool include_tokens = true;
@@ -1805,8 +1805,7 @@ int main(int argc, char* argv[]) {
             std::string ks = argv[++i];
             if (ks == "silver")      use_silver_knobs = true;
             else if (ks == "sprite") use_silver_knobs = false;
-            // Other values (auto, standard) fall through; auto could
-            // pick by per-design heuristic in the future.
+            // Other values (auto, standard) leave the default silver style.
         } else if (std::strncmp(argv[i], "--knob-style=", 13) == 0) {
             std::string ks = argv[i] + 13;
             if (ks == "silver")      use_silver_knobs = true;
@@ -2134,8 +2133,7 @@ int main(int argc, char* argv[]) {
     // Tailwind formats are gated to DESIGN.md (they re-parse it for section
     // context — see the designmd dispatch in the token-write block). On any
     // other source they would silently fall through to W3C while reporting the
-    // requested format, so reject up front. Generalizing Tailwind to all
-    // sources is Workstream A2.
+    // requested format, so reject up front.
     if (is_tailwind_format(export_format) && *source != DesignSource::designmd) {
         std::cerr << "Error: --format " << export_format
                   << " currently requires --from designmd (got --from "
@@ -2305,8 +2303,8 @@ int main(int argc, char* argv[]) {
                     auto pr = parse_designmd(content);
                     ir = std::move(pr.ir);
                     // Hard fail on any error-severity diagnostic (e.g. duplicate
-                    // section heading, malformed YAML). Exit code 3 reserved
-                    // for parse errors per the integration plan.
+                    // section heading, malformed YAML). Exit code 3 denotes a
+                    // DESIGN.md parse error.
                     for (const auto& d : pr.diagnostics) {
                         if (d.severity == DesignMdSeverity::error) {
                             print_designmd_diagnostics(pr.diagnostics);
@@ -2428,7 +2426,7 @@ int main(int argc, char* argv[]) {
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
-    // ── Extensible key-based recognition (issue #4676) ───────────────────────
+    // ── Extensible key-based recognition ─────────────────────────────────────
     // Re-resolve each Figma component instance's component-set key / name prefix
     // against the MERGED recognition table (built-in Pulp Figma Library + the
     // user-supplied --recognition-manifest, the latter merged OVER the former),
@@ -2507,7 +2505,7 @@ int main(int argc, char* argv[]) {
                       << " from the recognition manifest set\n";
         // Surface present-but-unmatched component instances so they are SEEN
         // (a candidate for a --recognition-manifest entry), never silently
-        // rendered inert (P7 never-silent-knob). Recorded in the IR diagnostics
+        // rendered inert. Recorded in the IR diagnostics
         // AND printed directly to stderr — the shared print helper drops `info`
         // severity, and a missing knob the user must notice is not "info noise".
         for (const auto& u : unmatched) {
@@ -2527,13 +2525,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // P7 import report — surface every interactive control's resolution provenance
+    // Import report: surface every interactive control's resolution provenance
     // (rung / confidence / conflicts / verification) for EVERY output mode (codegen
     // and DesignIR-v1 alike), so a low-confidence or conflicted control is SEEN at
     // import time. Printed to stderr (stdout may carry dry-run JSON);
     // --import-report writes the machine-readable JSON a CI gate can threshold;
     // --fail-on-unresolved makes a conflicted/inert control a nonzero exit.
-    // P7 render-placement verification (structural): flag overlays that can't
+    // Render-placement verification (structural): flag overlays that can't
     // render (degenerate extent) or fall entirely outside the frame, BEFORE the
     // report collects verification_pass — so the report and the gate see it.
     apply_placement_verification(ir.root,
@@ -2645,10 +2643,10 @@ int main(int argc, char* argv[]) {
         swift_opts.emit_theme = include_tokens;
         swift_opts.emit_binding_manifest = true;
 
-        // B2 fidelity: the SwiftUI lowering reports each divergence a SwiftUI
-        // stack cannot reproduce (flex-wrap, justify distribution, align-
-        // stretch, absolute position, grid, skew/matrix transforms, per-side
-        // borders, multi/inset shadows). Surface them like the JS path and let
+        // SwiftUI fidelity: the lowering reports each divergence a SwiftUI stack
+        // cannot reproduce (flex-wrap, justify distribution, align-stretch,
+        // absolute position, grid, skew/matrix transforms, per-side borders,
+        // multi/inset shadows). Surface them like the JS path and let
         // --strict-fidelity gate on the non-informational ones.
         std::vector<pulp::view::FidelityIssue> swift_fidelity;
         swift_opts.fidelity_report = &swift_fidelity;
@@ -2671,7 +2669,7 @@ int main(int argc, char* argv[]) {
             std::cout << "=== Generated SwiftUI view (" << paths.view.string() << ") ===\n\n";
             std::cout << swift.view_source;
             if (!swift.theme_source.empty()) {
-                std::cout << "\n=== Generated PulpTheme (" << paths.theme.string() << ") ===\n\n";
+                std::cout << "\n=== Generated SwiftUI theme (" << paths.theme.string() << ") ===\n\n";
                 std::cout << swift.theme_source;
             }
             std::cout << "\n=== SwiftUI binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
@@ -2719,7 +2717,7 @@ int main(int argc, char* argv[]) {
         // Default shortcuts only fire when the developer's React source has a
         // high-confidence match. `apply_default_shortcuts` lowers
         // accepted DefaultShortcutCandidates into the same DetectedShortcut
-        // form so they ride V2's codegen path with no fork. Suppressed
+        // form as source-extracted shortcuts so codegen has one path. Suppressed
         // chord-by-chord against `detected_shortcuts` so an extracted
         // binding always wins.
         //
@@ -2729,7 +2727,7 @@ int main(int argc, char* argv[]) {
         // Win/Linux variants — at runtime only the chord matching the
         // physical key press fires its registerShortcut entry, so the
         // user gets the right native binding on each platform without
-        // platform detection at codegen time. Mirrors the V2 dual emit
+        // platform detection at codegen time. Mirrors the dual emit
         // for `metaKey||ctrlKey` (per-platform handlers, exact-mask
         // match on the bridge side).
         if (default_shortcuts) {
@@ -2798,7 +2796,7 @@ int main(int argc, char* argv[]) {
                     if (body->style.render_bounds && !n.style.render_bounds)
                         n.style.render_bounds = body->style.render_bounds;
                     // Single static body; a designer-supplied multi-frame strip
-                    // would set its own frame count (Approach A).
+                    // sets its own frame count.
                     if (!n.attributes.count("sprite_strip_frame_count"))
                         n.attributes["sprite_strip_frame_count"] = "1";
                     for (auto it = n.children.begin(); it != n.children.end(); ++it)
@@ -2810,7 +2808,7 @@ int main(int argc, char* argv[]) {
                     // DEMOTE to a plain container (the pre-interactive-sprite
                     // behavior): every layer renders as an image — faithful but
                     // not turnable. Compositing the layers into one rotational
-                    // strip is Approach A (follow-up). No silent layer loss.
+                    // strip is separate work; this path avoids silent layer loss.
                     n.audio_widget = pulp::view::AudioWidgetType::none;
                 }
                 // asset_images == 0: no captured art — leave the knob
@@ -3026,7 +3024,7 @@ int main(int argc, char* argv[]) {
         };
         resolve_node(ir.root);
 
-        // Resolve bundled-font asset_ids → absolute paths (#43b) so codegen can
+        // Resolve bundled-font asset_ids to absolute paths so codegen can
         // emit registerFont(family, path). Same base_dir + manifest resolution
         // as the node asset-path pass above.
         for (auto& fa : ir.font_family_assets) {
@@ -3223,7 +3221,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Wrote " << defaults_path
                       << " (" << default_scan.accepted.size() << " accepted, "
                       << default_scan.collisions.size() << " collisions"
-                      << " — Phase A source-matched defaults)\n";
+                      << " — source-matched defaults)\n";
         }
     }
 
