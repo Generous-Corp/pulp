@@ -226,6 +226,13 @@ private:
     void notify_property_changed(std::string_view name,
                                  const PropertyValue& old_val,
                                  const PropertyValue& new_val);
+    void notify_child_added(StateTree& child, int index);
+    void notify_child_removed(StateTree& child, int index);
+
+    // True if this node is `node` or one of its ancestors (walks `node`'s
+    // parent chain upward). Used by add_child / insert_child to reject
+    // parent/child cycles before they can form.
+    bool is_ancestor_of(const StateTree* node) const;
 };
 
 /// Owns the listener wiring created by `StateTree::clone_synced()`.
