@@ -120,8 +120,9 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
         } else if (*fmt == "float") {
             config.audio_capture_rolling_int24 = false;
         } else {
-            // Match the CLI flag's strictness: an unrecognized value is a
-            // mistake, not a silent fall-through to float.
+            // Unlike the CLI flag (which hard-rejects), an env var can't fail the
+            // launch — so warn loudly and default to float rather than silently
+            // swallowing what is almost certainly a typo.
             runtime::log_warn(
                 "Standalone: PULP_AUDIO_CAPTURE_ROLLING_FORMAT='{}' unrecognized "
                 "(expected 'float' or 'int24'); using float",

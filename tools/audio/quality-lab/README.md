@@ -1,114 +1,141 @@
 # Audio Quality Lab
 
-A perception-aware, offline harness so an **agent** (not just a human ear) can detect
-the subtle DSP artifacts — transient smear, seam clicks, sub-band wobble — that today
-gate on an A/B listen. It is an **additive, opt-in developer/CI tool**: Pulp's basic
-audio tests keep working with zero new dependencies; install this lab's deps only to
-use it.
+**Tell, automatically, whether a DSP change made a sound *worse* — and where.**
 
-Full design: `planning/2026-06-26-audio-quality-lab-perceptual-harness.md` (private
-planning submodule). It composes with the existing
-`examples/offline-stretch/eval/` A/B toolkit — basic A/B stands alone; this is the
-rigor upgrade that consumes the same renders.
+A perception-aware, offline tool that compares a candidate render against a reference and
+reports, per artifact, whether the candidate degraded (transient smear, brightness loss,
+metallic high-frequency sizzle, graininess) and the timestamp where it's worst. It exists
+so an agent (or a developer) can close the A/B tuning loop without a human listening on
+every iteration, and so a regression in those artifacts can fail a test instead of slipping
+through.
 
-## Status — P0a (the go/no-go slice)
+It is an **additive, opt-in developer/CI tool**: Pulp's basic audio tests keep working with
+zero new dependencies, and nothing here is ever linked into the MIT core or a shipped
+plugin (FFT/analysis stays tool-side).
 
-This is the smallest end-to-end slice that proves the architecture:
+## Value at a glance
 
-```
-generate → level-match → onset-map align → transient-sharpness detector → report.json
-```
-
-It must **localize** a known transient smear (within ±20 ms) AND stay **quiet** on an
-identity render. If it can't, the rest of the plan doesn't get built.
+- **Catches what peak/RMS/clip miss** — targeted detectors for transient smear, dulling,
+  metallic HF, and graininess, each localized to a timestamp.
+- **Runs on the real engine** — validates the actual Pulp stretch engine, not just a
+  reference, and a committed baseline flags when an engine change regresses.
+- **Works on real audio** — point it at any WAV; it checks reference-free that a faithful
+  stretch preserves the source's spectrum.
+- **Trustworthy** — non-circular validation, coverage/confidence on every verdict,
+  re-derivable provenance, and a license fence that keeps copyleft/heavy tools out of the
+  committed surface.
 
 ## Install (opt-in)
 
 ```bash
+cd tools/audio/quality-lab
 python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt   # numpy + soundfile (both permissive); pytest to run tests
+pip install -r requirements.txt   # numpy + soundfile (both permissive); add pytest to run tests
 ```
 
-## Run
-
-```bash
-# from this directory
-python -m quality_lab.cli run-p0a --mode bad  --out report.json   # smeared candidate → FIRES + localizes
-python -m quality_lab.cli run-p0a --mode good                     # identity candidate → CLEAN
-
-# run all detectors on a degradation and EXPORT listenable artifacts:
-python -m quality_lab.cli run --degradation smear --out-dir out --out out/report.json
-# writes out/reference.wav, out/candidate.wav, and a ref/candidate clip PAIR around each
-# worst region (region-NN-<detector>-<t>.{ref,cand}.wav) so you can hear the artifact.
-```
-
-## Test
-
-```bash
-pytest tests/ -q
-```
-
-The lab's pytest suite is **not** wired into the default `ctest` run — the lab's deps
-are opt-in, and basic testing must stay dependency-free (the plan's additive-by-default
-rule). The first-class `pulp audio quality` CLI verb and broader detector suite arrive
-in later phases.
-
-## Layout (the stable seams are the schemas, not the code)
-
-| Module | Role |
-|--------|------|
-| `quality_lab/schema.py` | `QualityCase`, report envelope, detector result — the public API |
-| `quality_lab/audio_io.py` | WAV load/save + RMS level-match (rule #1) |
-| `quality_lab/generate.py` | deterministic, self-labeling drum-break + smear degradation |
-| `quality_lab/align.py` | onset detection + onset-map (alignment runs before detectors) |
-| `quality_lab/detectors/` | one detector = one small module: `transient_sharpness.py`, `spectral_centroid.py` (brightness/dulling), `hf_fizz.py` (metallic HF sizzle) |
-| `quality_lab/dsp.py` | shared primitives (high-band, smoothed envelope, normalized local-align) |
-| `quality_lab/reference_pv.py` | an INDEPENDENT textbook phase vocoder for non-circular credibility tests |
-| `quality_lab/provenance.py` | re-derivable provenance block (§7.1) |
-| `quality_lab/pipeline.py` | pure stages: generate → level-match → align → detect → report |
-| `quality_lab/cli.py` | parse + dispatch only |
-
-## Validate the REAL Pulp stretch engine (strongest credibility)
-
-The lab can run the detectors against the **actual product engine** (`stretchcli`
-driving `pulp::signal::OfflineStretch`), not just the in-tree reference phase vocoder:
+Optional, for real-engine validation — build the stretch CLI once:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
 cmake --build build --target stretchcli
-python -m quality_lab.cli engine --ratio 2.0 --character clean      # real engine output
-python -m quality_lab.cli engine --ratio 2.0 --character varispeed  # different character
 ```
 
-This renders a source, stretches it with the real engine, and runs the detectors
-against a transient-faithful reference. It catches the engine's documented artifacts —
-`clean` smears attacks (transient_sharpness fires 1.0); `varispeed` additionally dulls
-brightness (spectral_centroid fires), matching the skill's "slowing down warms + dulls"
-note. The engine adapter is opt-in: `stretchcli` is discovered at the build path or via
-`PULP_STRETCHCLI`, and skips cleanly when absent (public CI doesn't build it).
-
-### Real audio (any WAV — reference-free)
-
-Real audio has no synthetic "ideal" reference, so the lab checks it **reference-free**:
-a faithful time-stretch preserves the *source* spectrum (timing changes, timbre
-shouldn't), so the global spectral detectors compare the engine output's LTAS to the
-source's.
+## Use
 
 ```bash
-python -m quality_lab.cli engine --input yourfile.wav --ratio 2.0 --character varispeed
+# all detectors on a synthetic case; export listenable reference/candidate clips
+python -m quality_lab.cli run --case drum  --degradation smear --out-dir out --out out/report.json
+python -m quality_lab.cli run --case tonal --degradation grainy
+
+# validate the REAL Pulp stretch engine (auto-skips if stretchcli isn't built)
+python -m quality_lab.cli engine --ratio 2.0 --character clean
+python -m quality_lab.cli engine --input yourfile.wav --character varispeed   # any real WAV
+
+# regression gate vs the engine's committed baseline
+python -m quality_lab.cli engine-baseline            # check
+python -m quality_lab.cli engine-baseline --capture  # re-freeze after an intentional change
+
+# versioned, license-guarded corpus
+python -m quality_lab.cli corpus list
+python -m quality_lab.cli corpus add --file vocal.wav --name vocal1 \
+    --class vocal --license CC0 --expect "graininess on sustained notes"
+
+pytest tests/ -q
 ```
 
-Works on any developer-supplied WAV. The **committed corpus stays synthetic / license-
-clean**; real audio is developer-local (your CC0 files, or quick local material). For a
-fast license-clean demo on macOS, synthesize real speech with `say`:
+The pytest suite is intentionally **not** wired into the default `ctest` — the lab's deps
+are opt-in and basic testing stays dependency-free.
 
-```bash
-say -o /tmp/vox.aiff "She sells sea shells; the sustained vowel rings on."
-python -m quality_lab.cli engine --input /tmp/vox.aiff --character varispeed  # formants drop ~58% -> centroid fires
-python -m quality_lab.cli engine --input /tmp/vox.aiff --character clean       # faithful -> CLEAN
-```
+## Features
 
-(`say` voices are Apple-proprietary — fine to *use* locally, do **not** commit the audio.)
+### Detectors
+
+| Detector | Catches | Method | Material |
+|----------|---------|--------|----------|
+| `transient_sharpness` | percussion attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
+| `spectral_centroid` | brightness loss / dulling | long-term-average-spectrum centroid shift (global) | any |
+| `hf_fizz` | added metallic HF sizzle | added >8 kHz energy fraction vs reference (global) | any |
+| `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
+
+Each detector fires only on its own artifact and stays quiet on the others and on an
+identity render. Each reports **coverage** (how many onsets it actually measured); a
+"clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+
+### Case families
+
+The unit of work is a *case* with a family, reference policy, alignment policy, and a set
+of detectors — so the same machinery serves more than drums:
+
+| Family | Stimulus | Alignment | Detectors |
+|--------|----------|-----------|-----------|
+| **percussive** | synthetic drum break | onset-map | transient, centroid, hf_fizz |
+| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux |
+| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux |
+
+### Real engine validation + regression gate
+
+`engine` runs the detectors on the actual Pulp stretch engine. It catches the engine's
+real behavior — the `clean` character smears attacks (transient fires); `varispeed`
+additionally dulls brightness (centroid fires). `engine-baseline` freezes the current
+engine's detector scalars and flags when a future build deviates — *did this change make
+it worse?* — with `transient_sharpness` increasing flagged as **WORSE**.
+
+### Real audio
+
+`engine --input <wav>` runs the real engine on any WAV and checks it **reference-free**: a
+faithful time-stretch preserves the source spectrum (timing changes, timbre shouldn't), so
+the global spectral detectors compare the engine output's spectrum to the source's.
+
+### Listenable clips + provenance
+
+`run --out-dir` writes the full reference/candidate WAVs plus a ref-vs-candidate clip pair
+around each worst region, so "attack softer at 0:02.6" is something you can play. It also
+drops a `<wav>.provenance.json` sidecar (engine commit, recipe, content hash) so a render
+you liked maps back to how it was made.
+
+### Perceptual models (opt-in, license-fenced)
+
+A full-reference perceptual MOS predictor is a coarse global guard, advisory only — it
+won't localize a defect but it flags when a change is perceptually worse overall. These are
+reached only across a process boundary via an explicit env-path, never bundled or
+auto-downloaded, and they degrade to `skipped` when absent (the default, and always in
+public CI):
+
+| Tool | License | Role |
+|------|---------|------|
+| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | full-reference perceptual MOS (music + speech) — the recommended starting point |
+| [PEAQ](https://en.wikipedia.org/wiki/PEAQ) (ITU-R BS.1387; e.g. GstPEAQ/PeaqB) | GPL | the classic broadcast metric |
+| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | bundles PEAQ + embedding distances (FAD, etc.) |
+
+GPL tools stay developer-local. See `NOTICE.md` and the public licensing page for full
+attribution.
+
+### Corpus
+
+A versioned corpus (`corpus/MANIFEST.json`) of sources by material class, license, and
+expected artifact. Generator-backed sources are synthetic and regenerable; file-backed
+sources are real audio you supply. `corpus add` rejects any non-permissive license, so the
+committed corpus stays license-clean; GPL/proprietary material stays developer-local.
 
 ### Regression gate on the real engine
 
@@ -128,95 +155,36 @@ in CI; the live check needs a built `stretchcli`.
 ## Credibility — why this isn't circular
 
 A detector validated only against a degradation written by the same author is
-self-fulfilling. So `transient_sharpness` is also tested against the output of an
-**independent textbook phase vocoder** (`reference_pv.py`) — which smears attacks
-through genuine STFT resynthesis with no knowledge of the detector. The detector
-fires hard (scalar ≈ 1.0) on that real PV smear, and stays clean comparing a PV
-render to itself. That is the evidence it catches the *real* documented artifact,
-not just a matched kernel. (`tests/test_real_pv_evidence.py`.)
+self-fulfilling. `transient_sharpness` is therefore also validated against the output of an
+**independent textbook phase vocoder** (`reference_pv.py`) and against the **real product
+engine** — firing on genuine attack smear in both, and staying clean when a render is
+compared to itself.
 
-Detectors also report **coverage** (onsets actually measured / offered); a "clean"
-verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+## Module map
 
-## Perceptual models (Layer B — opt-in, license-fenced)
-
-A full-reference perceptual MOS predictor is a *coarse global guard* complementary to
-the Layer-A detectors — advisory, never a gate. **ViSQOL** (Apache-2.0) is reached
-ONLY via an explicit env-path you set, never bundled or auto-downloaded:
-
-```bash
-export PULP_VISQOL_BIN=/path/to/visqol   # opt-in; unset → the report's perceptual block is "skipped"
-python -m quality_lab.cli run --degradation smear --out-dir out
-```
-
-When unset (the default, and always in public CI), the perceptual block degrades to
-`skipped` with a reason — never an error. PEAQ / AQUATK (GPL, Tier-3, developer-
-supplied) plug in the same way behind their own env-paths; no copyleft code is ever
-imported or bundled (see `NOTICE.md` and the plan's §4 license fence).
-
-## Self-describing samples (provenance)
-
-`run --out-dir` writes a `<wav>.provenance.json` sidecar next to each rendered WAV,
-carrying the engine commit, recipe, determinism context, and the WAV's SHA-256 — so a
-sample you liked maps back to exactly how it was made ("same-recipe" tier), even if
-separated from its run folder.
-
-## Detectors
-
-| Detector | Catches | Method | Family |
-|----------|---------|--------|--------|
-| `transient_sharpness` | PV attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
-| `spectral_centroid` | brightness loss / dulling (e.g. STN noise-morph) | LTAS centroid shift, candidate vs reference (global) | any |
-| `hf_fizz` | added metallic HF sizzle | added HF (>8 kHz) energy fraction vs reference (global) | any |
-| `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral flux increase (global) | tonal / sustained |
-
-The spectral detectors are **global** metrics — alignment-free and scale-invariant.
-`spectral_flux` belongs to the **tonal** family: on transient-heavy drums the onset
-flux dominates and it can't discriminate graininess, so it is exercised on sustained
-material (where graininess is actually heard).
-
-## Corpus (P0b — versioned, license-guarded)
-
-The lab has a versioned corpus (`corpus/MANIFEST.json`) of sources by material class,
-license, and the artifact each should expose. Two kinds: **generator-backed** (synthetic,
-regenerable — committed by recipe, no WAV) and **file-backed** (real audio you supply).
-
-```bash
-python -m quality_lab.cli corpus list
-python -m quality_lab.cli corpus seed                          # synthetic families
-python -m quality_lab.cli corpus add --file vox.wav --name vocal1 \
-    --class vocal --license CC0 --expect "graininess on sustained notes" --family tonal
-```
-
-**License fence (enforced in code):** `corpus add` rejects any non-permissive license —
-the committed corpus stays license-clean (the plan's §4). GPL / proprietary audio, and
-R3/PEAQ outputs, stay developer-local and never enter the manifest. File-backed sources
-record a SHA-256 (tamper-detected on `materialize`).
-
-## Case families (§3.5 — the harness serves more than drums)
-
-The lab's unit of work is a `QualityCase` with `family` / `reference_policy` /
-`alignment_policy` / `detector_tags`, so time-stretch is *one* family, not the
-ontology. Two families ship today:
-
-| Family | Stimulus | Alignment | Detectors |
-|--------|----------|-----------|-----------|
-| **time-stretch** (percussive) | synthetic drum break | onset-map | transient_sharpness, spectral_centroid, hf_fizz |
-| **tonal** (sustained) | synthetic vocal/pad (harmonics + formants + vibrato) | identity | spectral_centroid, hf_fizz, spectral_flux |
-
-```bash
-python -m quality_lab.cli run --case tonal --degradation grainy   # fires spectral_flux
-python -m quality_lab.cli run --case drum  --degradation smear     # fires transient_sharpness
-```
+| Module | Role |
+|--------|------|
+| `quality_lab/schema.py` | case, report envelope, detector result — the stable public shapes |
+| `quality_lab/audio_io.py` | WAV load/save + RMS level-match |
+| `quality_lab/generate.py` | deterministic synthetic stimuli + controlled degradations |
+| `quality_lab/align.py` | onset detection + onset-map (alignment runs before detectors) |
+| `quality_lab/dsp.py` | shared primitives (high-band, smoothed envelope, normalized correlation, LTAS) |
+| `quality_lab/detectors/` | one detector per module |
+| `quality_lab/reference_pv.py` | independent textbook phase vocoder for non-circular validation |
+| `quality_lab/engine.py` | adapter to the real stretch engine (`stretchcli`), skip-when-absent |
+| `quality_lab/engine_baseline.py` | real-engine regression gate |
+| `quality_lab/perceptual.py` | opt-in, license-fenced perceptual-model adapters |
+| `quality_lab/corpus.py` | versioned, license-guarded corpus |
+| `quality_lab/provenance.py` | re-derivable provenance + self-describing sidecars |
+| `quality_lab/regions.py` | worst-region clip extraction |
+| `quality_lab/pipeline.py` | pure stages: generate/load → level-match → align → detect → report |
+| `quality_lab/cli.py` | argument parsing + dispatch |
 
 ## Deferred detectors (honest status)
 
-- **onset_drift** — prototyped and **deferred**. A body-correlation timing measure
-  cannot resolve a few-millisecond drift against a *tonal* hit's quasi-periodic body
-  (a ~45 Hz kick cycle-slips; the detector could not distinguish a faithful render
-  from a 7 ms drift). It needs a better timing method (e.g. a matched filter on the
-  body's noise component, or sub-band envelope timing) before it can be trusted. The
-  harness *surfacing* this — rather than shipping a detector that fails its own
-  negative control — is the point of the P0a discipline.
+- **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing
+  measure can't reliably resolve a few-millisecond drift against a tonal hit's
+  quasi-periodic body. It needs a better timing method (or sustained-only scope) before it
+  can be trusted, so it is not shipped in the default detector set.
 
 See `NOTICE.md` for third-party attribution and the license fence.

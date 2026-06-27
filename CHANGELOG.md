@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05173"></a>
+## [0.517.3] - 2026-06-27
+
+- fix(sampler): unlinked tempo follows the sample + fractional BPM readout ([#5132](https://github.com/danielraffel/pulp/pull/5132))
+- fix(mcp): pulp_audio_render temp-dir leak + opaque-error hardening ([#5134](https://github.com/danielraffel/pulp/pull/5134))
+- docs(quality-lab): clean public-facing copy, attribute perceptual models ([#5131](https://github.com/danielraffel/pulp/pull/5131))
+- feat(mcp): pulp_audio_render MCP tool + refresh /audio-harness ([#5122](https://github.com/danielraffel/pulp/pull/5122))
+
 <a id="v05172"></a>
 ## [0.517.2] - 2026-06-27
 
@@ -5425,6 +5433,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.517.3]: https://github.com/danielraffel/pulp/releases/tag/v0.517.3
 [0.517.2]: https://github.com/danielraffel/pulp/releases/tag/v0.517.2
 [0.517.1]: https://github.com/danielraffel/pulp/releases/tag/v0.517.1
 [0.517.0]: https://github.com/danielraffel/pulp/releases/tag/v0.517.0
