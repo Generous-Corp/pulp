@@ -164,6 +164,25 @@ fn sdk_available_reaches_fallthrough_stub() {
 }
 
 #[test]
+fn sdk_delegated_nonzero_exit_code_is_preserved() {
+    let home = tempdir().unwrap();
+    let cpp = Command::cargo_bin("pulp")
+        .expect("pulp-rs binary")
+        .get_program()
+        .to_owned();
+    let out = pulp_rs()
+        .arg("sdk")
+        .arg("install")
+        .arg("--local")
+        .env("PULP_HOME", home.path())
+        .env("PULP_RS_CPP_BINARY", cpp)
+        .output()
+        .expect("run");
+
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn status_reports_standalone_mode_for_pulp_toml_project() {
     let td = tempdir().unwrap();
     std::fs::write(

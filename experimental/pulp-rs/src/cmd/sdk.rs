@@ -110,15 +110,23 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs> {
         return Ok(ParsedArgs { sub, json });
     }
 
-    let sub = parse_sub(&rest)?;
-    if json && !matches!(sub, Sub::Help | Sub::Status | Sub::Clean) {
+    if rest.iter().any(|arg| arg == "--json") || json {
+        let sub = parse_sub(&rest_without_json(&rest))?;
         return Err(CliError::BadUsage(format!(
             "pulp-rs sdk {}: --json is only supported for status and clean",
             sub.name()
         )));
     }
 
+    let sub = parse_sub(&rest)?;
     Ok(ParsedArgs { sub, json })
+}
+
+fn rest_without_json(rest: &[String]) -> Vec<String> {
+    rest.iter()
+        .filter(|arg| arg.as_str() != "--json")
+        .cloned()
+        .collect()
 }
 
 /// Parse the post-`sdk` positional slice into [`Sub`].
@@ -153,7 +161,9 @@ fn parse_leaf(name: &str, rest: &[String], sub: Sub) -> Result<Sub> {
 ///
 /// # Errors
 ///
-/// [`CliError::Io`] when the home directory can't be resolved.
+/// [`CliError::Io`] when the home directory can't be resolved,
+/// [`CliError::BadUsage`] for unsupported delegated JSON/fallthrough states,
+/// or [`CliError::Other`] when a delegated command exits nonzero.
 pub fn run(sub: Sub, json: bool, out: &mut impl Write) -> Result<()> {
     let home = pulp_home().ok_or_else(|| {
         CliError::Other(
@@ -163,18 +173,25 @@ pub fn run(sub: Sub, json: bool, out: &mut impl Write) -> Result<()> {
     run_with_home(sub, &home, json, out)
 }
 
-/// Run `pulp-rs sdk …` using the already-captured post-`sdk` tail.
+/// Run `pulp-rs sdk …` and return delegated child exit codes unchanged.
 ///
 /// # Errors
 ///
-/// [`CliError::Io`] when the home directory can't be resolved.
-pub fn run_with_tail(sub: Sub, json: bool, tail: &[String], out: &mut impl Write) -> Result<()> {
+/// [`CliError::Io`] when the home directory can't be resolved,
+/// [`CliError::BadUsage`] for unsupported delegated JSON/fallthrough states,
+/// or child-spawner errors from the delegated path.
+pub fn run_with_tail_exit(
+    sub: Sub,
+    json: bool,
+    tail: &[String],
+    out: &mut impl Write,
+) -> Result<i32> {
     let home = pulp_home().ok_or_else(|| {
         CliError::Other(
             "could not determine Pulp home directory (set $PULP_HOME or $HOME)".to_owned(),
         )
     })?;
-    run_with_home_and_tail(sub, &home, json, tail, out)
+    run_with_home_and_tail_exit(sub, &home, json, tail, out)
 }
 
 /// Same as [`run`] but takes an explicit home directory. Tests inject
@@ -185,20 +202,41 @@ pub fn run_with_tail(sub: Sub, json: bool, tail: &[String], out: &mut impl Write
 ///
 /// See [`run`].
 pub fn run_with_home(sub: Sub, home: &Path, json: bool, out: &mut impl Write) -> Result<()> {
-    run_with_home_and_tail(sub, home, json, &[], out)
+    let rc = run_with_home_and_tail_exit(sub, home, json, &[], out)?;
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(CliError::Other(format!(
+            "pulp-cpp sdk {} exited with code {rc}",
+            sub.name()
+        )))
+    }
 }
 
-fn run_with_home_and_tail(
+fn run_with_home_and_tail_exit(
     sub: Sub,
     home: &Path,
     json: bool,
     tail: &[String],
     out: &mut impl Write,
-) -> Result<()> {
+) -> Result<i32> {
+    if json && matches!(sub, Sub::Install | Sub::Available) {
+        return Err(json_not_supported_for_delegated(sub));
+    }
+
     match sub {
-        Sub::Help => print_help(out),
-        Sub::Status => do_status(home, json, out),
-        Sub::Clean => do_clean(home, json, out),
+        Sub::Help => {
+            print_help(out)?;
+            Ok(0)
+        }
+        Sub::Status => {
+            do_status(home, json, out)?;
+            Ok(0)
+        }
+        Sub::Clean => {
+            do_clean(home, json, out)?;
+            Ok(0)
+        }
         // These branches are not Rust-native yet. Delegate to `pulp-cpp`
         // transparently; if the C++ binary isn't on PATH, fall back to a
         // clear "not ported" message and exit 2.
@@ -207,18 +245,17 @@ fn run_with_home_and_tail(
     }
 }
 
-fn sdk_via_fallthrough(subcommand: &str, tail: &[String], out: &mut impl Write) -> Result<()> {
+fn json_not_supported_for_delegated(sub: Sub) -> CliError {
+    CliError::BadUsage(format!(
+        "pulp-rs sdk {}: --json is only supported for status and clean",
+        sub.name()
+    ))
+}
+
+fn sdk_via_fallthrough(subcommand: &str, tail: &[String], out: &mut impl Write) -> Result<i32> {
     let argv = collect_argv_tail(subcommand, tail);
     match crate::fallthrough::delegate(&argv)? {
-        crate::fallthrough::Outcome::Delegated(rc) => {
-            if rc == 0 {
-                Ok(())
-            } else {
-                Err(CliError::Other(format!(
-                    "pulp-cpp sdk {subcommand} exited with code {rc}"
-                )))
-            }
-        }
+        crate::fallthrough::Outcome::Delegated(rc) => Ok(rc),
         crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
             writeln!(
                 out,
@@ -472,10 +509,26 @@ mod tests {
     #[test]
     fn parse_args_rejects_json_for_delegated_subcommands() {
         let err = parse_args(&["available".to_owned(), "--json".to_owned()]).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
+        assert_json_delegated_error(err, "available");
+
+        let err = parse_args(&["install".to_owned(), "--json".to_owned()]).unwrap_err();
+        assert_json_delegated_error(err, "install");
 
         let err = parse_args(&["--json".to_owned(), "install".to_owned()]).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
+        assert_json_delegated_error(err, "install");
+    }
+
+    fn assert_json_delegated_error(err: CliError, subcommand: &str) {
+        match err {
+            CliError::BadUsage(msg) => {
+                assert!(msg.contains(&format!("pulp-rs sdk {subcommand}")), "{msg}");
+                assert!(
+                    msg.contains("--json is only supported for status and clean"),
+                    "{msg}"
+                );
+            }
+            other => panic!("expected BadUsage, got {other:?}"),
+        }
     }
 
     #[test]
@@ -489,8 +542,8 @@ mod tests {
         assert_eq!(parsed.sub, Sub::Install);
         assert!(!parsed.json);
 
-        let parsed = parse_args(&["install".to_owned(), "--json".to_owned()]).unwrap();
-        assert_eq!(parsed.sub, Sub::Install);
+        let parsed = parse_args(&["available".to_owned()]).unwrap();
+        assert_eq!(parsed.sub, Sub::Available);
         assert!(!parsed.json);
     }
 
@@ -588,6 +641,45 @@ mod tests {
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("sdk available"));
         assert!(s.contains("not ported"));
+    }
+
+    #[test]
+    fn run_with_home_rejects_json_for_delegated_subcommands() {
+        let td = tempfile::tempdir().unwrap();
+        let mut buf = Vec::new();
+
+        let err = run_with_home(Sub::Install, td.path(), true, &mut buf).unwrap_err();
+        assert_json_delegated_error(err, "install");
+
+        let err = run_with_home(Sub::Available, td.path(), true, &mut buf).unwrap_err();
+        assert_json_delegated_error(err, "available");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_home_preserves_delegated_failure_as_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = tempfile::tempdir().unwrap();
+        let delegate = td.path().join("pulp-cpp-fails");
+        std::fs::write(&delegate, "#!/bin/sh\nexit 7\n").unwrap();
+        let mut perms = std::fs::metadata(&delegate).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&delegate, perms).unwrap();
+
+        let delegate_path = delegate.to_string_lossy();
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, None),
+            (crate::fallthrough::RECURSION_GUARD_ENV, None),
+            ("PULP_RS_CPP_BINARY", Some(delegate_path.as_ref())),
+        ]);
+        let mut buf = Vec::new();
+        let err = run_with_home(Sub::Install, td.path(), false, &mut buf).unwrap_err();
+
+        match err {
+            CliError::Other(msg) => assert!(msg.contains("exited with code 7"), "{msg}"),
+            other => panic!("expected delegate exit error, got {other:?}"),
+        }
     }
 
     #[test]

@@ -506,8 +506,12 @@ fn real_main() -> Result<(), ExitCode> {
                     ExitCode::from(2)
                 }
             })?;
-            cmd::sdk::run_with_tail(parsed.sub, parsed.json, &args.tail, &mut out)
-                .map_err(|e| map_err(&e))
+            map_exit(cmd::sdk::run_with_tail_exit(
+                parsed.sub,
+                parsed.json,
+                &args.tail,
+                &mut out,
+            ))
         }
         Command::Build(args) => {
             let parsed = cmd::orchestrate::parse_build_args(&args.tail);
