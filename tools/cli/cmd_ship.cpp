@@ -58,7 +58,8 @@ static int print_ship_help() {
     std::cout << "Subcommands:\n";
     std::cout << "  sign       Sign plugin bundles or Android artifacts\n";
     std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
-    std::cout << "             --path <app|dmg|bundle>  (sign one explicit artifact)\n";
+    std::cout << "             --path <artifact>  "
+                 "(sign one explicit desktop artifact; .pkg is signed by package)\n";
     std::cout << "             --target android --keystore key.jks  (Android)\n";
     std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
     std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
@@ -147,7 +148,7 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "sign") {
         run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
-        std::string sign_path;  // --path: sign one explicit artifact (.app/.dmg/bundle)
+        std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
@@ -245,7 +246,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         // --path: sign exactly one artifact instead of auto-scanning the
         // build dirs. This is the composable primitive behind the one-off
         // "I built an app/DMG and want to hand it to a friend" flow — point
-        // it at a standalone `.app`, a `.dmg`, or a single plugin bundle.
+        // it at a standalone `.app`, `.dmg`, `.exe`, or a single plugin bundle.
         // `.pkg` installers are signed at creation time (`productsign` via
         // `create_pkg`'s signing_identity), not here, so reject them with a
         // pointer rather than producing a broken signature.

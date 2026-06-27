@@ -901,8 +901,10 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
-`--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
-`.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
+`--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
+macOS `.app`/`.dmg`/plugin bundles, or Windows `.exe`/plugin bundles. `.pkg`
+installers are signed at creation time with a Developer ID **Installer**
+identity, not here.
 
 `package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
 

@@ -674,6 +674,11 @@ through for free. Conventions that kept this testable without Apple creds:
   and parser-error shellout coverage. The `share` path accepts `--output` and
   `--entitlements` in addition to credentials/dry-run; if either changes,
   update all surfaces together.
+- For `pulp ship sign --path`, describe the argument as an explicit desktop
+  artifact rather than an Apple-only `.app`/`.dmg`/bundle set. The same CLI
+  primitive dispatches to macOS `codesign` or Windows `signtool`; `.pkg`
+  installers are intentionally rejected because `package` signs them at
+  creation time.
 - A subcommand of `ship` does NOT need its own top-level slash command or a
   `commands` top-level entry — it lives under the `ship` entry's `subcommands`
   in `cli-commands.yaml` and the `/ship` slash command. `cli_sync_check.py`
