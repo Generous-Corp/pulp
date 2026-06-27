@@ -280,7 +280,9 @@
       "paths": [
         "tools/cmake/FindSkia.cmake",
         "tools/build-skia.sh",
-        "tools/build-skia-android.sh"
+        "tools/build-skia-android.sh",
+        "tools/cmake/PulpBundleRelocatable.cmake",
+        "tools/cmake/scripts/check_bundle_relocatable.py"
       ]
     },
     "ship": {
