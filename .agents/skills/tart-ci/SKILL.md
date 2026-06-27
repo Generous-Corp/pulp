@@ -112,6 +112,11 @@ doesn't expand shell vars). Pulp CI routes to these via `build.yml`'s opt-in
   is too long"), whether passed as a `run.cmd --jitconfig` arg OR embedded in a
   `powershell -EncodedCommand`. Stream it into a file via **ssh stdin**, then run
   `Runner.Listener.exe run --jitconfig (Get-Content jit.cfg)`.
+- A golden may cache the Actions runner binaries, but it must not reuse a stale
+  registration. Scrub `C:\actions-runner\.runner`, `.credentials`,
+  `.credentials_rsaparams`, `.env`, `.path`, and `jit.cfg` before every JIT run;
+  otherwise the guest can connect to GitHub and then fail with "runner
+  registration has been deleted" before claiming the queued job.
 - `git reset --hard` (+ `core.autocrlf false`) for checkout — the golden's tree
   carries autocrlf churn that aborts a plain `git checkout`.
 
