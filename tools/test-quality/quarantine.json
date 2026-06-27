@@ -1,0 +1,351 @@
+{
+  "version": 1,
+  "status": "report-only",
+  "generated_from": ".github/workflows/build.yml",
+  "notes": [
+    "Initial Phase 0 manifest for inline CTest exclude-regex fragments.",
+    "Entries are not enforcement yet; they give each current exclusion owner, reason, tracking, expiry, and count impact metadata."
+  ],
+  "entries": [
+    {
+      "test_pattern": "STFT",
+      "platform": "all",
+      "tier": "unclassified",
+      "owner": "test-suite-quality",
+      "reason": "Existing broad workflow exclusion; classify and move to a proper tier or remove.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "VisualizationBridge",
+      "platform": "all",
+      "tier": "visual",
+      "owner": "view-ui",
+      "reason": "Existing broad workflow exclusion for visual/runtime bridge tests; needs capability labels and a dedicated visual lane.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "Clipboard",
+      "platform": "all",
+      "tier": "platform",
+      "owner": "platform-runtime",
+      "reason": "Existing broad workflow exclusion for platform clipboard behavior; needs platform capability labeling.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "Toolbar add items",
+      "platform": "all",
+      "tier": "visual",
+      "owner": "view-ui",
+      "reason": "Existing workflow exclusion for UI toolbar behavior; needs owner triage and stable lane classification.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "TextRunPlanner cache clear preserves shaped output contracts",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "text-rendering",
+      "reason": "Known macOS required-gate exclusion from local runner stability block.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "TextRunPlanner captures scope generation and RTL base direction",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "text-rendering",
+      "reason": "Known macOS required-gate exclusion from local runner stability block.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "MCP inspector tools map to expected inspector protocol methods",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "inspector-tools",
+      "reason": "Known macOS required-gate exclusion from local runner stability block.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "parse_cmake_project_version extracts VERSION from project\\\\(\\\\)",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "cli-tooling",
+      "reason": "Known macOS required-gate exclusion from local runner stability block.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "MCP pulp_motion_.* tools map to expected Motion\\\\..* methods",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "motion-tools",
+      "reason": "Known macOS required-gate exclusion from local runner stability block.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "register_font_file resolves a custom family through Skia",
+      "platform": "macos",
+      "tier": "visual",
+      "owner": "text-rendering",
+      "reason": "Known macOS required-gate exclusion involving Skia/font capability.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "FE0E forces text presentation",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "text-rendering",
+      "reason": "Known macOS required-gate exclusion for text shaping behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "text_align center and right reflect cluster-aware width",
+      "platform": "macos",
+      "tier": "unit",
+      "owner": "text-rendering",
+      "reason": "Known macOS required-gate exclusion for text layout behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "mac harness scroll event carries non-zero deltas through PulpView",
+      "platform": "macos",
+      "tier": "platform",
+      "owner": "mac-view",
+      "reason": "Known macOS required-gate exclusion for native event harness behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "mac harness right-click reaches PulpView::rightMouseDown",
+      "platform": "macos",
+      "tier": "platform",
+      "owner": "mac-view",
+      "reason": "Known macOS required-gate exclusion for native event harness behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "pulp-mcp-launcher",
+      "platform": "macos",
+      "tier": "integration",
+      "owner": "mcp-tools",
+      "reason": "Known macOS required-gate exclusion for MCP launcher integration behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "AudioInspectorPanel renders a non-empty headless snapshot",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "audio-inspector",
+      "reason": "Linux headless runner lacks compatible GPU/display capability; needs visual/platform tier.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "font v2 Slice 3\\\\.4",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "text-rendering",
+      "reason": "Linux headless runner capability exclusion for font golden/scaffold lane.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "baked native materializer makes a faithful_svg tab_group an interactive overlay",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design-import render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "ImageView value-driven silhouette fill scales with value",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "view-ui",
+      "reason": "Linux headless runner lacks compatible visual capability for image render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView renders",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignTabGroup renders",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignStepper renders",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignStepper with a single option paints nothing",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView paints",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView tints",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView xy_pad puck renders",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView slides",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "DesignFrameView rotates",
+      "platform": "linux",
+      "tier": "visual",
+      "owner": "design-import",
+      "reason": "Linux headless runner lacks compatible visual capability for design render assertion.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "STFT",
+      "platform": "windows",
+      "tier": "unclassified",
+      "owner": "test-suite-quality",
+      "reason": "Existing Windows workflow exclusion; classify and move to a proper tier or remove.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "VisualizationBridge",
+      "platform": "windows",
+      "tier": "visual",
+      "owner": "view-ui",
+      "reason": "Existing Windows workflow exclusion for visual/runtime bridge tests; needs capability labels and a dedicated visual lane.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "Clipboard",
+      "platform": "windows",
+      "tier": "platform",
+      "owner": "platform-runtime",
+      "reason": "Existing Windows workflow exclusion for platform clipboard behavior; needs platform capability labeling.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "Toolbar add items",
+      "platform": "windows",
+      "tier": "visual",
+      "owner": "view-ui",
+      "reason": "Existing Windows workflow exclusion for UI toolbar behavior; needs owner triage and stable lane classification.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "baked C.* exporter emits ownable C.* source artifacts",
+      "platform": "windows",
+      "tier": "integration",
+      "owner": "design-import",
+      "reason": "Existing Windows workflow exclusion for baked exporter artifact behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    },
+    {
+      "test_pattern": "pulp-import-design handles literal file paths and rejects unsafe URLs",
+      "platform": "windows",
+      "tier": "integration",
+      "owner": "design-import",
+      "reason": "Existing Windows workflow exclusion for import-design shellout/path behavior.",
+      "tracking_issue": "planning/test-suite-quality-remediation-goal.md",
+      "expires": "2026-07-31",
+      "max_count_impact": 1
+    }
+  ]
+}

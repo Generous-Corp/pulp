@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "required_status_contexts": [
+    {
+      "name": "macos",
+      "source": ".github/workflows/build.yml",
+      "scope": "required PR gate",
+      "test_signal": "Build and Test macOS alias over the native build matrix; this is the branch-protected product test gate."
+    },
+    {
+      "name": "Enforce version & skill sync",
+      "source": ".github/workflows/version-skill-check.yml",
+      "scope": "required PR gate",
+      "test_signal": "Repository governance gate, not a product test suite signal."
+    }
+  ],
+  "workflows": [
+    {
+      "path": ".github/workflows/build.yml",
+      "name": "Build and Test",
+      "cadence": "pull_request, workflow_dispatch",
+      "tier": "required-pr",
+      "platforms": ["macos", "linux", "windows"],
+      "test_signal": "Primary PR build and CTest lane. Branch protection requires only the macos alias; Linux and Windows aliases are advisory unless rules change.",
+      "quality_issue": "The main CTest step still carries inline exclude regex fragments; Phase 0 quarantine metadata now tracks those exclusions."
+    },
+    {
+      "path": ".github/workflows/build-macos.yml",
+      "name": "Build and Test (macOS retarget)",
+      "cadence": "workflow_dispatch",
+      "tier": "manual-required-context-retarget",
+      "platforms": ["macos"],
+      "test_signal": "Manual reroute for the branch-protected macos context.",
+      "quality_issue": "Useful for recovery, but not a separate coverage source."
+    },
+    {
+      "path": ".github/workflows/coverage.yml",
+      "name": "Coverage",
+      "cadence": "pull_request, push main, schedule, workflow_dispatch",
+      "tier": "required-pr-coverage",
+      "platforms": ["macos", "linux", "windows"],
+      "test_signal": "Diff coverage gate on PRs; wider platform coverage runs outside normal PR scope.",
+      "quality_issue": "Coverage is a useful guardrail but must not replace behavior-first test intent."
+    },
+    {
+      "path": ".github/workflows/cross-platform-check.yml",
+      "name": "Cross-platform check",
+      "cadence": "schedule, workflow_dispatch",
+      "tier": "nightly-platform",
+      "platforms": ["linux", "windows", "android"],
+      "test_signal": "Nightly build and test backstop for non-macOS platforms, with tracking issues on failure.",
+      "quality_issue": "Not a PR blocker; platform regressions can merge before the nightly reports them."
+    },
+    {
+      "path": ".github/workflows/nightly-full-build.yml",
+      "name": "Nightly full build",
+      "cadence": "schedule, workflow_dispatch",
+      "tier": "nightly-build",
+      "platforms": ["macos"],
+      "test_signal": "Full tree build with examples and all test targets to catch compile-only test rot.",
+      "quality_issue": "CTest runtime results are informational, so this is primarily a build-target integrity signal."
+    },
+    {
+      "path": ".github/workflows/format-baseline-diff.yml",
+      "name": "Format validator baseline diff",
+      "cadence": "pull_request path-filtered",
+      "tier": "validator",
+      "platforms": ["macos"],
+      "test_signal": "Path-filtered AU/VST3/CLAP validator baseline comparison for format-adapter changes.",
+      "quality_issue": "Only runs on selected paths; validator health outside those paths depends on other lanes."
+    },
+    {
+      "path": ".github/workflows/validate.yml",
+      "name": "Plugin Validation",
+      "cadence": "workflow_dispatch",
+      "tier": "manual-validator",
+      "platforms": ["macos"],
+      "test_signal": "Manual pluginval, clap-validator, auval, and CTest validation lane.",
+      "quality_issue": "Manual-only and some validator invocations are tolerated with `|| true`, so it is not a trustworthy required signal yet."
+    },
+    {
+      "path": ".github/workflows/sanitizers.yml",
+      "name": "Sanitizer Tests",
+      "cadence": "pull_request, push main, workflow_dispatch",
+      "tier": "advisory-runtime",
+      "platforms": ["macos", "linux"],
+      "test_signal": "ASan/TSan/UBSan/RTSan runtime safety signal.",
+      "quality_issue": "Advisory and partly dispatch-only; failures should inform remediation but do not block normal merge."
+    },
+    {
+      "path": ".github/workflows/visual-harness.yml",
+      "name": "Visual Harness",
+      "cadence": "pull_request, push main, workflow_dispatch",
+      "tier": "visual",
+      "platforms": ["macos"],
+      "test_signal": "Screenshot/render harness validation.",
+      "quality_issue": "Visual evidence needs reviewed baselines and capability labels so it is not mistaken for unit coverage."
+    },
+    {
+      "path": ".github/workflows/android.yml",
+      "name": "Android Build",
+      "cadence": "pull_request, push main",
+      "tier": "platform",
+      "platforms": ["android", "macos", "windows"],
+      "test_signal": "Android build and platform smoke coverage.",
+      "quality_issue": "Background signal, not a release gate; emulator/JNI coverage depends on runner capability."
+    },
+    {
+      "path": ".github/workflows/sandbox-e2e.yml",
+      "name": "sandbox-e2e",
+      "cadence": "pull_request, push main, reusable release pre-publish",
+      "tier": "integration",
+      "platforms": ["macos", "linux", "windows"],
+      "test_signal": "End-to-end sandbox/CLI/package behavior.",
+      "quality_issue": "Some build steps are allowed to continue on error; missing required binaries must be separated from optional smoke behavior."
+    },
+    {
+      "path": ".github/workflows/release-cli.yml",
+      "name": "Release CLI",
+      "cadence": "tag push, workflow_dispatch",
+      "tier": "release",
+      "platforms": ["macos", "linux", "windows"],
+      "test_signal": "Release artifact build and binary smoke checks.",
+      "quality_issue": "Release builds do not replace PR behavior tests; they prove ship artifacts can be built and packaged."
+    },
+    {
+      "path": ".github/workflows/sign-and-release.yml",
+      "name": "Sign and Release",
+      "cadence": "tag push",
+      "tier": "release",
+      "platforms": ["macos"],
+      "test_signal": "Signing, packaging, notarization, and release upload path.",
+      "quality_issue": "Tests are disabled by design; this protects release mechanics, not product behavior."
+    }
+  ]
+}

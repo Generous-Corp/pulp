@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "audio-dsp-realtime",
+      "owner": "audio-dsp-runtime",
+      "title": "Audio, DSP, and realtime safety",
+      "guarantees": [
+        "DSP helpers produce correct observable output across realistic buffer, sample-rate, channel, and parameter boundaries.",
+        "Realtime paths avoid allocation and blocking behavior where that is a documented contract.",
+        "Offline render helpers and audio observability tools report stable metrics instead of only proving that code ran."
+      ],
+      "representative_tests": [
+        "pulp-test-signal",
+        "pulp-test-audio-tools",
+        "pulp-test-audio-probe",
+        "pulp-test-signal-rt-safety",
+        "pulp-test-golden-effect"
+      ],
+      "missing_or_weak": [
+        "Needs systematic mutation proof for representative DSP and realtime invariants.",
+        "Needs clearer separation between unit, golden, performance, and realtime-safety tiers.",
+        "Host/DAW interaction remains partly outside the normal PR confidence signal."
+      ],
+      "command_patterns": [
+        "pulp-test-(audio|signal|dsp|golden|render-scenario|negative-path|stft|convolver|biquad|compressor|resampler|synthesiser|wavetable|sampler|voice|instrument|loop|onset|analyzer|time-pitch|buffer|workgroup|offline|soft-bypass|phase-vocoder|dc-blocker|denormal|adsr|fast-math|poly-math|filter-design|iir-design)",
+        "pulp-test-(multi-channel-meter|spectral-primitives|sample-converter|sample-voice-renderer|halfband-iir|pan-mix-laws|sample-stream-window|wav-metadata|frame-fill|special-functions)|pulp-(sampler|tempo-sampler)-test",
+        "pulp-test-(v3-gaps|sample-resource|effects|fft-backends|sinc-resampler|sample-zone-map|sample-pool|ogg-reader|built-in-transient-classifier|sample-key-map|sample-asset-io|matrix-effect|matrix-tone|matrix-drums|matrix-synth|matrix-sampler|matrix-compressor|noise-morpher|freeze-loop-sampler|stn-decomposer|built-in-key-tempo-analyzer)|pulp-(gain|effect|tone|compressor|synth|drums|pluck)-test|pulp-faust-(gain|filter|tremolo)-test"
+      ],
+      "test_name_patterns": [
+        "audio",
+        "signal",
+        "realtime",
+        "golden"
+      ]
+    },
+    {
+      "id": "midi-mpe-ump",
+      "owner": "midi-runtime",
+      "title": "MIDI, MPE, UMP, and sysex",
+      "guarantees": [
+        "MIDI parsers and buffers handle malformed, partial, realtime, sysex, MPE, and UMP inputs without corrupting event order.",
+        "Per-note expression and conversion paths preserve timing and channel semantics.",
+        "Platform MIDI backends fail or skip honestly when platform capability is absent."
+      ],
+      "representative_tests": [
+        "pulp-test-sysex-accumulator",
+        "pulp-test-midi",
+        "pulp-test-midi-expansion",
+        "pulp-test-mpe-buffer",
+        "pulp-test-ump-mpe"
+      ],
+      "missing_or_weak": [
+        "Some platform MIDI smokes still need stronger observable assertions.",
+        "Mutation proof should cover parser abort/restart and per-note state invariants."
+      ],
+      "command_patterns": [
+        "pulp-test-(midi|mpe|ump|sysex|raw-midi|running-status|parameter-event-queue)",
+        "pulp-test-(ble-midi|musical-typing-keyboard|musical-typing$)"
+      ],
+      "test_name_patterns": [
+        "MIDI",
+        "MPE",
+        "UMP",
+        "Sysex"
+      ]
+    },
+    {
+      "id": "state-parameters-presets",
+      "owner": "state-parameter-runtime",
+      "title": "State, parameters, presets, and edit history",
+      "guarantees": [
+        "Parameter metadata, normalization, binding, host sync, and modulation-visible state round-trip correctly.",
+        "State trees, properties, presets, and edit history reject malformed data and preserve compatible serialized form.",
+        "User-visible state diagnostics identify bad restore inputs rather than silently succeeding."
+      ],
+      "representative_tests": [
+        "pulp-test-state",
+        "pulp-test-state-tree",
+        "pulp-test-binding",
+        "pulp-test-preset-manager",
+        "pulp-test-param-host-sync"
+      ],
+      "missing_or_weak": [
+        "Needs cross-version state fixture coverage for important serialized formats.",
+        "Adapter lifecycle state restore paths need stronger representative mutation proof."
+      ],
+      "command_patterns": [
+        "pulp-test-(state|binding|preset|properties|param|parameter|edit-history|undo-manager|normalisable-range|sample-slot-bank-store|sample-edit-document)",
+        "pulp-test-(tweak-store|dirty-tracker|ab-compare|settings-sections)"
+      ],
+      "test_name_patterns": [
+        "state",
+        "preset",
+        "parameter"
+      ]
+    },
+    {
+      "id": "format-adapters-hosting",
+      "owner": "format-hosting",
+      "title": "Format adapters, hosting, plugin scanning, and validation",
+      "guarantees": [
+        "VST3, AU, AUv3, CLAP, LV2, ARA, AAX, and standalone adapters preserve lifecycle, bus, parameter, state, MIDI, latency, and editor contracts.",
+        "Host scanning, plugin slots, signal graphs, and real-plugin runners expose actionable failures instead of silent optional passes.",
+        "Validator output is captured and routed to owners when adapter compatibility regresses."
+      ],
+      "representative_tests": [
+        "pulp-test-clap-entry",
+        "pulp-test-vst3-plugin-state",
+        "pulp-test-au-plugin-state",
+        "pulp-test-host",
+        "pulp-test-host-signal-graph"
+      ],
+      "missing_or_weak": [
+        "Validator cadence is still weak: manual or path-filtered lanes do not provide broad required PR confidence.",
+        "Real plugin cache and host integration tests need clearer required-vs-optional preflight semantics.",
+        "Mutation proof should cover adapter state, parameter, bus, and lifecycle invariants."
+      ],
+      "command_patterns": [
+        "pulp-test-(clap|vst3|au-|auv3|aax|ara|lv2|host|plugin|scan|signal-graph|graph|processor|validation-harness|view-bridge|standalone|transport-hook|tempo-hook|playhead|descriptor|vendor-url|memory-pressure)",
+        "pulp-test-(isolated-scanner|native-core-ffi|native-core-processor|pulp-node-v1|node-pack)",
+        "pulp-test-(background-scanner|real-plugin-runner-cache|transport-quantizer|validation-contract|wam-wclap|process-block|generated-dsp-graph-parity|pulpset-replay)"
+      ],
+      "test_name_patterns": [
+        "CLAP",
+        "VST3",
+        "AUv3",
+        "host",
+        "plugin",
+        "validator"
+      ]
+    },
+    {
+      "id": "graph-scheduling-anticipation",
+      "owner": "graph-audio-runtime",
+      "title": "Graph scheduling, anticipation, and render partitioning",
+      "guarantees": [
+        "Graph anticipation classifies live, latent, feedback, sidechain, MIDI, and malformed graph edges without treating ineligible live paths as render-ahead work.",
+        "Partitioning and subgraph extraction preserve boundary ports and reject malformed or duplicate graph topology.",
+        "Anticipation render lanes produce boundary audio that matches synchronous rendering, handle underrun deterministically, avoid audio-thread allocation, and run race-free across producer/consumer paths."
+      ],
+      "representative_tests": [
+        "pulp-test-anticipation-eligibility",
+        "pulp-test-anticipation-partition",
+        "pulp-test-anticipation-subgraph",
+        "pulp-test-anticipation-subgraph-render",
+        "pulp-test-anticipation-lane",
+        "pulp-test-signal-graph-anticipation"
+      ],
+      "missing_or_weak": [
+        "Needs mutation proof for eligibility classification, boundary extraction, underrun behavior, and no-allocation guarantees.",
+        "Needs a clear tier split between fast graph-scheduling unit tests and longer race/stress coverage."
+      ],
+      "command_patterns": [
+        "pulp-test-anticipation-(eligibility|partition|subgraph|subgraph-render|lane)",
+        "pulp-test-signal-graph-anticipation"
+      ]
+    },
+    {
+      "id": "view-ui-webcompat-import",
+      "owner": "view-webcompat-import",
+      "title": "View, UI, WebCompat, design import, and rendering",
+      "guarantees": [
+        "View/widget behavior, layout, accessibility, text, rendering, and bridge APIs match documented user-visible semantics.",
+        "WebCompat and design import parsers reject malformed inputs and map supported source concepts to stable runtime output.",
+        "Visual/golden evidence is reviewed and separated from ordinary unit confidence."
+      ],
+      "representative_tests": [
+        "pulp-test-web-compat-parser",
+        "pulp-test-web-compat-layout",
+        "pulp-test-design-import",
+        "pulp-test-widget-bridge",
+        "visual-harness-self-test"
+      ],
+      "missing_or_weak": [
+        "Broad WebCompat/design-import coverage needs clearer parser, security, bridge integration, and visual-render subtiers.",
+        "GPU/font/screenshot capability labels are not yet consistently applied.",
+        "Placeholder visual/golden scaffolds should not count as normal passes."
+      ],
+      "command_patterns": [
+        "pulp-test-(view|widget|web-compat|design|canvas|font|text|sdf|msdf|psdf|svg|image|layout|visual|screenshot|gpu|render|scene3d|motion|animation|theme|accessibility|table|tree|toolbar|tooltip|modal|panel|lottie|threejs|webgpu|script|js-engine|app-framework)",
+        "pulp-test-(inspector|ui-components|rectangle-list|phase9-widgets|gui-components|attributed-string|editor-bridge|dnd|input-events|jsx-lock|interpolator|window-manager|editor-url|code-editor-tokenizer|overlay-routing|code-editor|skia-surface|scroll-view|document-window|resizable-shell|remote-view|property-panel|uia-mapping|vector-scene|frame-clock|scroll-bar|preferences-panel|appearance|context-menu|modulation-matrix|lasso|split-view|announce|waveform-editor|lock-to-source|command-registry)",
+        "pulp-test-(asset-manager|css-translator-gaps-1434|cluster-step|animator-set|typography-inheritance|combo-dropdown|waveform-headless-render-backend|waveform-gpu-render-controller|waveform-gpu-primitives|gap-widgets|atk-mapping|atspi-mapping|component-dragger|file-browser|auto-ui|bidi-text|path-to-sdf|bubble-message|side-panel|box-shadow-cache|sprite-strip|splash-screen|headless-surface|focused-input|file-chooser|model-manager-view|sample-asset-drop-target|zone-layer-select|partial-rendering-poc|w3c-tokens|token-lock|extensions-visitor|web-demos|headless-frame-pump|popover-row-template-1147|ui-preview-viewport|buttons|channel-strip-view|multi-window|minimal-append|parity|property-list|relative-point|hot-reload|faithful-specimens|import-object-coverage)"
+      ],
+      "test_name_patterns": [
+        "visual",
+        "design",
+        "web-compat",
+        "scene3d"
+      ]
+    },
+    {
+      "id": "runtime-events-network",
+      "owner": "runtime-events-network",
+      "title": "Runtime, events, IPC, networking, OSC, and security utilities",
+      "guarantees": [
+        "Runtime primitives, result/error handling, crypto, XML/ZIP, URL, SIMD, and filesystem helpers fail deterministically and safely.",
+        "Event loops, async streams, IPC, network streams, message channels, OSC, and service discovery tear down deterministically.",
+        "Security-sensitive helpers reject malformed input and keep platform-dependent skips explicit."
+      ],
+      "representative_tests": [
+        "pulp-test-runtime-utils",
+        "pulp-test-events",
+        "pulp-test-ipc",
+        "pulp-test-stream",
+        "pulp-test-osc"
+      ],
+      "missing_or_weak": [
+        "Async/network tests need continued scrutiny for timing and environment assumptions.",
+        "Platform/device-dependent soft skips need stronger reporting and capability labels."
+      ],
+      "command_patterns": [
+        "pulp-test-(runtime|events|ipc|stream|network|websocket|osc|json-rpc|crypto|ed25519|hmac|analytics|license|url|xml|zip|simd|sync|fifo|i18n|identity|high-resolution-timer|mac-address|memory-message-channel)",
+        "pulp-test-(child-process|async-stream|progress-parser|file-search-path|abstract-fifo|diagnostic|load-measurer|model-store|model-download)",
+        "pulp-test-(message-loop-integration|cfrunloop-cooperation|push-notifications|in-app-purchase)|pulp-stream-demo"
+      ],
+      "test_name_patterns": [
+        "runtime",
+        "events",
+        "IPC",
+        "OSC"
+      ]
+    },
+    {
+      "id": "cli-tooling-local-ci",
+      "owner": "cli-tooling-local-ci",
+      "title": "CLI, tools, package workflows, local CI, and developer automation",
+      "guarantees": [
+        "CLI commands return correct user-visible output, diagnostics, exit behavior, and artifact paths.",
+        "Shellout tests distinguish missing optional tools from missing required built binaries.",
+        "Local CI, package, content, kit, and maintenance scripts produce trustworthy automation evidence."
+      ],
+      "representative_tests": [
+        "pulp-test-cli-shellout",
+        "pulp-test-cli-import",
+        "pulp-test-cli-package-commands",
+        "pulp-test-cli-kit-commands",
+        "pulp-test-cli-validator-discovery"
+      ],
+      "missing_or_weak": [
+        "Shellout preflights still need stricter required-binary semantics.",
+        "Some CLI tests validate help text or process exit without enough product outcome assertions."
+      ],
+      "command_patterns": [
+        "pulp-test-cli|cli-|pulp-test-(package|content|kit|mcp|notary|appcast|sparkle|codesign|nsis|installer|build-check|workspace|install-sh|check-pulp-cli-hook|inject-claude-prefs-hook|retry-git-clone)"
+      ],
+      "test_name_patterns": [
+        "\\bcli[-:]",
+        "package",
+        "tooling"
+      ]
+    },
+    {
+      "id": "platform-apple-android-windows-linux",
+      "owner": "platform-runtime",
+      "title": "Platform, Apple, Android, Windows, Linux, and device surfaces",
+      "guarantees": [
+        "Platform-specific audio, MIDI, rendering, filesystem, permission, and package surfaces report correct behavior on supported hosts.",
+        "iOS/AUv3, Android, Windows, Linux, and macOS-only behavior is routed to explicit platform lanes instead of hidden in generic pass counts.",
+        "Device, SDK, GPU, display, audio-device, and validator dependencies are represented as capabilities."
+      ],
+      "representative_tests": [
+        "pulp-test-ios-audio-session",
+        "pulp-test-android-package",
+        "android-smoke",
+        "pulp-test-platform",
+        "pulp-test-wasapi-input"
+      ],
+      "missing_or_weak": [
+        "PR/nightly/release obligations are still uneven across platforms.",
+        "Capability labels for SDK/device/display/GPU requirements are not yet consistently enforced."
+      ],
+      "command_patterns": [
+        "pulp-test-(ios|android|wasapi|alsa|jack|udev|platform|permissions|environment|file-dialog|dbus|winmidi|winrt|mac-|xcode|linux|webview|audio-device|audio-system-hotplug|pulp-bridge)|android-smoke|cmake-ios"
+      ],
+      "test_name_patterns": [
+        "android",
+        "iOS",
+        "Windows",
+        "Linux",
+        "macOS"
+      ]
+    }
+  ]
+}

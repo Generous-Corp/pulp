@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "notes": [
+    "Report-only capability scaffold for Phase 1 of the test-suite quality remediation plan.",
+    "Capabilities describe environment or tool dependencies, not test quality tiers.",
+    "Counts are inferred from existing CTest labels plus command/name regexes until real CTest capability labels are applied.",
+    "Inferred matches are candidate labels, not proof that a test truly needs the capability; prefer undercounting where Pulp domain vocabulary collides with capability terms."
+  ],
+  "capabilities": [
+    {
+      "id": "requires-built-cli",
+      "title": "Built Pulp CLI",
+      "owner": "cli-tooling",
+      "description": "Tests that shell out to the built pulp CLI or its C++ delegate.",
+      "expected_behavior": "missing in required CLI/integration lanes should fail fast; optional lanes may skip with an explicit reason",
+      "command_patterns": [
+        "pulp-test-cli",
+        "pulp-test-.*kit.*commands"
+      ],
+      "test_name_patterns": [
+        "\\bcli[-:]",
+        "\\bpulp cli\\b",
+        "\\bpulp run\\b",
+        "\\bpulp build\\b"
+      ],
+      "label_patterns": [
+        "requires-built-cli",
+        "tooling"
+      ],
+      "missing_or_weak": [
+        "Several shellout-style tests still need lane-aware preflight semantics instead of pass-like dependency guards."
+      ]
+    },
+    {
+      "id": "requires-validator",
+      "title": "External Plugin Validators",
+      "owner": "format-adapters",
+      "description": "Tests or workflows that depend on auval, pluginval, clap-validator, or related format validators.",
+      "expected_behavior": "validator lanes should fail when the validator is expected and missing; scheduled/advisory lanes should report actionable unavailable status",
+      "command_patterns": [
+        "pulp-test-.*validator"
+      ],
+      "test_name_patterns": [
+        "auval",
+        "pluginval",
+        "clap[- ]validator",
+        "validator"
+      ],
+      "label_patterns": [
+        "validator"
+      ],
+      "missing_or_weak": [
+        "Validator cadence is not yet a normal PR guarantee for adapter changes."
+      ]
+    },
+    {
+      "id": "requires-gpu",
+      "title": "GPU Or Graphics Adapter",
+      "owner": "render-view",
+      "description": "Tests that require a GPU adapter, renderer backend, or graphics capability beyond pure CPU parsing.",
+      "expected_behavior": "required graphics lanes should fail when the configured adapter cannot initialize; optional lanes should skip with a capability reason",
+      "command_patterns": [
+        "pulp-test-gpu",
+        "pulp-test-skia",
+        "pulp-test-render",
+        "pulp-test-scene3d",
+        "pulp-motion-visual"
+      ],
+      "test_name_patterns": [
+        "\\bgpu\\b",
+        "\\bskia\\b",
+        "\\bwebgpu\\b",
+        "\\bdawn\\b",
+        "\\brenderer probe\\b"
+      ],
+      "label_patterns": [
+        "gpu",
+        "visual",
+        "gltf",
+        "threejs"
+      ],
+      "missing_or_weak": [
+        "GPU-dependent tests need consistent capability labels distinct from visual/golden quality tiers."
+      ]
+    },
+    {
+      "id": "requires-display",
+      "title": "Display Or Window Server",
+      "owner": "view-platform",
+      "description": "Tests that need a live display, window server, screenshot host, or desktop capture path.",
+      "expected_behavior": "headless-required lanes should skip explicitly; display-required lanes should fail with diagnostics when the display server is unavailable",
+      "command_patterns": [
+        "pulp-test-visual",
+        "pulp-motion-visual"
+      ],
+      "test_name_patterns": [
+        "screenshot",
+        "visual",
+        "window server",
+        "display server",
+        "capture"
+      ],
+      "label_patterns": [
+        "visual"
+      ],
+      "missing_or_weak": [
+        "Display and screenshot dependencies are currently mixed with visual tier labels."
+      ]
+    },
+    {
+      "id": "requires-ios-sdk",
+      "title": "iOS SDK Or Simulator",
+      "owner": "apple-platform",
+      "description": "Tests that configure, build, or validate iOS/AUv3 host or extension behavior.",
+      "expected_behavior": "Apple platform lanes should fail on missing expected SDKs; non-Apple lanes should skip because the capability is absent",
+      "command_patterns": [
+        "cmake-ios",
+        "pulp-test-.*ios"
+      ],
+      "test_name_patterns": [
+        "\\bios\\b",
+        "\\bios sdk\\b",
+        "\\bsimulator\\b"
+      ],
+      "label_patterns": [
+        "ios",
+        "auv3"
+      ],
+      "missing_or_weak": [
+        "iOS simulator/device expectations need clearer PR, nightly, and release ownership."
+      ]
+    },
+    {
+      "id": "requires-android-sdk",
+      "title": "Android SDK Or NDK",
+      "owner": "android-platform",
+      "description": "Tests that require Android toolchains, emulator support, or Android packaging.",
+      "expected_behavior": "Android platform lanes should fail when configured toolchains are missing; other lanes should skip explicitly",
+      "command_patterns": [
+        "android",
+        "pulp-test-.*android"
+      ],
+      "test_name_patterns": [
+        "\\bandroid\\b",
+        "\\bndk\\b",
+        "\\bemulator\\b"
+      ],
+      "label_patterns": [
+        "android"
+      ],
+      "missing_or_weak": [
+        "Android smoke coverage exists but is not part of the required PR signal."
+      ]
+    },
+    {
+      "id": "requires-network",
+      "title": "Network Or Service Discovery",
+      "owner": "runtime-events",
+      "description": "Tests that use sockets, HTTP, OSC, service discovery, or network-like IPC.",
+      "expected_behavior": "network-dependent tests should distinguish unavailable local capability from product failures",
+      "command_patterns": [
+        "pulp-test-osc",
+        "pulp-test-ipc",
+        "pulp-test-network-stream"
+      ],
+      "test_name_patterns": [
+        "socket",
+        "\\bhttp\\b",
+        "\\bosc\\b",
+        "service discovery",
+        "ipc"
+      ],
+      "label_patterns": [
+        "streams"
+      ],
+      "missing_or_weak": [
+        "Some runtime/event capabilities still need lane-specific skip reporting."
+      ]
+    },
+    {
+      "id": "requires-audio-device",
+      "title": "Audio Device Or Host Audio IO",
+      "owner": "audio-runtime",
+      "description": "Tests that depend on live audio device enumeration, host audio IO, or platform audio services.",
+      "expected_behavior": "offline DSP tests should not need this capability; live-device lanes should fail or skip based on lane contract",
+      "command_patterns": [
+        "pulp-test-audio-device",
+        "pulp-test-system-volume"
+      ],
+      "test_name_patterns": [
+        "audio device",
+        "system volume",
+        "coreaudio",
+        "asio",
+        "wasapi",
+        "alsa"
+      ],
+      "label_patterns": [],
+      "missing_or_weak": [
+        "Most audio confidence should remain offline; live device expectations need explicit tiering."
+      ]
+    },
+    {
+      "id": "requires-node",
+      "title": "Node.js Or JavaScript Tooling",
+      "owner": "webcompat-tooling",
+      "description": "Tests that invoke Node.js, bundlers, or JavaScript packaging helpers.",
+      "expected_behavior": "tooling lanes should fail when Node is expected and missing; optional import lanes should skip explicitly",
+      "command_patterns": [
+        "pulp_bundle_threejs",
+        "pulp-test-.*node"
+      ],
+      "test_name_patterns": [
+        "\\bnode\\.js\\b",
+        "\\bnpm\\b",
+        "\\bthreejs\\b"
+      ],
+      "label_patterns": [
+        "node",
+        "threejs"
+      ],
+      "missing_or_weak": [
+        "JS tooling dependencies are not yet separated from parser/import quality tiers."
+      ]
+    },
+    {
+      "id": "requires-real-plugin-cache",
+      "title": "Real Plugin Cache Or Installed Plugin",
+      "owner": "hosting-format",
+      "description": "Tests that depend on a real scanned plugin cache, installed plugin artifact, or external plugin binary.",
+      "expected_behavior": "host integration lanes should fail when a configured plugin artifact is missing; pure unit lanes should use fixtures or skip explicitly",
+      "command_patterns": [],
+      "test_name_patterns": [
+        "plugin cache",
+        "scan cache",
+        "real plugin",
+        "dlopen",
+        "host quirks"
+      ],
+      "label_patterns": [
+        "host-quirks"
+      ],
+      "missing_or_weak": [
+        "Host/plugin-cache tests need clearer separation between fixture caches and required real plugin artifacts."
+      ]
+    }
+  ]
+}

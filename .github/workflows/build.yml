@@ -956,6 +956,33 @@ jobs:
           if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
+      - name: Test suite quality baseline (report-only)
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if [ ! -d "$PULP_BUILD_DIR" ]; then
+            echo "PULP_BUILD_DIR does not exist; skipping test-suite quality baseline."
+            exit 0
+          fi
+          report_rc=0
+          python3 tools/scripts/test_suite_quality_report.py \
+            --build-dir "$PULP_BUILD_DIR" \
+            --format markdown \
+            --fail-on-quarantine-drift \
+            --fail-on-expired-quarantine \
+            --fail-on-weak-pattern-growth \
+            --fail-on-unmapped-triage-drift \
+            --output test-suite-quality-baseline.md || report_rc=$?
+          cat test-suite-quality-baseline.md || true
+          {
+            echo "## Test suite quality baseline"
+            echo
+            cat test-suite-quality-baseline.md || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$report_rc"
+
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.

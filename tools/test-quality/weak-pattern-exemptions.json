@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "status": "report-only",
+  "notes": [
+    "Exemptions for weak-test pattern hits that are fixture/literal text rather than executable weak assertions.",
+    "Raw weak-pattern counts remain visible; this manifest only separates exempted from unexempted hits so future enforcement can target real tests.",
+    "Each exemption has a max_count_impact cap so fixture scope cannot silently grow."
+  ],
+  "entries": [
+    {
+      "path": "tools/scripts/test_test_suite_quality_report.py",
+      "kind": "succeed",
+      "classification": "skip-as-pass",
+      "text_regex": "SUCCEED\\(\"skipped: helper not built\"\\)",
+      "owner": "test-quality",
+      "reason": "Fixture string used to verify weak-pattern scanner classification, not a runtime Catch2 assertion in the product suite.",
+      "max_count_impact": 1
+    },
+    {
+      "path": "tools/scripts/test_test_suite_quality_report.py",
+      "kind": "succeed",
+      "classification": "placeholder",
+      "text_regex": "SUCCEED\\(\"scaffold placeholder\"\\)",
+      "owner": "test-quality",
+      "reason": "Fixture string used to verify placeholder classification, not a scaffold test being counted as product confidence.",
+      "max_count_impact": 1
+    },
+    {
+      "path": "tools/scripts/test_test_suite_quality_report.py",
+      "kind": "skip",
+      "classification": "needs-review",
+      "text_regex": "SKIP\\(\"requires display\"\\)",
+      "owner": "test-quality",
+      "reason": "Fixture string used to verify SKIP() scanning; real SKIP accounting remains visible elsewhere in the report.",
+      "max_count_impact": 1
+    },
+    {
+      "path": "tools/scripts/test_test_suite_quality_report.py",
+      "kind": "require_true",
+      "classification": "unconditional-true",
+      "text_regex": "REQUIRE\\(true\\);",
+      "owner": "test-quality",
+      "reason": "Fixture strings used to test scanner and JSON contract behavior, not executable product assertions.",
+      "max_count_impact": 7
+    }
+  ]
+}

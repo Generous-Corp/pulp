@@ -189,6 +189,7 @@ if(PULP_BUILD_TESTS)
         "PULP_UPDATE_CHECK_DISABLED=1"
         "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-caches"
         "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=${CMAKE_BINARY_DIR}/test-tmp/fcc-empty-744")
+    set(_pulp_cli_shellout_labels "integration;requires-built-cli")
 
     add_test(NAME cli-help
         COMMAND pulp-cli help
@@ -517,4 +518,46 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-doctor-caches-json PROPERTIES
         ENVIRONMENT "${_pulp_cli_caches_ctest_env}"
         PASS_REGULAR_EXPRESSION "\"healthy\":")
+
+    # Keep this in sync with the CLI add_test calls above; this list is
+    # the single source of CTest tier/capability labels for the shellout lane.
+    set(_pulp_cli_shellout_tests
+        cli-help
+        cli-doctor
+        cli-doctor-versions
+        cli-doctor-ci
+        cli-doctor-validators
+        cli-doctor-host-quirks
+        cli-doctor-host-quirks-off
+        cli-doctor-host-quirks-validated
+        cli-status
+        cli-create-help
+        cli-run-help
+        cli-cache-status
+        cli-cache-help
+        cli-audio-help
+        cli-host-help
+        cli-host-missing-args
+        cli-host-missing-path-auv3-short-format
+        cli-host-missing-path-with-id
+        cli-host-missing-path-rescan-hint
+        cli-coverage-help
+        cli-coverage-help-flag
+        cli-coverage-unknown-subcommand
+        cli-coverage-diff-skip
+        cli-audio-excerpt-find-invalid-top
+        cli-audio-excerpt-find-invalid-min-score
+        cli-no-new-alias
+        cli-loop-help
+        cli-projects-help
+        cli-projects-list-empty
+        cli-doctor-versions-json
+        cli-doctor-caches-empty
+        cli-doctor-caches-json)
+    foreach(_pulp_host_format IN ITEMS clap vst3 au auv3 lv2)
+        list(APPEND _pulp_cli_shellout_tests
+            "cli-host-missing-path-${_pulp_host_format}")
+    endforeach()
+    set_tests_properties(${_pulp_cli_shellout_tests} PROPERTIES
+        LABELS "${_pulp_cli_shellout_labels}")
 endif()

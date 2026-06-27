@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "description": "Report-only triage for registered tests that are not yet owned by tools/test-quality/module-coverage.json. The expected_count values make unmapped-test drift visible without forcing ambiguous tests into the wrong product module.",
+  "entries": [
+    {
+      "command": "pulp-test-dsl-processor",
+      "expected_count": 19,
+      "owner": "dsl-tooling",
+      "reason": "Mixed FAUST UI metadata, generated DSP, and DslProcessor bridge coverage. Mapping it directly to audio/DSP would hide the DSL/tooling contract that needs explicit ownership.",
+      "next_action": "Decide whether DSL/native-language processor support becomes its own module or is split across audio/DSP, CLI/tooling, and view/import by test-name patterns."
+    },
+    {
+      "command": "cmake",
+      "expected_count": 15,
+      "owner": "build-tooling",
+      "reason": "CTest entries use the generic cmake command for mixed CMake, AU validator, install-layout, SDK guard, and Three.js capture checks. Command basename alone is not enough to infer product ownership.",
+      "next_action": "Add script/test-name aware mapping or explicit module labels for each cmake-backed test before assigning them to modules."
+    },
+    {
+      "command": "python3.13",
+      "expected_count": 11,
+      "owner": "tooling-import",
+      "reason": "Python wrapper tests cover token checks, refactor guards, MCP binary smoke, Figma export, import fidelity, and gallery diff helpers. The interpreter basename hides the real contract.",
+      "next_action": "Teach the report to inspect script paths or add explicit capability/module labels for Python-backed CTest entries."
+    },
+    {
+      "command": "bash",
+      "expected_count": 9,
+      "owner": "tooling-release",
+      "reason": "Shell-backed tests span install, signing, MCP launcher, Spectr capture, workspace freshness, retry logic, GPU requirement checks, and auval coverage. The shell command is not a useful module signal.",
+      "next_action": "Map shell-backed tests by script path/test name or replace generic shell commands with labelled CTest wrappers."
+    },
+    {
+      "command": "pulp-test-matrix",
+      "expected_count": 5,
+      "owner": "example-plugin-matrix",
+      "reason": "Matrix tests exercise generated example/plugin combinations and smoke-style product assembly, not one core runtime module.",
+      "next_action": "Decide whether example/plugin matrix coverage belongs in a product-assembly module, smoke tier, or format-adapter module."
+    },
+    {
+      "command": "pulp-test-spectr-regression",
+      "expected_count": 5,
+      "owner": "view-webcompat-import",
+      "reason": "Spectr regressions appear view/WebCompat-adjacent, but they need explicit import/runtime guarantee wording before being absorbed by the broad view/UI module.",
+      "next_action": "Review Spectr regression names and map each to a view/WebCompat guarantee or a separate import-regression capability."
+    },
+    {
+      "command": "<unknown>",
+      "expected_count": 2,
+      "owner": "build-tooling",
+      "reason": "These are NOT_BUILT placeholder CTest entries with no usable command. They should be handled as build/registration placeholders, not normal module coverage.",
+      "next_action": "Decide whether NOT_BUILT entries should stay registered, be labelled as disabled placeholders, or be excluded from module coverage accounting."
+    },
+    {
+      "command": "pulp-test-headless",
+      "expected_count": 2,
+      "owner": "format-view-runtime",
+      "reason": "The headless binary currently covers unrelated contracts: format-registry factory replacement and AutoUI fallback behavior. A command-level module assignment would be misleading.",
+      "next_action": "Split by test-name pattern or move one contract to a more specific binary before mapping."
+    },
+    {
+      "command": "pulp-test-waveform-recorder",
+      "expected_count": 2,
+      "owner": "view-audio-runtime",
+      "reason": "Waveform recorder tests bridge UI-visible recording behavior and audio/runtime data capture. The product guarantee needs explicit wording before module assignment.",
+      "next_action": "Define whether waveform recording is owned by view/UI, audio observability, or runtime capture, then map it accordingly."
+    },
+    {
+      "command": "node",
+      "expected_count": 1,
+      "owner": "webcompat-tooling",
+      "reason": "The Node wrapper hides the actual Three.js/JSC bundle smoke test contract from command-pattern matching.",
+      "next_action": "Map Node-backed CTest entries by script path or apply an explicit WebCompat/tooling module label."
+    },
+    {
+      "command": "pulp-view-bridge-demo",
+      "expected_count": 1,
+      "owner": "view-platform",
+      "reason": "This demo executable is a smoke/platform-view signal rather than a focused unit-test module contract.",
+      "next_action": "Classify demo executable coverage as smoke/platform/view or replace it with narrower tests that state the product guarantee."
+    }
+  ]
+}
