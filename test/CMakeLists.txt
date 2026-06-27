@@ -502,7 +502,7 @@ endif()
 if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
-catch_discover_tests(pulp-test-cli-shellout)
+catch_discover_tests(pulp-test-cli-shellout EXTRA_ARGS --allow-running-no-tests)
 
 if(TARGET pulp::inspect)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)

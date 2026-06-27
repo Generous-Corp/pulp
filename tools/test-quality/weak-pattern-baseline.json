@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-cli-import-design-skip-report.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-cli-shellout-skip-report.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 477,
+    "succeed": 415,
     "require_true": 16,
-    "skip": 334
+    "skip": 396
   },
   "classifications": {
-    "needs-review": 625,
+    "needs-review": 687,
     "placeholder": 4,
-    "skip-as-pass": 182,
+    "skip-as-pass": 120,
     "unconditional-true": 16
   },
   "notes": [
