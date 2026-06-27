@@ -90,9 +90,9 @@ TEST_CASE("TextShaper layout_with_lines materializes text", "[canvas][text_shape
     REQUIRE(layout.lines[0].text.find("Hello") != std::string::npos);
 }
 
-// pulp #1410 — `white-space: nowrap` consumers pass max_lines=1 to
-// force a single-line layout regardless of `max_width`. Otherwise the
-// wrapping path fires before #1407's ellipsis truncation can engage.
+// `white-space: nowrap` consumers pass max_lines=1 to force a single-line layout
+// regardless of `max_width`. Otherwise the wrapping path fires before ellipsis
+// truncation can engage.
 TEST_CASE("TextShaper layout with max_lines=1 forces single-line layout",
           "[canvas][text_shaper][issue-1410]") {
     TextShaper shaper;
@@ -120,12 +120,11 @@ TEST_CASE("TextShaper layout_with_lines max_lines=1 materializes the full string
     REQUIRE(nowrap.lines[0].text.find("delta") != std::string::npos);
 }
 
-// pulp #1410 — CSS `white-space: nowrap`
-// collapses hard line breaks into a single space, both in the
-// materialized line text and in the width sum. Otherwise an input
-// like "alpha\nbeta" would measure as alpha + beta with no inter-word
-// advance, mis-reporting the intrinsic width that #1407's ellipsis
-// truncation needs to detect overflow.
+// CSS `white-space: nowrap` collapses hard line breaks into a single space, both
+// in the materialized line text and in the width sum. Otherwise an input like
+// "alpha\nbeta" would measure as alpha + beta with no inter-word advance,
+// mis-reporting the intrinsic width that ellipsis truncation needs to detect
+// overflow.
 TEST_CASE("TextShaper layout_with_lines max_lines=1 collapses hard breaks to spaces",
           "[canvas][text_shaper][issue-1410]") {
     TextShaper shaper;
@@ -401,12 +400,9 @@ TEST_CASE("Parallelogram contains accepts reverse winding and rejects exterior p
     REQUIRE_FALSE(clockwise.contains(11.0f, 5.0f));
 }
 
-// ── pulp #1737 — CSS overflow-wrap / word-break BreakMode ───────────────
-// PR-1 of 2 in the css/overflowWrap roadmap slice. PR-1 ships the
-// TextShaper API for honoring break-word + anywhere break opportunities;
-// PR-2 wires Label::paint to call this through View::word_break_ and
-// flips the catalog. These tests anchor the contract for PR-2's
-// integration step.
+// ── CSS overflow-wrap / word-break BreakMode ─────────────────────────────
+// TextShaper honors break-word and anywhere break opportunities; Label paint
+// consumes the same BreakMode contract through View::word_break_.
 //
 // Approach: proportional in-segment split (`seg.width / utf8_codepoints`
 // per codepoint) at the codepoint boundary that fits before max_width.

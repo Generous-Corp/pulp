@@ -2247,8 +2247,8 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         if (it == native_gpu_bridge_state_->native_buffers.end())
             return choc::value::createBool(false);
 
-        // For now, store the raw base64 chunk reference.
-        // Full implementation would decode base64 and memcpy into the native buffer.
+        // This bridge entry currently validates the native buffer id and accepts
+        // the write call without copying payload bytes into the buffer.
         (void)offset;
         return choc::value::createBool(true);
     });

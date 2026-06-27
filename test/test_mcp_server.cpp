@@ -24,7 +24,7 @@
 //   - pulp_mcp.cpp  — protocol dispatcher (renames main → pulp_mcp_main_for_test)
 //   - mcp_compat.cpp — SDK-compat resolution; also re-exposes the file-local
 //                      parse_cmake_project_version / parse_pulp_toml_sdk_version
-//                      helpers this test exercises directly (Phase 6 B4 extraction)
+//                      helpers this test exercises directly
 //   - mcp_tools.cpp  — tool-call handlers invoked by the dispatcher
 // Without mcp_compat.cpp / mcp_tools.cpp the test fails to link
 // (undefined handle_build / resolve_project_sdk_version / …); without
@@ -574,8 +574,8 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
 // response through a `compact_for_wire` strip; this test pins the contract so a
 // future regression on the strip itself surfaces immediately.
 //
-// Pulp #2087 follow-up (B4 first cut): the bug shipped because there
-// was no protocol-shape test. The full B4 split is queued separately.
+// This protocol-shape regression shipped once without a focused test; keep the
+// newline-free wire contract pinned here.
 TEST_CASE("MCP wire output never contains embedded newlines",
           "[mcp][protocol][issue-2091]") {
     const std::vector<std::string> requests = {
@@ -656,11 +656,10 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(unknown, "Unknown tool: pulp_does_not_exist");
 }
 
-// pulp #1997 — gap 1: every advertised MCP tool is named in tools/list.
-// One missing entry = one silently broken tool, so the list-membership
-// check is the cheapest possible smoke test for each tool. Failing this
-// catches regressions where the JSON literal in tools_list_json() is
-// edited but a tool name is dropped.
+// Every advertised MCP tool must be named in tools/list. One missing entry is
+// one silently broken tool, so the list-membership check is the cheapest smoke
+// test for each tool. Failing this catches regressions where the JSON literal in
+// tools_list_json() is edited but a tool name is dropped.
 TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
           "[mcp][tools][issue-1997]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":40,"method":"tools/list"})JSON");
@@ -708,10 +707,9 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_kit_remove",
         "pulp_kit_pack",
         "pulp_kit_publish_check",
-        // pulp #2153: pulp_motion_* wrappers expose the Motion.*
-        // inspector protocol as first-class MCP tools so an LLM can
-        // discover motion observability from tools/list without
-        // resorting to pulp_inspect_evaluate or `nc localhost 9147`.
+        // Motion wrappers expose the Motion.* inspector protocol as first-class
+        // MCP tools so an LLM can discover motion observability from tools/list
+        // without resorting to pulp_inspect_evaluate or `nc localhost 9147`.
         "pulp_motion_disable_cost",
         "pulp_motion_enable_cost",
         "pulp_motion_list_traces",
@@ -1611,12 +1609,10 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
     }
 }
 
-// pulp #1997 — gap 1: each of the 11 previously-untested wrapper tools
-// (5 inspector + 4 view/screenshot/validate + 2 docs) reaches its
-// dispatch arm. Hermetic check: from a non-project tempdir, every tool
-// short-circuits with the project-root error BEFORE shelling out. This
-// proves the tool name routes to the right arm without depending on any
-// live binary, network, or running plugin process.
+// Each wrapper tool reaches its dispatch arm. Hermetic check: from a
+// non-project tempdir, every tool short-circuits with the project-root error
+// before shelling out. This proves the tool name routes to the right arm without
+// depending on any live binary, network, or running plugin process.
 //
 // The shellout-side semantics (no inspector found, etc.) are already
 // covered by test_cli_shellout.cpp. The MCP boundary is the
@@ -1948,11 +1944,11 @@ TEST_CASE("MCP audio probe JSON reports child runs that write no JSON",
 #endif
 }
 
-// pulp #1997 — gap 1: pulp_audio_model_list goes straight through to
-// the audio service (no project-root gate), so its routing test lives
-// here. The service returns a JSON tool payload regardless of model
-// install state — we only assert the envelope shape, not the inner
-// model registry contents (which depend on test-time fixture state).
+// pulp_audio_model_list goes straight through to the audio service with no
+// project-root gate, so its routing test lives here. The service returns a JSON
+// tool payload regardless of model install state; we only assert the envelope
+// shape, not the inner model registry contents, which depend on test-time
+// fixture state.
 TEST_CASE("MCP pulp_audio_model_list returns the structured tool-payload envelope",
           "[mcp][tools][issue-1997]") {
     auto response = handle_request(tool_call("60", "pulp_audio_model_list"));
@@ -2070,11 +2066,11 @@ TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
     REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
 }
 
-// pulp #1997 — gap 1: the 5 inspector tools each map to a distinct
-// inspector protocol method in pulp_mcp.cpp. Code-shape check: the
-// switch table must mention every method string. If a future refactor
-// drops one of these strings while leaving the dispatch arm intact,
-// the inspector tool would silently send the wrong inspector command.
+// Inspector tools each map to a distinct inspector protocol method in
+// pulp_mcp.cpp. Code-shape check: the switch table must mention every method
+// string. If a future refactor drops one of these strings while leaving the
+// dispatch arm intact, the inspector tool would silently send the wrong
+// inspector command.
 //
 // We assert against the source text rather than runtime behavior
 // because the actual inspector connection is over a TCP socket and
@@ -2107,7 +2103,7 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
     }
 }
 
-// ── pulp #2070: per-tool feature detection (min_sdk_version) ────────────────
+// ── Per-tool feature detection (min_sdk_version) ───────────────────────────
 //
 // pulp-mcp ships independently of any given Pulp project, so a user may
 // have a newer pulp-mcp on PATH while editing a project pinned to an
@@ -2129,9 +2125,8 @@ TEST_CASE("compare_semver orders pulp version triples", "[mcp][compat][issue-207
 
 TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
           "[mcp][compat][issue-2070]") {
-    // Default for any tool not in TOOL_MIN_SDK_TABLE: no floor. This
-    // preserves pre-#2070 behavior — only tools that explicitly opt in
-    // get gated.
+    // Default for any tool not in TOOL_MIN_SDK_TABLE: no floor. Only tools
+    // that explicitly opt in get gated.
     REQUIRE(min_sdk_for_tool("pulp_build") == "0.0.0");
     REQUIRE(min_sdk_for_tool("pulp_audio_excerpt_find") == "0.0.0");
     REQUIRE(min_sdk_for_tool("a_tool_that_does_not_exist") == "0.0.0");
@@ -2288,12 +2283,11 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
     REQUIRE(tools_list_wire.find("pulp_build") != std::string::npos);
 }
 
-// pulp #2153: every pulp_motion_* tool is recognised by the dispatcher
-// (no "Unknown tool" fall-through) AND routes through the same
-// project-root gate that pulp_inspect_* uses. From a tempdir all 10
-// tools must short-circuit with "Error: not in a Pulp project" before
-// shelling out to `pulp inspect`. This proves the dispatch arm exists
-// and the tool name is registered.
+// Every pulp_motion_* tool is recognised by the dispatcher with no "Unknown
+// tool" fall-through and routes through the same project-root gate that
+// pulp_inspect_* uses. From a tempdir all tools must short-circuit with
+// "Error: not in a Pulp project" before shelling out to `pulp inspect`. This
+// proves the dispatch arm exists and the tool name is registered.
 TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
           "[mcp][tools][motion][issue-2153]") {
     TempDir temp;
@@ -2347,13 +2341,11 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
     REQUIRE(scrub_to.find("Unknown tool") == std::string::npos);
 }
 
-// pulp #2153: code-shape check that the 10 pulp_motion_* MCP tools
-// map to the right Motion.* inspector protocol method names. Source
-// text assertion mirrors the existing inspector-mapping test — the
-// actual round-trip lands at MotionInspector::handle /
-// MotionScrubber::handle, which run inside the inspected process and
-// already have their own dedicated test coverage in
-// test_motion_inspector.cpp / test_motion_scrubber.cpp.
+// Code-shape check that the pulp_motion_* MCP tools map to the right Motion.*
+// inspector protocol method names. Source text assertion mirrors the existing
+// inspector-mapping test; the actual round-trip lands at
+// MotionInspector::handle / MotionScrubber::handle, which run inside the
+// inspected process and already have dedicated test coverage.
 TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
           "[mcp][tools][motion][issue-2153]") {
     auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
@@ -2383,11 +2375,10 @@ TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
     }
 }
 
-// pulp #2153: confirm every pulp_motion_* tool advertised in
-// tools/list also exposes a discoverable input schema with descriptive
-// titles/descriptions. An LLM consumer pulls these directly from
-// tools/list to decide which tool to call; a missing description is
-// invisible breakage.
+// Every pulp_motion_* tool advertised in tools/list must also expose a
+// discoverable input schema with descriptive titles/descriptions. An LLM
+// consumer pulls these directly from tools/list to decide which tool to call; a
+// missing description is invisible breakage.
 TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
           "[mcp][tools][motion][issue-2153]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":99,"method":"tools/list"})JSON");

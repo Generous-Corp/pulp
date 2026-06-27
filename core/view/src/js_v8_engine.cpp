@@ -154,8 +154,8 @@ public:
         context_.pumpMessageLoop();
     }
 
-    // First host-object slice is now wired through the shared engine-agnostic
-    // native-backed object descriptor seam.
+    // Host objects are wired through the shared engine-agnostic native-backed
+    // object descriptor seam.
     bool supports_host_objects() const override { return true; }
     bool supports_typed_arrays() const override { return true; }
     bool supports_promises() const override { return true; }

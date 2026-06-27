@@ -95,10 +95,8 @@ BlobData AssetManager::read_file_bytes(const std::string& path) {
 
 // ── Image Loading ───────────────────────────────────────────────────────────
 
-// Minimal PNG header check + raw pixel extraction
-// For production, this would use stb_image or platform decoders.
-// For now, we store the raw PNG bytes as the "image" and let the
-// rendering backend decode on use.
+// Minimal PNG header check. Image data keeps the encoded PNG bytes so the
+// rendering backend can decode on use.
 ImageData AssetManager::decode_png(const uint8_t* data, size_t size) {
     ImageData img;
     if (size < 8) return img;
@@ -256,10 +254,9 @@ FontData AssetManager::load_font_embedded(const std::string& name) {
 }
 
 void AssetManager::register_font_family(const std::string& family, const std::string& path_or_name) {
-    // pulp #1150 — historically this was dead plumbing: the family→path
-    // mapping was stored but never consulted by SkFontMgr, so plugin code
-    // calling `register_font_family("MyFamily", "/path/to.ttf")` got a
-    // silent no-op from the renderer's perspective.
+    // Historically this mapping was stored but never consulted by SkFontMgr,
+    // so plugin code calling `register_font_family("MyFamily", "/path/to.ttf")`
+    // got a silent no-op from the renderer's perspective.
     //
     // Now we forward to the canonical canvas-side registry, which
     // materialises the font via the platform SkFontMgr and makes it
@@ -299,8 +296,9 @@ FontData AssetManager::font_for_family(const std::string& family) const {
             font.family_name = family;
             return font;
         }
-        // Try as file path (need to bypass lock — const method)
-        // For now, return empty if not embedded
+        // Legacy lookup only materializes embedded registrations. File-path
+        // registrations resolve through the canvas-side registry at registration
+        // time, not through this path.
     }
 
     // Walk fallback chain

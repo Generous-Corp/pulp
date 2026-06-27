@@ -228,7 +228,7 @@ TEST_CASE("Fader renders track and thumb", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
-// ── pulp #3191: hybrid skinned fader/meter ──────────────────────────────────
+// ── Hybrid skinned fader/meter ───────────────────────────────────────────────
 
 TEST_CASE("Skinned Fader draws a value-positioned rounded-rect thumb",
           "[view][widget][issue-3191]") {
@@ -279,9 +279,9 @@ TEST_CASE("Skinned Fader thumb border emits a stroked rect",
 
 TEST_CASE("Skinned Fader strokes the empty track when a track border is set",
           "[view][widget][issue-3192]") {
-    // pulp #3192 — the captured empty track has a visible lighter outline. When
-    // the importer derives that edge colour, the fader strokes the track rect so
-    // the empty channel above the thumb doesn't read as a flat dark slab.
+    // The captured empty track has a visible lighter outline. When the importer
+    // derives that edge colour, the fader strokes the track rect so the empty
+    // channel above the thumb doesn't read as a flat dark slab.
     Fader fader;
     fader.set_bounds({0, 0, 96, 200});
     fader.set_skin_track_color(Color::rgba8(0x1f, 0x21, 0x29));
@@ -476,7 +476,7 @@ TEST_CASE("derive_fader_skin recovers track / fill / thumb colours",
     REQUIRE(skin.fill_color.b > skin.fill_color.g);
 }
 
-TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
+TEST_CASE("derive_*_skin recovers horizontal art widths",
           "[view][widget][issue-3191]") {
     // The captured art's visible element is a NARROW inset region, not the full
     // node box. The sampler must recover those horizontal extents from the
@@ -542,7 +542,7 @@ TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
         // Track is the thin 4-px column, NOT the 24-px thumb or 60-px box.
         REQUIRE(skin.track_width_px == Catch::Approx(4.0f).margin(1.0f));
         // Thumb slab centred at y≈44 within art rows [10,80) → ~0.51 up the
-        // bar (1 = top, 0 = bottom). pulp #3191 position fix.
+        // bar (1 = top, 0 = bottom).
         REQUIRE(skin.has_thumb_position);
         REQUIRE(skin.thumb_position == Catch::Approx(0.51f).margin(0.1f));
     }
@@ -550,7 +550,7 @@ TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
     SECTION("meter fill level from a partially-filled bar") {
         // 40-wide box; gradient bar fills the BOTTOM ~70% of the art (rows
         // 31..80 of art [10,80)) with dark/empty above — so fill_level ≈ 0.7,
-        // not the linear dB seed. pulp #3191 position fix.
+        // not the linear dB seed.
         const int W = 40, H = 100;
         std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);
         auto set = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b) {
@@ -771,7 +771,7 @@ TEST_CASE("derive_fader_skin fill colour is the dominant mid tone, not the most-
     REQUIRE(skin.fill_color.r < (101.0f / 255.0f));  // below the lightest too
 }
 
-TEST_CASE("Skinned Fader honours derived thin track width (pulp #3191)",
+TEST_CASE("Skinned Fader honours derived thin track width",
           "[view][widget][issue-3191]") {
     // A skinned fader whose widget box was sized to the captured thumb width
     // must draw its TRACK at the derived thin width (centred), not a fraction
@@ -912,7 +912,7 @@ TEST_CASE("Knob and Fader render loaded sprite strips",
     REQUIRE_THAT(fader_image.f[3], WithinAbs(4.0, 0.001));
 }
 
-// ── RangeSlider (pulp issue-966) ────────────────────────────────────────────
+// ── RangeSlider ─────────────────────────────────────────────────────────────
 
 TEST_CASE("RangeSlider default state matches HTML <input type=\"range\">",
           "[view][widget][issue-966]") {
@@ -1894,13 +1894,12 @@ TEST_CASE("View paint_all paints children", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 3);
 }
 
-// ── pulp #927 — Label honors setFontFamily / setFontWeight / setLetterSpacing ──
+// ── Label honors setFontFamily / setFontWeight / setLetterSpacing ───────────
 //
-// Before #927, Label::paint() called canvas.set_font("Inter", size) with no
-// weight / family / spacing — so JS calls into setFontWeight, setFontFamily,
-// and setLetterSpacing landed on Label members but were dropped on the floor
-// at render time. These tests assert the propagation through the
-// RecordingCanvas, which captures the rich state via DrawCommand::set_font_full.
+// Label::paint() must forward weight, family, and spacing to the canvas; JS calls
+// into setFontWeight, setFontFamily, and setLetterSpacing should not stop at the
+// Label members. These tests assert the propagation through RecordingCanvas,
+// which captures the rich state via DrawCommand::set_font_full.
 
 TEST_CASE("Label propagates font_family to canvas", "[view][widget][issue-927]") {
     Label label("Hello");
@@ -1990,7 +1989,7 @@ TEST_CASE("Label getters round-trip font_family", "[view][widget][issue-927]") {
     REQUIRE(label.font_family() == "Inter Display");
 }
 
-// ── pulp #1737 — #1791: clear font_features at end ────────────────────────
+// ── Clear font_features at end ─────────────────────────────────────────────
 // Label::paint sets font_features on the shared canvas when fontVariant
 // is non-empty (translates CSV → SkShaper Feature tags so HarfBuzz
 // honors the OpenType lookup). Because the canvas keeps font_features
@@ -2024,7 +2023,7 @@ struct FontFeatureSpyCanvas : pulp::canvas::RecordingCanvas {
 };
 }
 
-TEST_CASE("Label::paint always ends with clear_font_features (#1791)",
+TEST_CASE("Label::paint always ends with clear_font_features",
           "[view][widget][issue-1737][issue-1791]") {
     Label label("hello");
     label.set_bounds({0, 0, 120, 24});
@@ -2057,13 +2056,11 @@ TEST_CASE("Label::paint always ends with clear_font_features (#1791)",
     }
 }
 
-// ── pulp #1737 PR-2 — Label soft-wrap via TextShaper::layout_with_lines ──
-// PR-1 added the BreakMode plumbing inside TextShaper. PR-2 (this PR)
-// wires Label::paint multi-line path to consume TextShaper when
-// View::word_break_ opts into break-word or anywhere AND bounds().width
-// is bounded. Default (`normal` / empty) keeps the legacy `\n`-only
-// split — these tests pin both paths so a future change can't silently
-// flip semantics for either.
+// ── Label soft-wrap via TextShaper::layout_with_lines ─────────────────────
+// Label::paint consumes TextShaper when View::word_break_ opts into
+// break-word or anywhere AND bounds().width is bounded. Default
+// (`normal` / empty) keeps the legacy `\n`-only split — these tests pin
+// both paths so a future change can't silently flip semantics for either.
 
 TEST_CASE("Label soft-wrap: word_break='break-word' splits long unbroken word",
           "[view][widget][issue-1737]") {
@@ -2097,33 +2094,27 @@ TEST_CASE("Label soft-wrap: word_break='normal' on a single unbroken word keeps 
     RecordingCanvas canvas;
     label.paint(canvas);
 
-    // pulp #1924: the default (`normal`) path now also routes through
-    // TextShaper for bounded multi_line labels, but TextShaper's
-    // BreakMode::normal preserves the "whole-word overflow for a single
-    // unbroken word" CSS contract (see test_text_shaper.cpp
-    // "BreakMode::normal preserves legacy whole-word overflow"). So an
-    // input with no whitespace still emits exactly one fill_text — the
-    // observable output for this probe is unchanged from pre-#1924.
+    // The default (`normal`) path also routes through TextShaper for bounded
+    // multi_line labels, but TextShaper's BreakMode::normal preserves the
+    // "whole-word overflow for a single unbroken word" CSS contract. So an input
+    // with no whitespace still emits exactly one fill_text.
     auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(text_cmds.size() == 1);
     REQUIRE(text_cmds[0].text == "Antidisestablishmentarianism");
 }
 
-// ── pulp #1924 — Label soft-wraps under CSS default `white-space: normal` ──
-// Pre-#1924 the wrap gate required `word_break != normal` before the shaper
-// fired, so default Labels (no explicit word-break) overflowed their bounds
-// instead of soft-wrapping at whitespace. CSS `white-space: normal` is the
-// default and MUST soft-wrap at word boundaries. Hit on Spectr's dropdowns
-// (Settings / Preset Manager) — text overflowed the parent SChips /
-// PatternRow container.
+// ── Label soft-wraps under CSS default `white-space: normal` ───────────────
+// Default Labels with no explicit word-break must soft-wrap at whitespace under
+// CSS `white-space: normal`. This fences dropdown text against overflowing its
+// parent chips / row container.
 
-TEST_CASE("Label default word_break: text with whitespace soft-wraps at word boundaries (#1924)",
+TEST_CASE("Label default word_break: text with whitespace soft-wraps at word boundaries",
           "[view][widget][issue-1924]") {
     // Several short words separated by spaces. With bounds().width
     // narrower than the full string the shaper must break at whitespace,
     // emitting more than one line. NO explicit word_break is set — this
-    // is the CSS default (`white-space: normal`) path that was broken
-    // pre-#1924 (single overflowing line).
+    // is the CSS default (`white-space: normal`) path. The legacy fallback
+    // produced a single overflowing line.
     Label label("Settings Preset Manager Dropdown");
     label.set_bounds({0, 0, 60, 200});
     label.set_multi_line(true);
@@ -2134,8 +2125,8 @@ TEST_CASE("Label default word_break: text with whitespace soft-wraps at word bou
 
     auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
     // Expect >1 fill_text — soft-wrap at whitespace inside the bounded
-    // container. Pre-#1924 this would have been exactly 1 (the legacy
-    // `\n`-only path with no newlines in the input).
+    // container. The legacy `\n`-only path would have produced one line
+    // because the input has no explicit newline.
     REQUIRE(text_cmds.size() >= 2);
 
     // Reconstruction across all emitted lines must contain every
@@ -2186,8 +2177,8 @@ TEST_CASE("Label soft-wrap: line-clamp truncates wrapped lines + appends ellipsi
     // ≥3 shaped lines at width 60).
     REQUIRE(text_cmds.size() <= 2);
     if (text_cmds.size() == 2) {
-        // pulp #1552 — last visible line under line-clamp gets the
-        // U+2026 (UTF-8 0xE2 0x80 0xA6) ellipsis appended.
+        // The last visible line under line-clamp gets the U+2026
+        // (UTF-8 0xE2 0x80 0xA6) ellipsis appended.
         const std::string& last = text_cmds.back().text;
         REQUIRE(last.size() >= 3);
         REQUIRE((unsigned char)last[last.size()-3] == 0xE2);
@@ -2216,9 +2207,8 @@ TEST_CASE("Label soft-wrap: bounds().width == 0 falls through to legacy path (no
 
 namespace {
 
-// pulp #73 — minimal WindowHost that counts repaint() calls. Mirrors
-// the DummyWindowHost in test_view.cpp; duplicated here so the widget
-// suite stays self-contained.
+// Minimal WindowHost that counts repaint() calls. Mirrors the DummyWindowHost
+// in test_view.cpp; duplicated here so the widget suite stays self-contained.
 class CountingHost final : public WindowHost {
 public:
     void show() override {}
@@ -2233,15 +2223,12 @@ public:
 
 } // namespace
 
-// pulp #73 — programmatic value mutation MUST schedule a repaint.
-// User-input mutation (mouse drag) piggybacks on the host's per-event
-// setNeedsDisplay path; preset application / JS bridge setValue go
-// through THIS code path and would otherwise leave the painted state
-// stale until the next user input. The "preset-applied band-shape
-// outline missing (only renders during manual draw)" symptom in
-// Spectr was exactly this gap. These regression tests fence each
-// programmatic setter so a refactor that drops the request_repaint()
-// call surfaces in CI before the user sees a silent paint.
+// Programmatic value mutation must schedule a repaint. User-input mutation
+// piggybacks on the host's per-event setNeedsDisplay path; preset application
+// and JS bridge setValue go through this code path and would otherwise leave the
+// painted state stale until the next user input. These regression tests fence
+// each programmatic setter so a refactor that drops request_repaint() surfaces in
+// CI before the user sees a silent paint.
 TEST_CASE("Widget set_value programmatic mutation requests repaint [issue-73]",
           "[view][widget][issue-73]") {
     SECTION("Knob::set_value") {
@@ -2307,12 +2294,11 @@ TEST_CASE("Widget set_value programmatic mutation requests repaint [issue-73]",
     }
 }
 
-// PR #2013 — the no-change guard. WidgetBridge::sync_from_store
-// and restore_values(...) call set_value() / set_on() in tight loops
-// during sync/reload. Firing a host repaint when the value didn't change
-// burns wall-clock on large widget trees. These tests fence the guard
-// so a regression that drops the early-return surfaces as visible
-// frame-time spikes long before a human notices.
+// No-change guard: WidgetBridge::sync_from_store and restore_values(...) call
+// set_value() / set_on() in tight loops during sync/reload. Firing a host
+// repaint when the value didn't change burns wall-clock on large widget trees.
+// These tests fence the guard so a regression that drops the early-return
+// surfaces as visible frame-time spikes long before a human notices.
 TEST_CASE("Widget setters skip repaint when value is unchanged [issue-73]",
           "[view][widget][issue-73][issue-2013]") {
     SECTION("Knob::set_value") {

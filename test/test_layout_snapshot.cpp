@@ -227,7 +227,7 @@ TEST_CASE("dump_layout_tree emits deterministic semantic layout JSON",
 }
 
 TEST_CASE("layout-tree parity oracle compares live React render to handwritten native tree",
-          "[view][layout-snapshot][import-design][phase-2]") {
+          "[view][layout-snapshot][import-design][live-native-parity]") {
     auto live = build_live_react_fixture();
     REQUIRE(live->child_count() == 1);
     auto* live_panel = live->child_at(0);

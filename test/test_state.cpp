@@ -1449,7 +1449,7 @@ TEST_CASE("StateStore deserialize rejects trailing payload extensions",
     REQUIRE_THAT(target.get_value(1), WithinAbs(0.25, 0.001));
 }
 
-// ─── ListenerToken / thread routing (Slice 1) ───────────────────────────────
+// ─── ListenerToken / thread routing ──────────────────────────────────────────
 
 TEST_CASE("ListenerToken removes its listener on destruction",
           "[state][listener][token]") {
@@ -2094,7 +2094,7 @@ TEST_CASE("StateStore reset_all_to_defaults notifies in registration order",
     REQUIRE_THAT(values[1], WithinAbs(50.0, 0.001));
 }
 
-// ─── set_value_rt + pump_listeners (Slice 2) ────────────────────────────────
+// ─── set_value_rt + pump_listeners ───────────────────────────────────────────
 
 TEST_CASE("set_value_rt writes atomic value and defers Main listener",
           "[state][listener][rt]") {
@@ -2365,7 +2365,7 @@ TEST_CASE("RT-queued changes are skipped when the token was reset before pump",
     REQUIRE(fire_count == 0);
 }
 
-// ─── snapshot() block-local helper (Slice 5) ────────────────────────────────
+// ─── snapshot() block-local helper ───────────────────────────────────────────
 
 TEST_CASE("StateStore::snapshot returns values in the requested order",
           "[state][snapshot]") {

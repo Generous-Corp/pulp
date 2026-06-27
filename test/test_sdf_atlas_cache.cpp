@@ -127,7 +127,7 @@ TEST_CASE("SdfAtlasCache eviction keeps glyphs at the exact age threshold",
 }
 
 TEST_CASE("SdfAtlasCache ensure grows the atlas on demand",
-          "[canvas][cache][phase5]") {
+          "[canvas][cache][atlas-growth]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
     REQUIRE(cache.size() == 2);

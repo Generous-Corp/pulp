@@ -341,10 +341,9 @@ private:
         SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
         SDL_RenderClear(renderer_);
 
-        // For now, use RecordingCanvas to paint the view tree
-        // (real GPU rendering will use WebGPU canvas when Skia is integrated)
-        // The view tree layout and paint still work — just not visible on screen yet
-        // via SDL. The CoreGraphics path (WindowHost) handles visible rendering on macOS.
+        // The SDL host records the view-tree paint pass, but does not present
+        // those commands visibly through SDL. The CoreGraphics WindowHost path
+        // handles visible rendering on macOS.
         canvas::RecordingCanvas recording_canvas;
         root_.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
         root_.layout_children();
