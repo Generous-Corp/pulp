@@ -922,7 +922,9 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         bool has_upstream = false;
         for (const auto& c : cg.connections) {
             if (c.dest_node != id) continue;
-            if (c.feedback || c.midi || c.automation) continue;
+            // Only latency-aligned audio (plain feedforward or dense audio-rate)
+            // contributes to a node's input latency — single-sourced via classify.
+            if (!connection_affects_latency(c)) continue;
             auto src_it = cg.runtime.find(c.source_node);
             if (src_it == cg.runtime.end()) continue;
             max_upstream = std::max(max_upstream, src_it->second.output_latency);
@@ -958,7 +960,9 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
                 static_cast<size_t>(cg.max_block_size), 0.0f);
             continue;
         }
-        if (c.midi || c.automation) continue;
+        // Non-feedback edges that carry no latency-aligned audio (MIDI, sparse
+        // automation) get no delay line — single-sourced via classify().
+        if (!connection_affects_latency(c)) continue;
 
         int64_t want = dst_it->second.input_latency - src_it->second.output_latency;
         if (want < 0) want = 0;
@@ -1101,13 +1105,20 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             src_rt_it == cg->runtime.end() ? nullptr : &src_rt_it->second;
         auto& rt = rt_it->second;
         NodeRuntime::EdgeRef edge_ref{ci, source_runtime};
-        if (c.feedback) cg->feedback_edges.push_back(edge_ref);
-        if (c.midi && !c.feedback) {
+        // Lane bucketing is single-sourced through classify() — the same helper
+        // the executor-routing gather uses — so this reference walk and the
+        // routed path can never disagree about which lane a Connection carries.
+        // sidechain folds into Audio; feedback is orthogonal; the sparse-vs-dense
+        // automation split keys off the dense audio_rate flag (the two automation
+        // forms are mutually exclusive by construction).
+        const ConnectionClass cls = classify(c);
+        if (cls.feedback) cg->feedback_edges.push_back(edge_ref);
+        if (cls.kind == graph::GraphRuntimeConnectionKind::Event && !cls.feedback) {
             rt.inbound_midi_edges.push_back(edge_ref);
-        } else if (!c.midi && !c.automation && !c.audio_rate_modulation) {
+        } else if (cls.kind == graph::GraphRuntimeConnectionKind::Audio) {
             rt.inbound_audio_edges.push_back(edge_ref);
         }
-        if (c.automation) {
+        if (cls.kind == graph::GraphRuntimeConnectionKind::Automation && !cls.audio_rate) {
             rt.sparse_automation_edges.push_back(edge_ref);
             auto& ids = rt.sparse_automation_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
@@ -1115,7 +1126,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 rt.sparse_automation_accum.resize(ids.size());
             }
         }
-        if (c.audio_rate_modulation) {
+        if (cls.kind == graph::GraphRuntimeConnectionKind::Automation && cls.audio_rate) {
             rt.audio_rate_modulation_edges.push_back(edge_ref);
             auto& ids = rt.audio_rate_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
@@ -1217,7 +1228,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             // allocate none).
             bool plan_has_automation = false;
             for (const auto& conn : plan.connections) {
-                if (conn.is_automation) { plan_has_automation = true; break; }
+                if (graph::is_automation_conn(conn)) { plan_has_automation = true; break; }
             }
             if (cg->routing_valid && plan_has_automation && max_block_size > 0) {
                 cg->routing_valid = cg->routing_automation.reset(

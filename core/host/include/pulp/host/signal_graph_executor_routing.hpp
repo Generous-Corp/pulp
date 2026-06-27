@@ -19,6 +19,33 @@ class SignalGraph;
 struct GraphNode;
 struct Connection;
 
+// The single, authoritative classification of a host Connection into a runtime
+// lane. EVERY surface that needs to know whether a Connection is audio / MIDI /
+// automation — the executor-routing gather, the legacy reference-walk edge
+// bucketer, and the latency/PDC passes — routes through classify() so the three
+// can never drift apart. `kind` is the lane discriminator carried onto the
+// runtime connection structs; `feedback` is the orthogonal back-edge flag;
+// `audio_rate` distinguishes a dense audio-rate modulation edge from a sparse
+// two-point automation edge (both have kind == Automation). A sidechain edge is
+// deliberately NOT special-cased: it arrives as a plain-audio Connection with
+// the destination's sidechain input port already resolved, so it classifies as
+// Audio.
+struct ConnectionClass {
+    graph::GraphRuntimeConnectionKind kind = graph::GraphRuntimeConnectionKind::Audio;
+    bool feedback = false;
+    bool audio_rate = false;
+};
+
+ConnectionClass classify(const Connection& c);
+
+// True iff this connection carries latency-aligned audio that participates in
+// plug-in delay compensation: a plain feedforward audio edge or a dense
+// audio-rate modulation edge (its source is sampled per block-position and
+// time-aligned like audio). Feedback back-edges, MIDI edges, and sparse two-
+// point automation edges carry no latency-aligned audio. Single-sourced from
+// classify() so the latency/PDC passes can't drift from the lane bucketing.
+bool connection_affects_latency(const Connection& c);
+
 // Fallback scratch a routed Plugin-node binding hands to PluginSlot::process
 // when the routed call does not need per-node MIDI or automation buffers.
 // MIDI/automation graphs use the executor-owned per-node scratch exposed through

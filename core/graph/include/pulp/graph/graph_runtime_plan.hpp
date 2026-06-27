@@ -55,8 +55,8 @@ struct GraphRuntimeNodeSpec {
 // (sample 0 + sample N-1). All values the realtime automation gather needs —
 // the source→param range map, the per-source slew time, the mix mode, and the
 // resolved parameter bounds — are carried here so the gather never calls into
-// the plugin on the audio thread. Meaningful only when `GraphRuntimeConnection*
-// ::automation` is true.
+// the plugin on the audio thread. Meaningful only when the owning connection's
+// `kind` is GraphRuntimeConnectionKind::Automation.
 struct GraphRuntimeAutomationSpec {
     std::uint32_t param_id = 0;
     float range_lo = 0.0f;        // plain-parameter domain the source maps into
@@ -68,17 +68,31 @@ struct GraphRuntimeAutomationSpec {
     float bounds_hi = 1.0f;
 };
 
+// The lane a connection carries, as a single discriminator. A connection is
+// exactly one of: plain Audio (feedforward or sidechain — sidechain is plain
+// audio into a higher destination port), an Event edge (MIDI), or Automation
+// (the source audio drives a destination parameter; `automation` carries the
+// mapping, and `automation.audio_rate` further selects dense vs. sparse). This
+// replaces the older independent `event`/`is_automation` bools so the three
+// lanes can never be set inconsistently. `feedback` stays ORTHOGONAL: a
+// feedback edge is a plain-audio back-edge (kind == Audio) that reads the
+// previous block, so feedback and the lane are tracked separately.
+enum class GraphRuntimeConnectionKind : std::uint8_t {
+    Audio,
+    Event,
+    Automation,
+};
+
 struct GraphRuntimeConnectionSpec {
     NodeId source_node = 0;
     PortIndex source_port = 0;
     NodeId dest_node = 0;
     PortIndex dest_port = 0;
     bool feedback = false;
-    bool event = false;
-    // True if this connection drives a parameter rather than an audio/event
-    // port; `automation` then carries the mapping. Automation connections still
-    // order the graph (source before dest) but carry no audio/MIDI payload.
-    bool is_automation = false;
+    // The connection lane. Automation connections still order the graph (source
+    // before dest) but carry no audio/MIDI payload; `automation` carries the
+    // parameter mapping when kind == Automation.
+    GraphRuntimeConnectionKind kind = GraphRuntimeConnectionKind::Audio;
     GraphRuntimeAutomationSpec automation;
 };
 
@@ -105,11 +119,28 @@ struct GraphRuntimeConnectionPlan {
     std::uint32_t dest_index = 0;
     PortIndex dest_port = 0;
     bool feedback = false;
-    bool event = false;
-    // Carried from GraphRuntimeConnectionSpec; see those fields.
-    bool is_automation = false;
+    // Carried from GraphRuntimeConnectionSpec; see that field.
+    GraphRuntimeConnectionKind kind = GraphRuntimeConnectionKind::Audio;
     GraphRuntimeAutomationSpec automation;
 };
+
+// Lane accessors shared by GraphRuntimeConnectionSpec and
+// GraphRuntimeConnectionPlan (both expose `kind`). They read ONLY the lane
+// discriminator, never `feedback` — a feedback edge is a plain-audio back-edge
+// (carries_audio() is true for it). Templated so a single definition serves
+// both the spec and the plan connection types.
+template <class Connection>
+constexpr bool is_event(const Connection& c) noexcept {
+    return c.kind == GraphRuntimeConnectionKind::Event;
+}
+template <class Connection>
+constexpr bool is_automation_conn(const Connection& c) noexcept {
+    return c.kind == GraphRuntimeConnectionKind::Automation;
+}
+template <class Connection>
+constexpr bool carries_audio(const Connection& c) noexcept {
+    return c.kind == GraphRuntimeConnectionKind::Audio;
+}
 
 struct GraphRuntimePlan {
     std::vector<GraphRuntimeNodePlan> nodes;
