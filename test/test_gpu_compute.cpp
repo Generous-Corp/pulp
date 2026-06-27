@@ -283,6 +283,30 @@ TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     REQUIRE_FALSE(compute->fft_inverse(in.data(), out.data(), 100));
 }
 
+// ── Capability Report Tests ─────────────────────────────────────────────────
+
+TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute) return;
+
+    // Before initialization the device is unavailable.
+    REQUIRE_FALSE(compute->capabilities().available);
+
+    if (!compute->initialize_standalone()) return;
+
+    const auto caps = compute->capabilities();
+    REQUIRE(caps.available);
+    REQUIRE_FALSE(caps.backend.empty());
+    REQUIRE(caps.max_storage_buffer_binding_size > 0);
+    REQUIRE(caps.max_buffer_size > 0);
+    // Our compute kernels dispatch at workgroup_size(256).
+    REQUIRE(caps.max_compute_invocations_per_workgroup >= 256u);
+    REQUIRE(caps.max_compute_workgroup_size_x >= 256u);
+    // Derived FFT cap is a power of two and covers the sizes the FFT tests use.
+    REQUIRE(caps.max_fft_size >= 1024u);
+    REQUIRE((caps.max_fft_size & (caps.max_fft_size - 1u)) == 0u);
+}
+
 // ── Device Sharing Tests ────────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]") {

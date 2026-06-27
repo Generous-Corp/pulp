@@ -133,6 +133,25 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
 // ── Timing helper ───────────────────────────────────────────────────────────
 
+// Largest power-of-two complex FFT the GPU path accepts: keeps
+// 2*N*sizeof(float) well within uint32_t and typical WebGPU storage-buffer
+// limits (32 MiB per complex buffer). Shared by fft_run() and capabilities().
+static constexpr uint32_t kMaxFftN = 1u << 22;
+
+static const char* backend_name(wgpu::BackendType type) {
+    switch (type) {
+        case wgpu::BackendType::Metal:    return "Metal";
+        case wgpu::BackendType::D3D12:    return "D3D12";
+        case wgpu::BackendType::D3D11:    return "D3D11";
+        case wgpu::BackendType::Vulkan:   return "Vulkan";
+        case wgpu::BackendType::OpenGL:   return "OpenGL";
+        case wgpu::BackendType::OpenGLES: return "OpenGLES";
+        case wgpu::BackendType::WebGPU:   return "WebGPU";
+        case wgpu::BackendType::Null:     return "Null";
+        default:                          return "Unknown";
+    }
+}
+
 static double now_us() {
     using Clock = std::chrono::high_resolution_clock;
     return static_cast<double>(
@@ -382,6 +401,48 @@ public:
 
     bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) override {
         return fft_run(complex_in, complex_out, n, /*sign=*/+1.0f, /*normalize=*/true);
+    }
+
+    // ── Capabilities ─────────────────────────────────────────────────────
+
+    CapabilityReport capabilities() const override {
+        CapabilityReport r{};
+        r.available = initialized_ && (device_ != nullptr);
+        if (!r.available) return r;
+
+        r.timestamp_query = device_.HasFeature(wgpu::FeatureName::TimestampQuery);
+        r.shader_f16 = device_.HasFeature(wgpu::FeatureName::ShaderF16);
+
+        wgpu::Limits limits{};
+        if (device_.GetLimits(&limits) == wgpu::Status::Success) {
+            r.max_storage_buffer_binding_size = limits.maxStorageBufferBindingSize;
+            r.max_buffer_size = limits.maxBufferSize;
+            r.max_compute_invocations_per_workgroup = limits.maxComputeInvocationsPerWorkgroup;
+            r.max_compute_workgroup_size_x = limits.maxComputeWorkgroupSizeX;
+            r.max_compute_workgroup_storage_size = limits.maxComputeWorkgroupStorageSize;
+        }
+
+        if (adapter_) {
+            wgpu::AdapterInfo info{};
+            adapter_.GetInfo(&info);
+            r.backend = backend_name(info.backendType);
+            r.vendor = std::string(info.vendor.data, info.vendor.length);
+        } else {
+            // Shared-device mode borrows the surface's device; we don't hold
+            // the adapter here.
+            r.backend = "shared";
+        }
+
+        // Largest power-of-two complex FFT the storage-buffer limit admits,
+        // capped at the implementation maximum.
+        if (r.max_storage_buffer_binding_size > 0) {
+            const uint64_t max_complex =
+                r.max_storage_buffer_binding_size / (2u * sizeof(float));
+            for (uint32_t nfft = 1u; nfft <= kMaxFftN && nfft <= max_complex; nfft <<= 1) {
+                r.max_fft_size = nfft;
+            }
+        }
+        return r;
     }
 
     // ── Device sharing verification ─────────────────────────────────────
@@ -817,11 +878,8 @@ private:
     // applies the 1/N inverse scale on readback. Not real-time safe.
     bool fft_run(const float* complex_in, float* complex_out, uint32_t n,
                  float sign, bool normalize) {
-        // Upper bound keeps 2*n*sizeof(float) well within uint32_t and within
-        // typical WebGPU storage-buffer limits (here: 32 MiB per complex
-        // buffer). Larger transforms are rejected rather than silently
-        // overflowing the byte count and under-allocating GPU buffers.
-        static constexpr uint32_t kMaxFftN = 1u << 22;
+        // kMaxFftN (file scope) rejects transforms that would overflow the
+        // byte count and under-allocate GPU buffers.
         if (!initialized_ || !complex_in || !complex_out) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
 

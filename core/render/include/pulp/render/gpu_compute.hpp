@@ -85,6 +85,31 @@ public:
     /// either pointer is null, or dispatch fails.
     virtual bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) = 0;
 
+    // ── Capabilities ─────────────────────────────────────────────────────
+
+    /// Runtime GPU capability/limit report for the compute device. Queryable
+    /// after a successful initialize_*; `available` is false otherwise. Treat
+    /// optional features (timestamp_query, shader_f16) and limits as runtime
+    /// capabilities — select shader variants / sizes from these, never assume.
+    struct CapabilityReport {
+        bool available = false;
+        std::string backend;        // "Metal" / "D3D12" / "Vulkan" / "shared" / ...
+        std::string vendor;
+        bool timestamp_query = false;   // compute-pass GPU timing available
+        bool shader_f16 = false;        // half-precision in WGSL
+        uint64_t max_storage_buffer_binding_size = 0;
+        uint64_t max_buffer_size = 0;
+        uint32_t max_compute_invocations_per_workgroup = 0;
+        uint32_t max_compute_workgroup_size_x = 0;
+        uint32_t max_compute_workgroup_storage_size = 0;
+        // Largest power-of-two complex FFT this device's storage-buffer limit
+        // admits, capped at the implementation maximum (0 if unavailable).
+        uint32_t max_fft_size = 0;
+    };
+
+    /// Query the compute device's backend, optional features, and limits.
+    virtual CapabilityReport capabilities() const = 0;
+
     // ── Device sharing verification ──────────────────────────────────────
 
     struct DeviceSharingReport {
