@@ -568,17 +568,17 @@ platform_maturity:
   file_dialogs:
     status: partial
     notes: >-
-      macOS native (NSOpenPanel/NSSavePanel) — `usable`. Linux ships a
-      built-in xdg-desktop-portal FileChooser backend (open/open-many/
-      save/choose-folder) over a runtime-dlopen libdbus client; a host
-      opts in via FileDialog::install_native_backend() (the standalone
-      app does this automatically), and it honest-fails when libdbus or
-      the portal service is absent. File-type filters and a preselected
-      folder are a follow-up (the portal marshals those as nested
-      variants the minimal client does not yet emit). No native provider
-      ships yet for Windows/Android; callers there register their own
-      backend or receive explicit no-selection. has_backend() stays
-      honest on every platform.
+      macOS native (NSOpenPanel/NSSavePanel) — `usable`. Windows ships
+      an opt-in built-in IFileDialog backend (open/open-many/save/
+      choose-folder); Linux ships an opt-in built-in xdg-desktop-portal
+      FileChooser backend over a runtime-dlopen libdbus client. Hosts
+      opt in with FileDialog::install_native_backend() (the standalone
+      app does this automatically), and Linux honest-fails when libdbus
+      or the portal service is absent. File-type filters and a
+      preselected folder are a follow-up for the Windows/Linux built-in
+      backends. No native provider ships yet for iOS/Android; callers
+      there register their own backend or receive explicit no-selection.
+      has_backend() stays honest on every platform.
   native_child_view_embedding_window_host:
     status: partial
     notes: >-
