@@ -18,6 +18,49 @@ Keep intermediates GPU-resident, read back once, and amortize the round-trip by
 batching. Small/low-latency DSP stays on the CPU; the GPU does the coarse, heavy,
 batched, latency-tolerant work.
 
+## What belongs on the GPU (and what doesn't)
+
+The GPU only pays off for work that is **heavy, parallel, and latency-tolerant** —
+enough arithmetic per block to dwarf the CPU↔GPU round-trip. Match the workload:
+
+**Good GPU candidates** (big parallel math, or batched across instances/voices):
+- FFTs / iFFTs
+- Partitioned & long-IR convolution (and many IRs at once)
+- Spectral EQ, spectral freeze, spectral morphing
+- Large filter banks / beamforming
+- ML model inference (NAM / CLAP-style neural models)
+- Waveform & spectrogram generation; large additive / sinewave banks
+
+**Keep on the CPU** (too small to beat the round-trip; latency-sensitive):
+- Simple gain, biquad filters, compressors
+- Small delays, envelope followers, MIDI processing
+
+Rule of thumb: if it's a tight per-sample scalar op, leave it on the CPU. If it's
+a block-wide transform or a bank you can batch, the GPU can win — and the
+further you push size (long IRs, many voices, big FFTs), the bigger the win.
+SuperConvolver's GPU mode targets the long-IR / many-IR regime for this reason;
+at short IRs the CPU path is selected because it's faster there.
+
+## Which GPUs / platforms
+
+GPU compute runs through the WebGPU layer (Dawn / wgpu-native), so it follows
+WebGPU's backends. Every path has a CPU fallback, so a plugin still works with no
+compatible GPU — it just runs the `signal::*` reference path.
+
+| Platform | Backend | GPUs |
+|---|---|---|
+| macOS — **Apple Silicon (M1–M5)** | Metal | integrated Apple GPU ✅ *(validated)* |
+| macOS — Intel | Metal | Intel / AMD GPUs |
+| Windows 10+ | D3D12 (or Vulkan) | NVIDIA, AMD, Intel |
+| Linux | Vulkan | NVIDIA, AMD, Intel |
+| no compatible GPU | — | CPU fallback (correct, not accelerated) |
+
+`capabilities().backend` reports the live backend at runtime ("Metal" / "D3D12" /
+"Vulkan"), plus limits and optional features (timestamp-query, f16). Audio paths
+are currently **validated on Apple Silicon / Metal**; the other backends are
+supported by the WebGPU layer but not yet audio-validated — treat them as
+experimental until benchmarked, and rely on the CPU fallback meanwhile.
+
 ## Layer 1 — compute primitives (`pulp::render::GpuCompute`)
 
 Create with `GpuCompute::create()` then `initialize_standalone()` (own device,
