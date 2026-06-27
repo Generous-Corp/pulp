@@ -1,4 +1,4 @@
-// SvgRect + SvgLine widget tests — pulp #1416.
+// SvgRect + SvgLine widget tests.
 //
 // Coverage targets:
 //   * Defaults match SVG semantics (rect: fill=black, no stroke;
