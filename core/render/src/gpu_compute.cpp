@@ -296,6 +296,33 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kDenseTanhShader = R"wgsl(
+// GPU dense layer with tanh activation: one thread per output neuron.
+// out[j] = tanh(Σ_i W[j*in_dim + i]·x[i] + b[j]). W row-major [out_dim×in_dim].
+
+struct DenseParams { in_dim : u32, out_dim : u32, pad0 : u32, pad1 : u32 };
+
+@group(0) @binding(0) var<storage, read>       x   : array<f32>;
+@group(0) @binding(1) var<storage, read>       w   : array<f32>;
+@group(0) @binding(2) var<storage, read>       b   : array<f32>;
+@group(0) @binding(3) var<storage, read_write> out : array<f32>;
+@group(0) @binding(4) var<uniform>             p   : DenseParams;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let j = gid.x;
+    if (j >= p.out_dim) {
+        return;
+    }
+    var acc = b[j];
+    let base = j * p.in_dim;
+    for (var i = 0u; i < p.in_dim; i = i + 1u) {
+        acc = acc + w[base + i] * x[i];
+    }
+    out[j] = tanh(acc);
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 // Largest power-of-two complex FFT the GPU path accepts: keeps
@@ -343,6 +370,7 @@ public:
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
         granular_pipeline_ = nullptr;
+        dense_tanh_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -928,6 +956,41 @@ public:
         return read_back(rb, out, obytes);
     }
 
+    // ── Neural inference ────────────────────────────────────────────────────
+
+    bool dense_tanh(const float* input, const float* weights, const float* bias,
+                    float* output, uint32_t in_dim, uint32_t out_dim) override {
+        if (!initialized_ || !input || !weights || !bias || !output) return false;
+        if (in_dim == 0u || out_dim == 0u) return false;
+        const uint64_t we = static_cast<uint64_t>(in_dim) * out_dim;
+        if (we > (1u << 24) || in_dim > (1u << 20) || out_dim > (1u << 20)) return false;
+
+        const uint32_t xb = in_dim * 4u, wb = static_cast<uint32_t>(we) * 4u, ob = out_dim * 4u;
+        auto x_buf = create_storage_buffer(xb, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto w_buf = create_storage_buffer(wb, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto b_buf = create_storage_buffer(ob, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto o_buf = create_storage_buffer(ob, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto rb = create_readback_buffer(ob);
+        wgpu::BufferDescriptor ud{};
+        ud.size = 16;
+        ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        auto u_buf = device_.CreateBuffer(&ud);
+        if (!x_buf || !w_buf || !b_buf || !o_buf || !rb || !u_buf) return false;
+
+        struct DenseParams { uint32_t in_dim; uint32_t out_dim; uint32_t p0; uint32_t p1; };
+        DenseParams dp{in_dim, out_dim, 0u, 0u};
+        queue_.WriteBuffer(x_buf, 0, input, xb);
+        queue_.WriteBuffer(w_buf, 0, weights, wb);
+        queue_.WriteBuffer(b_buf, 0, bias, ob);
+        queue_.WriteBuffer(u_buf, 0, &dp, sizeof(dp));
+
+        auto bg = create_bind_group(dense_tanh_pipeline_, {x_buf, w_buf, b_buf, o_buf, u_buf});
+        if (!bg) return false;
+        dispatch(dense_tanh_pipeline_, bg, (out_dim + 63u) / 64u);
+        copy_buffer(o_buf, rb, ob);
+        return read_back(rb, output, ob);
+    }
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     CapabilityReport capabilities() const override {
@@ -1274,6 +1337,7 @@ private:
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
     wgpu::ComputePipeline granular_pipeline_;
+    wgpu::ComputePipeline dense_tanh_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -1372,6 +1436,9 @@ private:
 
         granular_pipeline_ = create_pipeline("granular_cloud", kGranularShader);
         if (!granular_pipeline_) return false;
+
+        dense_tanh_pipeline_ = create_pipeline("dense_tanh", kDenseTanhShader);
+        if (!dense_tanh_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute

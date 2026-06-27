@@ -163,6 +163,17 @@ public:
                                 uint32_t num_grains, uint32_t source_len,
                                 uint32_t num_samples) = 0;
 
+    // ── Neural inference ────────────────────────────────────────────────────
+
+    /// GPU dense (fully-connected) layer with tanh activation:
+    /// out[j] = tanh(Σ_i W[j][i]·x[i] + b[j]), one thread per output neuron.
+    /// W is row-major [out_dim × in_dim], b is [out_dim]. The core building
+    /// block for GPU neural inference — NAM dense / output layers and LSTM gate
+    /// evaluations are dense layers (the WaveNet path reuses the conv
+    /// primitives). Not real-time-safe. Returns false on invalid args.
+    virtual bool dense_tanh(const float* input, const float* weights, const float* bias,
+                            float* output, uint32_t in_dim, uint32_t out_dim) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

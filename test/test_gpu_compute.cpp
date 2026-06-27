@@ -651,6 +651,29 @@ TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][com
     REQUIRE_FALSE(compute->granular_cloud(grains.data(), source.data(), out.data(), 0, SRCLEN, N));
 }
 
+TEST_CASE("GpuCompute dense_tanh matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t IN = 5, OUT = 4;
+    std::vector<float> x(IN), w(OUT * IN), b(OUT), out(OUT, 0.0f), ref(OUT, 0.0f);
+    for (uint32_t i = 0; i < IN; ++i) x[i] = std::sin(0.4f * i) - 0.2f;
+    for (uint32_t i = 0; i < OUT * IN; ++i) w[i] = std::cos(0.15f * i) * 0.5f;
+    for (uint32_t j = 0; j < OUT; ++j) b[j] = 0.1f * j - 0.15f;
+
+    REQUIRE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), IN, OUT));
+
+    for (uint32_t j = 0; j < OUT; ++j) {
+        double acc = b[j];
+        for (uint32_t i = 0; i < IN; ++i) acc += static_cast<double>(w[j * IN + i]) * x[i];
+        ref[j] = std::tanh(static_cast<float>(acc));
+    }
+    for (uint32_t j = 0; j < OUT; ++j)
+        REQUIRE(std::abs(out[j] - ref[j]) < 1e-4f);
+
+    REQUIRE_FALSE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), 0, OUT));
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
