@@ -1,4 +1,4 @@
-# GPU Audio SDK (developer guide)
+# GPU audio runtime (developer guide)
 
 > Status: experimental, default-OFF. Built on `develop/gpu-audio-runtime`; not in
 > a public release until human-reviewed. Requires a Skia/Dawn GPU build
@@ -20,8 +20,8 @@ batched, latency-tolerant work.
 
 ## Honest tradeoffs (read this first)
 
-GPU-audio pitches often skip the hard parts. We won't — three things you should
-know before reaching for it:
+GPU audio is easy to oversell, so here are the hard parts up front — three things
+to know before reaching for it:
 
 1. **The round-trip tax is real and we don't hide it.** Every block crosses
    CPU→GPU and back. That transfer + the GPU's own dispatch/readback latency is
@@ -39,9 +39,9 @@ know before reaching for it:
    list below). We'd rather tell you that than sell you a GPU mode that
    regresses your plugin.
 
-3. **Compatibility is opt-out-safe: there is always a CPU fallback.** The most
-   common GPU-audio failure mode in the wild is "the GPU demo didn't even run on
-   my card." Pulp's contract is the opposite: **no path hard-requires a GPU.**
+3. **Compatibility is opt-out-safe: there is always a CPU fallback.** A common
+   disappointment with GPU audio is a plugin that won't even run on a given card.
+   Pulp's contract avoids that: **no path hard-requires a GPU.**
    If the GPU is absent, unsupported, or fails to initialize, the node logs it
    and runs its `signal::*` CPU reference — the plugin still loads and produces
    correct audio, just unaccelerated. On a *miss* mid-stream (the worker didn't
@@ -63,21 +63,20 @@ enough arithmetic per block to dwarf the CPU↔GPU round-trip. Match the workloa
 
 **The value case — two ways GPU audio is genuinely worth it:**
 1. **Things that are otherwise impossible / infeasible on CPU.** A single plugin
-   whose compute a CPU just can't sustain in real time: large-scale physical
+   whose compute a CPU can't sustain in real time: large-scale physical
    modeling, thousands of simultaneous convolutions/partials, room/spatial
    modeling that touches enormous sample counts, real-time neural inference. The
-   interesting question (per Anukari's Evan Mezeske) is "what plugins *couldn't
-   exist* without this?" — that's where the GPU earns its keep.
+   most compelling case is a plugin that simply *couldn't exist* on a CPU at all
+   — that's where the GPU earns its keep.
 2. **Headroom — running more heavy work at once.** Offloading demanding,
    batchable DSP to the otherwise-idle GPU so the session can carry more heavy
    instances/voices than the CPU alone would allow.
 
-**When it is NOT worth it (we'll say it plainly):** if your project is "a soft
-synth and a delay," or your plugin is light DSP, leave the GPU out — even GPU-
-audio vendors concede there's "not much call" for it there, and the round-trip
-will only make it slower. And because the GPU path is **latency-tolerant by
-design** (it adds fixed plugin-delay-compensated latency), it suits mixing,
-sound-design and rendering — *not* zero-latency live tracking/monitoring.
+**When it is NOT worth it (we'll say it plainly):** if your plugin is light DSP —
+a basic synth, an EQ, a delay — leave the GPU out; there's little to gain and the
+round-trip will only make it slower. And because the GPU path is **latency-
+tolerant by design** (it adds fixed plugin-delay-compensated latency), it suits
+mixing, sound-design and rendering — *not* zero-latency live tracking/monitoring.
 
 The crossover, concretely: GPU wins once per-block compute ≫ the round-trip, and
 the win grows as you scale size (longer IRs, more voices, bigger FFTs/banks).
