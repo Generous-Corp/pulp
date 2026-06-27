@@ -87,8 +87,7 @@ const SampleEvent* first_of(const std::vector<SampleEvent>& b,
 }
 
 /// Number of data + framing events excluding the one-shot TraceStarted
-/// emission. Earlier tests assumed buffer.size() never
-/// counted a registration event.
+/// emission.
 std::size_t data_event_count(const std::vector<SampleEvent>& b) {
     std::size_t n = 0;
     for (const auto& e : b) {

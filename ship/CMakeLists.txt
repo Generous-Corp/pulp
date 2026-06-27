@@ -14,7 +14,7 @@ target_sources(pulp-ship PRIVATE
 )
 
 target_link_libraries(pulp-ship PUBLIC pulp::platform)
-# Ed25519 signing/verification for Sparkle appcasts (macOS plan item 7.3)
+# Ed25519 signing/verification for Sparkle appcasts
 # routes through pulp::runtime::ed25519_* + base64 helpers.
 target_link_libraries(pulp-ship PRIVATE pulp::runtime)
 

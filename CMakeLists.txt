@@ -73,12 +73,11 @@ option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
        "Build the opt-in Rust staticlib reference core + FFI/RT-safety tests \
         (requires a Rust toolchain). OFF by default; no Rust for default builds."
        OFF)
-# SDK-release safety net. When ON, configure FAILS if PULP_ENABLE_GPU
-# is set but Skia binaries weren't located. The release
-# workflow flips this ON so an SDK tarball can never ship with the GPU
-# code path silently #ifdef'd out. Local developer builds leave it OFF
-# (the default) so a no-Skia incremental rebuild still configures and
-# transparently falls back to the CG path.
+# SDK-release safety net. When ON, configure FAILS if PULP_ENABLE_GPU is set
+# but Skia binaries weren't located. The release workflow flips this ON so an
+# SDK tarball can never ship with the GPU code path silently #ifdef'd out.
+# Local developer builds leave it OFF (the default) so a no-Skia incremental
+# rebuild still configures and transparently falls back to the CG path.
 option(PULP_REQUIRE_GPU_FOR_SDK
        "Fail configure if PULP_ENABLE_GPU=ON but Skia was not found. \
         Set ON in .github/workflows/release-cli.yml to prevent silently \
@@ -147,7 +146,7 @@ endif()
 # developers and dedicated lanes flip it on with
 #   cmake -DPULP_REAL_PLUGIN_TESTS=ON ...
 # and populate the fixture cache with tools/scripts/fetch_real_plugins.py.
-option(PULP_REAL_PLUGIN_TESTS "Build the opt-in real-plugin integration suite (item 4.2)" OFF)
+option(PULP_REAL_PLUGIN_TESTS "Build the opt-in real-plugin integration suite" OFF)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")

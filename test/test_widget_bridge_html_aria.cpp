@@ -1,18 +1,16 @@
 // HTML compatibility bundle — two coherent surfaces:
 //
-//   1. ARIA attribute routing (#1476 / html.2). aria-label and role
-//      attributes flow through the html-compat shim into View's
-//      accessibility slots that the macOS NSAccessibility bridge
-//      consumes. setAttribute / removeAttribute round-trip;
-//      mount-deferred attributes replay on appendChild; aria-pressed
-//      / -checked / -disabled / -hidden route to View slots.
+//   1. ARIA attribute routing. aria-label and role attributes flow through
+//      the html-compat shim into View's accessibility slots that the macOS
+//      NSAccessibility bridge consumes. setAttribute / removeAttribute
+//      round-trip; mount-deferred attributes replay on appendChild;
+//      aria-pressed / -checked / -disabled / -hidden route to View slots.
 //
-//   2. querySelector / querySelectorAll (#1476 / html.3). Selector
-//      engine accepts tag / .class / #id / attribute selectors,
-//      colons inside attribute brackets, descendant ( ) and child
-//      (>) combinators, :hover / :disabled / :checked / :enabled /
-//      :not() pseudo-classes, and structural :first-child / :last-child
-//      / :nth-child / :only-child / :empty.
+//   2. querySelector / querySelectorAll. Selector engine accepts tag /
+//      .class / #id / attribute selectors, colons inside attribute brackets,
+//      descendant ( ) and child (>) combinators, :hover / :disabled /
+//      :checked / :enabled / :not() pseudo-classes, and structural
+//      :first-child / :last-child / :nth-child / :only-child / :empty.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -39,14 +37,14 @@ using Catch::Matchers::WithinAbs;
 
 // ── HTML bundle (ARIA + querySelector) ──────────────────────────────────
 //
-// pulp #1476: aria-label / role attributes flow through the
+// aria-label / role attributes flow through the
 // html-compat shim into View::access_label_ / View::access_role_ slots
 // that the macOS NSAccessibility bridge already consumes.
 // document.querySelector accepts attribute selectors, compound selectors,
 // descendant / child combinators, and the basic tag/.class/#id forms.
 
 TEST_CASE("HTML aria-label routes to View access_label",
-          "[view][bridge][wave3-html][html-aria]") {
+          "[view][bridge][html][html-aria]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -65,7 +63,7 @@ TEST_CASE("HTML aria-label routes to View access_label",
 }
 
 TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
-          "[view][bridge][wave3-html][html-aria]") {
+          "[view][bridge][html][html-aria]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -96,7 +94,7 @@ TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
 }
 
 TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",
-          "[view][bridge][wave3-html][html-aria]") {
+          "[view][bridge][html][html-aria]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -123,7 +121,7 @@ TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",
 }
 
 TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",
-          "[view][bridge][wave3-html][html-aria]") {
+          "[view][bridge][html][html-aria]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -154,12 +152,12 @@ TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",
     REQUIRE(v->access_role() == View::AccessRole::slider);
 }
 
-// pulp #1641 follow-up — `removeAttribute('role')` /
-// `removeAttribute('aria-label')` must reset View::access_role_ /
-// access_label_, not just delete the JS-side `_attributes[name]` entry
-// while leaving the bridge slot stale for assistive tech.
+// `removeAttribute('role')` / `removeAttribute('aria-label')` must reset
+// View::access_role_ / access_label_, not just delete the JS-side
+// `_attributes[name]` entry while leaving the bridge slot stale for
+// assistive tech.
 TEST_CASE("HTML removeAttribute resets View accessibility slots",
-          "[view][bridge][html][issue-1641-followup-aria-removeattribute]") {
+          "[view][bridge][html][html-aria][removeAttribute]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -189,18 +187,17 @@ TEST_CASE("HTML removeAttribute resets View accessibility slots",
     REQUIRE(v->access_role() == View::AccessRole::none);
 }
 
-// pulp #1737 — ARIA state attributes (aria-pressed, aria-checked,
-// aria-disabled, aria-hidden) round-trip through the new
-// setAccessibilityState bridge fn into View::access_pressed_ /
+// ARIA state attributes (aria-pressed, aria-checked, aria-disabled,
+// aria-hidden) round-trip through the setAccessibilityState bridge fn into View::access_pressed_ /
 // access_checked_ / access_disabled_ / access_hidden_ slots. macOS
 // NSAccessibility reads them automatically; Linux AT-SPI / Windows UIA
-// read the same slots when those bridges land (pulp #217).
+// read the same slots when those bridges are available.
 //
 // Test exercises both code paths: setAttribute on a mounted element
 // (fast-path through the bridge) and setAttribute before mount
 // followed by appendChild (replay through __replayAriaAttributes__).
 TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slots",
-          "[view][bridge][wave3-html][html-aria][issue-1737]") {
+          "[view][bridge][html][html-aria][aria-state]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -255,7 +252,7 @@ TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slot
 }
 
 TEST_CASE("querySelector matches tag / .class / #id forms",
-          "[view][bridge][wave3-html][html-querySelector]") {
+          "[view][bridge][html][html-querySelector]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -288,7 +285,7 @@ TEST_CASE("querySelector matches tag / .class / #id forms",
 }
 
 TEST_CASE("querySelector matches attribute selectors",
-          "[view][bridge][wave3-html][html-querySelector]") {
+          "[view][bridge][html][html-querySelector]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -326,13 +323,13 @@ TEST_CASE("querySelector matches attribute selectors",
     REQUIRE(std::string(engine.evaluate("__withAria").getWithDefault<std::string_view>("")) == "d4");
 }
 
-// pulp #1641 follow-up — _parseSelector colon handling. Selectors like
+// _parseSelector colon handling. Selectors like
 // `[href="http://x"]` and `[data-time="12:30"]` contain `:` inside the
 // attribute brackets. A plain `str.search(/:/)` finds the first colon
 // anywhere, so the selector parser must scan for `:` at bracket depth 0
 // only and avoid truncating mid-bracket.
 TEST_CASE("querySelector handles colons inside attribute brackets",
-          "[view][bridge][html][issue-1641-followup-querySelector-colon]") {
+          "[view][bridge][html][html-querySelector][attribute-selector]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -353,7 +350,7 @@ TEST_CASE("querySelector handles colons inside attribute brackets",
         globalThis.__byHttp  = (document.querySelector('[href="http://example.com/page"]')  || {id:'MISS'}).id;
         globalThis.__byHttps = (document.querySelector('[href="https://example.com/page"]') || {id:'MISS'}).id;
         globalThis.__byTime  = (document.querySelector('[data-time="12:30"]')               || {id:'MISS'}).id;
-        // pulp #1737 — a:hover strictly matches only currently-hovered anchors.
+        // a:hover strictly matches only currently-hovered anchors.
         // With no hovered <a>, the selector returns null; after we flag a1 as
         // hovered, the matcher finds it.
         globalThis.__pseudoNull = document.querySelector('a:hover') === null;
@@ -369,7 +366,7 @@ TEST_CASE("querySelector handles colons inside attribute brackets",
 }
 
 TEST_CASE("querySelector descendant and child combinators",
-          "[view][bridge][wave3-html][html-querySelector]") {
+          "[view][bridge][html][html-querySelector]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -409,7 +406,7 @@ TEST_CASE("querySelector descendant and child combinators",
     REQUIRE(engine.evaluate("__deepDescAll").getWithDefault<int64_t>(0) == 2);
 }
 
-// pulp #1737 — querySelector evaluates pseudo-classes against element state.
+// querySelector evaluates pseudo-classes against element state.
 // The matcher honours runtime-state pseudo-classes
 // (`:hover`, `:focus`, `:active`, `:disabled`, `:checked`, `:enabled`),
 // DOM-position pseudo-classes (`:first-child`, `:last-child`, `:nth-child`,
@@ -422,7 +419,7 @@ TEST_CASE("querySelector descendant and child combinators",
 // pseudo-classes return no-match per CSS Selectors Level 4 forward-
 // compat, which is what the test now asserts.
 TEST_CASE("querySelector evaluates :hover pseudo-class against element state",
-          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
+          "[view][bridge][html][html-querySelector][pseudo-class]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -453,11 +450,11 @@ TEST_CASE("querySelector evaluates :hover pseudo-class against element state",
     ) == "pseudo");
 }
 
-// pulp #1737 — :disabled, :checked, :enabled — state-on-element pseudo
+// :disabled, :checked, :enabled — state-on-element pseudo
 // classes that read the bridge-maintained el._disabled / el._checked
 // slots. Comprehensive coverage including the negation pseudo (:not()).
 TEST_CASE("querySelector :disabled / :checked / :enabled / :not()",
-          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
+          "[view][bridge][html][html-querySelector][pseudo-class]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -489,10 +486,10 @@ TEST_CASE("querySelector :disabled / :checked / :enabled / :not()",
     REQUIRE(engine.evaluate("__notDisabledMatches").getWithDefault<int64_t>(0) == 2);
 }
 
-// pulp #1737 — DOM-position pseudo-classes: :first-child, :last-child,
+// DOM-position pseudo-classes: :first-child, :last-child,
 // :nth-child(N), :nth-child(2n+1), :only-child, :empty, :root.
 TEST_CASE("querySelector :first-child / :last-child / :nth-child / :only-child / :empty",
-          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
+          "[view][bridge][html][html-querySelector][pseudo-class]") {
     ScriptEngine engine;
     View root;
     StateStore store;

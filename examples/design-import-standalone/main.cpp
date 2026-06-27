@@ -115,10 +115,10 @@ std::string read_text_file(const fs::path& p) {
 // PNG, and the positional knob<->shape pairing was off by one (the header hatch
 // counted as a "shape"). Those are structural to guessing on a flattened,
 // pre-colored raster — not polish bugs. The capability stays; the correct way to
-// drive it is design-authored (recognize the gradient-fill layer + binding,
-// capture an empty-interior outline, clip to the vector outline) — tracked in
-// pulp #3562. Until that lands the knobs simply turn and the shapes render their
-// faithful static captured art.
+// drive it is design-authored: recognize the gradient-fill layer and binding,
+// capture an empty-interior outline, and clip to the vector outline. Until that
+// import path exists, the knobs simply turn and the shapes render their faithful
+// static captured art.
 
 }  // namespace
 
@@ -249,8 +249,8 @@ int main(int argc, char** argv) {
                 };
             set_knobs(root.get());
         }
-        // Lay out so bounds exist before rendering. (Shape fills are inert —
-        // see the note above / pulp #3562.)
+        // Lay out so bounds exist before rendering. Shape fills are inert for
+        // the design-captured art path above.
         root->set_bounds({0, 0, design_w, design_h});
         root->layout_children();
         apply_demo_state();  // focus search / open dropdown for the capture
@@ -289,8 +289,8 @@ int main(int argc, char** argv) {
 
     // The knobs turn (sprite indicator) but do NOT drive the shape fills — the
     // value-driven gradient fill is a proven capability that needs a
-    // design-authored binding to drive it correctly (pulp #3562), not the
-    // raster-guess heuristic this demo used to run each frame.
+    // design-authored binding to drive it correctly, not the raster-guess
+    // heuristic this demo used to run each frame.
     int frame_count = 0;
     const bool capture = !screenshot_path.empty();
     window->set_idle_callback([&] {

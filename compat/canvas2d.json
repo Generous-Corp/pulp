@@ -107,9 +107,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][wave2-canvas2d]"
+        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][canvas2d-compat]"
       ],
-      "notes": "PR #1348 + Wave 2 cheap wiring \u2014 confirmed all five radii forms thread through to SkRRect::setRectRadii with 4 distinct SkVector corners.",
+      "notes": "All five radii forms thread through to SkRRect::setRectRadii with 4 distinct SkVector corners.",
       "issue": "1346"
     },
     "canvas2d/arc": {
@@ -170,9 +170,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][wave2-canvas2d]"
+        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][canvas2d-compat]"
       ],
-      "notes": "PR #1521 + Wave 2 cheap wiring \u2014 confirmed rotation threads through SkMatrix and CGAffineTransform.",
+      "notes": "Rotation threads through SkMatrix and CGAffineTransform.",
       "issue": "1346"
     },
     "canvas2d/fill": {
@@ -184,9 +184,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][wave2-canvas2d]"
+        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][canvas2d-compat]"
       ],
-      "notes": "Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOFillPath) backends. Pre-Wave-2 the rule was read by widget_bridge but discarded by canvas_widget.",
+      "notes": "FillRule enum threads cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOFillPath) backends. Older builds read the rule in widget_bridge but discarded it in canvas_widget.",
       "issue": ""
     },
     "canvas2d/stroke": {
@@ -209,9 +209,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][wave2-canvas2d]"
+        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][canvas2d-compat]"
       ],
-      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.) Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOClip) backends.",
+      "notes": "Backed by SkCanvas::clipPath; older canvasClipRect is the rect-only path. FillRule enum threads cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOClip) backends.",
       "issue": ""
     },
     "canvas2d/isPointInPath": {
@@ -383,9 +383,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][wave2-canvas2d]"
+        "test/test_widget_bridge_wave2_cheap.cpp [view][bridge][canvas][canvas2d-compat]"
       ],
-      "notes": "PR #1525 + Codex P2 follow-up \u2014 make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring \u2014 confirmed end-to-end and bumped from partial -> supported.",
+      "notes": "make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state.",
       "issue": ""
     },
     "canvas2d/measureText": {

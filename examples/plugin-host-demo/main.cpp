@@ -10,7 +10,6 @@
 //   pulp-plugin-host-demo --path <bundle>      # pick a scanned bundle path
 //   pulp-plugin-host-demo --id <plugin-id>     # pick a scanned descriptor by id
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
-//                                              # (issue #494 demo)
 //
 // This is a validation harness for loading real plugins through Pulp's host
 // abstraction. It is not a DAW: there is no audio device I/O, no native window,

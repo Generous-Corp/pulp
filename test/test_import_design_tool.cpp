@@ -210,7 +210,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
     }
 }
 
-TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
+TEST_CASE("pulp-import-design validates import source vocabulary",
           "[cli][import-design][tool][issue-493][network]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
 
@@ -1208,7 +1208,7 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     // audio_widget="knob" path. The full envelope shape is
     // documented in tools/figma-plugin/schema/figma-plugin-export-v1.json
     // and exercised end-to-end by test/test_design_import_codegen.cpp's
-    // "[figma-plugin][phase-3]" cases. Here we only care that the CLI
+    // figma-plugin codegen cases. Here we only care that the CLI
     // unpacks the zip and round-trips the IR through to the codegen.
     const std::string envelope = R"JSON({
         "format_version": "2026.05-figma-plugin-v1",

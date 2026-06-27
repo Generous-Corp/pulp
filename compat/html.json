@@ -13,11 +13,11 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [wave3-html] (HTML aria-label + role attributes route to View access slots)",
-        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]",
-        "test/test_widget_bridge.cpp [issue-1737] (aria-pressed / -checked / -disabled / -hidden routing to View::access_*_ slots; tri-state; removeAttribute resets)"
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-aria] (HTML aria-label + role attributes route to View access slots)",
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-aria][removeAttribute]",
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-aria][aria-state] (aria-pressed / -checked / -disabled / -hidden routing to View::access_*_ slots; tri-state; removeAttribute resets)"
       ],
-      "notes": "Wave 3 (PR #1641) wired aria-label + role + macOS NSAccessibility. pulp #1737 \u2014 added aria-pressed / -checked / -disabled / -hidden state attributes via new setAccessibilityState bridge fn + View::access_pressed_/_checked_/_disabled_/_hidden_ slots; JS shim setAttribute fast-paths the four state attrs and __replayAriaAttributes__ covers the React-pre-mount commit order; removeAttribute clears the matching slot (mirrors the #1641 followup pattern for aria-label / role). Linux AT-SPI bridge + Windows UIA bridge remain `arch-deferred-platform-at` (tracked under pulp #217 \u2014 multi-week platform integration scope; not a Pulp-side ARIA-attribute gap). The state slots are populated cross-platform; whichever platform AT bridge lands next will read them automatically.",
+      "notes": "aria-label + role route into Pulp access slots and macOS NSAccessibility. aria-pressed / -checked / -disabled / -hidden state attributes route through setAccessibilityState into View::access_pressed_/_checked_/_disabled_/_hidden_ slots; JS shim setAttribute fast-paths the four state attrs and __replayAriaAttributes__ covers the React-pre-mount commit order. removeAttribute clears the matching slot for aria-label, role, and state attributes. Linux AT-SPI bridge + Windows UIA bridge remain `arch-deferred-platform-at`; the state slots are populated cross-platform so whichever platform AT bridge lands next can read them.",
       "issue": "1476"
     },
     "html/DocumentFragment": {
@@ -493,11 +493,11 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [wave3-html] (querySelector minimal selector engine)",
-        "test/test_widget_bridge.cpp [issue-1641-followup-querySelector-colon]",
-        "test/test_widget_bridge.cpp [issue-1737] (pseudo-class evaluation: :hover state, :disabled, :checked, :enabled, :not, :first/:last/:only-child, :nth-child, :empty)"
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-querySelector] (querySelector minimal selector engine)",
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-querySelector][attribute-selector]",
+        "test/test_widget_bridge_html_aria.cpp [view][bridge][html][html-querySelector][pseudo-class] (pseudo-class evaluation: :hover state, :disabled, :checked, :enabled, :not, :first/:last/:only-child, :nth-child, :empty)"
       ],
-      "notes": "Wave 3 (PR #1641) wired tag/.class/#id/[attr]/[attr=value]/descendant/child. pulp #1641 followup fixed bracket-aware colon scanning. pulp #1737 \u2014 pseudo-class state matching now implemented end-to-end: state-on-element forms read the bridge-maintained el._isHovered/_hasFocus/_isActive/_disabled/_checked slots; DOM-position forms walk parent._children; :nth-child(...) supports both keyword (`odd`/`even`) and `An+B` formula syntax; :not(<simple>) recursively dispatches to _matchesSelector. Stylesheet `_applyTo` strips the pseudo before structural matching so the existing :hover/:focus/:active wire-up path keeps firing on style application (the live state evaluation happens via the event listener). Out of scope: `:has()`, `:is()`, `:where()`, attribute namespaces \u2014 these need the full CSS Selectors Level 4 cascade engine (arch-no-cascade-engine per CLAUDE.md; use @pulp/react components for state-dependent styling that goes beyond what's wired here).",
+      "notes": "querySelector supports tag/.class/#id/[attr]/[attr=value]/descendant/child matching and bracket-aware colon scanning. Pseudo-class state matching is implemented end-to-end: state-on-element forms read the bridge-maintained el._isHovered/_hasFocus/_isActive/_disabled/_checked slots; DOM-position forms walk parent._children; :nth-child(...) supports both keyword (`odd`/`even`) and `An+B` formula syntax; :not(<simple>) recursively dispatches to _matchesSelector. Stylesheet `_applyTo` strips the pseudo before structural matching so the existing :hover/:focus/:active wire-up path keeps firing on style application (the live state evaluation happens via the event listener). Out of scope: `:has()`, `:is()`, `:where()`, attribute namespaces \u2014 these need the full CSS Selectors Level 4 cascade engine (arch-no-cascade-engine per CLAUDE.md; use @pulp/react components for state-dependent styling that goes beyond what's wired here).",
       "issue": ""
     },
     "html/footer": {

@@ -1,5 +1,5 @@
 // AudioThumbnail + AudioThumbnailCache tests.
-// Pulp item 6.12 — wire AudioThumbnail into existing WaveformView.
+// WaveformView integration coverage for AudioThumbnail.
 //
 // Coverage:
 //   * peak-table generation against a known sine wave (min/max bounds,
@@ -661,14 +661,14 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
     std::filesystem::remove_all(cache_dir, ec);
 }
 
-// #2966 — clear_disk_cache() is documented as best-effort/no-op, so the
+// clear_disk_cache() is documented as best-effort/no-op, so the
 // range-for over `directory_iterator(dir, ec)` must not use the THROWING
 // increment path where a permission error or concurrent filesystem change
 // mid-iteration can escape as filesystem_error. We pin REQUIRE_NOTHROW for
 // the happy path (empty dir, missing dir, nonexistent dir) and for an
 // extra-file-mid-iteration case.
 TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
-          "[audio][thumbnail][cache][persist][issue-2966]") {
+          "[audio][thumbnail][cache][persist][filesystem]") {
     AudioThumbnailCache cache(2);
 
     // Case 1: no disk dir set — early return, no throw.
@@ -700,14 +700,14 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
     std::filesystem::remove_all(empty_dir, ec);
 }
 
-// #2966 — load_from_disk() must not trust the .thumb file size and allocate
+// load_from_disk() must not trust the .thumb file size and allocate
 // a `std::vector<uint8_t>` of that exact size with no upper bound. A corrupt
 // or hostile oversized cache file would throw `std::bad_alloc` (or trip
 // OOM-killer) instead of being treated as a cache miss. We pin the contract:
 // an oversize blob in the cache directory must NOT crash get_or_build() and
 // the call must fall back to rebuilding from source.
 TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss",
-          "[audio][thumbnail][cache][persist][issue-2966]") {
+          "[audio][thumbnail][cache][persist][filesystem]") {
     const auto cache_dir = unique_cache_dir();
     const auto wav_path = unique_wav_path();
     REQUIRE(write_wav_file(wav_path.string(),

@@ -1,5 +1,5 @@
-// Multi-line TextEditor coverage for the audit's "text entry depth"
-// follow-up. The base test_text_editor.cpp file already pins single-
+// Multi-line TextEditor coverage for wrapped layout, y-aware caret placement,
+// and Enter handling. The base test_text_editor.cpp file already pins single-
 // line behavior plus the hard-newline arrow-key path; these tests pin
 // the previously-untested visual layer: wrapped layout, y-aware
 // click-to-caret, caret-rect pixel positioning, and the contractual
@@ -143,10 +143,9 @@ TEST_CASE("TextEditor multi-line soft-wrap recorded in the layout snapshot via c
     // index 0 must be on row 0 — y must be lower than the end-of-text
     // y because the text wrapped to multiple visual rows.
     //
-    // NB: arrow Up/Down across soft-wrapped lines is a known follow-up
-    // (TODO below). This test only pins that the layout snapshot
-    // records multiple visual rows, which is what enables the eventual
-    // arrow-key fix to be observable.
+    // Arrow Up/Down across soft-wrapped lines is covered separately. This
+    // test pins that the layout snapshot records multiple visual rows, which
+    // makes y-aware caret movement observable.
     REQUIRE(editor.on_key_event(key(KeyCode::home)));
     prime_layout(editor);
     auto home_rect = editor.caret_rect();

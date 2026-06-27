@@ -1,13 +1,13 @@
-// WidgetBridge Wave 2 cheap-wiring tests: two bundles of compat.json
-// partial → supported closures from the Wave 2 cleanup pass:
+// WidgetBridge compatibility value-coverage tests: two bundles of compat.json
+// partial → supported closures:
 //
-//   1. canvas2d cheap wiring (DIVERGE → PASS). JS-evaluates a single
+//   1. canvas2d compatibility wiring. JS-evaluates a single
 //      CanvasRenderingContext2D method/property, asserts on the
 //      recorded CanvasDrawCmd or View slot. Bridge ↔ Canvas API
 //      contract tests; Skia paint-side honouring is unit-tested at
 //      the Canvas backend layer.
 //
-//   2. css bundle cheap value-coverage wiring. Pins previously
+//   2. css bundle value-coverage wiring. Pins previously
 //      unwired CSS property/value combinations through the JS shim
 //      → CSS translator → View slot pipeline.
 
@@ -44,10 +44,10 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
 }
 } // namespace
 
-// ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
+// ── Canvas2D compatibility wiring ────────────────────────────────────────
 //
 // These tests close the loop on the five compat.json entries that flipped
-// from partial → supported in the Wave 2 sweep. Each test goes JS → bridge
+// from partial → supported. Each test goes JS → bridge
 // → CanvasWidget::paint(RecordingCanvas) → assert on the recorded Canvas
 // API call so a regression anywhere in the chain surfaces here.
 //
@@ -69,8 +69,8 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
 // tested at the Canvas backend layer; here we focus on the bridge ↔ Canvas
 // API contract that the harness adapter scores.
 
-TEST_CASE("Wave 2 canvas2d — ctx.fill('evenodd') reaches Canvas::fill_current_path with FillRule::evenodd",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("canvas2d ctx.fill('evenodd') reaches Canvas::fill_current_path with FillRule::evenodd",
+          "[view][bridge][canvas][canvas2d-compat]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 200, 200});
@@ -114,8 +114,8 @@ TEST_CASE("Wave 2 canvas2d — ctx.fill('evenodd') reaches Canvas::fill_current_
     REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("canvas2d ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
+          "[view][bridge][canvas][canvas2d-compat]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 200, 200});
@@ -156,8 +156,8 @@ TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with Fil
     REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("canvas2d ctx.roundRect with 4 distinct corners produces 4 distinct radii",
+          "[view][bridge][canvas][canvas2d-compat]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 200, 200});
@@ -208,8 +208,8 @@ TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 
     REQUIRE_THAT(rrCmd.floats[5], WithinAbs(16.0f, 1e-5f));  // bl_y
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("canvas2d ctx.ellipse with non-zero rotation threads through to a single ellipse command",
+          "[view][bridge][canvas][canvas2d-compat]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 200, 200});
@@ -255,8 +255,8 @@ TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads throug
     REQUIRE_THAT(eCmd.f[4], WithinAbs(std::numbers::pi_v<float> / 4.0f, 1e-4f));
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("canvas2d ctx.strokeText routes through dedicated stroke_text command",
+          "[view][bridge][canvas][canvas2d-compat]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 200});
@@ -291,14 +291,14 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
             fillTextCount++;
         }
     }
-    // Wave 2 cheap wiring confirmation: strokeText must produce a real
+    // strokeText must produce a real
     // stroke_text command (true stroked-glyph rendering with kStroke_Style),
     // NOT a fill_text command using strokeStyle as the fill colour.
     REQUIRE(strokeTextCount == 1);
     REQUIRE(fillTextCount == 0);
 }
 
-// ── pulp Wave 2 css bundle (cheap value-coverage wiring) ────────────────
+// ── CSS value-coverage wiring ────────────────────────────────────────────
 //
 // The CSS shim accepts a wider value vocabulary than the bridge fns
 // natively understand, with the resolution math performed JS-side
@@ -310,10 +310,10 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
 // slot (width%, fontSize em, lineHeight, gap two-value).
 
 TEST_CASE("CSSStyleDeclaration forwards width percent via el.style",
-          "[view][bridge][css][wave2-css]") {
+          "[view][bridge][css][css-compat]") {
     // Round-trips `el.style.width = '50%'` through the shim into the
     // bridge's setFlex dim_width.unit = percent route. Mirrors the
-    // direct setFlex('a','width','50%') test (issue-1434-auto) but
+    // direct setFlex('a','width','50%') test but
     // exercises the JS-side _applyProperty('width', '50%') path.
     ScriptEngine engine;
     View root;
@@ -335,8 +335,8 @@ TEST_CASE("CSSStyleDeclaration forwards width percent via el.style",
 }
 
 TEST_CASE("CSSStyleDeclaration fontSize em resolves against default 14px",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — em/rem/% relative-unit resolution. Default
+          "[view][bridge][css][css-compat]") {
+    // em/rem/% relative-unit resolution. Default
     // inherited font-size is 14px (matches resolveLength fallback).
     ScriptEngine engine;
     View root;
@@ -379,10 +379,10 @@ TEST_CASE("CSSStyleDeclaration fontSize em resolves against default 14px",
 }
 
 TEST_CASE("CSSStyleDeclaration lineHeight unitless multiplies font-size",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — unitless multiplier is the most common CSS form
+          "[view][bridge][css][css-compat]") {
+    // Unitless multiplier is the most common CSS form
     // (e.g. `line-height: 1.5`). Resolved against the default 14px
-    // font-size; nested cascade is the follow-up.
+    // font-size; nested cascade is covered separately.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -412,8 +412,8 @@ TEST_CASE("CSSStyleDeclaration lineHeight unitless multiplies font-size",
 }
 
 TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — `gap: 10px 20px` is the CSS shorthand for
+          "[view][bridge][css][css-compat]") {
+    // `gap: 10px 20px` is the CSS shorthand for
     // row-gap + column-gap. The shim splits on whitespace and dispatches
     // to setFlex(row_gap) + setFlex(column_gap).
     ScriptEngine engine;
@@ -432,12 +432,12 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
     REQUIRE_THAT(f.column_gap, WithinAbs(20.0f, 0.001f));
 }
 
-// pulp #1638 — single-token `gap` must clear prior row_gap/column_gap.
+// Single-token `gap` must clear prior row_gap/column_gap.
 // FlexStyle::effective_gap prefers per-axis when ≥0, so `gap: 5px`
 // after `gap: 10px 20px` would read 10/20 instead of 5/5 unless the
 // per-axis slots reset to the -1 sentinel before writing the shared slot.
 TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
-          "[view][bridge][css][issue-1638]") {
+          "[view][bridge][css][gap]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -468,12 +468,11 @@ TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
                  WithinAbs(5.0f, 0.001f));
 }
 
-// pulp #1707 — single-token gap with invalid input must NOT clobber
+// Single-token gap with invalid input must NOT clobber
 // prior 2-token state. Parse first; only reset the per-axis slots when
-// the new value is valid (an earlier ordering reset them before parsing,
-// nuking the per-axis state silently on a failed parse).
+// the new value is valid.
 TEST_CASE("CSSStyleDeclaration single-token gap with invalid input preserves prior 2-token state",
-          "[view][bridge][css][issue-1707]") {
+          "[view][bridge][css][gap]") {
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -504,7 +503,7 @@ TEST_CASE("CSSStyleDeclaration single-token gap with invalid input preserves pri
     REQUIRE_THAT(f.row_gap, WithinAbs(10.0f, 0.001f));
     REQUIRE_THAT(f.column_gap, WithinAbs(20.0f, 0.001f));
 
-    // Valid single-token gap still resets per-axis (existing #1638 behavior).
+    // Valid single-token gap still resets per-axis.
     bridge.load_script(R"(
         var s4 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s4._applyProperty('gap', '7px');
@@ -514,21 +513,10 @@ TEST_CASE("CSSStyleDeclaration single-token gap with invalid input preserves pri
     REQUIRE(f.column_gap < 0.0f);
 }
 
-// pulp #1638 baseline-corruption: this TEST_CASE body got truncated
-// during the bad merge — it set up `using BM = ...; ScriptEngine
-// engine; View root; root.set_bounds(...);` but never wrapped the
-// rest of the test, instead transitioning straight into a banner
-// comment for the canvas2d block. Stubbed for compile; the
-// equivalent assertion lives below in the
-// "CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus" test; despite
-// the shorter title, that body covers both plus-lighter and plus-darker
-// mapping to BM::lighter.
-// Wave 5 css.5 audit — recover the corrupted #1638 body that was
-// orphaned by a merge into a stub-with-stray-string. The body below
-// is the original Wave 2 css.9 plus-lighter / plus-darker test.
+// Covers both plus-lighter and plus-darker mapping to BM::lighter.
 TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
-          "[view][bridge][css][wave2-css][issue-1549]") {
-    // Wave 2 css.9 — plus-lighter / plus-darker are CSS Compositing &
+          "[view][bridge][css][css-compat][mix-blend-mode]") {
+    // plus-lighter / plus-darker are CSS Compositing &
     // Blending Level 2 keywords. Both map to BlendMode::lighter
     // (Skia's SkBlendMode::kPlus / additive). Previously fell through
     // to the unknown-keyword normal fallback.
@@ -821,11 +809,11 @@ TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
     CHECK(lbl->attributed_span_count() == 2);  // "Hello" styled run + " world" gap
 }
 
-// pulp #3336: a plain set_text() must supersede prior per-range runs. The old
+// A plain set_text() must supersede prior per-range runs. The old
 // spans index into the OLD string, so leaving has_attributed_ set would paint
 // stale, mis-indexed runs over the new text.
 TEST_CASE("set_text clears stale attributed runs",
-          "[view][widget][text][issue-3336]") {
+          "[view][widget][text][attributed-text]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 200, 40});
@@ -842,11 +830,11 @@ TEST_CASE("set_text clears stale attributed runs",
     CHECK_FALSE(lbl->has_attributed_string());  // runs dropped → single-style path
 }
 
-// pulp #3336: paint_attributed_ must honor the text-align cascade instead of
+// paint_attributed_ must honor the text-align cascade instead of
 // hard-coding a left/x=0 anchor. RecordingCanvas measures 7px/char, so the two
 // spans ("Hello"+" world" = 11 chars) span 77px inside a 200px-wide label.
 TEST_CASE("paint_attributed_ honors text-align",
-          "[view][widget][text][issue-3336]") {
+          "[view][widget][text][attributed-text]") {
     using pulp::canvas::DrawCommand;
     using pulp::canvas::RecordingCanvas;
     auto first_fill_x = [](RecordingCanvas& rc) -> float {
