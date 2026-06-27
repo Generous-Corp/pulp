@@ -793,8 +793,8 @@ private:
     // soft-clip still bounds any grafted peak).
     void restore_onset_head(const float* const* in, long in_frames,
                             float* const* out, long out_frames) const noexcept {
-        const long head = std::min<long>({out_frames, in_frames,
-                                          std::llround(kHeadMs * sample_rate_)});
+        const long head_span = static_cast<long>(std::llround(kHeadMs * sample_rate_));
+        const long head = std::min<long>({out_frames, in_frames, head_span});
         if (head < 2) return;
         float in_peak = 0.0f, out_peak = 0.0f;
         for (int c = 0; c < channels_; ++c)

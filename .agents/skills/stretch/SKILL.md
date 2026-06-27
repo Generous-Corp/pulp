@@ -190,6 +190,11 @@ INVISIBLE to peak/RMS/clip/AM metrics — output can sit at ~0.8 full-scale and 
 
 - Don't trust harmonic-clarity (peak/valley) or autocorr-f0-on-drums — both misled
   during tuning. Use centroid + peak-Hz-vs-source + wobble + the ear.
+- Keep integer types explicit around frame counts on Windows. MSVC's `long` is
+  32-bit, while `std::llround` returns `long long`; passing that directly into an
+  initializer-list such as `std::min<long>({ ... })` can fail the Windows
+  release-path gate as narrowing. Cast or store the rounded value as `long` before
+  it enters `std::min<long>` / frame-count lists.
 - A faithful time-stretch must keep `peak_hz` IDENTICAL to the source at every
   ratio. If it drifts, something's wrong (that's how the vertical-coherence and the
   bass-FFT bugs were caught).
