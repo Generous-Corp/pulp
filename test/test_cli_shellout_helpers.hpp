@@ -109,6 +109,27 @@ inline ProcessResult run_pulp(const std::vector<std::string>& args,
 
 inline bool binary_exists() { return fs::exists(pulp_binary()); }
 
+inline bool binary_available() {
+    if (const char* env = std::getenv("PULP_CLI_PATH"); env) {
+        // Empty override is an explicit "CLI unavailable" sentinel for
+        // skip-path tests; a non-empty missing path is a broken test config.
+        if (!*env) return false;
+        if (!fs::exists(fs::path(env))) {
+            FAIL("pulp binary configured but missing at " << env);
+            return false;
+        }
+        return true;
+    }
+
+    auto bin = pulp_binary();
+    if (bin.empty()) return false;
+    if (!fs::exists(bin)) {
+        FAIL("pulp binary configured but missing at " << bin.string());
+        return false;
+    }
+    return true;
+}
+
 inline std::string read_file(const fs::path& path) {
     std::ifstream f(path);
     if (!f.is_open()) return {};

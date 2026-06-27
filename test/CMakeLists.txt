@@ -519,7 +519,7 @@ endif()
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-loop)
-catch_discover_tests(pulp-test-cli-shellout-loop)
+catch_discover_tests(pulp-test-cli-shellout-loop EXTRA_ARGS --allow-running-no-tests)
 
 # `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
 # shell-out helpers with the sibling shell-out targets.
