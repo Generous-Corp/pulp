@@ -45,6 +45,10 @@ int main(int argc, char** argv) {
     store.set_value(examples::kGain, 0.0f);
     store.set_value(examples::kBypass, 0.0f);
     store.set_value(examples::kEngine, std::getenv("SC_GPU") ? 1.0f : 0.0f);  // SC_GPU=1 → GPU engine
+    if (std::getenv("SC_GPU")) {
+        const char* rooms = std::getenv("SC_ROOMS");
+        store.set_value(examples::kRooms, rooms ? static_cast<float>(std::atoi(rooms)) : 64.0f);
+    }
 
     constexpr int BLOCK = 512;
     constexpr double SR = 48000.0;
