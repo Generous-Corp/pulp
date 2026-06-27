@@ -16,6 +16,7 @@ pulp_add_plugin(<target>
     MANUFACTURER    <string>
     VERSION         <string>
     CATEGORY        <Effect|Instrument|MidiEffect>
+    ACCEPTS_MIDI
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
     AAX_PRODUCT_CODE <4-char>
@@ -40,6 +41,7 @@ pulp_add_plugin(<target>
 | `MANUFACTURER` | No | `"Unknown"` | Manufacturer name |
 | `VERSION` | No | `"1.0.0"` | Plugin version string |
 | `CATEGORY` | No | `"Effect"` | Plugin category: `Effect`, `Instrument`, or `MidiEffect` |
+| `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `PLUGIN_CODE` | AU/AUv3 only | -- | 4-character AU plugin code |
 | `MANUFACTURER_CODE` | AU/AUv3/AAX only | -- | 4-character manufacturer code used by AU, AUv3, and AAX |
 | `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |

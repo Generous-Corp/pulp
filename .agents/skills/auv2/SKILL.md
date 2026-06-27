@@ -47,6 +47,12 @@ The resulting mapping (`_pulp_add_au` / `_pulp_add_auv3` in `tools/cmake/PulpUti
 
 When you add a new example or change an existing one's descriptor to declare `accepts_midi = true`, you **must** also add `ACCEPTS_MIDI` to its `pulp_add_plugin()` call. There is no runtime fallback — the two surfaces are independent and the CMake flag is what ends up in the Info.plist.
 
+Do **not** pass `PRODUCES_MIDI` to `pulp_add_plugin()`. MIDI output is
+declared by `PluginDescriptor::produces_midi` in processor code and consumed
+by the format/runtime layer where supported; it is not a CMake packaging flag.
+If a caller passes `PRODUCES_MIDI` anyway, CMake warns and ignores it so stale
+docs/tests cannot imply a fake packaging effect.
+
 ## MIDI Input Wiring
 
 ### The entry FACTORY must dispatch MusicDevice selectors — not just the base class
@@ -145,7 +151,7 @@ the audio callback path. Tests live in
 
 ## Current Gaps
 
-- **MIDI output from AU v2 effects** is not wired yet; `#626` tracks the missing render-notify / `MIDIOutput` path. `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is *not* wired to a CMake flag yet — the AU type selection is driven entirely by `accepts_midi`.
+- **MIDI output from AU v2 effects** is not wired yet; `#626` tracks the missing render-notify / `MIDIOutput` path. `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is descriptor/runtime metadata, not a CMake flag; AU type selection is driven entirely by `accepts_midi` / `ACCEPTS_MIDI`, and passing `PRODUCES_MIDI` to `pulp_add_plugin()` warns without changing package metadata.
 
 - **AU v3 parity** for MIDI on effects is not re-audited in this pass. If you touch `core/format/src/au_adapter.mm`, confirm the AUv3 `componentType` logic in `_pulp_add_auv3` still matches the fix in `_pulp_add_au`.
 

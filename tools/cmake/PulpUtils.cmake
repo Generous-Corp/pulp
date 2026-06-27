@@ -490,11 +490,17 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;PRODUCES_MIDI"
+        "ACCEPTS_MIDI"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS"
         ${ARGN}
     )
+    if("PRODUCES_MIDI" IN_LIST PLUGIN_UNPARSED_ARGUMENTS)
+        message(WARNING
+            "pulp_add_plugin(${target}): PRODUCES_MIDI is ignored. "
+            "Set PluginDescriptor::produces_midi = true in the processor; "
+            "MIDI output is format/runtime metadata, not a CMake packaging flag.")
+    endif()
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)

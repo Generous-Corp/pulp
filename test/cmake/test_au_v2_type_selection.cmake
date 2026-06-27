@@ -14,6 +14,10 @@ Expected mapping:
   (MidiEffect,  *)     -> aumi
   (Effect,      true)  -> aumf   <-- the fix
   (Effect,      false) -> aufx
+
+Also pins the public CMake-option contract: `ACCEPTS_MIDI` is the only
+pulp_add_plugin MIDI packaging option. MIDI output remains
+PluginDescriptor/format metadata, not a parallel `PRODUCES_MIDI` CMake flag.
 ]]
 
 function(_select_au_type out_var category accepts_midi)
@@ -69,6 +73,50 @@ endif()
 
 if(_fail)
     message(FATAL_ERROR "AU v2 component-type selection smoke failed.")
-else()
-    message(STATUS "AU v2 component-type selection: all cases pass.")
 endif()
+
+get_filename_component(_repo_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(_utils "${_repo_root}/tools/cmake/PulpUtils.cmake")
+set(_reference "${_repo_root}/docs/reference/cmake.md")
+set(_status "${_repo_root}/docs/status/cmake-functions.yaml")
+
+foreach(_path IN LISTS _utils _reference _status)
+    if(NOT EXISTS "${_path}")
+        message(FATAL_ERROR "Required file missing: ${_path}")
+    endif()
+endforeach()
+
+file(READ "${_utils}" _utils_text)
+string(REGEX MATCH "cmake_parse_arguments\\(PLUGIN[ \t\r\n]+\"([^\"]*)\"" _parse_match "${_utils_text}")
+if(NOT _parse_match)
+    message(FATAL_ERROR "Could not find pulp_add_plugin cmake_parse_arguments option list")
+endif()
+
+set(_plugin_options "${CMAKE_MATCH_1}")
+if(NOT _plugin_options MATCHES "(^|;)ACCEPTS_MIDI($|;)")
+    message(FATAL_ERROR "pulp_add_plugin must parse ACCEPTS_MIDI")
+endif()
+if(_plugin_options MATCHES "(^|;)PRODUCES_MIDI($|;)")
+    message(FATAL_ERROR "pulp_add_plugin must not parse inert PRODUCES_MIDI")
+endif()
+if(NOT _utils_text MATCHES "PRODUCES_MIDI is ignored")
+    message(FATAL_ERROR "pulp_add_plugin must warn when callers pass inert PRODUCES_MIDI")
+endif()
+
+file(READ "${_reference}" _reference_text)
+if(NOT _reference_text MATCHES "`ACCEPTS_MIDI`")
+    message(FATAL_ERROR "docs/reference/cmake.md must document ACCEPTS_MIDI")
+endif()
+if(_reference_text MATCHES "\\|[ \t]*`PRODUCES_MIDI`")
+    message(FATAL_ERROR "docs/reference/cmake.md must not document PRODUCES_MIDI as a CMake option")
+endif()
+
+file(READ "${_status}" _status_text)
+if(NOT _status_text MATCHES "[ \t-]ACCEPTS_MIDI")
+    message(FATAL_ERROR "docs/status/cmake-functions.yaml must list ACCEPTS_MIDI")
+endif()
+if(_status_text MATCHES "[ \t-]PRODUCES_MIDI")
+    message(FATAL_ERROR "docs/status/cmake-functions.yaml must not list PRODUCES_MIDI")
+endif()
+
+message(STATUS "AU v2 type selection and pulp_add_plugin MIDI-option contract: OK")

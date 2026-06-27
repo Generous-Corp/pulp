@@ -13,6 +13,7 @@ functions:
       - MANUFACTURER
       - VERSION
       - CATEGORY
+      - ACCEPTS_MIDI
       - PLUGIN_CODE
       - MANUFACTURER_CODE
       - AAX_PRODUCT_CODE
