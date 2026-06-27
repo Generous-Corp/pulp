@@ -1,7 +1,7 @@
 /// @file test_audio_device_manager.cpp
-/// Item 1.2a — AudioDeviceManager persistence + MIDI hub.
+/// AudioDeviceManager persistence, MIDI hub, and runtime telemetry.
 ///
-/// Acceptance from the macOS-plugin-authoring plan:
+/// Acceptance coverage:
 ///   - restart-with-same-device — save then load round-trips
 ///   - fallback-to-default-when-persisted-missing — resolver returns
 ///     the default id and sets the fallback flag
@@ -347,7 +347,7 @@ TEST_CASE("AudioDeviceManager runtime telemetry polling allocates zero times",
     REQUIRE_FALSE(probe.saw_allocation());
 }
 
-// ── 1.2b — Lifecycle / hotplug / recovery ──────────────────────────
+// ── Lifecycle / hotplug / recovery ─────────────────────────────────
 
 TEST_CASE("AudioDeviceManager dispatches injected device-change events",
           "[audio][audio-device-manager][lifecycle][issue-2935]") {
@@ -550,8 +550,7 @@ TEST_CASE("AudioDeviceManager MIDI endpoint delta tracking fires per change",
     REQUIRE(mgr.midi_endpoints()[0].id == "ep:mini");
 }
 
-// Regression for issue #2976 / PR #2970:
-// subscribe_midi() and subscribe_midi_endpoints() previously used two
+// Regression: subscribe_midi() and subscribe_midi_endpoints() previously used two
 // independent counters that both started at 1. unsubscribe_midi()
 // erases by id from BOTH maps, so destroying the endpoint token (id=1)
 // would erase the unrelated MIDI subscriber (also id=1) and leave the
@@ -623,7 +622,7 @@ TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load"
     // thread-safe, so a REQUIRE inside the worker can race or otherwise
     // wedge the harness in nondeterministic ways. Track the failure as
     // an atomic flag here and assert it on the test thread after join()
-    // (PR #3001).
+    // to keep the assertion on the test thread.
     std::atomic<int> inactive_token_count{0};
 
     auto worker = [&](bool use_endpoints) {
