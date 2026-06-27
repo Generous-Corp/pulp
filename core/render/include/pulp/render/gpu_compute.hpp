@@ -95,6 +95,26 @@ public:
     virtual bool fft_forward_timed(const float* complex_in, float* complex_out,
                                    uint32_t n, double* gpu_compute_us) = 0;
 
+    // ── GPU-resident convolution ───────────────────────────────────────────
+    //
+    // Fused FFT convolution that keeps intermediates GPU-resident: forward FFT
+    // → complex-multiply by a resident IR spectrum → inverse FFT (1/N
+    // normalized), all encoded into ONE command buffer with ONE readback
+    // (vs three readbacks for fft_forward + complex_multiply + fft_inverse).
+    // Not real-time-safe (still blocks on the single readback) but the
+    // amortizable building block toward a real-time GPU convolver.
+
+    /// Build the resident convolution plan for size `n` (power of two) and
+    /// upload `ir_spec` — the interleaved-complex spectrum of the zero-padded
+    /// IR (length 2*n, e.g. produced by fft_forward of the padded IR). Call
+    /// once before convolve(n). Returns false on invalid args / GPU failure.
+    virtual bool prepare_convolution(uint32_t n, const float* ir_spec) = 0;
+
+    /// Run the fused convolution for a prepared `n`. in/out are interleaved
+    /// complex, length 2*n. Returns false if prepare_convolution(n) was not
+    /// called, args are invalid, or dispatch fails.
+    virtual bool convolve(const float* in_complex, float* out_complex, uint32_t n) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

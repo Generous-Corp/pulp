@@ -369,6 +369,43 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
     std::printf("\n");
 }
 
+TEST_CASE("GpuCompute fused convolve vs 3-call readback cost",
+          "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 4096;
+    std::vector<float> ir_spec(N * 2, 0.0f);
+    for (uint32_t i = 0; i < N; ++i) { ir_spec[i * 2] = 0.5f; ir_spec[i * 2 + 1] = 0.1f; }
+    REQUIRE(compute->prepare_convolution(N, ir_spec.data()));
+
+    std::vector<float> in(N * 2), out(N * 2), spec(N * 2), prod(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { in[i * 2] = std::sin(0.01f * i); in[i * 2 + 1] = 0.0f; }
+
+    constexpr int iters = 30;
+    compute->convolve(in.data(), out.data(), N);  // warm
+
+    auto f0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) compute->convolve(in.data(), out.data(), N);
+    auto f1 = std::chrono::high_resolution_clock::now();
+    const double fused_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(f1 - f0).count() / 1000.0 / iters;
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) {
+        compute->fft_forward(in.data(), spec.data(), N);
+        compute->complex_multiply(spec.data(), ir_spec.data(), prod.data(), N);
+        compute->fft_inverse(prod.data(), out.data(), N);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    const double three_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0 / iters;
+
+    std::printf("\n  Convolution (N=%u): fused 1-readback = %.1f us/block | "
+                "3-call (3 readbacks) = %.1f us/block | speedup %.2fx\n",
+                N, fused_us, three_us, three_us / fused_us);
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {

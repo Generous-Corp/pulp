@@ -48,11 +48,10 @@ private:
     std::vector<float> ir_spec_;     // 2*fft_size interleaved IR spectrum
     std::vector<std::vector<float>> carry_;   // per-channel OLA accumulator (fft_size)
 
-    // Per-block GPU scratch (allocated in prepare()).
+    // Per-block host scratch (allocated in prepare()). The FFT/mul/inverse
+    // intermediates stay GPU-resident inside GpuCompute::convolve().
     std::vector<float> in_pad_;      // 2*fft_size interleaved complex input
-    std::vector<float> spec_;        // 2*fft_size input spectrum
-    std::vector<float> prod_;        // 2*fft_size product
-    std::vector<float> time_;        // 2*fft_size inverse result
+    std::vector<float> time_;        // 2*fft_size inverse result (one readback)
 
     std::vector<signal::Convolver> fallback_;  // per-channel CPU fallback
     bool prepared_ = false;

@@ -33,8 +33,6 @@ bool GpuConvolver::prepare() {
 
     const uint32_t cplx = fft_size_ * 2u;
     in_pad_.assign(cplx, 0.0f);
-    spec_.assign(cplx, 0.0f);
-    prod_.assign(cplx, 0.0f);
     time_.assign(cplx, 0.0f);
     ir_spec_.assign(cplx, 0.0f);
     carry_.assign(channels_, std::vector<float>(fft_size_, 0.0f));
@@ -55,7 +53,8 @@ bool GpuConvolver::prepare() {
         for (uint32_t i = 0; i < ir_.size() && i < fft_size_; ++i) {
             in_pad_[2u * i] = ir_[i];  // real; imag stays 0
         }
-        if (!gpu_->fft_forward(in_pad_.data(), ir_spec_.data(), fft_size_)) {
+        if (!gpu_->fft_forward(in_pad_.data(), ir_spec_.data(), fft_size_) ||
+            !gpu_->prepare_convolution(fft_size_, ir_spec_.data())) {
             gpu_.reset();
         }
     } else {
@@ -82,12 +81,12 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
         for (uint32_t i = 0; i < n; ++i) in_pad_[2u * i] = x[i];
 
-        // If any GPU call fails, emit silence for this channel and DO NOT mutate
-        // its overlap carry — feeding a stale time_ into the accumulator would
-        // poison all subsequent output for the channel.
-        if (!gpu_->fft_forward(in_pad_.data(), spec_.data(), fft_size_) ||
-            !gpu_->complex_multiply(spec_.data(), ir_spec_.data(), prod_.data(), fft_size_) ||
-            !gpu_->fft_inverse(prod_.data(), time_.data(), fft_size_)) {
+        // One fused GPU-resident convolution (forward FFT → complex-mul by the
+        // resident IR spectrum → inverse FFT) with a single readback. If it
+        // fails, emit silence for this channel and DO NOT mutate its overlap
+        // carry — feeding a stale time_ into the accumulator would poison all
+        // subsequent output for the channel.
+        if (!gpu_->convolve(in_pad_.data(), time_.data(), fft_size_)) {
             for (uint32_t i = 0; i < n; ++i) y[i] = 0.0f;
             continue;
         }

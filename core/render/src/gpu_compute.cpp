@@ -168,6 +168,7 @@ public:
         // destructors call into Dawn internals and need a live device.
         pool_.reset();
         fft_plans_.clear();
+        conv_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
@@ -419,6 +420,108 @@ public:
                                 /*normalize=*/false, &ns);
         if (gpu_compute_us) *gpu_compute_us = (ns >= 0.0) ? ns / 1000.0 : -1.0;
         return ok;
+    }
+
+    // ── GPU-resident convolution ───────────────────────────────────────────
+
+    bool prepare_convolution(uint32_t n, const float* ir_spec) override {
+        if (!initialized_ || ir_spec == nullptr) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+
+        ConvPlan plan;
+        plan.n = n;
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+
+        const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                      | wgpu::BufferUsage::CopySrc;
+        plan.buf_a = create_storage_buffer(bytes, sc);
+        plan.buf_b = create_storage_buffer(bytes, sc);
+        plan.buf_c = create_storage_buffer(bytes, sc);
+        plan.irspec = create_storage_buffer(bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.readback = create_readback_buffer(bytes);
+        if (!plan.buf_a || !plan.buf_b || !plan.buf_c || !plan.irspec || !plan.readback) {
+            return false;
+        }
+
+        // Forward (sign=-1) and inverse (sign=+1) per-pass uniforms + bind
+        // groups; both ping-pong starting from buf_a. Uniforms are constant per
+        // pass, so write them once here.
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            struct FftParams { uint32_t n; uint32_t ns; float sign; float pad; };
+            const bool src_is_a = (s % 2u == 0u);
+            for (int dir = 0; dir < 2; ++dir) {
+                const float sign = (dir == 0) ? -1.0f : 1.0f;
+                wgpu::BufferDescriptor ud{};
+                ud.size = 16;
+                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+                wgpu::Buffer u = device_.CreateBuffer(&ud);
+                if (!u) return false;
+                FftParams p{n, 1u << s, sign, 0.0f};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(
+                    fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.buf_a, plan.buf_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.buf_b, plan.buf_a, u});
+                if (!bg) return false;
+                if (dir == 0) { plan.fwd_u.push_back(std::move(u)); plan.fwd_bgs.push_back(std::move(bg)); }
+                else          { plan.inv_u.push_back(std::move(u)); plan.inv_bgs.push_back(std::move(bg)); }
+            }
+        }
+
+        // Forward result lands in buf_b for odd log2n, buf_a for even. The
+        // complex-multiply reads it × irspec → buf_c.
+        wgpu::Buffer& fwd_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
+        plan.mul_bg = create_bind_group(complex_mul_pipeline_,
+                                        {fwd_buf, plan.irspec, plan.buf_c});
+        if (!plan.mul_bg) return false;
+
+        queue_.WriteBuffer(plan.irspec, 0, ir_spec, bytes);
+
+        conv_plans_.insert_or_assign(n, std::move(plan));
+        return true;
+    }
+
+    bool convolve(const float* in_complex, float* out_complex, uint32_t n) override {
+        if (!initialized_ || in_complex == nullptr || out_complex == nullptr) return false;
+        auto it = conv_plans_.find(n);
+        if (it == conv_plans_.end()) return false;
+        ConvPlan& plan = it->second;
+
+        const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t fft_wg = ((n / 2u) + 255u) / 256u;  // FFT passes: n/2 threads
+        const uint32_t mul_wg = (n + 255u) / 256u;          // complex-mul: n pairs
+
+        queue_.WriteBuffer(plan.buf_a, 0, in_complex, bytes);
+
+        // One command buffer: forward FFT → complex-mul → copy product into the
+        // inverse input → inverse FFT → copy result to readback. Intermediates
+        // never leave the GPU; only the final block is read back.
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(complex_mul_pipeline_);
+            pass.SetBindGroup(0, plan.mul_bg);
+            pass.DispatchWorkgroups(mul_wg);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.buf_c, 0, plan.buf_a, 0, bytes);
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
+        encoder.CopyBufferToBuffer(inv_buf, 0, plan.readback, 0, bytes);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        if (!read_back(plan.readback, out_complex, bytes)) return false;
+
+        const float inv = 1.0f / static_cast<float>(n);  // inverse-FFT normalization
+        for (uint32_t i = 0; i < n * 2u; ++i) out_complex[i] *= inv;
+        return true;
     }
 
     // ── Capabilities ─────────────────────────────────────────────────────
@@ -791,6 +894,26 @@ private:
     };
     std::unordered_map<uint32_t, FftPlan> fft_plans_;
 
+    // GPU-resident convolution plan: forward + complex-mul + inverse fused into
+    // one command buffer (one readback). Separate forward/inverse uniform sets
+    // (sign -1/+1) so both run in a single submit; buf_c holds the product; the
+    // IR spectrum lives resident in `irspec`. "Plan once, run many."
+    struct ConvPlan {
+        uint32_t n = 0;
+        uint32_t log2n = 0;
+        wgpu::Buffer buf_a;       // ping-pong + inverse input (Storage|CopyDst|CopySrc)
+        wgpu::Buffer buf_b;       // ping-pong (Storage|CopyDst|CopySrc)
+        wgpu::Buffer buf_c;       // complex-mul product (Storage|CopyDst|CopySrc)
+        wgpu::Buffer irspec;      // resident IR spectrum (Storage|CopyDst)
+        wgpu::Buffer readback;    // CopyDst|MapRead
+        std::vector<wgpu::Buffer> fwd_u;       // forward per-pass uniforms (sign=-1)
+        std::vector<wgpu::Buffer> inv_u;       // inverse per-pass uniforms (sign=+1)
+        std::vector<wgpu::BindGroup> fwd_bgs;  // forward passes (ping-pong from buf_a)
+        std::vector<wgpu::BindGroup> inv_bgs;  // inverse passes (ping-pong from buf_a)
+        wgpu::BindGroup mul_bg;   // {forward-result-buf, irspec, buf_c}
+    };
+    std::unordered_map<uint32_t, ConvPlan> conv_plans_;
+
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
     // to eliminate allocator churn. Created lazily in create_pipelines().
@@ -863,6 +986,22 @@ private:
 
     static bool is_power_of_two(uint32_t n) {
         return n != 0u && (n & (n - 1u)) == 0u;
+    }
+
+    // Encode one Stockham FFT pass per bind group into an existing encoder (no
+    // submit). Each pass is its own compute pass so Dawn inserts the required
+    // cross-pass synchronization. Shared by the fused convolution path.
+    void encode_fft_passes(wgpu::CommandEncoder& encoder,
+                           const std::vector<wgpu::BindGroup>& stage_bgs,
+                           uint32_t workgroups) {
+        for (const auto& bg : stage_bgs) {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(fft_pipeline_);
+            pass.SetBindGroup(0, bg);
+            pass.DispatchWorkgroups(workgroups);
+            pass.End();
+        }
     }
 
     // Build (or fetch) the persistent ping-pong plan for a given FFT size.
