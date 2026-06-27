@@ -1951,6 +1951,11 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-spectral-morph
         SOURCES test_gpu_spectral_morph.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Hyper-Freeze (Phase 5, hardcore): multi-layer frozen stack + weighted
+    # morph + spectral smear.
+    pulp_add_test_suite(pulp-test-gpu-hyper-freeze
+        SOURCES test_gpu_hyper_freeze.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 
 # Test signal source (sine tone, file playback)
