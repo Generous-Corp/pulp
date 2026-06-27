@@ -1041,7 +1041,7 @@ TEST_CASE("View::paint_all does NOT bracket concat when origin is unset (back-co
           "[view][transform][issue-1026]") {
     using namespace pulp::canvas;
 
-    // pulp #1026 — only an EXPLICIT setTransformOrigin call activates the
+    // Only an EXPLICIT setTransformOrigin call activates the
     // pre/post-origin translate bracket on the matrix path. A setTransform()
     // call with no origin emits a single concat, matching the issue-930
     // contract.
@@ -1087,8 +1087,8 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
 }
 
-// pulp #1171 — uniform set_border_radius() followed
-// by a single per-corner override must NOT zero the other three corners.
+// uniform set_border_radius() followed by a single per-corner override
+// must NOT zero the other three corners.
 TEST_CASE("set_border_radius + per-corner override seeds remaining corners",
           "[view][border][issue-1171]") {
     View v;
