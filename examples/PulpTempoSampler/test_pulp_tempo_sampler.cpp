@@ -793,32 +793,39 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     CHECK(played_long > played_short);
 }
 
-// Bar-snap: the analyzer reports an INTEGER bpm, but a real loop's tempo is
-// usually fractional, so stretching to the rounded value tiles slightly short
-// ("ends a bit early"). bar_snap_bpm recovers the exact bar-multiple tempo.
-TEST_CASE("bar-snap derives the exact loop tempo so loops tile perfectly",
+// bar_exact_bpm derives the EXACT bar-multiple tempo so a loop tiles perfectly at
+// any host tempo, and uses the host as an octave prior to resolve half/double
+// detection errors.
+TEST_CASE("bar-exact tempo: perfect tiling + host-prior octave resolution",
           "[tempo-sampler][issue-tempo-barsnap]") {
     using P = PulpTempoSamplerProcessor;
     const double sr = 48000.0;
     // A 2-bar (8-beat) loop whose TRUE tempo is fractional (103.4). The analyzer
-    // rounds to 103, which would tile short; snapping recovers ~103.4.
+    // rounds to 103; bar_exact recovers ~103.4.
     const double true_bpm = 103.4;
-    const long frames = std::lround(8.0 * 60.0 / true_bpm * sr);  // exactly 8 beats long
-    const double rough = std::round(true_bpm);                    // 103 (analyzer output)
-    const double snapped = P::bar_snap_bpm(rough, frames, sr);
-    CHECK(std::abs(snapped - true_bpm) < 0.05);
-    // Tiling invariant: frames * snapped == 8 beats * 60 * sr (host-independent),
-    // so the loop fills an exact 2 bars at ANY host tempo.
+    const long frames = std::lround(8.0 * 60.0 / true_bpm * sr);   // exactly 8 beats long
+    const double exact = P::bar_exact_bpm(frames, sr, /*host*/120.0, /*analyzer*/103.0);
+    CHECK(std::abs(exact - true_bpm) < 0.05);
+    // Tiling invariant: frames * exact == 8 beats * 60 * sr (host-independent), so
+    // the loop fills an exact 2 bars at ANY host tempo.
     const double ideal = 8.0 * 60.0 * sr;
-    CHECK(std::abs(static_cast<double>(frames) * snapped - ideal) < 0.002 * ideal);
+    CHECK(std::abs(static_cast<double>(frames) * exact - ideal) < 0.002 * ideal);
 
-    // Non-loop material (beat count far from an integer) is left on the estimate.
-    const long odd = std::lround(7.5 * 60.0 / 100.0 * sr);        // 7.5 beats at 100
-    CHECK(P::bar_snap_bpm(100.0, odd, sr) == 100.0);
+    // OCTAVE FIX: the analyzer detected DOUBLE tempo (206) for the same 2-bar loop,
+    // but the host is 120, so bar_exact picks the 8-beat reading (~103.4), not 206.
+    CHECK(std::abs(P::bar_exact_bpm(frames, sr, 120.0, 206.0) - true_bpm) < 0.1);
+    // With NO host hint it trusts the analyzer's octave (16 beats at ~206.8).
+    CHECK(P::bar_exact_bpm(frames, sr, 0.0, 206.0) > 200.0);
+    // And a genuine 3-bar loop (12 beats) is NOT collapsed to 2 bars by the host
+    // prior — the octave neighbours of the analyzer's count don't include 8.
+    const long f3 = std::lround(12.0 * 60.0 / 155.0 * sr);         // 3 bars at 155
+    const double e3 = P::bar_exact_bpm(f3, sr, 120.0, 155.0);
+    CHECK(std::abs(static_cast<double>(f3) * e3 - 12.0 * 60.0 * sr) < 0.002 * 12.0 * 60.0 * sr);
+    CHECK(e3 > 140.0);  // ~155 (3 bars), not ~103 (2 bars)
 
     // Degenerate inputs pass straight through.
-    CHECK(P::bar_snap_bpm(0.0, frames, sr) == 0.0);
-    CHECK(P::bar_snap_bpm(120.0, 0, sr) == 120.0);
+    CHECK(P::bar_exact_bpm(frames, sr, 120.0, 0.0) == 0.0);
+    CHECK(P::bar_exact_bpm(0, sr, 120.0, 120.0) == 120.0);
 }
 
 // A manually-set TEMPO must survive close+reopen (serialize/deserialize) — it
