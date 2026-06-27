@@ -6,11 +6,10 @@
 // routing. This split keeps recovered CSS cases and later Canvas2D
 // bridge regressions that were separated from the original merge cleanup.
 //
-// Each test goes JS → bridge → CanvasWidget::paint(RecordingCanvas) →
-// asserts on the recorded Canvas API call so a regression anywhere in
-// the chain surfaces here. Skia / CG paint-side honouring of FillRule
-// and kStroke_Style is unit-tested at the Canvas backend layer; here we
-// focus on the bridge ↔ Canvas API contract.
+// Live CanvasWidget tests in this file go JS → bridge →
+// CanvasWidget::paint(RecordingCanvas) → recorded Canvas API
+// assertions. Skia / CG paint-side honoring is unit-tested at the
+// Canvas backend layer; this file focuses on bridge ↔ Canvas contracts.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
