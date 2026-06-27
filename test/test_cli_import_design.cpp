@@ -73,8 +73,9 @@ bool json_structurally_equal(const std::string& a, const std::string& b) {
 // the Rust front-end lands at <build>/pulp and forwards import-design to that
 // delegate. The test runner's working directory at invocation is <build>/test.
 // Prefer an explicit override, then the C++ delegate (the real implementation
-// of this command), then the legacy/Rust names. Returning a non-existent path
-// makes binary_exists() false so the case skips when nothing is built.
+// of this command), then the legacy/Rust names. An empty PULP_CLI_PATH is the
+// explicit unavailable-CLI sentinel for skip-path tests; a configured but
+// missing binary is a test setup failure.
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
@@ -91,7 +92,24 @@ fs::path pulp_binary() {
     return build / "tools" / "cli" / "pulp-cpp";
 }
 
-bool binary_exists() { return fs::exists(pulp_binary()); }
+bool binary_available() {
+    if (const char* env = std::getenv("PULP_CLI_PATH"); env) {
+        if (!*env) return false;
+        if (!fs::exists(fs::path(env))) {
+            FAIL("pulp binary configured but missing at " << env);
+            return false;
+        }
+        return true;
+    }
+
+    auto bin = pulp_binary();
+    if (bin.empty()) return false;
+    if (!fs::exists(bin)) {
+        FAIL("pulp binary configured but missing at " << bin.string());
+        return false;
+    }
+    return true;
+}
 
 ProcessResult run_pulp(const std::vector<std::string>& args, int timeout_ms = 30000) {
     auto bin = pulp_binary();
@@ -233,7 +251,7 @@ TEST_CASE("extract_claude_classnames handles comma-separated selector lists",
 
 TEST_CASE("pulp import-design --from claude emits classnames.json by default",
           "[cli][import-design][issue-1035][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-classnames");
     auto html_in = fixture_dir() / "example.html";
@@ -272,7 +290,7 @@ TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean imp
     // and the new return path is exercised. (The failure→4 path needs real
     // skewed PNG assets; the geometry logic is unit-covered in
     // test_design_fidelity.cpp / test_design_import.cpp.)
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-dryrun-strict");
     auto html_in = fixture_dir() / "example.html";
@@ -292,7 +310,7 @@ TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean imp
 
 TEST_CASE("pulp import-design --from claude --no-emit-classnames suppresses the artifact",
           "[cli][import-design][issue-1035][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-classnames-off");
     auto html_in = fixture_dir() / "example.html";
@@ -359,7 +377,7 @@ TEST_CASE("looks_like_bundler_entry on empty / pathological input",
 
 TEST_CASE("pulp import-design --from claude emits native-react hint on bundler entry",
           "[cli][import-design][friction-3][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction3");
     // Tiny bundler entry — should produce few elements + the hint.
@@ -396,7 +414,7 @@ TEST_CASE("pulp import-design --from claude emits native-react hint on bundler e
 
 TEST_CASE("pulp import-design --output anchors sidecar files to output dir",
           "[cli][import-design][friction-4][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction4");
     auto html_in = fixture_dir() / "example.html";
@@ -415,7 +433,7 @@ TEST_CASE("pulp import-design --output anchors sidecar files to output dir",
 
 TEST_CASE("pulp import-design respects explicit sidecar paths over --output anchor",
           "[cli][import-design][friction-4][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction4-explicit");
     auto sidecar_dir = tmp / "sidecars";
@@ -453,7 +471,7 @@ TEST_CASE("pulp import-design respects explicit sidecar paths over --output anch
 // with a stderr note. This guards against the silent-empty footgun.
 TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
           "[cli][import-design][issue-41][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-import-source-routing");
     auto scene = tmp / "scene.pulp.json";
@@ -529,7 +547,7 @@ fs::path write_sprite_knob_fixture(const fs::path& tmp) {
 
 TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interactive",
           "[cli][import-design][sprite][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-hoist");
     auto scene = write_sprite_knob_fixture(tmp);
@@ -566,7 +584,7 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
 // This guards the baked lane: children survive AND the parsed manifest is kept.
 TEST_CASE("pulp import-design --emit ir-json keeps a figma-plugin tree + assets",
           "[cli][import-design][ir-json][figma-plugin][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-irjson-figma-plugin");
     auto scene = write_sprite_knob_fixture(tmp);  // 1 asset (knob_body) + nested GainKnob
@@ -593,7 +611,7 @@ TEST_CASE("pulp import-design normalizes + emits a Figma blend mode (end-to-end)
     // The figma-plugin export carries the blend mode in the `figma` block in
     // UPPER_SNAKE. parse_ir_node normalizes it to the CSS keyword and codegen
     // emits setMixBlendMode — except PASS_THROUGH (= normal), which is dropped.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-blend-mode");
     {
@@ -632,7 +650,7 @@ TEST_CASE("pulp import-design lowers an SVG path node to a native SvgPath (end-t
     // Full pipeline: the figma-plugin parser routes a `path` node carrying `d`
     // through parse_ir_node (which preserves it as path_data) and codegen emits
     // createSvgPath + setSvgPath — instead of silently dropping the vector.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-vector-path");
     {
@@ -669,7 +687,7 @@ TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no
     // the leaf knob codegen would silently drop every layer after the first.
     // So when there is >1 asset-image child the importer DEMOTES to a plain
     // container and every layer renders as an image (faithful, not turnable).
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-multilayer");
     fs::create_directories(tmp / "assets");
@@ -723,7 +741,7 @@ TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no
 
 TEST_CASE("pulp import-design default (silver) knob keeps the native vector body",
           "[cli][import-design][sprite][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-silver");
     auto scene = write_sprite_knob_fixture(tmp);

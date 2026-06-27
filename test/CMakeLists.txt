@@ -5498,7 +5498,7 @@ endif()
 if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-import-design pulp-import-design)
 endif()
-catch_discover_tests(pulp-test-cli-import-design
+catch_discover_tests(pulp-test-cli-import-design EXTRA_ARGS --allow-running-no-tests
     PROPERTIES
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
         LABELS "parser-import")
