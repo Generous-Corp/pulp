@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -790,6 +791,82 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     CHECK(within_rate1(played_long, smax));
     // And the longer region genuinely plays longer — the SAME rate orders them.
     CHECK(played_long > played_short);
+}
+
+// A manually-set TEMPO must survive close+reopen (serialize/deserialize) — it
+// lives in a non-param atomic that v1 state did not persist.
+TEST_CASE("tempo override persists across serialize/deserialize",
+          "[tempo-sampler][issue-tempo-persist]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_target_bpm(150.0);                 // manual tempo (auto-unlinks)
+    CHECK_FALSE(f.proc->tempo_linked());
+    const auto blob = f.proc->serialize_plugin_state();
+    REQUIRE(!blob.empty());
+
+    Fixture g;                                     // a freshly reopened plugin instance
+    REQUIRE(g.proc->deserialize_plugin_state(
+        std::span<const std::uint8_t>(blob.data(), blob.size())));
+    REQUIRE(wait_for([&] { return g.proc->has_sample(); }));
+    CHECK(std::lround(g.proc->effective_bpm()) == 150);  // tempo restored, not reset
+    CHECK_FALSE(g.proc->tempo_linked());                 // still manual
+}
+
+// TEMPO LINK: default linked (follows host); a manual value unlinks; re-link
+// follows the host again. Mirrors the editor's LINK toggle + drag-to-unlink.
+TEST_CASE("tempo LINK: default-linked follows host, manual unlinks, relink re-follows",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+
+    // Default LINKED → follows the host transport.
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    const long exp90 = std::llround(48000.0 * 120.0 / 90.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+    process_block(*f.proc, 140.0, false, 0, l, r);       // change host tempo
+    const long exp140 = std::llround(48000.0 * 120.0 / 140.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp140; }));  // auto-follows
+
+    // Manual tempo UNLINKS — host changes are now ignored.
+    f.proc->set_target_bpm(100.0);
+    CHECK_FALSE(f.proc->tempo_linked());
+    process_block(*f.proc, 200.0, false, 0, l, r);       // host ignored
+    const long exp100 = std::llround(48000.0 * 120.0 / 100.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp100; }));
+
+    // Re-link → follows the host again.
+    f.proc->set_tempo_linked(true);
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+}
+
+// In the standalone (no DAW transport) LINKED resolves to the loop's OWN detected
+// tempo, so a dropped loop plays at its natural tempo (R≈1) rather than a host
+// default. set_standalone_host(true) is what the editor reports on view-open.
+TEST_CASE("standalone LINKED follows the loop's detected tempo, not the host default",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    f.proc->set_standalone_host(true);
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);            // detected = 120
+    CHECK(f.proc->tempo_linked());
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 90.0, false, 0, l, r);    // host says 90 — ignored in standalone
+    // Linked-standalone renders at the detected tempo → R = 120/120 = 1 → raw length.
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == 48000; }));
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
