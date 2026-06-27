@@ -361,11 +361,12 @@ These are the 12 additional Web API specifications that frontend developers use 
 | lineCap / lineJoin | ✅ | butt/round/square, miter/round/bevel |
 | globalAlpha | ✅ | Per-canvas opacity |
 | globalCompositeOperation | ✅ | source-over, multiply, screen, overlay |
-| createLinearGradient / createRadialGradient | ✅ | With color stops |
-| measureText | ⚠️ | Approximate (no Skia font shaping) |
-| drawImage | ❌ | Cannot render images on canvas |
-| getImageData / putImageData | ❌ | Structurally hard with command list |
-| createPattern | ❌ | Needs Skia shader pattern |
+| createLinearGradient / createRadialGradient / createConicGradient | ✅ | With color stops; conic uses Skia sweep / CoreGraphics rasterized conic |
+| measureText | ✅ | Skia metrics with populated fallback estimates when Skia is unavailable |
+| drawImage | ✅ | 3 / 5 / 9-arg forms, including source/destination rect rendering |
+| getImageData | ⚠️ | Returns a correctly shaped zero-filled buffer until a live surface readback path exists |
+| putImageData | ✅ | Writes RGBA buffers through `Canvas::write_pixels` on supporting backends |
+| createPattern | ✅ | CanvasPattern handles with repeat / repeat-x / repeat-y / no-repeat |
 
 ### 18. Clipboard API
 **Spec:** https://www.w3.org/TR/clipboard-apis/

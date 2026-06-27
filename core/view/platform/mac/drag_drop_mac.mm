@@ -149,10 +149,12 @@ static DragSession& mac_drag_session(const void* view) {
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 @end
+#ifdef PULP_HAS_SKIA
 @interface PulpGpuPluginView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 @end
+#endif
 
 namespace pulp::view {
 // Shared bodies so the CPU + GPU categories don't duplicate the dispatch.
@@ -203,6 +205,7 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
 }
 @end
 
+#ifdef PULP_HAS_SKIA
 @interface PulpGpuPluginView (PulpDragDrop) <NSDraggingDestination>
 @end
 @implementation PulpGpuPluginView (PulpDragDrop)
@@ -218,6 +221,7 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
     return pulp::view::hosted_perform_drop(self, self.rootView, self.pointTransform, s);
 }
 @end
+#endif
 
 // A self-retaining NSDraggingSource for outbound file drags (see
 // begin_file_drag below). AppKit does NOT keep the source alive for the

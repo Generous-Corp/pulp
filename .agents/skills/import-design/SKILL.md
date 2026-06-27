@@ -2627,12 +2627,12 @@ canvasSetLinearGradient(id, x0, y0, x1, y1, ...stopArgs);
 
 **Now (pulp v0.74.1+):** each `CanvasWidget::paint` is wrapped in `save_layer`, isolating clearRect / Porter-Duff to that canvas's own buffer. Importer can emit `<canvas>` siblings without worrying about cross-erasure. Pin SDK `>= 0.74.1`.
 
-### 5. Other Canvas2D methods missing from the bridge
+### 5. Canvas2D bridge caveats to handle explicitly
 
-- `ctx.measureText()` — bridge has `canvasMeasureText` but the shim should fall back to a per-char approximation (~6.5px for 10px monospace, ~px*0.6 for proportional) when not available
-- `ctx.strokeText()` — bridge has no stroke path; fall back to `canvasFillText` and accept the visual gap
-- `ctx.createPattern()` — not implemented; emit a solid-color fallback from the pattern's first stop
-- `ctx.createConicGradient()` — bridge has no `canvasSetConicGradient` registration even though `SkiaCanvas::set_fill_gradient_conic` exists; either file a Pulp follow-up or fall back to a flat solid
+- `ctx.measureText()` — bridge has `canvasMeasureText` and the JS shim falls back to populated 0.6em estimates when the bridge is unavailable. Do not emit importer-local metric stubs unless you are targeting an older SDK.
+- `ctx.strokeText()` — bridge has `canvasStrokeText`; the JS shim keeps a fillText-style fallback for older hosts. Prefer the native call and let the shim decide.
+- `ctx.createPattern()` — bridge has `canvasSetFillPattern` / `canvasSetStrokePattern`. Still emit a solid-color fallback when the importer knows the image source cannot be resolved, because an unresolved pattern source degrades visibly at paint time.
+- `ctx.createConicGradient()` — bridge has `canvasSetConicGradient`; Skia renders a sweep shader and CoreGraphics software-rasterizes the conic image. Keep CSS conic gradients as gradients instead of flattening them to a solid fill.
 
 ### 6. SDK version requirements for canvas2d parity
 
@@ -2640,6 +2640,9 @@ canvasSetLinearGradient(id, x0, y0, x1, y1, ...stopArgs);
 |------------|---------|
 | `canvasSetLinearGradient` / `canvasSetRadialGradient` | v0.72.4 |
 | Gradient stops actually applied to fills | v0.72.5 |
+| `canvasSetConicGradient` | v0.78.2 |
+| `canvasStrokeText`, CoreGraphics conic/pattern rendering, stroke gradients, and `canvasSetFillPattern` / `canvasSetStrokePattern` | v0.78.3 |
+| 9-arg `drawImage` source-rect routing | v0.81.0 |
 | `set_blend_mode` on Skia (GPU) honored | already wired; CG/CPU is silent no-op |
 | Per-canvas `save_layer` isolation (no sibling clearRect erase) | v0.74.1 |
 | Canvas paint instrumentation (`PULP_LOG_CANVAS_PAINT=1`) | v0.75.0 |
