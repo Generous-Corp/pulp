@@ -17,8 +17,13 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     d.output_channels = channels_;
     d.block_size = block_;
     d.sample_rate = sample_rate_;
-    d.latency_blocks = 1;
-    d.miss_policy = MissPolicy::PassthroughDry;
+    // 2 blocks of worker headroom for the GPU round-trip, and CpuFallback so a
+    // miss is filled by the (RT-safe) CPU convolver — seamless, never a dry
+    // glitch. The node has a real CPU fallback, so this is the right default:
+    // the GPU contributes when it keeps up, the CPU covers it transparently
+    // otherwise, and the plugin always produces correct audio.
+    d.latency_blocks = 2;
+    d.miss_policy = MissPolicy::CpuFallback;
     d.supports_cpu_fallback = true;
     return d;
 }
