@@ -20,6 +20,8 @@
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/view/theme_presets.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <algorithm>
@@ -34,26 +36,43 @@ namespace pulp::examples {
 namespace cv = pulp::canvas;
 namespace vw = pulp::view;
 
-namespace sc_palette {
-inline constexpr cv::Color bg          = cv::Color::rgba8(18, 19, 30);
-inline constexpr cv::Color surface     = cv::Color::rgba8(30, 32, 48);
-inline constexpr cv::Color elevated    = cv::Color::rgba8(46, 49, 70);
-inline constexpr cv::Color border      = cv::Color::rgba8(70, 74, 100);
-inline constexpr cv::Color text        = cv::Color::rgba8(214, 221, 245);
-inline constexpr cv::Color text_dim    = cv::Color::rgba8(150, 158, 188);
-inline constexpr cv::Color accent      = cv::Color::rgba8(137, 180, 250);
-inline constexpr cv::Color accent_warm = cv::Color::rgba8(245, 169, 184);
-// IR waveform — a cool base that warms where the spectrum is hot.
-inline constexpr cv::Color ir_cold     = cv::Color::rgba8(96, 196, 210);
-inline constexpr cv::Color ir_hot      = cv::Color::rgba8(247, 162, 138);
-inline constexpr cv::Color ir_axis     = cv::Color::rgba8(58, 62, 86);
-// Spectrum — teal line over a soft fill.
-inline constexpr cv::Color spec_line   = cv::Color::rgba8(148, 226, 213);
-inline constexpr cv::Color spec_fill   = cv::Color::rgba8(148, 226, 213, 40);
-inline constexpr cv::Color slider_track= cv::Color::rgba8(40, 43, 62);
-inline constexpr cv::Color slider_fill = cv::Color::rgba8(137, 180, 250, 70);
-inline constexpr cv::Color bypass_on   = cv::Color::rgba8(250, 179, 135);
-} // namespace sc_palette
+// The UI palette is resolved from Pulp's "Ink & Signal" design language (the
+// flagship token preset), not hardcoded — so the editor is wired to the same
+// semantic tokens (bg/text/accent/waveform/slider/meter…) the rest of the
+// system uses and would track a reskin or appearance change. Each lookup falls
+// back to a brand-matched constant so it still renders if a token is absent.
+struct ScPalette {
+    cv::Color bg, surface, elevated, border, text, text_dim, accent, accent_warm;
+    cv::Color ir_cold, ir_hot, ir_axis, spec_line, spec_fill;
+    cv::Color slider_track, slider_fill, bypass_on;
+};
+
+inline ScPalette make_ink_signal_palette() {
+    vw::Theme th;
+    if (const auto* preset = vw::find_preset("ink-signal"))
+        th = vw::theme_from_preset(*preset, /*dark=*/true);
+    auto C = [&](const char* name, cv::Color fb) { return th.color(name).value_or(fb); };
+    ScPalette p;
+    p.bg           = C("bg.primary",      cv::Color::rgba8(18, 19, 30));
+    p.surface      = C("bg.surface",      cv::Color::rgba8(30, 32, 48));
+    p.elevated     = C("bg.elevated",     cv::Color::rgba8(46, 49, 70));
+    p.border       = C("control.border",  cv::Color::rgba8(70, 74, 100));
+    p.text         = C("text.primary",    cv::Color::rgba8(214, 221, 245));
+    p.text_dim     = C("text.secondary",  cv::Color::rgba8(150, 158, 188));
+    p.accent       = C("accent.primary",  cv::Color::rgba8(22, 218, 194));   // signal teal
+    p.accent_warm  = C("accent.secondary", cv::Color::rgba8(139, 108, 245)); // ink violet
+    // IR waveform — signal-teal base that warms toward amber where the spectrum
+    // is hot (the live cross-feed).
+    p.ir_cold      = C("waveform.line",   cv::Color::rgba8(22, 218, 194));
+    p.ir_hot       = C("accent.warning",  cv::Color::rgba8(246, 184, 71));
+    p.ir_axis      = C("waveform.grid",   cv::Color::rgba8(58, 62, 86));
+    p.spec_line    = C("waveform.line",   cv::Color::rgba8(22, 218, 194));
+    p.spec_fill    = p.spec_line.with_alpha(0.16f);
+    p.slider_track = C("slider.track",    cv::Color::rgba8(40, 43, 62));
+    p.slider_fill  = C("slider.fill",     p.accent).with_alpha(0.45f);
+    p.bypass_on    = C("accent.warning",  cv::Color::rgba8(246, 184, 71));
+    return p;
+}
 
 class SuperConvolverUi : public vw::View {
 public:
@@ -75,13 +94,13 @@ public:
         const float W = local_bounds().width, H = local_bounds().height;
         const float s = scale();
 
-        canvas.set_fill_color(sc_palette::bg);
+        canvas.set_fill_color(pal_.bg);
         canvas.fill_rect(0, 0, W, H);
 
-        canvas.set_fill_color(sc_palette::text);
+        canvas.set_fill_color(pal_.text);
         canvas.set_font("Inter", 21.0f * s);
         canvas.fill_text("SuperConvolver", 20 * s, 32 * s);
-        canvas.set_fill_color(sc_palette::text_dim);
+        canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 12.0f * s);
         canvas.fill_text("Convolution reverb · GPU-rendered UI — live impulse response & spectrum",
                          20 * s, 50 * s);
@@ -203,9 +222,9 @@ private:
     void paint_ir(cv::Canvas& canvas) {
         const float s = scale();
         const auto& r = ir_;
-        canvas.set_fill_color(sc_palette::surface);
+        canvas.set_fill_color(pal_.surface);
         canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
-        canvas.set_fill_color(sc_palette::text_dim);
+        canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 11.0f * s);
         canvas.fill_text("impulse response", r.x + 10 * s, r.y + 16 * s);
 
@@ -217,7 +236,7 @@ private:
         const float midY = (top + bot) * 0.5f, halfH = (bot - top) * 0.5f;
 
         // Center axis.
-        canvas.set_stroke_color(sc_palette::ir_axis);
+        canvas.set_stroke_color(pal_.ir_axis);
         canvas.set_line_width(1.0f);
         canvas.stroke_line(x0, midY, x0 + xspan, midY);
 
@@ -244,7 +263,7 @@ private:
             const float amp = std::clamp(peak, 0.0f, 1.0f) * halfH * 0.94f;
             const float x = x0 + frac * xspan;
             const float t = spectrum_energy_at(frac);  // 0..1 cold→hot tint
-            canvas.set_stroke_color(lerp_color(sc_palette::ir_cold, sc_palette::ir_hot, t));
+            canvas.set_stroke_color(lerp_color(pal_.ir_cold, pal_.ir_hot, t));
             canvas.stroke_line(x, midY - amp, x, midY + amp);
         }
         canvas.restore();
@@ -254,9 +273,9 @@ private:
     void paint_spectrum(cv::Canvas& canvas) {
         const float s = scale();
         const auto& r = spectrum_rect_;
-        canvas.set_fill_color(sc_palette::surface);
+        canvas.set_fill_color(pal_.surface);
         canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 8 * s);
-        canvas.set_fill_color(sc_palette::text_dim);
+        canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 11.0f * s);
         canvas.fill_text("output spectrum (log f)", r.x + 8 * s, r.y + 16 * s);
 
@@ -277,9 +296,9 @@ private:
         const int curve_pts = pc;
         poly[static_cast<size_t>(pc++)] = {x0 + xspan, base};
         poly[static_cast<size_t>(pc++)] = {x0, base};
-        canvas.set_fill_color(sc_palette::spec_fill);
+        canvas.set_fill_color(pal_.spec_fill);
         canvas.fill_path(poly.data(), static_cast<size_t>(pc));
-        canvas.set_stroke_color(sc_palette::spec_line);
+        canvas.set_stroke_color(pal_.spec_line);
         canvas.set_line_width(1.6f);
         canvas.stroke_path(poly.data(), static_cast<size_t>(curve_pts));
         canvas.restore();
@@ -288,7 +307,7 @@ private:
     // ── controls (vertical sliders + bypass toggle) ──
     void paint_controls(cv::Canvas& canvas) {
         const float s = scale();
-        canvas.set_fill_color(sc_palette::surface);
+        canvas.set_fill_color(pal_.surface);
         canvas.fill_rounded_rect(controls_.x, controls_.y, controls_.width,
                                  controls_.height, 8 * s);
 
@@ -296,7 +315,7 @@ private:
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
             // Label (top of cell), centered.
-            canvas.set_fill_color(sc_palette::text_dim);
+            canvas.set_fill_color(pal_.text_dim);
             canvas.set_font("Inter", 12.0f * s);
             canvas.fill_text(sl.label, sl.cell.x + (sl.cell.width - 36 * s) * 0.5f,
                              sl.cell.y + 16 * s);
@@ -304,14 +323,14 @@ private:
             const float frac = value_frac(i);
             const float handle_y = t.bottom() - frac * t.height;
             // Track + fill below the handle.
-            canvas.set_fill_color(sc_palette::slider_track);
+            canvas.set_fill_color(pal_.slider_track);
             canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.width * 0.5f);
-            canvas.set_fill_color(sc_palette::slider_fill);
+            canvas.set_fill_color(pal_.slider_fill);
             canvas.fill_rounded_rect(t.x, handle_y, t.width, t.bottom() - handle_y,
                                      t.width * 0.5f);
             // Handle.
             const bool active = (active_slider_ == i);
-            canvas.set_fill_color(active ? sc_palette::accent_warm : sc_palette::accent);
+            canvas.set_fill_color(active ? pal_.accent_warm : pal_.accent);
             canvas.fill_circle(t.x + t.width * 0.5f, handle_y, t.width * 0.9f);
 
             // Value readout (bottom of cell), centered.
@@ -319,7 +338,7 @@ private:
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(sc_palette::text);
+            canvas.set_fill_color(pal_.text);
             canvas.set_font("Inter", 13.0f * s);
             canvas.fill_text(buf, sl.cell.x + (sl.cell.width - 44 * s) * 0.5f,
                              sl.cell.bottom() - 8 * s);
@@ -327,9 +346,9 @@ private:
 
         // Bypass toggle.
         const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        canvas.set_fill_color(bypassed ? sc_palette::bypass_on : sc_palette::elevated);
+        canvas.set_fill_color(bypassed ? pal_.bypass_on : pal_.elevated);
         canvas.fill_rounded_rect(bypass_.x, bypass_.y, bypass_.width, bypass_.height, 8 * s);
-        canvas.set_fill_color(bypassed ? sc_palette::bg : sc_palette::text);
+        canvas.set_fill_color(bypassed ? pal_.bg : pal_.text);
         canvas.set_font("Inter", 14.0f * s);
         canvas.fill_text(bypassed ? "● BYPASSED" : "BYPASS",
                          bypass_.x + 16 * s, bypass_.y + bypass_.height * 0.62f);
@@ -396,6 +415,7 @@ private:
     pulp::examples::SpectrumBus& spectrum_;
     pulp::examples::SuperConvolverProcessor& proc_;
     pulp::state::ParameterEdit edit_;
+    ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
     vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{};
     std::array<Slider, 3> sliders_{{
