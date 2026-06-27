@@ -1124,7 +1124,7 @@ TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
 }
 
 TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
-          "[view][import][coverage]") {
+          "[view][import]") {
     auto json = R"json({
         "type": "frame",
         "name": "Rack",
@@ -1891,7 +1891,7 @@ TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
 }
 
 TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget edge branches",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
     ir.root.type = "frame";
@@ -1998,7 +1998,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget
 }
 
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::v0;
     ir.root.type = "frame";

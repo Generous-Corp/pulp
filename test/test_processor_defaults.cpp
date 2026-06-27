@@ -610,7 +610,7 @@ TEST_CASE("PluginDescriptor effective_capabilities ORs legacy and node fields",
 }
 
 TEST_CASE("PluginDescriptor preserves optional vendor contact metadata",
-          "[format][processor-defaults][metadata][coverage]") {
+          "[format][processor-defaults][metadata]") {
     PluginDescriptor d;
     d.vendor_url = "https://example.test/pulp";
     d.vendor_email = "support@example.test";
@@ -921,7 +921,7 @@ TEST_CASE("Processor default view_size reflects an overridden editor_size",
 }
 
 TEST_CASE("Processor custom view_size can provide resize bounds and aspect ratio",
-          "[format][processor-defaults][editor][coverage]") {
+          "[format][processor-defaults][editor]") {
     CustomViewSizeProcessor p;
     const auto hints = p.view_size();
 
@@ -971,7 +971,7 @@ TEST_CASE("view_size_from_design derives sensible bounds + aspect from preferred
 }
 
 TEST_CASE("Processor has_editor override can disable default editor contract",
-          "[format][processor-defaults][editor][coverage]") {
+          "[format][processor-defaults][editor]") {
     EditorlessProcessor p;
 
     REQUIRE_FALSE(p.has_editor());
@@ -993,7 +993,7 @@ TEST_CASE("Processor default latency and plugin-owned state hooks are inert",
 }
 
 TEST_CASE("Processor default lifecycle hooks are callable no-ops",
-          "[format][processor-defaults][lifecycle][coverage]") {
+          "[format][processor-defaults][lifecycle]") {
     PlainProcessor p;
     pulp::view::View view;
 
@@ -1011,7 +1011,7 @@ TEST_CASE("Processor default lifecycle hooks are callable no-ops",
 }
 
 TEST_CASE("Processor prepare receives the exact host context",
-          "[format][processor-defaults][context][coverage]") {
+          "[format][processor-defaults][context]") {
     PlainProcessor p;
     PrepareContext context;
     context.sample_rate = 96000.0;
@@ -1029,7 +1029,7 @@ TEST_CASE("Processor prepare receives the exact host context",
 }
 
 TEST_CASE("Processor process receives the exact transport context",
-          "[format][processor-defaults][context][coverage]") {
+          "[format][processor-defaults][context]") {
     PlainProcessor p;
     float out_samples[4] = {};
     float* out_channels[1] = {out_samples};
@@ -1133,7 +1133,7 @@ TEST_CASE("Processor sidechain, MPE, and UMP sidecar pointers can be set and cle
 }
 
 TEST_CASE("Processor sidecar pointers replace independently between blocks",
-          "[format][processor-defaults][sidecars][coverage]") {
+          "[format][processor-defaults][sidecars]") {
     PlainProcessor p;
 
     const float first_samples[2] = {0.1f, 0.2f};
@@ -1276,7 +1276,7 @@ TEST_CASE("for_each_subblock invokes one full block for null or empty queues",
 }
 
 TEST_CASE("for_each_subblock skips zero-sample buffers",
-          "[format][params][subblock][coverage]") {
+          "[format][params][subblock]") {
     pulp::state::StateStore store;
     store.add_parameter({
         .id = 3,
@@ -1307,7 +1307,7 @@ TEST_CASE("for_each_subblock skips zero-sample buffers",
 }
 
 TEST_CASE("for_each_subblock ignores boundary events and slices input with output",
-          "[format][params][subblock][coverage]") {
+          "[format][params][subblock]") {
     pulp::state::StateStore store;
     store.add_parameter({
         .id = 9,
@@ -1462,7 +1462,7 @@ TEST_CASE("ControlRateParamSmoother is bit-exact off and ramps when opted in",
 }
 
 TEST_CASE("ControlRateParamSmoother handles invalid rates reset and skip",
-          "[format][params][smoothing][coverage]") {
+          "[format][params][smoothing]") {
     pulp::state::ParamInfo info;
     info.smoothing_ramp_seconds = 0.004f;
 

@@ -372,7 +372,7 @@ TEST_CASE("SignalGraph custom node registrations invalidate matching snapshots",
 }
 
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "Input");
     auto gain = graph.add_gain_node("Gain");
@@ -1341,7 +1341,7 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
 }
 
 TEST_CASE("SignalGraph rejects audio connections with invalid ports",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1476,7 +1476,7 @@ private:
 } // namespace
 
 TEST_CASE("SignalGraph prepare failure leaves process output silent",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto plugin = graph.add_plugin_node(std::make_unique<PrepareFailPlugin>(),
@@ -1503,7 +1503,7 @@ TEST_CASE("SignalGraph prepare failure leaves process output silent",
 }
 
 TEST_CASE("SignalGraph process silences oversized blocks",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1526,7 +1526,7 @@ TEST_CASE("SignalGraph process silences oversized blocks",
 }
 
 TEST_CASE("SignalGraph process ignores non-positive block sizes",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1550,7 +1550,7 @@ TEST_CASE("SignalGraph process ignores non-positive block sizes",
 }
 
 TEST_CASE("SignalGraph clears stale audio input channels",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(2, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1587,7 +1587,7 @@ TEST_CASE("SignalGraph clears stale audio input channels",
 }
 
 TEST_CASE("SignalGraph placeholder plugin nodes preserve identity and clear extra outputs",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     PluginInfo missing = make_plugin_info("Missing CLAP", 1, 2);
@@ -2226,7 +2226,7 @@ TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
 }
 
 TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
-          "[host][graph][midi][coverage]") {
+          "[host][graph][midi]") {
     SignalGraph graph;
     auto midi_in = graph.add_midi_input_node("keys");
     auto midi_out = graph.add_midi_output_node("thru");
@@ -2794,7 +2794,7 @@ TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
 }
 
 TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1);
     auto out_node = graph.add_output_node(1);
@@ -2815,7 +2815,7 @@ TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
 }
 
 TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -2846,7 +2846,7 @@ TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
 }
 
 TEST_CASE("SignalGraph automation clamps add-mode and stored smoothing",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>();
@@ -2945,7 +2945,7 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
 }
 
 TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cycle edges",
-          "[host][graph][automation][audio-rate][coverage]") {
+          "[host][graph][automation][audio-rate]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -3115,7 +3115,7 @@ TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge orde
 }
 
 TEST_CASE("SignalGraph audio-rate replace and add modulation clamp to parameter bounds",
-          "[host][graph][automation][audio-rate][coverage]") {
+          "[host][graph][automation][audio-rate]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>(

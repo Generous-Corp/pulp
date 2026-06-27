@@ -263,7 +263,7 @@ TEST_CASE("parse_w3c_tokens resolves alias then evaluates math", "[view][import]
 }
 
 TEST_CASE("token parsers cover border composites inference and alternate sources",
-          "[view][import][coverage]") {
+          "[view][import]") {
     auto w3c = R"({
         "border": {
             "$type": "border",

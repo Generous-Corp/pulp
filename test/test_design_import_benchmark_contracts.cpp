@@ -75,7 +75,7 @@ public:
 }  // namespace
 
 TEST_CASE("design-import benchmark escapes JSON strings used in reports",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     REQUIRE(json_escape("plain") == "plain");
     REQUIRE(json_escape("quote\"slash\\") == "quote\\\"slash\\\\");
     REQUIRE(json_escape("line\nfeed") == "line\\nfeed");
@@ -86,7 +86,7 @@ TEST_CASE("design-import benchmark escapes JSON strings used in reports",
 }
 
 TEST_CASE("design-import benchmark parse_int accepts complete integers only",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     int value = 0;
     REQUIRE(parse_int("42", value));
     REQUIRE(value == 42);
@@ -108,7 +108,7 @@ TEST_CASE("design-import benchmark parse_int accepts complete integers only",
 }
 
 TEST_CASE("design-import benchmark argument parser supports split and equals forms",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     auto config = parse_args_vec({"bench", "--lane=baked-cpp", "--idle-ms=25",
                                   "--interactive-ms", "50", "--target-fps=120",
                                   "--output", "out.json"});
@@ -130,7 +130,7 @@ TEST_CASE("design-import benchmark argument parser supports split and equals for
 }
 
 TEST_CASE("design-import benchmark argument parser rejects invalid shapes",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     REQUIRE_FALSE(parse_args_vec({"bench", "--lane=nope"}).has_value());
     REQUIRE_FALSE(parse_args_vec({"bench", "--lane="}).has_value());
     REQUIRE_FALSE(parse_args_vec({"bench", "--lane"}).has_value());
@@ -145,7 +145,7 @@ TEST_CASE("design-import benchmark argument parser rejects invalid shapes",
 }
 
 TEST_CASE("design-import benchmark argument parser preserves explicit empty output",
-          "[design-import][benchmark][coverage][requested]") {
+          "[design-import][benchmark]") {
     auto config = parse_args_vec({"bench", "--output="});
     REQUIRE(config.has_value());
     CHECK(config->lane == "live");
@@ -156,7 +156,7 @@ TEST_CASE("design-import benchmark argument parser preserves explicit empty outp
 }
 
 TEST_CASE("design-import benchmark argument parser clamps timing knobs",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     auto config = parse_args_vec({"bench", "--idle-ms=-10",
                                   "--interactive-ms=-20", "--target-fps=0"});
     REQUIRE(config.has_value());
@@ -167,7 +167,7 @@ TEST_CASE("design-import benchmark argument parser clamps timing knobs",
 }
 
 TEST_CASE("design-import benchmark argument parser uses last explicit option",
-          "[design-import][benchmark][coverage][requested]") {
+          "[design-import][benchmark]") {
     auto config = parse_args_vec({"bench",
                                   "--lane", "live",
                                   "--lane=baked-cpp",
@@ -188,7 +188,7 @@ TEST_CASE("design-import benchmark argument parser uses last explicit option",
 }
 
 TEST_CASE("design-import benchmark argument parser rejects orphaned values",
-          "[design-import][benchmark][coverage][requested]") {
+          "[design-import][benchmark]") {
     REQUIRE_FALSE(parse_args_vec({"bench", "stray"}).has_value());
     REQUIRE_FALSE(parse_args_vec({"bench", "--lane", "live", "extra"}).has_value());
     REQUIRE_FALSE(parse_args_vec({"bench", "--idle-ms", "1", "--", "--target-fps", "60"}).has_value());
@@ -204,7 +204,7 @@ TEST_CASE("design-import benchmark argument parser rejects orphaned values",
 }
 
 TEST_CASE("design-import benchmark fixture and phase helpers fail closed",
-          "[design-import][benchmark][coverage][requested]") {
+          "[design-import][benchmark]") {
     REQUIRE(make_fixture("not-a-lane") == nullptr);
 
     CountingFixture fixture;
@@ -218,7 +218,7 @@ TEST_CASE("design-import benchmark fixture and phase helpers fail closed",
 }
 
 TEST_CASE("design-import benchmark JSON report contains escaped config and metrics",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     Config config;
     config.lane = "lane\"x";
     config.target_fps = 144;
@@ -252,7 +252,7 @@ TEST_CASE("design-import benchmark JSON report contains escaped config and metri
 }
 
 TEST_CASE("design-import benchmark JSON report includes complete phase fields",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     Config config;
     config.lane = "baked-native";
     config.target_fps = 90;
@@ -310,7 +310,7 @@ TEST_CASE("design-import benchmark JSON report includes complete phase fields",
 }
 
 TEST_CASE("design-import benchmark write_file handles stdout sentinel and nested paths",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     REQUIRE(write_file({}, "stdout sentinel"));
 
     auto path = temp_path("nested");
@@ -325,7 +325,7 @@ TEST_CASE("design-import benchmark write_file handles stdout sentinel and nested
 }
 
 TEST_CASE("design-import benchmark metric helpers handle edge inputs",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     REQUIRE(percentile({}, 50.0) == 0.0);
     REQUIRE(percentile({5.0}, 99.0) == 5.0);
     REQUIRE(percentile({30.0, 10.0, 20.0}, 50.0) == 20.0);
@@ -338,7 +338,7 @@ TEST_CASE("design-import benchmark metric helpers handle edge inputs",
 }
 
 TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     const auto ir = build_baked_ir();
 
     REQUIRE(ir.source == DesignSource::jsx);
@@ -375,7 +375,7 @@ TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
 }
 
 TEST_CASE("design-import benchmark fixture factory and render path are deterministic",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     REQUIRE(make_fixture("missing") == nullptr);
 
     auto fixture = make_fixture("baked-cpp");
@@ -391,7 +391,7 @@ TEST_CASE("design-import benchmark fixture factory and render path are determini
 }
 
 TEST_CASE("design-import benchmark fixture factory creates the baked-native lane",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     auto baked_native = make_fixture("baked-native");
     REQUIRE(baked_native != nullptr);
     REQUIRE(baked_native->root().id() == "bench-root");
@@ -401,7 +401,7 @@ TEST_CASE("design-import benchmark fixture factory creates the baked-native lane
 }
 
 TEST_CASE("design-import benchmark run_phase records idle and interactive contracts",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     CountingFixture fixture;
 
     const auto zero = run_phase(fixture, 0, 60, true);
@@ -425,7 +425,7 @@ TEST_CASE("design-import benchmark run_phase records idle and interactive contra
 }
 
 TEST_CASE("design-import benchmark main writes reports and rejects invalid args",
-          "[design-import][benchmark][coverage]") {
+          "[design-import][benchmark]") {
     auto output = temp_path("main-report");
     std::filesystem::remove(output);
 

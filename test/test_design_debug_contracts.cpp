@@ -45,7 +45,7 @@ int run_design_debug(std::vector<std::string> args) {
 } // namespace
 
 TEST_CASE("design-debug JSON escaping preserves report syntax",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     REQUIRE(json_escape("plain") == "plain");
     REQUIRE(json_escape("quote\"slash\\") == "quote\\\"slash\\\\");
     REQUIRE(json_escape("line\nfeed") == "line\\nfeed");
@@ -56,7 +56,7 @@ TEST_CASE("design-debug JSON escaping preserves report syntax",
 }
 
 TEST_CASE("design-debug file helpers round-trip text and binary artifacts",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     auto temp = make_temp_dir("files");
     auto text_path = temp / "nested" / "artifact.txt";
     auto binary_path = temp / "artifact.bin";
@@ -83,7 +83,7 @@ TEST_CASE("design-debug file helpers round-trip text and binary artifacts",
 }
 
 TEST_CASE("design-debug slugifies artifact stems deterministically",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     REQUIRE(slugify("Make The Filter Pop!") == "make-the-filter-pop");
     REQUIRE(slugify("  spaced   prompt  ") == "spaced-prompt");
     REQUIRE(slugify("A/B\\C.D") == "a-b-c-d");
@@ -102,7 +102,7 @@ TEST_CASE("design-debug slugifies artifact stems deterministically",
 }
 
 TEST_CASE("design-debug repo discovery finds the design tool from nested directories",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     auto temp = make_temp_dir("repo-root");
     auto repo = temp / "repo";
     auto design_dir = repo / "examples" / "design-tool";
@@ -138,7 +138,7 @@ TEST_CASE("design-debug repo discovery finds the design tool from nested directo
 }
 
 TEST_CASE("design-debug loads ordered design-tool modules from the entry path",
-          "[tools][design-debug][coverage][requested]") {
+          "[tools][design-debug]") {
     auto temp = make_temp_dir("module-load");
     auto js_dir = temp / "examples" / "design-tool";
     REQUIRE(std::filesystem::create_directories(js_dir));
@@ -166,7 +166,7 @@ TEST_CASE("design-debug loads ordered design-tool modules from the entry path",
 }
 
 TEST_CASE("design-debug loads custom scripts without implicit design-tool modules",
-          "[tools][design-debug][coverage][requested]") {
+          "[tools][design-debug]") {
     auto temp = make_temp_dir("custom-script-load");
     auto js_dir = temp / "examples" / "design-tool";
     REQUIRE(std::filesystem::create_directories(js_dir));
@@ -192,7 +192,7 @@ TEST_CASE("design-debug loads custom scripts without implicit design-tool module
 }
 
 TEST_CASE("design-debug capture metadata matches backend behavior",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     REQUIRE(std::string(capture_mode_flag_name(CaptureMode::headless_skia,
                                                ScreenshotBackend::skia)) == "skia");
     REQUIRE(std::string(capture_mode_flag_name(CaptureMode::headless_coregraphics,
@@ -220,7 +220,7 @@ TEST_CASE("design-debug capture metadata matches backend behavior",
 }
 
 TEST_CASE("design-debug default option structs preserve artifact contracts",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     const Options opts;
     REQUIRE(opts.script_path.empty());
     REQUIRE(opts.design_tool_bin.empty());
@@ -256,7 +256,7 @@ TEST_CASE("design-debug default option structs preserve artifact contracts",
 }
 
 TEST_CASE("design-debug timestamp stamp uses sortable local format",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     const auto stamp = now_stamp();
     REQUIRE(stamp.size() == 15);
     REQUIRE(stamp[8] == '-');
@@ -267,7 +267,7 @@ TEST_CASE("design-debug timestamp stamp uses sortable local format",
 }
 
 TEST_CASE("design-debug target bounds parser accepts debug state shape",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     auto parsed = parse_target_bounds(R"JSON({
         "selection": "knob1",
         "targetBounds": { "x": 12.5, "y": -3, "width": 88.25, "height": 44 }
@@ -292,7 +292,7 @@ TEST_CASE("design-debug target bounds parser accepts debug state shape",
 }
 
 TEST_CASE("design-debug target bounds parser rejects incompatible JSON shapes",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":null})JSON").valid);
     REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":[]})JSON").valid);
     REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":"1","y":2,"width":3,"height":4}})JSON").valid);
@@ -311,7 +311,7 @@ TEST_CASE("design-debug target bounds parser rejects incompatible JSON shapes",
 }
 
 TEST_CASE("design-debug shell quoting keeps AI command templates inert",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     REQUIRE(shell_quote("plain") == "'plain'");
     REQUIRE(shell_quote("") == "''");
     REQUIRE(shell_quote("two words") == "'two words'");
@@ -320,7 +320,7 @@ TEST_CASE("design-debug shell quoting keeps AI command templates inert",
 }
 
 TEST_CASE("design-debug command capture preserves stdout and exit status",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     int exit_code = -1;
 #if defined(_WIN32)
     auto output = run_command_capture("cmd /C \"echo design-debug-output& exit /B 7\"",
@@ -335,7 +335,7 @@ TEST_CASE("design-debug command capture preserves stdout and exit status",
 }
 
 TEST_CASE("design-debug option validation fails before expensive render setup",
-          "[tools][design-debug][coverage]") {
+          "[tools][design-debug]") {
     auto temp = make_temp_dir("options");
     auto script = temp / "script.js";
     auto response = temp / "response.txt";
@@ -389,7 +389,7 @@ TEST_CASE("design-debug option validation fails before expensive render setup",
 }
 
 TEST_CASE("design-debug headless response-file run writes report artifacts",
-          "[tools][design-debug][coverage][requested]") {
+          "[tools][design-debug]") {
 #if !defined(__APPLE__)
     SKIP("design-debug artifact comparison needs the native screenshot backend");
 #endif
@@ -461,7 +461,7 @@ function getDesignDebugStateJson() {
 }
 
 TEST_CASE("design-debug response-file run accepts explicit CoreGraphics capture",
-          "[tools][design-debug][coverage][requested]") {
+          "[tools][design-debug]") {
 #if !defined(__APPLE__)
     SKIP("CoreGraphics capture is macOS-only");
 #endif

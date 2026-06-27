@@ -220,7 +220,7 @@ TEST_CASE("PulpBridge state serialize and deserialize use the fallback store",
 }
 
 TEST_CASE("PulpBridge parameter calls fail closed for unknown ids",
-          "[apple][bridge][params][coverage]") {
+          "[apple][bridge][params]") {
     reset_bridge_store();
     constexpr PulpParamID kMissingParamId = 90909;
 
@@ -260,7 +260,7 @@ TEST_CASE("PulpBridge parameter calls fail closed for unknown ids",
 }
 
 TEST_CASE("PulpBridge parameters clamp raw and normalized values",
-          "[apple][bridge][params][coverage]") {
+          "[apple][bridge][params]") {
     reset_bridge_store();
 
     pulp_param_set(kBridgeParamId, -999.0f);
@@ -284,7 +284,7 @@ TEST_CASE("PulpBridge parameters clamp raw and normalized values",
 }
 
 TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering values",
-          "[apple][bridge][state][coverage]") {
+          "[apple][bridge][state]") {
     reset_bridge_store();
     pulp_param_set(kBridgeParamId, 7.25f);
     pulp_param_set(kSecondBridgeParamId, 33.0f);
@@ -316,7 +316,7 @@ TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering val
 }
 
 TEST_CASE("PulpBridge state serialization snapshots current parameter values",
-          "[apple][bridge][state][coverage]") {
+          "[apple][bridge][state]") {
     reset_bridge_store();
 
     pulp_param_set(kBridgeParamId, -6.0f);
@@ -382,7 +382,7 @@ TEST_CASE("PulpBridge plugin info exposes the registered descriptor",
 }
 
 TEST_CASE("PulpBridge plugin info string storage survives later descriptor calls",
-          "[apple][bridge][plugin-info][coverage]") {
+          "[apple][bridge][plugin-info]") {
     ScopedFactoryRegistration registration(create_test_processor);
 
     PulpPluginInfo first{};
@@ -409,7 +409,7 @@ TEST_CASE("PulpBridge plugin info string storage survives later descriptor calls
 }
 
 TEST_CASE("PulpBridge plugin info updates static string storage per descriptor",
-          "[apple][bridge][plugin-info][coverage]") {
+          "[apple][bridge][plugin-info]") {
     PulpPluginInfo info{};
 
     {
@@ -437,7 +437,7 @@ TEST_CASE("PulpBridge plugin info updates static string storage per descriptor",
 }
 
 TEST_CASE("PulpBridge state serialization owns returned buffers independently",
-          "[apple][bridge][state][coverage][requested]") {
+          "[apple][bridge][state]") {
     reset_bridge_store();
 
     pulp_param_set(kBridgeParamId, -30.0f);

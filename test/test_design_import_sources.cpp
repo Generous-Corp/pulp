@@ -269,7 +269,7 @@ TEST_CASE("parse_pencil_json parses node tree", "[view][import]") {
 }
 
 TEST_CASE("parse_pencil_json covers sizing layout padding and widget metadata edges",
-          "[view][import][coverage]") {
+          "[view][import]") {
     auto json = R"json({
         "type": "frame",
         "name": "PencilRack",
@@ -362,7 +362,7 @@ TEST_CASE("parse_pencil_json covers sizing layout padding and widget metadata ed
 }
 
 TEST_CASE("generate_pulp_js bridge_native_js mode covers fill-height and leaf fallback branches",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
     ir.root.type = "frame";

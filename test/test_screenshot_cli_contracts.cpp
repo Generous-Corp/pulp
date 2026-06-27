@@ -50,7 +50,7 @@ int run_screenshot_cli(std::initializer_list<const char*> args) {
 }  // namespace
 
 TEST_CASE("pulp-screenshot base64 encoder handles RFC 4648 padding cases",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     REQUIRE(base64_encode({}).empty());
     REQUIRE(base64_encode({'f'}) == "Zg==");
     REQUIRE(base64_encode({'f', 'o'}) == "Zm8=");
@@ -72,7 +72,7 @@ TEST_CASE("pulp-screenshot base64 encoder handles RFC 4648 padding cases",
 }
 
 TEST_CASE("pulp-screenshot base64 encoder preserves binary PNG-like bytes",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     std::vector<uint8_t> png_header = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
     auto encoded = base64_encode(png_header);
     REQUIRE(encoded == "iVBORw0KGgo=");
@@ -91,7 +91,7 @@ TEST_CASE("pulp-screenshot base64 encoder preserves binary PNG-like bytes",
 }
 
 TEST_CASE("pulp-screenshot base64 encoder emits stable 4-character blocks",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     for (std::size_t size = 1; size <= 12; ++size) {
         std::vector<uint8_t> bytes(size);
         for (std::size_t i = 0; i < size; ++i)
@@ -112,7 +112,7 @@ TEST_CASE("pulp-screenshot base64 encoder emits stable 4-character blocks",
 }
 
 TEST_CASE("pulp-screenshot read_file preserves script bytes and fails closed",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto path = temp_file_path("script.js");
     std::filesystem::remove(path);
     write_bytes(path, "createLabel('title', 'Hello');\n");
@@ -135,7 +135,7 @@ TEST_CASE("pulp-screenshot read_file preserves script bytes and fails closed",
 }
 
 TEST_CASE("pulp-screenshot runtime trace script records live native bounds",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     const std::string script = runtime_trace_script();
     REQUIRE(script.find("native_bounds_count") != std::string::npos);
     REQUIRE(script.find("native_bounds") != std::string::npos);
@@ -148,7 +148,7 @@ TEST_CASE("pulp-screenshot runtime trace script records live native bounds",
 }
 
 TEST_CASE("pulp-screenshot option parser preserves documented defaults",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto options = parse_args({});
 
     REQUIRE(options.script_path.empty());
@@ -169,7 +169,7 @@ TEST_CASE("pulp-screenshot option parser preserves documented defaults",
 }
 
 TEST_CASE("pulp-screenshot option parser accepts explicit render settings",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto options = parse_args({
         "--script", "ui.js",
         "--output", "render.png",
@@ -197,7 +197,7 @@ TEST_CASE("pulp-screenshot option parser accepts explicit render settings",
 }
 
 TEST_CASE("pulp-screenshot option parser handles aliases and last value wins",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto options = parse_args({
         "--demo",
         "--script", "first.js",
@@ -227,7 +227,7 @@ TEST_CASE("pulp-screenshot option parser handles aliases and last value wins",
 }
 
 TEST_CASE("pulp-screenshot help option short-circuits parsing entirely",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     // After #2956's pre-scan fix, `--help` anywhere in argv short-circuits
     // BEFORE the option loop runs — including BEFORE flags that come
     // earlier in argv. This is the documented help-path contract: any
@@ -258,7 +258,7 @@ TEST_CASE("pulp-screenshot help option short-circuits parsing entirely",
 // of clean help output. This pins help-path robustness in the order
 // the user is most likely to hit it: a typo first, `--help` later.
 TEST_CASE("pulp-screenshot --help short-circuits malformed args before it (#2956)",
-          "[tools][screenshot][coverage][issue-2956]") {
+          "[tools][screenshot][issue-2956]") {
     // Malformed --width / --height BEFORE --help must not blow up.
     ScreenshotCliOptions options;
     REQUIRE_NOTHROW(options = parse_args({
@@ -287,7 +287,7 @@ TEST_CASE("pulp-screenshot --help short-circuits malformed args before it (#2956
 }
 
 TEST_CASE("pulp-screenshot backend normalization rejects unavailable explicit Skia",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto explicit_skia = parse_args({"--demo", "--backend", "skia"});
     REQUIRE(explicit_skia.backend_name == "skia");
     REQUIRE_FALSE(explicit_skia.backend_was_defaulted);
@@ -310,7 +310,7 @@ TEST_CASE("pulp-screenshot backend normalization rejects unavailable explicit Sk
 }
 
 TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     REQUIRE_THROWS(parse_args({"--width", "wide"}));
     REQUIRE_THROWS(parse_args({"--height", "tall"}));
     REQUIRE_THROWS(parse_args({"--scale", "large"}));
@@ -336,7 +336,7 @@ TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations"
 }
 
 TEST_CASE("pulp-screenshot option parser ignores incomplete trailing switches",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto options = parse_args({
         "--script",
         "--output",
@@ -354,7 +354,7 @@ TEST_CASE("pulp-screenshot option parser ignores incomplete trailing switches",
 }
 
 TEST_CASE("pulp-screenshot option parser keeps numeric boundary contracts explicit",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto zero_size = parse_args({
         "--demo",
         "--width", "0",
@@ -378,13 +378,13 @@ TEST_CASE("pulp-screenshot option parser keeps numeric boundary contracts explic
 }
 
 TEST_CASE("pulp-screenshot main rejects unknown backend before rendering",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     auto exit_code = run_screenshot_cli({"--demo", "--backend", "metal"});
     REQUIRE(exit_code == 1);
 }
 
 TEST_CASE("pulp-screenshot main handles early non-render exits",
-          "[tools][screenshot][coverage]") {
+          "[tools][screenshot]") {
     REQUIRE(run_screenshot_cli({"--help"}) == 0);
     REQUIRE(run_screenshot_cli({"--width", "bad", "--help"}) == 0);
     REQUIRE(run_screenshot_cli({}) == 1);
@@ -396,7 +396,7 @@ TEST_CASE("pulp-screenshot main handles early non-render exits",
 }
 
 TEST_CASE("pulp-screenshot main renders demo files and base64 output",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto output = temp_file_path("demo-output.png");
     std::filesystem::remove(output);
     const auto output_arg = output.string();
@@ -426,7 +426,7 @@ TEST_CASE("pulp-screenshot main renders demo files and base64 output",
 }
 
 TEST_CASE("pulp-screenshot main captures the demo through the smart auto backend",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto output = temp_file_path("auto-output.png");
     std::filesystem::remove(output);
     const auto output_arg = output.string();
@@ -454,7 +454,7 @@ TEST_CASE("pulp-screenshot main captures the demo through the smart auto backend
 }
 
 TEST_CASE("pulp-screenshot --compare scores similarity and writes a diff image",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto img = temp_file_path("compare-input.png");
     auto diff = temp_file_path("compare-diff.png");
     std::filesystem::remove(img);
@@ -493,7 +493,7 @@ TEST_CASE("pulp-screenshot --compare scores similarity and writes a diff image",
 }
 
 TEST_CASE("pulp-screenshot main renders script files through the CLI path",
-          "[tools][screenshot][coverage][requested]") {
+          "[tools][screenshot]") {
     auto script = temp_file_path("script-render.js");
     auto output = temp_file_path("script-output.png");
     std::filesystem::remove(script);

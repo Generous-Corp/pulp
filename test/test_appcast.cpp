@@ -122,7 +122,7 @@ TEST_CASE("Appcast XML emits Sparkle signature when present", "[ship][appcast]")
 }
 
 TEST_CASE("Appcast XML escapes greater-than characters in feed and item fields",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     Appcast feed;
     feed.title = "Pulp > Beta";
     feed.link = "https://example.com/feed.xml";
@@ -275,7 +275,7 @@ TEST_CASE("Appcast from_xml ignores malformed enclosure length", "[ship][appcast
 }
 
 TEST_CASE("Appcast XML uses short version as build number when build is empty",
-          "[ship][appcast][coverage][issue-644]") {
+          "[ship][appcast][issue-644]") {
     Appcast feed;
     feed.title = "Fallback Feed";
     feed.link = "https://example.com/appcast.xml";
@@ -296,7 +296,7 @@ TEST_CASE("Appcast XML uses short version as build number when build is empty",
 }
 
 TEST_CASE("Appcast from_xml accepts rss with item-only metadata",
-          "[ship][appcast][coverage][issue-644]") {
+          "[ship][appcast][issue-644]") {
     auto parsed = Appcast::from_xml(R"(<rss version="2.0">
   <channel>
     <item>
@@ -319,7 +319,7 @@ TEST_CASE("Appcast from_xml accepts rss with item-only metadata",
 }
 
 TEST_CASE("Appcast from_xml only requires rss marker",
-          "[ship][appcast][coverage][issue-644]") {
+          "[ship][appcast][issue-644]") {
     auto parsed = Appcast::from_xml("<rss version=\"2.0\"></rss>");
 
     REQUIRE(parsed.has_value());
@@ -327,7 +327,7 @@ TEST_CASE("Appcast from_xml only requires rss marker",
 }
 
 TEST_CASE("Appcast XML emits stable empty-feed skeleton",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     Appcast feed;
     feed.title = "Empty Updates";
     feed.link = "https://example.com/empty.xml";
@@ -344,7 +344,7 @@ TEST_CASE("Appcast XML emits stable empty-feed skeleton",
 }
 
 TEST_CASE("Appcast XML emits each item branch independently",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     Appcast feed;
     feed.title = "Mixed Feed";
     feed.link = "https://example.com/appcast.xml";
@@ -384,7 +384,7 @@ TEST_CASE("Appcast XML emits each item branch independently",
 }
 
 TEST_CASE("Appcast from_xml handles empty and zero-valued enclosure attributes",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<rss version="2.0">
   <channel>
     <title>Zero Feed</title>
@@ -415,7 +415,7 @@ TEST_CASE("Appcast from_xml handles empty and zero-valued enclosure attributes",
 }
 
 TEST_CASE("Appcast from_xml keeps partial item metadata when optional tags are malformed",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<rss version="2.0">
   <channel>
     <title>Partial Items</title>
@@ -440,7 +440,7 @@ TEST_CASE("Appcast from_xml keeps partial item metadata when optional tags are m
 }
 
 TEST_CASE("Appcast from_xml ignores single-quoted enclosure attributes",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<rss version="2.0">
   <channel>
     <title>Quoted Feed</title>
@@ -461,7 +461,7 @@ TEST_CASE("Appcast from_xml ignores single-quoted enclosure attributes",
 }
 
 TEST_CASE("Appcast from_xml captures CDATA with nested markup and brackets",
-          "[ship][appcast][coverage]") {
+          "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<rss version="2.0">
   <channel>
     <title>Notes Feed</title>
@@ -499,7 +499,7 @@ TEST_CASE("Version comparison tolerates non-numeric segments", "[ship][version]"
 }
 
 TEST_CASE("Version comparison pads and orders long mixed versions",
-          "[ship][version][coverage][issue-644]") {
+          "[ship][version][issue-644]") {
     REQUIRE(compare_versions("", "0") == 0);
     REQUIRE(compare_versions("1.0.0", "1.0.0.0.0") == 0);
     REQUIRE(compare_versions("1.0.0.0.1", "1.0.0.0") == 1);

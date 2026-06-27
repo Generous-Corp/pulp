@@ -207,7 +207,7 @@ TEST_CASE("InspectorServer starts on an explicit port and writes discovery file"
 }
 
 TEST_CASE("InspectorServer pre-start operations are inert",
-          "[inspect][server][coverage][requested]") {
+          "[inspect][server]") {
     InspectorServer server;
 
     REQUIRE(server.port() == 0);
@@ -252,7 +252,7 @@ TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
 }
 
 TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
-          "[inspect][server][coverage][requested]") {
+          "[inspect][server]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-invalid-env-test-" +
                       std::to_string(socket_port_seed()));
@@ -360,7 +360,7 @@ TEST_CASE("InspectorServer dispatches requests through the configured handler",
 }
 
 TEST_CASE("InspectorServer uses the latest installed request handler",
-          "[inspect][server][coverage][requested]") {
+          "[inspect][server]") {
     InspectorServer server;
     auto port = start_inspector_server(server);
     REQUIRE(port.has_value());
@@ -526,7 +526,7 @@ TEST_CASE("InspectorServer returns protocol errors for invalid JSON frames",
 }
 
 TEST_CASE("InspectorServer drops valid requests when no handler is installed",
-          "[inspect][server][coverage][requested]") {
+          "[inspect][server]") {
     InspectorServer server;
     auto port = start_inspector_server(server);
     REQUIRE(port.has_value());

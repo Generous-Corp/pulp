@@ -244,7 +244,7 @@ TEST_CASE("LV2 host discovery resolves shared objects from bundle roots",
 }
 
 TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
-          "[host][lv2][coverage]") {
+          "[host][lv2]") {
     ScratchDir scratch("sparse");
     const auto missing = scratch.path / "Missing.lv2";
 
@@ -330,7 +330,7 @@ TEST_CASE("LV2 PluginSlot load fails cleanly for invalid bundles",
 #if defined(PULP_TEST_LV2_SLOT_PROBE_BUNDLE) && defined(PULP_TEST_LV2_SLOT_PROBE_BINARY)
 
 TEST_CASE("LV2 PluginSlot loads probe descriptor by URI and exposes TTL params",
-          "[host][lv2][slot][coverage][issue-493]") {
+          "[host][lv2][slot][issue-493]") {
     Lv2ProbeLibrary probe(PULP_TEST_LV2_SLOT_PROBE_BINARY);
     auto slot = try_load_lv2_slot_probe(probe);
     if (!slot) return;
@@ -362,7 +362,7 @@ TEST_CASE("LV2 PluginSlot loads probe descriptor by URI and exposes TTL params",
 }
 
 TEST_CASE("LV2 PluginSlot processes audio and applies control-port events",
-          "[host][lv2][slot][coverage][issue-493]") {
+          "[host][lv2][slot][issue-493]") {
     Lv2ProbeLibrary probe(PULP_TEST_LV2_SLOT_PROBE_BINARY);
     auto slot = try_load_lv2_slot_probe(probe);
     if (!slot) return;
@@ -419,7 +419,7 @@ TEST_CASE("LV2 PluginSlot processes audio and applies control-port events",
 }
 
 TEST_CASE("LV2 PluginSlot bypass and released processing avoid LV2 run",
-          "[host][lv2][slot][coverage][issue-493]") {
+          "[host][lv2][slot][issue-493]") {
     Lv2ProbeLibrary probe(PULP_TEST_LV2_SLOT_PROBE_BINARY);
     auto slot = try_load_lv2_slot_probe(probe);
     if (!slot) return;

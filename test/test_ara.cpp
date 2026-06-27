@@ -38,7 +38,7 @@ TEST_CASE("AraDocumentController subclass overrides work", "[ara]") {
     REQUIRE((c.supported_roles() & static_cast<int>(AraRole::EditorView)) != 0);
 }
 
-TEST_CASE("AraDocumentController defaults are inert and non-ARA", "[ara][coverage][issue-648]") {
+TEST_CASE("AraDocumentController defaults are inert and non-ARA", "[ara][issue-648]") {
     AraDocumentController controller;
     controller.begin_editing();
     controller.notify_audio_source_content_changed(123);
@@ -48,7 +48,7 @@ TEST_CASE("AraDocumentController defaults are inert and non-ARA", "[ara][coverag
     REQUIRE(controller.ara_factory_name().empty());
 }
 
-TEST_CASE("AraRole bit values remain stable for adapter metadata", "[ara][coverage][issue-648]") {
+TEST_CASE("AraRole bit values remain stable for adapter metadata", "[ara][issue-648]") {
     REQUIRE(static_cast<int>(AraRole::None) == 0);
     REQUIRE(static_cast<int>(AraRole::PlaybackRenderer) == 1);
     REQUIRE(static_cast<int>(AraRole::EditorRenderer) == 2);

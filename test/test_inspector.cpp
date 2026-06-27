@@ -194,7 +194,7 @@ TEST_CASE("ViewInspector type_name", "[view][inspector]") {
 }
 
 TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state",
-          "[view][inspector][window][coverage][requested]") {
+          "[view][inspector][window]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 640, 480});
@@ -219,7 +219,7 @@ TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state"
 }
 
 TEST_CASE("CollapsableSection toggles only from header mouse-down events",
-          "[view][inspector][window][coverage][requested]") {
+          "[view][inspector][window]") {
     CollapsableSection section("Layout", true);
     section.set_bounds({0, 0, 200, 120});
 
@@ -374,7 +374,7 @@ TEST_CASE("Protocol: decode invalid JSON") {
 }
 
 TEST_CASE("Protocol: response encoding preserves parseable result JSON",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto object_response = encode_message(make_response(7, R"({"root":{"id":"gain"},"count":2})"));
     REQUIRE(object_response.find(R"("id")") != std::string::npos);
     REQUIRE(object_response.find(R"("result")") != std::string::npos);
@@ -391,7 +391,7 @@ TEST_CASE("Protocol: response encoding preserves parseable result JSON",
 }
 
 TEST_CASE("Protocol: invalid JSON payloads encode as strings",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto response = encode_message(make_response(10, "{not-json"));
     REQUIRE(response.find(R"("result")") != std::string::npos);
     REQUIRE(response.find("{not-json") != std::string::npos);
@@ -408,7 +408,7 @@ TEST_CASE("Protocol: invalid JSON payloads encode as strings",
 }
 
 TEST_CASE("Protocol: empty response and default params omit payload keys",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto empty_response = encode_message(make_response(12, ""));
     REQUIRE(empty_response.find(R"("id")") != std::string::npos);
     REQUIRE(empty_response.find(R"("result")") == std::string::npos);
@@ -426,7 +426,7 @@ TEST_CASE("Protocol: empty response and default params omit payload keys",
 }
 
 TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto encoded = encode_message(make_error(15, "View not found: gain"));
     REQUIRE(encoded.find(R"("id")") != std::string::npos);
     REQUIRE(encoded.find(R"("error")") != std::string::npos);
@@ -445,7 +445,7 @@ TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
 }
 
 TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     InspectorMessage request;
     REQUIRE(decode_message(R"({"id":17,"method":"DOM.search","params":{"query":"Knob"}})", request));
     REQUIRE(request.id == 17);
@@ -467,7 +467,7 @@ TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",
 }
 
 TEST_CASE("Protocol: decode rejects invalid field types without partial output",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     InspectorMessage msg;
     msg.id = 99;
     msg.method = "stale";
@@ -1934,7 +1934,7 @@ TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][wi
 }
 
 TEST_CASE("CollapsableSection collapsed default paints and toggles predictably",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     CollapsableSection section("Theme Colors", false);
     section.set_bounds({0, 0, 220, 120});
     section.layout_children();
@@ -2052,7 +2052,7 @@ TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspec
 }
 
 TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     InspectorWindow window;
     REQUIRE(window.child_count() == 2);
     REQUIRE(window.active_tool() == 0);
@@ -2091,7 +2091,7 @@ TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
 }
 
 TEST_CASE("Inspector overlay and window public header toggles are direct contracts",
-          "[inspect][overlay][window][coverage][requested]") {
+          "[inspect][overlay][window]") {
     View root;
     root.set_bounds({0, 0, 320, 200});
 
@@ -2130,7 +2130,7 @@ TEST_CASE("Inspector overlay and window public header toggles are direct contrac
 }
 
 TEST_CASE("InspectorOverlay auxiliary panel toggles are stable public contracts",
-          "[inspect][overlay][coverage][requested]") {
+          "[inspect][overlay]") {
     View root;
     root.set_bounds({0, 0, 320, 200});
 
@@ -2184,7 +2184,7 @@ TEST_CASE("InspectorOverlay auxiliary panel toggles are stable public contracts"
 }
 
 TEST_CASE("InspectorWindow rebuilds tree and theme sections only from live roots",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     View first_root;
     first_root.set_id("first-root");
     first_root.set_bounds({0, 0, 480, 320});

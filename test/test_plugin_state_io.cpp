@@ -228,7 +228,7 @@ TEST_CASE("plugin_state_io round-trips parameter and plugin-owned state",
 }
 
 TEST_CASE("plugin_state_io envelope encodes payload sizes and CRC",
-          "[format][plugin-state][coverage]") {
+          "[format][plugin-state]") {
     TestRig source;
     source.store.set_value(1, -2.5f);
     source.processor.plugin_state = "layout=full";
@@ -263,7 +263,7 @@ TEST_CASE("plugin_state_io envelope encodes payload sizes and CRC",
 }
 
 TEST_CASE("plugin_state_io preserves binary plugin-owned payload bytes",
-          "[format][plugin-state][coverage]") {
+          "[format][plugin-state]") {
     TestRig source;
     source.store.set_value(1, -3.0f);
     source.processor.plugin_state.assign(
@@ -309,7 +309,7 @@ TEST_CASE("plugin_state_io preserves legacy raw StateStore blobs and resets plug
 }
 
 TEST_CASE("plugin_state_io envelope with empty plugin payload resets plugin state",
-          "[format][plugin-state][coverage][issue-647]") {
+          "[format][plugin-state][issue-647]") {
     TestRig source;
     source.store.set_value(1, -15.0f);
     auto store_blob = source.store.serialize();
@@ -487,7 +487,7 @@ TEST_CASE("plugin_state_io migrates old envelopes before parsing payloads",
 }
 
 TEST_CASE("plugin_state_io rejects invalid envelope migration registrations",
-          "[format][plugin-state][coverage]") {
+          "[format][plugin-state]") {
     using pulp::format::plugin_state_io::current_envelope_version;
     using pulp::format::plugin_state_io::register_envelope_migration;
 
@@ -671,7 +671,7 @@ TEST_CASE("plugin_state_io rejects malformed blobs without touching live state",
 }
 
 TEST_CASE("plugin_state_io rejects envelope CRC mismatch without plugin callback",
-          "[format][plugin-state][coverage][issue-647]") {
+          "[format][plugin-state][issue-647]") {
     TestRig source;
     source.store.set_value(1, -21.0f);
     source.processor.plugin_state = "snapshot-c";

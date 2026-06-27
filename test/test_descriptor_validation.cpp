@@ -66,7 +66,7 @@ TEST_CASE("DescriptorValidation: empty name/manufacturer/bundle_id/version are e
 }
 
 TEST_CASE("DescriptorValidation: empty version is an error",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     auto d = well_formed_effect();
     d.version.clear();
 
@@ -85,7 +85,7 @@ TEST_CASE("DescriptorValidation: non-reverse-DNS bundle_id produces a warning on
 }
 
 TEST_CASE("DescriptorValidation: reverse-DNS bundle_id requires at least three segments",
-          "[format][descriptor-validation][coverage]") {
+          "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.bundle_id = "com.plugin";
 
@@ -95,7 +95,7 @@ TEST_CASE("DescriptorValidation: reverse-DNS bundle_id requires at least three s
 }
 
 TEST_CASE("DescriptorValidation: malformed reverse-DNS bundle_id segments warn only",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     for (const auto* bundle_id : {
              ".example.plugin",
              "com..plugin",
@@ -113,7 +113,7 @@ TEST_CASE("DescriptorValidation: malformed reverse-DNS bundle_id segments warn o
 }
 
 TEST_CASE("DescriptorValidation: whitespace-only bundle_id segments warn only",
-          "[format][descriptor-validation][coverage]") {
+          "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.bundle_id = "com.\t.plugin";
 
@@ -140,7 +140,7 @@ TEST_CASE("DescriptorValidation: zero-channel main output is an error",
 }
 
 TEST_CASE("DescriptorValidation: negative bus channel counts are errors",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     SECTION("negative main output") {
         auto d = well_formed_effect();
         d.output_buses = {{"Invalid Out", -1, false}};
@@ -161,7 +161,7 @@ TEST_CASE("DescriptorValidation: negative bus channel counts are errors",
 }
 
 TEST_CASE("DescriptorValidation: negative main input is an error",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     auto d = well_formed_effect();
     d.input_buses = {{"Invalid In", -2, false}};
 
@@ -181,7 +181,7 @@ TEST_CASE("DescriptorValidation: instrument with non-optional stereo input warns
 }
 
 TEST_CASE("DescriptorValidation: instrument optional or zero-channel inputs do not warn",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     SECTION("optional stereo input") {
         auto d = well_formed_effect();
         d.category = PluginCategory::Instrument;
@@ -232,7 +232,7 @@ TEST_CASE("DescriptorValidation: supports_mpe without accepts_midi warns",
 }
 
 TEST_CASE("DescriptorValidation: MPE and UMP sidecars share one warning on audio effects",
-          "[format][descriptor-validation][coverage]") {
+          "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.supports_mpe = true;
     d.supports_ump = true;
@@ -256,7 +256,7 @@ TEST_CASE("DescriptorValidation: node capabilities use sidecar MIDI warning cont
 }
 
 TEST_CASE("DescriptorValidation: supports_ump follows the accepts_midi sidecar warning contract",
-          "[format][descriptor-validation][coverage][issue-493]") {
+          "[format][descriptor-validation][issue-493]") {
     SECTION("UMP without MIDI input warns") {
         auto d = well_formed_effect();
         d.supports_ump = true;
@@ -279,7 +279,7 @@ TEST_CASE("DescriptorValidation: supports_ump follows the accepts_midi sidecar w
 }
 
 TEST_CASE("DescriptorValidation: MIDI capability warnings accumulate without invalidating descriptor",
-          "[format][descriptor-validation][coverage][issue-646]") {
+          "[format][descriptor-validation][issue-646]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::MidiEffect;
     d.accepts_midi = false;
@@ -308,7 +308,7 @@ TEST_CASE("DescriptorValidation: MidiEffect without audio output is valid",
 }
 
 TEST_CASE("DescriptorValidation: MidiEffect ignores zero-channel audio output",
-          "[format][descriptor-validation][coverage]") {
+          "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::MidiEffect;
     d.accepts_midi = true;
@@ -372,7 +372,7 @@ TEST_CASE("DescriptorValidation: MIDI sidecar capabilities are warning-only with
 }
 
 TEST_CASE("descriptor_is_valid treats warnings as valid and any error as invalid",
-          "[format][descriptor-validation][coverage]") {
+          "[format][descriptor-validation]") {
     REQUIRE(descriptor_is_valid({}));
     REQUIRE(descriptor_is_valid({
         {DescriptorIssueSeverity::Warning, "bundle_id", "warning"},

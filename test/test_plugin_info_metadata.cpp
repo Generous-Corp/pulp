@@ -196,7 +196,7 @@ TEST_CASE("PluginFormat enum covers the 5 shipping formats",
 }
 
 TEST_CASE("PluginScanner default paths match platform format support",
-          "[host][plugin-info][format][coverage]") {
+          "[host][plugin-info][format]") {
 #if defined(__APPLE__)
     auto vst3 = PluginScanner::default_paths(PluginFormat::VST3);
     auto au = PluginScanner::default_paths(PluginFormat::AudioUnit);
@@ -254,7 +254,7 @@ TEST_CASE("PluginScanner identifies bundle suffixes for each host format",
 }
 
 TEST_CASE("PluginScanner honors disabled format flags without progress callbacks",
-          "[host][scanner][coverage]") {
+          "[host][scanner]") {
     PluginScanner scanner;
     ScanOptions opts;
     opts.scan_vst3 = false;
@@ -275,7 +275,7 @@ TEST_CASE("PluginScanner honors disabled format flags without progress callbacks
 }
 
 TEST_CASE("PluginScanner only_extra_paths reports each enabled format path",
-          "[host][scanner][coverage]") {
+          "[host][scanner]") {
     ScannerScratchDir scratch("empty-extra-paths");
 
     PluginScanner scanner;
@@ -304,7 +304,7 @@ TEST_CASE("PluginScanner only_extra_paths reports each enabled format path",
 }
 
 TEST_CASE("PluginScanner scans only supplied hermetic VST3 and LV2 directories",
-          "[host][scanner][coverage]") {
+          "[host][scanner]") {
     ScannerScratchDir scratch("synthetic-bundles");
     fs::create_directories(scratch.path / "BetaSynth.vst3" / "Contents" / "Resources");
     fs::create_directories(scratch.path / "AlphaVerb.lv2");
@@ -336,7 +336,7 @@ TEST_CASE("PluginScanner scans only supplied hermetic VST3 and LV2 directories",
 }
 
 TEST_CASE("PluginScanner skips missing and non-directory extra paths",
-          "[host][scanner][coverage]") {
+          "[host][scanner]") {
     ScannerScratchDir scratch("bad-extra-paths");
     const auto plain_file = scratch.path / "plain-file.vst3";
     write_text(plain_file, "not a directory");
@@ -366,7 +366,7 @@ TEST_CASE("PluginScanner skips missing and non-directory extra paths",
 }
 
 TEST_CASE("VST3 moduleinfo FUID reader normalizes valid CIDs and rejects malformed metadata",
-          "[host][scanner][vst3][coverage]") {
+          "[host][scanner][vst3]") {
     ScannerScratchDir scratch("vst3-moduleinfo");
     const auto bundle = scratch.path / "ModuleCase.vst3";
 
@@ -403,7 +403,7 @@ TEST_CASE("VST3 moduleinfo FUID reader normalizes valid CIDs and rejects malform
 }
 
 TEST_CASE("PluginScanner uses VST3 moduleinfo IDs while preserving blacklist short-circuiting",
-          "[host][scanner][vst3][blacklist][coverage]") {
+          "[host][scanner][vst3][blacklist]") {
     ScannerScratchDir scratch("vst3-scan-blacklist");
     const auto blocked = scratch.path / "BlockedSynth.vst3";
     const auto allowed = scratch.path / "AllowedFx.vst3";
@@ -438,7 +438,7 @@ TEST_CASE("PluginScanner uses VST3 moduleinfo IDs while preserving blacklist sho
 }
 
 TEST_CASE("PluginScanner LV2 URI extraction handles manifest variants and safe fallbacks",
-          "[host][scanner][lv2][coverage]") {
+          "[host][scanner][lv2]") {
     ScannerScratchDir scratch("lv2-manifest-variants");
     const auto canonical = scratch.path / "Canonical.lv2";
     const auto compound = scratch.path / "Compound.lv2";

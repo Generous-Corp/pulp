@@ -398,7 +398,7 @@ private:
 } // namespace
 
 TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
-          "[vst3][coverage][issue-493]") {
+          "[vst3][issue-493]") {
     TestVst3Config config;
     config.add_bypass_param = true;
     config.latency_samples = 128;
@@ -604,7 +604,7 @@ TEST_CASE("VST3 editor creation is disabled by automation env",
 }
 
 TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
-          "[vst3][process][coverage][issue-493]") {
+          "[vst3][process][issue-493]") {
     TestVst3Config config;
     config.mutate_gain_in_process = true;
     config.emit_midi_out = true;

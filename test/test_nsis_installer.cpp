@@ -219,7 +219,7 @@ TEST_CASE("NSIS script maps standalone and unknown formats to INSTDIR", "[ship][
 }
 
 TEST_CASE("NSIS script handles empty plugin list with only post and uninstall sections",
-          "[ship][installer][coverage][issue-644]") {
+          "[ship][installer][issue-644]") {
     auto config = make_test_config();
     config.plugins.clear();
     auto script = generate_nsis_script(config);
@@ -232,7 +232,7 @@ TEST_CASE("NSIS script handles empty plugin list with only post and uninstall se
 }
 
 TEST_CASE("NSIS script honors configured output path and install root",
-          "[ship][installer][coverage][issue-644]") {
+          "[ship][installer][issue-644]") {
     auto config = make_test_config();
     config.output_path = "dist/TestPlugin Setup.exe";
     config.publisher = "Acme Audio";
@@ -244,7 +244,7 @@ TEST_CASE("NSIS script honors configured output path and install root",
 }
 
 TEST_CASE("NSIS script installs file plugins without recursive flag",
-          "[ship][installer][coverage][issue-644]") {
+          "[ship][installer][issue-644]") {
     ScopedTempDir temp;
     auto plugin = temp.path / "TestPlugin.clap";
     std::ofstream(plugin) << "plugin";
@@ -259,7 +259,7 @@ TEST_CASE("NSIS script installs file plugins without recursive flag",
 }
 
 TEST_CASE("NSIS script uses per-user plugin common directories",
-          "[ship][installer][coverage][issue-644]") {
+          "[ship][installer][issue-644]") {
     auto config = make_test_config();
     config.per_user_install = true;
     auto script = generate_nsis_script(config);
@@ -271,7 +271,7 @@ TEST_CASE("NSIS script uses per-user plugin common directories",
 }
 
 TEST_CASE("NSIS script keeps install_dir field non-authoritative for format destinations",
-          "[ship][installer][coverage][issue-644]") {
+          "[ship][installer][issue-644]") {
     auto config = make_test_config();
     config.plugins = {
         {"/tmp/custom/TestPlugin.vst3", "C:/Ignored/VST3", "vst3"},

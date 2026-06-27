@@ -347,7 +347,7 @@ TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
 }
 
 TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
-          "[mcp][json][coverage]") {
+          "[mcp][json]") {
     const std::string payload =
         "{"
         "\"message\":\"hello \\\"pulp\\\"\","
@@ -388,7 +388,7 @@ TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
 }
 
 TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
-          "[mcp][json][coverage][requested]") {
+          "[mcp][json]") {
     const std::string payload =
         R"({"tool":"pulp_build","tool_extra":"wrong","text":"a \"quoted\" value","n":17})";
 
@@ -403,7 +403,7 @@ TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
 }
 
 TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct",
-          "[mcp][json][coverage][requested]") {
+          "[mcp][json]") {
     const std::string payload =
         R"({"id":5,"id2":99,"id_text":"5","method":"tools/call","methodExtra":"wrong"})";
 
@@ -416,7 +416,7 @@ TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct",
 }
 
 TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
-          "[mcp][json][coverage]") {
+          "[mcp][json]") {
     const auto error = json_error("null", -32602, "bad \"arg\"\nline");
     require_contains(error, R"JSON("jsonrpc":"2.0")JSON");
     require_contains(error, R"JSON("id":null)JSON");
@@ -438,7 +438,7 @@ TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
 }
 
 TEST_CASE("MCP shell_quote keeps shell arguments atomic",
-          "[mcp][shell][coverage]") {
+          "[mcp][shell]") {
 #if defined(_WIN32)
     REQUIRE(shell_quote(R"(C:\Program Files\Pulp\pulp.exe)") ==
             R"("C:\Program Files\Pulp\pulp.exe")");
@@ -451,7 +451,7 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 }
 
 TEST_CASE("MCP CLI resolver finds Windows multi-config delegates",
-          "[mcp][shell][coverage]") {
+          "[mcp][shell]") {
     TempDir project;
     const auto cli = project.path / "build" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
     std::filesystem::create_directories(cli.parent_path());
@@ -461,7 +461,7 @@ TEST_CASE("MCP CLI resolver finds Windows multi-config delegates",
 }
 
 TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
-          "[mcp][shell][coverage][requested]") {
+          "[mcp][shell]") {
 #if defined(_WIN32)
     auto ok = exec("cmd /c echo|set /p=pulp-mcp");
 #else
@@ -478,7 +478,7 @@ TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
 }
 
 TEST_CASE("MCP find_project_root walks upward and reports absence",
-          "[mcp][shell][coverage][requested]") {
+          "[mcp][shell]") {
     TempDir temp;
     auto project = temp.path / "project";
     auto nested = project / "plugins" / "demo";
@@ -530,7 +530,7 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
 }
 
 TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
-          "[mcp][main][coverage]") {
+          "[mcp][main]") {
     std::ostringstream out;
     std::ostringstream err;
     ScopedStreamRedirect capture_out(std::cout, out.rdbuf());
@@ -600,7 +600,7 @@ TEST_CASE("MCP wire output never contains embedded newlines",
 }
 
 TEST_CASE("MCP JSON scalar extraction rejects partial typed values",
-          "[mcp][json][coverage][requested]") {
+          "[mcp][json]") {
     const std::string payload =
         R"JSON({"whole":12,"partial":"12x","truth":true,"lie":false,"nil":null,"float":3.25,"badFloat":"3.25x","quoted":"hello \"pulp\""})JSON";
 
@@ -790,7 +790,7 @@ TEST_CASE("MCP project-root dependent tools reject non-project directories", "[m
 }
 
 TEST_CASE("MCP audio probe JSON validates frames before shelling out",
-          "[mcp][tools][audio][coverage]") {
+          "[mcp][tools][audio]") {
     ScopedCurrentPath cwd(repo_root_path());
 
     auto zero_frames = handle_request(tool_call(
@@ -814,7 +814,7 @@ TEST_CASE("MCP audio probe JSON validates frames before shelling out",
 }
 
 TEST_CASE("MCP audio probe JSON reports missing project roots",
-          "[mcp][tools][audio][coverage]") {
+          "[mcp][tools][audio]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
@@ -865,7 +865,7 @@ TEST_CASE("MCP audio scope validates parameters before shelling out",
 }
 
 TEST_CASE("MCP build and test handlers quote project paths and filters",
-          "[mcp][tools][shell][coverage]") {
+          "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("PATH-injected POSIX fake tools are only used on non-Windows");
 #else
@@ -900,7 +900,7 @@ TEST_CASE("MCP build and test handlers quote project paths and filters",
 }
 
 TEST_CASE("MCP docs_search and create quote user arguments",
-          "[mcp][tools][shell][coverage]") {
+          "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1105,7 +1105,7 @@ TEST_CASE("MCP docs_search and create quote user arguments",
 }
 
 TEST_CASE("MCP docs_check runs the project docs check script",
-          "[mcp][tools][docs][coverage]") {
+          "[mcp][tools][docs]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1257,7 +1257,7 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
 }
 
 TEST_CASE("MCP status quotes project roots before reading Git branch",
-          "[mcp][tools][shell][coverage][requested]") {
+          "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("POSIX shell quoting assertion is only used on non-Windows");
 #else
@@ -1288,7 +1288,7 @@ TEST_CASE("MCP status quotes project roots before reading Git branch",
 // inherited GIT_DIR and mutated the WRONG repo — corrupting live worktrees
 // during pre-push / shipyard ctest runs.
 TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
-          "[mcp][git-isolation][regression][coverage]") {
+          "[mcp][git-isolation][regression]") {
 #if defined(_WIN32)
     SKIP("POSIX git-environment isolation assertion is only used on non-Windows");
 #else
@@ -1330,7 +1330,7 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
 }
 
 TEST_CASE("MCP status resolves import-design defaults from config and env",
-          "[mcp][tools][import-design][codecov]") {
+          "[mcp][tools][import-design]") {
     ScopedCurrentPath cwd(repo_root_path());
 
     SECTION("built-ins stay live and js when no config or env is present") {
@@ -1687,7 +1687,7 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
 }
 
 TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable text",
-          "[mcp][tools][inspect][coverage]") {
+          "[mcp][tools][inspect]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1717,7 +1717,7 @@ TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable tex
 }
 
 TEST_CASE("MCP validate only passes --all for the explicit all flag",
-          "[mcp][tools][validate][coverage]") {
+          "[mcp][tools][validate]") {
 #if defined(_WIN32)
     SKIP("fake extensionless pulp CLI is only executable through popen on POSIX");
 #else
@@ -1753,7 +1753,7 @@ TEST_CASE("MCP validate only passes --all for the explicit all flag",
 }
 
 TEST_CASE("MCP audio probe JSON wraps pulp run and returns structured content",
-          "[mcp][tools][audio][coverage]") {
+          "[mcp][tools][audio]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1875,7 +1875,7 @@ TEST_CASE("MCP audio scope wraps pulp audio scope and returns structured content
 }
 
 TEST_CASE("MCP audio probe JSON rejects malformed child output",
-          "[mcp][tools][audio][coverage]") {
+          "[mcp][tools][audio]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1913,7 +1913,7 @@ TEST_CASE("MCP audio probe JSON rejects malformed child output",
 }
 
 TEST_CASE("MCP audio probe JSON reports child runs that write no JSON",
-          "[mcp][tools][audio][coverage]") {
+          "[mcp][tools][audio]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1967,7 +1967,7 @@ TEST_CASE("MCP pulp_audio_model_list returns the structured tool-payload envelop
 }
 
 TEST_CASE("MCP audio tools return structured diagnostics without a project root",
-          "[mcp][tools][audio][coverage][requested]") {
+          "[mcp][tools][audio]") {
     TempDir home;
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     TempDir cwd_dir;
@@ -1999,7 +1999,7 @@ TEST_CASE("MCP audio tools return structured diagnostics without a project root"
 }
 
 TEST_CASE("MCP audio excerpt-find validates request fields through the handler",
-          "[mcp][tools][audio][coverage][requested]") {
+          "[mcp][tools][audio]") {
     TempDir home;
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     TempDir temp;
@@ -2050,7 +2050,7 @@ TEST_CASE("MCP audio excerpt-find validates request fields through the handler",
 }
 
 TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
-          "[mcp][tools][audio][coverage][requested]") {
+          "[mcp][tools][audio]") {
     TempDir home;
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     TempDir temp;
@@ -2211,7 +2211,7 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
 }
 
 TEST_CASE("parse_cmake_project_version handles plugin VERSION fallback",
-          "[mcp][compat][coverage]") {
+          "[mcp][compat]") {
     REQUIRE(pulp_mcp::parse_cmake_project_version(
                 "cmake_minimum_required(VERSION 3.25)\n"
                 "pulp_add_plugin(MyPlugin VERSION \"1.2.3\")\n") == "1.2.3");
@@ -2238,7 +2238,7 @@ TEST_CASE("parse_cmake_project_version handles plugin VERSION fallback",
 }
 
 TEST_CASE("compare_semver tolerates metadata and leading zeroes",
-          "[mcp][compat][coverage]") {
+          "[mcp][compat]") {
     REQUIRE(compare_semver("1.2.3-alpha", "1.2.3") == 0);
     REQUIRE(compare_semver("1.2.4+build", "1.2.3") > 0);
     REQUIRE(compare_semver("01.002.0003", "1.2.3") == 0);
@@ -2471,7 +2471,7 @@ TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
 }
 
 TEST_CASE("parse_pulp_toml_sdk_version rejects ambiguous sdk pins",
-          "[mcp][compat][coverage]") {
+          "[mcp][compat]") {
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
                 "[pulp.extra]\nsdk_version = \"9.9.9\"\n").empty());
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(

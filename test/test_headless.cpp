@@ -173,7 +173,7 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
 }
 
 TEST_CASE("format registry stores and replaces the processor factory",
-          "[format][registry][coverage]") {
+          "[format][registry]") {
     const auto previous = pulp::format::registered_factory();
     {
         ScopedFactoryRegistration scoped(create_test_gain);
@@ -186,7 +186,7 @@ TEST_CASE("format registry stores and replaces the processor factory",
 }
 
 TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
-          "[format][editor_ui][codecov]") {
+          "[format][editor_ui]") {
     if (pulp::format::configured_ui_script_path().has_value()) {
         SKIP("AutoUi fallback requires a build without PULP_UI_SCRIPT_PATH");
     }
@@ -231,7 +231,7 @@ TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
 }
 
 TEST_CASE("HeadlessHost forwards prepare context and release",
-          "[headless][coverage][issue-647]") {
+          "[headless][issue-647]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(last_processor != nullptr);
     auto* processor = last_processor;
@@ -342,7 +342,7 @@ TEST_CASE("HeadlessHost try_prepare reports channel and voice budget failures",
 }
 
 TEST_CASE("HeadlessHost fills default process context",
-          "[headless][coverage][issue-647]") {
+          "[headless][issue-647]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(44100.0, 512);
 
@@ -364,7 +364,7 @@ TEST_CASE("HeadlessHost fills default process context",
 }
 
 TEST_CASE("HeadlessHost defaults non-positive context fields",
-          "[headless][coverage]") {
+          "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(88200.0, 512);
 
@@ -639,7 +639,7 @@ TEST_CASE("HeadlessHost offline render matches direct process for stateless effe
 }
 
 TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
-          "[headless][coverage][issue-647]") {
+          "[headless][issue-647]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
     REQUIRE(last_processor != nullptr);
@@ -661,7 +661,7 @@ TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
 }
 
 TEST_CASE("HeadlessHost forwards explicit parameter-event queues",
-          "[headless][params][coverage]") {
+          "[headless][params]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
     REQUIRE(last_processor != nullptr);
@@ -696,7 +696,7 @@ TEST_CASE("HeadlessHost forwards explicit parameter-event queues",
 }
 
 TEST_CASE("HeadlessHost forwards MIDI, parameter events, and explicit context together",
-          "[headless][params][coverage]") {
+          "[headless][params]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
     REQUIRE(last_processor != nullptr);
@@ -737,7 +737,7 @@ TEST_CASE("HeadlessHost forwards MIDI, parameter events, and explicit context to
 }
 
 TEST_CASE("HeadlessHost null processor process and release are no-ops",
-          "[headless][coverage][issue-647]") {
+          "[headless][issue-647]") {
     pulp::format::HeadlessHost host(create_null_processor);
     host.prepare(48000.0, 64);
 
