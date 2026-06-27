@@ -28,7 +28,7 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../planning/production-readiness/01-format-adapters.md#1.5) |
-| `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.alsa` | No input capture path. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
