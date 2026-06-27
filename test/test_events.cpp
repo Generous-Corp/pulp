@@ -1107,7 +1107,8 @@ TEST_CASE("Timer destroy-while-dispatched is UAF-free (#716)",
     // 50 iterations so timing-window regressions surface under any of
     // ASan, TSan, or UBSan. Each iteration: start a 1ms timer, let it
     // dispatch once, then destroy it while the NEXT dispatch may still
-    // be queued. Without the shared_ptr<Impl> fix this would UAF.
+    // be queued. Destroying while the next dispatch is queued must not UAF;
+    // pre-fix the queued dispatch outlived the destroyed timer.
     for (int i = 0; i < 50; ++i) {
         {
             Timer t(loop, 1ms, [count] { count->fetch_add(1); }, true);

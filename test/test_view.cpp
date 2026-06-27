@@ -305,9 +305,9 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
 
 TEST_CASE("set_theme repaints and cascades to children",
           "[view][theme][reskin]") {
-    // Regression: a theme swap must invalidate the surface (previously
-    // set_theme updated the member silently) and the new
-    // tokens must reach descendants that resolve up the parent chain.
+    // A theme swap must invalidate the surface (pre-fix it updated the member
+    // silently), and the new tokens must reach descendants that resolve up the
+    // parent chain.
     View root;
     auto child = std::make_unique<View>();
     View* child_ptr = child.get();

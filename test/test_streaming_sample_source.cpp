@@ -412,10 +412,8 @@ TEST_CASE("StreamingSampleSource terminates when a streamed source ends early",
 
 TEST_CASE("StreamingSampleSource zero-fills surplus destination channels",
           "[audio][streaming][issue-streaming]") {
-    // A mono source pulled into a stereo destination must leave the extra channel
-    // silent (matching the streamed ring path), not stale/garbage. Regression for
-    // the resident fast path, which previously copied only the source channels and
-    // left wider destination channels untouched.
+    // The resident fast path must leave wider destination channels silent,
+    // matching the streamed ring path; pre-fix it left surplus channels untouched.
     const std::uint32_t src_ch = 1;
     const std::uint64_t total = 2048;
 

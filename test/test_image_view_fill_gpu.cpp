@@ -115,8 +115,8 @@ TEST_CASE("ImageView silhouette fill composites on the GPU (Graphite) backend",
 
     const auto gpu_cmp = compare_screenshots(base_gpu, filled_gpu);
     REQUIRE(gpu_cmp.valid);
-    // The fix: the masked fill now uploads to a GPU texture and composites, so
-    // the filled GPU render must visibly differ from the unfilled one — exactly
-    // as it does on raster. Pre-fix this similarity was ~1.0 (draw dropped).
+    // The masked fill uploads to a GPU texture and composites, so the filled GPU
+    // render must visibly differ from the unfilled one — exactly as it does on
+    // raster. Pre-fix this similarity was ~1.0 (draw dropped).
     CHECK(gpu_cmp.similarity < 0.99f);
 }
