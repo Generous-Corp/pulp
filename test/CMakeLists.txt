@@ -1947,6 +1947,10 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-spectral-freeze
         SOURCES test_gpu_spectral_freeze.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Spectral morph (Phase 5): blend between two captured spectra.
+    pulp_add_test_suite(pulp-test-gpu-spectral-morph
+        SOURCES test_gpu_spectral_morph.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 
 # Test signal source (sine tone, file playback)
