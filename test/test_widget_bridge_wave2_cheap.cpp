@@ -243,10 +243,9 @@ TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads throug
             eCmd = cmd;
         }
     }
-    // Single ellipse command — the JS shim must NOT decompose into multiple
-    // arc segments when rotation is non-zero (pre-Wave-2 the rotation arg
-    // was ignored entirely, which would have collapsed the call to either
-    // `arc` or a no-op).
+    // Single ellipse command — the JS shim forwards non-zero rotation without
+    // decomposing into multiple arc segments or collapsing the call to either
+    // `arc` or a no-op.
     REQUIRE(ellipseCount == 1);
     REQUIRE_THAT(eCmd.f[0], WithinAbs(50.0f, 1e-5f));   // cx
     REQUIRE_THAT(eCmd.f[1], WithinAbs(50.0f, 1e-5f));   // cy
@@ -294,8 +293,7 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
     }
     // Wave 2 cheap wiring confirmation: strokeText must produce a real
     // stroke_text command (true stroked-glyph rendering with kStroke_Style),
-    // NOT a fill_text command using strokeStyle as the fill colour
-    // (the pre-#1525 approximation).
+    // NOT a fill_text command using strokeStyle as the fill colour.
     REQUIRE(strokeTextCount == 1);
     REQUIRE(fillTextCount == 0);
 }
@@ -521,10 +519,10 @@ TEST_CASE("CSSStyleDeclaration single-token gap with invalid input preserves pri
 // engine; View root; root.set_bounds(...);` but never wrapped the
 // rest of the test, instead transitioning straight into a banner
 // comment for the canvas2d block. Stubbed for compile; the
-// equivalent assertion lives below in the renamed
-// "CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker map
-// to BM::lighter" test (which is the canvas2d-fill title that got
-// the body that should have lived here, post-shuffle).
+// equivalent assertion lives below in the
+// "CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus" test; despite
+// the shorter title, that body covers both plus-lighter and plus-darker
+// mapping to BM::lighter.
 // Wave 5 css.5 audit — recover the corrupted #1638 body that was
 // orphaned by a merge into a stub-with-stray-string. The body below
 // is the original Wave 2 css.9 plus-lighter / plus-darker test.
@@ -575,10 +573,9 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
 
 TEST_CASE("Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2",
           "[view][bridge][events][contract]") {
-    // Pre-fix the bridge sent the raw MouseButton enum (left=1, right=2,
-    // middle=3). JSX handlers reading `e.button === 1` (W3C: middle
-    // click) then fired on every LEFT click — the cause of Spectr's
-    // band-drawing breakage (left click triggered pan-mode).
+    // The bridge emits W3C button values (left=0, middle=1, right=2), so
+    // JSX handlers reading `e.button === 1` fire only for middle click.
+    // Spectr depends on this distinction for band drawing vs pan-mode.
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -607,10 +604,10 @@ TEST_CASE("Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2"
 
 TEST_CASE("Event contract: forward_key_event emits W3C UIEvent.key strings + modifier booleans",
           "[view][bridge][events][contract]") {
-    // Pre-fix `e.key` was the raw int KeyCode — every JSX
-    // `e.key === 'Escape'` / `e.key === 'ArrowLeft'` comparison failed.
-    // Also pin `ctrlKey/shiftKey/altKey/metaKey` booleans (the W3C
-    // KeyboardEvent surface).
+    // The bridge emits W3C `e.key` strings, so JSX comparisons such as
+    // `e.key === 'Escape'` / `e.key === 'ArrowLeft'` work. Also pin
+    // `ctrlKey/shiftKey/altKey/metaKey` booleans (the W3C KeyboardEvent
+    // surface).
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -650,9 +647,8 @@ TEST_CASE("Event contract: forward_key_event emits W3C UIEvent.key strings + mod
 
 TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __global__ keydown",
           "[view][bridge][events][contract]") {
-    // Pre-fix only __callbacks__['__global__:keydown'] was fanned to —
-    // `window.addEventListener` listeners (the standard DOM API and the
-    // one Spectr uses for Escape) never fired.
+    // Both the internal callback table and `window.addEventListener` receive
+    // global keydown events. Spectr uses the standard DOM API path for Escape.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -671,10 +667,9 @@ TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __glo
 
 TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws",
           "[view][bridge][events][contract]") {
-    // Pre-fix a throw from any handler (a stale ref in a React tick,
-    // a bad prop deref) propagated out of evaluate() and killed the
-    // rAF self-rescheduling chain. Symptom: waveform animation died
-    // until mouse-move restarted it.
+    // Handler exceptions stay isolated inside `__dispatch__`: a stale ref in a
+    // React tick or a bad prop deref must not propagate out of evaluate() and
+    // kill the rAF self-rescheduling chain.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -698,10 +693,9 @@ TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a 
 
 TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}",
           "[view][bridge][events][contract]") {
-    // Pre-fix wheel sent raw positional args (deltaX, deltaY). The
-    // @pulp/react synthetic-event shim only lifts fields when
-    // isPlainObject(rawArgs[0]) — positional args fell through,
-    // `e.deltaY` was undefined, trackpad zoom broke silently.
+    // Wheel dispatch sends a plain object. The @pulp/react synthetic-event shim
+    // only lifts fields when isPlainObject(rawArgs[0]), which keeps
+    // `e.deltaY` defined for trackpad zoom.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -733,9 +727,8 @@ TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,cl
 
 TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)",
           "[view][bridge][events][contract]") {
-    // Pre-fix each call wrapped the previous on_pointer_event, so
-    // re-renders multiplied dispatch cost by the render count and
-    // every pointer event fired N times into the JS callback chain.
+    // Registration is idempotent: re-renders must not multiply dispatch cost or
+    // fire one pointer event N times into the JS callback chain.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -774,8 +767,7 @@ TEST_CASE("setBackgroundGradient parses linear / radial / conic into the right k
           "[view][widget-bridge][gradient]") {
     // The CSS parser must route each gradient form to the matching View kind
     // (1=linear, 2=radial, 3=conic) so the canvas paints a real radial/sweep
-    // instead of the old flat-color fallback. With or without a shape/position
-    // prefix.
+    // gradient, with or without a shape/position prefix.
     auto kind = [](const std::string& css) {
         ScriptEngine engine;
         View root;

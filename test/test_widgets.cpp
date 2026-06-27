@@ -96,8 +96,8 @@ TEST_CASE("Knob renders arcs and indicator", "[view][widget]") {
     knob.paint(canvas);
 
     // Ink & Signal knob: track arc + value arc, a raised body disc + a white
-    // dot pointer (fill_circle), and the label text. (The old thin-needle
-    // stroke_line was replaced by the dot pointer.)
+    // dot pointer (fill_circle), and the label text. The indicator is the dot
+    // pointer, not a thin-needle stroke_line.
     REQUIRE(canvas.count(DrawCommand::Type::stroke_arc) == 2);
     REQUIRE(canvas.count(DrawCommand::Type::fill_circle) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
@@ -619,9 +619,8 @@ TEST_CASE("Skinned Meter renders the warm top stop at the top of the fill",
           "[view][widget][issue-3191]") {
     // The gradient maps across the FILL region (not absolute meter height), so
     // a partial fill still shows the warm/red TOP stop at the top of the fill —
-    // matching the capture. With the old absolute-height mapping a 50% fill only
-    // exposed the lower (green) half of the gradient. We sample the painted rows
-    // and assert the topmost filled row is the red stop.
+    // matching the capture. We sample the painted rows and assert the topmost
+    // filled row is the red stop.
     Meter meter;
     meter.set_bounds({0, 0, 40, 200});
     meter.set_skin_gradient({
@@ -778,8 +777,8 @@ TEST_CASE("Skinned Fader honours derived thin track width",
     // of the widget box. We render into a RecordingCanvas and assert the track
     // rect spans ~the derived width, far narrower than the box.
     Fader fader;
-    // Box is deliberately WIDE (60 px) so the old skinned heuristic
-    // (0.18*box → ~11 px, clamped) would visibly differ from the derived
+    // Box is deliberately WIDE (60 px) so a box-fraction width
+    // (0.18*box → ~11 px, clamped) visibly differs from the derived
     // 5-px track. Honour-the-derived-width is the behaviour under test.
     fader.set_bounds({0, 0, 60, 200});
     fader.set_value(0.5f);
@@ -793,9 +792,8 @@ TEST_CASE("Skinned Fader honours derived thin track width",
     fader.paint(rc);
     // Rect geometry is in f[0..3] = x, y, w, h. The track is the FIRST
     // full-height rounded rect (drawn before fill + thumb). Assert it is the
-    // derived thin width (~5 px) and centred — NOT a fraction of the 60-px box
-    // (the old skinned heuristic would have drawn 60*0.18 ≈ 11 here, so make
-    // the box wide enough that 0.18*box clearly differs).
+    // derived thin width (~5 px) and centred — NOT a fraction of the 60-px box.
+    // The box is wide enough that 0.18*box clearly differs.
     auto rects = commands_of(rc, DrawCommand::Type::fill_rounded_rect);
     bool found_thin_track = false;
     for (const auto& r : rects) {
@@ -1493,7 +1491,7 @@ TEST_CASE("Meter renders with levels", "[view][widget]") {
     RecordingCanvas canvas;
     meter.paint(canvas);
 
-    // Background + RMS fill = 2 rects, peak line + held peak = 2 lines
+    // Background + RMS fill = 2 rects; at least one peak marker line is drawn.
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) >= 1);
@@ -1649,7 +1647,8 @@ TEST_CASE("WaveformView trigger -- falling zero crossing", "[view][widget][trigg
     size_t idx = WaveformView::find_trigger_index(
         samples.data(), samples.size(),
         WaveformView::TriggerMode::falling_zero);
-    // prev=0 at i=3 is not > 0, so the first falling crossing is i=4 (prev=0, curr=-0.5)
+    // The 0.5 -> 0 step is not a crossing because curr is not below zero; the
+    // first falling crossing is i=4 (prev=0, curr=-0.5).
     REQUIRE(idx == 4);
 }
 
