@@ -42,7 +42,7 @@ TEST_CASE("AppearanceTracker callback fires on lock", "[view][appearance]") {
 }
 
 TEST_CASE("AppearanceTracker replacing callback uses latest handler only",
-          "[view][appearance][coverage]") {
+          "[view][appearance]") {
     AppearanceTracker tracker;
     int first_calls = 0;
     std::vector<Appearance> latest;
@@ -58,7 +58,7 @@ TEST_CASE("AppearanceTracker replacing callback uses latest handler only",
 }
 
 TEST_CASE("AppearanceTracker callbacks follow repeated locks and locked poll no-op",
-          "[view][appearance][coverage][issue-493]") {
+          "[view][appearance][issue-493]") {
     AppearanceTracker tracker;
     std::vector<Appearance> received;
 
@@ -130,7 +130,7 @@ TEST_CASE("ThemeManager callback fires on theme change", "[view][appearance]") {
 }
 
 TEST_CASE("ThemeManager replacing callback uses latest handler only",
-          "[view][appearance][coverage]") {
+          "[view][appearance]") {
     ThemeManager mgr;
     int first_calls = 0;
     std::vector<uint8_t> latest_red;
@@ -154,7 +154,7 @@ TEST_CASE("ThemeManager replacing callback uses latest handler only",
 }
 
 TEST_CASE("ThemeManager callbacks cover locked theme poll and unlock",
-          "[view][appearance][coverage][issue-493]") {
+          "[view][appearance][issue-493]") {
     ThemeManager mgr;
 
     Theme light;

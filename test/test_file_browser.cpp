@@ -74,7 +74,7 @@ float x_for_exact_text(const RecordingCanvas& canvas, const std::string& text) {
 } // namespace
 
 TEST_CASE("FileBrowser set_root handles nonexistent roots without drawing entries",
-          "[view][file-browser][coverage][issue-493][issue-641]") {
+          "[view][file-browser][issue-493][issue-641]") {
     TempDir tmp("missing-root");
     const auto missing = tmp.path / "missing";
 
@@ -91,7 +91,7 @@ TEST_CASE("FileBrowser set_root handles nonexistent roots without drawing entrie
 }
 
 TEST_CASE("FileBrowser filters hidden files and sorts directories before files",
-          "[view][file-browser][coverage][issue-493][issue-641]") {
+          "[view][file-browser][issue-493][issue-641]") {
     TempDir tmp("filter-sort");
     std::filesystem::create_directory(tmp.path / "ZetaDir");
     std::filesystem::create_directory(tmp.path / "AlphaDir");
@@ -128,7 +128,7 @@ TEST_CASE("FileBrowser filters hidden files and sorts directories before files",
 }
 
 TEST_CASE("FileBrowser paint clips rows and keeps directories through filters",
-          "[view][file-browser][coverage][issue-655]") {
+          "[view][file-browser][issue-655]") {
     TempDir tmp("filter-clip");
     std::filesystem::create_directory(tmp.path / "Samples");
     write_file(tmp.path / "alpha.wav");
@@ -151,7 +151,7 @@ TEST_CASE("FileBrowser paint clips rows and keeps directories through filters",
 }
 
 TEST_CASE("FileBrowser navigate refreshes entries for the new directory",
-          "[view][file-browser][coverage]") {
+          "[view][file-browser]") {
     TempDir tmp("navigate");
     std::filesystem::create_directory(tmp.path / "samples");
     write_file(tmp.path / "root.wav");
@@ -180,7 +180,7 @@ TEST_CASE("FileBrowser navigate refreshes entries for the new directory",
 }
 
 TEST_CASE("FileBrowser non-wildcard filters keep directories and reject files",
-          "[view][file-browser][coverage]") {
+          "[view][file-browser]") {
     TempDir tmp("non-wildcard-filter");
     std::filesystem::create_directory(tmp.path / "Presets");
     write_file(tmp.path / "alpha.wav");
@@ -199,7 +199,7 @@ TEST_CASE("FileBrowser non-wildcard filters keep directories and reject files",
 }
 
 TEST_CASE("FileBrowser navigating to a regular file is a safe empty listing",
-          "[view][file-browser][coverage]") {
+          "[view][file-browser]") {
     TempDir tmp("file-as-root");
     const auto file = tmp.path / "single.wav";
     write_file(file);
@@ -217,7 +217,7 @@ TEST_CASE("FileBrowser navigating to a regular file is a safe empty listing",
 }
 
 TEST_CASE("FileTree skips hidden nodes and paints one expanded directory level",
-          "[view][file-tree][coverage][issue-493][issue-641]") {
+          "[view][file-tree][issue-493][issue-641]") {
     TempDir tmp("tree");
     std::filesystem::create_directories(tmp.path / "alpha" / "deeper");
     std::filesystem::create_directories(tmp.path / "zeta");
@@ -256,7 +256,7 @@ TEST_CASE("FileTree skips hidden nodes and paints one expanded directory level",
 }
 
 TEST_CASE("FileTree missing roots clear previously painted nodes",
-          "[view][file-tree][coverage]") {
+          "[view][file-tree]") {
     TempDir tmp("tree-missing-root");
     write_file(tmp.path / "visible.txt");
 
@@ -278,7 +278,7 @@ TEST_CASE("FileTree missing roots clear previously painted nodes",
 }
 
 TEST_CASE("MultiDocumentPanel remove_document preserves active document callbacks",
-          "[view][multi-document][coverage][issue-493][issue-641]") {
+          "[view][multi-document][issue-493][issue-641]") {
     SECTION("removing the active first document reports the replacement at the same index") {
         MultiDocumentPanel panel;
         std::vector<int> active_changes;
@@ -340,7 +340,7 @@ TEST_CASE("MultiDocumentPanel remove_document preserves active document callback
 }
 
 TEST_CASE("MultiDocumentPanel paint reflects active tab and empty state",
-          "[view][multi-document][coverage][issue-655]") {
+          "[view][multi-document][issue-655]") {
     MultiDocumentPanel empty;
     empty.set_bounds({0, 0, 200, 80});
     RecordingCanvas empty_canvas;

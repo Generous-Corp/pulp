@@ -32,7 +32,7 @@ TEST_CASE("ModalOverlay dismiss on Escape", "[view][modal]") {
 }
 
 TEST_CASE("ModalOverlay ignores key releases and handles Escape without callback",
-          "[view][modal][coverage][issue-493]") {
+          "[view][modal][issue-493]") {
     ModalOverlay modal;
 
     KeyEvent release;
@@ -57,7 +57,7 @@ TEST_CASE("ModalOverlay paints backdrop", "[view][modal]") {
 }
 
 TEST_CASE("ModalOverlay paint applies backdrop alpha to fill color",
-          "[view][modal][coverage][issue-493]") {
+          "[view][modal][issue-493]") {
     ModalOverlay modal;
     modal.set_bounds({0, 0, 320, 200});
     modal.backdrop_opacity = 0.25f;
@@ -86,7 +86,7 @@ TEST_CASE("ModalOverlay dismiss_on_backdrop_click flag", "[view][modal]") {
 }
 
 TEST_CASE("ModalOverlay backdrop mouse dismissal respects hit target and flag",
-          "[view][modal][coverage][issue-493]") {
+          "[view][modal][issue-493]") {
     ModalOverlay modal;
     modal.set_bounds({0, 0, 200, 120});
 
@@ -126,7 +126,7 @@ TEST_CASE("ModalOverlay non-Escape key not handled", "[view][modal]") {
 }
 
 TEST_CASE("ModalOverlay backdrop click dismisses only outside children",
-          "[view][modal][coverage][issue-653]") {
+          "[view][modal][issue-653]") {
     ModalOverlay modal;
     modal.set_bounds({0, 0, 200, 100});
     auto child = std::make_unique<View>();
@@ -154,7 +154,7 @@ TEST_CASE("ModalOverlay backdrop click dismisses only outside children",
 }
 
 TEST_CASE("ModalOverlay ignores mouse-up and missing dismiss callback",
-          "[view][modal][coverage][issue-653]") {
+          "[view][modal][issue-653]") {
     ModalOverlay modal;
     modal.set_bounds({0, 0, 80, 40});
 

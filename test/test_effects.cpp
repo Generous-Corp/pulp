@@ -67,7 +67,7 @@ TEST_CASE("Shadow effect with RecordingCanvas", "[canvas][effects]") {
 }
 
 TEST_CASE("apply_shadow records generic canvas setup commands",
-          "[canvas][effects][coverage]") {
+          "[canvas][effects]") {
     RecordingCanvas canvas;
     ShadowEffect shadow;
     shadow.offset_x = 6.0f;
@@ -92,7 +92,7 @@ TEST_CASE("apply_shadow records generic canvas setup commands",
 }
 
 TEST_CASE("direct blur and color adjustment calls are generic no-ops",
-          "[canvas][effects][coverage]") {
+          "[canvas][effects]") {
     RecordingCanvas canvas;
 
     apply_blur(canvas, BlurEffect{2.0f, 5.0f});
@@ -102,7 +102,7 @@ TEST_CASE("direct blur and color adjustment calls are generic no-ops",
 }
 
 TEST_CASE("effect layers can be nested and restore in order",
-          "[canvas][effects][coverage]") {
+          "[canvas][effects]") {
     RecordingCanvas canvas;
 
     begin_effect_layer(canvas, BlurEffect{1.0f, 2.0f});

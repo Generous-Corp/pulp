@@ -60,7 +60,7 @@ TEST_CASE("SpriteStrip empty", "[view][sprite]") {
 }
 
 TEST_CASE("SpriteStrip clamps frame lookup and exposes loaded data",
-          "[view][sprite][coverage]") {
+          "[view][sprite]") {
     SpriteStrip strip;
     std::vector<uint8_t> data(4 * 20 * 4, 77);
     strip.load(data.data(), data.size(), 4, 20, 5);
@@ -83,7 +83,7 @@ TEST_CASE("SpriteStrip clamps frame lookup and exposes loaded data",
 }
 
 TEST_CASE("SpriteStrip interpolation flag is independently configurable",
-          "[view][sprite][coverage]") {
+          "[view][sprite]") {
     SpriteStrip strip;
     REQUIRE_FALSE(strip.interpolate());
 

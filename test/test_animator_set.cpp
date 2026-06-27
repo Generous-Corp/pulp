@@ -63,7 +63,7 @@ TEST_CASE("AnimatorSetBuilder reset", "[view][animation]") {
 }
 
 TEST_CASE("AnimatorSetBuilder empty and ignored parallel inputs are safe",
-          "[view][animation][coverage]") {
+          "[view][animation]") {
     auto empty = AnimatorSetBuilder().build_runner();
     REQUIRE(empty.finished());
     REQUIRE(empty.advance(0.016f));
@@ -81,7 +81,7 @@ TEST_CASE("AnimatorSetBuilder empty and ignored parallel inputs are safe",
 }
 
 TEST_CASE("AnimatorSetBuilder parallel group updates members until all finish",
-          "[view][animation][coverage]") {
+          "[view][animation]") {
     float fast = 0.0f;
     float slow = 0.0f;
     auto runner = AnimatorSetBuilder()
@@ -129,7 +129,7 @@ TEST_CASE("Vector3D arithmetic", "[view][3d]") {
 }
 
 TEST_CASE("Vector3D subtraction and zero normalization are stable",
-          "[view][3d][coverage]") {
+          "[view][3d]") {
     Vector3D a{3, 2, 1};
     Vector3D b{1, 5, -2};
 
@@ -176,7 +176,7 @@ TEST_CASE("Quaternion multiply identity", "[view][3d]") {
 }
 
 TEST_CASE("Quaternion rotates vectors and normalizes zero quaternions",
-          "[view][3d][coverage]") {
+          "[view][3d]") {
     auto quarter_turn = Quaternion::from_axis_angle({0, 0, 1}, 3.14159265f * 0.5f);
     auto rotated = quarter_turn.rotate({1, 0, 0});
     REQUIRE(rotated.x == Catch::Approx(0.0f).margin(0.001f));
@@ -191,7 +191,7 @@ TEST_CASE("Quaternion rotates vectors and normalizes zero quaternions",
 }
 
 TEST_CASE("Quaternion slerp handles near and opposite hemispheres",
-          "[view][3d][coverage]") {
+          "[view][3d]") {
     const auto identity = Quaternion::identity();
     const auto near = Quaternion::from_axis_angle({0, 1, 0}, 0.001f);
     auto blended_near = Quaternion::slerp(identity, near, 0.5f);
@@ -204,7 +204,7 @@ TEST_CASE("Quaternion slerp handles near and opposite hemispheres",
 }
 
 TEST_CASE("Draggable3DOrientation drag lifecycle updates and resets orientation",
-          "[view][3d][coverage]") {
+          "[view][3d]") {
     Draggable3DOrientation orientation;
     const auto initial = orientation.orientation();
 

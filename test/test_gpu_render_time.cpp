@@ -153,7 +153,7 @@ TEST_CASE("RenderPassManager frame GPU time is independent of per-pass GPU time"
 }
 
 TEST_CASE("RenderPassManager handles empty pass endings and disabled budgets",
-          "[render][gpu-render-time][render-pass][coverage]") {
+          "[render][gpu-render-time][render-pass]") {
     RenderPassManager rpm;
     REQUIRE(rpm.budget() == 16.67f);
     REQUIRE(rpm.frame_count() == 0);

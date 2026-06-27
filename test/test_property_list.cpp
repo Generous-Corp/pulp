@@ -77,7 +77,7 @@ TEST_CASE("PropertyList intrinsic height accounts for category display", "[view]
 }
 
 TEST_CASE("PropertyList empty model still paints background only",
-          "[view][property_list][coverage][large]") {
+          "[view][property_list]") {
     PropertyList list;
     list.set_bounds({0, 0, 160, 80});
     list.set_row_height(18.0f);
@@ -146,7 +146,7 @@ TEST_CASE("PropertyList set_value only mutates existing keys", "[view][property_
 }
 
 TEST_CASE("PropertyList set_value preserves variant-specific value types",
-          "[view][property_list][coverage][large]") {
+          "[view][property_list]") {
     PropertyList list;
     list.set_properties({
         {"name", "Name", std::string("Old"), false, ""},
@@ -171,7 +171,7 @@ TEST_CASE("PropertyList set_value preserves variant-specific value types",
 }
 
 TEST_CASE("PropertyList category visibility and label fallback paint paths",
-          "[view][property_list][coverage][issue-653]") {
+          "[view][property_list][issue-653]") {
     PropertyList list;
     list.set_bounds({0, 0, 220, 100});
     list.set_row_height(20.0f);
@@ -195,7 +195,7 @@ TEST_CASE("PropertyList category visibility and label fallback paint paths",
 }
 
 TEST_CASE("PropertyList selection highlight covers non-bool rows and misses",
-          "[view][property_list][coverage][issue-653]") {
+          "[view][property_list][issue-653]") {
     PropertyList list;
     list.set_bounds({0, 0, 180, 100});
     list.set_row_height(20.0f);
@@ -228,7 +228,7 @@ TEST_CASE("PropertyList selection highlight covers non-bool rows and misses",
 }
 
 TEST_CASE("PropertyList clamps color text and ignores category header clicks",
-          "[view][property_list][coverage]") {
+          "[view][property_list]") {
     PropertyList list;
     list.set_bounds({0, 0, 200, 96});
     list.set_row_height(24.0f);

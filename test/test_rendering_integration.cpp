@@ -112,7 +112,7 @@ TEST_CASE("Dimension parse auto", "[view][dimension]") {
 }
 
 TEST_CASE("Dimension parse trims supported units and rejects unknown suffixes",
-          "[view][dimension][codecov]") {
+          "[view][dimension]") {
     auto px = view::Dimension::parse(" 12px \t");
     REQUIRE(px.unit == view::DimensionUnit::px);
     REQUIRE(px.value == Catch::Approx(12.0f));
@@ -192,7 +192,7 @@ TEST_CASE("RenderPassManager detects over budget", "[render][pass]") {
 }
 
 TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
-          "[render][pass][coverage]") {
+          "[render][pass]") {
     render::RenderPassManager pm;
 
     REQUIRE(pm.frame_count() == 0);
@@ -216,7 +216,7 @@ TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
 }
 
 TEST_CASE("RenderPassManager handles empty passes and disabled budget",
-          "[render][pass][coverage]") {
+          "[render][pass]") {
     render::RenderPassManager pm;
 
     pm.begin_frame();
@@ -286,7 +286,7 @@ TEST_CASE("FillStyle linear gradient", "[canvas][gradient]") {
 }
 
 TEST_CASE("FillStyle radial gradient exposes focal point and stops",
-          "[canvas][gradient][coverage]") {
+          "[canvas][gradient]") {
     canvas::RadialGradient rg{10.0f, 20.0f, 30.0f, 0.0f, 0.0f, {}};
     rg.focal_x = 12.0f;
     rg.focal_y = 18.0f;

@@ -86,7 +86,7 @@ TEST_CASE("serialize + deserialize round-trip", "[ui][resizable-shell]") {
 }
 
 TEST_CASE("serialize stores little-endian width and height bytes",
-          "[ui][resizable-shell][coverage]") {
+          "[ui][resizable-shell]") {
     ResizableShell s({.initial_size = {0x0304u, 0x020Du}});
 
     const auto blob = s.serialize();
@@ -103,7 +103,7 @@ TEST_CASE("serialize stores little-endian width and height bytes",
 }
 
 TEST_CASE("deserialize ignores trailing bytes after the size payload",
-          "[ui][resizable-shell][coverage]") {
+          "[ui][resizable-shell]") {
     uint8_t blob[] = {
         0x2Cu, 0x01u, 0x00u, 0x00u, // 300
         0xC8u, 0x00u, 0x00u, 0x00u, // 200
@@ -160,7 +160,7 @@ TEST_CASE("constructor normalizes initial size through negotiate",
 }
 
 TEST_CASE("non-positive aspect ratio uses plain min max clamping",
-          "[ui][resizable-shell][coverage]") {
+          "[ui][resizable-shell]") {
     ResizableShell zero({.min_size = {100, 80},
                          .max_size = {500, 400},
                          .initial_size = {300, 300},

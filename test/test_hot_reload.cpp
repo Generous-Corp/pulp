@@ -202,7 +202,7 @@ TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader seeds observed JS files and ignores stale events",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_seed");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -233,7 +233,7 @@ TEST_CASE("HotReloader seeds observed JS files and ignores stale events",
 }
 
 TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_non_js");
     auto text_file = tmp_dir / "notes.txt";
     write_js_file(text_file, "not javascript");
@@ -247,7 +247,7 @@ TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
 }
 
 TEST_CASE("HotReloader file watcher ignores unsupported changes",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_filter");
     auto entry = tmp_dir / "main.js";
     auto text_file = tmp_dir / "notes.txt";
@@ -273,7 +273,7 @@ TEST_CASE("HotReloader file watcher ignores unsupported changes",
 }
 
 TEST_CASE("HotReloader module file change reloads directory entry",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_module");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -298,7 +298,7 @@ TEST_CASE("HotReloader module file change reloads directory entry",
 }
 
 TEST_CASE("HotReloader pending reload without callback still drains",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_no_callback");
     auto entry = tmp_dir / "main.js";
     write_js_file(entry, "// entry");
@@ -315,7 +315,7 @@ TEST_CASE("HotReloader pending reload without callback still drains",
 }
 
 TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_empty_entry");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";

@@ -107,7 +107,7 @@ TEST_CASE("KeyShortcut parses named keys and rejects invalid function keys",
 }
 
 TEST_CASE("KeyShortcut parses modifiers independent of their order",
-          "[view][keys][coverage]") {
+          "[view][keys]") {
     auto ks = KeyShortcut::from_string("Shift+Meta+Cmd+A");
     REQUIRE(ks.key == KeyCode::a);
     REQUIRE((ks.modifiers & kModShift) != 0);
@@ -138,7 +138,7 @@ TEST_CASE("KeyShortcut to_string round-trips", "[view][keys]") {
 }
 
 TEST_CASE("KeyShortcut parser accepts out-of-order modifiers once",
-          "[view][keys][coverage]") {
+          "[view][keys]") {
     auto ks = KeyShortcut::from_string("Shift+Cmd+A");
     REQUIRE(ks.key == KeyCode::a);
     REQUIRE((ks.modifiers & kModCmd) != 0);
@@ -297,7 +297,7 @@ TEST_CASE("KeyMapping no-op branches leave commands intact", "[view][keys]") {
 }
 
 TEST_CASE("KeyMapping handles commands without actions",
-          "[view][keys][coverage]") {
+          "[view][keys]") {
     KeyMapping km;
     km.add_command({1, "No Action", "File",
                     KeyShortcut::from_string("Cmd+N"), {}, {}, false});
@@ -336,7 +336,7 @@ TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
 }
 
 TEST_CASE("KeyMapping save_bindings fails when parent is missing",
-          "[view][keys][coverage]") {
+          "[view][keys]") {
     KeyMapping km;
     km.add_command({1, "Save", "File",
                     KeyShortcut::from_string("Cmd+S"), [] {}, {}, false});
@@ -402,7 +402,7 @@ TEST_CASE("MenuBar set_key_mapping preserves command metadata",
 }
 
 TEST_CASE("MenuBar add_menu preserves submenu and disabled item metadata",
-          "[view][menu][coverage]") {
+          "[view][menu]") {
     MenuBar menu;
     menu.add_menu("View", {
         {"Zoom", {}, {}, true, false, {
@@ -436,7 +436,7 @@ TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
 }
 
 TEST_CASE("NativeToolbar stores callable item actions",
-          "[view][toolbar][coverage]") {
+          "[view][toolbar]") {
     NativeToolbar tb;
     int calls = 0;
     tb.add_item({"render", "Render", "play", [&] { ++calls; }});
@@ -513,7 +513,7 @@ TEST_CASE("AppSettings invalid typed values return null or false",
 }
 
 TEST_CASE("AppSettings numeric getters reject partial parses",
-          "[view][settings][coverage][large]") {
+          "[view][settings]") {
     AppSettings settings("PulpTest");
     settings.set_string("int_suffix", "256samples");
     settings.set_string("int_decimal", "256.5");
@@ -585,7 +585,7 @@ TEST_CASE("AppSettings saves and loads from platform settings root",
 }
 
 TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
-          "[view][settings][coverage]") {
+          "[view][settings]") {
     auto root = make_temp_root("pulp-app-settings-malformed");
 
 #if defined(_WIN32)
@@ -614,7 +614,7 @@ TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
 }
 
 TEST_CASE("AppSettings load clears stale values from an empty settings file",
-          "[view][settings][coverage]") {
+          "[view][settings]") {
     auto root = make_temp_root("pulp-app-settings-empty");
 
 #if defined(_WIN32)
@@ -643,7 +643,7 @@ TEST_CASE("AppSettings load clears stale values from an empty settings file",
 }
 
 TEST_CASE("AppSettings load clears stale values before partial parse",
-          "[view][settings][coverage]") {
+          "[view][settings]") {
     auto root = make_temp_root("pulp-app-settings-partial");
 
 #if defined(_WIN32)

@@ -23,7 +23,7 @@ TEST_CASE("SdfAtlasCache duplicate seed glyphs produce one resident entry",
 }
 
 TEST_CASE("SdfAtlasCache can initialize an empty resident set",
-          "[canvas][cache][coverage][issue-650]") {
+          "[canvas][cache][issue-650]") {
     SdfAtlasCache cache;
     REQUIRE_FALSE(cache.initialize("", {}, 24, 4, 512));
     REQUIRE(cache.size() == 0);
@@ -62,7 +62,7 @@ TEST_CASE("SdfAtlasCache reinitialize stamps new glyphs at current frame",
 }
 
 TEST_CASE("SdfAtlasCache touching resident glyph updates recency without clearing dirty",
-          "[canvas][cache][coverage][issue-650]") {
+          "[canvas][cache][issue-650]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
 

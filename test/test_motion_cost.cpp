@@ -278,7 +278,7 @@ TEST_CASE("CostSample zeroes render fields when no probe is wired",
 }
 
 TEST_CASE("Cost buffer sink tolerates a null destination",
-          "[motion-cost][coverage]") {
+          "[motion-cost]") {
     auto sink = make_cost_buffer_sink(nullptr);
 
     CostSample s;
@@ -382,7 +382,7 @@ TEST_CASE("CostSample JSONL serialization round-trips a stream", "[motion-cost]"
 }
 
 TEST_CASE("load_cost_stream rejects missing or unsupported headers",
-          "[motion-cost][coverage]") {
+          "[motion-cost]") {
     REQUIRE(load_cost_stream(unique_path("missing")).empty());
 
     const std::string no_header = unique_path("no-header");

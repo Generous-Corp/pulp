@@ -66,7 +66,7 @@ TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
     REQUIRE(grid->child_count() == 3);  // Gain + Mix + Bypass
 }
 
-TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui][coverage]") {
+TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui]") {
     StateStore store;
     auto root = AutoUi::build(store);
     REQUIRE(root != nullptr);
@@ -237,7 +237,7 @@ TEST_CASE("AutoUi generated controls write changes back to the store",
 }
 
 TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
-          "[view][auto_ui][coverage][issue-493]") {
+          "[view][auto_ui][issue-493]") {
     StateStore store;
     store.add_parameter(make_param(1, "Frequency", "Hz", {0.0f, 1000.0f, 500.0f}));
     store.add_parameter(make_param(2, "Drive", "dB", {0.0f, 80.0f, 50.0f}));
@@ -269,7 +269,7 @@ TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
 }
 
 TEST_CASE("AutoUi sync updates generated toggles and existing faders",
-          "[view][auto_ui][coverage][issue-493]") {
+          "[view][auto_ui][issue-493]") {
     StateStore store;
     store.add_parameter(make_param(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
     store.add_parameter(make_param(2, "Level", "", {0.0f, 1.0f, 0.0f}));
@@ -299,7 +299,7 @@ TEST_CASE("AutoUi sync updates generated toggles and existing faders",
 }
 
 TEST_CASE("AutoUi sync ignores unmatched widget identifiers",
-          "[view][auto_ui][coverage]") {
+          "[view][auto_ui]") {
     StateStore store;
     store.add_parameter(make_param(1, "Level", "", {0.0f, 1.0f, 0.0f}));
 

@@ -109,7 +109,7 @@ TEST_CASE("SplashScreen paint records default text and image paths",
 }
 
 TEST_CASE("SplashScreen manual dismiss waits for fade-out before callback",
-          "[view][splash][coverage]") {
+          "[view][splash]") {
     SplashScreen splash;
     splash.set_fade_in(0.1f);
     splash.set_duration(10.0f);
@@ -131,7 +131,7 @@ TEST_CASE("SplashScreen manual dismiss waits for fade-out before callback",
 }
 
 TEST_CASE("SplashScreen show restarts state after hidden dismiss",
-          "[view][splash][coverage]") {
+          "[view][splash]") {
     SplashScreen splash;
     splash.set_fade_in(0.2f);
     splash.set_duration(0.2f);
@@ -152,7 +152,7 @@ TEST_CASE("SplashScreen show restarts state after hidden dismiss",
 }
 
 TEST_CASE("SplashScreen can be shown again after completion",
-          "[view][splash][coverage]") {
+          "[view][splash]") {
     SplashScreen splash;
     splash.set_fade_in(0.01f);
     splash.set_duration(0.01f);
@@ -176,7 +176,7 @@ TEST_CASE("SplashScreen can be shown again after completion",
 }
 
 TEST_CASE("SplashScreen zero-duration phases finish deterministically",
-          "[view][splash][coverage]") {
+          "[view][splash]") {
     SplashScreen splash;
     splash.set_fade_in(0.0f);
     splash.set_duration(0.0f);

@@ -43,7 +43,7 @@ TEST_CASE("miss then hit", "[view][image-cache]") {
 }
 
 TEST_CASE("decoder replacement does not invalidate cached image entries",
-          "[view][image-cache][coverage][large]") {
+          "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> first_calls{0};
     std::atomic<int> second_calls{0};
@@ -149,7 +149,7 @@ TEST_CASE("clear invokes releaser for every entry",
 }
 
 TEST_CASE("clear preserves cache counters while removing entries",
-          "[view][image-cache][coverage]") {
+          "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> calls{0};
     c.set_decoder(make_fake_decoder(calls));
@@ -179,7 +179,7 @@ TEST_CASE("clear preserves cache counters while removing entries",
 }
 
 TEST_CASE("clear without a releaser drops entries safely",
-          "[view][image-cache][coverage]") {
+          "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> calls{0};
     c.set_decoder(make_fake_decoder(calls));
@@ -198,7 +198,7 @@ TEST_CASE("clear without a releaser drops entries safely",
 }
 
 TEST_CASE("clear on an empty cache is a no-op and preserves counters",
-          "[view][image-cache][coverage]") {
+          "[view][image-cache]") {
     ImageCache c;
     REQUIRE(c.stats().entry_count == 0);
     REQUIRE(c.stats().hits == 0);
@@ -216,7 +216,7 @@ TEST_CASE("clear on an empty cache is a no-op and preserves counters",
 }
 
 TEST_CASE("entry exactly matching byte budget remains cached",
-          "[view][image-cache][coverage]") {
+          "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> calls{0};
     c.set_decoder(make_fake_decoder(calls));
@@ -243,7 +243,7 @@ TEST_CASE("zero budget disables trimming", "[view][image-cache]") {
 }
 
 TEST_CASE("lowering byte budget trims least recently used entries",
-          "[view][image-cache][coverage][issue-493]") {
+          "[view][image-cache][issue-493]") {
     ImageCache c;
     std::atomic<int> calls{0};
     std::vector<void*> released;

@@ -172,7 +172,7 @@ TEST_CASE("EqCurveView empty hit does not start a drag", "[view][eq_curve][issue
 }
 
 TEST_CASE("EqCurveView paint covers disabled grid and disabled band handles",
-          "[view][eq_curve][coverage][issue-652]") {
+          "[view][eq_curve][issue-652]") {
     EqCurveView eq;
     eq.set_bounds({0, 0, 240, 120});
     eq.set_show_grid(false);
@@ -188,7 +188,7 @@ TEST_CASE("EqCurveView paint covers disabled grid and disabled band handles",
 }
 
 TEST_CASE("EqCurveView set_band updates valid indices",
-          "[view][eq_curve][coverage]") {
+          "[view][eq_curve]") {
     EqCurveView eq;
     eq.add_band({500.0f, -3.0f, 0.8f, EqCurveView::FilterType::peak, true});
 
@@ -203,7 +203,7 @@ TEST_CASE("EqCurveView set_band updates valid indices",
 }
 
 TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
-          "[view][eq_curve][coverage]") {
+          "[view][eq_curve]") {
     EqCurveView eq;
     eq.set_bounds({0, 0, 240, 120});
     const float spectrum[] = {-18.0f, -12.0f, -24.0f, -6.0f};
@@ -223,7 +223,7 @@ TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
 }
 
 TEST_CASE("EqCurveView forwards rich mouse events to the base pointer hook",
-          "[view][eq_curve][coverage]") {
+          "[view][eq_curve]") {
     EqCurveView eq;
     int forwarded = 0;
     eq.on_pointer_event = [&](const MouseEvent& event) {
@@ -326,7 +326,7 @@ TEST_CASE("MidiKeyboard vertical drag releases previous notes and misses",
 }
 
 TEST_CASE("MidiKeyboard drag releases old notes and supports vertical range",
-          "[view][midi_keyboard][coverage][issue-652]") {
+          "[view][midi_keyboard][issue-652]") {
     MidiKeyboard kb;
     kb.set_range(80, 60);
     REQUIRE(kb.first_note() == 80);
@@ -378,7 +378,7 @@ TEST_CASE("MidiKeyboard paint emits note names and active highlight color",
 }
 
 TEST_CASE("MidiKeyboard forwards rich mouse events to the base pointer hook",
-          "[view][midi_keyboard][coverage]") {
+          "[view][midi_keyboard]") {
     MidiKeyboard kb;
     int forwarded = 0;
     Point last{};
@@ -395,7 +395,7 @@ TEST_CASE("MidiKeyboard forwards rich mouse events to the base pointer hook",
 }
 
 TEST_CASE("MidiKeyboard overlapping black keys win hit testing",
-          "[view][midi_keyboard][coverage]") {
+          "[view][midi_keyboard]") {
     MidiKeyboard kb;
     kb.set_range(60, 61);
     kb.set_bounds({0, 0, 100, 80});
@@ -530,7 +530,7 @@ TEST_CASE("ColorPicker paint positions alpha cursor from normalized alpha",
 }
 
 TEST_CASE("ColorPicker paint draws configured swatches",
-          "[view][color_picker][coverage]") {
+          "[view][color_picker]") {
     ColorPicker picker;
     picker.set_bounds({0, 0, 200, 260});
     picker.set_swatches({
@@ -550,7 +550,7 @@ TEST_CASE("ColorPicker paint draws configured swatches",
 }
 
 TEST_CASE("ColorPicker forwards rich mouse events to the base pointer hook",
-          "[view][color_picker][coverage]") {
+          "[view][color_picker]") {
     ColorPicker picker;
     int forwarded = 0;
     picker.on_pointer_event = [&](const MouseEvent& event) {
@@ -565,7 +565,7 @@ TEST_CASE("ColorPicker forwards rich mouse events to the base pointer hook",
 }
 
 TEST_CASE("ColorPicker hidden alpha bar ignores alpha-region input",
-          "[view][color_picker][coverage]") {
+          "[view][color_picker]") {
     ColorPicker picker;
     picker.set_bounds({0, 0, 200, 280});
     picker.set_show_alpha(false);
@@ -582,7 +582,7 @@ TEST_CASE("ColorPicker hidden alpha bar ignores alpha-region input",
 }
 
 TEST_CASE("ColorPicker mode and outside mouse input are stable",
-          "[view][color_picker][coverage][issue-652]") {
+          "[view][color_picker][issue-652]") {
     ColorPicker picker;
     picker.set_bounds({0, 0, 200, 260});
     picker.set_mode(ColorPicker::Mode::hex_only);
@@ -652,7 +652,7 @@ TEST_CASE("FileDropZone empty extensions accepts all", "[view][file_drop]") {
 }
 
 TEST_CASE("FileDropZone rejects extensionless files when extensions are required",
-          "[view][file_drop][coverage]") {
+          "[view][file_drop]") {
     FileDropZone zone;
     zone.set_accepted_extensions({".wav"});
 
@@ -663,7 +663,7 @@ TEST_CASE("FileDropZone rejects extensionless files when extensions are required
 }
 
 TEST_CASE("FileDropZone paint reflects idle valid and invalid drag states",
-          "[view][file_drop][coverage][issue-652]") {
+          "[view][file_drop][issue-652]") {
     FileDropZone zone;
     zone.set_bounds({0, 0, 180, 120});
     zone.set_label("Idle");
@@ -704,7 +704,7 @@ TEST_CASE("FileDropZone paint reflects idle valid and invalid drag states",
 }
 
 TEST_CASE("FileDropZone invalid or empty drops do not call callback",
-          "[view][file_drop][coverage][issue-652]") {
+          "[view][file_drop][issue-652]") {
     FileDropZone zone;
     zone.set_accepted_extensions({".wav"});
 
@@ -857,7 +857,7 @@ TEST_CASE("SplitView paint emits horizontal and vertical divider grips",
 }
 
 TEST_CASE("SplitView can replace panes and lays out with custom divider width",
-          "[view][split_view][coverage]") {
+          "[view][split_view]") {
     SplitView split;
     split.set_bounds({0, 0, 300, 120});
     split.set_split_fraction(0.25f);
@@ -893,7 +893,7 @@ TEST_CASE("SplitView can replace panes and lays out with custom divider width",
 }
 
 TEST_CASE("SplitView forwards rich mouse events to the base pointer hook",
-          "[view][split_view][coverage]") {
+          "[view][split_view]") {
     SplitView split;
     int forwarded = 0;
     split.on_pointer_event = [&](const MouseEvent& event) {
@@ -1034,7 +1034,7 @@ TEST_CASE("PropertyList paints categories and scalar value variants",
 }
 
 TEST_CASE("PropertyList paints color values and selected row highlight",
-          "[view][property_list][coverage]") {
+          "[view][property_list]") {
     PropertyList list;
     list.set_bounds({0, 0, 260, 100});
     list.set_row_height(24.0f);
@@ -1111,7 +1111,7 @@ TEST_CASE("Breadcrumb separator", "[view][breadcrumb]") {
 }
 
 TEST_CASE("Breadcrumb empty and out-of-range interactions are stable",
-          "[view][breadcrumb][coverage]") {
+          "[view][breadcrumb]") {
     Breadcrumb bc;
     auto empty = bc.pop();
     REQUIRE(empty.label.empty());
@@ -1128,7 +1128,7 @@ TEST_CASE("Breadcrumb empty and out-of-range interactions are stable",
 }
 
 TEST_CASE("Breadcrumb navigation targets later items and ignores separators",
-          "[view][breadcrumb][coverage]") {
+          "[view][breadcrumb]") {
     Breadcrumb bc;
     bc.set_separator(">");
     bc.set_items({{"Home", "home"}, {"Settings", "settings"}, {"Audio", "audio"}});
@@ -1152,7 +1152,7 @@ TEST_CASE("Breadcrumb navigation targets later items and ignores separators",
 }
 
 TEST_CASE("Breadcrumb paint emits background, items, and separators",
-          "[view][breadcrumb][coverage]") {
+          "[view][breadcrumb]") {
     Breadcrumb bc;
     bc.set_bounds({0, 0, 240, 32});
     bc.set_separator(">");
@@ -1184,7 +1184,7 @@ TEST_CASE("Breadcrumb paint emits background, items, and separators",
 // ── ThemeEditor ────────────────────────────────────────────────────────────
 
 TEST_CASE("ThemeEditor covers missing selection empty theme and selected paint",
-          "[view][theme-editor][coverage][issue-652]") {
+          "[view][theme-editor][issue-652]") {
     ThemeEditor editor;
     editor.set_bounds({0, 0, 360, 120});
 
@@ -1212,7 +1212,7 @@ TEST_CASE("ThemeEditor covers missing selection empty theme and selected paint",
 }
 
 TEST_CASE("ThemeEditor wraps swatches when the row is full",
-          "[view][theme-editor][coverage]") {
+          "[view][theme-editor]") {
     ThemeEditor editor;
     editor.set_bounds({0, 0, 80, 160});
 
