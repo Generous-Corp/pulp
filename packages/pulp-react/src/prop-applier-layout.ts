@@ -242,10 +242,12 @@ export function applyLayoutProp(
         // Accepts a finite positive number (RN-style); strings
         // ("16/9", "auto") are NOT accepted at the JSX surface — those
         // belong to the CSS shim path (web-compat-style-decl.js). A value
-        // of 0 / NaN / undefined clears the slot on the bridge side.
+        // of 0 / NaN clears the slot on the bridge side; null/undefined
+        // are no-op'd by the dispatcher before this handler runs.
         case 'aspectRatio':     call('setFlex', id, 'aspect_ratio', value as number); return true;
 
-        // `display: 'flex' | 'none'`. RN and design-tool exports routinely emit
+        // `display: 'flex' | 'none'`. RN exports and imported design-tool
+        // HTML routinely emit
         // `style={{ display: 'flex' }}` (the implicit default in pulp,
         // but the prop-applier shouldn't drop it as unknown) or
         // `style={{ display: 'none' }}` to hide a subtree. The same
