@@ -205,6 +205,25 @@ predictable output, no MIDI.
     applies: any audio-output-affecting edit to the walk must be mirrored in the
     executor (and vice versa), guarded by `test_graph_routing_differential_parity`,
     `test_signal_graph_executor_parity`, and `test_signal_graph_offline_parity`.
+  - **Connection lane CLASSIFICATION is single-sourced** (distinct from the
+    execution-independence rule above). Which lane a host `Connection` carries —
+    audio / event(MIDI) / automation, plus the orthogonal feedback flag and the
+    dense-vs-sparse audio-rate split — is decided in ONE place: `classify()` in
+    `signal_graph_executor_routing.{hpp,cpp}`, returning a `ConnectionClass`. The
+    runtime structs carry this as a typed `graph::GraphRuntimeConnectionKind`
+    discriminator (`Audio`/`Event`/`Automation`, default `Audio`) instead of the
+    old independent `event`/`is_automation` bools; read it via the
+    `pulp::graph::is_event` / `is_automation_conn` / `carries_audio` accessors.
+    BOTH classification surfaces route through `classify()`: the executor-routing
+    gather (building `GraphRuntimeConnectionSpec`s) AND the compile-time
+    reference-walk edge bucketer in `SignalGraph::compile_` (audio / MIDI /
+    sparse-automation / dense-audio-rate / feedback buckets). The PDC/latency
+    passes share the matching `connection_affects_latency()` predicate. A
+    sidechain edge deliberately classifies as `Audio` (it is plain audio into a
+    higher dest port). This is single-sourced CLASSIFICATION only — the gather
+    math, PDC delay rings, and MIDI/automation evaluation stay independent and
+    dual-maintained per the rule above. New lane mappings are pinned by
+    `test_connection_classify`.
 - **Transport-aware `process()`.** Alongside the no-transport
   `process(out, in, n)` there is an additive
   `process(out, in, n, const format::ProcessContext& transport)` overload. Both

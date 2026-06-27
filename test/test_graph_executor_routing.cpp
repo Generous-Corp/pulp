@@ -372,7 +372,7 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a feedback loop"
     const std::array conns = {
         GraphRuntimeConnectionSpec{1, 0, 2, 0},
         GraphRuntimeConnectionSpec{2, 0, 3, 0},
-        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true},
     };
     constexpr int kFrames = 64;
     for (float gain : {0.5f, 0.3f, 0.0f}) {
@@ -459,7 +459,7 @@ TEST_CASE("GraphRuntimeExecutor feedback routing path does not allocate",
     const std::array conns = {
         GraphRuntimeConnectionSpec{1, 0, 2, 0},
         GraphRuntimeConnectionSpec{2, 0, 3, 0},
-        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true},
     };
     GainState s{0.5f};
     const std::array bindings = {

@@ -19,7 +19,7 @@ pulp::graph::GraphRuntimeConnectionSpec connect(pulp::graph::NodeId source,
                                                pulp::graph::NodeId dest,
                                                pulp::graph::PortIndex dest_port,
                                                bool feedback = false) {
-    return {source, source_port, dest, dest_port, feedback, false};
+    return {source, source_port, dest, dest_port, feedback};
 }
 
 pulp::graph::GraphRuntimeConnectionSpec event_connect(pulp::graph::NodeId source,
@@ -27,7 +27,8 @@ pulp::graph::GraphRuntimeConnectionSpec event_connect(pulp::graph::NodeId source
                                                      pulp::graph::NodeId dest,
                                                      pulp::graph::PortIndex dest_port,
                                                      bool feedback = false) {
-    return {source, source_port, dest, dest_port, feedback, true};
+    return {source, source_port, dest, dest_port, feedback,
+            pulp::graph::GraphRuntimeConnectionKind::Event};
 }
 
 pulp::graph::GraphRuntimeNodeSpec event_node(
@@ -197,7 +198,7 @@ TEST_CASE("GraphRuntimePlan validates event connections separately from audio po
     REQUIRE(accepted.plan.node_count() == 2);
     REQUIRE(accepted.plan.nodes[0].event_output_ports == 1);
     REQUIRE(accepted.plan.nodes[1].event_input_ports == 1);
-    REQUIRE(accepted.plan.connections[0].event);
+    REQUIRE(pulp::graph::is_event(accepted.plan.connections[0]));
     REQUIRE(accepted.plan.connections[0].source_index == 0);
     REQUIRE(accepted.plan.connections[0].dest_index == 1);
 
@@ -297,7 +298,7 @@ TEST_CASE("GraphRuntimePlan carries parameter-automation metadata",
     autom.source_port = 1;
     autom.dest_node = 2;
     autom.dest_port = 0;  // conventional; a parameter target, not an audio port
-    autom.is_automation = true;
+    autom.kind = GraphRuntimeConnectionKind::Automation;
     autom.automation = GraphRuntimeAutomationSpec{
         /*param_id=*/42, /*range_lo=*/-1.0f, /*range_hi=*/1.0f,
         /*smoothing_ms=*/25.0f, /*mix_add=*/true, /*audio_rate=*/false,
@@ -310,8 +311,8 @@ TEST_CASE("GraphRuntimePlan carries parameter-automation metadata",
 
     // The audio edge is unchanged; the automation edge carries its full spec.
     const auto& a = result.plan.connections[1];
-    CHECK(a.is_automation);
-    CHECK_FALSE(a.event);
+    CHECK(is_automation_conn(a));
+    CHECK_FALSE(is_event(a));
     CHECK_FALSE(a.feedback);
     CHECK(a.automation.param_id == 42u);
     CHECK(a.automation.range_lo == -1.0f);
@@ -343,7 +344,7 @@ TEST_CASE("GraphRuntimePlan skips the input-port check for automation edges",
     autom.source_port = 0;
     autom.dest_node = 2;
     autom.dest_port = 0;
-    autom.is_automation = true;
+    autom.kind = GraphRuntimeConnectionKind::Automation;
     autom.automation.param_id = 7;
     const std::array ok_conns = {autom};
     CHECK(build_graph_runtime_plan(nodes, ok_conns).ok());

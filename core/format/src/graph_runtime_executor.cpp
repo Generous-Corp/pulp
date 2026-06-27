@@ -86,7 +86,7 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
         // Event (MIDI) and automation edges carry no audio into an input port.
-        if (conn.event || conn.is_automation) continue;
+        if (graph::is_event(conn) || graph::is_automation_conn(conn)) continue;
         float* dst = pool.slot_data(slots.input_base + conn.dest_port);
         if (dst == nullptr) continue;
         if (conn.feedback) {
@@ -183,7 +183,7 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (!conn.event) continue;
+        if (!graph::is_event(conn)) continue;
         const midi::MidiBuffer* src = midi.out(conn.source_index);
         if (src == nullptr) continue;
         // A source whose output was incomplete, or a copy that drops here,
@@ -226,7 +226,7 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (!conn.is_automation || conn.automation.audio_rate) continue;
+        if (!graph::is_automation_conn(conn) || conn.automation.audio_rate) continue;
         const auto& src_slots = assignment.nodes[conn.source_index];
         const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
         if (src == nullptr) continue;
@@ -329,7 +329,7 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (!conn.is_automation || !conn.automation.audio_rate) continue;
+        if (!graph::is_automation_conn(conn) || !conn.automation.audio_rate) continue;
         std::uint32_t pi = 0;
         for (; pi < dense_count; ++pi) {
             if (automation.dense_param_id(node_index, pi) == conn.automation.param_id) break;
@@ -618,7 +618,7 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
                 const auto ci =
                     plan.inbound_connection_indices[node.first_inbound_connection + c];
                 const auto& conn = plan.connections[ci];
-                if (!conn.is_automation) continue;
+                if (!graph::is_automation_conn(conn)) continue;
                 if (conn.automation.audio_rate) {
                     bool seen = false;
                     for (std::uint32_t k = 0; k < node_dense_count_[n]; ++k) {

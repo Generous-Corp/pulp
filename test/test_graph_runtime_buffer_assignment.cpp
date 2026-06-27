@@ -117,7 +117,7 @@ TEST_CASE("Buffer assignment appends one previous-block slot per feedback edge",
     const std::array conns = {
         GraphRuntimeConnectionSpec{1, 0, 2, 0},
         GraphRuntimeConnectionSpec{2, 0, 3, 0},
-        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true, /*event=*/false},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true},
     };
     auto plan = build_graph_runtime_plan(nodes, conns);
     REQUIRE(plan.ok());

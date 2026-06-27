@@ -1,6 +1,7 @@
 #include <pulp/graph/graph_runtime_plan.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <limits>
 #include <queue>
 #include <utility>
@@ -161,12 +162,12 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             }
 
             const auto& source = result.plan.nodes[source_index];
-            const auto source_ports = spec.event ? source.event_output_ports
-                                                 : source.output_ports;
+            const auto source_ports = is_event(spec) ? source.event_output_ports
+                                                     : source.output_ports;
             if (spec.source_port >= source_ports) {
                 return fail(GraphRuntimePlanErrorCode::SourcePortOutOfRange, i,
                             spec.source_node,
-                            spec.event
+                            is_event(spec)
                                 ? "graph event connection source port is out of range"
                                 : "graph connection source port is out of range");
             }
@@ -174,27 +175,33 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             // audio/event input port (its dest_port is a conventional 0), so the
             // input-port range check does not apply. Its source IS an audio
             // output port, so the source check above still holds.
-            if (!spec.is_automation) {
+            if (!is_automation_conn(spec)) {
                 const auto& dest = result.plan.nodes[dest_index];
-                const auto dest_ports = spec.event ? dest.event_input_ports
-                                                   : dest.input_ports;
+                const auto dest_ports = is_event(spec) ? dest.event_input_ports
+                                                       : dest.input_ports;
                 if (spec.dest_port >= dest_ports) {
                     return fail(GraphRuntimePlanErrorCode::DestinationPortOutOfRange, i,
                                 spec.dest_node,
-                                spec.event
+                                is_event(spec)
                                     ? "graph event connection destination port is out of range"
                                     : "graph connection destination port is out of range");
                 }
             }
 
+            // Lane invariants (debug-only; no effect on release output). An
+            // automation connection is never a feedback back-edge — automation
+            // edges contribute to topological order, so a back-edge here would be
+            // un-orderable and is rejected upstream. The automation payload is
+            // only meaningful when kind == Automation.
+            assert(!(is_automation_conn(spec) && spec.feedback) &&
+                   "automation connections are never feedback back-edges");
             result.plan.connections.push_back({
                 source_index,
                 spec.source_port,
                 dest_index,
                 spec.dest_port,
                 spec.feedback,
-                spec.event,
-                spec.is_automation,
+                spec.kind,
                 spec.automation,
             });
             ++outbound_counts[source_index];
