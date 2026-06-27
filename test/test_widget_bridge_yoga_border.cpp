@@ -1,12 +1,11 @@
-// WidgetBridge Yoga borderWidth tests for pulp #1543. Pulp's borders were
-// already painted as a Skia stroke via `View::set_border_*`, but Yoga never
-// knew about them. `apply_border_widths` in `core/view/src/yoga_layout.cpp`
-// now calls `YGNodeStyleSetBorder` so the layout engine subtracts the border
-// from the declared dimension the same way it subtracts padding.
+// WidgetBridge Yoga borderWidth tests. Pulp's borders are painted as a Skia
+// stroke via `View::set_border_*`; `apply_border_widths` in
+// `core/view/src/yoga_layout.cpp` calls `YGNodeStyleSetBorder` so the layout
+// engine subtracts the border from the declared dimension the same way it
+// subtracts padding.
 //
 // Yoga 3.x's default box-sizing is `border-box`, which is Pulp's
-// pre-#1516 implicit behavior; the companion content-box test lives
-// in #1516 once `setBoxSizing` is wired.
+// implicit behavior.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -17,18 +16,7 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// pulp #1543 — Yoga borderWidth wiring. Pulp's borders were already
-// painted as a Skia stroke via `View::set_border_*`, but Yoga never
-// knew about them. Now `apply_border_widths` in
-// `core/view/src/yoga_layout.cpp` calls `YGNodeStyleSetBorder` so the
-// layout engine subtracts the border from the declared dimension the
-// same way it already subtracts padding. Yoga 3.x's default
-// box-sizing is `border-box`, which is also Pulp's pre-#1516 implicit
-// behavior — so a border-box load-bearing test passes without any
-// box-sizing plumbing. The companion content-box test lives in #1516
-// once `setBoxSizing` is wired.
-//
-// Layout test 1: width=100, padding=0, borderWidth=10. Yoga 3.x's
+// width=100, padding=0, borderWidth=10. Yoga 3.x's
 // default border-box: outer (declared) = 100, border=10 each side →
 // content area = 100 - 2*10 = 80. We assert the parent's outer width
 // stays 100 (the declared dimension under border-box) and that a
@@ -65,7 +53,7 @@ TEST_CASE("borderWidth shrinks content area (Yoga border-box default, #1543)",
     REQUIRE_THAT(child->bounds().height, WithinAbs(80.0f, 0.5f));
 }
 
-// Layout test 3: per-edge border variants. borderTopWidth=5,
+// Per-edge border variants. borderTopWidth=5,
 // borderBottomWidth=5, padding=0 → inside the parent the top inset is
 // 5 and the bottom inset is 5. We pin a 100%-height child and assert
 // its absolute Y position is 5 (top border) and its height is 90
