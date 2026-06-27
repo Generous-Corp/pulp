@@ -5,9 +5,8 @@
 using namespace pulp::midi;
 
 // ────────────────────────────────────────────────────────────────────────
-// macOS plan item 8.5b — MpeVoiceTracker consumes UMP per-note
-// management (status 0xF0) and assignable per-note CC (status 0x10),
-// using the factories that landed in #2836.
+// MpeVoiceTracker consumes UMP per-note management (status 0xF0) and
+// assignable per-note CC (status 0x10) through the shared UMP factories.
 // ────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -18,7 +17,7 @@ UmpPacket note_on(uint8_t channel, uint8_t note, uint16_t velocity = 0x8000) {
 
 } // namespace
 
-TEST_CASE("MpeVoiceTracker assignable PNC is ignored without a configured index (item 8.5b)",
+TEST_CASE("MpeVoiceTracker assignable PNC is ignored without a configured index",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE_FALSE(tracker.assignable_timbre_index().has_value());
@@ -37,7 +36,7 @@ TEST_CASE("MpeVoiceTracker assignable PNC is ignored without a configured index 
     REQUIRE(n->timbre == 0.0f); // tracker has no index bound → ignored
 }
 
-TEST_CASE("MpeVoiceTracker assignable PNC routes to timbre when index is bound (item 8.5b)",
+TEST_CASE("MpeVoiceTracker assignable PNC routes to timbre when index is bound",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     tracker.set_assignable_timbre_index(uint8_t{17});
@@ -64,7 +63,7 @@ TEST_CASE("MpeVoiceTracker assignable PNC routes to timbre when index is bound (
     REQUIRE(n->timbre < 0.5001f);
 }
 
-TEST_CASE("MpeVoiceTracker per-note management reset returns expression to defaults (item 8.5b)",
+TEST_CASE("MpeVoiceTracker per-note management reset returns expression to defaults",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE(tracker.process(note_on(/*ch=*/2, /*note=*/64)));
@@ -95,7 +94,7 @@ TEST_CASE("MpeVoiceTracker per-note management reset returns expression to defau
     REQUIRE_FALSE(n_after->detached); // reset alone does not detach
 }
 
-TEST_CASE("MpeVoiceTracker per-note management detach blocks channel-level updates (item 8.5b)",
+TEST_CASE("MpeVoiceTracker per-note management detach blocks channel-level updates",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE(tracker.process(note_on(/*ch=*/3, /*note=*/72)));
@@ -132,7 +131,7 @@ TEST_CASE("MpeVoiceTracker per-note management detach blocks channel-level updat
     REQUIRE(tracker.find(3, 72)->pitch_bend_semitones > 0.0f);
 }
 
-TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state (item 8.5b)",
+TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE(tracker.process(note_on(/*ch=*/1, /*note=*/60)));
@@ -152,8 +151,8 @@ TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state (item 8.5b)",
     REQUIRE(tracker.find(1, 60)->pitch_bend_semitones > 0.0f);
 }
 
-TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state (#2860)",
-          "[midi][mpe][per-note-management][regression]") {
+TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state",
+          "[midi][mpe][per-note-management][regression][issue-2860]") {
     // Per the MIDI 2.0 UMP spec § Per-Note Management, when both detach
     // and reset bits are set, detach takes effect on the currently
     // sounding note (its controller state is preserved for the rest of
@@ -186,7 +185,7 @@ TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state (#2
     REQUIRE(tracker.find(2, 64)->pitch_bend_semitones == live_pitch_bend);
 }
 
-TEST_CASE("MpeVoiceTracker per-note management only targets the matching note (item 8.5b)",
+TEST_CASE("MpeVoiceTracker per-note management only targets the matching note",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE(tracker.process(note_on(/*ch=*/1, /*note=*/60)));
@@ -207,7 +206,7 @@ TEST_CASE("MpeVoiceTracker per-note management only targets the matching note (i
     REQUIRE(tracker.find(1, 64)->pitch_bend_semitones > 0.0f);
 }
 
-TEST_CASE("MpeVoiceTracker set_assignable_timbre_index masks to 7-bit range (item 8.5b)",
+TEST_CASE("MpeVoiceTracker set_assignable_timbre_index masks to 7-bit range",
           "[midi][mpe][per-note-management]") {
     MpeVoiceTracker tracker;
     tracker.set_assignable_timbre_index(uint8_t{0xFF}); // out of 7-bit range
