@@ -17,6 +17,18 @@
 
 using namespace pulp::view;
 
+// Internal helper (defined in window_host_mac_geometry.mm) that translates a
+// macOS virtual key code into Pulp's KeyCode. Forward-declared here to test the
+// Musical Typing additions without pulling the private platform header.
+namespace pulp::view::mac_geometry { pulp::view::KeyCode key_code_from_ns(unsigned short code); }
+
+TEST_CASE("macOS key_code_from_ns maps ; and ' (Musical Typing top keys)", "[view][mac]") {
+    using pulp::view::mac_geometry::key_code_from_ns;
+    CHECK(key_code_from_ns(41) == KeyCode::semicolon);   // kVK_ANSI_Semicolon
+    CHECK(key_code_from_ns(39) == KeyCode::apostrophe);  // kVK_ANSI_Quote
+    CHECK(key_code_from_ns(35) == KeyCode::p);           // unchanged neighbour key
+}
+
 TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",
           "[view][hosts][issue-661]") {
     @autoreleasepool {
