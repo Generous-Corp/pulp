@@ -458,7 +458,7 @@ TEST_CASE("cmd_target list shows source-checkout defaults without pulp.toml",
 }
 
 TEST_CASE("cmd_target covers alternate valid architectures",
-          "[cli][package-commands][target][coverage]") {
+          "[cli][package-commands][target]") {
     TempDir tmp;
     write_project_scaffold(tmp.path);
     REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
@@ -1083,7 +1083,7 @@ TEST_CASE("cmd_add does not accept arbitrary external sources for dependency pac
 }
 
 TEST_CASE("cmd_add accepts commercial override for proprietary packages",
-          "[cli][package-commands][add-remove][coverage]") {
+          "[cli][package-commands][add-remove]") {
     TempDir tmp;
     write_project_scaffold(tmp.path);
     write_file(tmp.path / "tools" / "packages" / "registry.json", R"({
@@ -1135,7 +1135,7 @@ TEST_CASE("cmd_add accepts commercial override for proprietary packages",
 }
 
 TEST_CASE("cmd_add permits review-required licenses with local metadata updates",
-          "[cli][package-commands][add-remove][coverage]") {
+          "[cli][package-commands][add-remove]") {
     TempDir tmp;
     write_project_scaffold(tmp.path);
     write_registry_fixture(tmp.path);
@@ -1172,7 +1172,7 @@ TEST_CASE("cmd_remove handles help and registry-free removal",
 }
 
 TEST_CASE("cmd_remove regenerates cmake when other packages remain",
-          "[cli][package-commands][add-remove][coverage]") {
+          "[cli][package-commands][add-remove]") {
     TempDir tmp;
     write_project_scaffold(tmp.path);
     write_registry_fixture(tmp.path);

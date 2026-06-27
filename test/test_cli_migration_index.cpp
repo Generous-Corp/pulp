@@ -189,7 +189,7 @@ TEST_CASE("render_notes_text - includes version, summary, body, breaking tag",
 }
 
 TEST_CASE("render_notes_text - body without trailing newline is terminated",
-          "[cli][migration][coverage]") {
+          "[cli][migration]") {
     mig::MigrationEntry entry{
         "1.2.3",
         false,
@@ -238,7 +238,7 @@ TEST_CASE("render_notes_json - empty entries emits valid JSON with empty array",
 }
 
 TEST_CASE("render_notes_json - escapes strings and control characters",
-          "[cli][migration][coverage]") {
+          "[cli][migration]") {
     std::string summary = "quote \" slash \\ tab\t";
     std::string body = std::string("line\ncarriage\rcontrol ") + char(0x01);
     mig::MigrationEntry entry{
@@ -256,7 +256,7 @@ TEST_CASE("render_notes_json - escapes strings and control characters",
 }
 
 TEST_CASE("render_notes_json escapes hop version strings",
-          "[cli][migration][coverage]") {
+          "[cli][migration]") {
     std::vector<const mig::MigrationEntry*> empty;
     auto out = mig::render_notes_json(empty,
                                       "1.0.0\"from",

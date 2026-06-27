@@ -467,7 +467,7 @@ TEST_CASE("tool registry rejects unsupported archive formats",
 }
 
 TEST_CASE("tool registry coverage preserves platform sources and home helpers",
-          "[cli][tool-registry][coverage]") {
+          "[cli][tool-registry]") {
     TempDir tmp;
     ScopedEnv home{"PULP_HOME", tmp.path / "custom-home"};
 
@@ -777,7 +777,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
 }
 
 TEST_CASE("tool install all succeeds with cached binary and python tools",
-          "[cli][tool-registry][install][coverage]") {
+          "[cli][tool-registry][install]") {
     TempDir tmp;
     ScopedEnv home{"PULP_HOME", tmp.path / "home"};
     fs::create_directories(tmp.path / "repo" / "tools" / "packages");

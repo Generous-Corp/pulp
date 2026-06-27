@@ -53,7 +53,7 @@ TEST_CASE("pulp projects list (no --json) emits human text",
 }
 
 TEST_CASE("pulp projects validates parser errors before registry mutation",
-          "[cli][shellout][projects][coverage]") {
+          "[cli][shellout][projects]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto pulp_home = unique_temp_dir("pulp-projects-parser-home");
@@ -201,7 +201,7 @@ TEST_CASE("pulp scan --help exits 0 with usage on stdout",
 }
 
 TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
-          "[cli][shellout][scan][coverage]") {
+          "[cli][shellout][scan]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const struct {
@@ -226,7 +226,7 @@ TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
 }
 
 TEST_CASE("pulp host validates parser errors before plugin loading",
-          "[cli][shellout][host][coverage]") {
+          "[cli][shellout][host]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const struct {
@@ -267,7 +267,7 @@ TEST_CASE("pulp host help lists every supported format and descriptor id flag",
 }
 
 TEST_CASE("pulp host derives AU id from bundle Info.plist",
-          "[cli][shellout][host][au][coverage]") {
+          "[cli][shellout][host][au]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 #if !defined(__APPLE__)
     SUCCEED("AU host loading is macOS-only");

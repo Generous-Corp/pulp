@@ -67,24 +67,24 @@ TEST_CASE("sdk_tarball_filename and legacy form disagree on every supported "
 }
 
 TEST_CASE("sdk_tarball_filename: prerelease versions remain literal in cache keys",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(sdk_tarball_filename("1.2.3-rc.1", "darwin-arm64") ==
             "pulp-sdk-v1.2.3-rc.1-darwin-arm64.tar.gz");
 }
 
 TEST_CASE("sdk_tarball_filename: platform strings are not normalized",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(sdk_tarball_filename("0.92.0", "Darwin-ARM64") ==
             "pulp-sdk-v0.92.0-Darwin-ARM64.tar.gz");
 }
 
 TEST_CASE("legacy_unversioned_sdk_tarball_filename: empty platform keeps legacy prefix",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(legacy_unversioned_sdk_tarball_filename("") == "pulp-sdk-.tar.gz");
 }
 
 TEST_CASE("sdk_tarball_filename: empty version keeps the version slot visible",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(sdk_tarball_filename("", "linux-x64") ==
             "pulp-sdk-v-linux-x64.tar.gz");
     REQUIRE(sdk_tarball_filename("", "darwin-arm64") ==
@@ -92,13 +92,13 @@ TEST_CASE("sdk_tarball_filename: empty version keeps the version slot visible",
 }
 
 TEST_CASE("sdk_tarball_filename: empty platform keeps the trailing platform slot",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(sdk_tarball_filename("0.92.0", "") ==
             "pulp-sdk-v0.92.0-.tar.gz");
 }
 
 TEST_CASE("sdk_tarball_filename: literal input is preserved for cache-key transparency",
-          "[cli][cache][coverage][large]") {
+          "[cli][cache]") {
     REQUIRE(sdk_tarball_filename(" 0.92.0 ", "linux x64") ==
             "pulp-sdk-v 0.92.0 -linux x64.tar.gz");
     REQUIRE(legacy_unversioned_sdk_tarball_filename("linux x64") ==

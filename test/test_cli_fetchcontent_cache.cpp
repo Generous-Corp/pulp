@@ -131,7 +131,7 @@ TEST_CASE("discover: healthy entries report Healthy and exit 0",
 }
 
 TEST_CASE("discover: empty root or missing list_dir returns no entries",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     MockState state;
 
     auto env = make_mock_env("/fake/cache", {}, state);
@@ -144,7 +144,7 @@ TEST_CASE("discover: empty root or missing list_dir returns no entries",
 }
 
 TEST_CASE("discover: lstat miss reports unknown with manual remediation",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "mystery-v1";
     MockState state;
@@ -202,7 +202,7 @@ TEST_CASE("discover: dangling symlink reports Dangling, fixable, exit 1",
 }
 
 TEST_CASE("discover: root-owned dangling symlink reports RootOwned",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "threejs-077dd13c0e869d9f3dbe55875686f920367de457";
     MockState state;
@@ -260,7 +260,7 @@ TEST_CASE("discover: cached ref differs from declared REF reports StaleCommit",
 }
 
 TEST_CASE("discover: sanitized declared ref matches cache suffix",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "yoga-release_3.2.12";
     MockState state;
@@ -612,7 +612,7 @@ TEST_CASE("split_entry_name: longest-match prefers declared dep names",
 }
 
 TEST_CASE("split_entry_name: fallback uses last hyphen when dep is undeclared",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "custom-dep-v1.2.3";
     MockState state;
@@ -634,7 +634,7 @@ TEST_CASE("split_entry_name: fallback uses last hyphen when dep is undeclared",
 }
 
 TEST_CASE("split_entry_name: fallback without hyphen lowercases whole name",
-          "[fetchcontent_cache][coverage]") {
+          "[fetchcontent_cache]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "Catch2";
     MockState state;

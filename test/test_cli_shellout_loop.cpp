@@ -138,7 +138,7 @@ TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
 }
 
 TEST_CASE("pulp loop validates value options before focus state changes",
-          "[cli][shellout][loop][coverage]") {
+          "[cli][shellout][loop]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto tmp_home = unique_temp_dir("pulp-loop-parser-errors");

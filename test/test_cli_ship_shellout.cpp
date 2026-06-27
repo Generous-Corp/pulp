@@ -271,7 +271,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship help does not require a project or build directory",
-                 "[cli][shellout][ship][help][coverage]") {
+                 "[cli][shellout][ship][help]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
 
     auto outside = run_pulp_in(fs::temp_directory_path(), {"ship", "--help"});
@@ -324,7 +324,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship rejects unknown subcommands before side effects",
-                 "[cli][shellout][ship][help][coverage]") {
+                 "[cli][shellout][ship][help]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("unknown-subcommand", true);
 
@@ -424,7 +424,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign discovers desktop bundles via env and config identities",
-                 "[cli][shellout][ship][coverage]") {
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("sign-bundles", true);
     make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
@@ -459,7 +459,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship validates option parser errors before side effects",
-                 "[cli][shellout][ship][coverage]") {
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("parser-errors", true);
 
@@ -519,7 +519,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship check reports desktop bundle signing status without credentials",
-                 "[cli][shellout][ship][coverage]") {
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("check-desktop", true);
     make_fake_bundle(root, "VST3", "CheckMe.vst3");
@@ -577,7 +577,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast uses safe defaults and preserves existing invalid feed fallback",
-                 "[cli][shellout][ship][appcast][coverage]") {
+                 "[cli][shellout][ship][appcast]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("appcast-defaults", true);
     auto feed = root / "artifacts" / "defaults.xml";
@@ -653,7 +653,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast appends local artifact metadata",
-                 "[cli][shellout][ship][appcast][coverage]") {
+                 "[cli][shellout][ship][appcast]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("appcast-local", true);
     auto feed = root / "artifacts" / "updates.xml";
@@ -711,7 +711,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast fails closed on invalid local signing keys",
-                 "[cli][shellout][ship][appcast][coverage]") {
+                 "[cli][shellout][ship][appcast]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("appcast-bad-sign", true);
     auto artifact = root / "artifacts" / "FakeShipPlugin-4.0.0.pkg";
@@ -740,7 +740,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship android check tolerates empty artifacts directory",
-                 "[cli][shellout][ship][android][coverage]") {
+                 "[cli][shellout][ship][android]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("android-empty-artifacts", true);
     fs::create_directories(root / "artifacts");
@@ -761,7 +761,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 #if defined(__APPLE__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package with no plugin bundles reports zero artifacts",
-                 "[cli][shellout][ship][package][coverage]") {
+                 "[cli][shellout][ship][package]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("package-empty", true);
 
@@ -777,7 +777,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 #elif defined(__linux__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux with no plugin bundles reports missing plugins",
-                 "[cli][shellout][ship][package][linux-package][coverage]") {
+                 "[cli][shellout][ship][package][linux-package]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("package-empty-linux", true);
 
@@ -850,7 +850,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release aborts before later stages when signing fails",
-                 "[cli][shellout][ship][release][macos-7.4][coverage]") {
+                 "[cli][shellout][ship][release][macos-7.4]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("release-sign-fail", true);
 
@@ -990,7 +990,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 #ifdef __APPLE__
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj parser rejects missing values and extra positionals",
-                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10][coverage]") {
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("auv3-xcodeproj-parser", true);
 

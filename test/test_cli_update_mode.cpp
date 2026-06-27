@@ -166,7 +166,7 @@ TEST_CASE("write_snooze rejects non-positive hour values",
 }
 
 TEST_CASE("write_snooze creates missing parent directories",
-          "[cli][update-mode][coverage]") {
+          "[cli][update-mode]") {
     auto dir = make_tmpdir("snooze-parent");
     auto snooze = dir / "nested" / "state" / "update-snooze";
 
@@ -196,7 +196,7 @@ TEST_CASE("pending-upgrade JSON round-trips through serialize/parse",
 }
 
 TEST_CASE("pending-upgrade JSON escapes string fields",
-          "[cli][update-mode][coverage]") {
+          "[cli][update-mode]") {
     um::PendingUpgrade p;
     p.version = "0.31.0-rc\"1\nbuild\rmeta\t";
     p.staged_at_epoch_sec = 7;
@@ -226,7 +226,7 @@ TEST_CASE("parse_pending_upgrade rejects markers without a version",
 }
 
 TEST_CASE("parse_pending_upgrade tolerates optional fields and bad timestamps",
-          "[cli][update-mode][coverage]") {
+          "[cli][update-mode]") {
     auto missing_optional = um::parse_pending_upgrade(
         "{\"version\":\"0.31.0\",\"extra\":\"ignored\"}");
     REQUIRE(missing_optional.has_value());

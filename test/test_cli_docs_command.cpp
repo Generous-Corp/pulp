@@ -182,7 +182,7 @@ commands:
 } // namespace
 
 TEST_CASE("docs command reports usage outside and inside projects",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
     TempDir tmp;
     {
         ScopedCurrentPath cwd{tmp.path};
@@ -199,7 +199,7 @@ TEST_CASE("docs command reports usage outside and inside projects",
 }
 
 TEST_CASE("docs command indexes opens and searches local docs",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
     TempDir tmp;
     auto root = make_project(tmp);
     ScopedCurrentPath cwd{root / "docs" / "guides"};
@@ -246,7 +246,7 @@ TEST_CASE("docs command indexes opens and searches local docs",
 }
 
 TEST_CASE("docs command shows support matrix entries sections and scalars",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
     TempDir tmp;
     auto root = make_project(tmp);
     ScopedCurrentPath cwd{root};
@@ -277,7 +277,7 @@ TEST_CASE("docs command shows support matrix entries sections and scalars",
 }
 
 TEST_CASE("docs command shows command cmake and style manifests",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
     TempDir tmp;
     auto root = make_project(tmp);
     ScopedCurrentPath cwd{root};
@@ -320,7 +320,7 @@ TEST_CASE("docs command shows command cmake and style manifests",
 }
 
 TEST_CASE("docs command reports missing manifest and script paths",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
     TempDir tmp;
     auto root = make_project(tmp);
     ScopedCurrentPath cwd{root};
@@ -371,7 +371,7 @@ TEST_CASE("docs command reports missing manifest and script paths",
 }
 
 TEST_CASE("docs command runs project docs check script",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -397,7 +397,7 @@ TEST_CASE("docs command runs project docs check script",
 }
 
 TEST_CASE("docs command runs project docs site build through mkdocs",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
 #if defined(_WIN32)
     SKIP("POSIX fake mkdocs assertions are only used on non-Windows");
 #else
@@ -446,7 +446,7 @@ TEST_CASE("docs command runs project docs site build through mkdocs",
 }
 
 TEST_CASE("docs command runs project API docs build script",
-          "[cli][docs][coverage]") {
+          "[cli][docs]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else

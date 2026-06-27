@@ -28,7 +28,7 @@ TEST_CASE("yaml_value reads plain and list-item scalars", "[cli][yaml][docs][iss
     REQUIRE(yaml_value("      - summary: list item", "summary") == "list item");
 }
 
-TEST_CASE("yaml_value rejects mismatched keys and empty values", "[cli][yaml][coverage]") {
+TEST_CASE("yaml_value rejects mismatched keys and empty values", "[cli][yaml]") {
     REQUIRE(yaml_value("slug_name: wrong", "slug").empty());
     REQUIRE(yaml_value("slug", "slug").empty());
     REQUIRE(yaml_value("slug:", "slug").empty());
@@ -37,7 +37,7 @@ TEST_CASE("yaml_value rejects mismatched keys and empty values", "[cli][yaml][co
     REQUIRE(yaml_value("  - name: ship", "slug").empty());
 }
 
-TEST_CASE("cli string helpers preserve command-facing contracts", "[cli][common][coverage]") {
+TEST_CASE("cli string helpers preserve command-facing contracts", "[cli][common]") {
     REQUIRE(trim("  \tPulp\n") == "Pulp");
     REQUIRE(strip_quotes("\"quoted value\"") == "quoted value");
     REQUIRE(strip_quotes("'quoted value'") == "quoted value");
@@ -53,7 +53,7 @@ TEST_CASE("cli string helpers preserve command-facing contracts", "[cli][common]
 }
 
 TEST_CASE("parse_size_arg accepts decimal integers without disturbing failures",
-          "[cli][common][coverage]") {
+          "[cli][common]") {
     std::size_t value = 77;
     REQUIRE(parse_size_arg("0", "--top", value));
     REQUIRE(value == 0);
@@ -79,7 +79,7 @@ TEST_CASE("parse_size_arg accepts decimal integers without disturbing failures",
 }
 
 TEST_CASE("parse_double_arg accepts finite decimals and rejects non-finite text",
-          "[cli][common][coverage]") {
+          "[cli][common]") {
     double value = 9.0;
     REQUIRE(parse_double_arg("0", "--min-score", value));
     REQUIRE(value == 0.0);

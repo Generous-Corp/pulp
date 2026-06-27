@@ -131,7 +131,7 @@ TEST_CASE("parse_compat_json rejects malformed input", "[cli][import-detect][iss
 }
 
 TEST_CASE("parse_compat_json preserves sources with empty detected formats",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     auto manifest = det::parse_compat_json(R"({
   "compat-schema-version": "1.0",
   "imports": {
@@ -158,7 +158,7 @@ TEST_CASE("parse_compat_json preserves sources with empty detected formats",
 }
 
 TEST_CASE("parse_compat_json keeps optional format metadata and skips bad shapes",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto manifest = det::parse_compat_json(R"({
   "compat-schema-version": "0.9",
   "imports": {
@@ -203,7 +203,7 @@ TEST_CASE("parse_compat_json keeps optional format metadata and skips bad shapes
 }
 
 TEST_CASE("parse_compat_json ignores malformed optional fields without dropping formats",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto manifest = det::parse_compat_json(R"({
   "compat-schema-version": 3,
   "imports": {
@@ -252,7 +252,7 @@ TEST_CASE("parse_compat_json ignores malformed optional fields without dropping 
 }
 
 TEST_CASE("find_compat_json walks parents and reports absence",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-compat-walk";
     fs::remove_all(dir);
     fs::create_directories(dir / "repo" / "nested" / "child");
@@ -273,7 +273,7 @@ TEST_CASE("find_compat_json walks parents and reports absence",
 }
 
 TEST_CASE("snapshot_input scrapes script attributes and frontmatter edge cases",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     ScratchDir scratch("snapshot-edges");
 
     write_text(scratch.path / "case.html", R"HTML(
@@ -387,7 +387,7 @@ TEST_CASE("clause matcher honors the fingerprint vocabulary", "[cli][import-dete
 }
 
 TEST_CASE("clause matcher handles filename regex flags and invalid patterns",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::InputSnapshot snap;
     snap.filename = "DESIGN.md";
     snap.directory_basenames = {"DESIGN.md"};
@@ -405,7 +405,7 @@ TEST_CASE("clause matcher handles filename regex flags and invalid patterns",
 }
 
 TEST_CASE("clause matcher rejects empty filename and script clauses",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::InputSnapshot snap;
     det::FingerprintClause c;
 
@@ -423,7 +423,7 @@ TEST_CASE("clause matcher rejects empty filename and script clauses",
 }
 
 TEST_CASE("clause matcher covers frontmatter fence and required key clauses",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::InputSnapshot snap;
     snap.has_frontmatter_fence = true;
     snap.frontmatter_keys = {"name", "colors", "typography"};
@@ -442,7 +442,7 @@ TEST_CASE("clause matcher covers frontmatter fence and required key clauses",
 }
 
 TEST_CASE("clause matcher covers frontmatter any-of keys",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::InputSnapshot snap;
     snap.has_frontmatter_fence = true;
     snap.frontmatter_keys = {"tokens", "spacing"};
@@ -457,7 +457,7 @@ TEST_CASE("clause matcher covers frontmatter any-of keys",
 }
 
 TEST_CASE("detect enforces all-of formats before considering a match",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "design-md";
@@ -497,7 +497,7 @@ TEST_CASE("detect enforces all-of formats before considering a match",
 }
 
 TEST_CASE("detect enforces minimum confidence thresholds",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "threshold";
@@ -541,7 +541,7 @@ TEST_CASE("detect enforces minimum confidence thresholds",
 }
 
 TEST_CASE("detect prefers higher confidence when match counts tie",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "tie";
@@ -576,7 +576,7 @@ TEST_CASE("detect prefers higher confidence when match counts tie",
 }
 
 TEST_CASE("snapshot_input extracts Markdown frontmatter only from markdown files",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-phase3-frontmatter";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -602,7 +602,7 @@ TEST_CASE("snapshot_input extracts Markdown frontmatter only from markdown files
 }
 
 TEST_CASE("snapshot_input accepts CRLF frontmatter and filters invalid top-level keys",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-frontmatter-crlf";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -638,7 +638,7 @@ TEST_CASE("snapshot_input accepts CRLF frontmatter and filters invalid top-level
 }
 
 TEST_CASE("snapshot_input rejects incomplete frontmatter fences",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-frontmatter-reject";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -665,7 +665,7 @@ TEST_CASE("snapshot_input rejects incomplete frontmatter fences",
 }
 
 TEST_CASE("snapshot_input prefers index html when code html is absent",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-index-html";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -691,7 +691,7 @@ TEST_CASE("snapshot_input prefers index html when code html is absent",
 }
 
 TEST_CASE("snapshot_input scrapes script attributes without case or prefix traps",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-script-attrs";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -738,7 +738,7 @@ TEST_CASE("snapshot_input scrapes script attributes without case or prefix traps
 }
 
 TEST_CASE("snapshot_input ignores script-like tags and prefixed attributes",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-script-boundaries";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -787,7 +787,7 @@ TEST_CASE("snapshot_input ignores script-like tags and prefixed attributes",
 }
 
 TEST_CASE("snapshot_input accepts script tag and attribute whitespace boundaries",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-script-whitespace-boundaries";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -830,7 +830,7 @@ TEST_CASE("snapshot_input accepts script tag and attribute whitespace boundaries
 }
 
 TEST_CASE("snapshot_input falls back to sorted html candidates with attribute forms",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-script-fallback";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -864,7 +864,7 @@ TEST_CASE("snapshot_input falls back to sorted html candidates with attribute fo
 }
 
 TEST_CASE("snapshot_input captures unquoted script attributes and sorted directory names",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-unquoted-script-attrs";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -896,7 +896,7 @@ TEST_CASE("snapshot_input captures unquoted script attributes and sorted directo
 }
 
 TEST_CASE("new-format reports cap unknown tailwind tokens and keep fallbacks stable",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "stitch";
@@ -945,7 +945,7 @@ TEST_CASE("new-format reports cap unknown tailwind tokens and keep fallbacks sta
 }
 
 TEST_CASE("render_new_format_json includes removals and empty additions",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     det::NewFormatReport report;
     report.candidate_source = "stitch";
     report.candidate_format_version = "2026.06";
@@ -965,7 +965,7 @@ TEST_CASE("render_new_format_json includes removals and empty additions",
 }
 
 TEST_CASE("render_new_format_json escapes generated string fields",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     det::NewFormatReport report;
     report.candidate_source = "stitch\"beta";
     report.candidate_format_version = "2026.06\\next";
@@ -985,7 +985,7 @@ TEST_CASE("render_new_format_json escapes generated string fields",
 }
 
 TEST_CASE("detect preserves manifest order when matches and confidence tie",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
 
     det::FingerprintClause script;
@@ -1028,7 +1028,7 @@ TEST_CASE("detect preserves manifest order when matches and confidence tie",
 }
 
 TEST_CASE("detect reports matched and unmatched clause kinds for partial matches",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "diagnostic";
@@ -1075,7 +1075,7 @@ TEST_CASE("detect reports matched and unmatched clause kinds for partial matches
 }
 
 TEST_CASE("snapshot_input prefers code html over sorted html fallbacks",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-code-html-priority";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -1107,7 +1107,7 @@ TEST_CASE("snapshot_input prefers code html over sorted html fallbacks",
 }
 
 TEST_CASE("new-format reports keep empty additions when no baseline tokens exist",
-          "[cli][import-detect][coverage]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "claude";
@@ -1216,7 +1216,7 @@ TEST_CASE("snapshot_input handles file and directory inputs", "[cli][import-dete
 }
 
 TEST_CASE("snapshot_input chooses deterministic directory HTML candidates",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     ScratchDir scratch("html-priority");
     write_text(scratch.path / "z-last.html",
                R"(<html><script src="/fallback.js"></script></html>)");
@@ -1239,7 +1239,7 @@ TEST_CASE("snapshot_input chooses deterministic directory HTML candidates",
 }
 
 TEST_CASE("snapshot_input falls back to the sorted first HTML candidate",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     ScratchDir scratch("html-fallback");
     write_text(scratch.path / "b-page.htm",
                R"(<html><script src="/b.js"></script></html>)");
@@ -1254,7 +1254,7 @@ TEST_CASE("snapshot_input falls back to the sorted first HTML candidate",
 }
 
 TEST_CASE("snapshot_input frontmatter probe records only top-level valid keys",
-          "[cli][import-detect][coverage][requested]") {
+          "[cli][import-detect]") {
     ScratchDir scratch("frontmatter-keys");
     const auto path = scratch.path / "DESIGN.md";
     write_text(path,
@@ -1444,7 +1444,7 @@ TEST_CASE("report-new-format diffs unknown tokens against the closest match",
 }
 
 TEST_CASE("report-new-format caps token suggestions at twenty entries",
-          "[cli][import-detect][coverage][large]") {
+          "[cli][import-detect]") {
     det::ImportsManifest manifest;
     det::SourceEntry source;
     source.source = "stitch";

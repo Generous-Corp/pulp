@@ -125,7 +125,7 @@ std::string compact_json_for_assertion(std::string text) {
 }  // namespace
 
 TEST_CASE("pulp inspect one-shot prints a server response",
-          "[cli][shellout][inspect][coverage][requested]") {
+          "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     InspectServerFixture fixture;
@@ -161,7 +161,7 @@ TEST_CASE("pulp inspect one-shot prints a server response",
 }
 
 TEST_CASE("pulp inspect one-shot can discover the advertised server port",
-          "[cli][shellout][inspect][coverage][requested]") {
+          "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     InspectServerFixture fixture;
@@ -191,7 +191,7 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
 }
 
 TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
-          "[cli][shellout][inspect][coverage][requested]") {
+          "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     InspectServerFixture fixture;
@@ -237,7 +237,7 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
 }
 
 TEST_CASE("pulp inspect validates missing values before connecting",
-          "[cli][shellout][inspect][coverage][requested]") {
+          "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");

@@ -263,7 +263,7 @@ TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
 }
 
 TEST_CASE("pulp audio model commands report install, activation, and status state",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto home = unique_temp_dir("pulp-audio-model-shellout-home");
@@ -330,7 +330,7 @@ TEST_CASE("pulp audio model commands report install, activation, and status stat
 }
 
 TEST_CASE("pulp audio read-bundle reports manifest metadata in text and json",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto root = unique_temp_dir("pulp-audio-bundle-shellout");
@@ -388,7 +388,7 @@ TEST_CASE("pulp audio read-bundle reports manifest metadata in text and json",
 }
 
 TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto home = unique_temp_dir("pulp-audio-excerpt-shellout-home");
@@ -443,7 +443,7 @@ TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json
 }
 
 TEST_CASE("pulp cache usage and parser errors are deterministic",
-          "[cli][shellout][cache][coverage]") {
+          "[cli][shellout][cache]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto home = unique_temp_dir("pulp-cache-shellout-home");
@@ -609,7 +609,7 @@ TEST_CASE("pulp status reports effective PR workflow",
 }
 
 TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
-          "[cli][shellout][misc][coverage]") {
+          "[cli][shellout][misc]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto status_extra = run_pulp({"status", "extra"});
@@ -626,7 +626,7 @@ TEST_CASE("pulp status and clean reject unexpected arguments before side effects
 }
 
 TEST_CASE("pulp clean removes the active project build directory",
-          "[cli][shellout][misc][coverage]") {
+          "[cli][shellout][misc]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto project = unique_temp_dir("pulp-clean-shellout");
@@ -871,7 +871,7 @@ TEST_CASE("pulp version check exits 0 on a clean tree and mentions SDK/plugin/ma
 }
 
 TEST_CASE("pulp version outside a project reports SDK but check fails clearly",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -897,7 +897,7 @@ TEST_CASE("pulp version outside a project reports SDK but check fails clearly",
 }
 
 TEST_CASE("pulp version check accepts a complete matching project fixture",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -934,7 +934,7 @@ TEST_CASE("pulp version check accepts a complete matching project fixture",
 }
 
 TEST_CASE("pulp version check reports every version drift surface",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -969,7 +969,7 @@ TEST_CASE("pulp version check reports every version drift surface",
 }
 
 TEST_CASE("pulp version check rejects unknown options before running checks",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -994,7 +994,7 @@ TEST_CASE("pulp version check rejects unknown options before running checks",
 }
 
 TEST_CASE("pulp version bump updates project version and changelog guidance",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1030,7 +1030,7 @@ TEST_CASE("pulp version bump updates project version and changelog guidance",
 }
 
 TEST_CASE("pulp version bump --plugin only updates pulp_add_plugin version",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1065,7 +1065,7 @@ TEST_CASE("pulp version bump --plugin only updates pulp_add_plugin version",
 }
 
 TEST_CASE("pulp version bump rejects missing and invalid components",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1202,7 +1202,7 @@ TEST_CASE("pulp help output lists the top-level subcommands",
 }
 
 TEST_CASE("pulp macos validates local operator arguments before gh calls",
-          "[cli][shellout][macos][coverage]") {
+          "[cli][shellout][macos]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1259,7 +1259,7 @@ TEST_CASE("pulp macos validates local operator arguments before gh calls",
 }
 
 TEST_CASE("pulp overflow validates non-mutating operator arguments",
-          "[cli][shellout][overflow][coverage]") {
+          "[cli][shellout][overflow]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1521,7 +1521,7 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
 }
 
 TEST_CASE("pulp create validates parser errors before scaffolding",
-          "[cli][shellout][create][coverage]") {
+          "[cli][shellout][create]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto base = fs::temp_directory_path() /
@@ -1761,7 +1761,7 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
 }
 
 TEST_CASE("pulp build validates js engine option before compatibility checks",
-          "[cli][shellout][build][coverage]") {
+          "[cli][shellout][build]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     auto tmp = unique_temp_dir("pulp-shellout-build-js-engine");
@@ -2063,7 +2063,7 @@ TEST_CASE("pulp project bump rejects non-semver --to",
 }
 
 TEST_CASE("pulp project bump rejects missing --to values before project lookup",
-          "[cli][shellout][project][coverage]") {
+          "[cli][shellout][project]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const auto bin = fs::absolute(pulp_binary());
@@ -2087,7 +2087,7 @@ TEST_CASE("pulp project bump rejects missing --to values before project lookup",
 }
 
 TEST_CASE("pulp project validates stray parser arguments before project lookup",
-          "[cli][shellout][project][coverage]") {
+          "[cli][shellout][project]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     const auto bin = fs::absolute(pulp_binary());

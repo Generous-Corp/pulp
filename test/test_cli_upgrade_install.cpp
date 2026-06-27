@@ -103,7 +103,7 @@ TEST_CASE("upgrade install copies sibling payloads before self replacement",
 }
 
 TEST_CASE("upgrade install skips directories, primary binary, and downloaded archive",
-          "[cli][upgrade][coverage][issue-643]") {
+          "[cli][upgrade][issue-643]") {
     auto extracted = make_tmpdir("skip");
     auto install = make_tmpdir("skip-install");
 
@@ -132,14 +132,14 @@ TEST_CASE("upgrade install skips directories, primary binary, and downloaded arc
 }
 
 TEST_CASE("upgrade install detects cpp delegate only by exact filename",
-          "[cli][upgrade][coverage][issue-643]") {
+          "[cli][upgrade][issue-643]") {
     REQUIRE(ui::installed_cpp_delegate({fs::path{"bin"} / ui::cpp_binary_name()}));
     REQUIRE_FALSE(ui::installed_cpp_delegate({fs::path{"bin"} / "pulp-cpp-helper"}));
     REQUIRE_FALSE(ui::installed_cpp_delegate({}));
 }
 
 TEST_CASE("upgrade install same_path falls back to lexical normalization",
-          "[cli][upgrade][coverage][issue-643]") {
+          "[cli][upgrade][issue-643]") {
     auto root = make_tmpdir("same-path");
     auto path = root / "a" / ".." / "artifact";
     auto normalized = root / "artifact";
@@ -151,7 +151,7 @@ TEST_CASE("upgrade install same_path falls back to lexical normalization",
 }
 
 TEST_CASE("upgrade install executable permission policy covers binary names and source bits",
-          "[cli][upgrade][coverage][issue-643]") {
+          "[cli][upgrade][issue-643]") {
     auto root = make_tmpdir("perms");
     auto primary = root / ui::primary_binary_name();
     auto cpp = root / ui::cpp_binary_name();

@@ -227,7 +227,7 @@ TEST_CASE("add_project falls back to directory basename when no name hint",
 }
 
 TEST_CASE("add_project canonicalises relative paths from current directory",
-          "[projects-registry][coverage]") {
+          "[projects-registry]") {
     TempDir tmp;
     auto reg = tmp.path / "projects.json";
     auto repo = tmp.path / "repo";
@@ -271,7 +271,7 @@ TEST_CASE("remove_project drops matching entries and is idempotent",
 }
 
 TEST_CASE("remove_project matches canonical relative paths",
-          "[projects-registry][coverage]") {
+          "[projects-registry]") {
     TempDir tmp;
     auto reg = tmp.path / "projects.json";
     auto repo = tmp.path / "repo";

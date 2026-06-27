@@ -88,7 +88,7 @@ TEST_CASE("CLI create targets skip malformed targets when class_name is empty ac
 }
 
 TEST_CASE("CLI create targets match complete format tokens only",
-          "[cli][create][coverage]") {
+          "[cli][create]") {
     const auto auv3_only =
         create_default_build_targets("PulpPlugin", "instrument", "AUv3");
     CHECK(auv3_only == std::vector<std::string>{
@@ -129,7 +129,7 @@ TEST_CASE("CLI create selects build config at build/test time for multi-config g
 }
 
 TEST_CASE("CLI create standalone commands quote paths with spaces",
-          "[cli][create][shellout][coverage]") {
+          "[cli][create][shellout]") {
     const fs::path source_dir = fs::path("Generated Projects") / "My Plugin";
     const fs::path build_dir = source_dir / "build dir";
     const fs::path sdk_dir = fs::path("SDK Cache") / "Pulp SDK";

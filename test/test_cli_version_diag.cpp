@@ -120,7 +120,7 @@ TEST_CASE("read_plugin_version returns empty on missing file",
 }
 
 TEST_CASE("read_plugin_version returns empty when manifest has no version field",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     TempDir tmp;
     auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
     write_file(plugin_json, R"({
@@ -151,7 +151,7 @@ TEST_CASE("read_plugin_version accepts tag-style version strings",
 }
 
 TEST_CASE("read_plugin_version returns non-comparable for tagged dev manifests",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     TempDir tmp;
     auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
     write_file(plugin_json, R"({"version": "0.8.0-dev"})");
@@ -182,7 +182,7 @@ TEST_CASE("locate_plugin_json falls back to the repo .claude-plugin dir",
 }
 
 TEST_CASE("locate_plugin_json ignores a missing override and falls back",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     TempDir tmp;
     auto repo_plugin = tmp.path / ".claude-plugin" / "plugin.json";
     write_file(repo_plugin, R"({"version": "0.6.0"})");
@@ -192,7 +192,7 @@ TEST_CASE("locate_plugin_json ignores a missing override and falls back",
 }
 
 TEST_CASE("locate_plugin_json returns empty without repo or override matches",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     TempDir tmp;
     auto found = locate_plugin_json(tmp.path / "not-a-repo", {});
     REQUIRE(found.empty());
@@ -280,7 +280,7 @@ TEST_CASE("execution preflight ignores satisfied and non-comparable requirements
 }
 
 TEST_CASE("execution preflight records the highest required CLI version",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     auto sdk_required = analyze_execution_preflight(parse_semver("0.33.0"),
                                                    parse_semver("0.40.0"),
                                                    parse_semver("0.36.0"));
@@ -342,7 +342,7 @@ TEST_CASE("read_project_cli_min_version returns empty when absent",
 }
 
 TEST_CASE("read_project_cli_min_version ignores an empty project root",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     auto v = read_project_cli_min_version({});
     REQUIRE_FALSE(v.comparable);
     REQUIRE(v.raw.empty());
@@ -398,7 +398,7 @@ TEST_CASE("read_project_cli_min_version still reads through comments",
 }
 
 TEST_CASE("read_project_cli_min_version ignores unquoted and malformed values",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     TempDir tmp;
     write_file(tmp.path / "pulp.toml",
                "[pulp]\n"
@@ -498,7 +498,7 @@ TEST_CASE("analyze is silent when a per-project SDK matches the CLI",
 }
 
 TEST_CASE("analyze uses the path basename when project name is empty",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     VersionReport r;
     r.cli = parse_semver("0.20.0");
     ProjectEntry p;
@@ -554,7 +554,7 @@ TEST_CASE("read_plugin_min_cli_version is empty when the field is absent",
 }
 
 TEST_CASE("read_plugin_min_cli_version returns empty on missing file",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     auto v = read_plugin_min_cli_version("/nonexistent/path/plugin.json");
     REQUIRE_FALSE(v.comparable);
     REQUIRE(v.raw.empty());
@@ -680,7 +680,7 @@ TEST_CASE("render_report returns zero for an empty comparable report",
 }
 
 TEST_CASE("render_report prints scanned and missing project markers",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     VersionReport r;
     r.cli = parse_semver("0.31.0");
 
@@ -737,7 +737,7 @@ TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
 }
 
 TEST_CASE("render_report_json escapes strings and control characters",
-          "[version-diag][coverage][issue-643]") {
+          "[version-diag][issue-643]") {
     VersionReport r;
     r.cli = parse_semver("0.20.0");
     r.plugin_json_path = "/tmp/plugin\"quoted\".json";

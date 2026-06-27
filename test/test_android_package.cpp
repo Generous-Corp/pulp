@@ -315,7 +315,7 @@ TEST_CASE("Android SDK discovery falls back to SDK root and dedicated NDK home",
 }
 
 TEST_CASE("Android SDK discovery skips invalid primary env roots",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto sdk = make_fake_sdk(temp.path);
     auto invalid_sdk = temp.path / "invalid-sdk";
@@ -332,7 +332,7 @@ TEST_CASE("Android SDK discovery skips invalid primary env roots",
 }
 
 TEST_CASE("Android SDK discovery returns empty for invalid env roots",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto invalid_home = temp.path / "not-an-sdk";
     fs::create_directories(invalid_home);
@@ -350,7 +350,7 @@ TEST_CASE("Android SDK discovery returns empty for invalid env roots",
 }
 
 TEST_CASE("Android SDK discovery ignores empty tool directories",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto sdk = temp.path / "sdk";
     fs::create_directories(sdk / "build-tools");
@@ -366,7 +366,7 @@ TEST_CASE("Android SDK discovery ignores empty tool directories",
 }
 
 TEST_CASE("Android SDK discovery treats malformed revisions as zero",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto sdk = temp.path / "sdk";
     fs::create_directories(sdk / "build-tools" / "preview");
@@ -384,7 +384,7 @@ TEST_CASE("Android SDK discovery treats malformed revisions as zero",
 }
 
 TEST_CASE("Android SDK discovery handles very large revision components",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto sdk = temp.path / "sdk";
     const std::string huge = "999999999999999999999999999999";
@@ -402,7 +402,7 @@ TEST_CASE("Android SDK discovery handles very large revision components",
 }
 
 TEST_CASE("Android Java version detection parses quoted java output",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto bin_dir = temp.path / "bin";
     fs::create_directories(bin_dir);
@@ -427,7 +427,7 @@ TEST_CASE("Android Java version detection parses quoted java output",
 }
 
 TEST_CASE("Android Java version detection returns empty for unquoted output",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto bin_dir = temp.path / "bin";
     fs::create_directories(bin_dir);
@@ -492,7 +492,7 @@ TEST_CASE("Android signing helpers use SDK tools and parse APK verification outp
 }
 
 TEST_CASE("Android signing helpers fail cleanly when SDK tools are unavailable",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     ScopedEnvVar android_home("ANDROID_HOME", (temp.path / "missing-sdk").string());
     ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
@@ -585,7 +585,7 @@ TEST_CASE("Android Gradle packaging collects APK and AAB artifacts", "[ship][and
 }
 
 TEST_CASE("Android Gradle packaging supports APK-only and AAB-only builds",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto project = temp.path / "android";
     fs::create_directories(project);
@@ -611,7 +611,7 @@ TEST_CASE("Android Gradle packaging supports APK-only and AAB-only builds",
 }
 
 TEST_CASE("Android Gradle packaging reports command failures",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto project = temp.path / "android";
     fs::create_directories(project);
@@ -676,7 +676,7 @@ TEST_CASE("Android bundletool conversion passes optional signing config", "[ship
 }
 
 TEST_CASE("Android bundletool conversion supports unsigned output",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     auto bundletool = tool_path(temp.path, "bundletool");
     auto bundletool_log = temp.path / "bundletool-unsigned.args";
@@ -697,7 +697,7 @@ TEST_CASE("Android bundletool conversion supports unsigned output",
 }
 
 TEST_CASE("Android bundletool conversion reports missing command",
-          "[ship][android][coverage][issue-644]") {
+          "[ship][android][issue-644]") {
     TempDir temp;
     ScopedEnvVar bundletool_env("BUNDLETOOL", (temp.path / "missing-bundletool").string());
 
