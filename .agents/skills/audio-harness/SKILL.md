@@ -284,3 +284,20 @@ output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
 inspection* above). Remaining ideas are additive — e.g. a 24-bit-int capture
 alongside the float WAV, and sample-accurate (not block-quantized) `--param`
 automation in `render`.
+
+## Sibling: the Audio Quality Lab (reference-vs-candidate perceptual artifacts)
+
+This skill covers presence / level / THD / response. For **reference-vs-candidate
+perceptual artifact** detection — "did this DSP change make it sound *worse*?"
+(transient smear, seam clicks) — there is a separate **opt-in** developer/CI tool,
+`tools/audio/quality-lab/` (Python, numpy + soundfile). It is additive: it does NOT
+change anything here and is never required to run the basic harness or `ctest`.
+
+- Run: `cd tools/audio/quality-lab && python -m quality_lab.cli run-p0a --mode bad`.
+- The P0a slice aligns a candidate to a reference (onset-map + local cross-correlation),
+  runs a transient-sharpness detector, and writes a `report.json` with per-onset
+  localization, coverage/confidence, and provenance.
+- Credibility: the detector is validated against an *independent* textbook phase
+  vocoder (`reference_pv.py`), not just its own synthetic degradation.
+- Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
+  `tools/audio/quality-lab/README.md`.

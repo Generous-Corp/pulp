@@ -63,6 +63,11 @@ What the suite exercises:
 
 For coverage numbers and per-subsystem / per-platform / per-surface breakdowns, see [Test Coverage](coverage.md).
 
+For reference-vs-candidate **perceptual artifact** detection (catching when a DSP
+change makes a sound *worse* — transient smear, seam clicks — without a human A/B),
+see the opt-in [Audio Quality Lab](audio-quality-lab.md). It is additive: the basic
+suite above runs with zero new dependencies.
+
 ## Test Layers
 
 | Layer | What | When |
