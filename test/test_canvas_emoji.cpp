@@ -308,7 +308,7 @@ TEST_CASE("font_registration_generation: bump_font_registration_generation advan
     pulp::canvas::bump_font_registration_generation();
     REQUIRE(pulp::canvas::font_registration_generation() > before);
 #else
-    SUCCEED("Skipped: no-Skia build — generation counter is a no-op stub.");
+    SKIP("no-Skia build: generation counter is a no-op stub");
 #endif
 }
 
@@ -377,8 +377,7 @@ TEST_CASE("emoji typeface registered (bundled Noto or platform)",
 TEST_CASE("measure_text_with_font reports non-zero width for single emoji",
           "[canvas][emoji][skia][measure]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     // 😀 width must be positive when an emoji typeface is available;
     // the legacy single-typeface path returned tofu width.
@@ -389,8 +388,7 @@ TEST_CASE("measure_text_with_font reports non-zero width for single emoji",
 TEST_CASE("ZWJ family measures within one cluster, not four codepoints",
           "[canvas][emoji][skia][cluster]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(64, 64);
     h.canvas->set_font("Inter", 32.0f);
@@ -421,8 +419,7 @@ TEST_CASE("ZWJ family measures within one cluster, not four codepoints",
 TEST_CASE("regional flag pair measures as one emoji cluster",
           "[canvas][emoji][skia][cluster]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(64, 64);
     h.canvas->set_font("Inter", 32.0f);
@@ -435,8 +432,7 @@ TEST_CASE("regional flag pair measures as one emoji cluster",
 TEST_CASE("keycap sequence renders as one emoji cell",
           "[canvas][emoji][skia][cluster]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(64, 64);
     h.canvas->set_font("Inter", 32.0f);
@@ -461,8 +457,7 @@ TEST_CASE("FE0E forces text presentation — width matches plain text",
 TEST_CASE("fill_text paints visible color emoji pixels",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(96, 64);
     h.canvas->set_font("Inter", 36.0f);
@@ -476,8 +471,7 @@ TEST_CASE("fill_text paints visible color emoji pixels",
 TEST_CASE("fill_text paints ZWJ family in one cluster",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(192, 64);
     h.canvas->set_font("Inter", 36.0f);
@@ -496,8 +490,7 @@ TEST_CASE("fill_text paints ZWJ family in one cluster",
 TEST_CASE("fill_text paints regional flag",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(96, 64);
     h.canvas->set_font("Inter", 36.0f);
@@ -511,8 +504,7 @@ TEST_CASE("fill_text paints regional flag",
 TEST_CASE("fill_text paints keycap 1️⃣",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(96, 64);
     h.canvas->set_font("Inter", 36.0f);
@@ -526,8 +518,7 @@ TEST_CASE("fill_text paints keycap 1️⃣",
 TEST_CASE("fill_text paints skin-tone modifier as one glyph",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(96, 64);
     h.canvas->set_font("Inter", 36.0f);
@@ -541,8 +532,7 @@ TEST_CASE("fill_text paints skin-tone modifier as one glyph",
 TEST_CASE("fill_text paints mixed sequence — text + ZWJ family + flag + keycap",
           "[canvas][emoji][skia][visual]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(640, 96);
     h.canvas->set_font("Inter", 32.0f);
@@ -564,8 +554,7 @@ TEST_CASE("fill_text paints mixed sequence — text + ZWJ family + flag + keycap
 TEST_CASE("text_align center and right reflect cluster-aware width",
           "[canvas][emoji][skia][align]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(256, 64);
     h.canvas->set_font("Inter", 28.0f);
@@ -589,8 +578,7 @@ TEST_CASE("text_align center and right reflect cluster-aware width",
 TEST_CASE("letter_spacing tracks between graphemes, not within emoji cluster",
           "[canvas][emoji][skia][letter-spacing]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(512, 96);
     h.canvas->set_font("Inter", 32.0f);
@@ -629,8 +617,7 @@ TEST_CASE("letter_spacing tracks between graphemes, not within emoji cluster",
 TEST_CASE("measure_text includes trailing spaces on SkParagraph emoji path",
           "[canvas][emoji][skia][measure][issue-2163]") {
     if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
-        SUCCEED("Skipped: no emoji typeface registered.");
-        return;
+        SKIP("no emoji typeface registered");
     }
     SurfaceHarness h(256, 64);
     h.canvas->set_font("Inter", 32.0f);

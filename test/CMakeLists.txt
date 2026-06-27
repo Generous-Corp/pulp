@@ -4273,7 +4273,7 @@ target_link_libraries(pulp-test-canvas-emoji PRIVATE
     pulp::canvas
     Catch2::Catch2WithMain
 )
-catch_discover_tests(pulp-test-canvas-emoji)
+catch_discover_tests(pulp-test-canvas-emoji EXTRA_ARGS --allow-running-no-tests)
 
 # SDF glyph atlas exploration (#76)
 pulp_add_test_suite(pulp-test-sdf-atlas LIBRARIES pulp::canvas)
