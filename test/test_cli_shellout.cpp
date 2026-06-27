@@ -17,25 +17,6 @@ using namespace pulp_test_cli;
 
 namespace {
 
-class ScopedCurrentPath {
-public:
-    explicit ScopedCurrentPath(const fs::path& next)
-        : previous_(fs::current_path()) {
-        fs::current_path(next);
-    }
-
-    ~ScopedCurrentPath() {
-        std::error_code ec;
-        fs::current_path(previous_, ec);
-    }
-
-    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
-    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
-
-private:
-    fs::path previous_;
-};
-
 std::string repo_project_version_for_shellout_tests() {
     const auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
     auto cmake = read_file(repo_root / "CMakeLists.txt");
@@ -77,15 +58,6 @@ fs::path write_version_project_fixture(const std::string& prefix,
                    marketplace_plugin_version + "\"}]\n"
                "}\n");
     return root;
-}
-
-ProcessResult run_pulp_in_directory(const fs::path& dir,
-                                    const std::vector<std::string>& args,
-                                    int timeout_ms = 10000) {
-    const auto bin = fs::absolute(pulp_binary());
-    REQUIRE(fs::exists(bin));
-    ScopedCurrentPath cwd(dir);
-    return exec(bin.string(), args, timeout_ms);
 }
 
 }  // namespace
