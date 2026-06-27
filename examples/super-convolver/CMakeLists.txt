@@ -46,7 +46,7 @@ pulp_add_plugin(SuperConvolver
     PLUGIN_NAME       "SuperConvolver"
     BUNDLE_ID         "com.pulp.superconvolver"
     MANUFACTURER      "Pulp"
-    VERSION           "1.0.3"
+    VERSION           "1.0.4"
     CATEGORY          Effect
     PLUGIN_CODE       "SpCv"
     MANUFACTURER_CODE "Pulp"
