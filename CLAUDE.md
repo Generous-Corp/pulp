@@ -39,6 +39,17 @@ Rules of thumb:
   build/<dir>/CMakeFiles/<target>.dir/flags.make` (should contain
   `-O3 -DNDEBUG`) must check out. Checking only the cache field is
   necessary-but-not-sufficient — it has been wrong by itself.
+- **A struct-layout change must compile EVERYWHERE before shipping**: when a
+  change alters the field layout of a struct that is brace-initialized
+  positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
+  FULL `cmake --build build -j$(sysctl -n hw.ncpu)` over ALL targets — not just
+  the named feature/parity targets — and run it in the background (a full build
+  exceeds a short foreground budget). Stray positional inits in unrelated test
+  files fail *closed* at compile time, so they are safe, but only a full build
+  surfaces them; building a subset and shipping pushes the discovery to CI. A
+  uniform build failure across macOS/Linux/Windows is the tell for a real
+  compile miss, versus the macOS-only stale-build-dir ODR the `pulp-runner-ops`
+  skill handles.
 
 ```bash
 # Configure (first time or after CMakeLists.txt changes)
@@ -666,6 +677,16 @@ contain a bump-marker commit whose subject starts with exactly
 unless the tip commit has a top-level `Version-Bump: skip reason="..."`
 trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
 When manually repairing a release bump, use the exact canonical subject.
+
+**Bumps are diff-driven, not title-driven.** `--require-bump-for-fix-feat`
+is an *additional* gate layered on `fix:`/`feat:` titles — it is NOT what
+triggers the base requirement. `version_bump_check.py` derives a bump
+heuristic from the touched paths, so ANY change to versioned source (e.g.
+`core/**`) needs a `chore: bump versions` commit regardless of the PR/commit
+title — a `refactor:` or `chore:` subject does not exempt it. Don't predict
+from the title; run `tools/scripts/gates.sh origin/main` (the same check)
+before pushing. Genuinely exempt changes (docs-only, workflow-only,
+test-only) use the `Version-Bump: <surface>=skip reason="..."` trailer.
 
 Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.
 
