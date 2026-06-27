@@ -126,7 +126,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "loop",
-        summary: "Leveraged-prototype focus mode: single-platform watch + rebuild (#940)",
+        summary: "Leveraged-prototype focus marker + watch loop",
     },
     Entry {
         name: "inspect",

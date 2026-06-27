@@ -1468,7 +1468,7 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" marker. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling can read the advisory focus marker when it needs platform-specific behavior; `pulp loop` itself does not rewrite the build graph.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host

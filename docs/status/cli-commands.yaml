@@ -1724,7 +1724,7 @@ commands:
 
   - name: loop
     status: experimental
-    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
       - name: --platform
         kind: option
