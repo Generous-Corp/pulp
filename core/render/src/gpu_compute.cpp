@@ -253,6 +253,49 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kGranularShader = R"wgsl(
+// GPU granular synthesis: one thread per output sample, summing the contribution
+// of every active grain. grains: num_grains × [onset, duration, src_pos, pitch,
+// amp]. Each grain is a Hann-windowed, linearly-interpolated, pitch-shifted
+// snippet of `source`.
+
+struct GrainParams { num_grains : u32, num_samples : u32, source_len : u32, pad : u32 };
+
+@group(0) @binding(0) var<storage, read>       grains : array<f32>;
+@group(0) @binding(1) var<storage, read>       source : array<f32>;
+@group(0) @binding(2) var<storage, read_write> out    : array<f32>;
+@group(0) @binding(3) var<uniform>             p      : GrainParams;
+
+const TWO_PI : f32 = 6.2831853071795864;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let s = gid.x;
+    if (s >= p.num_samples) {
+        return;
+    }
+    let sf = f32(s);
+    var acc = 0.0;
+    for (var g = 0u; g < p.num_grains; g = g + 1u) {
+        let onset = grains[g * 5u];
+        let dur   = grains[g * 5u + 1u];
+        if (dur <= 0.0 || sf < onset || sf >= onset + dur) {
+            continue;
+        }
+        let local = sf - onset;
+        let w = 0.5 - 0.5 * cos(TWO_PI * local / dur);  // Hann
+        let srcf = grains[g * 5u + 2u] + local * grains[g * 5u + 3u];  // pos + local*pitch
+        if (srcf < 0.0) { continue; }
+        let i0 = u32(srcf);
+        if (i0 + 1u >= p.source_len) { continue; }
+        let frac = srcf - f32(i0);
+        let smp = source[i0] * (1.0 - frac) + source[i0 + 1u] * frac;
+        acc = acc + grains[g * 5u + 4u] * w * smp;  // amp * window * sample
+    }
+    out[s] = acc;
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 // Largest power-of-two complex FFT the GPU path accepts: keeps
@@ -299,6 +342,7 @@ public:
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
+        granular_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -849,6 +893,41 @@ public:
         return read_back(rb, out, obytes);
     }
 
+    bool granular_cloud(const float* grains, const float* source, float* out,
+                        uint32_t num_grains, uint32_t source_len,
+                        uint32_t num_samples) override {
+        if (!initialized_ || grains == nullptr || source == nullptr || out == nullptr) return false;
+        if (num_grains == 0u || source_len == 0u || num_samples == 0u) return false;
+        if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
+            static_cast<uint64_t>(source_len) > (1u << 24) ||
+            static_cast<uint64_t>(num_grains) > (1u << 22)) return false;
+
+        const uint32_t gbytes = num_grains * 5u * 4u;  // 5 floats/grain
+        const uint32_t sbytes = source_len * 4u;
+        const uint32_t obytes = num_samples * 4u;
+        auto g_buf = create_storage_buffer(gbytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto s_buf = create_storage_buffer(sbytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto o_buf = create_storage_buffer(obytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto rb = create_readback_buffer(obytes);
+        wgpu::BufferDescriptor ud{};
+        ud.size = 16;
+        ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        auto u_buf = device_.CreateBuffer(&ud);
+        if (!g_buf || !s_buf || !o_buf || !rb || !u_buf) return false;
+
+        struct GrainParams { uint32_t num_grains; uint32_t num_samples; uint32_t source_len; uint32_t pad; };
+        GrainParams gp{num_grains, num_samples, source_len, 0u};
+        queue_.WriteBuffer(g_buf, 0, grains, gbytes);
+        queue_.WriteBuffer(s_buf, 0, source, sbytes);
+        queue_.WriteBuffer(u_buf, 0, &gp, sizeof(gp));
+
+        auto bg = create_bind_group(granular_pipeline_, {g_buf, s_buf, o_buf, u_buf});
+        if (!bg) return false;
+        dispatch(granular_pipeline_, bg, (num_samples + 255u) / 256u);
+        copy_buffer(o_buf, rb, obytes);
+        return read_back(rb, out, obytes);
+    }
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     CapabilityReport capabilities() const override {
@@ -1194,6 +1273,7 @@ private:
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
+    wgpu::ComputePipeline granular_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -1289,6 +1369,9 @@ private:
 
         modal_pipeline_ = create_pipeline("modal_strike", kModalStrikeShader);
         if (!modal_pipeline_) return false;
+
+        granular_pipeline_ = create_pipeline("granular_cloud", kGranularShader);
+        if (!granular_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute

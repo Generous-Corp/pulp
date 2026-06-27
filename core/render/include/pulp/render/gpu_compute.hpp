@@ -154,6 +154,15 @@ public:
     virtual bool modal_strike(const float* modes, float* out, uint32_t num_modes,
                               uint32_t num_samples, float sample_rate, float t0_samples) = 0;
 
+    /// GPU granular synthesis ("grain cloud"): sum many Hann-windowed,
+    /// pitch-shifted snippets of `source` into `out`, one GPU thread per output
+    /// sample. `grains` is num_grains × [onset(sample), duration(samples),
+    /// source_pos(sample), pitch(ratio), amp]. Tens of thousands of grains
+    /// parallelize across samples. Not real-time-safe. Returns false on bad args.
+    virtual bool granular_cloud(const float* grains, const float* source, float* out,
+                                uint32_t num_grains, uint32_t source_len,
+                                uint32_t num_samples) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

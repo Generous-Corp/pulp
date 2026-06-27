@@ -619,6 +619,38 @@ TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
     REQUIRE_FALSE(compute->modal_strike(modes.data(), out.data(), 0, N, SR, 0.0f));
 }
 
+TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t SRCLEN = 4096, N = 2048;
+    std::vector<float> source(SRCLEN);
+    for (uint32_t i = 0; i < SRCLEN; ++i) source[i] = std::sin(0.1f * i);
+
+    // Two grains: [onset, duration, src_pos, pitch, amp].
+    std::vector<float> grains = {
+        100.0f, 256.0f, 0.0f,   1.0f, 1.0f,
+        1000.0f, 256.0f, 500.0f, 1.0f, 1.0f,
+    };
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->granular_cloud(grains.data(), source.data(), out.data(), 2, SRCLEN, N));
+
+    auto rms = [&](uint32_t a, uint32_t b) {
+        double e = 0.0; for (uint32_t i = a; i < b; ++i) e += out[i] * out[i];
+        return std::sqrt(e / (b - a));
+    };
+    REQUIRE(rms(0, 90) < 1e-4f);          // silence before grain 1
+    REQUIRE(rms(150, 350) > 0.05f);        // energy inside grain 1
+    REQUIRE(rms(400, 950) < 1e-4f);        // silent gap between grains
+    REQUIRE(rms(1050, 1250) > 0.05f);      // energy inside grain 2
+    REQUIRE(rms(1300, N) < 1e-4f);         // silence after grain 2
+
+    // Hann window: grain center louder than its edge.
+    REQUIRE(rms(220, 240) > rms(102, 112));
+
+    REQUIRE_FALSE(compute->granular_cloud(grains.data(), source.data(), out.data(), 0, SRCLEN, N));
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
