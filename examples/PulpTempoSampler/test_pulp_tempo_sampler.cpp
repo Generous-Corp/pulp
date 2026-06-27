@@ -897,6 +897,42 @@ TEST_CASE("standalone LINKED follows the loop's detected tempo, not the host def
     REQUIRE(wait_for([&] { return f.proc->published_frames() == 48000; }));
 }
 
+// Unlinking engages the SAMPLE's own (fractional, bar-snapped) tempo so the loop
+// plays at its natural speed and the readout shows it — not the host BPM.
+TEST_CASE("unlinking engages the sample's own detected tempo (not the host)",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(103.4);   // the loop's fractional detected tempo
+    REQUIRE(f.proc->tempo_linked());        // default linked
+    f.proc->set_tempo_linked(false);        // unlink → adopt the sample's tempo
+    CHECK_FALSE(f.proc->tempo_linked());
+    CHECK(std::abs(f.proc->effective_bpm() - 103.4) < 0.01);
+}
+
+// A fresh drop WHILE UNLINKED adopts the new sample's detected tempo (the readout
+// follows the dropped sample, not a stale value).
+TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto a = percussive_loop(48000, 8);
+    const float* ca[1] = {a.data()};
+    REQUIRE(f.proc->load_loop(ca, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_tempo_linked(false);        // unlink
+    auto b = percussive_loop(48000, 4);     // a DIFFERENT loop
+    const float* cb[1] = {b.data()};
+    REQUIRE(f.proc->load_loop(cb, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    CHECK_FALSE(f.proc->tempo_linked());
+    const double det = f.proc->detected_bpm();
+    if (det > 0.0)                          // when the analyzer found a tempo for the drop
+        CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
+}
+
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
 // guard) and every cut snapped to a zero-crossing so slice edges don't click.
 TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",
