@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for scripts/run_coverage.sh.
 
-Covers the two bugs fixed in issue #566 Phase 1 PR 1:
+Covers two coverage regressions tracked by issue #566:
 
 - #570: silent failure when CMakeCache.txt was previously configured
   with PULP_ENABLE_COVERAGE:BOOL=OFF. The script must error loudly

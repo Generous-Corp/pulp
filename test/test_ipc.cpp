@@ -157,12 +157,10 @@ TEST_CASE("IPC connect to nonexistent fails", "[events][ipc]") {
     REQUIRE(conn.state() == IpcState::Error);
 }
 
-// "IPC socket connect rejects malformed endpoints" lived here before
-// companion-track U-8. Its coverage (host-only, non-numeric port,
-// out-of-range port) is fully subsumed by the more thorough table
-// in test_ipc_endpoints.cpp ("IPC socket client rejects malformed
-// port strings without connecting"). Kept here as a pointer so a
-// future test author doesn't recreate the duplicate.
+// "IPC socket connect rejects malformed endpoints" is fully covered by
+// the more thorough table in test_ipc_endpoints.cpp ("IPC socket client
+// rejects malformed port strings without connecting"). Keep the note
+// here so the duplicate does not return.
 
 TEST_CASE("IPC send while disconnected returns false", "[events][ipc]") {
     InterprocessConnection conn;
@@ -926,12 +924,11 @@ TEST_CASE("ChildProcessManager cleans up completed connected children",
     REQUIRE(manager.active_count() == 0);
 }
 
-// "IPC socket server rejects malformed listen endpoints" lived here
-// before companion-track U-8. Its coverage is subsumed by the more
-// thorough tables in test_ipc_endpoints.cpp ("IPC socket listener
-// rejects empty endpoint strings" + "...rejects malformed port
-// strings without staying running"). Kept here as a pointer so a
-// future test author doesn't recreate the duplicate.
+// "IPC socket server rejects malformed listen endpoints" lived here.
+// This duplicate regression is covered by the more thorough tables in
+// test_ipc_endpoints.cpp ("IPC socket listener rejects empty endpoint
+// strings" + "...rejects malformed port strings without staying
+// running"). Keep the note here so the duplicate does not return.
 
 TEST_CASE("IPC socket server stops while waiting for a client",
           "[events][ipc][socket]") {
@@ -945,7 +942,7 @@ TEST_CASE("IPC socket server stops while waiting for a client",
 }
 
 TEST_CASE("IPC socket server stop releases listener for immediate reuse",
-          "[events][ipc][socket][lifecycle][codecov]") {
+          "[events][ipc][socket][lifecycle]") {
     InterprocessConnectionServer first;
     auto port = start_socket_server_on_loopback(first);
     REQUIRE(port.has_value());
@@ -962,7 +959,7 @@ TEST_CASE("IPC socket server stop releases listener for immediate reuse",
 }
 
 TEST_CASE("IPC socket server default callback owns accepted clients",
-          "[events][ipc][socket][codecov][phase3]") {
+          "[events][ipc][socket]") {
     InterprocessConnectionServer server;
     auto port = start_socket_server_on_any_interface(server);
     REQUIRE(port.has_value());
@@ -1201,7 +1198,7 @@ TEST_CASE("IPC socket server virtual callback accepts empty frames",
 }
 
 TEST_CASE("IPC socket server receives binary payload frames",
-          "[events][ipc][socket][codecov]") {
+          "[events][ipc][socket]") {
     CapturingServer server;
     auto port = start_socket_server_on_loopback(server);
     REQUIRE(port.has_value());
@@ -1235,7 +1232,7 @@ TEST_CASE("IPC socket server receives binary payload frames",
 }
 
 TEST_CASE("IPC socket server observes client disconnect",
-          "[events][ipc][socket][codecov]") {
+          "[events][ipc][socket]") {
     CapturingServer server;
     auto port = start_socket_server_on_loopback(server);
     REQUIRE(port.has_value());
@@ -1264,7 +1261,7 @@ TEST_CASE("IPC socket server observes client disconnect",
 }
 
 TEST_CASE("IPC socket client reports disconnect callback once",
-          "[events][ipc][socket][codecov]") {
+          "[events][ipc][socket]") {
     CapturingServer server;
     auto port = start_socket_server_on_loopback(server);
     REQUIRE(port.has_value());

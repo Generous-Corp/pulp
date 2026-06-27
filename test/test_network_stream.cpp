@@ -1105,7 +1105,7 @@ TEST_CASE("HttpStream rejects null read buffers before transport errors",
 }
 
 TEST_CASE("HttpStream factories and refetch reset closed state to request results",
-          "[network_stream][http][codecov]") {
+          "[network_stream][http]") {
     auto get_stream = HttpStream::get("http://", 1);
     REQUIRE(get_stream);
     REQUIRE_FALSE(get_stream->is_open());

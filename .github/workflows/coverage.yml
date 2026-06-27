@@ -1533,7 +1533,7 @@ jobs:
           # fails the step AND the job, hard-blocking the PR.
           exit "$rc"
 
-      - name: Install PyYAML (#566 Phase 2)
+      - name: Install PyYAML for coverage tier gate (#566)
         # Installed before the fixture tests because
         # test_coverage_tier_check.py exercises ctc.load_targets() which
         # imports yaml (issue #900). Also required by the per-tier gate
@@ -1542,7 +1542,7 @@ jobs:
         run: python3 -m pip install --user 'pyyaml>=6'
         shell: bash
 
-      - name: coverage_tier_check.py fixture tests (#566 Phase 2)
+      - name: coverage_tier_check.py fixture tests (#566)
         # Guard the per-tier gate script the same way we guard
         # coverage_diff_comment.py — unit tests run before the live
         # invocation so a regression in classify_file / aggregate /
@@ -1551,7 +1551,7 @@ jobs:
         run: python3 tools/scripts/test_coverage_tier_check.py
         shell: bash
 
-      - name: Run per-tier coverage gate (#566 Phase 2)
+      - name: Run per-tier coverage gate (#566)
         # Runs alongside the existing diff-cover gate. diff-cover
         # enforces a single global 75% floor; this step layers the
         # per-tier floors from `ci/coverage-targets.yaml` on top
