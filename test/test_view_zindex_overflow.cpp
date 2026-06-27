@@ -202,7 +202,7 @@ TEST_CASE("paint_all fast path preserves insertion order for default-z children"
     // With all-default z (fast path), children must paint in insertion order —
     // identical to the stable-sorted order — so the last-inserted full-bounds
     // fill is the topmost. Locks behavioral equivalence of the alloc-free path
-    // against the sorted path exercised by the issue-972 paint test above.
+    // against the sorted path exercised by the non-fast-path paint coverage.
     View parent;
     parent.set_bounds({0, 0, 100, 100});
 

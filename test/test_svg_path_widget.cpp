@@ -1,4 +1,4 @@
-// SvgPathWidget tests — pulp #965.
+// SvgPathWidget tests.
 //
 // Coverage targets:
 //   * Path-data parser handles M/m, L/l, H/h, V/v, C/c, S/s, Q/q, T/t,
@@ -461,7 +461,7 @@ TEST_CASE("SvgPathWidget setFill / clearFill toggles emission",
 }
 
 
-// ── pulp #932 / #1737 PR-4 — SVG fill via CSS linear-gradient ───────────
+// ── SVG fill via CSS linear-gradient ─────────────────────────────────────
 //
 // SvgPathWidget::set_fill_gradient() accepts a CSS linear-gradient
 // string verbatim. paint() parses it on each frame against the

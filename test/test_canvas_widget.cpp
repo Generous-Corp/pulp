@@ -1617,7 +1617,7 @@ TEST_CASE("CanvasWidget::paint logging summary covers every CanvasDrawCmd type",
     add(CanvasDrawCmd::Type::fill_path);
     add(CanvasDrawCmd::Type::stroke_path);
     add(CanvasDrawCmd::Type::clip_path);
-    // save/restore covered in the previous test
+    // save/restore have dedicated stack-depth coverage.
     add(CanvasDrawCmd::Type::translate);
     add(CanvasDrawCmd::Type::scale);
     add(CanvasDrawCmd::Type::rotate);
@@ -1628,7 +1628,7 @@ TEST_CASE("CanvasWidget::paint logging summary covers every CanvasDrawCmd type",
     add(CanvasDrawCmd::Type::set_line_dash);
     add(CanvasDrawCmd::Type::put_image_data);
     add(CanvasDrawCmd::Type::clear);
-    // clear_rect covered in the previous test
+    // clear_rect has dedicated clear-isolation coverage.
 
     REQUIRE_NOTHROW(cw.paint(rc));
     // No assertion on rc — some types are no-ops on RecordingCanvas; the
