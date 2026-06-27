@@ -756,6 +756,14 @@ const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const n
     return &it->second;
 }
 
+const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor(
+    NodeId id) const noexcept {
+    if (!live_) return nullptr;
+    auto it = live_->custom_transport_processors.find(id);
+    if (it == live_->custom_transport_processors.end()) return nullptr;
+    return &it->second;
+}
+
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_;  // aliases the live CompiledGraph as an opaque keepalive
 }
@@ -841,6 +849,7 @@ void SignalGraph::clear_prepared_stats_() {
     prepared_automation_buffer_bytes_.store(0, std::memory_order_relaxed);
     prepared_delay_buffer_bytes_.store(0, std::memory_order_relaxed);
     prepared_total_buffer_bytes_.store(0, std::memory_order_relaxed);
+    transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
 }
 
 void SignalGraph::publish_prepared_stats_(const CompiledGraph& cg) {
@@ -1026,6 +1035,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         cg->shapes[n.id] = shape;
 
         if (n.plugin) cg->plugins[n.id] = n.plugin;
+        // Resolve the node's transport-sensitivity ONCE here (before the
+        // anticipation eligibility analysis and the routed-snapshot build, both
+        // later in compile_). The SAME GraphNode::transport_sensitive value feeds
+        // the anticipation partition (seeds AnticipationExclusion::TransportSensitive)
+        // and the routed binding (PluginBindingContext::wants_transport /
+        // CustomBindingContext::process_transport), so the two can never disagree.
+        // Prepare-stable: a slot/type whose capability changes later needs a
+        // re-prepare to be observed.
+        n.transport_sensitive = false;
+        if (n.type == NodeType::Plugin) {
+            n.transport_sensitive = n.plugin && n.plugin->wants_transport();
+        }
         if (n.type == NodeType::Custom) {
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
@@ -1046,6 +1067,26 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                         };
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
+                }
+                // Transport-aware resolution mirrors the plain one: prefer the
+                // stateful variant when an instance + stateful callback exist,
+                // else the stateless variant. Any non-empty result marks the node
+                // transport-sensitive (the presence of the map entry mirrors the
+                // flag, both resolved from this one condition).
+                if (n.custom_instance && type->process_instance_transport) {
+                    auto inst = n.custom_instance;
+                    auto fn = type->process_instance_transport;
+                    cg->custom_transport_processors[n.id] =
+                        [inst, fn](audio::BufferView<float>& out,
+                                   const audio::BufferView<const float>& in,
+                                   int num_samples,
+                                   const format::ProcessContext& transport) {
+                            fn(inst.get(), out, in, num_samples, transport);
+                        };
+                    n.transport_sensitive = true;
+                } else if (type->process_transport) {
+                    cg->custom_transport_processors[n.id] = type->process_transport;
+                    n.transport_sensitive = true;
                 }
             }
         }
@@ -1133,6 +1174,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             [&cgr](NodeId id) -> const CustomNodeProcessFn* {
                 auto it = cgr.custom_processors.find(id);
                 return it == cgr.custom_processors.end() ? nullptr : &it->second;
+            },
+            [&cgr](NodeId id) -> const CustomNodeTransportProcessFn* {
+                auto it = cgr.custom_transport_processors.find(id);
+                return it == cgr.custom_transport_processors.end() ? nullptr
+                                                                   : &it->second;
             });
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
@@ -1205,6 +1251,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 [&cgr](NodeId id) -> const CustomNodeProcessFn* {
                     auto it = cgr.custom_processors.find(id);
                     return it == cgr.custom_processors.end() ? nullptr : &it->second;
+                },
+                [&cgr](NodeId id) -> const CustomNodeTransportProcessFn* {
+                    auto it = cgr.custom_transport_processors.find(id);
+                    return it == cgr.custom_transport_processors.end() ? nullptr
+                                                                       : &it->second;
                 });
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
@@ -1250,11 +1301,27 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         // live-path splice (a skip mask over the routed plan + a map from each lane
         // output channel to the interior boundary-source output slot it fills).
         // Requires the canonical routed snapshot (the splice runs on that path).
+        // Recomputed every compile: with no active anticipation no node is forced
+        // exterior, so the counter must read 0 rather than keep a prior value.
+        transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
         if (cg->routing_valid &&
             anticipation_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
             const auto eligibility =
                 analyze_anticipation_eligibility(nodes_, connections_);
+            // Record how many transport-sensitive nodes anticipation forced
+            // exterior: each such node was seeded TransportSensitive above and so
+            // is excluded from the interior, running live to observe the host
+            // transport. This is the repurposed meaning of
+            // transport_suppressed_for_anticipation() — no longer "transport
+            // dropped per block" (transport now stays live; the masked interior
+            // is transport-insensitive by construction).
+            std::uint64_t transport_forced_exterior = 0;
+            for (const auto& n : nodes_) {
+                if (n.transport_sensitive) ++transport_forced_exterior;
+            }
+            transport_suppressed_for_anticipation_.store(transport_forced_exterior,
+                                                         std::memory_order_relaxed);
             const auto partition =
                 build_anticipation_partition(nodes_, connections_, eligibility);
             const auto subgraph =
@@ -1676,35 +1743,29 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             buses.add_input("main", input, pulp::format::BusRole::Main) &&
             buses.add_output("main", output, pulp::format::BusRole::Main);
         if (buses_ok) {
-            // Anticipation safety: an ahead-rendered interior is advanced solely
-            // by the producer and can never observe the live playhead, so feeding
-            // it transport would diverge from the masked live render. While
-            // anticipation is active, SUPPRESS the supplied transport for this
-            // block (the per-node transport-sensitivity opt-out that would let a
-            // transport-aware interior coexist with anticipation does not exist
-            // yet). This reproduces the safe no-transport interior render exactly.
-            const bool anticipation_active =
-                anticipation_enabled_.load(std::memory_order_relaxed) && cg &&
-                cg->anticipation_valid;
-            const pulp::format::ProcessContext* effective_transport =
-                anticipation_active ? nullptr : transport;
-            if (effective_transport != transport) {
-                transport_suppressed_for_anticipation_.fetch_add(
-                    1, std::memory_order_relaxed);
-            }
-
+            // Anticipation safety (per-node, not blanket): a transport-sensitive
+            // node opts in via GraphNode::transport_sensitive, which seeds
+            // AnticipationExclusion::TransportSensitive and so excludes that node
+            // (and its downstream cone) from the ahead-rendered interior. Every
+            // node that IS ahead-rendered is therefore transport-insensitive by
+            // construction and ignores block.transport. So the live transport can
+            // stay populated even while anticipation is active: forwarding it is
+            // inert for the masked interior, and the transport-sensitive nodes
+            // that need it always run live/exterior. (Resolved at compile; the
+            // count of nodes forced exterior is in
+            // transport_suppressed_for_anticipation().)
             pulp::format::ProcessBlock block;
             block.sample_rate = cg->sample_rate;
             block.frame_count = frames32;
             block.buses = &buses;
-            if (effective_transport != nullptr) {
+            if (transport != nullptr) {
                 // Deliver transport + process_mode + render_speed_hint to
                 // Processors via *block.transport. block.sample_rate stays sourced
                 // from cg (the prepared rate is authoritative). render_speed is left
                 // at 1.0: render_speed_hint is a categorical hint that reaches
                 // Processors through *block.transport, not a numeric multiplier.
-                block.transport = effective_transport;
-                block.mode = effective_transport->process_mode;
+                block.transport = transport;
+                block.mode = transport->process_mode;
             }
 
             // Run one routed path with the shared MIDI mailbox bridge around it.

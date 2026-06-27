@@ -10,12 +10,15 @@
 // a live audio device, so the same graph can be rendered at different block
 // partitionings and compared.
 //
-// Scope note (invariant "offline equals online"): SignalGraph nodes do NOT
-// receive ProcessMode or transport today, so the only thing that distinguishes
-// an "online" (live, block-by-block) render from an "offline" one here is the
-// block partitioning. For DETERMINISTIC nodes whose output depends only on the
-// current block's samples, rendering the same input at any block size must
-// produce the same result. This host makes that comparison cheap to set up.
+// Scope note (invariant "offline equals online"): this host drives the
+// no-transport SignalGraph::process() overload, so no node receives host
+// transport here regardless of whether it opts in (routed nodes can consume
+// transport via the transport-bearing overload, but this host never supplies
+// one). The only thing that distinguishes an "online" (live, block-by-block)
+// render from an "offline" one here is therefore the block partitioning. For
+// DETERMINISTIC nodes whose output depends only on the current block's samples,
+// rendering the same input at any block size must produce the same result.
+// This host makes that comparison cheap to set up.
 //
 // Usage:
 //   SignalGraph graph;

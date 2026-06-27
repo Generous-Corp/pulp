@@ -38,12 +38,21 @@ AnticipationEligibility analyze_anticipation_eligibility(
         }
     };
 
-    // Seed live-input roots.
+    // Seed live-input roots and transport-sensitive nodes. A node that opted into
+    // the host transport (cached, prepare-stable GraphNode::transport_sensitive)
+    // must run live, so seed it here exactly like a hard topology exclusion; the
+    // forward propagation below then carries TransportSensitive over its whole
+    // downstream cone. The seed order makes a live-input/feedback/sidechain reason
+    // win over TransportSensitive when a node is both (first-reason-wins, and the
+    // specific reason is only diagnostic — exclusion is the load-bearing bit).
     for (std::size_t i = 0; i < nodes.size(); ++i) {
         if (nodes[i].type == NodeType::AudioInput) {
             seed(i, AnticipationExclusion::LiveAudioInput);
         } else if (nodes[i].type == NodeType::MidiInput) {
             seed(i, AnticipationExclusion::LiveMidiInput);
+        }
+        if (nodes[i].transport_sensitive) {
+            seed(i, AnticipationExclusion::TransportSensitive);
         }
     }
 

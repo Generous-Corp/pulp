@@ -218,6 +218,50 @@ TEST_CASE("Partition: a MIDI boundary edge from the interior is captured",
     CHECK(has_boundary(p, 1, 3));            // the midi edge is a boundary
 }
 
+TEST_CASE("Partition: a transport-sensitive node never enters the interior",
+          "[host][anticipation][partition]") {
+    // ts(transport-sensitive gen) -> gain -> out. The transport-sensitive node is
+    // excluded (TransportSensitive) and so is its downstream cone, so NOTHING is
+    // ahead-renderable — the interior is empty and there is nothing worth
+    // anticipating. This is the partition-level guarantee that a transport-aware
+    // node always runs live.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),
+                                 mk(2, NodeType::Gain, 2, 2),
+                                 mk(3, NodeType::AudioOutput, 2, 0)};
+    nodes[0].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3)};
+    const auto p = partition_of(nodes, conns);
+    REQUIRE(p.ok);
+    CHECK_FALSE(interior_has(p, nodes, 1));  // transport-sensitive: never interior
+    CHECK_FALSE(interior_has(p, nodes, 2));  // its cone inherits the exclusion
+    CHECK(p.interior_nodes.empty());
+    CHECK_FALSE(p.worth_anticipating());
+}
+
+TEST_CASE("Partition: a transport-sensitive branch stays exterior beside a latent interior",
+          "[host][anticipation][partition]") {
+    // Two independent branches into one live sink:
+    //   gen1 -> gain1 -> out          (transport-insensitive: ahead-renderable)
+    //   ts(gen2) -> gain2 -> out      (transport-sensitive: forced exterior)
+    // Only the first branch is interior; the transport-sensitive node and its
+    // cone never enter the interior, yet the latent branch still anticipates.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),   // gen1 (interior)
+                                 mk(2, NodeType::Gain, 2, 2),     // gain1 (interior)
+                                 mk(3, NodeType::AudioOutput, 2, 0),  // shared sink
+                                 mk(4, NodeType::Plugin, 0, 2),   // gen2 (ts)
+                                 mk(5, NodeType::Gain, 2, 2)};     // gain2 (ts cone)
+    nodes[3].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3), edge(4, 5), edge(5, 3)};
+    const auto p = partition_of(nodes, conns);
+    REQUIRE(p.ok);
+    CHECK(interior_has(p, nodes, 1));         // latent branch is interior
+    CHECK(interior_has(p, nodes, 2));
+    CHECK_FALSE(interior_has(p, nodes, 4));   // transport-sensitive: exterior
+    CHECK_FALSE(interior_has(p, nodes, 5));   // its cone: exterior
+    CHECK(has_boundary(p, 2, 3));             // gain1 -> out is the splice point
+    CHECK(p.worth_anticipating());
+}
+
 TEST_CASE("Partition: an empty graph is ok but not worth anticipating",
           "[host][anticipation][partition]") {
     const auto p = partition_of({}, {});

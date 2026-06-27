@@ -55,6 +55,18 @@ using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
 
+// Transport-aware custom-node callback (additive). Identical to
+// CustomNodeProcessFn plus the host transport for the block. A custom type that
+// registers one of the transport-aware callbacks below is treated as
+// transport-sensitive: its routed binding forwards the live transport and it is
+// excluded from the anticipation interior so it always runs live (see
+// GraphNode::transport_sensitive).
+using CustomNodeTransportProcessFn =
+    std::function<void(audio::BufferView<float>& output,
+                       const audio::BufferView<const float>& input,
+                       int num_samples,
+                       const format::ProcessContext& transport)>;
+
 struct CustomNodeType {
     std::string type_id;
     int version = 1;
@@ -94,6 +106,22 @@ struct CustomNodeType {
         process_instance;
     std::function<std::vector<uint8_t>(void* /*instance*/)> save_state;
     std::function<bool(void* /*instance*/, const std::vector<uint8_t>& /*bytes*/)> load_state;
+
+    // Optional transport-aware callbacks (additive opt-in). When either is set,
+    // the node is transport-sensitive: the graph forwards the host transport to
+    // it and excludes it from the anticipation interior so it always runs live.
+    // `process_transport` is the stateless variant (used when `create` is empty);
+    // `process_instance_transport` is the stateful variant (leading instance
+    // pointer, used when an instance exists). Both default-empty == today's
+    // transport-unaware node, byte-for-byte unchanged. A type that sets a
+    // transport-aware callback alongside its plain `process`/`process_instance`
+    // gets the transport variant on the routed path; the plain one remains the
+    // fallback when no transport is available for the block.
+    CustomNodeTransportProcessFn process_transport;  // stateless
+    std::function<void(void* /*instance*/, audio::BufferView<float>& /*output*/,
+                       const audio::BufferView<const float>& /*input*/,
+                       int /*num_samples*/, const format::ProcessContext& /*transport*/)>
+        process_instance_transport;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -180,6 +208,19 @@ struct GraphNode {
     std::shared_ptr<void> custom_instance;
     std::vector<uint8_t> custom_state_blob;
     bool custom_state_pending = false;
+
+    // Cached, prepare-stable mirror of this node's transport-sensitivity
+    // capability. Resolved ONCE in compile_() — for a Plugin node from its
+    // slot's PluginSlot::wants_transport(), for a Custom node from whether its
+    // type registered a transport-aware callback — BEFORE the anticipation
+    // eligibility analysis runs, and read by BOTH the anticipation analyzer
+    // (which seeds AnticipationExclusion::TransportSensitive on a true value) and
+    // the routed binding resolution (which forwards the live transport to a
+    // true-valued node). The single shared read guarantees the partition and the
+    // bindings can never disagree. Prepare-stable: if a node's capability could
+    // change after compile, that requires a re-prepare for the graph to observe
+    // it — process() never re-polls the live slot per block.
+    bool transport_sensitive = false;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -433,6 +474,12 @@ public:
     // mismatch). The pointee is the snapshot's own callback (which keeps any
     // stateful instance alive); same lifetime contract as live_plugin_slot.
     const CustomNodeProcessFn* live_custom_processor(NodeId id) const noexcept;
+    // The live compiled snapshot's transport-aware custom callback for a Custom
+    // node, or nullptr when the node's type registered none. Same lifetime
+    // contract as live_custom_processor; non-null iff that node's
+    // GraphNode::transport_sensitive was resolved true.
+    const CustomNodeTransportProcessFn* live_custom_transport_processor(
+        NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
@@ -530,15 +577,19 @@ public:
     // on the live path; an underrun yields silence for that block, never a live
     // re-render (which would double-advance the producer-owned state).
     //
-    // SAFETY NOTE: the static eligibility (analyze_anticipation_eligibility) does
-    // NOT detect a host-clock-sensitive interior plugin (one whose output depends
-    // on the transport playhead). The transport process() overload therefore
-    // SUPPRESSES the supplied transport for any block where anticipation is active
-    // (counted by transport_suppressed_for_anticipation), so the ahead-render and
-    // the live render both see absent transport — exactly the safe no-transport
-    // interior render. A per-node transport-sensitivity opt-out is the precondition
-    // for letting a transport-aware interior coexist with anticipation; until that
-    // exists, suppression is the conservative guarantee.
+    // SAFETY NOTE: a host-clock-sensitive node (one whose output depends on the
+    // transport playhead) is NOT detectable from topology alone, so it opts in
+    // via PluginSlot::wants_transport() / a transport-aware custom callback. That
+    // capability is resolved once at compile into GraphNode::transport_sensitive
+    // and SEEDS AnticipationExclusion::TransportSensitive in
+    // analyze_anticipation_eligibility, which excludes the node AND its whole
+    // downstream cone from the ahead-rendered interior. A transport-sensitive
+    // node therefore always runs live/exterior, never ahead — so the live
+    // transport can stay populated on every block (the masked interior nodes are
+    // transport-insensitive by construction and ignore it). This per-node
+    // exclusion replaces the former blanket transport suppression under
+    // anticipation; transport_suppressed_for_anticipation() now counts the
+    // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
     }
@@ -575,23 +626,24 @@ public:
     // the nodes that consume it (e.g. ProcessorNode, via the routed ProcessBlock's
     // transport pointer), so a Processor sees the host playhead, mode, and
     // render-speed hint for the block. Nodes that do not consume transport are
-    // bit-identical to the no-transport overload. When anticipative rendering is
-    // active the transport is conservatively SUPPRESSED for the block (see
-    // set_anticipation_enabled / transport_suppressed_for_anticipation): an
-    // ahead-rendered interior would diverge from the live playhead, and the
-    // per-node transport-sensitivity opt-out that would let the two coexist does
-    // not exist yet.
+    // bit-identical to the no-transport overload. Under active anticipation the
+    // transport stays live: transport-sensitive nodes are excluded from the
+    // ahead-rendered interior (AnticipationExclusion::TransportSensitive) and run
+    // exterior, so every interior node that IS ahead-rendered is
+    // transport-insensitive by construction and ignores the populated transport
+    // (see set_anticipation_enabled / transport_suppressed_for_anticipation).
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples,
                  const format::ProcessContext& transport);
 
-    // Count of blocks for which a supplied transport was SUPPRESSED because
-    // anticipative rendering was active (see the transport process() overload).
-    // Stays 0 unless both transport and anticipation are in use at once; a
-    // non-zero value confirms the anticipation interior rendered without the
-    // live playhead, exactly as the no-transport path would. Relaxed-atomic,
-    // written only by the audio thread.
+    // Count of transport-sensitive nodes that anticipation forced to run
+    // exterior (excluded from the ahead-rendered interior so they observe the
+    // live host transport). Resolved at compile when anticipation is active; the
+    // former "transport suppressed per block" meaning is retired — the per-node
+    // exclusion (AnticipationExclusion::TransportSensitive) replaced the blanket
+    // suppression. Stays 0 unless a transport-sensitive node coexists with active
+    // anticipation. Relaxed-atomic; written by compile_() on the control thread.
     std::uint64_t transport_suppressed_for_anticipation() const noexcept {
         return transport_suppressed_for_anticipation_.load(std::memory_order_relaxed);
     }
@@ -776,6 +828,12 @@ private:
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+        // Transport-aware custom callbacks, populated alongside custom_processors
+        // for any Custom node whose type registered a transport-aware variant.
+        // The presence of an entry mirrors GraphNode::transport_sensitive for
+        // that node (both resolved from the same compile-time condition), so the
+        // routed binding and the anticipation analysis stay consistent.
+        std::unordered_map<NodeId, CustomNodeTransportProcessFn> custom_transport_processors;
         struct NodeShape {
             NodeType type;
             int num_input_ports;
@@ -935,9 +993,10 @@ private:
     // See routed_walk_fallbacks(): incremented when an eligible routed path failed
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
-    // See transport_suppressed_for_anticipation(): incremented when a supplied
-    // transport was dropped for a block because anticipation was active.
-    // Audio-thread writer only.
+    // See transport_suppressed_for_anticipation(): set by compile_() to the count
+    // of transport-sensitive nodes that active anticipation forced exterior
+    // (excluded from the ahead-rendered interior so they observe the live
+    // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
     std::atomic<std::uint32_t> active_process_readers_{0};

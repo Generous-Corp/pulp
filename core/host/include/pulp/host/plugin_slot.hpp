@@ -213,6 +213,40 @@ public:
         process(output ? *output : empty_output, input ? *input : empty_input, midi_in, midi_out,
                 param_events, num_samples);
     }
+
+    // ── Opt-in host transport (additive) ────────────────────────────────────
+    //
+    // A slot whose output depends on the host timeline (playhead, tempo, loop,
+    // process-mode) opts in by overriding wants_transport() to return true and
+    // overriding the transport-carrying process() overload below to read the
+    // supplied ProcessContext. A slot that ignores transport leaves both at
+    // their defaults and is byte-for-byte unchanged from before this seam.
+    //
+    // INVARIANT (prepare-stable): wants_transport() is resolved ONCE when the
+    // owning graph compiles its snapshot (cached into the routed binding and the
+    // anticipation-eligibility analysis from the SAME read), never re-polled per
+    // block on the audio thread. A slot must therefore settle its transport
+    // capability before prepare(); a slot that changes the value later requires
+    // a re-prepare for the graph to observe the new value. The cached bit is
+    // also the precondition that lets a transport-sensitive slot coexist with
+    // anticipative rendering: such a node is excluded from the ahead-rendered
+    // interior so it always runs live and can safely observe transport.
+    virtual bool wants_transport() const { return false; }
+
+    // Transport-carrying multi-bus process entry point. Appended last to
+    // preserve the existing PluginSlot virtual ordering. The default forwards to
+    // the transport-less overload above, so a slot that does not override it is
+    // unaffected. Only invoked by the host when wants_transport() returned true
+    // and a transport is available for the block; otherwise the host calls the
+    // transport-less overload.
+    virtual void process(format::ProcessBuffers& audio,
+                         const midi::MidiBuffer& midi_in,
+                         midi::MidiBuffer& midi_out,
+                         const ParameterEventQueue& param_events,
+                         int num_samples,
+                         const format::ProcessContext& /*transport*/) {
+        process(audio, midi_in, midi_out, param_events, num_samples);
+    }
 };
 
 } // namespace pulp::host

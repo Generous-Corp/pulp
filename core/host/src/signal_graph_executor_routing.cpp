@@ -49,7 +49,7 @@ bool gain_binding(fmt::ProcessBlock&,
 // are stack-built each call (string_view names, no allocation), matching
 // SignalGraph; both paths reach the slot through PluginSlot::process's default
 // main-in/main-out projection, so the audio output is bit-identical.
-bool plugin_binding(fmt::ProcessBlock&,
+bool plugin_binding(fmt::ProcessBlock& block,
                     const fmt::GraphRuntimeNodeProcessContext& ctx,
                     void* user_data) noexcept {
     auto* pctx = static_cast<PluginBindingContext*>(user_data);
@@ -112,7 +112,18 @@ bool plugin_binding(fmt::ProcessBlock&,
     state::ParameterEventQueue& param_events =
         ctx.node_param_events != nullptr ? *ctx.node_param_events
                                          : pctx->scratch->param_events;
-    pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
+    // A transport-sensitive plugin (wants_transport cached once at compile from
+    // PluginSlot::wants_transport(), never re-polled here) gets the live host
+    // transport when the block carries one; otherwise — and for every
+    // transport-unaware plugin — the transport-less overload runs, byte-for-byte
+    // as before. block.transport is the routed ProcessBlock's transport pointer,
+    // populated by SignalGraph::process_impl from the host playhead.
+    if (pctx->wants_transport && block.transport != nullptr) {
+        pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples,
+                            *block.transport);
+    } else {
+        pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
+    }
     return true;
 }
 
@@ -128,13 +139,20 @@ bool plugin_binding(fmt::ProcessBlock&,
 // bit-identical to the walk either way. RT-safe: the BufferView copies are
 // lightweight views (no allocation), and the std::function copy that may
 // allocate happened off the audio thread at snapshot-build time.
-bool custom_binding(fmt::ProcessBlock&,
+bool custom_binding(fmt::ProcessBlock& block,
                     const fmt::GraphRuntimeNodeProcessContext& ctx,
                     void* user_data) noexcept {
     const auto* cctx = static_cast<const CustomBindingContext*>(user_data);
     const auto in = ctx.node_inputs;
     auto out = ctx.node_outputs;
     const std::size_t frames = out.num_samples();
+    // A transport-sensitive custom node (process_transport set once at compile)
+    // gets the live host transport when the block carries one; otherwise the
+    // transport-unaware `process` runs, byte-for-byte as before.
+    if (cctx != nullptr && cctx->process_transport && block.transport != nullptr) {
+        cctx->process_transport(out, in, static_cast<int>(frames), *block.transport);
+        return true;
+    }
     if (cctx != nullptr && cctx->process) {
         cctx->process(out, in, static_cast<int>(frames));
         return true;
@@ -237,7 +255,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                  load_for,
                              std::vector<CustomBindingContext>* custom_ctx,
                              const std::function<const CustomNodeProcessFn*(NodeId)>&
-                                 custom_for) {
+                                 custom_for,
+                             const std::function<const CustomNodeTransportProcessFn*(NodeId)>&
+                                 custom_transport_for) {
     out.clear();
     plugin_ctx.clear();
     if (custom_ctx != nullptr) custom_ctx->clear();
@@ -396,6 +416,11 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             } else {
                 PluginBindingContext ctx;
                 ctx.slot = slot;
+                // Cache the node's transport-sensitivity from the SAME compile-time
+                // GraphNode::transport_sensitive the anticipation analysis reads, so
+                // the routed forwarding and the partition never disagree. Never
+                // re-poll slot->wants_transport() per block on the audio thread.
+                ctx.wants_transport = src->transport_sensitive;
                 if (parallel_safe) {
                     try {
                         ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();
@@ -422,7 +447,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             // holding its slot). required=false: the pass-through covers a null
             // callback, so a missing resolution never disqualifies the snapshot.
             const CustomNodeProcessFn* fn = custom_for ? custom_for(id) : nullptr;
-            custom_ctx->push_back(CustomBindingContext{fn ? *fn : CustomNodeProcessFn{}});
+            // Resolve the transport-aware callback from the SAME compile-time
+            // resolution that set GraphNode::transport_sensitive (a non-null
+            // result <=> transport_sensitive), so binding and partition agree.
+            const CustomNodeTransportProcessFn* tfn =
+                custom_transport_for ? custom_transport_for(id) : nullptr;
+            custom_ctx->push_back(CustomBindingContext{
+                fn ? *fn : CustomNodeProcessFn{},
+                tfn ? *tfn : CustomNodeTransportProcessFn{}});
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, custom_binding, &custom_ctx->back(), /*required=*/false});
         } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null
@@ -459,7 +491,8 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
             [&graph](NodeId id) { return graph.live_plugin_slot(id); },
             out.plugin_ctx, out.plugin_scratch, out.snapshot, /*parallel_safe=*/false,
             /*load_for=*/{}, &out.custom_ctx,
-            [&graph](NodeId id) { return graph.live_custom_processor(id); })) {
+            [&graph](NodeId id) { return graph.live_custom_processor(id); },
+            [&graph](NodeId id) { return graph.live_custom_transport_processor(id); })) {
         return false;
     }
 

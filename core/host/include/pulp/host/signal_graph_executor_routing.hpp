@@ -41,6 +41,12 @@ struct PluginBindingContext {
     PluginSlot* slot = nullptr;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
+    // Cached, prepare-stable copy of the node's transport-sensitivity capability
+    // (GraphNode::transport_sensitive, resolved once at compile from
+    // PluginSlot::wants_transport()). The binding reads THIS, never a live
+    // slot->wants_transport() per block, so the routed forwarding and the
+    // anticipation partition resolve from the same value and can never disagree.
+    bool wants_transport = false;
 };
 
 // The custom-node process callback. Declared here (identical to the alias in
@@ -50,6 +56,15 @@ struct PluginBindingContext {
 using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
+
+// Transport-aware custom callback (identical to the alias in signal_graph.hpp;
+// see the note above on the redeclaration being well-formed). Carries the host
+// transport for a transport-sensitive custom node.
+using CustomNodeTransportProcessFn =
+    std::function<void(audio::BufferView<float>& output,
+                       const audio::BufferView<const float>& input,
+                       int num_samples,
+                       const format::ProcessContext& transport)>;
 
 // Per-Custom-node binding context (the binding's user_data). Stored in a
 // caller-owned vector reserved to the custom-node count so its elements keep
@@ -62,6 +77,13 @@ using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
 // mismatch); the binding then reproduces SignalGraph's pass-through-or-zero.
 struct CustomBindingContext {
     CustomNodeProcessFn process;
+    // Transport-aware callback for a transport-sensitive custom node. When set
+    // (and a transport is available for the block) the binding invokes this
+    // instead of `process`; empty == transport-unaware node. A COPY of the
+    // resolved callback (its own keepalive on any captured instance), mirroring
+    // `process`. Its non-empty state mirrors the node's resolved
+    // GraphNode::transport_sensitive, so binding and partition stay consistent.
+    CustomNodeTransportProcessFn process_transport;
 };
 
 // A SignalGraph translated into the canonical GraphRuntimeExecutor's routing
@@ -154,7 +176,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                  load_for = {},
                              std::vector<CustomBindingContext>* custom_ctx = nullptr,
                              const std::function<const CustomNodeProcessFn*(NodeId)>&
-                                 custom_for = {});
+                                 custom_for = {},
+                             // Resolves a Custom node's transport-aware callback
+                             // (null = none). Populated into the binding context
+                             // alongside `custom_for`; a node with a non-null
+                             // result is transport-sensitive (consistent with
+                             // GraphNode::transport_sensitive resolved at compile).
+                             const std::function<const CustomNodeTransportProcessFn*(NodeId)>&
+                                 custom_transport_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On
