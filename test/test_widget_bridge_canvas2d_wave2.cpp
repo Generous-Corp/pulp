@@ -85,7 +85,7 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker maps to B
 
 TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
           "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — CSS Backgrounds & Borders L3 named widths.
+    // CSS Backgrounds & Borders L3 named widths.
     // Pulp picks 1/2/4 px (slightly thinner than browsers' canonical
     // 1/3/5 — see compat.json css/borderWidth note).
     ScriptEngine engine;
@@ -112,7 +112,7 @@ TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
 
 TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
           "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.4 — Skia distinguishes italic-vs-oblique only via
+    // Skia distinguishes italic-vs-oblique only via
     // the `slnt` font variation axis, which most bundled fonts don't
     // ship. Aliasing oblique -> italic upgrades a silent no-op to the
     // closest visual approximation.
@@ -140,7 +140,7 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
 
 TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
           "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — em/rem default to 14 px, vh/vw default to a
+    // em/rem default to 14 px, vh/vw default to a
     // 600x800 viewport (matches resolveLength fallback).
     ScriptEngine engine;
     View root;
@@ -170,9 +170,8 @@ TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport"
 
 TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
           "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — margin shorthand re-tokenized so each edge
-    // routes through the same string-aware setFlex pathway as the
-    // per-edge longhands. `margin: auto` centers via Yoga's
+    // Margin shorthand routes each edge through the same string-aware setFlex
+    // pathway as the per-edge longhands. `margin: auto` centers via Yoga's
     // YGNodeStyleSetMarginAuto when paired across opposing edges.
     ScriptEngine engine;
     View root;
@@ -205,7 +204,6 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
     REQUIRE_THAT(fb.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
 }
 
-// pulp #1638 — ctx.arcTo records a single path_arc_to with the radius.
 TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to with the radius (recovered from #1638)",
           "[view][bridge][canvas][wave3-canvas2d][wave5-recovered]") {
     ScriptEngine engine;
@@ -285,8 +283,8 @@ TEST_CASE("Wave 3 canvas2d — fillText after gradient fillStyle keeps the gradi
         g.addColorStop(1, '#0000ff');
         ctx.fillStyle = g;
         ctx.font = '20px Inter';
-        // No maxWidth: Wave 3 c2d.6 only requires gradient passthrough; the
-        // maxWidth squeeze was wired in #1525.
+        // No maxWidth: this case only requires gradient passthrough; the
+        // maxWidth squeeze is covered by #1525.
         ctx.fillText('Hi', 20, 60);
     )");
     root.layout_children();
@@ -355,8 +353,8 @@ TEST_CASE("Wave 3 canvas2d — strokeStyle = createLinearGradient routes through
         g.addColorStop(1, '#00ff00');
         ctx.strokeStyle = g;
         ctx.lineWidth = 3;
-        // strokeRect with no explicit color — uses the active strokeStyle
-        // which is now a gradient and must emit a set_stroke_gradient_linear
+        // strokeRect with no explicit color uses the active strokeStyle,
+        // which is a gradient and must emit a set_stroke_gradient_linear
         // cmd via the JS shim's _applyStrokeStyle dispatch.
         ctx.strokeRect(20, 20, 100, 60);
     )");
