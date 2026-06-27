@@ -529,9 +529,34 @@ TEST_CASE("pulp run --audio-capture-rolling implies headless and forwards the pa
     REQUIRE(eq.error.empty());
     REQUIRE(eq.audio_capture_rolling_path == "/tmp/roll2.wav");
     REQUIRE(eq.headless);
+    REQUIRE(eq.audio_capture_rolling_int24 == false);  // float is the default
     auto eq_args = assemble_launch_args(eq);
     REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-frames")
             == eq_args.end());
+    REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-format")
+            == eq_args.end());  // default float not forwarded
+}
+
+TEST_CASE("pulp run --audio-capture-rolling-format int24 parses and forwards",
+          "[cli][run][audio-capture-rolling]") {
+    auto r = parse_run_options({"--audio-capture-rolling", "/tmp/r.wav",
+                                "--audio-capture-rolling-format", "int24"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_capture_rolling_int24);
+    auto args = assemble_launch_args(r);
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-rolling-format") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "int24") != args.end());
+
+    // Explicit float, = form.
+    auto f = parse_run_options({"--audio-capture-rolling=/tmp/r.wav",
+                                "--audio-capture-rolling-format=float"});
+    REQUIRE(f.error.empty());
+    REQUIRE(f.audio_capture_rolling_int24 == false);
+
+    // Invalid value and requires-rolling are rejected.
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling", "/tmp/r.wav",
+                                     "--audio-capture-rolling-format", "int32"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-format", "int24"}).error.empty());
 }
 
 TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mode contention",

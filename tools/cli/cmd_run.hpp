@@ -35,6 +35,7 @@ struct ParseRunResult {
     int audio_capture_frames = 0;       ///< --audio-capture-frames <n>, 0 = ring default
     std::string audio_capture_rolling_path; ///< --audio-capture-rolling <file>; implies --headless
     int audio_capture_rolling_frames = 0;   ///< --audio-capture-rolling-frames <n>, 0 = ring default
+    bool audio_capture_rolling_int24 = false; ///< --audio-capture-rolling-format int24 (default float)
 
     /// Args explicitly forwarded by the user with `-- ...`, plus any
     /// unknown flags (legacy permissive behaviour).

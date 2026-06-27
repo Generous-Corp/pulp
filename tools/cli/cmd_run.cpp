@@ -32,6 +32,7 @@ constexpr const char* kAudioCaptureWavEnv = "PULP_AUDIO_CAPTURE_WAV";
 constexpr const char* kAudioCaptureWavFramesEnv = "PULP_AUDIO_CAPTURE_WAV_FRAMES";
 constexpr const char* kAudioCaptureRollingEnv = "PULP_AUDIO_CAPTURE_ROLLING";
 constexpr const char* kAudioCaptureRollingFramesEnv = "PULP_AUDIO_CAPTURE_ROLLING_FRAMES";
+constexpr const char* kAudioCaptureRollingFormatEnv = "PULP_AUDIO_CAPTURE_ROLLING_FORMAT";
 constexpr const char* kAudioNoticeEnv    = "PULP_RUN_AUDIO_NOTICE";
 
 void print_help() {
@@ -80,8 +81,10 @@ void print_help() {
            "                          rendering, then exit. Unlike --audio-capture-wav this\n"
            "                          keeps the LAST (steady-state) window — the window\n"
            "                          doctor/compare want — with no int16 floor.\n"
-           "                          --audio-capture-rolling-frames <n> sets the window.\n"
-           "                          Implies --headless but still uses the live device.\n"
+           "                          --audio-capture-rolling-frames <n> sets the window;\n"
+           "                          --audio-capture-rolling-format float|int24 picks the\n"
+           "                          sample format (default float; int24 = smaller, integer,\n"
+           "                          ~-144 dBFS floor). Implies --headless; uses the live device.\n"
            "  PULP_RUN_AUDIO_NOTICE=0\n"
            "                          Suppress the pre-launch notice that the\n"
            "                          standalone may activate system audio output.\n"
@@ -316,6 +319,8 @@ int cmd_run(const std::vector<std::string>& args) {
         if (opts.audio_capture_rolling_frames > 0)
             set_env(kAudioCaptureRollingFramesEnv,
                     std::to_string(opts.audio_capture_rolling_frames));
+        if (opts.audio_capture_rolling_int24)
+            set_env(kAudioCaptureRollingFormatEnv, "int24");
     }
 
     auto launch_args = assemble_launch_args(opts);

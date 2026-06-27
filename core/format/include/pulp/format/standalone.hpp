@@ -107,6 +107,9 @@ struct StandaloneConfig {
     // meaningful when PULP_ENABLE_AUDIO_PROBES is ON. Captures all output channels.
     std::string audio_capture_rolling_path;
     int audio_capture_rolling_frames = 0;
+    // Rolling capture sample format: false → float32 (default, full precision),
+    // true → int24 (≈ −144 dBFS floor, smaller file, universal DAW compatibility).
+    bool audio_capture_rolling_int24 = false;
 
     // Built-in tempo source. The standalone host has no DAW providing
     // transport, so it acts as one: it surfaces `tempo_bpm` / time signature on

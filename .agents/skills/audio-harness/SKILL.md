@@ -269,25 +269,28 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
   `assert` (presence / level / clip / NaN); the wrong window for steady-state
   `doctor` and quantization-limited for `compare`. `--audio-capture-frames <n>`
   sets the window.
-- **`--audio-capture-rolling <file>` (last-N, float).** Keeps the LAST
+- **`--audio-capture-rolling <file>` (last-N, float or int24).** Keeps the LAST
   (steady-state) window in a `RollingAudioCaptureBuffer` and writes a **float**
   WAV (no int16 floor) — the window `doctor` (THD/response) and `compare`
   (sub-−96 dBFS residuals) actually want. `--audio-capture-rolling-frames <n>`
-  sets the window. Uses the hold protocol so the off-RT materialize is safe while
-  the audio thread is still appending. One capture mode per invocation (mutually
-  exclusive with `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
+  sets the window; `--audio-capture-rolling-format int24` swaps the float WAV for
+  int24 (≈ −144 dBFS floor, smaller, universal DAW compatibility). Uses the hold
+  protocol so the off-RT materialize is safe while the audio thread is still
+  appending. One capture mode per invocation (mutually exclusive with
+  `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
 
-Float WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth::Float32)`.
+WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
+`Int16` (default overload), `Int24`, or `Float32`.
 
 ## Roadmap
 
 The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
-render` (offline plugin render), `pulp run --audio-capture-wav` (earliest-window
-int16), and `pulp run --audio-capture-rolling` (last-N float). The live realtime
-output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
-inspection* above). `render`'s `--param @frame` automation is sample-accurate
-(forwarded queue; see above). Remaining ideas are additive — e.g. a 24-bit-int
-capture alongside the float WAV.
+render` (offline plugin render, sample-accurate `--param @frame`), `pulp run
+--audio-capture-wav` (earliest-window int16), and `pulp run
+--audio-capture-rolling` (last-N, float or int24). The live realtime output tap
+they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live inspection*
+above). The harness's offline/live capture surface is feature-complete; further
+work is open-ended (e.g. additional analysis verbs), not a tracked backlog.
 
 ## Sibling: the Audio Quality Lab (reference-vs-candidate perceptual artifacts)
 
