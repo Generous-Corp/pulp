@@ -137,6 +137,24 @@ The spectral detectors are **global** metrics — alignment-free and scale-invar
 flux dominates and it can't discriminate graininess, so it is exercised on sustained
 material (where graininess is actually heard).
 
+## Corpus (P0b — versioned, license-guarded)
+
+The lab has a versioned corpus (`corpus/MANIFEST.json`) of sources by material class,
+license, and the artifact each should expose. Two kinds: **generator-backed** (synthetic,
+regenerable — committed by recipe, no WAV) and **file-backed** (real audio you supply).
+
+```bash
+python -m quality_lab.cli corpus list
+python -m quality_lab.cli corpus seed                          # synthetic families
+python -m quality_lab.cli corpus add --file vox.wav --name vocal1 \
+    --class vocal --license CC0 --expect "graininess on sustained notes" --family tonal
+```
+
+**License fence (enforced in code):** `corpus add` rejects any non-permissive license —
+the committed corpus stays license-clean (the plan's §4). GPL / proprietary audio, and
+R3/PEAQ outputs, stay developer-local and never enter the manifest. File-backed sources
+record a SHA-256 (tamper-detected on `materialize`).
+
 ## Case families (§3.5 — the harness serves more than drums)
 
 The lab's unit of work is a `QualityCase` with `family` / `reference_policy` /
