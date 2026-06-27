@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <cstdlib>
 #include <functional>
 #include <vector>
 
@@ -173,6 +174,24 @@ TEST_CASE("rolling capture WAV with an empty path or unprepared buffer is a no-o
     CHECK_FALSE(pulp::format::detail::write_audio_capture_rolling_wav_file("", rolling, cfg));
     CHECK_FALSE(pulp::format::detail::write_audio_capture_rolling_wav_file(
         (fs::temp_directory_path() / "pulp_rolling_empty.wav").string(), rolling, cfg));
+}
+
+TEST_CASE("PULP_AUDIO_CAPTURE_ROLLING_FORMAT env parses int24/float and ignores junk",
+          "[standalone][audio-capture-rolling]") {
+    auto parse = [](const char* value) {
+        if (value) ::setenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value, 1);
+        else ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
+        pulp::format::StandaloneConfig cfg;
+        cfg = pulp::format::detail::standalone_config_from_environment(cfg);
+        return cfg.audio_capture_rolling_int24;
+    };
+    CHECK(parse("int24") == true);
+    CHECK(parse("float") == false);
+    // Unrecognized values fall back to float (and log a warning — see the env parser).
+    CHECK(parse("int32") == false);
+    CHECK(parse("INT24") == false);
+    CHECK(parse(nullptr) == false);  // unset → default float
+    ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
 }
 
 #if PULP_ENABLE_AUDIO_PROBES
