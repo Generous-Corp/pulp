@@ -305,7 +305,15 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // never another open plugin editor's focused field (focused_input_ is
     // process-global).
     auto* fv = pulp_focus_under_root(root);
-    if (!fv) return false;
+    // No focused input widget: still give the editor ROOT a shot at the key, so a
+    // plugin's own key handling (e.g. the tempo-sampler's Musical Typing, wired on
+    // the root's on_key_event) fires when hosted — matching the standalone path,
+    // where the window host routes every keystroke to root->on_global_key. The
+    // base View::on_key_event is a no-op returning false, so plugins WITHOUT a root
+    // key handler are unaffected: the key falls through to the host (below) for DAW
+    // shortcuts. Only KEYS THE ROOT CONSUMES are swallowed.
+    const bool has_focused_widget = (fv != nullptr);
+    if (!fv) fv = root;
     pulp::view::KeyEvent ke;
     ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
@@ -315,6 +323,15 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // The return value tells us whether the editor already handled this key as a
     // command — if so it must NOT also be inserted as text.
     const bool consumed = fv->on_key_event(ke);
+
+    // Unfocused (root-fallback) path: the root only consumes keys it owns (e.g. a
+    // Musical Typing note). Anything it did NOT consume must go back to the host so
+    // DAW transport/shortcuts keep working — and there is no text field to insert
+    // into, so skip text insertion + the focus-blur affordance entirely.
+    if (!has_focused_widget) {
+        if (consumed) root->request_repaint();
+        return consumed;
+    }
 
     // Printable characters → text insertion, but only when the key was NOT
     // consumed as a command above. Without the !consumed gate an arrow key both

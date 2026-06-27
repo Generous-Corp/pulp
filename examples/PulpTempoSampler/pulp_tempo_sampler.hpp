@@ -412,16 +412,20 @@ public:
     // The FrameTick poller defaults the fader/readout to the detected loop BPM
     // whenever a new loop is analyzed (generation bump), so R≈1 on load.
     view::Fader* tempo_fader = nullptr;
+    view::ToggleButton* link_btn = nullptr;  // tempo LINK toggle (follow host vs manual)
+    bool hosted_in_standalone_ = false;      // resolved on view-open
     std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
 
     // Reveal the "Settings" button only when hosted in the standalone settings
     // chrome (a TabPanel ancestor carrying the Audio/MIDI Settings tab). Called
     // from Processor::on_view_opened — by then the editor is parented into the
     // chrome, so format::standalone_settings_available() can detect it. Cheap and
-    // allocation-free, so it is safe outside the paint no-alloc scope.
+    // allocation-free, so it is safe outside the paint no-alloc scope. Also records
+    // the standalone-vs-DAW verdict so the processor can resolve LINKED tempo.
     void update_standalone_chrome_affordances() {
+        hosted_in_standalone_ = format::standalone_settings_available(this);
         if (settings_button)
-            settings_button->set_visible(format::standalone_settings_available(this));
+            settings_button->set_visible(hosted_in_standalone_);
     }
 
     SamplerEditorRoot() {
@@ -601,7 +605,7 @@ public:
         std::vector<std::uint8_t> out;
         if (raw_frames_ <= 0) return out;  // nothing loaded
         const std::uint32_t magic = 0x504C5053u;  // 'PLPS'
-        const std::uint32_t version = 1;
+        const std::uint32_t version = 2;  // v2 appends the engaged target tempo
         const std::int32_t ch = raw_channels_;
         const std::int64_t frames = raw_frames_;
         const double sr = raw_sr_;
@@ -612,6 +616,11 @@ public:
         put(&magic, 4); put(&version, 4); put(&ch, 4); put(&frames, 8); put(&sr, 8);
         for (int c = 0; c < raw_channels_; ++c)
             put(raw_[c].data(), static_cast<std::size_t>(raw_frames_) * sizeof(float));
+        // v2: persist the TEMPO setting (0 = linked/follow-host, >0 = manual BPM) so
+        // a chosen tempo survives close+reopen / project reload. Trails the audio so
+        // a v1 reader simply ignores it.
+        const double tempo = tempo_override_.load(std::memory_order_relaxed);
+        put(&tempo, 8);
         return out;
     }
     bool deserialize_plugin_state(std::span<const std::uint8_t> data) override {
@@ -635,7 +644,19 @@ public:
             p += static_cast<std::size_t>(frames) * sizeof(float);
             ptrs[static_cast<std::size_t>(c)] = tmp[static_cast<std::size_t>(c)].data();
         }
+        // v2: an engaged target tempo trails the audio. Read it BEFORE load_loop
+        // (which resets generations but not the override), then apply it so the
+        // saved tempo wins over the load's default-to-host render.
+        bool have_tempo = false; double saved_tempo = 0.0;
+        if (version >= 2 && data.size() >= need + 8) {
+            std::memcpy(&saved_tempo, p, 8);
+            have_tempo = std::isfinite(saved_tempo) && saved_tempo >= 0.0;
+        }
         load_loop(ptrs.data(), ch, static_cast<long>(frames), sr);
+        if (have_tempo) {
+            if (saved_tempo > 0.0) set_target_bpm(saved_tempo);  // manual: re-engage + render
+            else set_tempo_linked(true);                         // linked: follow host
+        }
         return true;
     }
 
@@ -898,15 +919,50 @@ public:
         tempo_override_.store(clamped, std::memory_order_relaxed);
         request_render(clamped);  // re-stretch to the new target now
     }
-    /// The tempo the loop is currently stretched TO: the override when engaged,
-    /// else the last host/standalone tempo seen by the worker (default 120).
+    /// The tempo the loop is currently stretched TO. With a manual override it is
+    /// that value; otherwise (LINKED) it follows the reference tempo — the loop's
+    /// own detected BPM in the standalone (no transport to link to), or the last
+    /// host transport tempo in a plugin host.
     double effective_bpm() const {
         const double o = tempo_override_.load(std::memory_order_relaxed);
-        return o > 0.0 ? o : pending_host_bpm_.load(std::memory_order_relaxed);
+        if (o > 0.0) return o;
+        if (standalone_host_.load(std::memory_order_relaxed)) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            if (det > 0.0) return det;
+        }
+        return pending_host_bpm_.load(std::memory_order_relaxed);
+    }
+    /// The editor reports whether it is hosted in the standalone chrome (no DAW
+    /// transport), so the audio thread can resolve LINKED tempo to the loop's
+    /// natural BPM there instead of a host tempo.
+    void set_standalone_host(bool on) {
+        standalone_host_.store(on, std::memory_order_relaxed);
     }
     /// True once a UI target tempo is engaged (vs. following the host).
     bool tempo_override_active() const {
         return tempo_override_.load(std::memory_order_relaxed) > 0.0;
+    }
+
+    /// Tempo LINK state. Linked (override == 0) means the loop follows the host/
+    /// transport tempo and re-stretches automatically when the DAW tempo changes;
+    /// unlinked means a manual target BPM is engaged. This is the natural reading
+    /// of `tempo_override_` (0 = follow host), surfaced for the editor's link
+    /// toggle. (Distinct from kTempoLink, which is the pitch+time "vinyl" link.)
+    bool tempo_linked() const {
+        return tempo_override_.load(std::memory_order_relaxed) <= 0.0;
+    }
+    /// Toggle tempo LINK. Linking clears the override so playback follows the host;
+    /// unlinking seeds the manual target from the currently-engaged (host) tempo so
+    /// the slider/number start where the sound is now (no jump). Off-audio-thread.
+    void set_tempo_linked(bool linked) {
+        if (linked) {
+            tempo_override_.store(0.0, std::memory_order_relaxed);  // follow the reference again
+            request_render(effective_bpm());  // re-render at the now-linked source tempo
+        } else {
+            const double cur = std::clamp(effective_bpm(), kTargetBpmMin, kTargetBpmMax);
+            tempo_override_.store(cur, std::memory_order_relaxed);  // engage manual at current
+            request_render(cur);
+        }
     }
 
     std::size_t num_slices() const {
@@ -1190,16 +1246,19 @@ public:
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 396, 322, 86, 16);
-            fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
-                                                              : effective_bpm()));
+            place(*fader, 396, 322, 80, 16);
+            fader->set_value(bpm_to_norm(effective_bpm()));
+            // Dragging engages a manual target tempo — which auto-UNLINKS from the
+            // host (set_target_bpm sets the override). The FrameTick re-syncs the
+            // LINK toggle's lit state from tempo_linked() on the next frame.
             fader->on_change = [this, norm_to_bpm](float v) {
                 set_target_bpm(norm_to_bpm(v));
             };
             root->tempo_fader = fader.get();
             root->add_child(std::move(fader));
         }
-        // Live BPM readout for the TEMPO fader (shows the engaged target tempo).
+        // Live BPM readout (shows the tempo the loop is currently stretched to —
+        // the host tempo while linked, the manual target while unlinked).
         {
             auto live = std::make_unique<LiveText>();
             live->font_family = mono;
@@ -1207,8 +1266,29 @@ public:
             live->text = [this] {
                 return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
             };
-            place(*live, 488, 320, 64, 18);
+            place(*live, 480, 320, 56, 18);
             root->add_child(std::move(live));
+        }
+        // TEMPO LINK toggle: ON = follow the reference tempo (host transport in a
+        // DAW; the loop's detected BPM in standalone) and re-stretch automatically
+        // when it changes. OFF = the manual TEMPO fader value. Tapping it re-links
+        // (clears the override) or unlinks (seeds the override from the current
+        // tempo, no jump). Defaults ON, so a fresh plugin instance follows the DAW.
+        {
+            auto linkBtn = std::make_unique<ToggleButton>();
+            linkBtn->set_label("LINK");
+            linkBtn->set_font_size(10.0f);
+            linkBtn->set_corner_radius(6.0f);
+            linkBtn->set_on_background_color(teal);
+            linkBtn->set_on_text_color(bg900);
+            linkBtn->set_off_background_color(raised);
+            linkBtn->set_off_text_color(muted);
+            linkBtn->set_off_border_color(faint);
+            linkBtn->set_on(tempo_linked());
+            linkBtn->on_toggle = [this](bool on) { set_tempo_linked(on); };
+            place(*linkBtn, 542, 316, 64, 26);
+            root->link_btn = linkBtn.get();
+            root->add_child(std::move(linkBtn));
         }
 
         // Live slice count, in green and sitting RIGHT OF THE SENS fader (which
@@ -1222,24 +1302,22 @@ public:
             root->add_child(std::move(live));
         }
 
-        // Per-frame poller: when a new loop is analyzed (generation bump), default
-        // the TEMPO fader + override to the detected loop BPM so it plays at its
-        // natural tempo (R≈1) until the user drags. Lives in the UI (not the
-        // processor) so the headless / plugin paths keep following the host tempo.
+        // Per-frame poller: keep the TEMPO fader knob + LINK lit-state in sync with
+        // the live effective tempo. While LINKED the fader visually tracks the
+        // reference tempo (host transport / detected BPM) as it changes; while
+        // unlinked it matches the manual value (a no-op). Fader::set_value is silent
+        // (no on_change), so this never spuriously unlinks. A fresh loop stays in
+        // its current LINK state — no forced override — so a plugin instance follows
+        // the DAW by default and the standalone plays the loop at its natural tempo.
         {
             auto tick = std::make_unique<FrameTick>();
             SamplerEditorRoot* rp = root.get();
             tick->on_tick = [this, rp, bpm_to_norm] {
-                // Watch load_generation (new-sample only), NOT raw_generation — a
-                // re-slice bumps raw_generation but must keep the user's tempo.
-                const std::uint64_t g = load_generation();
-                if (g == rp->tempo_seen_gen_) return;
-                rp->tempo_seen_gen_ = g;
-                const double b = detected_bpm();
-                if (b > 0.0) {
-                    set_target_bpm(b);
-                    if (rp->tempo_fader) rp->tempo_fader->set_value(bpm_to_norm(b));
-                }
+                rp->tempo_seen_gen_ = load_generation();  // tracked for parity; no reset
+                if (rp->tempo_fader)
+                    rp->tempo_fader->set_value(bpm_to_norm(effective_bpm()));
+                if (rp->link_btn && rp->link_btn->is_on() != tempo_linked())
+                    rp->link_btn->set_on(tempo_linked());
             };
             place(*tick, 0, 0, 0, 0);
             root->add_child(std::move(tick));
@@ -1259,7 +1337,7 @@ public:
             loopBtn->set_off_background_color(raised);
             loopBtn->set_off_text_color(muted);
             loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 560, 316, 84, 26);
+            place(*loopBtn, 614, 316, 84, 26);
             root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
             root->add_child(std::move(loopBtn));
         }
@@ -1278,8 +1356,12 @@ public:
     // reveal the "Settings" button only when the Audio/MIDI panel is actually
     // reachable. In a DAW there is no such chrome, so the button stays hidden.
     void on_view_opened(view::View& view) override {
-        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view))
+        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view)) {
             root->update_standalone_chrome_affordances();
+            // Tell the audio thread whether to resolve LINKED tempo to the loop's
+            // detected BPM (standalone) or the host transport (DAW).
+            set_standalone_host(root->hosted_in_standalone_);
+        }
     }
 
     // ── Audio thread ───────────────────────────────────────────────────────
@@ -1299,7 +1381,19 @@ public:
         // user's pending_host_bpm_ back to the host's tempo.
         const double host_bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
         const double override_bpm = tempo_override_.load(std::memory_order_relaxed);
-        const double bpm = override_bpm > 0.0 ? override_bpm : host_bpm;
+        // Tempo source: a manual override wins; otherwise LINKED — follow the loop's
+        // own detected BPM in the standalone (no transport to link to), else the host
+        // transport. This makes a fresh plugin instance follow the DAW by default,
+        // while the standalone keeps playing loops at their natural tempo.
+        double bpm;
+        if (override_bpm > 0.0) {
+            bpm = override_bpm;
+        } else if (standalone_host_.load(std::memory_order_relaxed)) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            bpm = det > 0.0 ? det : host_bpm;
+        } else {
+            bpm = host_bpm;
+        }
         if (ctx.tempo_changed || bpm != last_host_bpm_) {
             last_host_bpm_ = bpm;
             request_render(bpm);
@@ -1959,6 +2053,10 @@ private:
     std::atomic<double> pending_host_bpm_{120.0};
     // UI target-tempo override: 0 = follow host, else the BPM to stretch TO.
     std::atomic<double> tempo_override_{0.0};
+    // Set by the editor: true when hosted in the standalone chrome (no DAW
+    // transport), so process()/effective_bpm() resolve LINKED tempo to the loop's
+    // natural BPM instead of a host tempo. Default false = behave as a plugin host.
+    std::atomic<bool> standalone_host_{false};
     std::mutex drop_mutex_;
     std::string pending_drop_path_;
 
