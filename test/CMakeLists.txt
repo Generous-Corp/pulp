@@ -542,7 +542,7 @@ catch_discover_tests(pulp-test-cli-shellout-pr EXTRA_ARGS --allow-running-no-tes
 add_executable(pulp-test-cli-shellout-lifecycle test_cli_shellout_lifecycle.cpp)
 target_link_libraries(pulp-test-cli-shellout-lifecycle PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-lifecycle)
-catch_discover_tests(pulp-test-cli-shellout-lifecycle)
+catch_discover_tests(pulp-test-cli-shellout-lifecycle EXTRA_ARGS --allow-running-no-tests)
 
 # `pulp tweaks diff` shell-out tests. Drives the built binary against
 # pulp-tweaks.json + design-snapshot fixtures and pins the clean /
