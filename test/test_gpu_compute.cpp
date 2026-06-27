@@ -275,6 +275,31 @@ TEST_CASE("GpuCompute FFT matches direct DFT (complex, phase-exact)",
     }
 }
 
+TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 1024;
+    std::vector<float> in(N * 2), out(N * 2), ref(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { in[i * 2] = std::sin(0.02f * i); in[i * 2 + 1] = 0.0f; }
+
+    // Timed forward must produce the same result as the plain forward.
+    REQUIRE(compute->fft_forward(in.data(), ref.data(), N));
+    double gpu_us = -123.0;
+    REQUIRE(compute->fft_forward_timed(in.data(), out.data(), N, &gpu_us));
+    for (uint32_t i = 0; i < N * 2; ++i) REQUIRE(std::abs(out[i] - ref[i]) < 1e-4f);
+
+    const auto caps = compute->capabilities();
+    if (caps.timestamp_query) {
+        // True GPU compute time is positive and far below the ~ms-scale
+        // wall-clock round trip (this is the readback-dominates finding).
+        REQUIRE(gpu_us > 0.0);
+        REQUIRE(gpu_us < 5000.0);
+    } else {
+        REQUIRE(gpu_us == -1.0);  // timing unavailable -> sentinel
+    }
+}
+
 TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;
@@ -301,9 +326,9 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
 
     std::printf("\n");
     std::printf("  FFT: CPU (pulp::signal::Fft) vs GPU (Stockham, single submit + sync readback)\n");
-    std::printf("  %8s | %12s | %12s | %9s | %s\n",
-                "N", "CPU us", "GPU us", "speedup", "winner");
-    std::printf("  ---------+--------------+--------------+-----------+--------\n");
+    std::printf("  %8s | %12s | %12s | %14s | %s\n",
+                "N", "CPU us", "GPU wall us", "GPU compute us", "winner (wall)");
+    std::printf("  ---------+--------------+--------------+----------------+--------------\n");
 
     for (uint32_t n : sizes) {
         // CPU baseline: complex forward FFT.
@@ -325,7 +350,9 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
         // GPU: interleaved input, full forward (upload + dispatches + readback).
         std::vector<float> in(n * 2), out(n * 2);
         for (uint32_t i = 0; i < n; ++i) { in[i * 2] = std::sin(0.01f * i); in[i * 2 + 1] = 0.0f; }
-        REQUIRE(compute->fft_forward(in.data(), out.data(), n));  // warm-up + correctness
+        double gpu_compute_us = -1.0;
+        REQUIRE(compute->fft_forward_timed(in.data(), out.data(), n,
+                                           &gpu_compute_us));  // warm-up + true GPU time
         auto gpu_t0 = std::chrono::high_resolution_clock::now();
         for (int it = 0; it < iters; ++it) {
             REQUIRE(compute->fft_forward(in.data(), out.data(), n));
@@ -336,8 +363,8 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
             / 1000.0 / iters;
 
         const double speedup = gpu_us > 0.0 ? cpu_us / gpu_us : 0.0;
-        std::printf("  %8u | %12.1f | %12.1f | %8.2fx | %s\n",
-                    n, cpu_us, gpu_us, speedup, speedup > 1.0 ? "GPU" : "CPU");
+        std::printf("  %8u | %12.1f | %12.1f | %14.2f | %s\n",
+                    n, cpu_us, gpu_us, gpu_compute_us, speedup > 1.0 ? "GPU" : "CPU");
     }
     std::printf("\n");
 }

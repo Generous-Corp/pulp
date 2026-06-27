@@ -218,6 +218,15 @@ public:
 
         wgpu::DeviceDescriptor dev_desc{};
         dev_desc.label = "Pulp Compute Device";
+        // Opt into compute-pass GPU timing when the adapter advertises it
+        // (the standalone device requests no features otherwise). Requesting an
+        // unsupported feature fails RequestDevice, so it is strictly gated.
+        std::vector<wgpu::FeatureName> required_features;
+        if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+            required_features.push_back(wgpu::FeatureName::TimestampQuery);
+        }
+        dev_desc.requiredFeatureCount = required_features.size();
+        dev_desc.requiredFeatures = required_features.data();
         dev_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView msg) {
                 runtime::log_error("GpuCompute: WebGPU error ({}): {}",
@@ -401,6 +410,15 @@ public:
 
     bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) override {
         return fft_run(complex_in, complex_out, n, /*sign=*/+1.0f, /*normalize=*/true);
+    }
+
+    bool fft_forward_timed(const float* complex_in, float* complex_out, uint32_t n,
+                           double* gpu_compute_us) override {
+        double ns = -1.0;
+        const bool ok = fft_run(complex_in, complex_out, n, /*sign=*/-1.0f,
+                                /*normalize=*/false, &ns);
+        if (gpu_compute_us) *gpu_compute_us = (ns >= 0.0) ? ns / 1000.0 : -1.0;
+        return ok;
     }
 
     // ── Capabilities ─────────────────────────────────────────────────────
@@ -736,6 +754,7 @@ private:
     wgpu::Adapter adapter_;
     std::unique_ptr<dawn::native::Instance> native_instance_;
     bool owns_device_ = false;
+    bool has_timestamp_ = false;  // TimestampQuery feature enabled on device_
 
 #ifdef PULP_BENCHMARK
     bench::PerfCounters* bench_counters_ = nullptr;
@@ -765,6 +784,10 @@ private:
         wgpu::Buffer readback;    // CopyDst | MapRead
         std::vector<wgpu::Buffer> uniforms;      // FftParams, one per pass
         std::vector<wgpu::BindGroup> stage_bgs;  // one per pass, alternating src/dst
+        // Timestamp resources, created lazily on the first timed call.
+        wgpu::QuerySet ts_qs;       // 2 Timestamp slots (begin/end of FFT passes)
+        wgpu::Buffer ts_resolve;    // QueryResolve | CopySrc
+        wgpu::Buffer ts_readback;   // CopyDst | MapRead (2 * u64)
     };
     std::unordered_map<uint32_t, FftPlan> fft_plans_;
 
@@ -794,6 +817,8 @@ private:
         // flight) times per-call buffer count (2-3 inputs + output), with
         // headroom.
         pool_ = std::make_shared<detail::StagingBufferPool>(device_, 8);
+
+        has_timestamp_ = device_.HasFeature(wgpu::FeatureName::TimestampQuery);
 
         initialized_ = true;
         runtime::log_info("GpuCompute: pipelines created (device shared: {})",
@@ -885,19 +910,48 @@ private:
         return &inserted.first->second;
     }
 
+    // Lazily allocate the 2-slot timestamp QuerySet + resolve/readback buffers
+    // for a plan. Returns false if any allocation fails.
+    bool ensure_ts_resources(FftPlan& plan) {
+        if (plan.ts_qs) return true;
+        wgpu::QuerySetDescriptor qd{};
+        qd.type = wgpu::QueryType::Timestamp;
+        qd.count = 2;
+        plan.ts_qs = device_.CreateQuerySet(&qd);
+
+        const uint64_t ts_bytes = 2u * sizeof(uint64_t);
+        wgpu::BufferDescriptor rd{};
+        rd.size = ts_bytes;
+        rd.usage = wgpu::BufferUsage::QueryResolve | wgpu::BufferUsage::CopySrc;
+        plan.ts_resolve = device_.CreateBuffer(&rd);
+
+        wgpu::BufferDescriptor bd{};
+        bd.size = ts_bytes;
+        bd.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        plan.ts_readback = device_.CreateBuffer(&bd);
+        return plan.ts_qs && plan.ts_resolve && plan.ts_readback;
+    }
+
     // Multi-pass Stockham FFT, encoded as a SINGLE command buffer (all log2(N)
     // passes + the copy-to-readback in one submit). sign = -1 forward,
-    // +1 inverse; `normalize` applies the 1/N inverse scale on readback. Still
-    // not real-time safe — it blocks on the readback map.
+    // +1 inverse; `normalize` applies the 1/N inverse scale on readback. When
+    // gpu_ns != null and timestamps are available, also measures the true GPU
+    // compute time of the passes (excludes upload/readback) and writes it (ns);
+    // sets *gpu_ns = -1 when timing is unavailable. Not real-time safe — it
+    // blocks on the readback map.
     bool fft_run(const float* complex_in, float* complex_out, uint32_t n,
-                 float sign, bool normalize) {
+                 float sign, bool normalize, double* gpu_ns = nullptr) {
         // kMaxFftN (file scope) rejects transforms that would overflow the
         // byte count and under-allocate GPU buffers.
         if (!initialized_ || !complex_in || !complex_out) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
+        if (gpu_ns) *gpu_ns = -1.0;
 
         FftPlan* plan = get_or_create_fft_plan(n);
         if (!plan) return false;
+
+        bool do_ts = (gpu_ns != nullptr) && has_timestamp_ && plan->log2n > 0;
+        if (do_ts && !ensure_ts_resources(*plan)) do_ts = false;
 
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         queue_.WriteBuffer(plan->buf_a, 0, complex_in, bytes);
@@ -917,6 +971,20 @@ private:
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
         for (uint32_t s = 0; s < plan->log2n; ++s) {
             wgpu::ComputePassDescriptor pass_desc{};
+            // Bracket the whole pass sequence: beginning-of-pass timestamp on
+            // the first pass, end-of-pass on the last (both on a single pass
+            // when log2n == 1). Each unused index MUST stay "undefined"
+            // (UINT32_MAX), not 0 — 0 is a valid slot. Set both explicitly
+            // rather than relying on the wrapper's default member initializers.
+            wgpu::PassTimestampWrites tw{};
+            tw.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            if (do_ts && (s == 0 || s + 1 == plan->log2n)) {
+                tw.querySet = plan->ts_qs;
+                if (s == 0) tw.beginningOfPassWriteIndex = 0;
+                if (s + 1 == plan->log2n) tw.endOfPassWriteIndex = 1;
+                pass_desc.timestampWrites = &tw;
+            }
             auto pass = encoder.BeginComputePass(&pass_desc);
             pass.SetPipeline(fft_pipeline_);
             pass.SetBindGroup(0, plan->stage_bgs[s]);
@@ -927,10 +995,23 @@ private:
         // log2(N), buf_a for even (we always start reading buf_a).
         wgpu::Buffer& result = (plan->log2n & 1u) ? plan->buf_b : plan->buf_a;
         encoder.CopyBufferToBuffer(result, 0, plan->readback, 0, bytes);
+        if (do_ts) {
+            encoder.ResolveQuerySet(plan->ts_qs, 0, 2, plan->ts_resolve, 0);
+            encoder.CopyBufferToBuffer(plan->ts_resolve, 0, plan->ts_readback, 0,
+                                       2u * sizeof(uint64_t));
+        }
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
         if (!read_back(plan->readback, complex_out, bytes)) return false;
+
+        if (do_ts) {
+            uint64_t ticks[2] = {0, 0};
+            if (read_back(plan->ts_readback, ticks, 2u * sizeof(uint64_t))
+                && ticks[1] >= ticks[0]) {
+                *gpu_ns = static_cast<double>(ticks[1] - ticks[0]);  // WebGPU ns
+            }
+        }
 
         if (normalize) {
             const float inv = 1.0f / static_cast<float>(n);

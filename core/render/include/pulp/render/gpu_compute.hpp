@@ -85,6 +85,16 @@ public:
     /// either pointer is null, or dispatch fails.
     virtual bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) = 0;
 
+    /// Forward FFT that also reports the TRUE GPU compute time (microseconds)
+    /// of the transform passes, measured with compute-pass timestamp queries
+    /// — i.e. excluding upload and the blocking readback that dominates
+    /// wall-clock. Sets *gpu_compute_us to -1 when timestamp queries are
+    /// unavailable (capabilities().timestamp_query == false) or N == 1.
+    /// Diagnostic/benchmark path. Returns false on the same conditions as
+    /// fft_forward.
+    virtual bool fft_forward_timed(const float* complex_in, float* complex_out,
+                                   uint32_t n, double* gpu_compute_us) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable
