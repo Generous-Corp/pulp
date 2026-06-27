@@ -550,7 +550,7 @@ catch_discover_tests(pulp-test-cli-shellout-lifecycle EXTRA_ARGS --allow-running
 add_executable(pulp-test-cli-tweaks-shellout test_cli_tweaks_shellout.cpp)
 target_link_libraries(pulp-test-cli-tweaks-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-tweaks-shellout)
-catch_discover_tests(pulp-test-cli-tweaks-shellout)
+catch_discover_tests(pulp-test-cli-tweaks-shellout EXTRA_ARGS --allow-running-no-tests)
 
 # pulp #776 — pin shell_quote's per-platform contract so it can't
 # silently regress to the pre-fix shape that broke `git fetch origin`
