@@ -8,11 +8,9 @@
 //
 // The actual diff-coverage logic lives in
 // tools/scripts/local_diff_cover.sh (covered end-to-end by
-// tools/scripts/test_local_diff_cover.py); this file is dispatcher-only
-// and is excluded from diff-coverage accounting via the
-// `diff_cover_excludes` array in coverage_config.json. The
-// `cli-coverage-help` + `cli-coverage-bogus-subcommand` ctest shell-out
-// tests still exercise the dispatch paths end-to-end.
+// tools/scripts/test_local_diff_cover.py); this file is dispatcher-only.
+// The `cli-coverage-*` ctest shell-out tests still exercise usage,
+// unknown-subcommand, and diff-dispatch paths end-to-end.
 
 #include "cli_common.hpp"
 
