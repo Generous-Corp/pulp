@@ -300,11 +300,11 @@ TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle",
 
 // ── pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration ─────────
 //
-// Mirrors the #965 SvgPath bridge tests. Closes Spectr [G] preset
-// manager band-shape thumbnails: MiniPreview renders <svg><rect> per
-// band + <line> separators, which dom-adapter routes to <View> with
-// SVG attribute props. Without these bridge handlers the geometry is
-// dropped on the floor and the tiles render blank.
+// Mirrors the #965 SvgPath bridge tests. Covers Spectr [G] preset manager
+// band-shape thumbnails: MiniPreview renders <svg><rect> per band + <line>
+// separators, which dom-adapter routes to <View> with SVG attribute props.
+// These bridge handlers carry that geometry; absent them the tiles render
+// blank.
 
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
@@ -488,8 +488,8 @@ TEST_CASE("WidgetBridge SvgRect uses parent for hierarchy attachment",
 // pulp #1410 — setWhiteSpace must (a) flip the generic
 // `View::white_space_nowrap()` flag for ANY widget (not just Label) so
 // non-Label text-bearing surfaces can react, and (b) keep
-// `Label::set_multi_line` in lock-step so existing callers / the #1407
-// ellipsis path keep working when only one of the flags is set.
+// `Label::set_multi_line` in lock-step so callers and the #1407 ellipsis path
+// stay correct when only one of the flags is set.
 TEST_CASE("WidgetBridge setWhiteSpace flips View flag and Label multi_line for both modes",
           "[view][bridge][css][issue-1410]") {
     ScriptEngine engine;
@@ -510,8 +510,7 @@ TEST_CASE("WidgetBridge setWhiteSpace flips View flag and Label multi_line for b
     REQUIRE(label != nullptr);
     REQUIRE(panel != nullptr);
 
-    // Generic flag is set on BOTH the Label and the non-Label Panel —
-    // before #1410 only the Label dynamic_cast branch handled it.
+    // Generic flag is set on both the Label and the non-Label Panel.
     REQUIRE(label->white_space_nowrap());
     REQUIRE(panel->white_space_nowrap());
     // Label's multi_line side-effect stays in lock-step.
@@ -527,16 +526,15 @@ TEST_CASE("WidgetBridge setWhiteSpace flips View flag and Label multi_line for b
     REQUIRE(label->multi_line());
 }
 
-// pulp #1737 — full CSS white-space enum. Beyond normal/nowrap (#1410
-// covered), the bridge now routes pre / pre-wrap / pre-line /
-// break-spaces to View::WhiteSpaceMode and toggles Label.multi_line
+// pulp #1737 — full CSS white-space enum. The bridge routes pre / pre-wrap /
+// pre-line / break-spaces to View::WhiteSpaceMode and toggles Label.multi_line
 // per spec semantics:
 //   pre          → no wrap (treat like nowrap for Label)
 //   pre-wrap     → wrap
 //   pre-line     → wrap
 //   break-spaces → wrap
-// The legacy white_space_nowrap() bool is true for { nowrap, pre }
-// so existing consumers (text shaper) keep working.
+// The white_space_nowrap() bool is true for { nowrap, pre } so the text
+// shaper stays correct.
 TEST_CASE("WidgetBridge setWhiteSpace routes all 6 CSS keywords to WhiteSpaceMode",
           "[view][bridge][css][issue-1737]") {
     ScriptEngine engine;
@@ -558,9 +556,8 @@ TEST_CASE("WidgetBridge setWhiteSpace routes all 6 CSS keywords to WhiteSpaceMod
         bool expected_multi_line;
         bool expected_nowrap_bool;
     } cases[] = {
-        // For pulp #1737, `pre` keeps multi_line=true so newlines render. The
-        // spec's "no-soft-wrap" semantic for `pre` is a Label-side follow-up;
-        // newline preservation is the spec-critical part.
+        // For pulp #1737, `pre` keeps multi_line=true so newlines render;
+        // newline preservation is the spec-critical behavior.
         {"normal",       M::normal,       true,  false},
         {"nowrap",       M::nowrap,       false, true },
         {"pre",          M::pre,          true,  true },
@@ -665,10 +662,8 @@ TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
     REQUIRE_THAT(child->bounds().height, WithinAbs(100.0f, 0.5f));
 }
 
-// pulp #1423 — px values still work after the percent-aware refactor.
-// Regression guard: the old code path stored only `preferred_width`; px
-// values now also store `dim_width.unit = px`. Layout must keep using the
-// px size when no percent was specified.
+// pulp #1423 — px values store `dim_width.unit = px`; layout must keep using
+// the px size when no percent is specified.
 TEST_CASE("CSS width/height px paths unchanged by percent support",
           "[view][bridge][css][issue-1423]") {
     ScriptEngine engine;
@@ -697,11 +692,10 @@ TEST_CASE("CSS width/height px paths unchanged by percent support",
     REQUIRE_THAT(child->bounds().height, WithinAbs(80.0f, 0.5f));
 }
 
-// pulp #1434 batch 6 — `top: '50%'`, `right`, `bottom`, `left` percent
-// strings propagate through the CSS translator and bridge to Yoga's
+// pulp #1434 — `top: '50%'`, `right`, `bottom`, `left` percent strings
+// propagate through the CSS translator and bridge to Yoga's
 // `YGNodeStyleSetPositionPercent`. Mirrors the issue-1423 width/height
-// percent path; the four View positional fields previously dropped the
-// `%` suffix at the bridge boundary.
+// percent path.
 TEST_CASE("CSS top/right/bottom/left percent strings propagate to Yoga",
           "[view][bridge][css][issue-1434]") {
     ScriptEngine engine;
@@ -743,10 +737,8 @@ TEST_CASE("CSS top/right/bottom/left percent strings propagate to Yoga",
     REQUIRE_THAT(child->bottom(), WithinAbs(0.0f, 0.001f));
 }
 
-// pulp #1434 batch 6 — px positional values still work after the
-// percent-aware refactor. Regression guard: the existing single-arg
-// View::set_top setter must keep top_unit_ at px so layout_children
-// uses YGNodeStyleSetPosition (not Percent).
+// pulp #1434 — the single-arg View::set_top setter must keep top_unit_ at px
+// so layout_children uses YGNodeStyleSetPosition, not Percent.
 TEST_CASE("CSS top/right/bottom/left px paths unchanged by percent support",
           "[view][bridge][css][issue-1434]") {
     ScriptEngine engine;
@@ -778,7 +770,7 @@ TEST_CASE("CSS top/right/bottom/left px paths unchanged by percent support",
     REQUIRE_THAT(child->bottom(), WithinAbs(78.0f, 0.001f));
 }
 
-// pulp #1434 batch 6 — direct bridge entry-point coverage. The CSS
+// pulp #1434 — direct bridge entry-point coverage. The CSS
 // translator path is exercised by the test above; this case calls the
 // bridge's setTop/setRight/setBottom/setLeft directly so the @pulp/react
 // JSX path (which forwards `'NN%'` strings without going through the

@@ -305,9 +305,8 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
 
 TEST_CASE("set_theme repaints and cascades to children",
           "[view][theme][reskin]") {
-    // A theme swap must invalidate the surface (pre-fix it updated the member
-    // silently), and the new tokens must reach descendants that resolve up the
-    // parent chain.
+    // A theme swap must invalidate the surface, and the new tokens must reach
+    // descendants that resolve up the parent chain.
     View root;
     auto child = std::make_unique<View>();
     View* child_ptr = child.get();
@@ -471,12 +470,12 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     View::set_inspector_paint_hook({});
 }
 
-// The mouse / cursor / text inspector hooks now carry the
+// The mouse / cursor / text inspector hooks carry the
 // event's root View so the installed hook can gate to the inspected canvas
 // root (mirroring the paint-hook root-gate above). This proves the call
 // forwards the root and that an installed gate dispatches only when the event
 // root matches, no-ops when it is a different root or nullptr is treated as
-// "root unknown" (legacy/headless path runs unconditionally).
+// "root unknown" (headless path runs unconditionally).
 TEST_CASE("Inspector mouse/cursor/text hooks carry + gate on event root",
           "[view][inspector][wysiwyg]") {
     View inspected_root;
@@ -1043,9 +1042,9 @@ TEST_CASE("View::paint_all does NOT bracket concat when origin is unset (back-co
     using namespace pulp::canvas;
 
     // pulp #1026 — only an EXPLICIT setTransformOrigin call activates the
-    // pre/post-origin translate bracket on the matrix path. Existing
-    // setTransform() call sites (no origin) keep the pre-#1026 single
-    // concat, preserving back-compat with the issue-930 contract.
+    // pre/post-origin translate bracket on the matrix path. A setTransform()
+    // call with no origin emits a single concat, matching the issue-930
+    // contract.
     RecordingCanvas rc;
     View v;
     v.set_bounds({0, 0, 100, 50});
@@ -1090,8 +1089,6 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
 
 // pulp #1171 — uniform set_border_radius() followed
 // by a single per-corner override must NOT zero the other three corners.
-// Previously: set_border_radius(10); set_corner_radius_tl(2);
-// rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
 TEST_CASE("set_border_radius + per-corner override seeds remaining corners",
           "[view][border][issue-1171]") {
     View v;
@@ -1128,8 +1125,7 @@ TEST_CASE("simulate_click bubble does NOT walk past `this` receiver",
     // Build: outer (PARENT) > root (this) > child.
     // outer has on_click set. root + child have no on_click.
     // Calling root->simulate_click(...) MUST NOT bubble up to outer —
-    // that would leak the synthetic click across component boundaries
-    // (the bug flagged on #1073).
+    // that would leak the synthetic click across component boundaries.
     View outer;
     outer.set_bounds({0, 0, 200, 200});
     bool outer_clicked = false;
@@ -1195,10 +1191,10 @@ TEST_CASE("View::paint_all routes background through path API when per-corner ra
 //
 // The macOS standalone window plumbs an NSWindow resize through to
 // PulpView::setFrameSize: and the PulpWindowDelegate's windowDidResize:
-// notification, both of which now call root.set_bounds(...) +
-// root.layout_children(). This Catch2 test exercises the same model
-// path that those AppKit hooks invoke, asserting that descendants
-// reflow when the root is given a new size.
+// notification, both of which call root.set_bounds(...) +
+// root.layout_children(). This Catch2 test exercises the same model path that
+// those AppKit hooks invoke, asserting that descendants reflow when the root is
+// given a new size.
 
 TEST_CASE("Window resize reflows Yoga layout (pulp #1321)",
           "[view][layout][issue-1321]") {
@@ -1224,13 +1220,12 @@ TEST_CASE("Window resize reflows Yoga layout (pulp #1321)",
     REQUIRE(child_a_ptr->bounds().height == Catch::Approx(892.0f));
 
     // ── Simulate the user dragging the window down to 800×500 ────────
-    // (matches the osascript repro in the issue body).
     root.set_bounds({0, 0, 800, 500});
     root.layout_children();
 
-    // Each flex:1 child must now occupy half of the new width and the
-    // full new height — i.e. Yoga reflowed against the new constraints
-    // rather than reusing the original 1320×892 root size.
+    // Each flex:1 child occupies half of the new width and the full new
+    // height, so Yoga reflows against the new constraints rather than reusing
+    // the original 1320×892 root size.
     REQUIRE(child_a_ptr->bounds().width == Catch::Approx(400.0f));
     REQUIRE(child_b_ptr->bounds().width == Catch::Approx(400.0f));
     REQUIRE(child_a_ptr->bounds().height == Catch::Approx(500.0f));
@@ -1288,8 +1283,8 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
 
 // ── pulp #1368 — absolute children with inset:0 + explicit height ─────────
 //
-// Spectr filterbank repro. Two `<canvas>` siblings share the same wrap parent
-// (1320×860) with `position: absolute; inset: 0`
+// Spectr filterbank scenario. Two `<canvas>` siblings share the same wrap
+// parent (1320×860) with `position: absolute; inset: 0`
 // (top/right/bottom/left = 0), but each has an explicit setFlex height —
 // pr_1 = 760, pr_2 = 860. The visible-rendering symptom on the live plugin
 // is consistent with pr_1's bounds_.y landing above the visible window
@@ -1449,7 +1444,7 @@ TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
 }
 
 // Per-component paint timing.
-// View::paint_all() now records nanoseconds spent inside paint() (self)
+// View::paint_all() records nanoseconds spent inside paint() (self)
 // and the recursive children walk (with_children) so the inspector can
 // show per-view cost without adding new instrumentation per query.
 
