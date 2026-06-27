@@ -34,7 +34,7 @@ pulp_add_plugin(SuperConvolver
     PLUGIN_NAME       "SuperConvolver"
     BUNDLE_ID         "com.pulp.superconvolver"
     MANUFACTURER      "Pulp"
-    VERSION           "1.0.1"
+    VERSION           "1.0.2"
     CATEGORY          Effect
     PLUGIN_CODE       "SpCv"
     MANUFACTURER_CODE "Pulp"
@@ -45,6 +45,17 @@ if(TARGET SuperConvolver_Core)
     target_include_directories(SuperConvolver_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(SuperConvolver_Core PUBLIC pulp::view pulp::canvas)
 endif()
+
+# Make the GPU bundles self-contained (the @loader_path fix) AND fail the build
+# if any bundle isn't relocatable — the dylib-rpath footgun that ships a build
+# that only works on the build machine. See PulpBundleRelocatable.cmake.
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+foreach(_sc_target SuperConvolver_CLAP SuperConvolver_VST3 SuperConvolver_AU SuperConvolver_Standalone)
+    if(TARGET ${_sc_target})
+        pulp_make_bundle_relocatable(${_sc_target})
+        pulp_validate_bundle_relocatable(${_sc_target})
+    endif()
+endforeach()
 
 # CLAP load smoke test — the plugin's shared object must dlopen cleanly.
 if(PULP_HAS_CLAP AND APPLE)

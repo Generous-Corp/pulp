@@ -82,7 +82,7 @@ public:
             .name = "SuperConvolver",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.superconvolver",
-            .version = "1.0.1",
+            .version = "1.0.2",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
