@@ -18,10 +18,70 @@ Keep intermediates GPU-resident, read back once, and amortize the round-trip by
 batching. Small/low-latency DSP stays on the CPU; the GPU does the coarse, heavy,
 batched, latency-tolerant work.
 
+## Honest tradeoffs (read this first)
+
+GPU-audio pitches often skip the hard parts. We won't — three things you should
+know before reaching for it:
+
+1. **The round-trip tax is real and we don't hide it.** Every block crosses
+   CPU→GPU and back. That transfer + the GPU's own dispatch/readback latency is
+   pure overhead, and for small or scalar work it *dwarfs* the compute — the GPU
+   is then **slower** than the CPU, full stop. We measured it on our own
+   convolution path: at a 256-sample block the per-call readback dominates, so
+   the CPU wins there. GPU only pays off when the per-block compute is large
+   enough to swamp the round-trip (long IRs, many voices/IRs batched, big FFTs).
+   That's why SuperConvolver **defaults to the CPU engine** and the GPU engine is
+   opt-in, aimed at the heavy regime.
+
+2. **It is NOT a free speed-up for any plugin.** If your DSP is gain, biquads,
+   a compressor, a small delay, an envelope follower, or MIDI — keep it on the
+   CPU; the GPU will only make it slower. The win is narrow and specific (see the
+   list below). We'd rather tell you that than sell you a GPU mode that
+   regresses your plugin.
+
+3. **Compatibility is opt-out-safe: there is always a CPU fallback.** The most
+   common GPU-audio failure mode in the wild is "the GPU demo didn't even run on
+   my card." Pulp's contract is the opposite: **no path hard-requires a GPU.**
+   If the GPU is absent, unsupported, or fails to initialize, the node logs it
+   and runs its `signal::*` CPU reference — the plugin still loads and produces
+   correct audio, just unaccelerated. On a *miss* mid-stream (the worker didn't
+   finish in time) the transport's `CpuFallback` policy fills the block on the
+   CPU, seamlessly — no dropout. `capabilities().backend` tells you at runtime
+   which backend you actually got ("Metal"/"D3D12"/"Vulkan"), and audio paths are
+   only **validated on Apple Silicon / Metal** today (see the matrix below) —
+   everything else is experimental-but-falls-back. We won't claim a card works
+   until we've tested it.
+
+Bottom line: GPU audio here is a **latency-tolerant accelerator for heavy,
+batched, parallel DSP, with a guaranteed CPU fallback** — not a magic
+across-the-board speed-up, and never a hard GPU dependency.
+
 ## What belongs on the GPU (and what doesn't)
 
 The GPU only pays off for work that is **heavy, parallel, and latency-tolerant** —
-enough arithmetic per block to dwarf the CPU↔GPU round-trip. Match the workload:
+enough arithmetic per block to dwarf the CPU↔GPU round-trip. Match the workload.
+
+**The value case — two ways GPU audio is genuinely worth it:**
+1. **Things that are otherwise impossible / infeasible on CPU.** A single plugin
+   whose compute a CPU just can't sustain in real time: large-scale physical
+   modeling, thousands of simultaneous convolutions/partials, room/spatial
+   modeling that touches enormous sample counts, real-time neural inference. The
+   interesting question (per Anukari's Evan Mezeske) is "what plugins *couldn't
+   exist* without this?" — that's where the GPU earns its keep.
+2. **Headroom — running more heavy work at once.** Offloading demanding,
+   batchable DSP to the otherwise-idle GPU so the session can carry more heavy
+   instances/voices than the CPU alone would allow.
+
+**When it is NOT worth it (we'll say it plainly):** if your project is "a soft
+synth and a delay," or your plugin is light DSP, leave the GPU out — even GPU-
+audio vendors concede there's "not much call" for it there, and the round-trip
+will only make it slower. And because the GPU path is **latency-tolerant by
+design** (it adds fixed plugin-delay-compensated latency), it suits mixing,
+sound-design and rendering — *not* zero-latency live tracking/monitoring.
+
+The crossover, concretely: GPU wins once per-block compute ≫ the round-trip, and
+the win grows as you scale size (longer IRs, more voices, bigger FFTs/banks).
+Below that line the CPU is faster — so pick per workload:
 
 **Good GPU candidates** (big parallel math, or batched across instances/voices):
 - FFTs / iFFTs
