@@ -523,6 +523,30 @@ TEST_CASE("GpuCompute batched convolve amortizes readback",
                 N, B, single_us, batch_us, single_us / batch_us);
 }
 
+TEST_CASE("GpuCompute matmul matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t M = 6, K = 4, N = 5;
+    std::vector<float> a(M * K), b(K * N), c(M * N, 0.0f), ref(M * N, 0.0f);
+    for (uint32_t i = 0; i < M * K; ++i) a[i] = std::sin(0.3f * i) + 0.5f;
+    for (uint32_t i = 0; i < K * N; ++i) b[i] = std::cos(0.2f * i) - 0.25f;
+
+    REQUIRE(compute->matmul(a.data(), b.data(), c.data(), M, K, N));
+
+    for (uint32_t r = 0; r < M; ++r)
+        for (uint32_t col = 0; col < N; ++col) {
+            double acc = 0.0;
+            for (uint32_t kk = 0; kk < K; ++kk)
+                acc += static_cast<double>(a[r * K + kk]) * b[kk * N + col];
+            ref[r * N + col] = static_cast<float>(acc);
+        }
+    for (uint32_t i = 0; i < M * N; ++i)
+        REQUIRE(std::abs(c[i] - ref[i]) < 1e-4f * (1.0f + std::abs(ref[i])));
+
+    REQUIRE_FALSE(compute->matmul(a.data(), b.data(), c.data(), 0, K, N));  // invalid
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {

@@ -125,6 +125,15 @@ public:
     virtual bool convolve_batch(const float* in_complex, float* out_complex,
                                 uint32_t n, uint32_t batch) = 0;
 
+    // ── Linear algebra ─────────────────────────────────────────────────────
+
+    /// Dense matrix multiply C[M×N] = A[M×K] · B[K×N], all row-major f32.
+    /// The foundational GPU primitive for neural inference (dense layers, LSTM
+    /// gate matmuls) and matrix-heavy DSP. Not real-time-safe (uploads + blocks
+    /// on readback). Returns false on invalid args / dispatch failure.
+    virtual bool matmul(const float* a, const float* b, float* c,
+                        uint32_t m, uint32_t k, uint32_t n) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

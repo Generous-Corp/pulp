@@ -165,6 +165,33 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kMatmulShader = R"wgsl(
+// Dense matmul C[M*N] = A[M*K] * B[K*N], all row-major. One thread per output
+// element. Foundational primitive for GPU neural inference (dense / LSTM gates).
+
+struct MatmulParams { m : u32, k : u32, n : u32, pad : u32 };
+
+@group(0) @binding(0) var<storage, read>       a : array<f32>;
+@group(0) @binding(1) var<storage, read>       b : array<f32>;
+@group(0) @binding(2) var<storage, read_write> c : array<f32>;
+@group(0) @binding(3) var<uniform>             p : MatmulParams;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let idx = gid.x;
+    if (idx >= p.m * p.n) {
+        return;
+    }
+    let row = idx / p.n;
+    let col = idx % p.n;
+    var acc = 0.0;
+    for (var kk = 0u; kk < p.k; kk = kk + 1u) {
+        acc = acc + a[row * p.k + kk] * b[kk * p.n + col];
+    }
+    c[idx] = acc;
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 // Largest power-of-two complex FFT the GPU path accepts: keeps
@@ -208,6 +235,7 @@ public:
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
         conv_bmul_pipeline_ = nullptr;
+        matmul_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -657,6 +685,45 @@ public:
         return true;
     }
 
+    // ── Linear algebra ─────────────────────────────────────────────────────
+
+    bool matmul(const float* a, const float* b, float* c,
+                uint32_t m, uint32_t k, uint32_t n) override {
+        if (!initialized_ || a == nullptr || b == nullptr || c == nullptr) return false;
+        if (m == 0u || k == 0u || n == 0u) return false;
+        // Bound element counts so byte sizes stay within uint32_t and a sane
+        // storage-buffer budget (≤ 2^24 elems = 64 MiB per matrix).
+        const uint64_t ae = static_cast<uint64_t>(m) * k;
+        const uint64_t be = static_cast<uint64_t>(k) * n;
+        const uint64_t ce = static_cast<uint64_t>(m) * n;
+        if (ae > (1u << 24) || be > (1u << 24) || ce > (1u << 24)) return false;
+
+        const uint32_t ab = static_cast<uint32_t>(ae) * 4u;
+        const uint32_t bb = static_cast<uint32_t>(be) * 4u;
+        const uint32_t cb = static_cast<uint32_t>(ce) * 4u;
+        auto a_buf = create_storage_buffer(ab, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto b_buf = create_storage_buffer(bb, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto c_buf = create_storage_buffer(cb, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto rb = create_readback_buffer(cb);
+        wgpu::BufferDescriptor ud{};
+        ud.size = 16;
+        ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        auto u_buf = device_.CreateBuffer(&ud);
+        if (!a_buf || !b_buf || !c_buf || !rb || !u_buf) return false;
+
+        struct MatmulParams { uint32_t m; uint32_t k; uint32_t n; uint32_t pad; };
+        MatmulParams p{m, k, n, 0u};
+        queue_.WriteBuffer(a_buf, 0, a, ab);
+        queue_.WriteBuffer(b_buf, 0, b, bb);
+        queue_.WriteBuffer(u_buf, 0, &p, sizeof(p));
+
+        auto bg = create_bind_group(matmul_pipeline_, {a_buf, b_buf, c_buf, u_buf});
+        if (!bg) return false;
+        dispatch(matmul_pipeline_, bg, (m * n + 63u) / 64u);
+        copy_buffer(c_buf, rb, cb);
+        return read_back(rb, c, cb);
+    }
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     CapabilityReport capabilities() const override {
@@ -999,6 +1066,7 @@ private:
     wgpu::ComputePipeline magnitude_pipeline_;
     wgpu::ComputePipeline complex_mul_pipeline_;
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
+    wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -1085,6 +1153,9 @@ private:
 
         conv_bmul_pipeline_ = create_pipeline("conv_bmul", kComplexMulBroadcastShader);
         if (!conv_bmul_pipeline_) return false;
+
+        matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
+        if (!matmul_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
