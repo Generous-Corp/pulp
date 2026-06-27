@@ -243,10 +243,9 @@ view::motion::FixtureHeader MotionScrubber::header() const {
 
 // ── emission ────────────────────────────────────────────────────────
 
-// Dispatch a snapshot of events to the given sinks + server WITHOUT
-// holding mtx_. A sink that re-enters add_sink/remove_sink/scrub_to
-// (or any other MotionScrubber method) used to self-deadlock under
-// the old emit_prefix_locked design.
+// Dispatch a snapshot of events to the given sinks + server WITHOUT holding
+// mtx_. A sink can re-enter add_sink/remove_sink/scrub_to (or any other
+// MotionScrubber method), which would self-deadlock if dispatch held the lock.
 void MotionScrubber::dispatch_snapshot(
     const std::vector<view::motion::SampleEvent>& events,
     const std::vector<SinkSlot>& sinks,

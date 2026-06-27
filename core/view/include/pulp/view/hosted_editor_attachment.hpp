@@ -5,19 +5,12 @@
 // Native-window embedding uses the canonical contract for embedding a
 // platform-native child view inside a Pulp WindowHost via
 // WindowHost::attach_native_child_view / set_native_child_view_bounds /
-// detach_native_child_view. This header migrates the legacy "void* editor
-// handle" hosting path onto that canonical contract.
-//
-// Before:  a host walked PluginSlot::create_editor_view() -> void* and was
-//          responsible for embedding it into whatever native window it owned,
-//          with no typed contract for size, resizability, or detach.
-//
-// After:   a host calls EditorAttachment::create(slot, window) and receives an
-//          RAII object that owns the slot's HostedEditor and keeps it attached
-//          to the WindowHost for its lifetime. Destroying or releasing the
-//          attachment detaches the child view and asks the slot to destroy the
-//          editor, in the right order, without the host having to thread the
-//          native_handle through any glue code itself.
+// detach_native_child_view. A host calls EditorAttachment::create(slot, window)
+// and receives an RAII object that owns the slot's HostedEditor and keeps it
+// attached to the WindowHost for its lifetime. Destroying or releasing the
+// attachment detaches the child view and asks the slot to destroy the editor, in
+// the right order, without the host having to thread the native_handle through
+// any glue code itself.
 //
 // EditorAttachment is non-copyable, move-constructible. It is null-safe — if
 // the slot has no editor or the WindowHost has no factory for native child

@@ -500,8 +500,8 @@ export interface IconProps extends BaseProps {
 
 /// Inline SVG path widget. Renders an `<svg><path/></svg>` from a
 /// path-data string + paint attributes. Use this for icon glyphs inside
-/// React-rendered UIs that previously sent raw `<svg>` markup, which the
-/// bridge has no DOM equivalent for.
+/// React-rendered UIs; the bridge has no DOM equivalent for raw `<svg>`
+/// markup.
 export interface SvgPathProps extends BaseProps {
     /// SVG path-data string (the `d=` attribute on `<path>`).
     /// Supports M/m, L/l, H/h, V/v, C/c, S/s, Q/q, T/t, A/a, Z/z.

@@ -24,18 +24,16 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
-        // Canvas2D `strokeText(text, x, y, maxWidth)` recorded
-        // as a distinct cmd so the paint loop can route it through the
-        // dedicated `Canvas::stroke_text` (true outlined glyphs) instead
-        // of the older fillText-with-stroke-color approximation.
+        // Canvas2D `strokeText(text, x, y, maxWidth)` is a distinct cmd so the
+        // paint loop can route it through `Canvas::stroke_text` for true
+        // outlined glyphs, not a fillText-with-stroke-color approximation.
         // Layout: text in `text`, (x,y) in `x`/`y`, maxWidth in `w`
         // (0 = no limit), font size in `extra`, color in `color`.
         stroke_text,
-        // Canvas2D `ctx.font` full CSS font shorthand. The
-        // legacy `set_font` only carries family + size; the JS shim now
-        // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
-        // <family>`. `set_font_full` carries the parsed weight / slant
-        // through to `Canvas::set_font_full`, which Skia honours via
+        // Canvas2D `ctx.font` full CSS font shorthand. `set_font` carries
+        // family + size only; `set_font_full` carries weight / slant parsed
+        // from `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+        // <family>` through to `Canvas::set_font_full`, which Skia honours via
         // `make_font(family, size, weight, slant)`. CG falls back to
         // family+size (no slant override) — same as the base
         // `set_font_full` default. Layout in CanvasDrawCmd:
