@@ -132,6 +132,7 @@ one-command path and is fully separate from the repo release pipeline.
 # the exact `spctl -a -t open --context context:primary-signature` Gatekeeper
 # check. Green = the recipient will NOT see "Unnotarized Developer ID".
 pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+pulp ship share MyApp.app --identity "..." --output dist --entitlements entitlements.plist
 
 pulp ship share MyApp.dmg            # already a DMG → skip the wrap step
 pulp ship share Installer.pkg        # pkg assumed installer-signed → notarize only
@@ -143,6 +144,8 @@ Gatekeeper (`source=Unnotarized Developer ID`). The cert is fine; the gap is
 notarization. `share` closes that gap in one step. Credentials resolve through
 the same chain as `pulp ship notarize` (App Store Connect API key preferred);
 without creds, the notarize step fails loudly rather than shipping unnotarized.
+For `.app` inputs, `--output <dir>` chooses where the generated DMG lands and
+`--entitlements <plist>` overrides the default app-signing entitlements.
 
 **Signed + notarized is NOT the same as portable.** A perfectly signed, notarized
 `.app` still degrades on another machine if it reads an asset (SVG / JSON / image)

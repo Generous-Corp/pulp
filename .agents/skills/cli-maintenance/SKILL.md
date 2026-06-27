@@ -669,6 +669,11 @@ through for free. Conventions that kept this testable without Apple creds:
 - Put guard rails (input not found, unsupported extension, missing identity)
   *before* the side-effecting work so they're exercised by credential-free
   shellout tests.
+- Keep accepted orchestrator flags discoverable across `cmd_ship` help/usage,
+  `docs/reference/cli.md`, `docs/status/cli-commands.yaml`, topical skill text,
+  and parser-error shellout coverage. The `share` path accepts `--output` and
+  `--entitlements` in addition to credentials/dry-run; if either changes,
+  update all surfaces together.
 - A subcommand of `ship` does NOT need its own top-level slash command or a
   `commands` top-level entry — it lives under the `ship` entry's `subcommands`
   in `cli-commands.yaml` and the `/ship` slash command. `cli_sync_check.py`

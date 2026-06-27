@@ -78,7 +78,8 @@ static int print_ship_help() {
     std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
     std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
-    std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [creds]\n";
+    std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [--output <dir>]\n";
+    std::cout << "             [--entitlements <plist>] [creds]\n";
     std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
@@ -1537,7 +1538,8 @@ int cmd_ship(const std::vector<std::string>& args) {
             std::cerr <<
                 "Usage: pulp ship share <app-or-dmg-or-pkg> [--identity \"...\"]\n"
                 "                       [--version X.Y.Z] [--output <dir>]\n"
-                "                       [notarization creds] [--dry-run]\n"
+                "                       [--entitlements <plist>] [notarization creds]\n"
+                "                       [--dry-run]\n"
                 "Signs, notarizes, staples, and Gatekeeper-verifies a single\n"
                 "artifact for sharing. .app inputs are wrapped in a DMG first.\n";
             return 2;

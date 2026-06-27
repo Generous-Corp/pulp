@@ -495,6 +495,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "release", "--installer-identity"}, "--installer-identity requires a value"},
         {{"ship", "share", "--identity"}, "--identity requires a value"},
         {{"ship", "share", "--version"}, "--version requires a value"},
+        {{"ship", "share", "--output"}, "--output requires a value"},
+        {{"ship", "share", "--entitlements"}, "--entitlements requires a value"},
         {{"ship", "share", "--bogus"}, "unknown argument"},
     });
 #endif

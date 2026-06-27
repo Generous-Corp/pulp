@@ -918,6 +918,7 @@ without running the full release pipeline. Point it at a `.app`, `.dmg`, or
 
 ```bash
 pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+pulp ship share MyApp.app --identity "..." --output dist --entitlements entitlements.plist
 pulp ship share MyApp.app --dry-run        # print the plan, do nothing
 ```
 
@@ -929,6 +930,10 @@ performs on download. A green result means the recipient will **not** see
 chain as `pulp ship notarize` (App Store Connect API key preferred). `.dmg`
 inputs skip the wrap step; `.pkg` inputs are assumed already installer-signed
 and are only notarized + verified.
+
+For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
+instead of `artifacts/`, and `--entitlements <plist>` to override the default
+app-signing entitlements.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
