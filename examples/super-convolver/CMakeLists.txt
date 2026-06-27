@@ -37,6 +37,13 @@ if(APPLE AND TARGET pulp::gpu-audio AND PULP_ENABLE_GPU)
     target_link_libraries(super-convolver-bench
         PRIVATE pulp::format pulp::signal pulp::gpu-audio)
     target_include_directories(super-convolver-bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # GPU-only load generator: proves at the hardware level that the convolution
+    # math runs on the GPU (back-to-back submits → measurable GPU utilization).
+    add_executable(super-convolver-gpu-hammer gpu_hammer.cpp)
+    target_link_libraries(super-convolver-gpu-hammer
+        PRIVATE pulp::render pulp::signal)
+    target_include_directories(super-convolver-gpu-hammer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # Plugin (VST3, AU v2, CLAP, Standalone)

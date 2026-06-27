@@ -329,7 +329,25 @@ TEST_CASE("SuperConvolver GPU engine convolves through the GPU transport",
         std::this_thread::sleep_for(std::chrono::milliseconds(8));
         out_all.insert(out_all.end(), out_l.begin(), out_l.end());
     }
+    // Capture the live GPU-cost stat while the engine is still up (release()
+    // tears the transport down). Populated once the worker produced blocks: a
+    // positive per-block wall-clock time — the UI's "µs/block" readout, real
+    // worker timing, not a synthesized number.
+    const auto live_stats = proc.gpu_block_stats();
+    const auto live_us = proc.gpu_block_us();
+    const auto live_status = proc.gpu_status();   // coherent UI snapshot
     proc.release();
+    INFO("GPU blocks=" << live_stats.first << " avg_us=" << live_us.second
+         << " budget_us=" << live_status.budget_us
+         << " rt%=" << live_status.rt_percent);
+    REQUIRE(live_stats.first > 0);
+    REQUIRE(live_us.second > 0.0);
+    // The UI snapshot agrees with the granular probes and derives a real,
+    // positive real-time budget + utilization for THIS device/sample-rate.
+    REQUIRE(live_status.active);
+    REQUIRE(live_status.blocks == live_stats.first);
+    REQUIRE(live_status.budget_us > 0.0);
+    REQUIRE(live_status.rt_percent > 0.0);
 
     // Peak-align (the IR's onset is its unit first sample) and score against the
     // reference IR via normalized cross-correlation.

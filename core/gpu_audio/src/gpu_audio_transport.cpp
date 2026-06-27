@@ -59,6 +59,8 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     produced_blocks_.store(0, std::memory_order_relaxed);
     miss_blocks_.store(0, std::memory_order_relaxed);
     input_dropped_blocks_.store(0, std::memory_order_relaxed);
+    last_block_ns_.store(0, std::memory_order_relaxed);
+    avg_block_ns_.store(0, std::memory_order_relaxed);
     prepared_ = true;
 
     if (config.run_worker_thread) {
@@ -158,8 +160,23 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
            input_ring_.available_frames() >= bs &&
            output_ring_.free_frames() >= bs) {
         if (!input_ring_.read(in_w, bs)) break;
+        const auto t0 = std::chrono::steady_clock::now();
         node_->process_block(in_c, out_w, bs);
+        const auto block_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - t0).count());
         if (output_ring_.write(out_w, bs) < bs) break;
+        // Publish per-block timing: last value + an EWMA (alpha = 1/16) so the
+        // UI sees a smooth, current figure without storing a history.
+        last_block_ns_.store(block_ns, std::memory_order_relaxed);
+        const std::uint64_t prev = avg_block_ns_.load(std::memory_order_relaxed);
+        // EWMA toward block_ns with alpha = 1/16. Branch on direction so the
+        // unsigned difference never underflows (block_ns can be below prev).
+        std::uint64_t next;
+        if (prev == 0) next = block_ns;
+        else if (block_ns >= prev) next = prev + (block_ns - prev) / 16;
+        else next = prev - (prev - block_ns) / 16;
+        avg_block_ns_.store(next, std::memory_order_relaxed);
         produced_blocks_.fetch_add(1, std::memory_order_relaxed);
         ++done;
     }
@@ -171,6 +188,8 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.miss_blocks = miss_blocks_.load(std::memory_order_relaxed);
     s.input_dropped_frames =
         input_dropped_blocks_.load(std::memory_order_relaxed) * block_size_;
+    s.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
+    s.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     return s;
 }
 

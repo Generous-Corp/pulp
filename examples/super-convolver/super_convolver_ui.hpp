@@ -104,17 +104,29 @@ public:
         // the AUDIO is on the GPU (the UI is GPU-rendered either way). When the
         // GPU engine is active it names the backend; otherwise it says CPU.
         std::string audio_status = "Audio: CPU";
-        if (proc_.gpu_engine_active()) {
-            const std::string b = proc_.gpu_backend();
-            audio_status = b.empty() ? "Audio: GPU" : ("Audio: GPU · " + b);
+        // One coherent snapshot per repaint (single lock) so blocks, misses and
+        // cost can't disagree across the line.
+        const auto g = proc_.gpu_status();
+        if (g.active) {
+            audio_status = g.backend.empty() ? "Audio: GPU"
+                                             : ("Audio: GPU · " + g.backend);
             // Live proof the GPU is carrying the audio: room count + blocks the
             // GPU worker produced vs blocks it missed (CPU/silence-filled).
-            const auto st = proc_.gpu_block_stats();
-            if (proc_.gpu_multi_active())
-                audio_status += " · " + std::to_string(proc_.gpu_rooms()) + " rooms";
-            audio_status += " · " + std::to_string(st.first) + " blocks";
-            if (st.second > 0)
-                audio_status += ", " + std::to_string(st.second) + " misses";
+            if (g.multi)
+                audio_status += " · " + std::to_string(g.rooms) + " rooms";
+            audio_status += " · " + std::to_string(g.blocks) + " blocks";
+            if (g.misses > 0)
+                audio_status += ", " + std::to_string(g.misses) + " misses";
+            // Live GPU cost + headroom: the measured average wall-clock per block
+            // (round-trip included), and what fraction of this device's real-time
+            // budget that uses — so the lower the %, the more rooms the GPU could
+            // still take. Shown once the worker has produced its first block.
+            if (g.blocks > 0 && g.avg_us > 0.0) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), " · %.0f µs/block (%.0f%% of real-time)",
+                              g.avg_us, g.rt_percent);
+                audio_status += buf;
+            }
         }
         canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 12.0f * s);

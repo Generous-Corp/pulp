@@ -42,6 +42,12 @@ public:
         std::uint64_t produced_blocks = 0;   // blocks the worker completed
         std::uint64_t miss_blocks = 0;       // RT reads with no ready output
         std::uint64_t input_dropped_frames = 0;   // RT writes lost to a full input ring
+        // Wall-clock cost of the node's work per block, measured on the worker
+        // thread (includes the GPU submit + the blocking readback — the honest
+        // real cost of the GPU path). last = most recent block; avg = an EWMA.
+        // Zero until the first block is produced.
+        double last_block_us = 0.0;
+        double avg_block_us = 0.0;
     };
 
     GpuAudioTransport() = default;
@@ -100,6 +106,10 @@ private:
     std::atomic<std::uint64_t> produced_blocks_{0};
     std::atomic<std::uint64_t> miss_blocks_{0};
     std::atomic<std::uint64_t> input_dropped_blocks_{0};  // whole-block input drops
+    // Per-block worker timing, published as integer nanoseconds for lock-free
+    // reads by the UI thread (double isn't reliably lock-free).
+    std::atomic<std::uint64_t> last_block_ns_{0};
+    std::atomic<std::uint64_t> avg_block_ns_{0};
 
     // Optional internal worker. The worker polls the input ring; the RT path
     // never touches these.

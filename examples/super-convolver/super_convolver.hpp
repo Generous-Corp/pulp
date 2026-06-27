@@ -190,6 +190,58 @@ public:
         return {s.produced_blocks, s.miss_blocks};
     }
 
+    /// Live GPU cost: {last, average} wall-clock microseconds the GPU worker
+    /// spent per block (the real per-block cost of the GPU path, including the
+    /// CPU↔GPU round-trip). {0,0} when the GPU engine isn't carrying the audio.
+    /// UI/main-thread only (takes the worker mutex).
+    std::pair<double, double> gpu_block_us() const {
+        std::lock_guard<std::mutex> lock(stack_mutex_);
+        if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
+            return {0.0, 0.0};
+        const auto s = current_stack_->transport->stats();
+        return {s.last_block_us, s.avg_block_us};
+    }
+
+    /// One coherent snapshot of the live GPU engine for the UI status line,
+    /// taken under a SINGLE lock so the fields can't disagree across a repaint
+    /// (the granular accessors above are kept as per-field probes for tests).
+    /// Also derives the real-time headroom: `budget_us` is how long one GPU
+    /// block has to finish on THIS device + sample rate, and `rt_percent` is the
+    /// measured average cost as a percentage of that budget — so 100 − rt_percent
+    /// is the headroom left (roughly how much more work, e.g. more rooms, the GPU
+    /// could still take in real time). UI/main-thread only.
+    struct GpuStatus {
+        bool active = false;
+        std::string backend;
+        int rooms = 0;
+        bool multi = false;
+        std::uint64_t blocks = 0;
+        std::uint64_t misses = 0;
+        double avg_us = 0.0;      // EWMA wall-clock per block (round-trip included)
+        double budget_us = 0.0;   // real-time budget for one GPU block here
+        double rt_percent = 0.0;  // avg_us / budget_us * 100 (lower = more headroom)
+    };
+    GpuStatus gpu_status() const {
+        std::lock_guard<std::mutex> lock(stack_mutex_);
+        GpuStatus g;
+        g.active = gpu_engine_active();
+        if (!g.active || !current_stack_) return g;
+        g.backend = current_stack_->backend();
+        g.rooms = current_stack_->rooms;
+        g.multi = current_stack_->multi != nullptr;
+        if (current_stack_->transport) {
+            const auto s = current_stack_->transport->stats();
+            g.blocks = s.produced_blocks;
+            g.misses = s.miss_blocks;
+            g.avg_us = s.avg_block_us;
+        }
+        if (sample_rate_ > 0.0) {
+            g.budget_us = static_cast<double>(kInternalBlock) / sample_rate_ * 1e6;
+            if (g.budget_us > 0.0) g.rt_percent = g.avg_us / g.budget_us * 100.0;
+        }
+        return g;
+    }
+
     void prepare(const format::PrepareContext& ctx) override {
         stop_worker();
         // Tear down any previous GPU stacks (the worker is stopped, so the audio
