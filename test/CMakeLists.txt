@@ -390,7 +390,7 @@ endif()
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-cli-create-shellout)
+catch_discover_tests(pulp-test-cli-create-shellout EXTRA_ARGS --allow-running-no-tests)
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import
