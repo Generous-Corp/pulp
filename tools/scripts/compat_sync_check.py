@@ -25,8 +25,9 @@ Modes:
     --mode=hint    advisory text only, exit 0
     --mode=report  exit 1 on drift when --enforce or
                    PULP_ENFORCE_PREPUSH=1 is set (advisory otherwise)
-    --mode=apply   like report, but ALSO writes stub keys into
-                   compat.json so the user only has to fill in details
+    --mode=apply   like report, but ALSO writes missing top-level
+                   compat.json sections; the user still must fill
+                   real entries, docs, and tests
 
 The compat matrix is populated. A compat-json requirement counts as
 satisfied when:
