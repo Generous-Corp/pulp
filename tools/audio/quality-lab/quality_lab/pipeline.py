@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from . import align, audio_io, generate, provenance
-from .detectors import transient_sharpness
+from .detectors import hf_fizz, spectral_centroid, transient_sharpness
 from .schema import QualityCase, build_report
 
 # Registry: detector tag -> detect fn. New detectors plug in here; the pipeline stays
@@ -20,6 +20,8 @@ from .schema import QualityCase, build_report
 # method before it can be trusted. See the README "Deferred detectors" note.
 _DETECTORS = {
     "transient_sharpness": transient_sharpness.detect,
+    "spectral_centroid": spectral_centroid.detect,
+    "hf_fizz": hf_fizz.detect,
 }
 
 P0A_CASE = QualityCase(
@@ -27,7 +29,7 @@ P0A_CASE = QualityCase(
     family="time-stretch",
     reference_policy="frozen-reference",
     alignment_policy="onset-map",
-    detector_tags=["transient_sharpness"],
+    detector_tags=["transient_sharpness", "spectral_centroid", "hf_fizz"],
     params={"ratio": 1.5, "sr": 48000, "bpm": 120.0, "seed": 0},
 )
 
@@ -54,6 +56,12 @@ def make_signals(
     if degradation == "smear":
         candidate = generate.smear_transients(reference, ref_onsets, sr, smear_ms)
         injected_idx = list(range(len(ref_onsets)))
+    elif degradation == "dull":
+        candidate = generate.dull(reference, sr)
+        injected_idx = []
+    elif degradation == "fizz":
+        candidate = generate.add_fizz(reference, sr)
+        injected_idx = []
     else:  # identity
         candidate = reference.copy()
         injected_idx = []

@@ -56,7 +56,7 @@ in later phases.
 | `quality_lab/audio_io.py` | WAV load/save + RMS level-match (rule #1) |
 | `quality_lab/generate.py` | deterministic, self-labeling drum-break + smear degradation |
 | `quality_lab/align.py` | onset detection + onset-map (alignment runs before detectors) |
-| `quality_lab/detectors/` | one detector = one small module (`transient_sharpness.py`) |
+| `quality_lab/detectors/` | one detector = one small module: `transient_sharpness.py`, `spectral_centroid.py` (brightness/dulling), `hf_fizz.py` (metallic HF sizzle) |
 | `quality_lab/dsp.py` | shared primitives (high-band, smoothed envelope, normalized local-align) |
 | `quality_lab/reference_pv.py` | an INDEPENDENT textbook phase vocoder for non-circular credibility tests |
 | `quality_lab/provenance.py` | re-derivable provenance block (§7.1) |
@@ -75,6 +75,18 @@ not just a matched kernel. (`tests/test_real_pv_evidence.py`.)
 
 Detectors also report **coverage** (onsets actually measured / offered); a "clean"
 verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+
+## Detectors
+
+| Detector | Catches | Method |
+|----------|---------|--------|
+| `transient_sharpness` | PV attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned |
+| `spectral_centroid` | brightness loss / dulling (e.g. STN noise-morph) | LTAS centroid shift, candidate vs reference (global, alignment-free) |
+| `hf_fizz` | added metallic HF sizzle | added HF (>8 kHz) energy fraction vs reference (global) |
+
+The two spectral detectors are **global LTAS metrics** — alignment-free and
+scale-invariant, so they are robust on any material (no onset-matching fragility).
+Each fires on its own artifact and stays quiet on the others and on identity.
 
 ## Deferred detectors (honest status)
 

@@ -99,3 +99,38 @@ def smear_transients(
         seg = out[lo:hi]
         out[lo:hi] = np.convolve(seg, kernel, mode="same")
     return out
+
+
+def dull(y: np.ndarray, sr: int, cutoff_hz: float = 3500.0) -> np.ndarray:
+    """One-pole low-pass over the whole signal — a controlled stand-in for the
+    brightness loss (STN dulling) the spectral-centroid detector must catch."""
+    y = np.asarray(y, dtype=np.float64)
+    dt = 1.0 / sr
+    rc = 1.0 / (2 * np.pi * cutoff_hz)
+    a = dt / (rc + dt)
+    out = np.empty_like(y)
+    acc = 0.0
+    for i in range(len(y)):
+        acc += a * (y[i] - acc)
+        out[i] = acc
+    return out
+
+
+def add_fizz(y: np.ndarray, sr: int, amount: float = 0.10, cutoff_hz: float = 8000.0) -> np.ndarray:
+    """Add high-pass-filtered noise — a controlled stand-in for the metallic HF sizzle
+    a phase vocoder can birth, for the hf_fizz detector's positive control. Seeded."""
+    y = np.asarray(y, dtype=np.float64)
+    rng = np.random.default_rng(12345)
+    noise = rng.standard_normal(len(y))
+    # crude high-pass: subtract a one-pole low-pass of the noise
+    dt = 1.0 / sr
+    rc = 1.0 / (2 * np.pi * cutoff_hz)
+    a = dt / (rc + dt)
+    lp = np.empty_like(noise)
+    acc = 0.0
+    for i in range(len(noise)):
+        acc += a * (noise[i] - acc)
+        lp[i] = acc
+    hp = noise - lp
+    env = np.sqrt(np.mean(y * y) + 1e-20)
+    return y + amount * env * hp

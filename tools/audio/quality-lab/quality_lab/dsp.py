@@ -29,6 +29,29 @@ def smooth_energy_env(seg: np.ndarray, sr: int, hop_s: float = 0.00025, smooth_s
     return env, hop
 
 
+def ltas(y: np.ndarray, sr: int, n_fft: int = 2048, hop: int = 512):
+    """Long-Term Average Spectrum: mean magnitude per bin over Hann-windowed frames,
+    plus the bin frequencies (Hz). Alignment-free — a global spectral fingerprint that
+    is robust where per-onset measures are fragile (it never needs a time map)."""
+    y = np.asarray(y, dtype=np.float64)
+    win = np.hanning(n_fft)
+    n = max(0, (len(y) - n_fft) // hop + 1)
+    if n < 1:
+        return np.fft.rfftfreq(n_fft, 1.0 / sr), np.zeros(n_fft // 2 + 1)
+    acc = np.zeros(n_fft // 2 + 1)
+    for i in range(n):
+        s = i * hop
+        acc += np.abs(np.fft.rfft(y[s : s + n_fft] * win))
+    return np.fft.rfftfreq(n_fft, 1.0 / sr), acc / n
+
+
+def spectral_centroid_hz(freqs: np.ndarray, mag: np.ndarray) -> float:
+    """Energy-weighted mean frequency (brightness). Scale-invariant, so silence padding
+    and level differences don't move it — only timbre does."""
+    total = float(np.sum(mag))
+    return float(np.sum(freqs * mag) / total) if total > 1e-20 else 0.0
+
+
 def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:
     """Sliding normalized cross-correlation of `short` within `long` (values in ~[-1,1]).
 
