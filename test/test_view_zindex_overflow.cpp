@@ -1,6 +1,6 @@
 // View z-index and overflow tests for two coherent paint-order surfaces:
 //
-//   1. pulp #972 — z-index paint order
+//   1. z-index paint order
 //      `sorted_children_by_z_index` returns insertion order at default
 //      z=0, sorts ascending so higher-z comes last, and is stable for
 //      equal z. `View::paint_all` and `View::hit_test` honour the
@@ -8,9 +8,8 @@
 //      pointer-hit at overlapping bounds, with insertion-order
 //      fallback at equal z.
 //
-//   2. pulp #972 — overflow:visible default for absolute-positioned
-//      popovers + pulp #1148 slice (a) — symmetric overflow:visible
-//      hit-test extension.
+//   2. overflow:visible default for absolute-positioned popovers plus
+//      symmetric overflow:visible hit-test extension.
 //      Default overflow is visible (matches CSS); `View::paint_all`
 //      only emits `clip_rect` when overflow is explicitly hidden;
 //      absolute children positioned outside parent bounds still paint;
@@ -30,10 +29,10 @@
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #972 — z-index paint-order ──────────────────────────────────────────
+// ── Z-index paint order ─────────────────────────────────────────────────
 
 TEST_CASE("sorted_children_by_z_index returns insertion order at default z=0",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     View parent;
     auto a = std::make_unique<View>(); auto* a_ptr = a.get();
     auto b = std::make_unique<View>(); auto* b_ptr = b.get();
@@ -50,7 +49,7 @@ TEST_CASE("sorted_children_by_z_index returns insertion order at default z=0",
 }
 
 TEST_CASE("sorted_children_by_z_index sorts ascending — higher z comes last",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     // Spectr's bandsMenu repro: insertion order is content, content, popover,
     // but popover has zIndex=20. Sorted order must paint popover last.
     View parent;
@@ -71,7 +70,7 @@ TEST_CASE("sorted_children_by_z_index sorts ascending — higher z comes last",
 }
 
 TEST_CASE("sorted_children_by_z_index is stable for equal z (insertion order)",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     View parent;
     auto a = std::make_unique<View>(); auto* a_ptr = a.get();
     auto b = std::make_unique<View>(); auto* b_ptr = b.get();
@@ -90,13 +89,13 @@ TEST_CASE("sorted_children_by_z_index is stable for equal z (insertion order)",
 }
 
 TEST_CASE("View::paint_all paints higher-z child last so it lands on top",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     using namespace pulp::canvas;
 
     // Three siblings stacked at the same bounds with distinct backgrounds.
     // Popover sits in the MIDDLE of insertion order with z_index=10. The
     // last full-bounds fill in the recorded stream must be popover's
-    // colour — without #972 it would be content_b's (last by insertion).
+    // colour; otherwise it would be content_b's (last by insertion).
     View parent;
     parent.set_bounds({0, 0, 100, 100});
 
@@ -245,7 +244,7 @@ TEST_CASE("paint_all fast path preserves insertion order for default-z children"
 }
 
 TEST_CASE("View::hit_test returns the highest-z child for overlapping bounds",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     // Three siblings at the same bounds: content (z=0, inserted last),
     // popover (z=10, inserted middle), content (z=0, inserted first).
     // Click in the middle should hit the popover, not whichever content
@@ -277,7 +276,7 @@ TEST_CASE("View::hit_test returns the highest-z child for overlapping bounds",
 }
 
 TEST_CASE("View::hit_test falls back to insertion-order topmost at equal z",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     // All siblings at same z=0 (default) — last inserted is visually topmost,
     // matching legacy behaviour. This locks in the no-regression contract.
     View parent;
@@ -329,7 +328,7 @@ TEST_CASE("hit_test z-order fast path matches the sorted path on both branches",
     }
 }
 
-// ── pulp #972 — overflow:visible default for absolute-positioned popovers ────
+// ── Overflow:visible default for absolute-positioned popovers ───────────
 // Symptom on Spectr's bandsMenu: a `position:absolute; top:28; right:0`
 // popover declared inside a 24px-tall flex parent renders nowhere because
 // Pulp previously defaulted overflow to hidden and clipped paint to the
@@ -339,13 +338,13 @@ TEST_CASE("hit_test z-order fast path matches the sorted path on both branches",
 // popover's fill regardless of paint order.
 
 TEST_CASE("View default overflow is visible (matches CSS default)",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     View v;
     REQUIRE(v.overflow() == View::Overflow::visible);
 }
 
 TEST_CASE("View::paint_all does not emit clip_rect when overflow is visible",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     using namespace pulp::canvas;
     View v;
     v.set_bounds({0, 0, 100, 24});
@@ -370,7 +369,7 @@ TEST_CASE("View::paint_all does not emit clip_rect when overflow is visible",
 }
 
 TEST_CASE("View::paint_all emits clip_rect when overflow is explicitly hidden",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     using namespace pulp::canvas;
     View v;
     v.set_bounds({0, 0, 100, 24});
@@ -392,7 +391,7 @@ TEST_CASE("View::paint_all emits clip_rect when overflow is explicitly hidden",
 }
 
 TEST_CASE("Absolute child positioned outside parent's bounds still paints",
-          "[view][issue-972]") {
+          "[view][z-index]") {
     // Spectr bandsMenu repro: 24px-tall parent with a popover-like child
     // at top:50, left:50 — completely outside the parent's content rect.
     // With overflow:visible default, the child's translate-from-bounds.x/y
@@ -437,14 +436,13 @@ TEST_CASE("Absolute child positioned outside parent's bounds still paints",
     REQUIRE_FALSE(saw_parent_clip);
 }
 
-// pulp #1409 paint-time probe series — empirical answer to the Spectr
-// [I] "preset items render outside overlay" report. The framework
-// already pushes a parent clip_rect before children paint when the
-// parent has overflow:hidden, so the symptom is consumer-side, not
-// framework-side. These tests stand as a regression guard — if any of
-// them flips to a fail, paint-time clipping has regressed.
+// Paint-time probe series for the Spectr "preset items render outside overlay"
+// report. The framework already pushes a parent clip_rect before children paint
+// when the parent has overflow:hidden, so the symptom is consumer-side, not
+// framework-side. These tests stand as a regression guard: if any of them flips
+// to a fail, paint-time clipping has regressed.
 TEST_CASE("Probe: overflow:hidden parent clip-rect precedes child paint",
-          "[view][probe][issue-overlay-clip]") {
+          "[view][probe][overlay-clip]") {
     using namespace pulp::canvas;
 
     View parent;
@@ -485,14 +483,13 @@ TEST_CASE("Probe: overflow:hidden parent clip-rect precedes child paint",
     REQUIRE(parent_clip_idx < child_fill_idx);
 }
 
-// pulp #1409 paint-time probe — absolutely-positioned child translated
-// past the parent's right edge. Mirrors a Spectr preset-menu item
-// scenario where a row's `position: absolute; left: 80px` puts it past
-// a 100×40 dropdown's content rect. The clip must STILL precede the
-// child's paint command in the recording — translates do not reset the
-// active clip.
+// Paint-time probe: an absolutely-positioned child translated past the parent's
+// right edge. Mirrors a Spectr preset-menu item scenario where a row's
+// `position: absolute; left: 80px` puts it past a 100×40 dropdown's content
+// rect. The clip must STILL precede the child's paint command in the recording;
+// translates do not reset the active clip.
 TEST_CASE("Probe: overflow:hidden parent clips translated absolute child too",
-          "[view][probe][issue-overlay-clip]") {
+          "[view][probe][overlay-clip]") {
     using namespace pulp::canvas;
 
     View parent;

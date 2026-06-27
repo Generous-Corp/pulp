@@ -61,7 +61,7 @@
 //     time (so a CI lane without a working Dawn adapter soft-skips
 //     instead of hard-failing).
 //
-// Tag: [golden][gpu][skia][font][issue-2257-followup]
+// Tag: [golden][gpu][skia][font]
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -366,8 +366,8 @@ constexpr Digest kGpuHelloWorldMono12 {
 // Goldens — three strings, three scenarios.
 // ────────────────────────────────────────────────────────────────
 
-TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px 'Hello'",
-          "[golden][gpu][skia][font][issue-2257-followup]") {
+TEST_CASE("font GPU rendering golden: Inter 14px 'Hello'",
+          "[golden][gpu][skia][font]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
         SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
@@ -390,8 +390,8 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px 'Hello'",
                           "hello-inter-14", pixels, pw, ph);
 }
 
-TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px CJK 日本語",
-          "[golden][gpu][skia][font][issue-2257-followup]") {
+TEST_CASE("font GPU rendering golden: Inter 14px CJK 日本語",
+          "[golden][gpu][skia][font][cjk]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
         SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
@@ -420,8 +420,8 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px CJK 日本語",
                           "cjk-inter-14", pixels, pw, ph);
 }
 
-TEST_CASE("font v2 Slice 3.4 — GPU golden JetBrains Mono 12px 'Hello world'",
-          "[golden][gpu][skia][font][issue-2257-followup]") {
+TEST_CASE("font GPU rendering golden: JetBrains Mono 12px 'Hello world'",
+          "[golden][gpu][skia][font][monospace]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
         SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
@@ -452,8 +452,8 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden JetBrains Mono 12px 'Hello world'",
 // relax the per-string tolerance, that's the wrong fix.
 // ────────────────────────────────────────────────────────────────
 
-TEST_CASE("font v2 Slice 3.4 — GPU render pipeline is deterministic in-process",
-          "[golden][gpu][skia][font][determinism][issue-2257-followup]") {
+TEST_CASE("font GPU rendering golden: render pipeline is deterministic in-process",
+          "[golden][gpu][skia][font][determinism]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
         SUCCEED("Dawn/Graphite unavailable on this host — determinism probe skipped.");
@@ -483,8 +483,8 @@ TEST_CASE("font v2 Slice 3.4 — GPU render pipeline is deterministic in-process
 // within ±15%. Width/height must match exactly (sanity).
 // ────────────────────────────────────────────────────────────────
 
-TEST_CASE("font v2 Slice 3.4 — raster and GPU digests agree within tolerance",
-          "[golden][gpu][skia][font][cross-backend][issue-2257-followup]") {
+TEST_CASE("font GPU rendering golden: raster and GPU digests agree within tolerance",
+          "[golden][gpu][skia][font][cross-backend]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
         SUCCEED("Dawn/Graphite unavailable on this host — cross-backend probe skipped.");
@@ -531,7 +531,7 @@ TEST_CASE("font v2 Slice 3.4 — raster and GPU digests agree within tolerance",
 
 #else  // !(PULP_HAS_SKIA && __APPLE__)
 
-TEST_CASE("font v2 Slice 3.4 — GPU rendering goldens require Skia on macOS",
+TEST_CASE("font GPU rendering goldens require Skia on macOS",
           "[golden][gpu][skia][font]") {
     // Two reasons we end up here:
     //  1. Skia not linked (Namespace macOS overflow runner, Linux/Win CI).

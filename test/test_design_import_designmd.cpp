@@ -1,8 +1,7 @@
 // test_design_import_designmd.cpp — DESIGN.md import test suite
 //
-// Covers the Phase 1 acceptance criteria from
-// planning/2026-05-13-designmd-integration-plan.md. Tag set:
-// [view][import][designmd][issue-1434]
+// Covers DESIGN.md import parsing, linting, diff, and export-gated behavior.
+// Tag set: [view][import][designmd]
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -61,7 +60,7 @@ pulp::import_detect::ImportsManifest load_manifest() {
 
 // (1) ── parses paws-and-paths frontmatter into populated tokens ────────
 TEST_CASE("parse_designmd populates colors/typography/rounded/spacing/components on paws-and-paths",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = upstream_fixture();
     REQUIRE_FALSE(text.empty());
 
@@ -87,7 +86,7 @@ TEST_CASE("parse_designmd populates colors/typography/rounded/spacing/components
 
 // (2) ── resolves nested color references in components section ────────
 TEST_CASE("token references inside components resolve to primitive values",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = hand_authored_fixture();
     auto result = parse_designmd(text);
     auto it = result.ir.tokens.strings.find("components.button-primary.backgroundColor");
@@ -98,7 +97,7 @@ TEST_CASE("token references inside components resolve to primitive values",
 
 // (3) ── composite typography refs inside components are preserved ─────
 TEST_CASE("composite typography refs inside components are preserved verbatim",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = hand_authored_fixture();
     auto result = parse_designmd(text);
     auto it = result.ir.tokens.strings.find("components.button-primary.typography");
@@ -109,7 +108,7 @@ TEST_CASE("composite typography refs inside components are preserved verbatim",
 
 // (4) ── group refs outside components emit a broken-ref diagnostic ────
 TEST_CASE("non-component reference to a group emits broken-ref warning",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     // colors.accent → {colors.primary}: this is a valid in-group ref to a
     // primitive, which the parser resolves. The "group-ref" rejection
     // case is exercised when a value points at a bare group name
@@ -122,7 +121,7 @@ TEST_CASE("non-component reference to a group emits broken-ref warning",
 
 // (5) ── DTCG export round-trip on paws-and-paths is non-empty + valid ─
 TEST_CASE("export_w3c_tokens emits DTCG JSON from a parsed DESIGN.md",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = upstream_fixture();
     auto result = parse_designmd(text);
     auto theme = ir_tokens_to_theme(result.ir.tokens);
@@ -134,7 +133,7 @@ TEST_CASE("export_w3c_tokens emits DTCG JSON from a parsed DESIGN.md",
 
 // (6) ── unknown section headings preserved without erroring ────────────
 TEST_CASE("unknown section headings are preserved and do not error",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = hand_authored_fixture();
     auto result = parse_designmd(text);
     bool seen_iconography = false;
@@ -152,7 +151,7 @@ TEST_CASE("unknown section headings are preserved and do not error",
 
 // (7) ── duplicate section headings reject the file ────────────────────
 TEST_CASE("duplicate ## section heading reports error-severity diagnostic",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     std::string text =
         "---\nname: Dup\ncolors:\n  primary: \"#000\"\n---\n"
         "## Colors\nFirst body.\n\n## Colors\nSecond body — duplicate!\n";
@@ -169,7 +168,7 @@ TEST_CASE("duplicate ## section heading reports error-severity diagnostic",
 
 // (8) ── detector identifies a DESIGN.md as `designmd` source ─────────
 TEST_CASE("detector recognizes upstream DESIGN.md fixture",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto manifest = load_manifest();
     auto snap = pulp::import_detect::snapshot_input(
         fs::path(PULP_REPO_ROOT) / "test/fixtures/imports/designmd/alpha/DESIGN.md");
@@ -182,7 +181,7 @@ TEST_CASE("detector recognizes upstream DESIGN.md fixture",
 
 // (9a) ── detector rejects Jekyll-style blog post ─────────────────────
 TEST_CASE("detector rejects generic Markdown frontmatter (Jekyll decoy)",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto manifest = load_manifest();
     auto snap = pulp::import_detect::snapshot_input(
         fs::path(PULP_REPO_ROOT) / "test/fixtures/imports/designmd/alpha/decoys/jekyll/blog-post.md");
@@ -192,7 +191,7 @@ TEST_CASE("detector rejects generic Markdown frontmatter (Jekyll decoy)",
 
 // (9b) ── detector rejects DESIGN.md missing `name:` key ───────────────
 TEST_CASE("detector rejects DESIGN.md without name: key (missing-name decoy)",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto manifest = load_manifest();
     auto snap = pulp::import_detect::snapshot_input(
         fs::path(PULP_REPO_ROOT) / "test/fixtures/imports/designmd/alpha/decoys/missing-name/DESIGN.md");
@@ -202,7 +201,7 @@ TEST_CASE("detector rejects DESIGN.md without name: key (missing-name decoy)",
 
 // (9c) ── detector rejects DESIGN.md without any canonical token group ─
 TEST_CASE("detector rejects DESIGN.md without token-group keys",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto manifest = load_manifest();
     auto snap = pulp::import_detect::snapshot_input(
         fs::path(PULP_REPO_ROOT) / "test/fixtures/imports/designmd/alpha/decoys/missing-token-groups/DESIGN.md");
@@ -212,7 +211,7 @@ TEST_CASE("detector rejects DESIGN.md without token-group keys",
 
 // (10) ── prose-only DESIGN.md emits empty tokens, no error ────────────
 TEST_CASE("DESIGN.md with no frontmatter produces empty tokens + info diagnostic",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     std::string text = "# Brand Notes\n\nNo frontmatter; just prose.\n";
     auto result = parse_designmd(text);
     REQUIRE_FALSE(result.had_frontmatter);
@@ -222,7 +221,7 @@ TEST_CASE("DESIGN.md with no frontmatter produces empty tokens + info diagnostic
 }
 
 TEST_CASE("parse_designmd mirrors YAML parse and shape errors into import diagnostics",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     SECTION("parser error") {
         auto result = parse_designmd(
             "---\n"
@@ -261,7 +260,7 @@ TEST_CASE("parse_designmd mirrors YAML parse and shape errors into import diagno
 
 // (11) ── fontFeature / fontVariation preserved verbatim ───────────────
 TEST_CASE("fontFeature and fontVariation typography fields survive parse",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto text = hand_authored_fixture();
     auto result = parse_designmd(text);
     auto feat = result.ir.tokens.strings.find("typography.body-md.fontFeature");
@@ -274,17 +273,17 @@ TEST_CASE("fontFeature and fontVariation typography fields survive parse",
 
 // (12) ── parse_design_source(\"designmd\") wires the enum value ──────
 TEST_CASE("parse_design_source maps \"designmd\" → DesignSource::designmd",
-          "[view][import][designmd][issue-1434]") {
+          "[view][import][designmd][parse]") {
     auto src = parse_design_source("designmd");
     REQUIRE(src.has_value());
     REQUIRE(*src == DesignSource::designmd);
     REQUIRE(std::string(design_source_name(DesignSource::designmd)) == "DESIGN.md");
 }
 
-// ── Phase 2: lint, diff, Tailwind ──────────────────────────────────────
+// ── Lint, diff, Tailwind ───────────────────────────────────────────────
 
 TEST_CASE("lint_designmd flags missing-primary when no primary color is defined",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][colors]") {
     std::string text = "---\nname: NoPrimary\ncolors:\n  secondary: \"#888\"\n---\n";
     auto parsed = parse_designmd(text);
     auto findings = lint_designmd(parsed);
@@ -294,7 +293,7 @@ TEST_CASE("lint_designmd flags missing-primary when no primary color is defined"
 }
 
 TEST_CASE("lint_designmd flags missing-typography when colors but no typography",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][typography]") {
     std::string text = "---\nname: ColorsOnly\ncolors:\n  primary: \"#000\"\n---\n";
     auto parsed = parse_designmd(text);
     auto findings = lint_designmd(parsed);
@@ -304,7 +303,7 @@ TEST_CASE("lint_designmd flags missing-typography when colors but no typography"
 }
 
 TEST_CASE("lint_designmd promotes broken-ref to error severity",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][references]") {
     std::string text =
         "---\nname: Broken\ncolors:\n  primary: \"#000\"\n  bad: \"{colors.missing}\"\n---\n";
     auto parsed = parse_designmd(text);
@@ -320,7 +319,7 @@ TEST_CASE("lint_designmd promotes broken-ref to error severity",
 }
 
 TEST_CASE("lint_designmd flags low-contrast component pairs",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][contrast]") {
     // Light gray text on white = ~2:1 contrast → below WCAG AA 4.5:1.
     std::string text =
         "---\nname: LowContrast\n"
@@ -336,7 +335,7 @@ TEST_CASE("lint_designmd flags low-contrast component pairs",
 }
 
 TEST_CASE("lint_designmd flags orphaned color tokens",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][tokens]") {
     std::string text =
         "---\nname: Orphan\n"
         "colors:\n  primary: \"#000\"\n  unused-accent: \"#f0f\"\n"
@@ -359,7 +358,7 @@ TEST_CASE("lint_designmd flags orphaned color tokens",
 // re-scanning post-resolution strings. Without the fix, `primary` would
 // be flagged as orphaned despite being used by every component.
 TEST_CASE("lint_designmd does NOT flag referenced color as orphan after resolution",
-          "[view][import][designmd][phase2][regression][issue-1434]") {
+          "[view][import][designmd][lint][tokens][regression]") {
     std::string text =
         "---\nname: ResolvedRef\n"
         "colors:\n  primary: \"#1A1C1E\"\n"
@@ -381,7 +380,7 @@ TEST_CASE("lint_designmd does NOT flag referenced color as orphan after resoluti
 }
 
 TEST_CASE("lint_designmd emits token-summary info diagnostic",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][summary]") {
     auto parsed = parse_designmd(upstream_fixture());
     auto findings = lint_designmd(parsed);
     bool found = false;
@@ -390,7 +389,7 @@ TEST_CASE("lint_designmd emits token-summary info diagnostic",
 }
 
 TEST_CASE("lint_designmd flags section-order when sections are out of canonical order",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][lint][sections]") {
     std::string text =
         "---\nname: BadOrder\ncolors:\n  primary: \"#000\"\n---\n\n"
         "## Components\nthen\n\n## Colors\nlater\n";
@@ -402,7 +401,7 @@ TEST_CASE("lint_designmd flags section-order when sections are out of canonical 
 }
 
 TEST_CASE("diff_designmd reports added, removed, and modified color tokens",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][diff][colors]") {
     auto before = parse_designmd(
         "---\nname: V1\ncolors:\n  primary: \"#000\"\n  removed: \"#fff\"\n---\n");
     auto after = parse_designmd(
@@ -417,7 +416,7 @@ TEST_CASE("diff_designmd reports added, removed, and modified color tokens",
 }
 
 TEST_CASE("diff_designmd reports regression when after has more lint findings",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][diff][lint]") {
     auto before = parse_designmd(
         "---\nname: Clean\ncolors:\n  primary: \"#000\"\ntypography:\n  body-md:\n    fontFamily: Inter\n---\n");
     auto after = parse_designmd(
@@ -427,7 +426,7 @@ TEST_CASE("diff_designmd reports regression when after has more lint findings",
 }
 
 TEST_CASE("export_tailwind_v3_json emits theme.extend-shaped JSON",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][tailwind][v3]") {
     auto parsed = parse_designmd(
         "---\nname: TW3\ncolors:\n  primary: \"#1A1C1E\"\nrounded:\n  sm: 4px\nspacing:\n  md: 16px\n---\n");
     auto json = export_tailwind_v3_json(parsed);
@@ -438,7 +437,7 @@ TEST_CASE("export_tailwind_v3_json emits theme.extend-shaped JSON",
 }
 
 TEST_CASE("export_tailwind_v4_css emits @theme block with --color/--radius/--spacing vars",
-          "[view][import][designmd][phase2][issue-1434]") {
+          "[view][import][designmd][tailwind][v4]") {
     auto parsed = parse_designmd(
         "---\nname: TW4\ncolors:\n  primary: \"#1A1C1E\"\nrounded:\n  md: 8px\nspacing:\n  lg: 24px\n---\n");
     auto css = export_tailwind_v4_css(parsed);
@@ -452,7 +451,7 @@ TEST_CASE("export_tailwind_v4_css emits @theme block with --color/--radius/--spa
 // (fontFamily, fontSize, fontWeight, lineHeight, letterSpacing).
 // Without the fix these tokens are silently dropped from the output.
 TEST_CASE("export_tailwind_v3_json includes typography fontFamily/fontSize/fontWeight/etc",
-          "[view][import][designmd][phase2][regression][issue-1434]") {
+          "[view][import][designmd][tailwind][v3][typography][regression]") {
     auto parsed = parse_designmd(
         "---\nname: TW3Typography\n"
         "colors:\n  primary: \"#000\"\n"
@@ -472,7 +471,7 @@ TEST_CASE("export_tailwind_v3_json includes typography fontFamily/fontSize/fontW
 }
 
 TEST_CASE("export_tailwind_v4_css includes --font / --text / --leading / --tracking / --font-weight vars",
-          "[view][import][designmd][phase2][regression][issue-1434]") {
+          "[view][import][designmd][tailwind][v4][typography][regression]") {
     auto parsed = parse_designmd(
         "---\nname: TW4Typography\n"
         "colors:\n  primary: \"#000\"\n"
@@ -487,10 +486,10 @@ TEST_CASE("export_tailwind_v4_css includes --font / --text / --leading / --track
     REQUIRE(css.find("--font-weight-h1: 600") != std::string::npos);
 }
 
-// ── Phase 3: signature is fixed, body gated on pulp #1307 ─────────────
+// ── DESIGN.md export remains gated until native export is implemented ───
 
-TEST_CASE("export_designmd throws std::logic_error until pulp #1307 lands",
-          "[view][import][designmd][phase3][gated-1307][issue-1434]") {
+TEST_CASE("export_designmd throws std::logic_error while export is gated",
+          "[view][import][designmd][export-gated]") {
     Theme t;
     DesignMdProseHints hints;
     REQUIRE_THROWS_AS(export_designmd(t, hints), std::logic_error);

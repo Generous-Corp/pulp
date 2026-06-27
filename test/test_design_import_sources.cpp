@@ -386,7 +386,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers fill-height and leaf fa
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Phase 3 — Pulp Library component recognition (figma-plugin lane).
+// Pulp Library knob recognition through the figma-plugin lane.
 //
 // The TypeScript extractor (tools/figma-plugin/src/extract.ts) matches an
 // INSTANCE node's `component_set_key` against `library-manifest.json`. When
@@ -398,11 +398,10 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers fill-height and leaf fa
 //
 // This test pins that contract — without it the figma-plugin extractor and
 // design_import.cpp parser can drift apart silently.
-TEST_CASE("parse_figma_plugin_json maps Phase 3 Pulp / Knob envelope onto IR widget",
-          "[view][import][figma-plugin][phase-3]") {
-    // Envelope shape mirrors what tools/figma-plugin/src/serialize.ts emits
-    // for an instance of the Pulp / Knob component-set (the file authored
-    // in Phase 0 at https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library).
+TEST_CASE("parse_figma_plugin_json maps Pulp / Knob envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][knob]") {
+    // Envelope shape mirrors what tools/figma-plugin/src/serialize.ts emits for
+    // an instance of the Pulp / Knob component-set.
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -441,8 +440,8 @@ TEST_CASE("parse_figma_plugin_json maps Phase 3 Pulp / Knob envelope onto IR wid
     REQUIRE(ir.root.attributes.at("binding") == "filter.cutoff_hz");
 }
 
-TEST_CASE("parse_figma_plugin_json handles a Phase 3 knob without optional units",
-          "[view][import][figma-plugin][phase-3]") {
+TEST_CASE("parse_figma_plugin_json handles a Pulp / Knob without optional units",
+          "[view][import][figma-plugin][pulp-library][audio-widget][knob]") {
     // An instance can leave `units` empty (the Pulp / Knob default is an
     // empty string). The extractor SHOULD omit empty units; check that the
     // parser still maps the rest of the envelope correctly without it.
@@ -475,7 +474,7 @@ TEST_CASE("parse_figma_plugin_json handles a Phase 3 knob without optional units
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// figma-plugin binding wire-up (feat/figma-plugin-binding-wireup).
+// figma-plugin audio-widget binding wire-up.
 //
 // The figma-plugin extractor emits a recognized Pulp Library control as an
 // audio widget plus a single free-form `attributes["binding"]` string. Before
@@ -670,16 +669,15 @@ TEST_CASE("figma-plugin knob with explicit pulp* binding is not overwritten",
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Phase 5 part 1 — Pulp / Fader + Pulp / Meter recognition.
+// Pulp / Fader + Pulp / Meter recognition.
 //
-// Mirrors the Phase 3 contract for the two new library widgets added in
-// Pulp Library v0.2.0:
+// Mirrors the knob contract for library widgets added in Pulp Library v0.2.0:
 //   - Pulp / Fader  (component_set_key 1c2b727f0c0e11026512725aeb546997f16042bd)
 //   - Pulp / Meter  (component_set_key 52e1636086b855cb2d20d341d4cfa15e94151eef)
 //
 // Same envelope shape as Pulp / Knob; only audio_widget enum changes.
-TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Fader envelope onto IR widget",
-          "[view][import][figma-plugin][phase-5]") {
+TEST_CASE("parse_figma_plugin_json maps Pulp / Fader envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][fader]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -725,8 +723,8 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Fader envelope onto IR wi
     REQUIRE(ir.root.attributes.at("binding") == "param.master_level");
 }
 
-TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Meter envelope onto IR widget",
-          "[view][import][figma-plugin][phase-5]") {
+TEST_CASE("parse_figma_plugin_json maps Pulp / Meter envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][meter]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -757,10 +755,10 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Meter envelope onto IR wi
     REQUIRE(ir.root.attributes.at("binding") == "meter.out_l");
 }
 
-// ── pulp #3191: codegen emits derived skin setters for fader/meter ──────────
+// ── Codegen emits derived skin setters for fader/meter ──────────────────
 
 TEST_CASE("Codegen emits setFaderSkin from derived skin attributes",
-          "[view][import][issue-3191]") {
+          "[view][import][skin][fader]") {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "root";
@@ -802,7 +800,7 @@ TEST_CASE("Codegen emits setFaderSkin from derived skin attributes",
 }
 
 TEST_CASE("Codegen emits setMeterColors + normalized level from derived skin",
-          "[view][import][issue-3191]") {
+          "[view][import][skin][meter]") {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "root";
@@ -838,10 +836,10 @@ TEST_CASE("Codegen emits setMeterColors + normalized level from derived skin",
     REQUIRE(plain_js.find("setMeterColors(") == std::string::npos);
 }
 
-// ── pulp #3191 width fix: derived narrow widths flow to render ───────────────
+// ── Derived narrow widths flow to render ────────────────────────────────
 
 TEST_CASE("Codegen renders fader at derived thumb width + emits thin track width",
-          "[view][import][issue-3191]") {
+          "[view][import][skin][fader][width]") {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "root";
@@ -876,7 +874,7 @@ TEST_CASE("Codegen renders fader at derived thumb width + emits thin track width
 }
 
 TEST_CASE("Codegen renders meter at derived narrow bar width, centred in column",
-          "[view][import][issue-3191]") {
+          "[view][import][skin][meter][width]") {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "root";
@@ -906,7 +904,7 @@ TEST_CASE("Codegen renders meter at derived narrow bar width, centred in column"
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Phase 5 part 2 — Pulp / XYPad + Pulp / Waveform + Pulp / Spectrum.
+// Pulp / XYPad + Pulp / Waveform + Pulp / Spectrum recognition.
 //
 // Library v0.3.0 adds three component-sets in
 // https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library:
@@ -918,8 +916,8 @@ TEST_CASE("Codegen renders meter at derived narrow bar width, centred in column"
 // Waveform and Spectrum's `binding` carries an audio-source path
 // (bus.master_l / bus.fft.master_l) instead of a parameter route.
 
-TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / XYPad envelope onto IR widget",
-          "[view][import][figma-plugin][phase-5]") {
+TEST_CASE("parse_figma_plugin_json maps Pulp / XYPad envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][xy-pad]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -954,8 +952,8 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / XYPad envelope ont
     REQUIRE(ir.root.attributes.at("binding_y") == "filter.resonance");
 }
 
-TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / Waveform envelope onto IR widget",
-          "[view][import][figma-plugin][phase-5]") {
+TEST_CASE("parse_figma_plugin_json maps Pulp / Waveform envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][waveform]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -987,8 +985,8 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / Waveform envelope 
     REQUIRE(ir.root.attributes.count("binding_y") == 0);
 }
 
-TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / Spectrum envelope onto IR widget",
-          "[view][import][figma-plugin][phase-5]") {
+TEST_CASE("parse_figma_plugin_json maps Pulp / Spectrum envelope onto IR widget",
+          "[view][import][figma-plugin][pulp-library][audio-widget][spectrum]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",
@@ -1040,12 +1038,10 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / Spectrum envelope 
 //   5. XYPad-specific binding_y rides on attributes.binding_y.
 //   6. Audio ranges round-trip on every widget.
 //
-// Once the library republish AND Agent A's fidelity harness both land in
-// main, we'll author a Figma file mirroring this layout via the MCP
-// connector and replace this hand-rolled envelope with one produced by
-// the real published plugin — closing the loop on Phase B5.
+// The envelope is hand-rolled so the parser contract stays deterministic and
+// does not depend on a live Figma document or plugin publish state.
 TEST_CASE("kitchen-sink envelope parses all 6 Pulp Library widgets from one root frame",
-          "[view][import][figma-plugin][phase-b5][kitchen-sink]") {
+          "[view][import][figma-plugin][pulp-library][kitchen-sink]") {
     const std::string envelope = R"JSON({
         "format_version": "v1",
         "parser_version": "0.1.0",

@@ -1,4 +1,4 @@
-// pulp #59/#63/#64/#65 — WindowHost::compute_design_viewport_transform.
+// WindowHost::compute_design_viewport_transform.
 //
 // Unit-tests the pure math behind set_design_viewport so the
 // scale + letterbox math is locked down independent of any platform
@@ -6,8 +6,7 @@
 // so a regression here would silently break proportional resize for
 // every fixed-design import.
 //
-// Tag [issue-pulp-design-viewport] so the coverage harness can
-// attribute these to the slice that introduced them.
+// Tag [design-viewport] so the coverage harness can attribute these cases.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -34,7 +33,7 @@ constexpr float kEps = 1e-4f;
 
 } // namespace
 
-TEST_CASE("design viewport: 1:1 match yields identity", "[view][design-viewport][issue-pulp-design-viewport]") {
+TEST_CASE("design viewport: 1:1 match yields identity", "[view][design-viewport]") {
     auto t = xform(1320, 860, 1320, 860);
     REQUIRE(t.ok);
     REQUIRE_THAT(t.sx, WithinAbs(1.0f, kEps));
@@ -43,7 +42,7 @@ TEST_CASE("design viewport: 1:1 match yields identity", "[view][design-viewport]
     REQUIRE_THAT(t.ty, WithinAbs(0.0f, kEps));
 }
 
-TEST_CASE("design viewport: proportional shrink keeps aspect", "[view][design-viewport][issue-pulp-design-viewport]") {
+TEST_CASE("design viewport: proportional shrink keeps aspect", "[view][design-viewport]") {
     // Half-size window at the design aspect — uniform 0.5x scale,
     // no letterboxing because aspect matches.
     auto t = xform(660, 430, 1320, 860);
@@ -55,7 +54,7 @@ TEST_CASE("design viewport: proportional shrink keeps aspect", "[view][design-vi
     REQUIRE_THAT(t.ty, WithinAbs(0.0f, kEps));
 }
 
-TEST_CASE("design viewport: wider window letterboxes horizontally", "[view][design-viewport][issue-pulp-design-viewport]") {
+TEST_CASE("design viewport: wider window letterboxes horizontally", "[view][design-viewport]") {
     // 1600x860 window, 1320x860 design — height is the limiting axis
     // (1.0x), letterbox bars appear on left+right.
     auto t = xform(1600, 860, 1320, 860);
@@ -67,7 +66,7 @@ TEST_CASE("design viewport: wider window letterboxes horizontally", "[view][desi
     REQUIRE_THAT(t.ty, WithinAbs(0.0f, kEps));
 }
 
-TEST_CASE("design viewport: taller window letterboxes vertically", "[view][design-viewport][issue-pulp-design-viewport]") {
+TEST_CASE("design viewport: taller window letterboxes vertically", "[view][design-viewport]") {
     // 1320x1000 window — width is the limiting axis (1.0x), letterbox
     // bars appear on top+bottom.
     auto t = xform(1320, 1000, 1320, 860);
@@ -80,7 +79,7 @@ TEST_CASE("design viewport: taller window letterboxes vertically", "[view][desig
 }
 
 TEST_CASE("design viewport: input inverse round-trips a known point",
-          "[view][design-viewport][issue-pulp-design-viewport]") {
+          "[view][design-viewport]") {
     // Mouse at the centre of a wider-than-design window should map to
     // the centre of the design surface, not the centre of the window.
     const float ww = 1600.0f, wh = 860.0f, dw = 1320.0f, dh = 860.0f;
@@ -112,7 +111,7 @@ TEST_CASE("design viewport: input inverse round-trips a known point",
 }
 
 TEST_CASE("design viewport: rejects degenerate inputs",
-          "[view][design-viewport][issue-pulp-design-viewport]") {
+          "[view][design-viewport]") {
     REQUIRE_FALSE(xform(0, 860, 1320, 860).ok);
     REQUIRE_FALSE(xform(1320, 0, 1320, 860).ok);
     REQUIRE_FALSE(xform(1320, 860, 0, 860).ok);
@@ -126,7 +125,7 @@ TEST_CASE("design viewport: rejects degenerate inputs",
 // between two bands, matching CLAP/VST3. Horizontal centering + scale unchanged;
 // must equal centered behavior when there is no vertical slack.
 TEST_CASE("design viewport: top_align anchors to top in a taller pane",
-          "[view][design-viewport][issue-pulp-design-viewport]") {
+          "[view][design-viewport]") {
     // 1320-wide design in a much taller 1320x1200 pane → fits to width (1.0x),
     // 340px of vertical slack.
     float sx, sy, tx, ty;
@@ -146,7 +145,7 @@ TEST_CASE("design viewport: top_align anchors to top in a taller pane",
 }
 
 TEST_CASE("design viewport: top_align is a no-op when no vertical slack",
-          "[view][design-viewport][issue-pulp-design-viewport]") {
+          "[view][design-viewport]") {
     // Matching aspect → ty is 0 with or without top_align (no behavior change
     // for CLAP/VST3/standalone, whose windows are aspect-constrained).
     float sx, sy, tx, ty, sx2, sy2, tx2, ty2;
@@ -170,7 +169,7 @@ TEST_CASE("design viewport: top_align is a no-op when no vertical slack",
 //     canvas transform) WITHOUT double-counting;
 //   - OS input arrives in physical pixels on Win/Linux, so a host divides by
 //     scale before the logical-space design-viewport inverse.
-// Tag with [hidpi] so the coverage harness can attribute these to the slice.
+// Tag with [hidpi] so the coverage harness can attribute these cases.
 
 namespace {
 
@@ -191,7 +190,7 @@ float dpi_to_scale(unsigned dpi) {
 } // namespace
 
 TEST_CASE("hidpi: dpi maps to scale (dpi/96, 0 floors to 1.0)",
-          "[view][design-viewport][hidpi][issue-pulp-design-viewport]") {
+          "[view][design-viewport][hidpi]") {
     REQUIRE_THAT(dpi_to_scale(96),  WithinAbs(1.0f, kEps));   // 1×
     REQUIRE_THAT(dpi_to_scale(144), WithinAbs(1.5f, kEps));   // 1.5×
     REQUIRE_THAT(dpi_to_scale(192), WithinAbs(2.0f, kEps));   // 2×
@@ -199,7 +198,7 @@ TEST_CASE("hidpi: dpi maps to scale (dpi/96, 0 floors to 1.0)",
 }
 
 TEST_CASE("hidpi: logical size times scale yields pixel surface size",
-          "[view][design-viewport][hidpi][issue-pulp-design-viewport]") {
+          "[view][design-viewport][hidpi]") {
     // A 400x300 editor at 2× must allocate an 800x600 pixel surface; the view
     // tree stays 400x300 logical.
     REQUIRE(pixel_dim(400, 2.0f) == 800u);
@@ -214,7 +213,7 @@ TEST_CASE("hidpi: logical size times scale yields pixel surface size",
 }
 
 TEST_CASE("hidpi: design-viewport transform is independent of DPI scale",
-          "[view][design-viewport][hidpi][issue-pulp-design-viewport]") {
+          "[view][design-viewport][hidpi]") {
     // The host computes the design-viewport transform from LOGICAL host size,
     // and the DPI scale is applied SEPARATELY by SkiaSurface. So at a fixed
     // logical host size the transform must NOT change with the DPI scale — the
@@ -239,7 +238,7 @@ TEST_CASE("hidpi: design-viewport transform is independent of DPI scale",
 }
 
 TEST_CASE("hidpi: pixel input divides by scale before the logical inverse",
-          "[view][design-viewport][hidpi][issue-pulp-design-viewport]") {
+          "[view][design-viewport][hidpi]") {
     // Win/Linux deliver pointer coords in PHYSICAL pixels. The host divides by
     // scale to get logical host coords, THEN applies the design-viewport
     // inverse. With a design viewport set, the centre of the physical surface

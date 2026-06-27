@@ -168,14 +168,14 @@ TEST_CASE("ScrollView: hit testing follows scrolled content", "[scrollview]") {
     REQUIRE(hit == label_ptr);
 }
 
-// ── pulp #1170: ScrollView honors React Native pointerEvents ───────────────
+// ── ScrollView honors React Native pointerEvents ────────────────────────
 //
-// Regression for #1044 / #1170: ScrollView::hit_test shadowed View::hit_test
-// without honoring pointer_events(), so setPointerEvents("box-only"/"box-none"
-// /"none") was a silent no-op for any scrollable container.
+// ScrollView::hit_test must honor pointer_events() so
+// setPointerEvents("box-only"/"box-none"/"none") works for scrollable
+// containers.
 
-TEST_CASE("ScrollView::hit_test honors pointerEvents == none (#1170)",
-          "[scrollview][hit_test][issue-1170]") {
+TEST_CASE("ScrollView::hit_test honors pointerEvents == none",
+          "[scrollview][hit_test][pointer-events]") {
     ScrollView sv;
     sv.set_bounds({0, 0, 200, 200});
     sv.set_content_size({200, 200});
@@ -189,8 +189,8 @@ TEST_CASE("ScrollView::hit_test honors pointerEvents == none (#1170)",
     REQUIRE(sv.hit_test({10, 10}) == nullptr);
 }
 
-TEST_CASE("ScrollView::hit_test honors pointerEvents == box-only (#1170)",
-          "[scrollview][hit_test][issue-1170]") {
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-only",
+          "[scrollview][hit_test][pointer-events]") {
     ScrollView sv;
     sv.set_bounds({0, 0, 200, 200});
     sv.set_content_size({200, 200});
@@ -206,8 +206,8 @@ TEST_CASE("ScrollView::hit_test honors pointerEvents == box-only (#1170)",
     REQUIRE(sv.hit_test({10, 10}) == &sv);
 }
 
-TEST_CASE("ScrollView::hit_test honors pointerEvents == box-none (#1170)",
-          "[scrollview][hit_test][issue-1170]") {
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-none",
+          "[scrollview][hit_test][pointer-events]") {
     ScrollView sv;
     sv.set_bounds({0, 0, 200, 200});
     sv.set_content_size({200, 200});
@@ -224,8 +224,8 @@ TEST_CASE("ScrollView::hit_test honors pointerEvents == box-none (#1170)",
     REQUIRE(sv.hit_test({10, 10}) == nullptr);
 }
 
-TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target (#1170)",
-          "[scrollview][hit_test][issue-1170]") {
+TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target",
+          "[scrollview][hit_test][pointer-events]") {
     ScrollView sv;
     sv.set_bounds({0, 0, 200, 100});
     // Content taller than view → vertical scrollbar appears at the right edge.
@@ -237,7 +237,7 @@ TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target (
     REQUIRE(sv.hit_test({195, 50}) == nullptr);
 }
 
-// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+// ── Symmetric overflow:visible hit-test extension ───────────────────────
 //
 // ScrollView::hit_test had the same right/down-only asymmetry as
 // View::hit_test. Lock the symmetric ±500px slack here too so left- or
@@ -271,31 +271,31 @@ struct ScrollPopoverFixture {
 } // namespace
 
 TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the LEFT",
-          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+          "[scrollview][hit_test][overflow-symmetric]") {
     ScrollPopoverFixture f(-200, 25);
     REQUIRE(f.sv.hit_test({425, 650}) == f.popover);
 }
 
 TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the RIGHT",
-          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+          "[scrollview][hit_test][overflow-symmetric]") {
     ScrollPopoverFixture f(200, 25);
     REQUIRE(f.sv.hit_test({825, 650}) == f.popover);
 }
 
 TEST_CASE("ScrollView::hit_test extends overflow:visible 500px UPWARD",
-          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+          "[scrollview][hit_test][overflow-symmetric]") {
     ScrollPopoverFixture f(25, -200);
     REQUIRE(f.sv.hit_test({650, 425}) == f.popover);
 }
 
 TEST_CASE("ScrollView::hit_test extends overflow:visible 500px DOWNWARD",
-          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+          "[scrollview][hit_test][overflow-symmetric]") {
     ScrollPopoverFixture f(25, 200);
     REQUIRE(f.sv.hit_test({650, 825}) == f.popover);
 }
 
 TEST_CASE("ScrollView::hit_test does NOT extend overflow:visible past 500px LEFT",
-          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+          "[scrollview][hit_test][overflow-symmetric]") {
     ScrollPopoverFixture f(-650, 25);
     REQUIRE(f.sv.hit_test({0, 650}) != f.popover);
 }

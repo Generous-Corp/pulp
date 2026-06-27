@@ -260,7 +260,7 @@
           "test/test_design_import_designmd.cpp"
         ],
         "test_tags": [
-          "[view][import][designmd][issue-1434]"
+          "[view][import][designmd]"
         ],
         "pulp_render_reference": {
           "status": "not-applicable",

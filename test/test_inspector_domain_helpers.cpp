@@ -111,7 +111,7 @@ TEST_CASE("AudioInspector MIDI and underrun histories keep newest entries",
 }
 
 TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
-          "[inspect][audio][telemetry][phase2]") {
+          "[inspect][audio][telemetry][snapshot]") {
     AudioInspector audio;
 
     auto empty = audio.runtime_telemetry();
@@ -149,7 +149,7 @@ TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
 }
 
 TEST_CASE("AudioInspector consumes AudioDeviceManager runtime telemetry",
-          "[inspect][audio][telemetry][phase2]") {
+          "[inspect][audio][telemetry][device-manager]") {
     pulp::audio::AudioDeviceManager manager;
     AudioInspector audio;
 

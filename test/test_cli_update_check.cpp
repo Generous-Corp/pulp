@@ -397,7 +397,7 @@ TEST_CASE("read_toml_key_in_section ignores commented examples",
 }
 
 TEST_CASE("read_toml_key_in_section trims quoted values before inline comments",
-          "[cli][update-check][coverage][phase3]") {
+          "[cli][update-check][toml][comments]") {
     std::string src =
         "[update]\n"
         "mode =   \"manual\"   # selected by user\n"
@@ -408,7 +408,7 @@ TEST_CASE("read_toml_key_in_section trims quoted values before inline comments",
 }
 
 TEST_CASE("write_toml_key_in_section appends into empty section before the next section",
-          "[cli][update-check][coverage][phase3]") {
+          "[cli][update-check][toml][section-insert]") {
     std::string src =
         "[update]\n"
         "\n"
@@ -495,7 +495,7 @@ TEST_CASE("refresh_cache carries forward previous on fetch failure",
     REQUIRE(next.last_check_epoch_sec == 2'000);
 }
 
-// ── resolve_latest_with_persist (#1599) ─────────────────────────────────────
+// ── resolve_latest_with_persist ────────────────────────────────────────
 //
 // Regression for the "cache permanently stuck at v0.73.0 despite v0.78.2
 // being live" trap: pulp_cli.cpp's detached background refresh gets reaped

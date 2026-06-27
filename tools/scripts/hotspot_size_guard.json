@@ -52,8 +52,8 @@
     },
     {
       "path": "test/test_design_import_sources.cpp",
-      "max_loc": 1203,
-      "note": "design-import source parser test split"
+      "max_loc": 1199,
+      "note": "design-import source parser test split; lowered after comment-hygiene cleanup"
     },
     {
       "path": "test/test_renderer3d_shared.hpp",

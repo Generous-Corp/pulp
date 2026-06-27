@@ -96,7 +96,7 @@ TEST_CASE("parse_snooze tolerates whitespace and trailing content",
 }
 
 TEST_CASE("parse_snooze starts at the first numeric run",
-          "[cli][update-mode][coverage][phase3]") {
+          "[cli][update-mode][snooze][parse]") {
     REQUIRE(um::parse_snooze("expires: 1700000000") == 1'700'000'000);
     REQUIRE(um::parse_snooze("abc -42 trailing 99") == -42);
     REQUIRE(um::parse_snooze("12 34") == 12);
@@ -268,13 +268,12 @@ TEST_CASE("pending-upgrade file round-trips through write/read/clear",
     fs::remove_all(dir);
 }
 
-// Issue #590: the auto-mode banner in pulp_cli.cpp must gate its
-// "downloaded / will complete next invocation" notice on
-// write_pending_upgrade succeeding. Exercise the underlying failure mode
-// (non-existent file as the parent path) so a regression in the return-value
-// contract surfaces immediately.
+// The auto-mode banner in pulp_cli.cpp must gate its "downloaded / will
+// complete next invocation" notice on write_pending_upgrade succeeding.
+// Exercise the underlying failure mode so the return-value contract stays
+// visible.
 TEST_CASE("write_pending_upgrade returns false when the parent cannot be created",
-          "[cli][update-mode][issue-590]") {
+          "[cli][update-mode][pending-upgrade][error]") {
     auto dir = make_tmpdir("pending-upgrade-badparent");
     // Create a plain file at what would otherwise be a directory —
     // fs::create_directories refuses to stomp on a regular file, so
@@ -293,15 +292,14 @@ TEST_CASE("write_pending_upgrade returns false when the parent cannot be created
     fs::remove_all(dir);
 }
 
-// Issue #590: the opportunistic tombstone sweep in
-// maybe_complete_pending_upgrade() runs even when no pending marker exists
-// (covers direct `pulp upgrade` flows on Windows). This test asserts the
-// contract of the piece that sweep relies on:
+// The opportunistic tombstone sweep in maybe_complete_pending_upgrade() runs
+// even when no pending marker exists, which covers direct `pulp upgrade` flows
+// on Windows. This test asserts the contract of the piece that sweep relies on:
 // cleanup_tombstone must be safe to call unconditionally, regardless
 // of marker state. The two cases already covered above (present /
 // absent) are what the unconditional call in pulp_cli.cpp depends on.
 TEST_CASE("cleanup_tombstone is safe to call after a no-marker fast path",
-          "[cli][update-mode][issue-590]") {
+          "[cli][update-mode][tombstone][windows]") {
     auto dir = make_tmpdir("tombstone-no-marker");
     auto exe = dir / "pulp";
     std::ofstream(exe) << "live";

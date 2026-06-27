@@ -134,7 +134,7 @@ TEST_CASE("read_plugin_version returns empty when manifest has no version field"
 }
 
 TEST_CASE("read_plugin_version accepts tag-style version strings",
-          "[version-diag][coverage][phase3]") {
+          "[version-diag][plugin-manifest][version-parse]") {
     TempDir tmp;
     auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
     write_file(plugin_json, R"({
@@ -348,14 +348,11 @@ TEST_CASE("read_project_cli_min_version ignores an empty project root",
     REQUIRE(v.raw.empty());
 }
 
-// Issue #546: the earlier scanner treated any line containing the
-// `cli_min_version` substring as a real config entry and grabbed the next
-// quoted value. A commented example therefore produced a false skew warning in
-// `pulp doctor --versions`. The fix strips in-line `#` comments before
-// matching, so the commented line is silently ignored and
-// `read_project_cli_min_version` returns empty.
+// Commented examples must not parse as real `cli_min_version` entries. Strip
+// inline `#` comments before matching so `pulp doctor --versions` does not
+// report false skew from documentation snippets.
 TEST_CASE("read_project_cli_min_version ignores commented-out examples",
-          "[version-diag][issue-499][issue-546]") {
+          "[version-diag][cli-min-version][comments]") {
     TempDir tmp;
     auto toml = tmp.path / "pulp.toml";
     write_file(toml,
@@ -413,7 +410,7 @@ TEST_CASE("read_project_cli_min_version ignores unquoted and malformed values",
     REQUIRE(v.raw.empty());
 }
 
-// ── Per-project skew via VersionReport.projects (#552) ─────────────
+// ── Per-project skew via VersionReport.projects ───────────────────
 
 TEST_CASE("analyze warns per-project when project[].cli_min exceeds CLI",
           "[version-diag][issue-552]") {
@@ -520,7 +517,7 @@ TEST_CASE("analyze uses the path basename when project name is empty",
     REQUIRE(saw_basename);
 }
 
-// ── Plugin ↔ CLI skew detection (#551) ─────────────────────────────
+// ── Plugin ↔ CLI skew detection ───────────────────────────────────
 
 TEST_CASE("read_plugin_min_cli_version scrapes min_cli_version field",
           "[version-diag][issue-551]") {

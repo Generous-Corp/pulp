@@ -1668,6 +1668,12 @@ python3 tools/import-validation/check-source-contracts.py --format markdown
 python3 -m pytest tools/import-validation/test_source_contracts.py -v
 ```
 
+When cleaning Catch2 tags in source-contract test files, update the matching
+`validation.test_tags` entry in `source-contracts.json` in the same change.
+Prefer broad stable tags such as `[view][import][designmd]` when the registry row
+represents a full validation surface; do not narrow it to one subarea tag if the
+roundtrip/contract expects parser, lint, diff, export, and recovery coverage.
+
 The checker also enforces coverage symmetry between
 `parse_design_source()` labels and the registry. When adding a source label
 such as `jsx`, add a matching row to `source-contracts.json` and reference

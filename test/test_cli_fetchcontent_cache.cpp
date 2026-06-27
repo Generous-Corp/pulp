@@ -1,8 +1,8 @@
 // test_cli_fetchcontent_cache.cpp — Unit tests for the
-// `pulp doctor --caches` discovery + healing core. Issue #744.
+// `pulp doctor --caches` discovery + healing core.
 //
-// All four acceptance scenarios from the issue are covered (healthy /
-// dangling / stale-commit / root-owned). Tests inject a deterministic
+// All four accepted cache states are covered (healthy / dangling /
+// stale-commit / root-owned). Tests inject a deterministic
 // `DiscoveryEnv` so they don't touch the developer's real
 // `~/Library/Caches/Pulp/` state — that's the same isolation pattern
 // used by test_cli_version_diag and test_cli_projects_registry.
@@ -693,7 +693,7 @@ TEST_CASE("discover: FetchContent scratch dirs do not register as stale-commit",
     CHECK_FALSE(fcc::any_unhealthy(entries));
 }
 
-// ── PR #753: stale-ref entries must NOT block preflight ────────────────────
+// ── Stale-ref entries must NOT block preflight ─────────────────────────────
 //
 // CMake's pulp_register_fetchcontent_source override path keys on the
 // CURRENT sanitized ref (`<dep>-<ref>`), so leftover `<dep>-<oldref>`
@@ -708,7 +708,7 @@ TEST_CASE("discover: FetchContent scratch dirs do not register as stale-commit",
 //   - apply_fixes()         → still removes stale entries on `--fix`
 
 TEST_CASE("preflight: stale-ref-only state does NOT block build/test",
-          "[fetchcontent_cache][issue-744][pr-753]") {
+          "[fetchcontent_cache][issue-744][stale-ref][preflight]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "choc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     MockState state;
@@ -744,7 +744,7 @@ TEST_CASE("preflight: stale-ref-only state does NOT block build/test",
 }
 
 TEST_CASE("preflight: dangling symlinks DO block build/test",
-          "[fetchcontent_cache][issue-744][pr-753]") {
+          "[fetchcontent_cache][issue-744][dangling][preflight]") {
     // Counter-test: confirm we still gate on truly broken states.
     fs::path root = "/fake/cache";
     fs::path entry = root / "threejs-077dd13c0e869d9f3dbe55875686f920367de457";
@@ -774,7 +774,7 @@ TEST_CASE("preflight: dangling symlinks DO block build/test",
 }
 
 TEST_CASE("preflight: mixed stale + dangling reports only the dangling entry",
-          "[fetchcontent_cache][issue-744][pr-753]") {
+          "[fetchcontent_cache][issue-744][stale-ref][dangling][preflight]") {
     // When both stale and blocking states are present, preflight blocks
     // (because of the dangling), but the rendered report should only
     // mention the truly blocking entries — listing stale entries here
@@ -816,7 +816,7 @@ TEST_CASE("preflight: mixed stale + dangling reports only the dangling entry",
     CHECK(s.find("choc-aaaaa") == std::string::npos);
 }
 
-// ── PR #753: --caches --json exit code reflects health ─────────────────────
+// ── --caches --json exit code reflects health ──────────────────────────────
 //
 // `render_report_json` itself always returns 0, but the cmd_doctor
 // caller is responsible for setting the exit code via any_unhealthy().
@@ -826,7 +826,7 @@ TEST_CASE("preflight: mixed stale + dangling reports only the dangling entry",
 // value for the unhealthy fixture.
 
 TEST_CASE("render_report_json: data surface always returns 0",
-          "[fetchcontent_cache][issue-744][pr-753]") {
+          "[fetchcontent_cache][issue-744][json][health]") {
     fs::path root = "/fake/cache";
     fs::path stale = root / "choc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     MockState state;
@@ -855,7 +855,7 @@ TEST_CASE("render_report_json: data surface always returns 0",
 }
 
 TEST_CASE("render_report_json: healthy fixture reports healthy=true",
-          "[fetchcontent_cache][issue-744][pr-753]") {
+          "[fetchcontent_cache][issue-744][json][health]") {
     fs::path root = "/fake/cache";
     fs::path entry = root / "choc-f0f5cdf5a938b8b779fea6c083571cce5ccab925";
     MockState state;
