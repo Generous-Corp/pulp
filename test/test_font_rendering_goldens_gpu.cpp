@@ -370,15 +370,13 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px 'Hello'",
           "[golden][gpu][skia][font][issue-2257-followup]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host: GPU golden skipped");
     }
 
     std::vector<uint8_t> pixels;
     uint32_t pw = 0, ph = 0;
     if (!gpu_render_text(f, "Inter", 14.0f, "Hello", pixels, pw, ph)) {
-        SUCCEED("GPU readback failed — golden skipped (likely no adapter).");
-        return;
+        SKIP("GPU readback failed: golden skipped (likely no adapter)");
     }
 
     Digest d = digest_from_rgba(pixels, pw, ph);
@@ -394,15 +392,13 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px CJK 日本語",
           "[golden][gpu][skia][font][issue-2257-followup]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host: GPU golden skipped");
     }
 
     std::vector<uint8_t> pixels;
     uint32_t pw = 0, ph = 0;
     if (!gpu_render_text(f, "Inter", 14.0f, "日本語", pixels, pw, ph)) {
-        SUCCEED("GPU readback failed — golden skipped (likely no adapter).");
-        return;
+        SKIP("GPU readback failed: golden skipped (likely no adapter)");
     }
 
     Digest d = digest_from_rgba(pixels, pw, ph);
@@ -413,8 +409,7 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden Inter 14px CJK 日本語",
     // the raster file: this guards CJK cascade on hosts that
     // DO ship a CJK font, without nagging on hosts that don't.
     if (d.opaque_pixels < 20) {
-        SUCCEED("CJK fallback unavailable on this host — GPU golden skipped.");
-        return;
+        SKIP("CJK fallback unavailable on this host: GPU golden skipped");
     }
     expect_digest_matches(d, kGpuCjkInter14,
                           "cjk-inter-14", pixels, pw, ph);
@@ -424,16 +419,14 @@ TEST_CASE("font v2 Slice 3.4 — GPU golden JetBrains Mono 12px 'Hello world'",
           "[golden][gpu][skia][font][issue-2257-followup]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — GPU golden skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host: GPU golden skipped");
     }
 
     std::vector<uint8_t> pixels;
     uint32_t pw = 0, ph = 0;
     if (!gpu_render_text(f, "JetBrains Mono", 12.0f, "Hello world",
                          pixels, pw, ph)) {
-        SUCCEED("GPU readback failed — golden skipped (likely no adapter).");
-        return;
+        SKIP("GPU readback failed: golden skipped (likely no adapter)");
     }
 
     Digest d = digest_from_rgba(pixels, pw, ph);
@@ -456,19 +449,16 @@ TEST_CASE("font v2 Slice 3.4 — GPU render pipeline is deterministic in-process
           "[golden][gpu][skia][font][determinism][issue-2257-followup]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — determinism probe skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host: determinism probe skipped");
     }
 
     std::vector<uint8_t> a, b;
     uint32_t aw = 0, ah = 0, bw = 0, bh = 0;
     if (!gpu_render_text(f, "Inter", 14.0f, "Hello", a, aw, ah)) {
-        SUCCEED("GPU readback failed — determinism probe skipped.");
-        return;
+        SKIP("GPU readback failed: determinism probe skipped");
     }
     if (!gpu_render_text(f, "Inter", 14.0f, "Hello", b, bw, bh)) {
-        SUCCEED("GPU readback failed — determinism probe skipped.");
-        return;
+        SKIP("GPU readback failed: determinism probe skipped");
     }
 
     REQUIRE(aw == bw);
@@ -487,8 +477,7 @@ TEST_CASE("font v2 Slice 3.4 — raster and GPU digests agree within tolerance",
           "[golden][gpu][skia][font][cross-backend][issue-2257-followup]") {
     auto f = make_gpu_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — cross-backend probe skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host: cross-backend probe skipped");
     }
 
     // GPU side.
@@ -496,8 +485,7 @@ TEST_CASE("font v2 Slice 3.4 — raster and GPU digests agree within tolerance",
     uint32_t gpu_w = 0, gpu_h = 0;
     if (!gpu_render_text(f, "Inter", 14.0f, "Hello",
                          gpu_pixels, gpu_w, gpu_h)) {
-        SUCCEED("GPU readback failed — cross-backend probe skipped.");
-        return;
+        SKIP("GPU readback failed: cross-backend probe skipped");
     }
     Digest dg = digest_from_rgba(gpu_pixels, gpu_w, gpu_h);
 
@@ -538,7 +526,7 @@ TEST_CASE("font v2 Slice 3.4 — GPU rendering goldens require Skia on macOS",
     //  2. Skia linked but not on Apple — Dawn-on-Metal is the only
     //     headless GPU lane wired up today; Vulkan + D3D paths are
     //     deferred until those lanes exist.
-    SUCCEED("Skia GPU goldens are gated on PULP_HAS_SKIA && APPLE.");
+    SKIP("Skia GPU goldens are gated on PULP_HAS_SKIA && APPLE");
 }
 
 #endif // PULP_HAS_SKIA && __APPLE__

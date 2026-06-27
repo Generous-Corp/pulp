@@ -1667,7 +1667,7 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         ${SKIA_INCLUDE_DIRS})
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
-    catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
+    catch_discover_tests(pulp-test-font-rendering-goldens-gpu EXTRA_ARGS --allow-running-no-tests)
 
     # GPU view-host-in-plugins — proves a Processor::create_view() editor
     # that sets requires_gpu_host() auto-selects the GPU host, mounts a real
