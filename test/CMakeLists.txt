@@ -1924,6 +1924,13 @@ pulp_add_test_suite(pulp-test-convolver-bg-swap LIBRARIES pulp::signal pulp::run
 # head (small block) + tail (K× larger block) with zero-latency mixing.
 pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 
+# GPU audio runtime: real-time transport (fixed-latency proxy + non-RT worker
+# pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
+# runs on no-GPU CI too.
+pulp_add_test_suite(pulp-test-gpu-audio-transport
+    SOURCES test_gpu_audio_transport.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # Standalone editor chrome helpers

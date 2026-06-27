@@ -1,0 +1,191 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include <pulp/gpu_audio/gpu_audio_node.hpp>
+
+#include <algorithm>
+#include <vector>
+
+using namespace pulp::gpu_audio;
+using pulp::audio::BufferView;
+
+namespace {
+
+// Test-only node: out = gain * in. Deterministic, no GPU — exercises the
+// transport's scheduling, latency, and miss handling.
+class GainNode : public GpuAudioNode {
+public:
+    GainNode(uint32_t channels, uint32_t block, float gain, MissPolicy mp,
+             uint32_t latency = 2, bool supports_fallback = true)
+        : channels_(channels), block_(block), gain_(gain), mp_(mp),
+          latency_(latency), supports_fallback_(supports_fallback) {}
+
+    GpuAudioNodeDescriptor descriptor() const override {
+        GpuAudioNodeDescriptor d;
+        d.name = "gain";
+        d.input_channels = channels_;
+        d.output_channels = channels_;
+        d.block_size = block_;
+        d.sample_rate = 48000;
+        d.latency_blocks = latency_;
+        d.miss_policy = mp_;
+        d.supports_cpu_fallback = supports_fallback_;
+        return d;
+    }
+    bool prepare() override { return true; }
+    void process_block(const BufferView<const float>& in, BufferView<float>& out,
+                       uint32_t n) override {
+        for (uint32_t c = 0; c < channels_; ++c) {
+            const float* s = in.channel_ptr(c);
+            float* d = out.channel_ptr(c);
+            for (uint32_t i = 0; i < n; ++i) d[i] = s[i] * gain_;
+        }
+    }
+
+private:
+    uint32_t channels_, block_;
+    float gain_;
+    MissPolicy mp_;
+    uint32_t latency_;
+    bool supports_fallback_;
+};
+
+// Per-channel storage with stable float / const-float pointer arrays.
+struct Block {
+    Block(uint32_t ch, uint32_t n) : storage(ch, std::vector<float>(n, 0.0f)),
+                                     ptrs(ch), cptrs(ch), n(n) {
+        for (uint32_t c = 0; c < ch; ++c) { ptrs[c] = storage[c].data(); cptrs[c] = storage[c].data(); }
+    }
+    void fill(float v) { for (auto& ch : storage) std::fill(ch.begin(), ch.end(), v); }
+    BufferView<float> view() { return BufferView<float>(ptrs.data(), ptrs.size(), n); }
+    BufferView<const float> cview() { return BufferView<const float>(cptrs.data(), cptrs.size(), n); }
+    std::vector<std::vector<float>> storage;
+    std::vector<float*> ptrs;
+    std::vector<const float*> cptrs;
+    uint32_t n;
+};
+
+} // namespace
+
+TEST_CASE("GpuAudioTransport applies fixed latency + node processing", "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 2, BS = 64, L = 2, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+    REQUIRE(t.latency_samples() == L * BS);
+
+    Block in(CH, BS), out(CH, BS);
+    std::vector<float> first_sample;
+    constexpr int NBLK = 10;
+    for (int k = 0; k < NBLK; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);   // RT: write input, read delayed output
+        t.pump();                // worker keeps pace (one block per call)
+        first_sample.push_back(out.storage[0][0]);
+    }
+
+    for (int k = 0; k < NBLK; ++k) {
+        const float expected = (k >= static_cast<int>(L)) ? 2.0f * static_cast<float>(k - L + 1) : 0.0f;
+        REQUIRE(first_sample[k] == expected);
+    }
+    REQUIRE(t.stats().miss_blocks == 0);
+    REQUIRE(t.stats().produced_blocks == NBLK);
+}
+
+TEST_CASE("GpuAudioTransport miss policy fills dry on starvation", "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    Block in(CH, BS), out(CH, BS);
+    std::vector<float> first_sample;
+    for (int k = 0; k < 4; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);   // NEVER pump → worker starved
+        first_sample.push_back(out.storage[0][0]);
+    }
+
+    REQUIRE(first_sample[0] == 0.0f);
+    REQUIRE(first_sample[1] == 0.0f);
+    REQUIRE(first_sample[2] == 3.0f);   // dry input value k+1 = 3
+    REQUIRE(first_sample[3] == 4.0f);
+    REQUIRE(t.stats().miss_blocks == 2);
+}
+
+TEST_CASE("GpuAudioTransport drops input on a full ring (no block)", "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 1, BS = 32, RING = 4;
+    GainNode node(CH, BS, 1.0f, MissPolicy::Silence, 2);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    Block in(CH, BS), out(CH, BS);
+    in.fill(1.0f);
+    for (int k = 0; k < 20; ++k) {
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+    }
+    REQUIRE(t.stats().input_dropped_frames > 0);
+}
+
+TEST_CASE("GpuAudioTransport rejects invalid descriptor / config", "[gpu_audio][transport]") {
+    // Zero channels.
+    {
+        GainNode bad(0, 64, 1.0f, MissPolicy::Silence, 2);
+        GpuAudioTransport t;
+        REQUIRE_FALSE(t.prepare(&bad, {8}));
+        REQUIRE_FALSE(t.is_prepared());
+    }
+    // ring_blocks too small for latency (needs latency + 2).
+    {
+        GainNode node(1, 64, 1.0f, MissPolicy::Silence, 4);
+        GpuAudioTransport t;
+        REQUIRE_FALSE(t.prepare(&node, {5}));   // 5 < 4 + 2
+        REQUIRE(t.prepare(&node, {6}));         // ok
+    }
+    // CpuFallback miss policy without a real fallback.
+    {
+        GainNode node(1, 64, 1.0f, MissPolicy::CpuFallback, 2, /*supports_fallback=*/false);
+        GpuAudioTransport t;
+        REQUIRE_FALSE(t.prepare(&node, {8}));
+    }
+    // null node.
+    {
+        GpuAudioTransport t;
+        REQUIRE_FALSE(t.prepare(nullptr, {8}));
+    }
+}
+
+TEST_CASE("GpuAudioTransport silences mismatched / too-small views", "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 2, BS = 64, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, 2);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    Block in(CH, BS), out(CH, BS);
+    in.fill(1.0f);
+    out.fill(7.0f);  // sentinel — must be overwritten with silence
+
+    // Wrong block size.
+    auto iv = in.cview();
+    auto ov = out.view();
+    t.process(iv, ov, BS / 2);
+    REQUIRE(out.storage[0][0] == 0.0f);
+
+    // Too few output channels.
+    Block mono_out(1, BS);
+    mono_out.fill(7.0f);
+    auto mov = mono_out.view();
+    t.process(iv, mov, BS);
+    REQUIRE(mono_out.storage[0][0] == 0.0f);
+}
