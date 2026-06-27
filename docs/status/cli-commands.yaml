@@ -207,7 +207,11 @@ commands:
             required: false
           - name: --output
             required: false
+          - name: --title
+            required: false
           - name: --sign-key
+            required: false
+          - name: --min-os
             required: false
       - name: check
         summary: Check signing status of built desktop plugins or Android APK/AAB artifacts
