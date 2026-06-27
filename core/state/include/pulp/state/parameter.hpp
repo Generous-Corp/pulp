@@ -315,6 +315,15 @@ public:
 private:
     std::atomic<float> value_{0.0f};
     std::atomic<float> mod_offset_{0.0f};
+
+    // value_ / mod_offset_ are read and written on the audio thread through
+    // relaxed std::atomic<float> (see get()/set()/get_modulated()). If
+    // std::atomic<float> were not lock-free on a target, those accessors would
+    // fall back to a hidden mutex and violate the audio-thread no-lock contract.
+    // Fail the build instead. See docs/guides/dsp-threading.md "The three rules".
+    static_assert(std::atomic<float>::is_always_lock_free,
+                  "Pulp requires a lock-free std::atomic<float> for real-time-safe "
+                  "parameter access on the audio thread");
 };
 
 /// Callback signature for parameter change notifications.

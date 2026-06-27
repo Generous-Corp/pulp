@@ -15,7 +15,10 @@ off the audio thread, then keep `process()` bounded and predictable.
    `Processor::prepare()`.
 2. **Don't lock.** No `std::mutex::lock()`, no `std::condition_variable`,
    no spinlock with unbounded wait. The atomic accessors on Pulp's
-   `state::ParamValue` / `state::StateStore` are lock-free.
+   `state::ParamValue` / `state::StateStore` are lock-free — and
+   `state::ParamValue` `static_assert`s `std::atomic<float>::is_always_lock_free`,
+   so a target where that fallback would take a hidden mutex fails the build
+   rather than silently violating this rule.
 3. **Don't block on the main thread.** No `std::cout`, no file I/O,
    no `std::async`, no `dispatch_to_main()`-and-wait. If the audio
    thread sends work to the main thread, it does so via a non-blocking
@@ -53,8 +56,10 @@ tails decaying toward silence. Pulp addresses this at two levels:
 
    On targets without a hardware mode (e.g. MSVC/ARM64) the guard is a
    correct no-op (`kHardwareFlushSupported == false`); `snap_to_zero`
-   remains the safety net there. The standalone host wraps its process
-   call in this guard; format adapters wrap theirs where supported.
+   remains the safety net there. The standalone host and **every** format
+   adapter — VST3, AU v2, AU v3, CLAP, and AAX — wrap their real-time
+   callback body in this guard, so a plugin gets denormal flushing in every
+   host, not just the standalone app.
 
 **Determinism contract.** Flush-to-zero changes denormal results to
 zero, so a flushed render is *not bit-identical* to an unflushed one for
