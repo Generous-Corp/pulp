@@ -754,17 +754,17 @@ private:
     std::unordered_map<std::string, wgpu::ComputePipeline> pipeline_cache_;
 
     // Persistent per-N FFT plan: two ping-pong complex buffers (2*N floats),
-    // a uniform for the per-pass params, both bind-group orientations, and a
-    // readback buffer. Built lazily on first use of a given N and reused.
+    // one uniform + one bind group PER pass (so all log2(N) passes plus the
+    // copy-to-readback encode into a single command buffer / single submit),
+    // and a readback buffer. Built lazily on first use of a given N and reused.
     struct FftPlan {
         uint32_t n = 0;
         uint32_t log2n = 0;
         wgpu::Buffer buf_a;       // Storage | CopyDst | CopySrc
         wgpu::Buffer buf_b;       // Storage | CopyDst | CopySrc
-        wgpu::Buffer uniform;     // Uniform | CopyDst (FftParams)
         wgpu::Buffer readback;    // CopyDst | MapRead
-        wgpu::BindGroup bg_ab;    // src=a, dst=b
-        wgpu::BindGroup bg_ba;    // src=b, dst=a
+        std::vector<wgpu::Buffer> uniforms;      // FftParams, one per pass
+        std::vector<wgpu::BindGroup> stage_bgs;  // one per pass, alternating src/dst
     };
     std::unordered_map<uint32_t, FftPlan> fft_plans_;
 
@@ -857,25 +857,38 @@ private:
                              | wgpu::BufferUsage::CopySrc;
         plan.buf_a = create_storage_buffer(bytes, buf_usage);
         plan.buf_b = create_storage_buffer(bytes, buf_usage);
-
-        wgpu::BufferDescriptor udesc{};
-        udesc.size = 16;  // FftParams: u32 n, u32 ns, f32 sign, f32 pad
-        udesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        plan.uniform = device_.CreateBuffer(&udesc);
-
         plan.readback = create_readback_buffer(bytes);
-        if (!plan.buf_a || !plan.buf_b || !plan.uniform || !plan.readback) return nullptr;
+        if (!plan.buf_a || !plan.buf_b || !plan.readback) return nullptr;
 
-        plan.bg_ab = create_bind_group(fft_pipeline_, {plan.buf_a, plan.buf_b, plan.uniform});
-        plan.bg_ba = create_bind_group(fft_pipeline_, {plan.buf_b, plan.buf_a, plan.uniform});
-        if (!plan.bg_ab || !plan.bg_ba) return nullptr;
+        // One uniform + one bind group per pass, so a single command buffer can
+        // encode every pass. Pass i reads from buf_a and writes buf_b on even i,
+        // and the reverse on odd i (Stockham ping-pong starting at buf_a).
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            wgpu::BufferDescriptor udesc{};
+            udesc.size = 16;  // FftParams: u32 n, u32 ns, f32 sign, f32 pad
+            udesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            wgpu::Buffer u = device_.CreateBuffer(&udesc);
+            if (!u) return nullptr;
+
+            const bool src_is_a = (s % 2u == 0u);
+            wgpu::BindGroup bg = create_bind_group(
+                fft_pipeline_,
+                src_is_a ? std::initializer_list<wgpu::Buffer>{plan.buf_a, plan.buf_b, u}
+                         : std::initializer_list<wgpu::Buffer>{plan.buf_b, plan.buf_a, u});
+            if (!bg) return nullptr;
+
+            plan.uniforms.push_back(std::move(u));
+            plan.stage_bgs.push_back(std::move(bg));
+        }
 
         auto inserted = fft_plans_.emplace(n, std::move(plan));
         return &inserted.first->second;
     }
 
-    // Multi-pass Stockham FFT. sign = -1 forward, +1 inverse; `normalize`
-    // applies the 1/N inverse scale on readback. Not real-time safe.
+    // Multi-pass Stockham FFT, encoded as a SINGLE command buffer (all log2(N)
+    // passes + the copy-to-readback in one submit). sign = -1 forward,
+    // +1 inverse; `normalize` applies the 1/N inverse scale on readback. Still
+    // not real-time safe — it blocks on the readback map.
     bool fft_run(const float* complex_in, float* complex_out, uint32_t n,
                  float sign, bool normalize) {
         // kMaxFftN (file scope) rejects transforms that would overflow the
@@ -888,22 +901,35 @@ private:
 
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         queue_.WriteBuffer(plan->buf_a, 0, complex_in, bytes);
-
-        const uint32_t half = n / 2u;
-        const uint32_t workgroups = (half + 255u) / 256u;
-        bool src_is_a = true;
         for (uint32_t s = 0; s < plan->log2n; ++s) {
             struct FftParams { uint32_t n; uint32_t ns; float sign; float pad; };
             FftParams params{n, 1u << s, sign, 0.0f};
-            queue_.WriteBuffer(plan->uniform, 0, &params, sizeof(params));
-            dispatch(fft_pipeline_, src_is_a ? plan->bg_ab : plan->bg_ba, workgroups);
-            src_is_a = !src_is_a;
+            queue_.WriteBuffer(plan->uniforms[s], 0, &params, sizeof(params));
         }
 
+        // Encode all passes + the result copy into one command buffer. Each
+        // pass is its own compute pass; WebGPU/Dawn inserts the required
+        // synchronization/resource transitions between encoded uses, so one
+        // pass's storage writes are visible to the next pass's reads.
+        const uint32_t half = n / 2u;
+        const uint32_t workgroups = (half + 255u) / 256u;
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        for (uint32_t s = 0; s < plan->log2n; ++s) {
+            wgpu::ComputePassDescriptor pass_desc{};
+            auto pass = encoder.BeginComputePass(&pass_desc);
+            pass.SetPipeline(fft_pipeline_);
+            pass.SetBindGroup(0, plan->stage_bgs[s]);
+            pass.DispatchWorkgroups(workgroups);
+            pass.End();
+        }
         // After log2(N) ping-pong passes the result lives in buf_b for odd
         // log2(N), buf_a for even (we always start reading buf_a).
         wgpu::Buffer& result = (plan->log2n & 1u) ? plan->buf_b : plan->buf_a;
-        copy_buffer(result, plan->readback, bytes);
+        encoder.CopyBufferToBuffer(result, 0, plan->readback, 0, bytes);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
         if (!read_back(plan->readback, complex_out, bytes)) return false;
 
         if (normalize) {

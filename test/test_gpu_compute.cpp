@@ -300,7 +300,7 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
     constexpr int iters = 20;
 
     std::printf("\n");
-    std::printf("  FFT: CPU (pulp::signal::Fft) vs GPU (Stockham, per-pass submit)\n");
+    std::printf("  FFT: CPU (pulp::signal::Fft) vs GPU (Stockham, single submit + sync readback)\n");
     std::printf("  %8s | %12s | %12s | %9s | %s\n",
                 "N", "CPU us", "GPU us", "speedup", "winner");
     std::printf("  ---------+--------------+--------------+-----------+--------\n");
