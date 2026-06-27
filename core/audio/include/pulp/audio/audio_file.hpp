@@ -35,10 +35,11 @@ std::optional<AudioFileInfo> read_audio_file_info(const std::string& path);
 std::optional<AudioFileData> read_audio_file(const std::string& path);
 
 // WAV sample format for writing. Int16 is the compact default (≈ −96 dBFS
-// noise floor); Float32 preserves the full float render — needed when the
-// downstream analysis cares about residuals below the int16 floor (null/compare)
-// or about samples beyond ±1.0 (no hard clip on write).
-enum class WavBitDepth { Int16, Float32 };
+// noise floor); Int24 is a middle ground (≈ −144 dBFS floor, integer, universal
+// DAW/tool compatibility, 75% the size of float); Float32 preserves the full
+// render — needed when the downstream analysis cares about residuals below the
+// int24 floor or about samples beyond ±1.0 (no hard clip on write).
+enum class WavBitDepth { Int16, Int24, Float32 };
 
 // Write audio data to a WAV file (int16).
 bool write_wav_file(const std::string& path, const AudioFileData& data);

@@ -566,6 +566,9 @@ commands:
       - name: --audio-capture-rolling-frames
         kind: option
         description: Window in samples for --audio-capture-rolling (0 = as much as the ring holds, clamped). Forwarded as --audio-capture-rolling-frames <n> and PULP_AUDIO_CAPTURE_ROLLING_FRAMES=<n>.
+      - name: --audio-capture-rolling-format
+        kind: option
+        description: "Sample format for --audio-capture-rolling: float (default, full precision) or int24 (smaller, integer, ~-144 dBFS floor, universal DAW compatibility). Forwarded as --audio-capture-rolling-format <fmt> and PULP_AUDIO_CAPTURE_ROLLING_FORMAT=<fmt>."
       - name: PULP_RUN_AUDIO_NOTICE
         kind: environment
         description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.

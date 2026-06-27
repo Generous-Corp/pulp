@@ -209,6 +209,56 @@ def run_and_export(
     return report
 
 
+def run_real_engine(
+    ratio: float = 2.0,
+    character: str = "clean",
+    case: QualityCase = P0A_CASE,
+) -> dict[str, Any]:
+    """Validate the REAL Pulp stretch engine (stretchcli): render a source, stretch it
+    with the actual `pulp::signal::OfflineStretch`, and run the detectors on its output
+    vs a transient-faithful reference. Returns the report (with an `engine` block), or a
+    skip report when stretchcli isn't built. The strongest credibility path — the
+    detectors run on the product engine's real artifacts, not a synthetic degradation."""
+    import os
+    import tempfile
+
+    from . import engine
+
+    if not engine.available():
+        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
+                "reason": "stretchcli not built"}
+
+    sr = int(case.params["sr"])
+    with tempfile.TemporaryDirectory() as d:
+        src_wav = os.path.join(d, "source.wav")
+        out_wav = os.path.join(d, "engine.wav")
+        source, _ = generate.render_drum_break(sr, case.params["bpm"], 1.0, int(case.params["seed"]))
+        audio_io.save_wav(src_wav, source, sr)
+        eng_res = engine.stretch(src_wav, out_wav, ratio, character=character)
+        if eng_res["status"] != "ok":
+            return {"verdict": "ERROR", "engine": eng_res}
+
+        reference, _ = generate.render_drum_break(sr, case.params["bpm"], ratio, int(case.params["seed"]))
+        candidate, _ = audio_io.load_wav(out_wav)
+        candidate = audio_io.level_match(candidate, reference)
+
+    ref_onsets = align.detect_onsets(reference, sr)
+    cand_onsets = align.detect_onsets(candidate, sr)
+    pairs = align.map_onsets(ref_onsets, cand_onsets, len(reference) / sr, len(candidate) / sr)
+    detectors = [t for t in case.detector_tags if t in _DETECTORS]
+    results = [_DETECTORS[name](reference, candidate, sr, pairs) for name in detectors]
+
+    determinism = {"level_match": "rms", "alignment": "onset-map", "sample_rate": sr,
+                   "onset_match": {"ref_onsets": len(ref_onsets), "cand_onsets": len(cand_onsets),
+                                   "matched_pairs": len(pairs)}}
+    recipe = {"case": case.case_id, "family": case.family, "source": "real-engine",
+              "engine": "stretchcli", "character": character, "ratio": ratio}
+    verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
+    report = build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
+    report["engine"] = eng_res
+    return report
+
+
 def run_p0a(smear: bool, latency_ms: float = 5.0, smear_ms: float = 8.0,
             case: QualityCase = P0A_CASE) -> dict[str, Any]:
     """The P0a gate: the drum-break with just the transient-sharpness detector."""

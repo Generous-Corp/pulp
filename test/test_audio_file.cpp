@@ -668,6 +668,40 @@ TEST_CASE("Float32 WAV preserves precision below the int16 floor", "[audio][file
     std::filesystem::remove(default_path);
 }
 
+TEST_CASE("Int24 WAV sits between int16 and float precision", "[audio][file]") {
+    auto i24_path = std::filesystem::temp_directory_path() / "pulp_test_audio_i24.wav";
+    auto i16_path = std::filesystem::temp_directory_path() / "pulp_test_audio_i24_i16.wav";
+
+    // ~ -100 dBFS: below the int16 step (~3.05e-5, ≈ -90 dBFS) but well above the
+    // int24 step (~1.2e-7, ≈ -138 dBFS). int16 quantizes to 0; int24 keeps it.
+    AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels.resize(1);
+    data.channels[0] = {1.0e-5f, -1.0e-5f, 2.0e-5f, -2.0e-5f};
+
+    REQUIRE(write_wav_file(i24_path.string(), data, WavBitDepth::Int24));
+    REQUIRE(write_wav_file(i16_path.string(), data, WavBitDepth::Int16));
+
+    auto i24 = read_audio_file(i24_path.string());
+    auto i16 = read_audio_file(i16_path.string());
+    REQUIRE(i24.has_value());
+    REQUIRE(i16.has_value());
+
+    auto info = read_audio_file_info(i24_path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->bits_per_sample == 24);
+
+    for (size_t i = 0; i < data.channels[0].size(); ++i) {
+        // int24 preserves the value within its quantization step…
+        REQUIRE(std::abs(i24->channels[0][i] - data.channels[0][i]) < 1.0e-6f);
+        // …while int16 collapses the same value to silence.
+        REQUIRE(i16->channels[0][i] == 0.0f);
+    }
+
+    std::filesystem::remove(i24_path);
+    std::filesystem::remove(i16_path);
+}
+
 TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     auto result = read_audio_file("/nonexistent/path.wav");
     REQUIRE_FALSE(result.has_value());

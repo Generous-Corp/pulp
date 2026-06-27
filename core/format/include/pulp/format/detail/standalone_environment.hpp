@@ -113,6 +113,8 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
         if (parse_positive_frame_delay(*frames, parsed))
             config.audio_capture_rolling_frames = parsed;
     }
+    if (auto fmt = runtime::get_env("PULP_AUDIO_CAPTURE_ROLLING_FORMAT"))
+        config.audio_capture_rolling_int24 = (*fmt == "int24");
     if (!config.audio_capture_rolling_path.empty())
         config.headless = true;
 
