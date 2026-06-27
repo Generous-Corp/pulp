@@ -38,12 +38,12 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 // ── CSS filter chain pixel readback ────────────────────────────────────
-// Regression: SkColorFilters::Matrix translation column is in 0..255
-// space. `contrast(0)` must produce mid-gray (~128) and `invert(1)`
-// must map black to white pixel-for-pixel.
-// Regression: opacity() must remain in the composed chain at its
-// source-order position so subsequent filters (drop-shadow) see the
-// reduced alpha as their input.
+// SkColorFilters::Matrix translation column is in 0..255 space:
+// `contrast(0)` must produce mid-gray (~128) and `invert(1)` must map
+// black to white pixel-for-pixel.
+// opacity() must remain in the composed chain at its source-order
+// position so subsequent filters (drop-shadow) see the reduced alpha as
+// their input.
 TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
           "[canvas][skia][filter-chain][!mayfail]") {
     constexpr int kW = 16;
@@ -181,8 +181,8 @@ TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
     REQUIRE(any_channel_differs);
 }
 
-// Regression test: `parse_filter_chain("drop-shadow(dx dy blur color)")`
-// must return non-null and the resulting SkImageFilter must produce a
+// `parse_filter_chain("drop-shadow(dx dy blur color)")` must return
+// non-null, and the resulting SkImageFilter must produce a
 // visible offset shadow when rendered through SkiaCanvas::set_filter().
 TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
           "[canvas][skia][filter-chain][drop-shadow][!mayfail]") {
@@ -260,9 +260,8 @@ TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
 // ── Portable filter-chain matrix math ──────────────────────────────────
 // These tests run on every platform (no Skia required) and dry-run the
 // SAME float math the production save_layer_with_filters() switch uses
-// to populate SkColorMatrix entries. They guard against the two
-// regressions independently of whether Skia is linked into the test
-// binary:
+// to populate SkColorMatrix entries. They guard these known defect cases
+// independently of whether Skia is linked into the test binary:
 //   - contrast / invert bias must be in 0..255 space.
 //   - opacity() must be a per-position color matrix.
 //

@@ -129,11 +129,11 @@ TEST_CASE("SpectralFrameEngine neutral reconstruction below -100 dBFS",
 
 TEST_CASE("SpectralFrameEngine tapers stream edges instead of spiking",
           "[signal][spectral-frame-engine][issue-3975]") {
-    // Regression for #3975: the OLA normalization used to divide
-    // partial-overlap samples at the very start of the stream by a
-    // near-zero coverage, producing a full-scale spike in the first
-    // ~fft_size/hop samples. The whole output — including sample 0 —
-    // must stay within a small per-sample step for a sustained tone.
+    // #3975: OLA normalization must not divide start-of-stream
+    // partial-overlap samples by near-zero coverage, which produces a
+    // full-scale spike in the first ~fft_size/hop samples. The whole
+    // output — including sample 0 — must stay within a small per-sample
+    // step for a sustained tone.
     SpectralFrameEngineConfig config;
     config.fft_size = 2048;
     config.analysis_hop = 512;
@@ -150,7 +150,7 @@ TEST_CASE("SpectralFrameEngine tapers stream edges instead of spiking",
     }
     INFO("whole-stream max step: " << max_step << ", peak: " << peak);
     // A 440+1237 Hz tone at 0.7 amp has per-sample steps well under 0.2;
-    // the old edge spike was ~2.0 (full-scale). Peak must not exceed the
+    // the pre-fix edge spike was ~2.0 (full-scale). Peak must not exceed the
     // input amplitude envelope.
     REQUIRE(max_step < 0.3f);
     REQUIRE(peak < 1.0f);

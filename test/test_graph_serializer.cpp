@@ -1715,8 +1715,8 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
     REQUIRE_FALSE(result.missing_plugins.empty());
 
     REQUIRE(dst.prepare(48000.0, 64));
-    // The placeholder Plugin node is now executor-eligible: it routes through the
-    // canonical executor's pass-through-or-zero, matching the legacy walk.
+    // The placeholder Plugin node is executor-eligible and routes through the
+    // canonical executor's pass-through-or-zero behavior.
     REQUIRE(pulp::host::signal_graph_executor_eligible(dst));
 
     const int num_samples = 64;
@@ -1744,9 +1744,9 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
     }
 
     // Run a second block whose input is all zeros; stale data from the
-    // first block must NOT leak through. Before the fix, the placeholder
-    // node wrote nothing and the next AudioOutput accumulation carried
-    // whatever lived in output_data scratch.
+    // first block must NOT leak through. A placeholder that writes nothing
+    // lets the next AudioOutput accumulation carry whatever lived in
+    // output_data scratch.
     for (int i = 0; i < num_samples; ++i) {
         in_l[i] = 0.0f;
         in_r[i] = 0.0f;

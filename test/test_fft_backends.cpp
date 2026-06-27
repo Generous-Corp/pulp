@@ -72,13 +72,13 @@ void unset_env_var(const char* name) {
 
 }  // namespace
 
-// Regression: MKL DftiSetValue is a variadic API.
-// Calling it through a fixed-signature `fn_set_f` reinterpret_cast was UB
+// MKL DftiSetValue is a variadic API. Calling it through a fixed-signature
+// `fn_set_f`-style reinterpret_cast is UB
 // on most ABIs (varargs uses different register/stack slots than typed args)
 // and would silently mis-pass the backward-scale float on platforms where
-// MKL is available. The fix removed `fn_set_f` and routes the float through
-// the variadic `b.set(...)` entry. This test pins the public surface so a
-// future refactor cannot silently reintroduce the wrong call path.
+// MKL is available. The float must route through the variadic `b.set(...)`
+// entry. This test pins the public surface so a future refactor cannot silently
+// reintroduce the wrong fixed-signature call path.
 TEST_CASE("MKL backend availability stays gated on runtime presence "
           "(no UB call path)",
           "[fft][backend][mkl][issue-3021]") {
