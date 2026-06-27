@@ -600,7 +600,7 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
 }
 
-TEST_CASE("parse_v0_tsx resolves indexed useState value bindings (PR #3128 review)",
+TEST_CASE("parse_v0_tsx resolves indexed useState value bindings",
           "[view][import][cpp-codegen]") {
     // Regression: value={params[0]} validated its base identifier but returned
     // the full "params[0]" expression as the lookup key, so the initial value

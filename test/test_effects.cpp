@@ -92,7 +92,7 @@ TEST_CASE("apply_shadow records generic canvas setup commands",
 }
 
 TEST_CASE("direct blur and color adjustment calls are generic no-ops",
-          "[canvas][effects][coverage][phase3]") {
+          "[canvas][effects][coverage]") {
     RecordingCanvas canvas;
 
     apply_blur(canvas, BlurEffect{2.0f, 5.0f});
@@ -102,7 +102,7 @@ TEST_CASE("direct blur and color adjustment calls are generic no-ops",
 }
 
 TEST_CASE("effect layers can be nested and restore in order",
-          "[canvas][effects][coverage][phase3]") {
+          "[canvas][effects][coverage]") {
     RecordingCanvas canvas;
 
     begin_effect_layer(canvas, BlurEffect{1.0f, 2.0f});

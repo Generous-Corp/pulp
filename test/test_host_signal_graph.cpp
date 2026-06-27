@@ -1,5 +1,5 @@
-// SignalGraph tests, split out of test_host.cpp (P11-5, #2647) to bring the
-// 2,190-line parent under the 2,000-line target. Self-contained: uses
+// SignalGraph tests live separately from test_host.cpp so the host test surface
+// stays reviewable. Self-contained: uses
 // SignalGraph from pulp/host/signal_graph.hpp (in the shared host includes) and
 // carries its own interleaved helper namespaces.
 #include <catch2/catch_test_macros.hpp>
@@ -124,7 +124,7 @@ TEST_CASE("SignalGraph registers and processes custom nodes",
 }
 
 namespace {
-// A stateful custom node for the Phase 5 lifecycle tests: its opaque instance
+// A stateful custom node for lifecycle tests: its opaque instance
 // holds a `level` multiplier; process_instance scales the input by it;
 // save/load_state serialize the level as 4 little-endian bytes.
 struct StatefulLevel {
@@ -208,7 +208,7 @@ TEST_CASE("SignalGraph stateful custom node: lifecycle + state round-trip",
 }
 
 TEST_CASE("SignalGraph generated custom state changes require re-prepare",
-          "[host][graph][generated][rt-safety][phase3]") {
+          "[host][graph][generated][rt-safety]") {
     SignalGraph graph;
     REQUIRE(graph.register_custom_node_type(make_level_type()));
 
@@ -372,7 +372,7 @@ TEST_CASE("SignalGraph custom node registrations invalidate matching snapshots",
 }
 
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
-          "[host][graph][coverage][phase3]") {
+          "[host][graph][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "Input");
     auto gain = graph.add_gain_node("Gain");
@@ -506,7 +506,7 @@ TEST_CASE("SignalGraph MIDI nodes", "[host][graph]") {
 }
 
 TEST_CASE("SignalGraph routes input -> gain -> output", "[host][graph][routing]") {
-    // Validates the Phase 2 graph execution path: per-node scratch buffers,
+    // Validates the graph execution path: per-node scratch buffers,
     // inbound connection summing, gain application, and output accumulation.
     SignalGraph graph;
     auto in  = graph.add_input_node(2, "in");
@@ -866,7 +866,7 @@ TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
 }
 
 TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
-          "[host][graph][limits][phase2]") {
+          "[host][graph][limits]") {
     SECTION("node count") {
         SignalGraph graph;
         auto limits = graph.limits();
@@ -930,7 +930,7 @@ TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
 }
 
 TEST_CASE("SignalGraph generated graph validation reports limit reasons",
-          "[host][graph][generated][limits][phase3]") {
+          "[host][graph][generated][limits]") {
     SECTION("valid graph") {
         SignalGraph graph;
         auto input = graph.add_input_node(1, "in");
@@ -1076,7 +1076,7 @@ TEST_CASE("SignalGraph generated graph validation reports limit reasons",
 }
 
 TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
-          "[host][graph][limits][scale][phase2]") {
+          "[host][graph][limits][scale]") {
     SignalGraph graph;
     constexpr int kGainNodes = 128;
     constexpr int kBlock = 16;
@@ -1134,7 +1134,7 @@ TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
 }
 
 TEST_CASE("SignalGraph exposes prepared runtime stats",
-          "[host][graph][stats][phase2]") {
+          "[host][graph][stats]") {
     SignalGraph graph;
     REQUIRE(graph.prepared_stats().node_count == 0);
 
@@ -1165,7 +1165,7 @@ TEST_CASE("SignalGraph exposes prepared runtime stats",
 }
 
 TEST_CASE("SignalGraph evaluates optional runtime budget from prepared stats",
-          "[host][graph][budget-policy][phase4]") {
+          "[host][graph][budget-policy]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1202,7 +1202,7 @@ TEST_CASE("SignalGraph evaluates optional runtime budget from prepared stats",
 }
 
 TEST_CASE("SignalGraph optional runtime budget reports unprepared graphs",
-          "[host][graph][budget-policy][phase4]") {
+          "[host][graph][budget-policy]") {
     SignalGraph graph;
     pulp::runtime::RuntimeBudgetFrame frame(0);
 
@@ -1216,7 +1216,7 @@ TEST_CASE("SignalGraph optional runtime budget reports unprepared graphs",
 }
 
 TEST_CASE("SignalGraph optional runtime budget has deterministic large-graph cost",
-          "[host][graph][budget-policy][scale][phase4]") {
+          "[host][graph][budget-policy][scale]") {
     SignalGraph graph;
     constexpr int kGainNodes = 128;
     constexpr int kBlock = 16;
@@ -1261,7 +1261,7 @@ TEST_CASE("SignalGraph optional runtime budget has deterministic large-graph cos
 }
 
 TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
-          "[host][graph][stats][limits][phase2]") {
+          "[host][graph][stats][limits]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1282,7 +1282,7 @@ TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
 
 #if defined(__unix__) || defined(__APPLE__)
 TEST_CASE("SignalGraph optional runtime budget path allocates zero times",
-          "[host][graph][budget-policy][rt-safety][phase4]") {
+          "[host][graph][budget-policy][rt-safety]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1300,7 +1300,7 @@ TEST_CASE("SignalGraph optional runtime budget path allocates zero times",
 }
 
 TEST_CASE("SignalGraph prepared runtime stats path allocates zero times",
-          "[host][graph][stats][rt-safety][phase2]") {
+          "[host][graph][stats][rt-safety]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1341,7 +1341,7 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
 }
 
 TEST_CASE("SignalGraph rejects audio connections with invalid ports",
-          "[host][graph][routing][coverage][phase3]") {
+          "[host][graph][routing][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1476,7 +1476,7 @@ private:
 } // namespace
 
 TEST_CASE("SignalGraph prepare failure leaves process output silent",
-          "[host][graph][coverage][phase3]") {
+          "[host][graph][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto plugin = graph.add_plugin_node(std::make_unique<PrepareFailPlugin>(),
@@ -1503,7 +1503,7 @@ TEST_CASE("SignalGraph prepare failure leaves process output silent",
 }
 
 TEST_CASE("SignalGraph process silences oversized blocks",
-          "[host][graph][coverage][phase3]") {
+          "[host][graph][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1526,7 +1526,7 @@ TEST_CASE("SignalGraph process silences oversized blocks",
 }
 
 TEST_CASE("SignalGraph process ignores non-positive block sizes",
-          "[host][graph][coverage][phase3]") {
+          "[host][graph][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1550,7 +1550,7 @@ TEST_CASE("SignalGraph process ignores non-positive block sizes",
 }
 
 TEST_CASE("SignalGraph clears stale audio input channels",
-          "[host][graph][routing][coverage][phase3]") {
+          "[host][graph][routing][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(2, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1587,7 +1587,7 @@ TEST_CASE("SignalGraph clears stale audio input channels",
 }
 
 TEST_CASE("SignalGraph placeholder plugin nodes preserve identity and clear extra outputs",
-          "[host][graph][routing][coverage][phase3]") {
+          "[host][graph][routing][coverage]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     PluginInfo missing = make_plugin_info("Missing CLAP", 1, 2);
@@ -2226,7 +2226,7 @@ TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
 }
 
 TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
-          "[host][graph][midi][coverage][phase3]") {
+          "[host][graph][midi][coverage]") {
     SignalGraph graph;
     auto midi_in = graph.add_midi_input_node("keys");
     auto midi_out = graph.add_midi_output_node("thru");
@@ -2467,7 +2467,7 @@ TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
     graph.release();
 }
 
-// ── Phase 1E connect_automation test ────────────────────────────────────
+// ── connect_automation tests ─────────────────────────────────────────────
 
 namespace {
 // Plugin exposing a single automatable param and recording every
@@ -2794,7 +2794,7 @@ TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
 }
 
 TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
-          "[host][graph][automation][coverage][phase3]") {
+          "[host][graph][automation][coverage]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1);
     auto out_node = graph.add_output_node(1);
@@ -2815,7 +2815,7 @@ TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
 }
 
 TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
-          "[host][graph][automation][coverage][phase3]") {
+          "[host][graph][automation][coverage]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -2846,7 +2846,7 @@ TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
 }
 
 TEST_CASE("SignalGraph automation clamps add-mode and stored smoothing",
-          "[host][graph][automation][coverage][phase3]") {
+          "[host][graph][automation][coverage]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>();
@@ -2945,7 +2945,7 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
 }
 
 TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cycle edges",
-          "[host][graph][automation][audio-rate][coverage][phase3]") {
+          "[host][graph][automation][audio-rate][coverage]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -3115,7 +3115,7 @@ TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge orde
 }
 
 TEST_CASE("SignalGraph audio-rate replace and add modulation clamp to parameter bounds",
-          "[host][graph][automation][audio-rate][coverage][phase3]") {
+          "[host][graph][automation][audio-rate][coverage]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>(
@@ -3238,7 +3238,7 @@ TEST_CASE("SignalGraph audio-rate modulation fails closed when event capacity is
 
 #if defined(__unix__) || defined(__APPLE__)
 TEST_CASE("SignalGraph plugin automation process uses prepared scratch without allocation",
-          "[host][graph][automation][rt-safety][phase2]") {
+          "[host][graph][automation][rt-safety]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<FixedAutomationProbe>();
@@ -3486,7 +3486,7 @@ private:
 } // namespace
 
 TEST_CASE("SignalGraph dispatches plugin nodes through ProcessBuffers",
-          "[host][graph][process-buffers][phase2]") {
+          "[host][graph][process-buffers]") {
     SignalGraph graph;
     auto in = graph.add_input_node(2, "in");
     auto slot = std::make_unique<ProcessBufferAwareSlot>();
@@ -3586,7 +3586,7 @@ private:
 } // namespace
 
 TEST_CASE("SignalGraph routes multi-output plugin ProcessBuffers to AudioOutput",
-          "[host][graph][process-buffers][phase2][multi-output]") {
+          "[host][graph][process-buffers][multi-output]") {
     SignalGraph graph;
     auto slot = std::make_unique<MultiOutputProcessBufferSlot>();
     auto* slot_ptr = slot.get();
@@ -3962,4 +3962,4 @@ TEST_CASE("SignalGraph routed_walk_fallbacks() stays zero for routed + walk-by-c
     }
 }
 
-// ── Phase 3 GraphSerializer round-trip ──────────────────────────────────
+// ── GraphSerializer round-trip ───────────────────────────────────────────

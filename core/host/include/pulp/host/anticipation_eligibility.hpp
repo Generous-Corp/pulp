@@ -11,8 +11,8 @@ namespace pulp::host {
 struct GraphNode;
 struct Connection;
 
-// Why a node may NOT be rendered ahead of the audio deadline (anticipative
-// rendering, masterwork Phase 6). Anticipation pre-computes a latent subgraph's
+// Why a node may NOT be rendered ahead of the audio deadline. Anticipation
+// pre-computes a latent subgraph's
 // output into a buffer during earlier blocks' slack so a CPU spike is absorbed
 // off the critical block — but only for work whose result for a FUTURE block can
 // be computed from inputs already available, with no dependence on live or

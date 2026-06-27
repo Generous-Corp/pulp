@@ -189,14 +189,14 @@ TEST_CASE("TiffWriter rejects mismatched buffer sizes",
     REQUIRE(encoded.empty());
 }
 
-// Regression: PR #3017 — big-endian inline TIFF SHORT values were read as
-// low 16 bits of value_or_offset, which returns 0 in MM files
-// (where SHORT is left-justified in the 4-byte slot). This caused valid
-// big-endian baseline TIFFs to be rejected or decoded incorrectly. Build a
-// minimal 2×1 grayscale uncompressed MM TIFF by hand and prove the
-// reader extracts the right Width/Height/Compression/Photometric.
+// Regression coverage: big-endian inline TIFF SHORT values were read as low 16
+// bits of value_or_offset, which returns 0 in MM files (where SHORT is
+// left-justified in the 4-byte slot). This caused valid big-endian baseline
+// TIFFs to be rejected or decoded incorrectly. Build a minimal 2x1 grayscale
+// uncompressed MM TIFF by hand and prove the reader extracts the right
+// Width/Height/Compression/Photometric.
 TEST_CASE("TiffReader decodes big-endian inline SHORT values correctly "
-          "(regression: PR #3017 review)",
+          "(regression coverage)",
           "[image-codecs][tiff][issue-3017]") {
     // Big-endian TIFF: 'MM', magic 42, IFD at offset 8.
     // Layout chosen so IFD entries with SHORT inline values exercise the

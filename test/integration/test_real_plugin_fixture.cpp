@@ -160,13 +160,13 @@ TEST_CASE("resolver: TBD entry without override never silently passes",
     REQUIRE(r.skip_reason.find("PULP_REAL_PLUGIN_CACHE") != std::string::npos);
 }
 
-// Regression (#3015): The developer-supplied lane previously
-// accepted ANY existing path, including zero-byte placeholders left over
-// from a `touch $PULP_REAL_PLUGIN_CACHE/vital/Vital.vst3` mistake.
-// `PluginSlot::load` would then hard-fail on the bogus bundle instead of
-// the resolver returning a clean SKIP with actionable guidance.
+// Regression coverage: the developer-supplied lane previously accepted ANY
+// existing path, including zero-byte placeholders left over from a
+// `touch $PULP_REAL_PLUGIN_CACHE/vital/Vital.vst3` mistake. `PluginSlot::load`
+// would then hard-fail on the bogus bundle instead of the resolver returning a
+// clean SKIP with actionable guidance.
 TEST_CASE("resolver: developer-supplied lane skips an empty-file bundle "
-          "(regression: PR #3015 review)",
+          "(regression coverage)",
           "[host][integration][real-plugins][resolver][issue-3015]") {
     TempCache cache("tbd-empty-bundle-file");
     const auto e = make_entry("vital-like", "Vital.vst3", "TBD");
@@ -178,7 +178,7 @@ TEST_CASE("resolver: developer-supplied lane skips an empty-file bundle "
 }
 
 TEST_CASE("resolver: developer-supplied lane skips an empty-directory bundle "
-          "(regression: PR #3015 review)",
+          "(regression coverage)",
           "[host][integration][real-plugins][resolver][issue-3015]") {
     TempCache cache("tbd-empty-bundle-dir");
     const auto e = make_entry("vital-like", "Vital.vst3", "TBD");

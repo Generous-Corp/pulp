@@ -247,7 +247,7 @@ TEST_CASE("AlertWindow show forces at least one button when none added",
     REQUIRE(a.button_label(0) == "OK");
 }
 
-// ── PR #3006 regression: native close routing ──────────────────────────────
+// Native close routing regression coverage.
 //
 // On Apple platforms `WindowHost::create` ignores the registered factory
 // entirely and always returns the native NSWindow-backed host (see
@@ -307,7 +307,7 @@ struct ScopedFakeWindowFactory {
 } // namespace
 
 TEST_CASE("DocumentWindow::show() routes native closes through the "
-          "confirmation handler (regression: PR #3006 review)",
+          "confirmation handler (regression coverage)",
           "[view][window-classes][document-window][issue-3006]") {
     ScopedFakeWindowFactory factory;
     View root;
@@ -323,8 +323,8 @@ TEST_CASE("DocumentWindow::show() routes native closes through the "
     REQUIRE(doc.show());
     REQUIRE(factory.last_host != nullptr);
 
-    // Simulate a native title-bar close. The hook MUST run (otherwise the
-    // PR #3006 bug stands — close affordances bypass the hook).
+    // Simulate a native title-bar close. The hook MUST run so close affordances
+    // cannot bypass the confirmation handler.
     factory.last_host->fire_native_close();
     REQUIRE(hook_calls == 1);
 
@@ -336,7 +336,7 @@ TEST_CASE("DocumentWindow::show() routes native closes through the "
 }
 
 TEST_CASE("DialogWindow::show() emits closed via the completion handler "
-          "when the native window closes (regression: PR #3006 review)",
+          "when the native window closes (regression coverage)",
           "[view][window-classes][dialog-window][issue-3006]") {
     ScopedFakeWindowFactory factory;
     View content;

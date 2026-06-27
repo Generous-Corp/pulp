@@ -103,7 +103,7 @@ TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
 }
 
 TEST_CASE("DelayLine fractional reads interpolate across wrapped write positions",
-          "[signal][delay][coverage][phase3-batch756]") {
+          "[signal][delay][coverage]") {
     DelayLine dl;
     dl.prepare(3);
 
@@ -991,7 +991,7 @@ TEST_CASE("WaveShaper fold", "[signal][waveshaper]") {
 }
 
 TEST_CASE("WaveShaper handles zero and negative length buffers",
-          "[signal][waveshaper][coverage][phase3-batch756]") {
+          "[signal][waveshaper][coverage]") {
     WaveShaper ws;
     ws.set_curve(WaveShaper::Curve::hard_clip);
     ws.set_drive(8.0f);
@@ -1113,7 +1113,7 @@ TEST_CASE("NoiseGate clamps range, instant timing, reset, and buffers",
 }
 
 TEST_CASE("NoiseGate ignores nonpositive buffer lengths",
-          "[signal][gate][coverage][phase3-batch756]") {
+          "[signal][gate][coverage]") {
     NoiseGate gate;
     gate.set_sample_rate(1000.0f);
     gate.set_params({-20.0f, 20.0f, 0.0f, 0.0f, -24.0f});
@@ -1301,7 +1301,7 @@ TEST_CASE("Panner clamps and processes stereo in place",
 }
 
 TEST_CASE("Panner preserves equal-power mono energy and input sign",
-          "[signal][panner][coverage][phase3-batch756]") {
+          "[signal][panner][coverage]") {
     Panner pan;
     pan.set_pan(-0.25f);
 
