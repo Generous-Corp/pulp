@@ -793,6 +793,34 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     CHECK(played_long > played_short);
 }
 
+// Bar-snap: the analyzer reports an INTEGER bpm, but a real loop's tempo is
+// usually fractional, so stretching to the rounded value tiles slightly short
+// ("ends a bit early"). bar_snap_bpm recovers the exact bar-multiple tempo.
+TEST_CASE("bar-snap derives the exact loop tempo so loops tile perfectly",
+          "[tempo-sampler][issue-tempo-barsnap]") {
+    using P = PulpTempoSamplerProcessor;
+    const double sr = 48000.0;
+    // A 2-bar (8-beat) loop whose TRUE tempo is fractional (103.4). The analyzer
+    // rounds to 103, which would tile short; snapping recovers ~103.4.
+    const double true_bpm = 103.4;
+    const long frames = std::lround(8.0 * 60.0 / true_bpm * sr);  // exactly 8 beats long
+    const double rough = std::round(true_bpm);                    // 103 (analyzer output)
+    const double snapped = P::bar_snap_bpm(rough, frames, sr);
+    CHECK(std::abs(snapped - true_bpm) < 0.05);
+    // Tiling invariant: frames * snapped == 8 beats * 60 * sr (host-independent),
+    // so the loop fills an exact 2 bars at ANY host tempo.
+    const double ideal = 8.0 * 60.0 * sr;
+    CHECK(std::abs(static_cast<double>(frames) * snapped - ideal) < 0.002 * ideal);
+
+    // Non-loop material (beat count far from an integer) is left on the estimate.
+    const long odd = std::lround(7.5 * 60.0 / 100.0 * sr);        // 7.5 beats at 100
+    CHECK(P::bar_snap_bpm(100.0, odd, sr) == 100.0);
+
+    // Degenerate inputs pass straight through.
+    CHECK(P::bar_snap_bpm(0.0, frames, sr) == 0.0);
+    CHECK(P::bar_snap_bpm(120.0, 0, sr) == 120.0);
+}
+
 // A manually-set TEMPO must survive close+reopen (serialize/deserialize) — it
 // lives in a non-param atomic that v1 state did not persist.
 TEST_CASE("tempo override persists across serialize/deserialize",
