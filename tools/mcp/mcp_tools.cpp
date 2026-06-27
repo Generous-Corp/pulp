@@ -959,4 +959,115 @@ std::string handle_audio_scope(const std::string& params_json) {
     return json_tool_payload(normalized_json);
 }
 
+std::string handle_audio_render(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+
+    auto plugin = extract_string(params_json, "plugin");
+    if (plugin.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: plugin is required (path to a plugin bundle)\"}]}";
+    }
+    if (plugin.front() == '-') {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: plugin must be a bundle path, not an option\"}]}";
+    }
+
+    auto has = [&](const char* key) {
+        auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+
+    // Exactly one duration source (mirrors the CLI's mutually-exclusive contract).
+    const bool has_ms = has("duration_ms");
+    const bool has_frames = has("duration_frames");
+    if (has_ms == has_frames) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: pass exactly one of duration_ms / duration_frames\"}]}";
+    }
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio render";
+    cmd += " --plugin " + shell_quote(plugin);
+
+    // Output WAV: honor an explicit `out` (kept); otherwise render into a private
+    // temp dir we clean up — the metrics JSON is the return value either way.
+    std::string temp_error;
+    fs::path temp_dir;
+    auto out = extract_string(params_json, "out");
+    if (out.empty()) {
+        auto temp = make_private_probe_json_temp(temp_error);
+        if (temp.json_path.empty()) {
+            return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string("Error: " + temp_error) + "}]}";
+        }
+        temp_dir = temp.directory;
+        out = (temp.directory / "render.wav").string();
+    }
+    cmd += " --out " + shell_quote(out);
+
+    if (has_ms) {
+        int ms = extract_int(params_json, "duration_ms", -1);
+        if (ms <= 0) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: duration_ms must be a positive integer\"}]}";
+        cmd += " --duration-ms " + std::to_string(ms);
+    } else {
+        int fr = extract_int(params_json, "duration_frames", -1);
+        if (fr <= 0) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: duration_frames must be a positive integer\"}]}";
+        cmd += " --duration-frames " + std::to_string(fr);
+    }
+
+    auto add_str = [&](const char* key, const char* flag) {
+        auto v = extract_string(params_json, key);
+        if (!v.empty()) cmd += std::string(" ") + flag + " " + shell_quote(v);
+    };
+    add_str("format", "--format");
+    add_str("id", "--id");
+    add_str("input", "--input");
+    add_str("input_signal", "--input-signal");
+    add_str("param", "--param");   // a single id=value[@frame]; multiple → use the CLI
+    add_str("midi", "--midi");     // a single note:n,vel,on[,off]; multiple → use the CLI
+
+    auto add_int = [&](const char* key, const char* flag, int min_value) -> std::string {
+        if (has(key)) {
+            int v = extract_int(params_json, key, min_value - 1);
+            if (v < min_value)
+                return std::string("Error: ") + key + " must be >= " + std::to_string(min_value);
+            cmd += std::string(" ") + flag + " " + std::to_string(v);
+        }
+        return {};
+    };
+    for (auto err : {add_int("block", "--block", 1),
+                     add_int("in_channels", "--in-channels", 0),
+                     add_int("out_channels", "--out-channels", 1)}) {
+        if (!err.empty()) {
+            if (!temp_dir.empty()) { std::error_code ec; fs::remove_all(temp_dir, ec); }
+            return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(err) + "}]}";
+        }
+    }
+    if (has("sample_rate")) {
+        double sr = extract_double(params_json, "sample_rate", -1.0);
+        if (sr <= 0.0) {
+            if (!temp_dir.empty()) { std::error_code ec; fs::remove_all(temp_dir, ec); }
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: sample_rate must be positive\"}]}";
+        }
+        cmd += " --sample-rate " + std::to_string(sr);
+    }
+
+    // --json prints the metrics manifest to stdout; stderr (plugin logs, objc
+    // warnings) is dropped so stdout is clean JSON.
+    cmd += " --json 2>/dev/null";
+    auto output = exec(cmd);
+
+    if (!temp_dir.empty()) {
+        std::error_code ec;
+        fs::remove_all(temp_dir, ec);
+    }
+
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(output, normalized_json, parse_error)) {
+        std::string message = "Error: pulp audio render did not return metrics JSON: "
+                            + parse_error + "\n" + output;
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
+    }
+    return json_tool_payload(normalized_json);
+}
+
 }  // namespace pulp_mcp
