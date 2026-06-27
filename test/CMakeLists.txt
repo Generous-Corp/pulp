@@ -1931,6 +1931,15 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
+# GPU convolver node (first real GPU audio node): golden test vs direct
+# convolution. Only when GPU/render is available; skips at runtime without a
+# Skia device.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-gpu-convolver
+        SOURCES test_gpu_convolver.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio)
+endif()
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # Standalone editor chrome helpers
