@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file audio_contracts.hpp
-/// Named audio contracts over RenderScenario (harness PR 3).
+/// Named audio contracts over RenderScenario.
 ///
 /// A contract is a named, human-readable claim ("PulpGain bypass is
 /// transparent") bound to one rendered scenario plus a list of

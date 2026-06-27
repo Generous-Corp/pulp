@@ -1,4 +1,4 @@
-// test_audio_tone_regression.cpp — harness PR 1B regression scenario.
+// test_audio_tone_regression.cpp — PulpTone regression scenario.
 //
 // Renders PulpTone through HeadlessHost at 48 kHz across small host block
 // sizes (64/128/256) and asserts the signal facts the standalone-silence
@@ -86,7 +86,7 @@ pulp::audio::Buffer<float> render_tone(double sample_rate, int block,
 } // namespace
 
 TEST_CASE("Tone regression: PulpTone 48 kHz render across host block sizes",
-          "[audio][regression][pulptone][harness-1b]") {
+          "[audio][regression][pulptone]") {
     constexpr double sr = 48000.0;
     constexpr int total = 9600; // 200 ms; exact multiple of 64/128/256
 
@@ -124,10 +124,9 @@ TEST_CASE("Tone regression: PulpTone 48 kHz render across host block sizes",
 }
 
 TEST_CASE("Tone regression: metrics artifact JSON carries schema and facts",
-          "[audio][regression][harness-1b][artifact]") {
-    // The artifact writer is new in this PR, so it gets its own coverage:
-    // round-trip the JSON through choc::json::parse and verify the schema
-    // version, provenance, shape, and per-channel facts survive.
+          "[audio][regression][artifact]") {
+    // Round-trip the artifact JSON through choc::json::parse and verify the
+    // schema version, provenance, shape, and per-channel facts survive.
     auto out = render_tone(48000.0, 256, 1024);
     const auto m = analyze(out, 48000.0);
 

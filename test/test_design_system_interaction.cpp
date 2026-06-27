@@ -1,7 +1,7 @@
-// Phase 8 fidelity follow-up — verify the design-system widgets are actually
-// WIRED (not just painted): driving each via its input handlers must change
-// its value/state and fire its callback. Catches a widget that looks right but
-// doesn't respond (the "knobs don't move" failure mode).
+// Verify the design-system widgets are actually wired, not just painted:
+// driving each via its input handlers must change its value/state and fire its
+// callback. Catches a widget that looks right but doesn't respond (the "knobs
+// don't move" failure mode).
 
 #include <catch2/catch_test_macros.hpp>
 
