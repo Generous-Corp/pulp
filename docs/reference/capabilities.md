@@ -93,7 +93,8 @@ adapter compiles and loads — not that every host-facing feature is wired.
 - **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
   the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
 - **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
-  manifest yet. Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
+  manifest yet, and the Pulp browser-host runtime wiring is still scaffolded.
+  Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
 
 If you hit a limitation not listed, check
 `planning/production-readiness/01-format-adapters.md` and file an issue.
@@ -108,7 +109,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2, WebCLAP, Emscripten pipeline |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2/WebCLAP scaffolding, Emscripten pipeline; browser-host runtime not validated |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
