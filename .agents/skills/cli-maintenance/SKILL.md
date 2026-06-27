@@ -386,6 +386,10 @@ under `$PULP_HOME/tools/npm-packages/<id>/run.{sh,bat}`, so Rust
 alongside binary-download and python-env installs. Otherwise Rust-native
 `pulp tool info`, `path`, `run`, `doctor`, and `uninstall` can disagree with
 tools installed by the delegated C++ install path.
+The targeted `pulp tool doctor <id> [--run]` surface is part of that same
+contract: `--run` executes the resolved tool path with no forwarded arguments
+and returns its exit code. For `npm_package` tools, that path is the
+`run.{sh,bat}` wrapper smoke check.
 
 ### Package suggestion and analyzer metadata commands
 

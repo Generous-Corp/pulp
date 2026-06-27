@@ -1886,7 +1886,15 @@ commands:
       - name: run
         summary: Run the installed tool with pass-through arguments
       - name: doctor
-        summary: Health check — which tools are installed, missing, or unavailable on this platform
+        summary: Health check — which tools are installed, missing, or unavailable on this platform; with a tool id, checks one tool strictly and --run executes the resolved tool path with no args
+        args:
+          - name: tool-id
+            kind: positional
+            required: false
+          - name: --run
+            kind: flag
+            required: false
+            description: For a targeted tool check, execute the resolved tool path with no arguments and return its exit code; npm-package tools use that path as their wrapper smoke check
     docs: reference/cli.md#tool
 
   - name: audit
