@@ -1198,8 +1198,7 @@ int cmd_ship(const std::vector<std::string>& args) {
     // build tree ready to build the requested `<target>_AUv3` target for an
     // iOS Simulator, connected iOS device, or macOS. Picks the right SDK +
     // the right entitlements template from
-    // `tools/templates/auv3/iOS-{Simulator,Device}-Entitlements.plist.template`
-    // (shipped in PR #2938 alongside the CMake template wiring).
+    // `tools/templates/auv3/iOS-{Simulator,Device}-Entitlements.plist.template`.
     //
     // Usage:
     //   pulp ship auv3-xcodeproj <target>           # iphonesimulator (default)

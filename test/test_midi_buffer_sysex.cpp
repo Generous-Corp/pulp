@@ -11,8 +11,8 @@ using namespace pulp::midi;
 
 TEST_CASE("realtime SysEx pool recycles payloads so SysEx is never dropped across blocks",
           "[midi][buffer][sysex]") {
-    // RT contract for the pooled SysEx-copy path the VST3 adapter (PR #4564)
-    // relies on: in realtime-capacity mode add_sysex_copy() reuses a reserved
+    // RT contract for the pooled SysEx-copy path used by plugin adapters: in
+    // realtime-capacity mode add_sysex_copy() reuses a reserved
     // payload pool that is replenished by clear_sysex() each block. The critical
     // correctness property is that this never silently DROPS SysEx across blocks —
     // i.e. the pool does not deplete cycle over cycle. (Steady-state allocation

@@ -80,7 +80,7 @@ void unset_env_var(const char* name) {
 // the variadic `b.set(...)` entry. This test pins the public surface so a
 // future refactor cannot silently reintroduce the wrong call path.
 TEST_CASE("MKL backend availability stays gated on runtime presence "
-          "(no UB call path) (regression: PR #3021 review)",
+          "(no UB call path)",
           "[fft][backend][mkl][issue-3021]") {
     // Constructing with MKL when libmkl_rt is absent MUST throw — the
     // selector helper reports availability via runtime dlopen, not a

@@ -89,12 +89,11 @@ NSEvent* build_event(NSWindow* window,
     }
 
     if (type == NSEventTypeScrollWheel) {
-        // Regression (PR #2009): `+[NSEvent mouseEventWithType:]` does
-        // NOT carry scrolling deltas — the produced event reports
-        // `scrollingDeltaX/Y == 0`, so the synthetic scroll falls
-        // through `PulpView::scrollWheel:` as a no-op and tests pass
-        // while exercising nothing. Build the event via a CGEvent
-        // source so `event.scrollingDeltaX/Y` reflect the requested
+        // Regression coverage: `+[NSEvent mouseEventWithType:]` does NOT carry
+        // scrolling deltas — the produced event reports `scrollingDeltaX/Y == 0`,
+        // so the synthetic scroll falls through `PulpView::scrollWheel:` as a
+        // no-op and tests pass while exercising nothing. Build the event via a
+        // CGEvent source so `event.scrollingDeltaX/Y` reflect the requested
         // deltas. Axis order: CGEventCreateScrollWheelEvent2's
         // variadic wheel args are (wheel1, wheel2) ≡ (Y, X).
         CGEventRef cge = CGEventCreateScrollWheelEvent2(
@@ -105,12 +104,12 @@ NSEvent* build_event(NSWindow* window,
             static_cast<int32_t>(ev.scroll_delta_x),
             0);
         if (!cge) return nil;
-        // Regression (PR #2015) — set the CGEvent location so
-        // `event.locationInWindow` lands at the harness-requested
-        // coordinates instead of the current OS cursor position.
-        // PulpView::scrollWheel: hit-tests from locationInWindow, so
-        // without this, scroll tests targeted at a specific subview
-        // are dropped or routed wherever the cursor happened to be.
+        // Regression coverage: set the CGEvent location so
+        // `event.locationInWindow` lands at the harness-requested coordinates
+        // instead of the current OS cursor position. PulpView::scrollWheel:
+        // hit-tests from locationInWindow, so without this, scroll tests
+        // targeted at a specific subview are dropped or routed wherever the
+        // cursor happened to be.
         // CGEvent uses screen-space; convert via the window's screen frame.
         NSPoint screen_pt = cg_screen_point_for_window_location(window, location);
         CGEventSetLocation(cge, CGPointMake(screen_pt.x, screen_pt.y));
@@ -220,14 +219,14 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
         NSEvent* nsevent = build_event(window, content, event);
         if (!nsevent) return false;
 
-        // Regression (PR #2009): `build_event` correctly stamped
+        // Regression coverage: `build_event` correctly stamped
         // NSEventType{Right,Other}Mouse* based on `event.button`, but the
         // dispatch below previously routed every phase through
-        // `mouseDown:`/`mouseUp:`/`mouseDragged:`. That meant a right-
-        // click test exercised `mouseDown:` (single-click path) instead
-        // of `rightMouseDown:` (context-menu path), and middle-clicks
-        // never reached `otherMouseDown:`. Route by button so synthetic
-        // right/middle clicks hit the matching selectors on PulpView.
+        // `mouseDown:`/`mouseUp:`/`mouseDragged:`. That meant a right-click test
+        // exercised `mouseDown:` (single-click path) instead of
+        // `rightMouseDown:` (context-menu path), and middle-clicks never reached
+        // `otherMouseDown:`. Route by button so synthetic right/middle clicks hit
+        // the matching selectors on PulpView.
         switch (event.phase) {
             case SimulatedMouse::Phase::down:
                 if (event.button == pulp::view::MouseButton::right)

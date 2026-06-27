@@ -175,7 +175,7 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
 }
 
 TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table][coverage]") {
     SimpleTableModel model;
     model.set_data({
         {"Alpha", "3"},
@@ -195,7 +195,7 @@ TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
 }
 
 TEST_CASE("SimpleTableModel set_data replaces rows and sorts sparse descending",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table][coverage]") {
     SimpleTableModel model;
     model.add_row({"old", "row"});
     model.set_data({
@@ -289,7 +289,7 @@ TEST_CASE("TableListBox ignores clicks outside right and bottom bounds",
 }
 
 TEST_CASE("TableListBox ignores header clicks past scaled columns",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table][coverage]") {
     RecordingTableModel model({
         {"First", "A"},
         {"Second", "B"},

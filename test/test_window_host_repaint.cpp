@@ -58,7 +58,7 @@ bool wait_for(std::atomic<int>& v, int target) {
 } // namespace
 
 TEST_CASE("WindowHost::mark_dirty falls through to repaint with no RenderLoop",
-          "[view][window-host][vblank][slice-16]") {
+          "[view][window-host][vblank]") {
     CountingWindowHost host;
     REQUIRE(host.render_loop() == nullptr);
 
@@ -71,7 +71,7 @@ TEST_CASE("WindowHost::mark_dirty falls through to repaint with no RenderLoop",
 }
 
 TEST_CASE("WindowHost::mark_dirty routes through an attached RenderLoop",
-          "[view][window-host][vblank][slice-16]") {
+          "[view][window-host][vblank]") {
     CountingWindowHost host;
     auto loop = pulp::render::RenderLoop::create_timer_loop();
     REQUIRE(loop != nullptr);
@@ -105,8 +105,8 @@ TEST_CASE("WindowHost::mark_dirty routes through an attached RenderLoop",
 }
 
 TEST_CASE("WindowHost::mark_dirty falls through to repaint when the attached loop is not running",
-          "[view][window-host][vblank][slice-16][issue-2580]") {
-    // #2580: a loop attached but not running has a no-op request_frame(), so
+          "[view][window-host][vblank][issue-2580]") {
+    // A loop attached but not running has a no-op request_frame(), so
     // routing through it would silently drop the dirty update and freeze the UI.
     // mark_dirty() must guard on is_running().
     CountingWindowHost host;
@@ -139,7 +139,7 @@ TEST_CASE("WindowHost::mark_dirty falls through to repaint when the attached loo
 }
 
 TEST_CASE("WindowHost::mark_dirty reverts to repaint after the loop detaches",
-          "[view][window-host][vblank][slice-16]") {
+          "[view][window-host][vblank]") {
     CountingWindowHost host;
     auto loop = pulp::render::RenderLoop::create_timer_loop();
     REQUIRE(loop != nullptr);
@@ -158,7 +158,7 @@ TEST_CASE("WindowHost::mark_dirty reverts to repaint after the loop detaches",
 }
 
 TEST_CASE("View::request_repaint drives the host's vblank dirty path",
-          "[view][window-host][vblank][slice-16]") {
+          "[view][window-host][vblank]") {
     // request_repaint() is the in-tree consumer of the safe-repaint
     // pattern: a widget marks itself dirty and the host coalesces to one
     // repaint on the next vsync instead of the legacy poll-on-a-timer.

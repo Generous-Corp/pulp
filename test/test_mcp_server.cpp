@@ -570,10 +570,9 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
 // contain embedded `\n` or `\r` — the transport delimits messages with
 // a single newline. A response carrying a raw newline gets split and
 // the client (Claude Code, Codex CLI, etc.) reads only the first
-// fragment, then times out waiting for the rest. PR #2091 fixed this
-// by piping every wire-bound response through a `compact_for_wire`
-// strip; this test pins the contract so a future regression on the
-// strip itself surfaces immediately.
+// fragment, then times out waiting for the rest. The fix pipes every wire-bound
+// response through a `compact_for_wire` strip; this test pins the contract so a
+// future regression on the strip itself surfaces immediately.
 //
 // Pulp #2087 follow-up (B4 first cut): the bug shipped because there
 // was no protocol-shape test. The full B4 split is queued separately.

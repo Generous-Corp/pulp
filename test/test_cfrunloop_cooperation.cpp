@@ -1,13 +1,13 @@
-// CFRunLoop cooperation in plugin-mode (item 6.4b macOS plan, post-PR-#2825).
+// CFRunLoop cooperation in plugin mode.
 //
-// PR #2825 added pulp::events::MainThreadDispatcher and registered Cocoa /
-// UIKit / SDL backends from standalone WindowHost constructors. In plugin
-// mode (AU v3 / VST3 / CLAP loaded inside a DAW), there is no Pulp window
-// and historically no backend was installed, so any code that asked
-// "please run this on the host's main thread" silently no-oped.
+// pulp::events::MainThreadDispatcher registers Cocoa / UIKit / SDL backends
+// from standalone WindowHost constructors. In plugin mode (AU v3 / VST3 /
+// CLAP loaded inside a DAW), there is no Pulp window and historically no
+// backend was installed, so any code that asked "please run this on the
+// host's main thread" silently no-oped.
 //
-// Item 6.4b ships `pulp::events::register_plugin_backend()` and wires it
-// into each adapter's init/dealloc path. These tests pin the contract:
+// `pulp::events::register_plugin_backend()` wires that dispatcher into each
+// adapter's init/dealloc path. These tests pin the contract:
 //
 //   1. The bare contract — register installs a backend, unregister tears it
 //      down, and reference-counting works across multiple "plugin instances".
@@ -35,7 +35,7 @@
 using namespace pulp::events;
 
 TEST_CASE("plugin_backend_available reports the expected platform value",
-          "[events][main_thread_dispatcher][item-6-4b]") {
+          "[events][main_thread_dispatcher][plugin-backend]") {
 #if defined(__APPLE__)
     REQUIRE(plugin_backend_available());
 #else
@@ -44,7 +44,7 @@ TEST_CASE("plugin_backend_available reports the expected platform value",
 }
 
 TEST_CASE("register_plugin_backend / unregister_plugin_backend is symmetric",
-          "[events][main_thread_dispatcher][item-6-4b]") {
+          "[events][main_thread_dispatcher][plugin-backend]") {
     REQUIRE_FALSE(MainThreadDispatcher::has_backend());
 
     auto token = register_plugin_backend();
@@ -63,7 +63,7 @@ TEST_CASE("register_plugin_backend / unregister_plugin_backend is symmetric",
 }
 
 TEST_CASE("plugin backend is reference-counted across instances",
-          "[events][main_thread_dispatcher][item-6-4b]") {
+          "[events][main_thread_dispatcher][plugin-backend]") {
     REQUIRE_FALSE(MainThreadDispatcher::has_backend());
 
     auto t1 = register_plugin_backend();
@@ -102,10 +102,10 @@ TEST_CASE("plugin backend is reference-counted across instances",
 #if defined(__APPLE__)
 // macOS-only — verify call_async dispatches work that actually runs on the
 // real main thread when the plugin backend is the only registered backend.
-// This is the "dispatcher actually executes scheduled work on the host's
-// main thread" regression the macOS plan asks for under 6.4b.
+// This pins the "dispatcher actually executes scheduled work on the host's
+// main thread" regression contract.
 TEST_CASE("plugin backend marshals call_async onto the main thread",
-          "[events][main_thread_dispatcher][item-6-4b][macos]") {
+          "[events][main_thread_dispatcher][plugin-backend][macos]") {
     auto token = register_plugin_backend();
     REQUIRE(token != 0);
 
@@ -142,7 +142,7 @@ TEST_CASE("plugin backend marshals call_async onto the main thread",
 #endif // __APPLE__
 
 TEST_CASE("call_async without a backend returns false and runs nothing",
-          "[events][main_thread_dispatcher][item-6-4b]") {
+          "[events][main_thread_dispatcher][plugin-backend]") {
     REQUIRE_FALSE(MainThreadDispatcher::has_backend());
     std::atomic<int> ran{0};
     REQUIRE_FALSE(MainThreadDispatcher::call_async([&] { ran.fetch_add(1); }));
