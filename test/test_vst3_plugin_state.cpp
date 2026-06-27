@@ -282,6 +282,63 @@ std::unique_ptr<pulp::format::Processor> create_null_processor() {
     return {};
 }
 
+// A processor that stages each block through per-channel scratch sized to the
+// prepared max in prepare(). An oversized render block overruns that scratch —
+// which is the corruption the adapter's clamp guard prevents (the host output
+// buffer alone is large enough, so internal scratch is required to exercise
+// the real overrun under ASan).
+class ScratchStagingProcessor final : public pulp::format::Processor {
+public:
+    static ScratchStagingProcessor* g_last;
+    int observed_num_samples = 0;
+    int prepared_max = 0;
+    std::vector<std::vector<float>> scratch;
+
+    ScratchStagingProcessor() { g_last = this; }
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "Vst3ScratchStaging",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.vst3.scratch",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext& context) override {
+        prepared_max = context.max_buffer_size;
+        scratch.assign(2,
+            std::vector<float>(static_cast<std::size_t>(prepared_max), 0.0f));
+    }
+    void process(pulp::audio::BufferView<float>& audio_output,
+                 const pulp::audio::BufferView<const float>& audio_input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext& context) override {
+        observed_num_samples = context.num_samples;
+        const auto channels =
+            std::min(audio_output.num_channels(), audio_input.num_channels());
+        const auto frames = static_cast<std::size_t>(context.num_samples);
+        for (std::size_t ch = 0; ch < channels && ch < scratch.size(); ++ch) {
+            const auto* in = audio_input.channel_ptr(ch);
+            auto* out = audio_output.channel_ptr(ch);
+            auto& sc = scratch[ch];
+            // Without the adapter's clamp, frames > prepared_max overruns sc.
+            for (std::size_t i = 0; i < frames; ++i) sc[i] = in[i];
+            for (std::size_t i = 0; i < frames; ++i) out[i] = sc[i];
+        }
+    }
+};
+
+ScratchStagingProcessor* ScratchStagingProcessor::g_last = nullptr;
+
+std::unique_ptr<pulp::format::Processor> create_scratch_staging_processor() {
+    return std::make_unique<ScratchStagingProcessor>();
+}
+
 class HostApp final : public Steinberg::Vst::IHostApplication {
 public:
     Steinberg::tresult PLUGIN_API getName(Steinberg::Vst::String128 name) override {
@@ -1594,4 +1651,84 @@ TEST_CASE("VST3 honors a processor mono/stereo bus-layout veto even with the qui
     REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultFalse);
 
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// A spec-violating host that renders MORE frames than the prepared
+// maxSamplesPerBlock must not overrun the processor's prepared scratch.
+// The adapter clamps the processed region to the prepared max and zeros the
+// un-processable tail so it reads back as clean silence. (Un-fixed, this
+// path overruns the prepared buffers and trips ASan.)
+TEST_CASE("VST3 clamps an oversized render block and zeros the tail",
+          "[vst3][rt-safety][process]") {
+    ScratchStagingProcessor::g_last = nullptr;
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_scratch_staging_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = ScratchStagingProcessor::g_last;
+    REQUIRE(test_processor != nullptr);
+
+    constexpr int kPreparedMax = 64;
+    constexpr int kRenderFrames = 256;  // host exceeds the advertised max
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kPreparedMax;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    // Host-provided buffers are sized to the LARGER render count. Input is a
+    // sentinel value across the whole block; the unity test processor copies
+    // input -> output for the frames it processes.
+    std::array<float, kRenderFrames> in_l{};
+    std::array<float, kRenderFrames> in_r{};
+    std::array<float, kRenderFrames> out_l{};
+    std::array<float, kRenderFrames> out_r{};
+    in_l.fill(0.5f);
+    in_r.fill(0.5f);
+    // Pre-fill outputs with garbage so a clean tail proves the adapter zeroed
+    // it rather than the buffer happening to be zero.
+    out_l.fill(-9.0f);
+    out_r.fill(-9.0f);
+
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ParameterChanges input_params;
+    Steinberg::Vst::ParameterChanges output_params;
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kRenderFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+
+    // (a) No crash / no overrun — the core guarantee (would trip ASan unfixed).
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    // (b) The processor saw only the prepared-max count.
+    REQUIRE(test_processor->observed_num_samples == kPreparedMax);
+
+    // (c) The first kPreparedMax frames were processed (unity copy).
+    for (int i = 0; i < kPreparedMax; ++i) {
+        REQUIRE(out_l[i] == 0.5f);
+        REQUIRE(out_r[i] == 0.5f);
+    }
+    // (d) The un-processable tail [kPreparedMax, kRenderFrames) is silence.
+    for (int i = kPreparedMax; i < kRenderFrames; ++i) {
+        REQUIRE(out_l[i] == 0.0f);
+        REQUIRE(out_r[i] == 0.0f);
+    }
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

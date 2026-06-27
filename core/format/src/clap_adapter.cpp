@@ -220,6 +220,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // docs/guides/dsp-threading.md "Numeric mode".
     pulp::signal::ScopedFlushDenormals flush_denormals;
 
+    // Max-frames contract guard (defensive; well-behaved hosts never exceed the
+    // advertised max). The Processor and all its scratch buffers were sized in
+    // clap_activate() to self->max_buffer_size. A render larger than that would
+    // overrun them and corrupt DSP state. CLAP has no clean per-block reject, so
+    // clamp the processed region to the prepared max and zero the un-processable
+    // tail [max, original) on every main output channel below so it reads back
+    // as clean silence rather than garbage.
+    const auto original_num_samples = num_samples;
+    if (self->max_buffer_size > 0 &&
+        num_samples > static_cast<uint32_t>(self->max_buffer_size)) {
+        num_samples = static_cast<uint32_t>(self->max_buffer_size);
+    }
+
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
@@ -308,15 +321,28 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         out_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < out_channels; ++ch)
             self->output_ptrs[ch] = bus.data32[ch];
+        // When the render was clamped above, the processor only writes the
+        // first num_samples frames; zero the un-processable tail on every main
+        // output channel so the host reads silence past the prepared max.
+        if (original_num_samples > num_samples) {
+            for (int ch = 0; ch < out_channels; ++ch) {
+                if (self->output_ptrs[ch]) {
+                    std::memset(self->output_ptrs[ch] + num_samples, 0,
+                                sizeof(float) * (original_num_samples - num_samples));
+                }
+            }
+        }
     }
     // Secondary output buses are zero-filled so hosts do not read
     // uninitialised memory on multi-out instruments. Full multi-out routing
-    // to Processor is tracked separately (audit 5.2).
+    // to Processor is tracked separately (audit 5.2). Zero the full original
+    // block here — these channels are never processed, so the clamp does not
+    // apply.
     for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
         auto& bus = process->audio_outputs[b];
         for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
             if (bus.data32[ch]) {
-                std::memset(bus.data32[ch], 0, sizeof(float) * num_samples);
+                std::memset(bus.data32[ch], 0, sizeof(float) * original_num_samples);
             }
         }
     }
@@ -679,13 +705,15 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
     if (bypassed) {
+        // Bypass is pure host-buffer passthrough (no processor scratch), so it
+        // safely handles the full original block rather than the clamped count.
         for (int ch = 0; ch < out_channels; ++ch) {
             if (self->output_ptrs[ch] == nullptr) continue;
             if (ch < in_channels && self->input_ptrs[ch] != nullptr) {
                 std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
-                            sizeof(float) * num_samples);
+                            sizeof(float) * original_num_samples);
             } else {
-                std::memset(self->output_ptrs[ch], 0, sizeof(float) * num_samples);
+                std::memset(self->output_ptrs[ch], 0, sizeof(float) * original_num_samples);
             }
         }
         self->processor->set_sidechain(nullptr);

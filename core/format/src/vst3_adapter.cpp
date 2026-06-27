@@ -310,6 +310,11 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     native_in_ = in_ch;
     native_out_ = out_ch;
 
+    // Cache the prepared block size so process() can clamp an oversized
+    // render down to it (defensive guard; well-behaved hosts never exceed
+    // the advertised max).
+    max_block_size_ = setup.maxSamplesPerBlock;
+
     // Pre-allocate buffer pointer arrays for real-time safety
     input_ptrs_.resize(ctx.input_channels);
     output_ptrs_.resize(ctx.output_channels);
@@ -406,6 +411,18 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     int32 num_samples = data.numSamples;
     if (num_samples == 0) return kResultOk;
 
+    // Max-block contract guard (defensive; well-behaved hosts never exceed the
+    // advertised max). The Processor and all its scratch buffers were sized in
+    // setupProcessing() to max_block_size_ (setup.maxSamplesPerBlock). A render
+    // larger than that would overrun them and corrupt DSP state. VST3 has no
+    // clean per-block reject, so clamp the processed region to the prepared max
+    // and zero the un-processable tail [max_block_size_, original) on every main
+    // output channel so it reads back as clean silence rather than garbage.
+    const int32 original_num_samples = num_samples;
+    if (max_block_size_ > 0 && num_samples > max_block_size_) {
+        num_samples = max_block_size_;
+    }
+
     // Bus 0 routes to main input/output; bus 1 routes to
     // Processor::set_sidechain(). Additional input buses beyond index 1
     // are ignored because the Processor API exposes a single sidechain
@@ -444,16 +461,28 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         for (int ch = 0; ch < out_channels; ++ch) {
             output_ptrs_[ch] = data.outputs[0].channelBuffers32[ch];
         }
+        // When the render was clamped above, the processor only writes the
+        // first num_samples frames; zero the un-processable tail on every main
+        // output channel so the host reads silence past the prepared max.
+        if (original_num_samples > num_samples) {
+            for (int ch = 0; ch < out_channels; ++ch) {
+                if (output_ptrs_[ch] != nullptr) {
+                    std::memset(output_ptrs_[ch] + num_samples, 0,
+                                sizeof(float) * (original_num_samples - num_samples));
+                }
+            }
+        }
     }
     // Secondary output buses are zero-filled so hosts do not read
     // uninitialised memory on multi-out instruments. The Processor API
-    // currently exposes only the main output bus.
+    // currently exposes only the main output bus. Zero the full original block
+    // here — these channels are never processed, so the clamp does not apply.
     for (int32 b = 1; b < data.numOutputs; ++b) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
             if (bus.channelBuffers32 && bus.channelBuffers32[ch]) {
                 std::memset(bus.channelBuffers32[ch], 0,
-                            sizeof(float) * num_samples);
+                            sizeof(float) * original_num_samples);
             }
         }
     }
@@ -520,12 +549,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             // channelBuffers32[ch] entries are null; null-check before
             // writing. This guard mirrors the silence-accommodation path.
             if (output_ptrs_[ch] == nullptr) continue;
+            // Bypass is pure host-buffer passthrough (no processor scratch),
+            // so it safely handles the full original block rather than the
+            // clamped count.
             if (ch < in_channels && input_ptrs_[ch] != nullptr) {
                 std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
-                            sizeof(float) * num_samples);
+                            sizeof(float) * original_num_samples);
             } else {
                 std::memset(output_ptrs_[ch], 0,
-                            sizeof(float) * num_samples);
+                            sizeof(float) * original_num_samples);
             }
         }
         processor_->set_sidechain(nullptr);

@@ -122,6 +122,12 @@ private:
     int native_out_ = 0;
     bool silence_unsupported_active_ = false;
 
+    // Block size the processor's scratch buffers were prepared for in
+    // setupProcessing() (setup.maxSamplesPerBlock). process() clamps an
+    // oversized render to this so a host that exceeds the advertised max
+    // can't overrun the prepared buffers. 0 means "no limit set yet".
+    int max_block_size_ = 0;
+
     // Previous-block transport snapshot used to derive the
     // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
     // on `ProcessContext`. Default-constructed so the first process()

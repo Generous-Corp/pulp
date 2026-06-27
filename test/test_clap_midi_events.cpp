@@ -330,6 +330,57 @@ public:
     bool process_buffer_storage_valid = false;
 };
 
+// Copies the main input to the main output (unity gain) and records the
+// block size it was handed. Used to prove the oversized-block guard: the
+// processor must only ever see the prepared max, and the adapter zeros the
+// host's un-processable tail.
+class UnityCopyProcessor : public Processor {
+public:
+    mutable int observed_num_samples = 0;
+    mutable int process_count = 0;
+    // Per-channel scratch sized to the prepared max in prepare(); process()
+    // stages each block through it before writing the output. This mirrors a
+    // real DSP processor and is what an oversized block overruns — the host
+    // output buffer alone would be large enough, so the scratch is required to
+    // exercise the actual corruption the guard prevents.
+    int prepared_max = 0;
+    std::vector<std::vector<float>> scratch;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "UnityCopyCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.unity-copy";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext& context) override {
+        prepared_max = context.max_buffer_size;
+        scratch.assign(2, std::vector<float>(static_cast<std::size_t>(prepared_max), 0.0f));
+    }
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext& context) override {
+        ++process_count;
+        observed_num_samples = context.num_samples;
+        const auto channels =
+            std::min(audio_output.num_channels(), audio_input.num_channels());
+        const auto frames = static_cast<std::size_t>(context.num_samples);
+        for (std::size_t ch = 0; ch < channels && ch < scratch.size(); ++ch) {
+            const auto* in = audio_input.channel_ptr(ch);
+            auto* out = audio_output.channel_ptr(ch);
+            auto& sc = scratch[ch];
+            // Stage through the prepared-max scratch. Without the adapter's
+            // clamp, frames > prepared_max overruns sc here (ASan trap).
+            for (std::size_t i = 0; i < frames; ++i) sc[i] = in[i];
+            for (std::size_t i = 0; i < frames; ++i) out[i] = sc[i];
+        }
+    }
+};
+
 // Emits a pre-programmed set of MIDI events on midi_out so we can test
 // the outbound bridge.
 class EmittingProcessor : public Processor {
@@ -638,6 +689,7 @@ ObservingParamIngressProcessor* g_observing_param_ingress = nullptr;
 ObservingSidecarProcessor* g_observing_sidecar = nullptr;
 OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
+UnityCopyProcessor* g_unity_copy = nullptr;
 int g_pending_latency_samples = 0;
 int g_pending_tail_samples = 0;
 bool g_pending_opts_mpe = false;
@@ -674,6 +726,12 @@ std::unique_ptr<Processor> make_process_buffers_capturing() {
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
+    return up;
+}
+
+std::unique_ptr<Processor> make_unity_copy() {
+    auto up = std::make_unique<UnityCopyProcessor>();
+    g_unity_copy = up.get();
     return up;
 }
 
@@ -2671,4 +2729,61 @@ TEST_CASE("CLAP does NOT synthesize a Bypass param when the quirk is off",
         REQUIRE(h.plugin.bypass_param_id == 0u);  // no synthesis
     }
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// A spec-violating host that renders MORE frames than the activated
+// max_frames must not overrun the processor's prepared scratch. The adapter
+// clamps the processed region to the prepared max and zeros the un-processable
+// tail so it reads back as clean silence. (Un-fixed, this path overruns the
+// prepared buffers and trips ASan.)
+TEST_CASE("CLAP clamps an oversized render block and zeros the tail",
+          "[clap][rt-safety][process]") {
+    g_unity_copy = nullptr;
+
+    constexpr uint32_t kPreparedMax = 64;
+    constexpr uint32_t kRenderFrames = 256;  // host exceeds the advertised max
+
+    // Activate (prepare) for the small max; the processor's scratch is sized
+    // to kPreparedMax.
+    Harness h(make_unity_copy, kPreparedMax);
+    REQUIRE(g_unity_copy != nullptr);
+
+    // Host-provided buffers are sized to the LARGER render count. Input is a
+    // sentinel across the whole block; outputs are pre-filled with garbage so
+    // a clean tail proves the adapter zeroed it.
+    std::vector<float> in_l(kRenderFrames, 0.5f);
+    std::vector<float> in_r(kRenderFrames, 0.5f);
+    std::vector<float> out_l(kRenderFrames, -9.0f);
+    std::vector<float> out_r(kRenderFrames, -9.0f);
+
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+
+    clap_audio_buffer_t audio_in{};
+    audio_in.data32 = const_cast<float**>(in_ptrs);
+    audio_in.channel_count = 2;
+    clap_audio_buffer_t audio_out{};
+    audio_out.data32 = out_ptrs;
+    audio_out.channel_count = 2;
+
+    InputEventList empty;
+    // (a) No crash / no overrun — the core guarantee (would trip ASan unfixed).
+    REQUIRE(h.run_custom(&empty, nullptr,
+                         &audio_in, 1, &audio_out, 1,
+                         kRenderFrames, nullptr) != CLAP_PROCESS_ERROR);
+
+    // (b) The processor saw only the prepared-max count.
+    REQUIRE(g_unity_copy->process_count == 1);
+    REQUIRE(g_unity_copy->observed_num_samples == static_cast<int>(kPreparedMax));
+
+    // (c) The first kPreparedMax frames were processed (unity copy).
+    for (uint32_t i = 0; i < kPreparedMax; ++i) {
+        REQUIRE(out_l[i] == 0.5f);
+        REQUIRE(out_r[i] == 0.5f);
+    }
+    // (d) The un-processable tail [kPreparedMax, kRenderFrames) is silence.
+    for (uint32_t i = kPreparedMax; i < kRenderFrames; ++i) {
+        REQUIRE(out_l[i] == 0.0f);
+        REQUIRE(out_r[i] == 0.0f);
+    }
 }
