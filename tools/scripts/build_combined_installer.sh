@@ -78,7 +78,7 @@ add_ref() {  # $1=choice-id  $2=title  $3=desc  $4=pkgfile
 }
 
 echo "== plugins =="
-for i in "${!P_KIND[@]:-}"; do
+for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   deep_sign "$p"
   f="$(basename "$p").pkg"
@@ -89,7 +89,7 @@ for i in "${!P_KIND[@]:-}"; do
 done
 
 echo "== apps → /Applications =="
-for i in "${!A_TITLE[@]:-}"; do
+for ((i=0; i<${#A_TITLE[@]}; i++)); do
   t="${A_TITLE[$i]}"; p="${A_PATH[$i]}"; ent="${A_ENT[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   deep_sign "$p" "$ent"
   id="$(echo "$t" | tr ' A-Z' '-a-z' | tr -cd 'a-z0-9-')"

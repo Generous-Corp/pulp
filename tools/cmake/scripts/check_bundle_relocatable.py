@@ -157,22 +157,35 @@ def main():
         return 2
 
     label = args.label or os.path.basename(args.target)
-    findings = []
+    # HARD failures: an @rpath dependency that resolves nowhere safe (the real
+    # ship-breaker — e.g. libwgpu_native.dylib reachable only via a build cache).
+    # SOFT warnings: a dangling external LC_RPATH that NO dependency relies on
+    # (e.g. a leftover Xcode toolchain rpath on a pure-Swift app whose runtime
+    # loads from the OS /usr/lib/swift) — harmless, surfaced for hygiene only.
+    hard, soft = [], []
     for binary in _macho_binaries(args.target):
         ext, unres = check_binary(binary, args.target)
         rel = os.path.relpath(binary, args.target) if os.path.isdir(args.target) else binary
-        for rp in ext:
-            findings.append(f"{rel}: external LC_RPATH (won't resolve off the build machine): {rp}")
         for dep in unres:
-            findings.append(f"{rel}: {dep} not resolvable inside the bundle (no @loader_path rpath to it)")
+            hard.append(f"{rel}: {dep} not resolvable inside the bundle (no @loader_path rpath to it)")
+        # An external rpath only matters if a dependency would be unresolved
+        # without it. If there are no unresolved deps, it's dead weight → warn.
+        for rp in ext:
+            (hard if unres else soft).append(
+                f"{rel}: external LC_RPATH: {rp}"
+                + ("" if unres else " (dangling — no dependency uses it)"))
 
-    if not findings:
+    if soft:
+        print(f"check_bundle_relocatable: {label} — note (harmless):", file=sys.stderr)
+        for s in soft:
+            print(f"  - {s}", file=sys.stderr)
+    if not hard:
         print(f"check_bundle_relocatable: {label} is self-contained ✅")
         return 0
 
     tag = "ERROR" if args.strict else "WARNING"
     print(f"{tag}: {label} is NOT relocatable — would fail on another Mac:", file=sys.stderr)
-    for f in findings:
+    for f in hard:
         print(f"  - {f}", file=sys.stderr)
     print("  Fix: bundle the dylib in Contents/MacOS and add an @loader_path rpath "
           "(BUILD_WITH_INSTALL_RPATH). See the skia-gpu-build skill.", file=sys.stderr)
