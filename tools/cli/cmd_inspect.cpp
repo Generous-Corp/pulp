@@ -122,22 +122,6 @@ static int discover_port() {
     return found_port;
 }
 
-// Send a request and wait for response
-static std::string send_request(InterprocessConnection& conn, const std::string& method,
-                                 const std::string& params = "{}") {
-    static std::atomic<int64_t> next_id{1};
-    auto id = next_id++;
-    auto msg = make_request(id, method, params);
-    auto json = encode_message(msg);
-    conn.send_message(json);
-
-    // Wait for response (simple blocking — fine for CLI)
-    // The response will arrive via on_text_message
-    // For now, we use a simple sleep+poll approach
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    return "";  // Response handled by callback
-}
-
 } // anonymous namespace
 
 int cmd_inspect(const std::vector<std::string>& args) {

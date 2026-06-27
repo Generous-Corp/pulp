@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // importer_install.cpp — install / uninstall mechanism for framework-importer
-// add-ons (plan item #19, "Add-on packaging").
+// add-ons.
 //
 // An importer is a vendor-specific add-on tool distributed as a checksummed,
 // per-platform archive that drives Pulp's JSON-over-stdio import SPI. This file
@@ -15,8 +15,8 @@
 //   * skill install — the per-importer SKILL.md is dropped into
 //     ~/.agents/skills/<importer>/ on install and removed on uninstall.
 //   * install record — id/version/sha/paths recorded under ~/.pulp/importers/
-//     so uninstall and version checks work, and so #17's importer-terms gate
-//     can compose with the install (it reads the same ~/.pulp tree).
+//     so uninstall and version checks work, and so the importer-terms gate can
+//     compose with the install (it reads the same ~/.pulp tree).
 //
 // The producer side (building/hosting/signing the prebuilt artifacts, the
 // bundled-libclang choice) is intentionally NOT here — those are user/release
@@ -368,7 +368,8 @@ ImporterInstallResult install_importer(const ToolDescriptor& tool,
     auto install_dir = tools_dir() / tool.id / tool.pinned_version;
     auto record_path = importer_records_dir() / (tool.id + ".json");
 
-    // Idempotency: an existing record at the same version + sha is a no-op.
+    // Idempotency: an existing record for the pinned version is a no-op.
+    // Use --force to re-stage and re-verify the artifact checksum.
     if (!force && fs::exists(record_path) && fs::exists(install_dir)) {
         auto existing = read_text(record_path);
         if (existing.find("\"version\": \"" + tool.pinned_version + "\"") !=
@@ -471,7 +472,7 @@ ImporterInstallResult install_importer(const ToolDescriptor& tool,
     }
 
     // 6. Record the install under ~/.pulp/importers/ so uninstall + version
-    //    checks work and #17's terms-gate can compose against the same tree.
+    //    checks work and the terms gate can compose against the same tree.
     std::ostringstream rec;
     rec << "{\n"
         << "  \"id\": \"" << json_escape(tool.id) << "\",\n"
@@ -491,7 +492,6 @@ ImporterInstallResult install_importer(const ToolDescriptor& tool,
         return result;
     }
 
-    // Cleanup the staged archive.
     fs::remove(archive_path, ec);
 
     result.ok = true;

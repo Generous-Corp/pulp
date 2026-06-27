@@ -23,7 +23,7 @@ using namespace pulp::state;
 // Imports (Spectr, v0.dev, Stitch, Figma exports) routinely ship a
 // top-level container with literal-CSS hardcoded dimensions that
 // exceed the screenshot viewport. Canonical Spectr case
-// (`spectr-editor-extracted.js:4140`):
+// (`spectr-editor-extracted.js`):
 //   `<div style={{ position:'absolute', top:0, left:0,
 //                  width:1320, height:860, … }}>`
 // In a 1280×800 viewport, the App anchors to (0,0) and overflows by
@@ -410,8 +410,6 @@ int main(int argc, char* argv[]) {
     // but Skia isn't compiled in, fail loudly with exit code 2 so CI and
     // harness diffs catch the mismatch instead of comparing CoreGraphics
     // output against a Skia baseline.
-    // TODO: add CLI-shellout coverage for both the default warning path
-    // when Skia is absent and the explicit-skia exit-code-2 error path.
     if (!normalize_backend(options)) return 2;
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
@@ -452,8 +450,8 @@ int main(int argc, char* argv[]) {
     // gets 0, and every position:absolute + inset:0 child computes to
     // 0×0 — blanking any chain of absolute-positioned containers (the
     // canonical "fill containing block" CSS pattern). First surfaced
-    // via Spectr's editor.generated.tsx: Editor / FilterBank / canvas /
-    // Chrome hierarchy is exactly this chain.
+    // via Spectr's Editor / FilterBank / canvas / Chrome hierarchy,
+    // which is exactly this chain.
     root.set_bounds({0, 0, static_cast<float>(options.width), static_cast<float>(options.height)});
 
     root.flex().direction = FlexDirection::column;
@@ -507,9 +505,9 @@ int main(int argc, char* argv[]) {
         // After React mount, reconcile any oversize absolute descendants
         // with the viewport so bottom-anchored content lands within the
         // captured frame. No-op when content fits. Walks the entire
-        // subtree, not just direct children of root_, because
-        // runtime-import adapters (Spectr's dom-adapter at tsx:440-441)
-        // propagate the hardcoded oversize through multiple wrappers.
+        // subtree, not just direct children of root_, because runtime-import
+        // adapters such as Spectr's dom-adapter propagate the hardcoded
+        // oversize through multiple wrappers.
         pulp::view::reconcile_oversize_absolute_subtree(root, options.width, options.height);
     }
 
@@ -522,8 +520,8 @@ int main(int argc, char* argv[]) {
     // script-load and render. Spectr's editor uses this pattern for
     // drawSpectrum / drawRulers; the live host's NSRunLoop ticks them
     // naturally, but pulp-screenshot's headless path has to pump
-    // explicitly. __pulpRuntimeSettle__ is registered by WidgetBridge
-    // exactly for this case (see widget_bridge.cpp:1144).
+    // explicitly. WidgetBridge registers __pulpRuntimeSettle__ exactly
+    // for this case.
     bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
 
     if (!options.runtime_trace_path.empty()) {

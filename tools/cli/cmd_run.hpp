@@ -1,7 +1,7 @@
 // cmd_run.hpp — internal types for `pulp run`.
 //
 // Exposes a pure parse function so the new --headless / --screenshot /
-// --frames / --watch flag plumbing (#914) can be unit-tested without
+// --frames / --watch flag handling can be unit-tested without
 // shelling out to the CLI binary. The behavioural / shell-out coverage
 // lives in test_cli_shellout.cpp.
 #pragma once
@@ -18,7 +18,7 @@ struct ParseRunResult {
     std::string error;                 ///< Non-empty on parse failure
     std::string target_name;           ///< Optional positional target
 
-    // #914 flags
+    // Runtime launch flags.
     bool headless = false;             ///< --headless or implied by --screenshot
     std::string screenshot_path;       ///< --screenshot <path>
     int frames = 1;                    ///< --frames <n>, default 1

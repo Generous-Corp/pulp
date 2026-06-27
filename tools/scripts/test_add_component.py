@@ -60,7 +60,6 @@ components:
   - name: preset-browser
     description: Load and search presets
     status: planned
-    phase: 14
 
   - name: meter
     description: Display levels
@@ -74,7 +73,6 @@ components:
                         "name": "preset-browser",
                         "description": "Load and search presets",
                         "status": "planned",
-                        "phase": "14",
                     },
                     {
                         "name": "meter",
@@ -94,7 +92,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertIn("component registry not found", err)
 
-    def test_list_empty_registry_reports_phase_message(self) -> None:
+    def test_list_empty_registry_reports_registry_message(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             write_registry(root, "# comments only\ncomponents:\n")
@@ -104,7 +102,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(err, "")
         self.assertIn("No components available yet.", out)
-        self.assertIn("Phase 14", out)
+        self.assertIn("Register reusable components in tools/components/registry.yaml.", out)
 
     def test_list_non_empty_registry_prints_each_component_status(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -114,7 +112,6 @@ components:
   - name: preset-browser
     description: Load and search presets
     status: planned
-    phase: 14
   - name: meter
     description: Display levels
     status: implemented
@@ -154,7 +151,7 @@ components:
 
         self.assertEqual(rc, 1)
         self.assertIn('component "missing" not found', err)
-        self.assertIn("No components available yet. Coming in Phase 14.", out)
+        self.assertIn("No components available yet.", out)
 
     def test_planned_component_returns_not_implemented_message(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -164,16 +161,15 @@ components:
   - name: preset-browser
     description: Load and search presets
     status: planned
-    phase: 14
 """)
 
             rc, out, err = run_main(root, ["preset-browser"])
 
         self.assertEqual(rc, 1)
         self.assertEqual(err, "")
-        self.assertIn('Component "preset-browser" is planned for Phase 14', out)
+        self.assertIn('Component "preset-browser" is planned but not yet implemented.', out)
 
-    def test_implemented_component_reports_success(self) -> None:
+    def test_registered_component_fails_closed_until_install_is_implemented(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             write_registry(root, """
@@ -185,9 +181,12 @@ components:
 
             rc, out, err = run_main(root, ["meter"])
 
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         self.assertEqual(err, "")
-        self.assertEqual(out, 'Added component "meter" to your project.\n')
+        self.assertEqual(
+            out,
+            'Component "meter" is registered but component installation is not implemented yet.\n',
+        )
 
     def test_script_entry_point_exits_with_main_status(self) -> None:
         out = io.StringIO()
@@ -201,7 +200,7 @@ components:
 
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(err.getvalue(), "")
-        self.assertIn("No components available yet.", out.getvalue())
+        self.assertNotEqual(out.getvalue(), "")
 
 
 if __name__ == "__main__":

@@ -20,8 +20,8 @@
 //   * Embedding Babel-standalone (~3 MB) inside QuickJS for offline import
 //     puts parser-stack risk on the runtime-import lane, which already has
 //     JS-size caps.
-// Follow-up: replace this with embedded esbuild-wasm or sucrase when the
-// dependency story matters for production.
+// Keep JSX bundling in the Node preprocessor so runtime import does not embed
+// a second JavaScript compiler.
 
 import { build } from 'esbuild';
 import { resolve, dirname, basename, extname } from 'node:path';

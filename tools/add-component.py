@@ -27,7 +27,7 @@ def parse_registry(path: Path) -> list[dict]:
                     components.append(current)
                 current = {'name': m.group(1).strip()}
                 continue
-            for key in ('description', 'status', 'phase'):
+            for key in ('description', 'status'):
                 m = re.match(rf'\s+{key}:\s+(.+)', line)
                 if m:
                     current[key] = m.group(1).strip()
@@ -55,7 +55,7 @@ def main():
     if args.list or not args.name:
         if not components:
             print('No components available yet.')
-            print('Components will be added in Phase 14 (Core UI Components).')
+            print('Register reusable components in tools/components/registry.yaml.')
         else:
             print('Available components:\n')
             for c in components:
@@ -71,16 +71,15 @@ def main():
         if components:
             print(f'Available: {", ".join(c["name"] for c in components)}')
         else:
-            print('No components available yet. Coming in Phase 14.')
+            print('No components available yet.')
         return 1
 
     if comp.get('status') == 'planned':
-        print(f'Component "{args.name}" is planned for Phase {comp.get("phase", "?")} but not yet implemented.')
+        print(f'Component "{args.name}" is planned but not yet implemented.')
         return 1
 
-    # TODO: copy component files into project
-    print(f'Added component "{args.name}" to your project.')
-    return 0
+    print(f'Component "{args.name}" is registered but component installation is not implemented yet.')
+    return 1
 
 
 if __name__ == '__main__':

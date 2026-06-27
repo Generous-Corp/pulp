@@ -222,7 +222,7 @@ window.stopEngine = function() {
 };
 
 window.resetPlugin = function() {
-  // TODO: reset plugin state
+  // Clear the module query; navigation discards the current runtime state.
   location.search = '';
 };
 
@@ -254,8 +254,8 @@ async function loadModuleFromURL(url, pluginId) {
 
 async function loadWCLAP(url, pluginId) {
   document.getElementById('format-badge').textContent = 'WebCLAP';
-  // TODO: fetch .tar.gz, extract module.wasm, instantiate via wclap-host-js
-  // For now, show placeholder
+  // This static host detects WCLAP packages but does not unpack archives or
+  // instantiate the WebCLAP runtime.
   document.getElementById('plugin-name').textContent = 'WCLAP: ' + (pluginId || url);
   showMessage('WCLAP loading requires wclap-host-js runtime. Use ?module=URL to load.');
 }
