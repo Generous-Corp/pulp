@@ -283,6 +283,65 @@ TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     REQUIRE_FALSE(compute->fft_inverse(in.data(), out.data(), 100));
 }
 
+// ── FFT Benchmark (GPU vs CPU crossover) ─────────────────────────────────────
+//
+// Measures the current GPU FFT path (upload + log2(N) dispatches + readback)
+// against pulp::signal::Fft across sizes, to locate the crossover and quantify
+// per-call overhead. Prints a table; asserts only that GPU output is produced
+// (no perf assertion — GPU timing is host-load sensitive on shared runners).
+// The per-pass-submit overhead this exposes motivates the single-submit FFT
+// fusion tracked for the RT transport work.
+
+TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    const std::vector<uint32_t> sizes = {256, 1024, 4096, 16384, 65536};
+    constexpr int iters = 20;
+
+    std::printf("\n");
+    std::printf("  FFT: CPU (pulp::signal::Fft) vs GPU (Stockham, per-pass submit)\n");
+    std::printf("  %8s | %12s | %12s | %9s | %s\n",
+                "N", "CPU us", "GPU us", "speedup", "winner");
+    std::printf("  ---------+--------------+--------------+-----------+--------\n");
+
+    for (uint32_t n : sizes) {
+        // CPU baseline: complex forward FFT.
+        Fft fft(static_cast<int>(n));
+        std::vector<std::complex<float>> cbuf(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            cbuf[i] = std::complex<float>(std::sin(0.01f * i), 0.0f);
+        }
+        auto cpu_t0 = std::chrono::high_resolution_clock::now();
+        for (int it = 0; it < iters; ++it) {
+            auto tmp = cbuf;
+            fft.forward(tmp.data());
+        }
+        auto cpu_t1 = std::chrono::high_resolution_clock::now();
+        const double cpu_us =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(cpu_t1 - cpu_t0).count()
+            / 1000.0 / iters;
+
+        // GPU: interleaved input, full forward (upload + dispatches + readback).
+        std::vector<float> in(n * 2), out(n * 2);
+        for (uint32_t i = 0; i < n; ++i) { in[i * 2] = std::sin(0.01f * i); in[i * 2 + 1] = 0.0f; }
+        REQUIRE(compute->fft_forward(in.data(), out.data(), n));  // warm-up + correctness
+        auto gpu_t0 = std::chrono::high_resolution_clock::now();
+        for (int it = 0; it < iters; ++it) {
+            REQUIRE(compute->fft_forward(in.data(), out.data(), n));
+        }
+        auto gpu_t1 = std::chrono::high_resolution_clock::now();
+        const double gpu_us =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(gpu_t1 - gpu_t0).count()
+            / 1000.0 / iters;
+
+        const double speedup = gpu_us > 0.0 ? cpu_us / gpu_us : 0.0;
+        std::printf("  %8u | %12.1f | %12.1f | %8.2fx | %s\n",
+                    n, cpu_us, gpu_us, speedup, speedup > 1.0 ? "GPU" : "CPU");
+    }
+    std::printf("\n");
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
