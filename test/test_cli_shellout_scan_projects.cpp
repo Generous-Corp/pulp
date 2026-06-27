@@ -17,7 +17,7 @@ using namespace pulp_test_cli;
 
 TEST_CASE("pulp projects list --json emits valid JSON for empty registry",
           "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     // Isolated PULP_HOME so we don't read the user's real registry.
     auto tmp = fs::temp_directory_path() / "pulp-projects-json-test";
@@ -37,7 +37,7 @@ TEST_CASE("pulp projects list --json emits valid JSON for empty registry",
 
 TEST_CASE("pulp projects list (no --json) emits human text",
           "[cli][shellout][projects]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto tmp = fs::temp_directory_path() / "pulp-projects-text-test";
     fs::create_directories(tmp);
@@ -54,7 +54,7 @@ TEST_CASE("pulp projects list (no --json) emits human text",
 
 TEST_CASE("pulp projects validates parser errors before registry mutation",
           "[cli][shellout][projects][coverage][phase3]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto pulp_home = unique_temp_dir("pulp-projects-parser-home");
     auto project = unique_temp_dir("pulp-projects-parser-project");
@@ -97,7 +97,7 @@ TEST_CASE("pulp projects validates parser errors before registry mutation",
 // double-quote (the most common escapable character).
 TEST_CASE("pulp projects list --json emits per-project JSON with non-empty registry",
           "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto pulp_home = unique_temp_dir("pulp-projects-json-nonempty-home");
     fs::create_directories(pulp_home);
@@ -148,7 +148,7 @@ TEST_CASE("pulp projects list --json emits per-project JSON with non-empty regis
 // `"missing_on_disk": true` JSON emission line.
 TEST_CASE("pulp projects list --json reports missing_on_disk=true for deleted project",
           "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto pulp_home = unique_temp_dir("pulp-projects-json-missing-home");
     fs::create_directories(pulp_home);
@@ -190,7 +190,7 @@ TEST_CASE("pulp projects list --json reports missing_on_disk=true for deleted pr
 
 TEST_CASE("pulp scan --help exits 0 with usage on stdout",
           "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
     auto r = run_pulp({"scan", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE_FALSE(r.timed_out);
@@ -202,7 +202,7 @@ TEST_CASE("pulp scan --help exits 0 with usage on stdout",
 
 TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
           "[cli][shellout][scan][coverage][phase3]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     const struct {
         std::vector<std::string> args;
@@ -227,7 +227,7 @@ TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
 
 TEST_CASE("pulp host validates parser errors before plugin loading",
           "[cli][shellout][host][coverage][phase3]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     const struct {
         std::vector<std::string> args;
@@ -254,7 +254,7 @@ TEST_CASE("pulp host validates parser errors before plugin loading",
 
 TEST_CASE("pulp host help lists every supported format and descriptor id flag",
           "[cli][shellout][host][help]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto r = run_pulp({"host", "--help"}, /*timeout_ms=*/10000);
     REQUIRE_FALSE(r.timed_out);
@@ -268,10 +268,9 @@ TEST_CASE("pulp host help lists every supported format and descriptor id flag",
 
 TEST_CASE("pulp host derives AU id from bundle Info.plist",
           "[cli][shellout][host][au][coverage]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 #if !defined(__APPLE__)
-    SUCCEED("AU host loading is macOS-only");
-    return;
+    SKIP("AU host loading is macOS-only");
 #else
     auto root = unique_temp_dir("pulp-host-au-id");
     auto bundle = root / "PulpShelloutAU.component";
@@ -318,7 +317,7 @@ TEST_CASE("pulp host derives AU id from bundle Info.plist",
 
 TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
           "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
     auto r = run_pulp({"scan", "--no-load"}, /*timeout_ms=*/30000);
     // The whole point of --no-load is "doesn't crash on bad plugins".
     // If the host happens to have no plugins installed, that's also
@@ -332,10 +331,9 @@ TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
 
 TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
           "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 #if defined(_WIN32)
-    SUCCEED("Windows CLAP defaults do not derive from HOME");
-    return;
+    SKIP("Windows CLAP defaults do not derive from HOME");
 #else
     auto home = unique_temp_dir("pulp-scan-noload-home");
     ScopedEnvVar scoped_home("HOME");
@@ -373,7 +371,7 @@ TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
 
 TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
           "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto home = unique_temp_dir("pulp-scan-lv2-home");
     ScopedEnvVar scoped_home("HOME");
@@ -404,7 +402,7 @@ TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
 
 TEST_CASE("pulp scan --no-load --format clap restricts to one bucket",
           "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_available()) { SKIP("pulp binary not built"); }
     auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
                       /*timeout_ms=*/30000);
     REQUIRE_FALSE(r.timed_out);

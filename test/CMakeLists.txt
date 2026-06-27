@@ -526,7 +526,7 @@ catch_discover_tests(pulp-test-cli-shellout-loop EXTRA_ARGS --allow-running-no-t
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-scan-projects)
-catch_discover_tests(pulp-test-cli-shellout-scan-projects)
+catch_discover_tests(pulp-test-cli-shellout-scan-projects EXTRA_ARGS --allow-running-no-tests)
 
 # `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
 # handling, and native fallback. Shares the helper header with the
