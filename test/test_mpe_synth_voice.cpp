@@ -360,7 +360,7 @@ TEST_CASE("MpeGlideDetector flags overlap on same channel", "[midi][mpe]") {
 }
 
 TEST_CASE("MpeGlideDetector ignores unmatched releases and reset clears channels",
-          "[midi][mpe][codecov]") {
+          "[midi][mpe]") {
     MpeGlideDetector glide;
     MpeNoteState note;
     note.channel = 9;
@@ -387,9 +387,9 @@ TEST_CASE("MpeVoiceAllocator reports last_was_glide", "[midi][mpe]") {
 }
 
 TEST_CASE("MpeVoiceAllocator steal does not double-decrement glide on later note-off", "[midi][mpe]") {
-    // Regression for PR #138: if a voice is stolen mid-life, the
-    // deferred NoteOff for that note must not decrement the glide
-    // refcount again (its channel is already released by the steal path).
+    // If a voice is stolen mid-life, the deferred NoteOff for that note
+    // must not decrement the glide refcount again (its channel is already
+    // released by the steal path).
     MpeVoiceAllocator<TestVoice> alloc{1};
     alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
 

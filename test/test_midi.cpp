@@ -148,7 +148,7 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
 }
 
 TEST_CASE("MIDI device interface default hooks are safe no-ops",
-          "[midi][device][coverage][phase3]") {
+          "[midi][device]") {
     {
         std::unique_ptr<MidiInput> input = std::make_unique<DefaultHookInput>();
         bool called = false;
@@ -214,7 +214,7 @@ TEST_CASE("MidiEvent factory methods mask MIDI data-byte boundaries",
 }
 
 TEST_CASE("MIDI device defaults expose safe no-op extension hooks",
-          "[midi][device][codecov]") {
+          "[midi][device]") {
     MidiPortInfo info;
     REQUIRE(info.id.empty());
     REQUIRE(info.name.empty());
@@ -287,7 +287,7 @@ TEST_CASE("MidiBuffer operations", "[midi][buffer]") {
 }
 
 TEST_CASE("MidiBuffer stores independent SysEx sidecar events",
-          "[midi][buffer][sysex][codecov]") {
+          "[midi][buffer][sysex]") {
     MidiBuffer buffer;
     buffer.add(MidiEvent::note_on(0, 60, 100));
     buffer.add_sysex({0xF0, 0x7D, 0x01, 0xF7}, 12, 0.25);
@@ -313,7 +313,7 @@ TEST_CASE("MidiBuffer stores independent SysEx sidecar events",
 }
 
 TEST_CASE("MidiBuffer clear preserves SysEx sidecar until explicit clear",
-          "[midi][buffer][sysex][coverage][phase3]") {
+          "[midi][buffer][sysex]") {
     MidiBuffer buffer;
     buffer.add(MidiEvent::note_on(0, 60, 100));
     buffer.add_sysex({0xF0, 0x7D, 0x02, 0xF7}, 32, 1.0);
@@ -329,7 +329,7 @@ TEST_CASE("MidiBuffer clear preserves SysEx sidecar until explicit clear",
 }
 
 TEST_CASE("MidiKeyboardState tracks notes and releases with callbacks",
-          "[midi][keyboard][codecov]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
     std::vector<int> note_on_notes;
     std::vector<int> note_off_notes;
@@ -366,7 +366,7 @@ TEST_CASE("MidiKeyboardState tracks notes and releases with callbacks",
 }
 
 TEST_CASE("MidiKeyboardState handles invalid channels and reset without callbacks",
-          "[midi][keyboard][codecov]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
     int note_off_count = 0;
     keys.on_note_off = [&](uint8_t, uint8_t) { ++note_off_count; };
@@ -389,7 +389,7 @@ TEST_CASE("MidiKeyboardState handles invalid channels and reset without callback
 }
 
 TEST_CASE("MidiKeyboardState all_notes_off releases every channel in order",
-          "[midi][keyboard][codecov]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
     std::vector<std::pair<int, int>> released;
     keys.on_note_off = [&](uint8_t channel, uint8_t note) {
@@ -412,7 +412,7 @@ TEST_CASE("MidiKeyboardState all_notes_off releases every channel in order",
 }
 
 TEST_CASE("MidiKeyboardState channel release preserves other held notes",
-          "[midi][keyboard][codecov]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
     std::vector<std::pair<int, int>> released;
     keys.on_note_off = [&](uint8_t channel, uint8_t note) {
@@ -438,7 +438,7 @@ TEST_CASE("MidiKeyboardState channel release preserves other held notes",
 }
 
 TEST_CASE("RpnParser emits RPN NRPN and increment callbacks",
-          "[midi][rpn][codecov]") {
+          "[midi][rpn]") {
     RpnParser parser;
     std::vector<uint16_t> rpn_params;
     std::vector<uint16_t> rpn_values;
@@ -495,7 +495,7 @@ TEST_CASE("RpnParser emits RPN NRPN and increment callbacks",
 }
 
 TEST_CASE("RpnParser reset clears active parameter selection",
-          "[midi][rpn][codecov]") {
+          "[midi][rpn]") {
     RpnParser parser;
     int callbacks = 0;
     parser.on_rpn = [&](uint8_t, uint16_t, uint16_t) { ++callbacks; };
@@ -510,7 +510,7 @@ TEST_CASE("RpnParser reset clears active parameter selection",
 }
 
 TEST_CASE("MidiMessageSequence sorts ranges and matches note-offs",
-          "[midi][sequence][codecov]") {
+          "[midi][sequence]") {
     MidiMessageSequence sequence;
     sequence.add_note_off(2.0, 1, 64);
     sequence.add_note_on(0.5, 1, 64, 100);
@@ -553,7 +553,7 @@ TEST_CASE("MidiMessageSequence sorts ranges and matches note-offs",
 }
 
 TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx events",
-          "[midi][sequence][coverage]") {
+          "[midi][sequence]") {
     MidiMessageSequence sequence;
 
     TimestampedMidiEvent sysex;
@@ -585,7 +585,7 @@ TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx even
 }
 
 TEST_CASE("MidiMessageSequence preserves equal-timestamp insertion order",
-          "[midi][sequence][coverage]") {
+          "[midi][sequence]") {
     MidiMessageSequence sequence;
 
     sequence.add_note_on(1.0, 0, 60, 100);
@@ -602,7 +602,7 @@ TEST_CASE("MidiMessageSequence preserves equal-timestamp insertion order",
 }
 
 TEST_CASE("MidiMessageSequence stores raw sysex events and masks factories",
-          "[midi][sequence][coverage]") {
+          "[midi][sequence]") {
     MidiMessageSequence sequence;
 
     TimestampedMidiEvent sysex;
@@ -628,7 +628,7 @@ TEST_CASE("MidiMessageSequence stores raw sysex events and masks factories",
 }
 
 TEST_CASE("MidiMessageSequence preserves same-timestamp insertion order",
-          "[midi][sequence][codecov]") {
+          "[midi][sequence]") {
     MidiMessageSequence sequence;
     sequence.add_cc(0.0, 0, 7, 100);
     sequence.add_note_on(0.0, 0, 60, 80);
@@ -648,7 +648,7 @@ TEST_CASE("MidiMessageSequence preserves same-timestamp insertion order",
     REQUIRE(sequence[4].timestamp == Approx(1.0));
 }
 
-TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
+TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump]") {
     auto note = UmpPacket::note_on_2(0x1F, 0x2F, 0xC0, 0xABCD, 0xEE, 0x1234);
     REQUIRE(note.word_count == 2);
     REQUIRE(note.message_type() == UmpMessageType::Midi2ChannelVoice);
@@ -692,7 +692,7 @@ TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") 
 }
 
 TEST_CASE("UmpPacket MIDI 1.0 factory masks group channel and data bytes",
-          "[midi][ump][coverage]") {
+          "[midi][ump]") {
     auto packet = UmpPacket::midi1_note_on(0x2F, 0x31, 0xF4, 0xC8);
 
     REQUIRE(packet.word_count == 1);
@@ -705,7 +705,7 @@ TEST_CASE("UmpPacket MIDI 1.0 factory masks group channel and data bytes",
 }
 
 TEST_CASE("UMP conversion scales MIDI 1.0 events both directions",
-          "[midi][ump][codecov]") {
+          "[midi][ump]") {
     REQUIRE(scale_7_to_16(0) == 0);
     REQUIRE(scale_7_to_16(127) == 0xFFFF);
     REQUIRE(scale_16_to_7(0xFFFF) == 127);
@@ -749,7 +749,7 @@ TEST_CASE("UMP conversion scales MIDI 1.0 events both directions",
 }
 
 TEST_CASE("UMP conversion covers note-off cc and unsupported packet paths",
-          "[midi][ump][codecov]") {
+          "[midi][ump]") {
     auto note_off = midi1_event_to_ump2(MidiEvent::note_off(9, 36, 64), 12);
     REQUIRE(note_off.message_type() == UmpMessageType::Midi2ChannelVoice);
     REQUIRE(note_off.group() == 12);
@@ -772,7 +772,7 @@ TEST_CASE("UMP conversion covers note-off cc and unsupported packet paths",
 }
 
 TEST_CASE("UMP conversion rejects unsupported MIDI 2.0 channel statuses",
-          "[midi][ump][coverage]") {
+          "[midi][ump]") {
     UmpPacket channel_pressure{};
     channel_pressure.word_count = 2;
     channel_pressure.words[0] = (0x4u << 28) | (uint32_t(3) << 24)
@@ -786,7 +786,7 @@ TEST_CASE("UMP conversion rejects unsupported MIDI 2.0 channel statuses",
 }
 
 TEST_CASE("UMP conversion preserves MIDI 1.0 fallback bytes",
-          "[midi][ump][codecov]") {
+          "[midi][ump]") {
     auto program = midi1_event_to_ump2(MidiEvent::program_change(5, 42), 15);
 
     REQUIRE(program.message_type() == UmpMessageType::Midi1ChannelVoice);
@@ -802,7 +802,7 @@ TEST_CASE("UMP conversion preserves MIDI 1.0 fallback bytes",
 }
 
 TEST_CASE("MIDI 1.0 fallback conversion preserves requested group and offsets",
-          "[midi][ump][buffer][codecov]") {
+          "[midi][ump][buffer]") {
     MidiBuffer midi;
     auto program = MidiEvent::program_change(14, 91);
     program.sample_offset = 256;
@@ -821,7 +821,7 @@ TEST_CASE("MIDI 1.0 fallback conversion preserves requested group and offsets",
 }
 
 TEST_CASE("UMP scaling helpers preserve boundary values around pitch center",
-          "[midi][ump][codecov]") {
+          "[midi][ump]") {
     REQUIRE(scale_14_to_32(0) == 0);
     REQUIRE(scale_14_to_32(0x3FFF) == 0xFFFFFFFFu);
     REQUIRE(scale_32_to_14(0) == 0);
@@ -831,7 +831,7 @@ TEST_CASE("UMP scaling helpers preserve boundary values around pitch center",
 }
 
 TEST_CASE("UmpBuffer and MidiBuffer bridge preserve order and offsets",
-          "[midi][ump][buffer][codecov]") {
+          "[midi][ump][buffer]") {
     MidiBuffer midi;
     auto note = MidiEvent::note_on(0, 60, 100);
     note.sample_offset = 32;
@@ -865,7 +865,7 @@ TEST_CASE("UmpBuffer and MidiBuffer bridge preserve order and offsets",
 }
 
 TEST_CASE("MidiBuffer UMP sidecar pointer can be replaced and detached",
-          "[midi][ump][buffer][coverage]") {
+          "[midi][ump][buffer]") {
     MidiBuffer midi;
     UmpBuffer first;
     UmpBuffer second;
@@ -886,7 +886,7 @@ TEST_CASE("MidiBuffer UMP sidecar pointer can be replaced and detached",
 }
 
 TEST_CASE("UmpBuffer flatten skips packets without MIDI 1.0 equivalents",
-          "[midi][ump][buffer][codecov]") {
+          "[midi][ump][buffer]") {
     UmpBuffer ump;
     ump.add({UmpPacket::note_on_2(1, 2, 60, scale_7_to_16(96)), 12});
     ump.add({UmpPacket::per_note_pitch_bend(1, 2, 60, 0x90000000u), 18});
@@ -904,7 +904,7 @@ TEST_CASE("UmpBuffer flatten skips packets without MIDI 1.0 equivalents",
 }
 
 TEST_CASE("MPE buffer binding records tracker callbacks with sample offsets",
-          "[midi][mpe][buffer][codecov]") {
+          "[midi][mpe][buffer]") {
     MpeVoiceTracker tracker(MpeConfig::standard_lower(2));
     MpeBuffer buffer;
     int32_t sample_offset = 12;
@@ -967,7 +967,7 @@ TEST_CASE("MidiFileData summarizes tracks", "[midi][file]") {
 }
 
 TEST_CASE("MidiFileData duration ignores empty and negative-only tracks",
-          "[midi][file][coverage]") {
+          "[midi][file]") {
     MidiFileData data;
     data.tracks.push_back(MidiTrack{});
 
