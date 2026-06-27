@@ -28,6 +28,12 @@ public:
     uint32_t fft_size() const { return fft_size_; }
     const std::vector<float>& window() const { return window_; }
 
+    /// The underlying GPU compute device (or null if none initialized). Exposed
+    /// so a sibling primitive (e.g. the multi-layer spectral stack) can run on
+    /// the SAME device and keep spectral frames GPU-resident without a second
+    /// device. Worker / offline use only — not real-time-safe.
+    render::GpuCompute* compute() { return gpu_.get(); }
+
     /// frame_in: fft_size real samples. spectrum_out: 2*fft_size interleaved
     /// complex (windowed forward FFT). Returns false if not GPU-ready.
     bool analyze(const float* frame_in, float* spectrum_out);

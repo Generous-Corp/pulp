@@ -26,6 +26,7 @@ add_subdirectory(pulp-tone)
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
 add_subdirectory(super-convolver)
+add_subdirectory(spectral-lab)
 
 # PulpCompressor: sidechain compressor validating multi-bus
 add_subdirectory(pulp-compressor)

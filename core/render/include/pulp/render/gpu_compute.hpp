@@ -155,6 +155,53 @@ public:
                                 const float* pan_r, float* out_lr, uint32_t n,
                                 uint32_t num_ir) = 0;
 
+    // ── Multi-layer spectral stack (N resident layer-spectra → one frame) ───
+    //
+    // The spectral analogue of the multi-IR regime: keep `num_layers` frozen
+    // spectral frames (each a magnitude array + a persistent phase array)
+    // RESIDENT on the GPU, and per hop process EVERY layer's bins in ONE batched
+    // submit — advance each layer's phase by its nominal per-hop frequency, blur
+    // (smear) each layer's magnitude across frequency, then weighted-sum all
+    // layers into one combined spectrum and inverse-FFT it to a single real
+    // frame. Only that one frame (2n floats) is read back per hop, regardless of
+    // how many layers there are. On the CPU this is num_layers × (per-bin smear
+    // + transcendentals), serial; on the GPU it is one batch parallel across all
+    // n bins — the structural win that scales past real time on the CPU at high
+    // num_layers while the GPU holds. Not real-time-safe (blocks on the single
+    // readback); driven from the GPU audio worker / offline.
+
+    /// Build the spectral-stack plan for FFT size `n` (power of two), STFT hop
+    /// `hop`, and `num_layers` resident layer-spectra. `hop` fixes the per-bin
+    /// phase advance (2*pi*k*hop/n) applied each render. Allocates the resident
+    /// magnitude / phase buffers (zeroed: every layer starts inactive/silent)
+    /// and the combine + inverse-FFT pipeline. Call once before
+    /// spectral_stack_render. Returns false on invalid args, if the resident
+    /// buffers would exceed the device storage-buffer binding limit, or on GPU
+    /// failure.
+    virtual bool prepare_spectral_stack(uint32_t n, uint32_t hop,
+                                        uint32_t num_layers) = 0;
+
+    /// Upload one captured layer's magnitude (`mag`, n reals) and initial phase
+    /// (`phase`, n reals) into the resident plan for (`n`, `num_layers`),
+    /// activating it. The phase then persists and advances on the GPU each
+    /// render. Returns false if prepare_spectral_stack(n, num_layers) was not
+    /// called, args are invalid, or dispatch fails.
+    virtual bool spectral_stack_set_layer(uint32_t layer, const float* mag,
+                                          const float* phase, uint32_t n,
+                                          uint32_t num_layers) = 0;
+
+    /// Advance + smear + weighted-sum all resident layers and inverse-FFT to one
+    /// real frame. `layer_weights` (length num_layers) scales each layer (drive
+    /// it from a Morph control). `smear` (0..1) circular box-blurs each layer's
+    /// magnitude across frequency; `jitter` (0..1) adds conjugate-symmetric phase
+    /// wander seeded by `rng_seed`. The phase advance is conjugate-symmetric so
+    /// `frame_out` (n reals) is real. Returns false if the plan was not prepared
+    /// for (n, num_layers), args are invalid, or dispatch fails.
+    virtual bool spectral_stack_render(const float* layer_weights,
+                                       uint32_t num_layers, float smear,
+                                       float jitter, uint32_t rng_seed,
+                                       float* frame_out, uint32_t n) = 0;
+
     // ── Linear algebra ─────────────────────────────────────────────────────
 
     /// Dense matrix multiply C[M×N] = A[M×K] · B[K×N], all row-major f32.

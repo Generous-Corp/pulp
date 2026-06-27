@@ -231,6 +231,105 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kSpectralAdvanceShader = R"wgsl(
+// Per-bin phase advance + conjugate-symmetric jitter for a stack of frozen
+// layers. One thread per (layer, bin) over the resident phase buffer (num_layers
+// blocks of n). The nominal advance 2*pi*k*hop/n is the per-bin frequency over
+// one hop; it is conjugate-antisymmetric (bin n-k advances by the negative of
+// bin k mod 2*pi), so a magnitude-symmetric layer stays real after synthesis.
+// Jitter is made antisymmetric explicitly: bin k in (0, n/2) gets +h(k), bin k
+// in (n/2, n) gets -h(n-k), and bins 0 / n/2 get none — preserving realness.
+
+struct SpAdvance { n : u32, num_layers : u32, hop_ratio : f32, jitter : f32, seed : u32, pad0 : u32, pad1 : u32, pad2 : u32 };
+
+@group(0) @binding(0) var<storage, read_write> phase  : array<f32>;  // num_layers*n
+@group(0) @binding(1) var<uniform>             p      : SpAdvance;
+
+const TWO_PI_A : f32 = 6.2831853071795864;
+
+// Integer hash → f32 in [-0.5, 0.5]. Deterministic per (bin, seed).
+fn hash01(x : u32) -> f32 {
+    var h = x * 2654435761u + p.seed * 40503u;
+    h = (h ^ (h >> 15u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) / 16777216.0 - 0.5;
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let idx = gid.x;
+    if (idx >= p.num_layers * p.n) {
+        return;
+    }
+    let k = idx % p.n;
+    var ph = phase[idx] + TWO_PI_A * f32(k) * p.hop_ratio;
+    if (p.jitter > 0.0) {
+        let half = p.n / 2u;
+        if (k > 0u && k < half) {
+            ph = ph + p.jitter * hash01(k);
+        } else if (k > half && k < p.n) {
+            ph = ph - p.jitter * hash01(p.n - k);
+        }
+    }
+    // Wrap to [-pi, pi] (std::remainder semantics) to keep cos/sin precise.
+    phase[idx] = ph - TWO_PI_A * round(ph / TWO_PI_A);
+}
+)wgsl";
+
+static constexpr const char* kSpectralCombineShader = R"wgsl(
+// Smear + weighted complex sum across all resident layers into one combined
+// spectrum. One thread per output bin k (over n). For each active layer the
+// magnitude is optionally circular-box-blurred over +/- radius bins (the smear),
+// scaled by the layer weight, and rotated by the (already-advanced) per-bin
+// phase, then accumulated. Summing in the frequency domain and doing ONE inverse
+// FFT afterward is identical to synthesizing each layer and summing in time
+// (linearity), but costs one transform instead of num_layers — and the heavy
+// per-bin smear runs in parallel across all n bins here.
+
+struct SpCombine { n : u32, num_layers : u32, radius : u32, inv_kernel : f32 };
+
+@group(0) @binding(0) var<storage, read>       mag      : array<f32>;  // num_layers*n
+@group(0) @binding(1) var<storage, read>       phase    : array<f32>;  // num_layers*n
+@group(0) @binding(2) var<storage, read>       weights  : array<f32>;  // num_layers
+@group(0) @binding(3) var<storage, read_write> combined : array<f32>;  // 2n
+@group(0) @binding(4) var<uniform>             p        : SpCombine;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let k = gid.x;
+    if (k >= p.n) {
+        return;
+    }
+    var accR = 0.0;
+    var accI = 0.0;
+    for (var L = 0u; L < p.num_layers; L = L + 1u) {
+        let w = weights[L];
+        if (abs(w) < 1e-6) {
+            continue;
+        }
+        let base = L * p.n;
+        var m = mag[base + k];
+        if (p.radius > 0u) {
+            var s = 0.0;
+            let r = i32(p.radius);
+            let ni = i32(p.n);
+            for (var d = -r; d <= r; d = d + 1) {
+                var j = i32(k) + d;
+                j = ((j % ni) + ni) % ni;  // circular
+                s = s + mag[base + u32(j)];
+            }
+            m = s * p.inv_kernel;
+        }
+        let ph = phase[base + k];
+        accR = accR + w * m * cos(ph);
+        accI = accI + w * m * sin(ph);
+    }
+    combined[2u * k]      = accR;
+    combined[2u * k + 1u] = accI;
+}
+)wgsl";
+
 static constexpr const char* kMatmulShader = R"wgsl(
 // Dense matmul C[M*N] = A[M*K] * B[K*N], all row-major. One thread per output
 // element. Foundational primitive for GPU neural inference (dense / LSTM gates).
@@ -429,12 +528,15 @@ public:
         conv_plans_.clear();
         batch_conv_plans_.clear();
         multi_conv_plans_.clear();
+        spectral_stack_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
         conv_bmul_pipeline_ = nullptr;
         multi_ir_mul_pipeline_ = nullptr;
         multi_ir_combine_pipeline_ = nullptr;
+        spectral_advance_pipeline_ = nullptr;
+        spectral_combine_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
@@ -1058,6 +1160,185 @@ public:
         return read_back(plan.readback, out_lr, small);
     }
 
+    // ── Multi-layer spectral stack ──────────────────────────────────────────
+
+    bool prepare_spectral_stack(uint32_t n, uint32_t hop,
+                                uint32_t num_layers) override {
+        if (!initialized_ || num_layers == 0 || hop == 0) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+        // The resident magnitude / phase buffers are num_layers*n floats — the
+        // storage-buffer-binding-limited resource. Gate on the device's real
+        // limit and keep byte math within uint32 (buffer sizes are uint32_t).
+        const uint64_t res_bytes =
+            static_cast<uint64_t>(num_layers) * n * sizeof(float);
+        if (res_bytes > 0xFFFFFFFFull) return false;
+        wgpu::Limits limits{};
+        uint64_t max_bind = 0;
+        if (device_.GetLimits(&limits) == wgpu::Status::Success)
+            max_bind = limits.maxStorageBufferBindingSize;
+        if (max_bind == 0)
+            max_bind = static_cast<uint64_t>(kMaxFftN) * 2ull * sizeof(float);
+        // Strictly under the per-binding limit: a buffer AT the limit creates a
+        // Dawn error buffer (operations silently no-op), so leave headroom.
+        if (res_bytes >= max_bind) return false;
+
+        SpectralStackPlan plan;
+        plan.n = n;
+        plan.num_layers = num_layers;
+        plan.hop_ratio = static_cast<float>(hop) / static_cast<float>(n);
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
+        const uint32_t res = num_layers * n * static_cast<uint32_t>(sizeof(float));
+        const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                      | wgpu::BufferUsage::CopySrc;
+        plan.mag = create_storage_buffer(res,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.phase = create_storage_buffer(res, sc);
+        plan.weights = create_storage_buffer(
+            num_layers * 4u, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.comb_a = create_storage_buffer(small, sc);
+        plan.comb_b = create_storage_buffer(small, sc);
+        plan.readback = create_readback_buffer(small);
+        wgpu::BufferDescriptor ad{};
+        ad.size = 32;  // SpAdvance (8 x 4)
+        ad.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        plan.advance_u = device_.CreateBuffer(&ad);
+        wgpu::BufferDescriptor cd{};
+        cd.size = 16;  // SpCombine (4 x 4)
+        cd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        plan.combine_u = device_.CreateBuffer(&cd);
+        if (!plan.mag || !plan.phase || !plan.weights || !plan.comb_a ||
+            !plan.comb_b || !plan.readback || !plan.advance_u || !plan.combine_u) {
+            return false;
+        }
+
+        // Zero the resident buffers so an unset layer is silent (mag 0) and has a
+        // defined phase. WriteBuffer from a host-zero vector (prepare is non-RT).
+        std::vector<float> zeros(static_cast<std::size_t>(num_layers) * n, 0.0f);
+        queue_.WriteBuffer(plan.mag, 0, zeros.data(), res);
+        queue_.WriteBuffer(plan.phase, 0, zeros.data(), res);
+
+        plan.advance_bg = create_bind_group(spectral_advance_pipeline_,
+                                            {plan.phase, plan.advance_u});
+        if (!plan.advance_bg) return false;
+        // Combine writes into comb_a (the inverse-FFT start buffer).
+        plan.combine_bg = create_bind_group(
+            spectral_combine_pipeline_,
+            {plan.mag, plan.phase, plan.weights, plan.comb_a, plan.combine_u});
+        if (!plan.combine_bg) return false;
+
+        // Inverse FFT passes (sign +1, batch 1) ping-ponging comb_a/comb_b.
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            wgpu::BufferDescriptor ud{};
+            ud.size = 16;
+            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            wgpu::Buffer u = device_.CreateBuffer(&ud);
+            if (!u) return false;
+            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
+            FftParams fp{n, 1u << s, 1.0f, 1u};
+            queue_.WriteBuffer(u, 0, &fp, sizeof(fp));
+            const bool src_is_a = (s % 2u == 0u);
+            wgpu::BindGroup bg = create_bind_group(
+                fft_pipeline_,
+                src_is_a ? std::initializer_list<wgpu::Buffer>{plan.comb_a, plan.comb_b, u}
+                         : std::initializer_list<wgpu::Buffer>{plan.comb_b, plan.comb_a, u});
+            if (!bg) return false;
+            plan.inv_u.push_back(std::move(u));
+            plan.inv_bgs.push_back(std::move(bg));
+        }
+
+        spectral_stack_plans_.insert_or_assign(n, std::move(plan));
+        return true;
+    }
+
+    bool spectral_stack_set_layer(uint32_t layer, const float* mag,
+                                  const float* phase, uint32_t n,
+                                  uint32_t num_layers) override {
+        if (!initialized_ || !mag || !phase) return false;
+        auto it = spectral_stack_plans_.find(n);
+        if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
+            return false;
+        if (layer >= num_layers) return false;
+        SpectralStackPlan& plan = it->second;
+        const uint32_t row = n * static_cast<uint32_t>(sizeof(float));
+        const uint64_t off = static_cast<uint64_t>(layer) * row;
+        queue_.WriteBuffer(plan.mag, off, mag, row);
+        queue_.WriteBuffer(plan.phase, off, phase, row);
+        return true;
+    }
+
+    bool spectral_stack_render(const float* layer_weights, uint32_t num_layers,
+                               float smear, float jitter, uint32_t rng_seed,
+                               float* frame_out, uint32_t n) override {
+        if (!initialized_ || !layer_weights || !frame_out) return false;
+        auto it = spectral_stack_plans_.find(n);
+        if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
+            return false;
+        SpectralStackPlan& plan = it->second;
+
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+        // Blur half-width: any positive smear gives at least radius 1, up to
+        // ~n/32 (matches the CPU reference's kernel growth, no odd-only step).
+        const float sm = smear < 0.0f ? 0.0f : (smear > 1.0f ? 1.0f : smear);
+        uint32_t radius = 0u;
+        if (sm > 0.0f) {
+            radius = static_cast<uint32_t>(sm * static_cast<float>(n / 32u));
+            if (radius < 1u) radius = 1u;
+        }
+        const float jit = jitter < 0.0f ? 0.0f : (jitter > 1.0f ? 1.0f : jitter);
+
+        struct SpAdvance {
+            uint32_t n; uint32_t num_layers; float hop_ratio; float jitter;
+            uint32_t seed; uint32_t pad0; uint32_t pad1; uint32_t pad2;
+        };
+        SpAdvance adv{n, num_layers, plan.hop_ratio, jit, rng_seed, 0u, 0u, 0u};
+        struct SpCombine { uint32_t n; uint32_t num_layers; uint32_t radius; float inv_kernel; };
+        SpCombine cmb{n, num_layers, radius,
+                      1.0f / static_cast<float>(2u * radius + 1u)};
+        queue_.WriteBuffer(plan.advance_u, 0, &adv, sizeof(adv));
+        queue_.WriteBuffer(plan.combine_u, 0, &cmb, sizeof(cmb));
+        queue_.WriteBuffer(plan.weights, 0, layer_weights, num_layers * 4u);
+
+        const uint32_t adv_wg = ((num_layers * n) + 255u) / 256u;
+        const uint32_t comb_wg = (n + 255u) / 256u;
+        const uint32_t fft_wg = ((n / 2u) + 255u) / 256u;
+
+        // One command buffer: advance phase (all layers) → smear + weighted-sum
+        // combine → inverse FFT → copy the single frame to readback. Only 2n
+        // floats leave the GPU regardless of num_layers.
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(spectral_advance_pipeline_);
+            pass.SetBindGroup(0, plan.advance_bg);
+            pass.DispatchWorkgroups(adv_wg);
+            pass.End();
+        }
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(spectral_combine_pipeline_);
+            pass.SetBindGroup(0, plan.combine_bg);
+            pass.DispatchWorkgroups(comb_wg);
+            pass.End();
+        }
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        wgpu::Buffer& result = (plan.log2n & 1u) ? plan.comb_b : plan.comb_a;
+        encoder.CopyBufferToBuffer(result, 0, plan.readback, 0, small);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        if (!read_back(plan.readback, sp_scratch(small), small)) return false;
+        const float* cplx = sp_scratch(small);
+        const float inv = 1.0f / static_cast<float>(n);
+        for (uint32_t i = 0; i < n; ++i) frame_out[i] = cplx[2u * i] * inv;
+        return true;
+    }
+
     // ── Linear algebra ─────────────────────────────────────────────────────
 
     bool matmul(const float* a, const float* b, float* c,
@@ -1573,6 +1854,8 @@ private:
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
     wgpu::ComputePipeline multi_ir_mul_pipeline_;      // one input × many IRs
     wgpu::ComputePipeline multi_ir_combine_pipeline_;  // pan-combine reduce → stereo
+    wgpu::ComputePipeline spectral_advance_pipeline_;  // per-bin phase advance + jitter
+    wgpu::ComputePipeline spectral_combine_pipeline_;  // smear + weighted layer sum
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
@@ -1664,6 +1947,38 @@ private:
     };
     std::unordered_map<uint32_t, MultiConvPlan> multi_conv_plans_;
 
+    // Multi-layer spectral-stack plan: num_layers frozen layer-spectra resident
+    // as a magnitude buffer (mag, num_layers*n reals) and a persistent phase
+    // buffer (phase, num_layers*n reals, advanced in place each render). Per
+    // render: advance phase → smear+weighted-sum combine into comb_a (2n) →
+    // inverse FFT ping-ponging comb_a/comb_b → copy one frame to readback (2n).
+    // One submit + one 2n readback covers all layers. Keyed by n; rebuilt if
+    // num_layers changes.
+    struct SpectralStackPlan {
+        uint32_t n = 0;
+        uint32_t log2n = 0;
+        uint32_t num_layers = 0;
+        float hop_ratio = 0.0f;
+        wgpu::Buffer mag, phase;          // resident layer-spectra (num_layers*n)
+        wgpu::Buffer weights;             // per-layer morph weights (num_layers)
+        wgpu::Buffer comb_a, comb_b;      // combine out / inverse ping-pong (2n)
+        wgpu::Buffer advance_u, combine_u;
+        wgpu::Buffer readback;            // one frame (2n)
+        std::vector<wgpu::Buffer> inv_u;
+        std::vector<wgpu::BindGroup> inv_bgs;
+        wgpu::BindGroup advance_bg, combine_bg;
+    };
+    std::unordered_map<uint32_t, SpectralStackPlan> spectral_stack_plans_;
+
+    // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
+    // the render path is non-RT so a resize here is fine).
+    std::vector<float> sp_scratch_;
+    float* sp_scratch(uint32_t bytes) {
+        const std::size_t floats = bytes / sizeof(float);
+        if (sp_scratch_.size() < floats) sp_scratch_.assign(floats, 0.0f);
+        return sp_scratch_.data();
+    }
+
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
     // to eliminate allocator churn. Created lazily in create_pipelines().
@@ -1693,6 +2008,14 @@ private:
         multi_ir_combine_pipeline_ =
             create_pipeline("multi_ir_combine", kMultiIrCombineShader);
         if (!multi_ir_combine_pipeline_) return false;
+
+        spectral_advance_pipeline_ =
+            create_pipeline("spectral_advance", kSpectralAdvanceShader);
+        if (!spectral_advance_pipeline_) return false;
+
+        spectral_combine_pipeline_ =
+            create_pipeline("spectral_combine", kSpectralCombineShader);
+        if (!spectral_combine_pipeline_) return false;
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;
