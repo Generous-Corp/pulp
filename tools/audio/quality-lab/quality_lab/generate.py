@@ -99,3 +99,28 @@ def smear_transients(
         seg = out[lo:hi]
         out[lo:hi] = np.convolve(seg, kernel, mode="same")
     return out
+
+
+def jitter_transients(
+    y: np.ndarray, onset_times: list[float], sr: int, drift_ms: dict[int, float]
+) -> np.ndarray:
+    """Move selected hits later/earlier by a per-onset drift (a controlled stand-in for
+    a stretch engine that mis-times attacks). `drift_ms` maps onset index -> signed ms.
+
+    Each hit's segment [onset, next_onset) is copied to onset+drift; untouched hits stay
+    put. Output length is preserved; overlaps are summed.
+    """
+    out = np.zeros_like(y)
+    onsets = sorted(onset_times)
+    bounds = [int(round(t * sr)) for t in onsets] + [len(y)]
+    for i in range(len(onsets)):
+        a, b = bounds[i], bounds[i + 1]
+        shift = int(round(drift_ms.get(i, 0.0) * sr / 1000.0))
+        dst = a + shift
+        lo = max(0, dst)
+        hi = min(len(out), dst + (b - a))
+        src_lo = lo - dst
+        src_hi = src_lo + (hi - lo)
+        if hi > lo and src_hi <= (b - a):
+            out[lo:hi] += y[a + src_lo : a + src_hi]
+    return out
