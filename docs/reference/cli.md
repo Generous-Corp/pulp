@@ -1271,7 +1271,7 @@ file error.
 
 ### import-design
 
-**Status**: experimental
+**Status**: partial
 
 Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
 React JSX, or Google DESIGN.md source files into generated Pulp UI code.
