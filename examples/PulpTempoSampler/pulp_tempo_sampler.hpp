@@ -577,9 +577,19 @@ public:
         }
         resample_raw_to_host_locked();
         analyze_locked();
+        // A fresh drop while UNLINKED adopts the new sample's own (bar-snapped)
+        // tempo, so the loop plays at its natural fractional speed; LINKED stays
+        // following the host. deserialize re-applies a saved tempo AFTER load_loop,
+        // so a restored manual tempo still wins over this.
+        if (!tempo_linked()) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            if (det > 0.0)
+                tempo_override_.store(std::clamp(det, kTargetBpmMin, kTargetBpmMax),
+                                      std::memory_order_relaxed);
+        }
         raw_generation_.fetch_add(1, std::memory_order_acq_rel);
         load_generation_.fetch_add(1, std::memory_order_acq_rel);  // NEW sample → tempo poller re-detects BPM
-        request_render(pending_host_bpm_.load(std::memory_order_relaxed));
+        request_render(effective_bpm());  // render at the resolved tempo (host / detected / manual)
         return true;
     }
 
@@ -980,9 +990,15 @@ public:
             tempo_override_.store(0.0, std::memory_order_relaxed);  // follow the reference again
             request_render(effective_bpm());  // re-render at the now-linked source tempo
         } else {
-            const double cur = std::clamp(effective_bpm(), kTargetBpmMin, kTargetBpmMax);
-            tempo_override_.store(cur, std::memory_order_relaxed);  // engage manual at current
-            request_render(cur);
+            // Unlinking engages the SAMPLE's own tempo — its detected, bar-snapped
+            // value — so the loop plays (and the readout shows) its natural
+            // fractional tempo, free of the host. Fall back to the current effective
+            // tempo only if nothing is detected yet.
+            const double det = detected_bpm();
+            const double seed = std::clamp(det > 0.0 ? det : effective_bpm(),
+                                           kTargetBpmMin, kTargetBpmMax);
+            tempo_override_.store(seed, std::memory_order_relaxed);
+            request_render(seed);
         }
     }
 
@@ -1285,7 +1301,11 @@ public:
             live->font_family = mono;
             live->color = teal;
             live->text = [this] {
-                return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
+                // One decimal so the loop's bar-snapped fractional tempo is visible
+                // (e.g. 103.4 when unlinked) — an integer readout hid it.
+                char buf[24];
+                std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
+                return std::string(buf);
             };
             place(*live, 480, 320, 56, 18);
             root->add_child(std::move(live));
