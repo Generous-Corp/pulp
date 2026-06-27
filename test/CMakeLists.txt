@@ -1938,6 +1938,11 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-convolver
         SOURCES test_gpu_convolver.cpp
         LIBRARIES pulp::gpu-audio pulp::audio)
+    # GPU STFT primitive (Phase 4 spectral toolkit): window+FFT analyze,
+    # inverse-FFT synthesize, COLA overlap-add reconstruction.
+    pulp_add_test_suite(pulp-test-gpu-stft
+        SOURCES test_gpu_stft.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 
 # Test signal source (sine tone, file playback)

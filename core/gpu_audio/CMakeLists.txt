@@ -32,6 +32,6 @@ target_link_libraries(pulp-gpu-audio
 # above stays GPU-agnostic. The GPU path is a runtime no-op without a Skia
 # device (GpuCompute::create() returns null → CPU fallback).
 if(TARGET pulp::render)
-    target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver.cpp)
+    target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver.cpp src/gpu_stft.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)
 endif()
