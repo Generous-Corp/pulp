@@ -161,7 +161,7 @@ TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
 }
 
 TEST_CASE("ActionBroadcaster skips empty listener callbacks",
-          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+          "[events][async_updater][action_broadcaster][coverage]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -179,7 +179,7 @@ TEST_CASE("ActionBroadcaster skips empty listener callbacks",
 }
 
 TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
-          "[events][async_updater][action_broadcaster][coverage][phase3-large]") {
+          "[events][async_updater][action_broadcaster][coverage]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int second = -1;
@@ -235,7 +235,7 @@ TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
-          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+          "[events][async_updater][action_broadcaster][coverage]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int late_id = -1;

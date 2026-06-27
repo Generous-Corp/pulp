@@ -1,7 +1,8 @@
 #pragma once
 
-// Cryptographic primitives via Mbed TLS.
-// SHA-256, MD5, AES-CBC, RSA sign/verify.
+// Cryptographic primitives.
+// Mbed TLS: SHA-1/256, MD5, AES-CBC/GCM, HMAC.
+// TweetNaCl: Ed25519 sign/verify.
 
 #include <string>
 #include <string_view>
@@ -107,7 +108,6 @@ bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t size);
 //
 // Detached EdDSA signing over the Ed25519 curve. Used by:
 //   - Sparkle appcast `edSignature` (macOS auto-update)
-//   - Future v2 license-key payloads (post-RSA migration)
 //
 // Implementation: vendored TweetNaCl reference (public domain, RFC 8032
 // compliant). TweetNaCl exposes a combined sign-and-message API; the
