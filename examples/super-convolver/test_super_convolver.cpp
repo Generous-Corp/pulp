@@ -124,10 +124,10 @@ TEST_CASE("SuperConvolver Size knob swaps the IR live", "[golden][superconvolver
     std::size_t lag = 0; float peak = 0.0f;
     for (std::size_t i = 0; i < out.size(); ++i)
         if (std::abs(out[i]) > peak) { peak = std::abs(out[i]); lag = i; }
-    double sxy = 0, sxx = 0, syy = 0; std::size_t n = 0;
+    double sxy = 0, sxx = 0, syy = 0;
     for (std::size_t i = 0; i < want_len && lag + i < out.size(); ++i) {
         const double x = out[lag + i], y = new_ir[i];
-        sxy += x * y; sxx += x * x; syy += y * y; ++n;
+        sxy += x * y; sxx += x * x; syy += y * y;
     }
     const double corr = sxy / std::sqrt(sxx * syy + 1e-30);
     INFO("post-swap corr=" << corr);

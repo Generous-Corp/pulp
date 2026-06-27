@@ -15,14 +15,19 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fft.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <mutex>
 #include <thread>
 #include <vector>
+
+namespace pulp::view { class View; }
 
 namespace pulp::examples {
 
@@ -32,6 +37,12 @@ enum SuperConvolverParams : state::ParamID {
     kGain    = 3,  // output gain, dB
     kBypass  = 4,
 };
+
+// Live wet-output magnitude spectrum (dB), published lock-free from the audio
+// thread to the GPU UI's frequency display. 256 log-ready bins.
+inline constexpr int kSpectrumBins = 256;
+using SpectrumFrame = std::array<float, kSpectrumBins>;
+using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
 
 /// Build a deterministic, plausible reverb IR: exponentially-decaying white
 /// noise (seeded LCG → reproducible, so a golden test can rebuild it). length
@@ -98,6 +109,12 @@ public:
         return ir_display_;
     }
 
+    /// Lock-free latest wet-output spectrum for the UI (UI is sole reader).
+    SpectrumBus& spectrum_bus() { return spectrum_bus_; }
+
+    /// Native GPU front-end (live IR waveform + frequency display + controls).
+    std::unique_ptr<view::View> create_view() override;
+
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
@@ -119,6 +136,7 @@ public:
                 auto out = output.channel(ch);
                 for (std::size_t i = 0; i < n; ++i) out[i] = in[i];
             }
+            if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
             return;
         }
 
@@ -137,9 +155,33 @@ public:
                 out[i] = (1.0f - mix) * in[i] + mix * gain * wet_[i];
             for (std::size_t i = m; i < n; ++i) out[i] = in[i];  // (n>cap: pass dry)
         }
+
+        if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
     }
 
 private:
+    // Accumulate the output into a ring; once per block run a windowed FFT and
+    // publish a 256-bin dB magnitude spectrum. RT-safe: the Fft is preallocated
+    // and the TripleBuffer write never blocks.
+    void publish_spectrum(const float* mono, int n) {
+        for (int i = 0; i < n; ++i) {
+            spec_ring_[static_cast<std::size_t>(spec_pos_)] = mono[i];
+            spec_pos_ = (spec_pos_ + 1) % kSpectrumFft;
+        }
+        for (int i = 0; i < kSpectrumFft; ++i) {
+            const float w = 0.5f - 0.5f * std::cos(2.0f * 3.14159265f * i / kSpectrumFft);
+            spec_time_[static_cast<std::size_t>(i)] =
+                spec_ring_[static_cast<std::size_t>((spec_pos_ + i) % kSpectrumFft)] * w;
+        }
+        spec_fft_.forward_real(spec_time_.data(), spec_freq_.data());
+        SpectrumFrame frame;
+        for (int k = 0; k < kSpectrumBins; ++k) {
+            const float mag = std::abs(spec_freq_[static_cast<std::size_t>(k)]) / (kSpectrumFft * 0.25f);
+            frame[static_cast<std::size_t>(k)] = 20.0f * std::log10(mag + 1e-7f);
+        }
+        spectrum_bus_.write(frame);
+    }
+
     float current_size() const {
         const float s = state().get_value(kSize);
         return s > 0.05f ? s : 0.05f;
@@ -209,6 +251,15 @@ private:
     // UI display snapshot (UI + worker thread only; never audio thread).
     mutable std::mutex ir_display_mutex_;
     std::vector<float> ir_display_;
+
+    // Live wet-output spectrum (audio thread writes, UI reads).
+    static constexpr int kSpectrumFft = 2 * kSpectrumBins;  // 512
+    SpectrumBus spectrum_bus_;
+    signal::Fft spec_fft_{kSpectrumFft};
+    std::array<float, kSpectrumFft> spec_ring_{};
+    std::array<float, kSpectrumFft> spec_time_{};
+    std::array<std::complex<float>, kSpectrumFft> spec_freq_{};
+    int spec_pos_ = 0;
 };
 
 inline std::unique_ptr<format::Processor> create_super_convolver() {
