@@ -116,10 +116,11 @@ export function applyPaintProp(
     switch (key) {
         // Visual style
         // CSS `background` shorthand can carry color, gradient, or url. The
-        // C++ `setBackground` bridge path only parses a color token via
-        // `set_background_color(parseHexColor(...))`, so gradient strings
-        // collapse to a bogus color (often white). Detect gradients here so
-        // high-contrast labels on gradient-backed chip strips stay visible.
+        // C++ `setBackground` bridge fn only parses
+        // a color token via `set_background_color(parseHexColor(...))`, so
+        // gradient strings collapse to a bogus color (often white). Route
+        // gradients explicitly so labels on gradient-backed controls stay
+        // visible.
         // Mirrors the same gradient-detection path applied to
         // backgroundImage below.
         case 'background': {
@@ -138,11 +139,12 @@ export function applyPaintProp(
         }
         case 'backgroundGradient': call('setBackgroundGradient', id, value as string); return true;
         // CSS `background-image` longhand. The C++ `setBackground` bridge fn
-        // only parses a color token, so we must detect gradient strings here
-        // and route to the gradient bridge instead; otherwise inputs like
-        // `linear-gradient(...)` collapse to a bogus color parse. `url(...)`
-        // has no image bridge today — drop quietly rather than corrupting the
-        // color slot.
+        // only parses a color token (`set_background_color(parseHexColor(...))`),
+        // so we must detect gradient strings here and route to the gradient
+        // bridge instead;
+        // otherwise inputs like `linear-gradient(...)` collapse to a bogus
+        // color parse. `url(...)` has no image bridge today — drop quietly
+        // rather than corrupting the color slot.
         case 'backgroundImage': {
             const sval = String(value);
             if (/(linear|radial|conic)-gradient\(/i.test(sval)) {
