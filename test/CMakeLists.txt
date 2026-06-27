@@ -5522,23 +5522,15 @@ target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
-    catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "~[network]"
+    catch_discover_tests(pulp-test-import-design-tool TEST_SPEC "~[network]" EXTRA_ARGS --allow-running-no-tests
         PROPERTIES LABELS "parser-import;windows-pr-quarantine")
-    catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "[network]"
-        PROPERTIES
-            LABELS "parser-import;windows-pr-quarantine"
-            RESOURCE_LOCK "design-import-network")
+    catch_discover_tests(pulp-test-import-design-tool TEST_SPEC "[network]" EXTRA_ARGS --allow-running-no-tests
+        PROPERTIES LABELS "parser-import;windows-pr-quarantine" RESOURCE_LOCK "design-import-network")
 else()
-    catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "~[network]"
+    catch_discover_tests(pulp-test-import-design-tool TEST_SPEC "~[network]" EXTRA_ARGS --allow-running-no-tests
         PROPERTIES LABELS "parser-import")
-    catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "[network]"
-        PROPERTIES
-            LABELS "parser-import"
-            RESOURCE_LOCK "design-import-network")
+    catch_discover_tests(pulp-test-import-design-tool TEST_SPEC "[network]" EXTRA_ARGS --allow-running-no-tests
+        PROPERTIES LABELS "parser-import" RESOURCE_LOCK "design-import-network")
 endif()
 
 # pulp #468 — `--execute-bundle` harness end-to-end. Boots the

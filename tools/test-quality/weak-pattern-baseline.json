@@ -4,14 +4,14 @@
   "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format markdown --output /tmp/pulp-restored-quality-report.md",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 596,
+    "succeed": 563,
     "require_true": 16,
-    "skip": 215
+    "skip": 248
   },
   "classifications": {
-    "needs-review": 508,
+    "needs-review": 541,
     "placeholder": 4,
-    "skip-as-pass": 299,
+    "skip-as-pass": 266,
     "unconditional-true": 16
   },
   "notes": [

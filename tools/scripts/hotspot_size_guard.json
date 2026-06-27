@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6116,
-      "note": "shared test registration hotspot; lowered after compacting network-stream skip-registration wiring"
+      "max_loc": 6108,
+      "note": "shared test registration hotspot; lowered after compacting import-design skip-registration wiring"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
