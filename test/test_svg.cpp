@@ -133,10 +133,9 @@ TEST_CASE("SvgImage move semantics", "[canvas][svg]") {
 
 // pulp #72 — preset previews (Spectr's band-shape thumbnails were the
 // live-traffic example) render through SvgImage::render() into a Canvas,
-// not through nsvgRasterize() directly. The previous implementation:
-//   (a) only emitted `stroke_line` commands — fills were dropped silently;
-//   (b) treated each Bezier control point as a line endpoint, producing
-//       jagged polylines connecting handles instead of smooth curves.
+// not through nsvgRasterize() directly. These previews need two path-level
+// contracts: fill-only paths emit fill commands, and Bezier curves remain
+// curves instead of being flattened into handle-connecting polylines.
 // A path with `fill="#abc"` and no stroke would render NOTHING — which
 // is what the user observed as "preset preview blank."
 //
@@ -145,7 +144,7 @@ TEST_CASE("SvgImage move semantics", "[canvas][svg]") {
 // user sees blank thumbnails again.
 TEST_CASE("SvgImage::render emits fill_current_path for fill-only path [issue-72]",
           "[canvas][svg][issue-72]") {
-    // Filled rect with NO stroke — the case that previously rendered nothing.
+    // Filled rect with NO stroke — this still needs a fill path.
     auto img = SvgImage::from_string(R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10">
   <rect x="0" y="0" width="10" height="10" fill="#ff0000"/>
@@ -158,14 +157,14 @@ TEST_CASE("SvgImage::render emits fill_current_path for fill-only path [issue-72
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_current_path) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::stroke_current_path) == 0);
-    // Pre-fix bug: emitted stroke_line commands instead of building a path.
+    // Path rendering must build a path, not emit stroke_line commands.
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
 }
 
 TEST_CASE("SvgImage::render emits cubic_to for curved paths [issue-72]",
           "[canvas][svg][issue-72]") {
-    // A cubic Bezier curve — the band-shape preview pattern. Pre-fix this
-    // would have stepped through control points as straight-line endpoints.
+    // A cubic Bezier curve — the band-shape preview pattern. Rendering must
+    // preserve the curve instead of stepping through control points as lines.
     auto img = SvgImage::from_string(R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <path d="M 10 50 C 30 10, 70 90, 90 50" stroke="#000" stroke-width="2" fill="none"/>

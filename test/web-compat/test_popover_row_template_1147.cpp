@@ -132,8 +132,8 @@ TEST_CASE("popover-1147 (A): button display:block lays out children in a column"
     REQUIRE(desc->bounds().x + desc->bounds().width <= btn->bounds().width + 1.0f);
 
     // The description must occupy non-zero height so the popover row is
-    // actually visible to the user (regression: Yoga collapses it when the
-    // parent <span>'s intrinsic measure func clobbers child layout).
+    // visible; parent <span> intrinsic measurement must not clobber child
+    // layout.
     REQUIRE(desc->bounds().height > 0.0f);
 }
 
@@ -196,8 +196,7 @@ TEST_CASE("popover-1147 (B): inline <svg width/height> reserves layout space",
     REQUIRE_THAT(btn->bounds().width, WithinAbs(260.0f, 1.0f));
 
     // (B) anti-drift #1147 — SVG width/height attributes must reserve real
-    // layout space. Pre-fix the SVG element renders as a createCol with
-    // no flex preferred size and Yoga gives it 0×0; the row collapses.
+    // layout space by mapping to flex preferred size.
     REQUIRE_THAT(svg->bounds().width,  WithinAbs(28.0f, 1.0f));
     REQUIRE_THAT(svg->bounds().height, WithinAbs(20.0f, 1.0f));
 

@@ -1,19 +1,18 @@
 // pulp #1899 — Spectr import-flow visual gap fixes #4 and #5.
 //
-// (#4) The web-compat shim previously routed `<path>` into the
-// unknown-tag default (createCol), producing an empty layout box.
+// (#4) The web-compat shim routes `<path>` to createSvgPath rather than the
+// unknown-tag default column, avoiding an empty layout box.
 // Spectr's React-rendered icon glyphs emit raw `<svg viewBox="0 0 24 24">
 // <path d="M..." stroke="currentColor" stroke-width="2" fill="none"/></svg>`
-// markup, so every glyph painted blank. This test pins the new routing
-// (createSvgPath under the hood) plus the d / stroke / stroke-width /
+// markup. This test pins the path routing (createSvgPath under the hood) plus
+// the d / stroke / stroke-width /
 // fill / viewBox attribute replay.
 //
-// (#5) `<input type="range">` was hard-coded to "vertical" orientation
-// in the createFader call, which is the wrong default for HTML. The
+// (#5) `<input type="range">` defaults to horizontal orientation. The
 // HTML / MDN / Web-Audio convention is horizontal-by-default; Spectr's
 // MorphSlider, FilterBank, and almost every imported web slider expect
-// a 90px-wide horizontal fader. This test pins the new heuristic:
-// default horizontal, vertical only when an explicit hint (aria-
+// a 90px-wide horizontal fader. This test pins the heuristic: default
+// horizontal, vertical only when an explicit hint (aria-
 // orientation or style.height > style.width) says so.
 //
 // Both gaps are part of the Spectr webview-baseline visual chase
@@ -216,9 +215,8 @@ TEST_CASE("svg-1917: stroke=currentColor resolves to inline style.color",
     auto* widget = dynamic_cast<SvgPathWidget*>(resolve(env, "__path"));
     REQUIRE(widget != nullptr);
     REQUIRE(widget->has_stroke());
-    // Pre-fix, the literal "currentColor" token reached parseColor in the
-    // bridge, which fell through and returned the default (white 1,1,1,1).
-    // Post-fix, the JS shim resolves to #ff8800 (orange) before dispatch.
+    // The JS shim resolves currentColor against the CSS color cascade before
+    // dispatch, so the bridge receives #ff8800 (orange) here.
     auto c = widget->stroke_color();
     REQUIRE(c.r > 0.95f);                 // 0xff
     REQUIRE((c.g > 0.45f && c.g < 0.60f)); // 0x88 ≈ 0.533

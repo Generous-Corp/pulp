@@ -43,8 +43,7 @@ using Catch::Matchers::WithinAbs;
 // html-compat shim into View::access_label_ / View::access_role_ slots
 // that the macOS NSAccessibility bridge already consumes.
 // document.querySelector accepts attribute selectors, compound selectors,
-// and descendant / child combinators in addition to the previously
-// supported tag/.class/#id forms.
+// descendant / child combinators, and the basic tag/.class/#id forms.
 
 TEST_CASE("HTML aria-label routes to View access_label",
           "[view][bridge][wave3-html][html-aria]") {
@@ -180,7 +179,7 @@ TEST_CASE("HTML removeAttribute resets View accessibility slots",
     REQUIRE(v->access_label() == "Mute toggle");
     REQUIRE(v->access_role() == View::AccessRole::toggle);
 
-    // removeAttribute should reset the bridge slot (was the bug).
+    // removeAttribute must reset the bridge slot.
     bridge.load_script(R"(
         var d = document.getElementById('aria-rm');
         d.removeAttribute('aria-label');
@@ -354,10 +353,9 @@ TEST_CASE("querySelector handles colons inside attribute brackets",
         globalThis.__byHttp  = (document.querySelector('[href="http://example.com/page"]')  || {id:'MISS'}).id;
         globalThis.__byHttps = (document.querySelector('[href="https://example.com/page"]') || {id:'MISS'}).id;
         globalThis.__byTime  = (document.querySelector('[data-time="12:30"]')               || {id:'MISS'}).id;
-        // pulp #1737 — a:hover now strictly matches only currently-hovered
-        // anchors. Pre-fix the matcher returned a1 (broader match — any <a>
-        // after stripping). Post-fix it returns null because no <a> is
-        // currently hovered. After we flag a1 as hovered, the matcher finds it.
+        // pulp #1737 — a:hover strictly matches only currently-hovered anchors.
+        // With no hovered <a>, the selector returns null; after we flag a1 as
+        // hovered, the matcher finds it.
         globalThis.__pseudoNull = document.querySelector('a:hover') === null;
         a1._isHovered = true;
         globalThis.__pseudo = (document.querySelector('a:hover') || {id:'MISS'}).id;
@@ -411,10 +409,8 @@ TEST_CASE("querySelector descendant and child combinators",
     REQUIRE(engine.evaluate("__deepDescAll").getWithDefault<int64_t>(0) == 2);
 }
 
-// pulp #1737 — querySelector now evaluates pseudo-classes spec-correctly
-// (used to "tolerate by stripping" — every selector that included
-// `:hover` matched all elements regardless of hover state). The new
-// matcher honours element state for runtime-state pseudo-classes
+// pulp #1737 — querySelector evaluates pseudo-classes against element state.
+// The matcher honours runtime-state pseudo-classes
 // (`:hover`, `:focus`, `:active`, `:disabled`, `:checked`, `:enabled`),
 // DOM-position pseudo-classes (`:first-child`, `:last-child`, `:nth-child`,
 // `:nth-last-child`, `:only-child`, `:empty`, `:root`), and the
