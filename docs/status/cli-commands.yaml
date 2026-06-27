@@ -201,6 +201,8 @@ commands:
         args:
           - name: --url
             required: true
+          - name: --download-url
+            required: false
           - name: --version
             required: false
           - name: --notes

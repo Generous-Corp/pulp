@@ -884,6 +884,7 @@ pulp ship notarize --dry-run                       # print resolved argv, no sub
 pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
 pulp ship appcast --url https://example.com/MyApp-1.0.pkg --version 1.0.0
+pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key <base64-key>
 pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
@@ -913,7 +914,7 @@ identity, not here.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
-`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
+`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
