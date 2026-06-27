@@ -42,7 +42,7 @@ void print_warn(const std::string& msg);
 
 // Phase-marker for `PULP_DEBUG=1` (stderr, timestamped). Silent otherwise.
 // Sprinkle at user-entrypoint phases that could plausibly hang so the next
-// hang report pins itself. See #682.
+// hang report identifies the last reached phase.
 void pulp_debug(const char* phase);
 
 // ── Shell Execution ─────────────────────────────────────────────────────────
@@ -122,24 +122,23 @@ fs::path sdk_cache_path(const std::string& version);
 fs::path local_sdk_cache_path(const std::string& version);
 std::string detect_platform();
 
-// pulp #1814 — sdk_tarball_filename + legacy_unversioned_sdk_tarball_filename
-// live in tools/cli/sdk_cache_paths.hpp so the matching unit test can
-// link them without the cli_common dep chain.
+// SDK tarball filename helpers live in tools/cli/sdk_cache_paths.hpp so
+// the matching unit test can link them without the cli_common dep chain.
 fs::path ensure_sdk(const std::string& version);
 fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& version);
 int ensure_checkout_dependencies(const fs::path& repo_root);
 std::string read_pulp_toml_value(const fs::path& project_root, const std::string& key);
 // `read_sdk_version` returns the EFFECTIVE SDK version a build should use.
 // If pulp.toml pins an explicit version, that wins. If pulp.toml writes
-// `sdk_version = "latest"` (pulp #2087 floating mode — the new default
-// for `pulp create`), this returns the newest installed SDK under
+// `sdk_version = "latest"` (floating mode, the `pulp create` default),
+// this returns the newest installed SDK under
 // ~/.pulp/sdk/<x.y.z>/, falling back to PULP_SDK_VERSION when none
 // are installed. Use `read_raw_sdk_version` for the unresolved value.
 std::string read_sdk_version(const fs::path& project_root);
 std::string read_raw_sdk_version(const fs::path& project_root);
 // True when pulp.toml's sdk_version field is the floating marker
-// "latest" (pulp #2087), or absent entirely. Pinned projects (an
-// explicit x.y.z) return false. Used by `pulp upgrade` to skip
+// "latest", or absent entirely. Pinned projects (an explicit x.y.z)
+// return false. Used by `pulp upgrade` to skip
 // pinned-project SDK auto-update and by `pulp doctor --versions`
 // to render the pin status.
 bool is_floating_sdk(const fs::path& project_root);
@@ -179,7 +178,7 @@ bool enforce_project_cli_compatibility(const fs::path& project_root,
                                        const std::string& command_name,
                                        bool allow_unsupported_sdk);
 
-// FetchContent cache preflight (issue #744). Discovers the shared
+// FetchContent cache preflight. Discovers the shared
 // FetchContent source cache for the active project and renders a
 // compact remediation message to stderr if any entry is in a `[!!]`
 // state. Returns true when the caller may proceed, false when the
@@ -250,7 +249,7 @@ struct DoctorCheck {
     std::string fix;
     // Optional checks report remediation advice but don't contribute
     // to the overall doctor exit code when they fail. Used for e.g.
-    // the Google Android CLI accelerator (#355) which is a speedup,
+    // the Google Android CLI accelerator, which is a speedup,
     // not a requirement.
     bool optional = false;
 };
@@ -263,8 +262,8 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
                                            const std::string& only_filter = {});
 
 // `pulp doctor android` — Android NDK / SDK / emulator checks plus
-// optional Google "Android CLI" detection (#355). Passes the host
-// platform implicitly via #ifdef in the implementation.
+// optional Google "Android CLI" detection. Passes the host platform
+// implicitly via #ifdef in the implementation.
 std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filter = {});
 
 // `pulp doctor ios` — Xcode + iOS Simulator checks. macOS-only;

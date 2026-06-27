@@ -31,7 +31,7 @@ namespace {
 // Populate a ProjectEntry for a given root by reading the project's
 // sdk_version (CMakeLists.txt for source-tree projects, pulp.toml
 // otherwise) and cli_min_version. Mirrors active-project version
-// detection for each registered/scanned entry (#552).
+// detection for each registered/scanned entry.
 pulp::cli::version_diag::ProjectEntry make_project_entry(
     const fs::path& root, const std::string& display_name,
     bool scanned)
@@ -133,17 +133,17 @@ int cmd_doctor(const std::vector<std::string>& args) {
     auto root = standalone_mode ? fs::path{} : active_root;
 
     // First positional argument selects a sub-mode for mobile dev-env
-    // checks (#8 / #355). `pulp doctor` (no positional) keeps the
+    // checks. `pulp doctor` (no positional) keeps the
     // existing universal checks; `pulp doctor android` and
     // `pulp doctor ios` are the per-mobile-target lanes.
     std::string mode;  // empty = default
     bool fix_mode = false;
     bool ci_mode = false;
     bool dry_run = false;
-    bool versions_mode = false;   // --versions: issue #499
-    bool validators_mode = false; // --validators: issue #743
-    bool scan_parents = false;    // --scan-parents: issue #552
-    bool caches_mode = false;     // --caches: issue #744
+    bool versions_mode = false;   // --versions: CLI/SDK skew report
+    bool validators_mode = false; // --validators: format-validator discovery
+    bool scan_parents = false;    // --scan-parents: ancestor project audit
+    bool caches_mode = false;     // --caches: shared FetchContent cache audit
     bool au_cache_mode = false;   // --au-cache: refresh macOS AU registrar
     bool json_mode = false;       // --json (works with --versions and --caches)
     bool list_mode = false;       // --list / `pulp doctor list`
@@ -267,7 +267,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
 #endif
     }
 
-    // `pulp doctor --caches` (issue #744) — discovery + healing for the
+    // `pulp doctor --caches` — discovery + healing for the
     // shared FetchContent cache (`~/Library/Caches/Pulp/fetchcontent-src`
     // on macOS, equivalent paths on Linux/Windows). Short-circuits the
     // rest of the doctor pipeline for the same reason --versions does:
@@ -337,7 +337,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return rc;
     }
 
-    // `pulp doctor --validators` (issue #743) — discover plugin-format
+    // `pulp doctor --validators` — discover plugin-format
     // validators (auval / pluginval / clap-validator), surface broken
     // copies (signature-detached, ripped from a .app bundle, etc.) and
     // optionally heal user-owned breakage with `--fix`. Mirrors the
@@ -395,7 +395,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return vd::compute_exit_code(reports);
     }
 
-    // `pulp doctor --versions` is a dedicated diagnostic (#499). It
+    // `pulp doctor --versions` is a dedicated version-skew diagnostic. It
     // short-circuits the rest of the doctor pipeline on purpose — skew
     // warnings are advisory and must not gate the environment-readiness
     // exit code, so mixing the two would just confuse scripts that
@@ -413,7 +413,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         report.plugin = pulp::cli::version_diag::read_plugin_version(plugin_json);
         // Pick up the plugin's declared `min_cli_version` so the
         // diagnostic surfaces plugin ↔ CLI skew alongside the existing
-        // project ↔ CLI checks (#551).
+        // project ↔ CLI checks.
         report.plugin_min_cli =
             pulp::cli::version_diag::read_plugin_min_cli_version(plugin_json);
 
@@ -435,7 +435,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 pulp::cli::version_diag::read_project_cli_min_version(active_root);
         }
 
-        // Per-project registry (#552). The registry is authoritative;
+        // Per-project registry. The registry is authoritative;
         // only `pulp projects add/remove` and `pulp create` mutate it.
         // We dedupe against the active project so it isn't shown twice
         // in the diagnostic.
@@ -481,7 +481,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
             (void)pulp::cli::version_diag::render_report(report);
         }
 
-        // Pulp #2087: append local + remote SDK availability so users
+        // Append local + remote SDK availability so users
         // see at-a-glance whether they're behind. JSON consumers get
         // the same data via a stable trailing object, separate from
         // the existing report shape so older tooling that parses the
@@ -610,8 +610,8 @@ int cmd_doctor(const std::vector<std::string>& args) {
         } else {
             // Optional checks report advice but don't count toward
             // fail_count, so `pulp doctor android` returns 0 when
-            // only optional accelerators (e.g. Google Android CLI,
-            // #355) are missing.
+            // only optional accelerators (e.g. Google Android CLI)
+            // are missing.
             if (c.optional) {
                 ++optional_skipped;
                 if (!ci_mode) {

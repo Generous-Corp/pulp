@@ -39,8 +39,8 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     bool check_only = false;
     bool notes_only = false;
     bool notes_json = false;
-    // Pulp #2087: `pulp upgrade` updates BOTH CLI and SDK by default.
-    // `--cli-only` keeps the pre-#2087 behavior for the rare case
+    // `pulp upgrade` updates BOTH CLI and SDK by default.
+    // `--cli-only` keeps the legacy CLI-only behavior for the rare case
     // where a user wants a newer CLI paired with their current SDK
     // (e.g., they want a CLI bug fix without touching project pins).
     bool cli_only = false;
@@ -137,7 +137,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     // Reports what the banner would say. Uses uc::resolve_latest_with_persist
     // so a stale or empty cache triggers a synchronous refresh. The
     // on-every-invocation detached refresh in pulp_cli.cpp gets killed when
-    // short-lived commands exit before curl completes (#1599), so we
+    // short-lived commands exit before curl completes, so we
     // cannot rely on it. The user is explicitly asking about updates here,
     // so a 1–2s blocking GitHub call is the right tradeoff.
     if (check_only) {
@@ -194,7 +194,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     // Resolve the latest version. resolve_latest_with_persist handles the
     // empty/stale/fresh cases and writes the cache on a successful fetch
     // so the next invocation isn't stuck behind the unreliable detached
-    // background refresh (#1599).
+    // background refresh.
     std::string latest;
     if (target_version.empty()) {
         uc::GitHubReleasesFetcher fetcher;
@@ -342,7 +342,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
                   << "` to see what changed.\n";
     }
 
-    // Pulp #2087: by default, also install the matching SDK so the
+    // By default, also install the matching SDK so the
     // CLI and SDK stay coherent. The CLI's own `sdk install` flow
     // handles caching, idempotence, and the GitHub-releases fetch.
     //

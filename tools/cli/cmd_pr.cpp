@@ -4,7 +4,7 @@
 // workflow is `shipyard` (the default) and Shipyard is installed.
 // Shipyard is Pulp's single-source-of-truth ship orchestrator; keeping
 // a parallel native implementation in two tools is how drift starts.
-// See issue #352.
+// Keep this wrapper thin so the Shipyard implementation remains authoritative.
 //
 // If Shipyard is unavailable while the shipyard workflow is selected,
 // print a concise install/switch guide and exit 2. `--workflow github`

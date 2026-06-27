@@ -240,7 +240,7 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         // real offset), applying it too early and defeating the accuracy it was
         // meant to provide. set_parameter reaches every loader (CLAP/VST3 queue
         // it internally at time 0; LV2/AU set it immediately). Sample-accurate
-        // parameter automation is a follow-up; MIDI stays sample-accurate.
+        // parameter automation is not wired here; MIDI stays sample-accurate.
         for (const auto& e : pq.events())
             slot->set_parameter(e.param_id, e.value);
         slot->process(out, in, midi_in, midi_out, kEmptyQueue, n);

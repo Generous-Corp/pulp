@@ -5,7 +5,7 @@
 # the fixture `test/cmake/test_debug_sdk_guard.cmake` can locate it
 # by its regex.
 
-# Debug-SDK perf-killer guard (pulp-internal task #35).
+# Debug-SDK perf-killer guard.
 #
 # A Pulp SDK that was itself BUILT with CMAKE_BUILD_TYPE=Debug ships
 # debug-mode Skia, debug-mode audio framework, and debug-mode JS

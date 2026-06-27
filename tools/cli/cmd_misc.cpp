@@ -189,7 +189,7 @@ int cmd_test(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
-        // FetchContent cache preflight (issue #744) — same gate cmd_build
+        // FetchContent cache preflight — same gate cmd_build
         // applies. Catching it here too means `pulp test` cold-starts
         // produce the same fail-fast remediation message instead of
         // tunneling through cmd_build's stdout. cmd_build runs its own
@@ -577,13 +577,13 @@ int cmd_cache(const std::vector<std::string>& args) {
         const std::string version = PULP_SDK_VERSION;
 
         // Versioned cache filename — `pulp-sdk-v<version>-<platform>.tar.gz`.
-        // The version pin in the filename is the structural fix for pulp
-        // #1814: a stale tarball from a prior release cannot silently
-        // shadow a fresh download because the filename lookup misses.
+        // The version pin in the filename means a stale tarball from a
+        // prior release cannot silently shadow a fresh download because
+        // the filename lookup misses.
         std::string sdk_tarball_name = pulp::cli::sdk_tarball_filename(version, platform);
         auto sdk_cache = cache_dir / sdk_tarball_name;
 
-        // Best-effort cleanup of the pre-#1814 unversioned tarball so it
+        // Best-effort cleanup of the legacy unversioned tarball so it
         // doesn't sit in ~/.pulp/cache/ forever eating ~20 MB. Skipped
         // silently on any error — this is purely housekeeping.
         {

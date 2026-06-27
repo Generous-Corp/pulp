@@ -1,6 +1,6 @@
 // validator_discovery.hpp — Discovery + healing for plugin-format validators
 //
-// Issue #743: `pulp validate` wraps three third-party tools — auval (Xcode),
+// `pulp validate` wraps three third-party tools — auval (Xcode),
 // pluginval (Homebrew cask), and clap-validator (cargo install). One failure
 // mode observed in the wild on 2026-04-24: a validator binary copied out of
 // its `.app` bundle into `/usr/local/bin` retains a code signature that
@@ -172,7 +172,7 @@ FixOutcome apply_fixes(std::vector<ValidatorReport>& reports, bool dry_run);
 
 // Render the report set as a human-readable block. Returns the rendered
 // text (so callers can write it to stdout/stderr or capture it for tests).
-// Mirrors the format spec'd in #743:
+// Mirrors the validator-report format:
 //
 //   ✓ pluginval: /Applications/pluginval.app/... (signed, notarized)
 //   ✗ pluginval: /usr/local/bin/pluginval — broken signature (...). Auto-fixable.
@@ -190,7 +190,7 @@ std::string render_report(const std::vector<ValidatorReport>& reports,
 int compute_exit_code(const std::vector<ValidatorReport>& reports);
 
 // True iff the report set contains at least one Broken entry. Used by
-// the `pulp validate` preflight (#743) to decide whether to abort
+// the `pulp validate` preflight to decide whether to abort
 // before launching the validator and risking the SIGKILL-by-amfid
 // silent-fail mode.
 bool has_broken_validator(const std::vector<ValidatorReport>& reports);

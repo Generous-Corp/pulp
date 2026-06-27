@@ -56,9 +56,8 @@ fs::path local_sdk_cache_path(const std::string& version) {
     return pulp_home() / "sdk-local" / detect_platform() / version;
 }
 
-// pulp #1814 — sdk_tarball_filename / legacy_unversioned_sdk_tarball_filename
-// live in tools/cli/sdk_cache_paths.cpp so the matching unit test can
-// compile + link them standalone.
+// SDK tarball filename helpers live in tools/cli/sdk_cache_paths.cpp so
+// the matching unit test can compile + link them standalone.
 
 std::string detect_platform() {
 #ifdef __APPLE__
@@ -466,13 +465,13 @@ bool is_floating_sdk(const fs::path& project_root) {
 
 std::string read_sdk_version(const fs::path& project_root) {
     auto version = read_raw_sdk_version(project_root);
-    // Empty (no pulp.toml or no sdk_version key) preserves pre-#2087
+    // Empty (no pulp.toml or no sdk_version key) preserves legacy
     // behavior: fall back to the CLI's own SDK version. This is the
     // "no project at all" path — read_sdk_version is called from
     // contexts that have no project root, and returning newest-installed
     // there would surprise downstream code that expects PULP_SDK_VERSION.
     if (version.empty()) return PULP_SDK_VERSION;
-    // Pulp #2087 floating mode: ONLY an explicit `sdk_version = "latest"`
+    // Floating SDK mode: ONLY an explicit `sdk_version = "latest"`
     // resolves to the newest installed SDK at command time. The CLI's
     // own SDK version is the final fallback when no SDKs are installed
     // under ~/.pulp/sdk/ yet — common on a fresh `curl install.sh`

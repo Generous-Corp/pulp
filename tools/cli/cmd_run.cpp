@@ -4,7 +4,7 @@
 // path, supports headless / screenshot / frames / watch flags so any Pulp
 // plugin's standalone can be auto-validated in CI without a real window.
 //
-// Issue #914: surface --headless / --screenshot / --frames / --watch.
+// Surfaces --headless / --screenshot / --frames / --watch.
 // The standalone-side wiring (HeadlessHost, validation_harness,
 // pulp-screenshot) is already in place — this file plumbs the flags
 // through to the launched binary via both forwarded args AND env vars,

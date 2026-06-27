@@ -46,7 +46,7 @@ Semver read_plugin_version(const fs::path& plugin_json_path);
 
 // Parse ".claude-plugin/plugin.json" -> min_cli_version field. Returns
 // empty Semver if the field is absent — older plugin builds shipped
-// without it, so this is forward-compatible by design (#551).
+// without it, so this is forward-compatible by design.
 Semver read_plugin_min_cli_version(const fs::path& plugin_json_path);
 
 // Locate the plugin.json the diagnostic should report on, in order:
@@ -90,7 +90,7 @@ ExecutionPreflight analyze_execution_preflight(const Semver& cli,
 // skew lines in `pulp doctor --versions`. Populated by cmd_doctor from
 // `~/.pulp/projects.json` (or the `--scan-parents` ancestor walk) and
 // fed into VersionReport::analyze() so each project contributes its
-// own skew findings (#552).
+// own skew findings.
 struct ProjectEntry {
     fs::path path;               // canonical project root
     std::string name;            // display name (directory basename or custom)
@@ -106,14 +106,14 @@ struct ProjectEntry {
 struct VersionReport {
     Semver cli;                  // PULP_SDK_VERSION of the running binary
     Semver plugin;               // .claude-plugin/plugin.json "version"
-    Semver plugin_min_cli;       // .claude-plugin/plugin.json "min_cli_version" (#551)
+    Semver plugin_min_cli;       // .claude-plugin/plugin.json "min_cli_version"
     Semver project_sdk;          // project's own CMake/pulp.toml sdk_version
     Semver project_cli_min;      // project's pulp.toml cli_min_version
     fs::path project_root;       // for report lines
     fs::path plugin_json_path;   // for report lines
 
     // Other registered projects (from ~/.pulp/projects.json) plus any
-    // ancestor projects surfaced by `--scan-parents`. See issue #552.
+    // ancestor projects surfaced by `--scan-parents`.
     std::vector<ProjectEntry> projects;
 
     // Analyse and return user-visible findings. Rules:
@@ -134,7 +134,7 @@ int render_report(const VersionReport& report);
 // Render the same report as a single JSON object to stdout. The shape
 // is stable enough for scripts to parse (see docs/reference/cli.md).
 // Always returns 0 — the JSON lane is a pure data surface and mirrors
-// the human lane's advisory-only posture. Issue #552.
+// the human lane's advisory-only posture.
 int render_report_json(const VersionReport& report);
 
 }  // namespace pulp::cli::version_diag

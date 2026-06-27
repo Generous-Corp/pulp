@@ -25,7 +25,7 @@ namespace {
 
 using namespace pulp_cli::project_detail;
 
-// Pulp #2087: `pulp project unpin` removes the SDK pin from pulp.toml
+// `pulp project unpin` removes the SDK pin from pulp.toml
 // so the project goes back to floating mode and tracks the latest
 // installed SDK on every rebuild. Sibling of `pin` (= `bump`).
 //
@@ -139,7 +139,7 @@ int cmd_project(const std::vector<std::string>& args) {
     const auto& sub = args[0];
     std::vector<std::string> rest(args.begin() + 1, args.end());
 
-    // Pulp #2087: `pin` is the primary, intuitive name for what this
+    // `pin` is the primary, intuitive name for what this
     // command does. `bump` predates the rename and stays as a
     // deprecated alias so existing scripts and skill docs keep working
     // through one minor release. New docs and skill examples should

@@ -570,7 +570,7 @@ function(pulp_add_plugin target)
     # Plugins still pull this in via target_compile_definitions on Core,
     # so all linked format adapters see the same defs. Explicit MIN/MAX
     # args override the derived values. See processor.hpp:view_size() and
-    # the import-design skill. Issue #2784.
+    # the import-design skill.
     if(PLUGIN_DESIGN_WIDTH AND PLUGIN_DESIGN_HEIGHT)
         if(NOT PLUGIN_DESIGN_MIN_WIDTH)
             set(PLUGIN_DESIGN_MIN_WIDTH 0)

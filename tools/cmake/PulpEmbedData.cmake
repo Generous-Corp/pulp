@@ -1,6 +1,6 @@
 # PulpEmbedData.cmake — `pulp_add_binary_data()` extracted into a standalone
 # include so it can run *before* the Pulp targets exist (e.g. inside
-# core/canvas/CMakeLists.txt — see #932 bundled fonts).
+# core/canvas/CMakeLists.txt for bundled fonts).
 #
 # `PulpUtils.cmake` itself fails fast unless `pulp::format` already exists,
 # because most of its other helpers (pulp_add_plugin / pulp_add_app) wire
@@ -10,7 +10,7 @@
 # file as well, so the public surface is unchanged: callers continue to use
 # `pulp_add_binary_data(...)` and the function definition is identical.
 #
-# Implementation notes (issue #898):
+# Implementation notes for binary-data embedding:
 #   * The legacy implementation walked a hex-encoded file inside a CMake
 #     `while()` loop, building the C-array initializer with repeated
 #     `string(APPEND)`. CMake string append on a growing string is O(n²);

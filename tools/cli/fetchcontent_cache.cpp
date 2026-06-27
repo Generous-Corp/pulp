@@ -1,6 +1,6 @@
 // fetchcontent_cache.cpp — Implementation of the discovery and healing
 // helpers powering `pulp doctor --caches[ --fix]` and the cache
-// preflight inside `pulp build` / `pulp test`. Issue #744.
+// preflight inside `pulp build` / `pulp test`.
 //
 // Pure-logic core + a small set of narrow filesystem helpers. Only
 // `make_real_env` and `apply_fixes` interact with the disk; everything
