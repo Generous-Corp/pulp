@@ -291,7 +291,8 @@
         "tools/cli/cmd_ship.cpp",
         "tools/scripts/release-cli-local.sh",
         ".github/workflows/sign-and-release.yml",
-        ".github/workflows/release-cli.yml"
+        ".github/workflows/release-cli.yml",
+        "tools/scripts/build_combined_installer.sh"
       ]
     },
     "streams": {

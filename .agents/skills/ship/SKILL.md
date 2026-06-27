@@ -965,3 +965,31 @@ DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release onl
 appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
 leaves the release a draft. See the `ci` skill's coordinator note for the full
 mechanism and debugging steps.
+
+## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
+
+A user wants ONE installer, not a per-format `.pkg` plus a per-app `.dmg`. Do
+NOT reach for `pulp ship package` (emits a separate `.pkg` per format) and
+`pulp ship share` (a separate `.dmg` per app) piecemeal — that was the early
+SuperConvolver mistake. Use the canonical recipe:
+
+```
+tools/scripts/build_combined_installer.sh \
+  --name MyPlugin --version X.Y.Z \
+  --sign-identity <Developer ID Application hash> \
+  --installer-identity <Developer ID Installer hash> \
+  --out DIR \
+  --plugin au   build/AU/MyPlugin.component \
+  --plugin vst3 build/VST3/MyPlugin.vst3 \
+  --plugin clap build/CLAP/MyPlugin.clap \
+  --app "Standalone app" build/examples/myplugin/MyPlugin.app \
+  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements
+```
+
+It produces ONE component-selectable, notarized installer (Customize pane picks
+AU/VST3/CLAP/Standalone/Diagnostics). It deep-signs every bundle (inner dylibs
+first → `@loader_path`) and runs `check_bundle_relocatable.py --strict` on each,
+so a build that only works on the build machine never ships. Identities are the
+`security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
+the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
+copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
