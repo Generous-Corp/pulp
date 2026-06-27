@@ -1943,6 +1943,10 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-stft
         SOURCES test_gpu_stft.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Spectral freeze (Phase 5): capture + sustain a spectral frame.
+    pulp_add_test_suite(pulp-test-gpu-spectral-freeze
+        SOURCES test_gpu_spectral_freeze.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 
 # Test signal source (sine tone, file playback)
