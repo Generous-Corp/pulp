@@ -28,6 +28,7 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <pulp/signal/delay_line.hpp>
 
 #include <pluginterfaces/gui/iplugview.h>
 
@@ -106,6 +107,15 @@ private:
     // Cached parameter ID of the VST3 bypass parameter. 0 when none is
     // available, so process() never short-circuits.
     state::ParamID bypass_param_id_ = 0;
+
+    // Per-output-channel dry delay used during the bypass pass-through.
+    // A plugin that reports latency gets host plugin-delay-compensation on
+    // its path, so the bypassed dry signal must be delayed by exactly that
+    // many samples to stay sample-aligned with the compensated timeline.
+    // Sized once in setupProcessing() (off the audio thread). Empty / unused
+    // when the reported latency is 0, preserving the zero-copy fast path.
+    std::vector<signal::DelayLine> bypass_dry_delay_;
+    int bypass_delay_samples_ = 0;
 
     // Host accommodations, resolved once in initialize() via the runtime
     // policy (env / API / compile default). Adapters consult these flags

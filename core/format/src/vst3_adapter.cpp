@@ -333,6 +333,24 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    // Size the per-channel dry-delay used by the bypass pass-through. The
+    // host compensates the plugin path by getLatencySamples(), so the
+    // bypassed dry copy must be delayed by exactly that many samples to stay
+    // aligned with the host's plugin-delay-compensation. Allocate here, never
+    // in process(); a 0 latency keeps the delay line empty so the bypass
+    // pass-through stays a zero-copy memcpy.
+    bypass_delay_samples_ = static_cast<int>(
+        reported_latency_samples(processor_->latency_samples(), quirks_));
+    if (bypass_delay_samples_ < 0) bypass_delay_samples_ = 0;
+    if (bypass_delay_samples_ > 0) {
+        bypass_dry_delay_.resize(static_cast<std::size_t>(ctx.output_channels));
+        for (auto& line : bypass_dry_delay_) {
+            line.prepare(bypass_delay_samples_);
+        }
+    } else {
+        bypass_dry_delay_.clear();
+    }
+
     return SingleComponentEffect::setupProcessing(setup);
 }
 
@@ -544,6 +562,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // bypassed MIDI FX does not leak notes into the host bus.
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
+        // All-or-nothing across the block: only delay when a line was prepared
+        // for every output channel. If the host ever drives more channels than
+        // setupProcessing() negotiated (channel count is pinned by
+        // setBusArrangements in practice, so this is a corner), the whole block
+        // falls back to a zero-delay copy — degrading to pre-fix behaviour, not
+        // a mix of delayed and undelayed channels.
+        const bool delayed = bypass_delay_samples_ > 0 &&
+            static_cast<int>(bypass_dry_delay_.size()) >= out_channels;
         for (int ch = 0; ch < out_channels; ++ch) {
             // A VST3 bus can report numChannels > 0 while individual
             // channelBuffers32[ch] entries are null; null-check before
@@ -551,10 +577,31 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             if (output_ptrs_[ch] == nullptr) continue;
             // Bypass is pure host-buffer passthrough (no processor scratch),
             // so it safely handles the full original block rather than the
-            // clamped count.
+            // clamped count. The dry-delay line is sized independently of the
+            // block size (to the reported latency in setupProcessing()), so it
+            // too processes the full `original_num_samples` — bypass stays a
+            // true 1:1 host passthrough with no clamp tail to zero.
             if (ch < in_channels && input_ptrs_[ch] != nullptr) {
-                std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
-                            sizeof(float) * original_num_samples);
+                if (delayed) {
+                    // The plugin path is host-compensated by its reported
+                    // latency, so the bypassed dry signal must be delayed by
+                    // the same amount to stay sample-aligned with the host's
+                    // plugin-delay-compensation. The delay line is fed only
+                    // while bypassed: a one-time transient in the first
+                    // `bypass_delay_samples_` samples after engaging bypass is
+                    // accepted (bypass toggling is a user action, not
+                    // sample-critical) in exchange for a zero-cost
+                    // non-bypassed path. Steady state emits input[n - latency].
+                    auto& line = bypass_dry_delay_[ch];
+                    const float* in = input_ptrs_[ch];
+                    float* out = output_ptrs_[ch];
+                    for (int n = 0; n < original_num_samples; ++n) {
+                        out[n] = line.process(in[n], bypass_delay_samples_);
+                    }
+                } else {
+                    std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
+                                sizeof(float) * original_num_samples);
+                }
             } else {
                 std::memset(output_ptrs_[ch], 0,
                             sizeof(float) * original_num_samples);

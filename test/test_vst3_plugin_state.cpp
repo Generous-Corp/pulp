@@ -1334,6 +1334,160 @@ TEST_CASE("VST3 processBlockBypassed copies input to output without calling Proc
     // moved.
 }
 
+TEST_CASE("VST3 bypass pass-through delays the dry signal by the reported latency",
+          "[vst3][bypass][latency][pdc]") {
+    // A plugin that reports latency gets host plugin-delay-compensation on its
+    // path. The bypassed dry pass-through must be delayed by exactly that many
+    // samples so it stays sample-aligned with the host's PDC; otherwise the
+    // bypassed output arrives `latency` samples early and comb-filters against
+    // parallel tracks. Drive a known ramp through the real adapter process path
+    // with bypass engaged across enough blocks to exceed the latency, then
+    // assert steady-state output[n] == input[n - latency].
+    constexpr int kLatency = 16;
+    TestVst3Config config;
+    config.add_bypass_param = true;
+    config.latency_samples = kLatency;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE(processor.bypass_parameter_id() == kBypassParamId);
+
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultTrue);
+
+    constexpr int kBlock = 32;
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kBlock;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    // A monotonically rising input makes any misalignment obvious: a 0-delay
+    // copy would yield output[n] == input[n], not input[n - kLatency].
+    constexpr int kBlocks = 6;
+    constexpr int kTotal = kBlock * kBlocks;
+    std::vector<float> source(kTotal);
+    for (int n = 0; n < kTotal; ++n) source[n] = static_cast<float>(n + 1);
+
+    std::vector<float> captured_l(kTotal, 0.0f);
+    std::vector<float> captured_r(kTotal, 0.0f);
+
+    for (int b = 0; b < kBlocks; ++b) {
+        std::array<float, kBlock> in_l{};
+        std::array<float, kBlock> in_r{};
+        std::array<float, kBlock> out_l{};
+        std::array<float, kBlock> out_r{};
+        for (int i = 0; i < kBlock; ++i) {
+            in_l[i] = source[b * kBlock + i];
+            in_r[i] = -source[b * kBlock + i];
+        }
+        out_l.fill(99.0f);
+        out_r.fill(99.0f);
+        float* ins[2]  = {in_l.data(), in_r.data()};
+        float* outs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+        ab_in[0].numChannels = 2; ab_in[0].channelBuffers32 = ins;
+        Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+        ab_out[0].numChannels = 2; ab_out[0].channelBuffers32 = outs;
+
+        // Engage bypass at sample 0 of every block.
+        Steinberg::Vst::ParameterChanges params(1);
+        Steinberg::int32 q_index = 0;
+        auto* q = params.addParameterData(kBypassParamId, q_index);
+        REQUIRE(q != nullptr);
+        Steinberg::int32 pt = 0;
+        REQUIRE(q->addPoint(0, 1.0, pt) == Steinberg::kResultTrue);
+
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kBlock;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = ab_in;
+        data.outputs = ab_out;
+        data.inputParameterChanges = &params;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+        for (int i = 0; i < kBlock; ++i) {
+            captured_l[b * kBlock + i] = out_l[i];
+            captured_r[b * kBlock + i] = out_r[i];
+        }
+    }
+
+    // Steady state (past the warm-up): output[n] == input[n - kLatency].
+    for (int n = kLatency; n < kTotal; ++n) {
+        REQUIRE_THAT(captured_l[n], WithinAbs(source[n - kLatency], 1e-6f));
+        REQUIRE_THAT(captured_r[n], WithinAbs(-source[n - kLatency], 1e-6f));
+    }
+    // Warm-up: the first kLatency samples carry the pre-bypass (silent) delay
+    // contents, not the input — confirming the delay is real, not a no-op copy.
+    for (int n = 0; n < kLatency; ++n) {
+        REQUIRE_THAT(captured_l[n], WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("VST3 bypass pass-through is a zero-delay copy when latency is zero",
+          "[vst3][bypass][latency][pdc]") {
+    // The bug only exists for latency > 0; a 0-latency plugin must keep the
+    // original zero-copy pass-through (output[n] == input[n], no warm-up).
+    TestVst3Config config;
+    config.add_bypass_param = true;
+    config.latency_samples = 0;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE(processor.bypass_parameter_id() == kBypassParamId);
+
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultTrue);
+
+    constexpr int kBlock = 8;
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kBlock;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    std::array<float, kBlock> in_l{{1, 2, 3, 4, 5, 6, 7, 8}};
+    std::array<float, kBlock> in_r{{-1, -2, -3, -4, -5, -6, -7, -8}};
+    std::array<float, kBlock> out_l{};
+    std::array<float, kBlock> out_r{};
+    out_l.fill(99.0f);
+    out_r.fill(99.0f);
+    float* ins[2]  = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2; ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2; ab_out[0].channelBuffers32 = outs;
+
+    Steinberg::Vst::ParameterChanges params(1);
+    Steinberg::int32 q_index = 0;
+    auto* q = params.addParameterData(kBypassParamId, q_index);
+    REQUIRE(q != nullptr);
+    Steinberg::int32 pt = 0;
+    REQUIRE(q->addPoint(0, 1.0, pt) == Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kBlock;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+    data.inputParameterChanges = &params;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    for (int i = 0; i < kBlock; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_r[i], WithinAbs(in_r[i], 1e-6f));
+    }
+}
+
 TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
           "[vst3][bypass][item-3.2]") {
     // Since host-quirks P3b the adapter SYNTHESIZES a Bypass param by

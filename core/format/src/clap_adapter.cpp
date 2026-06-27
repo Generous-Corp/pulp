@@ -152,6 +152,22 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
     self->processor->prepare(ctx);
+
+    // Size the per-channel dry delay used by the bypass pass-through. The host
+    // compensates the plugin path by its reported latency, so the bypassed dry
+    // copy must be delayed by exactly that many samples to stay aligned with
+    // the host's plugin-delay-compensation. Allocate here, never in
+    // clap_process(); a 0 latency leaves the delay lines unused so the bypass
+    // pass-through stays a zero-copy memcpy.
+    self->bypass_delay_samples = reported_latency_samples(
+        self->processor->latency_samples(), self->host_quirks);
+    if (self->bypass_delay_samples < 0) self->bypass_delay_samples = 0;
+    if (self->bypass_delay_samples > 0) {
+        for (auto& line : self->bypass_dry_delay) {
+            line.prepare(self->bypass_delay_samples);
+        }
+    }
+
     // Reset the playhead snapshot — the next process() call is the
     // first block of a fresh activation cycle and must NOT diff against
     // stale transport data from the previous activation. Without this,
@@ -707,11 +723,37 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     if (bypassed) {
         // Bypass is pure host-buffer passthrough (no processor scratch), so it
         // safely handles the full original block rather than the clamped count.
+        // The dry-delay line is sized independently of the block size (to the
+        // reported latency in clap_activate()), so it too processes the full
+        // original_num_samples — bypass stays a true 1:1 host passthrough with
+        // no clamp tail to zero.
+        const bool delayed = self->bypass_delay_samples > 0 &&
+            out_channels <= static_cast<int>(self->bypass_dry_delay.size());
         for (int ch = 0; ch < out_channels; ++ch) {
             if (self->output_ptrs[ch] == nullptr) continue;
             if (ch < in_channels && self->input_ptrs[ch] != nullptr) {
-                std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
-                            sizeof(float) * original_num_samples);
+                if (delayed) {
+                    // The plugin path is host-compensated by its reported
+                    // latency, so the bypassed dry signal must be delayed by
+                    // the same amount to stay sample-aligned with the host's
+                    // plugin-delay-compensation. The delay line is fed only
+                    // while bypassed: a one-time transient in the first
+                    // bypass_delay_samples after engaging bypass is accepted
+                    // (bypass toggling is a user action, not sample-critical)
+                    // in exchange for a zero-cost non-bypassed path. Steady
+                    // state emits input[n - latency].
+                    auto& line = self->bypass_dry_delay[ch];
+                    const float* in = self->input_ptrs[ch];
+                    float* out = self->output_ptrs[ch];
+                    for (uint32_t n = 0; n < original_num_samples; ++n) {
+                        out[n] = line.process(
+                            in[n],
+                            static_cast<float>(self->bypass_delay_samples));
+                    }
+                } else {
+                    std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
+                                sizeof(float) * original_num_samples);
+                }
             } else {
                 std::memset(self->output_ptrs[ch], 0, sizeof(float) * original_num_samples);
             }

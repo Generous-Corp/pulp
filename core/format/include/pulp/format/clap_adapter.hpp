@@ -12,7 +12,9 @@
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <pulp/state/preset_manager.hpp>
+#include <pulp/signal/delay_line.hpp>
 #include <clap/clap.h>
+#include <array>
 
 // View includes only when building GUI-capable CLAP targets.
 //
@@ -45,6 +47,15 @@ struct PulpClapPlugin {
     // via synthesize_bypass_parameter. 0 when none; clap_process() then never
     // short-circuits to pass-through.
     state::ParamID bypass_param_id = 0;
+
+    // Per-output-channel dry delay used by the bypass pass-through. The host
+    // compensates the plugin path by its reported latency, so the bypassed
+    // dry signal must be delayed by the same amount to stay sample-aligned
+    // with the host's plugin-delay-compensation. Each line's storage is
+    // allocated in clap_activate() (off the audio thread). Unused when the
+    // reported latency is 0, preserving the zero-copy pass-through.
+    std::array<signal::DelayLine, kMaxChannels> bypass_dry_delay{};
+    int bypass_delay_samples = 0;
 
     // Stored at create_plugin() time so the adapter can publish
     // latency / tail change notifications back to the

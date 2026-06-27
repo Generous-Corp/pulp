@@ -678,6 +678,38 @@ public:
     int tail_samples = 0;
 };
 
+// Declares a real Bypass parameter and reports a non-zero latency, so the
+// adapter routes the bypass pass-through through the per-channel dry delay.
+class BypassLatencyProcessor : public Processor {
+public:
+    static constexpr state::ParamID kBypassId = 7777;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "BypassLatencyCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.bypass-latency";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kBypassId,
+            .name = "Bypass",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
+        });
+    }
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+    int latency_samples() const override { return latency; }
+
+    int latency = 0;
+};
+
 // Processor factory hooks have to be raw function pointers. Route through
 // singletons so the tests can configure the active processor before the
 // adapter instantiates one.
@@ -787,6 +819,15 @@ std::unique_ptr<Processor> make_latency_tail() {
     up->tail_samples = g_pending_tail_samples;
     g_pending_latency_samples = 0;
     g_pending_tail_samples = 0;
+    return up;
+}
+
+int g_pending_bypass_latency = 0;
+
+std::unique_ptr<Processor> make_bypass_latency() {
+    auto up = std::make_unique<BypassLatencyProcessor>();
+    up->latency = g_pending_bypass_latency;
+    g_pending_bypass_latency = 0;
     return up;
 }
 
@@ -2786,4 +2827,89 @@ TEST_CASE("CLAP clamps an oversized render block and zeros the tail",
         REQUIRE(out_l[i] == 0.0f);
         REQUIRE(out_r[i] == 0.0f);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Bypass pass-through must delay the dry signal by the plugin's reported
+// latency. A latency-reporting plugin gets host plugin-delay-compensation
+// on its path; the bypassed dry copy must be delayed by the same amount or
+// it arrives `latency` samples early and comb-filters against parallel
+// tracks. Drive a continuous ramp through the real clap_process() path with
+// bypass engaged across several blocks, then assert steady-state
+// output[n] == input[n - latency].
+// ─────────────────────────────────────────────────────────────────────
+TEST_CASE("CLAP bypass pass-through delays the dry signal by the reported latency",
+          "[clap][bypass][latency][pdc]") {
+    constexpr int kLatency = 16;
+    g_pending_bypass_latency = kLatency;
+
+    constexpr uint32_t kBlock = 32;
+    Harness h(make_bypass_latency, kBlock);
+    REQUIRE(h.plugin.bypass_param_id == BypassLatencyProcessor::kBypassId);
+
+    // Engage bypass for the whole run.
+    h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+
+    constexpr int kBlocks = 6;
+    constexpr int kTotal = static_cast<int>(kBlock) * kBlocks;
+    std::vector<float> source(kTotal);
+    for (int n = 0; n < kTotal; ++n) source[n] = static_cast<float>(n + 1);
+
+    std::vector<float> captured_l(kTotal, 0.0f);
+    std::vector<float> captured_r(kTotal, 0.0f);
+
+    for (int b = 0; b < kBlocks; ++b) {
+        std::vector<float> in_l(kBlock), in_r(kBlock), out_l(kBlock, 99.0f),
+            out_r(kBlock, 99.0f);
+        for (uint32_t i = 0; i < kBlock; ++i) {
+            in_l[i] = source[b * static_cast<int>(kBlock) + static_cast<int>(i)];
+            in_r[i] = -in_l[i];
+        }
+        const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+        float* out_ptrs[2] = {out_l.data(), out_r.data()};
+        clap_audio_buffer_t ab_in{};
+        ab_in.data32 = const_cast<float**>(in_ptrs);
+        ab_in.channel_count = 2;
+        clap_audio_buffer_t ab_out{};
+        ab_out.data32 = out_ptrs;
+        ab_out.channel_count = 2;
+
+        InputEventList empty;
+        REQUIRE(h.run_custom(&empty, nullptr, &ab_in, 1, &ab_out, 1, kBlock,
+                             nullptr) != CLAP_PROCESS_ERROR);
+        for (uint32_t i = 0; i < kBlock; ++i) {
+            captured_l[b * static_cast<int>(kBlock) + static_cast<int>(i)] = out_l[i];
+            captured_r[b * static_cast<int>(kBlock) + static_cast<int>(i)] = out_r[i];
+        }
+    }
+
+    // Steady state: output[n] == input[n - kLatency].
+    for (int n = kLatency; n < kTotal; ++n) {
+        REQUIRE(captured_l[n] == source[n - kLatency]);
+        REQUIRE(captured_r[n] == -source[n - kLatency]);
+    }
+    // Warm-up: the first kLatency samples reflect the pre-bypass (silent)
+    // delay-line contents, confirming a real delay rather than a no-op copy.
+    for (int n = 0; n < kLatency; ++n) {
+        REQUIRE(captured_l[n] == 0.0f);
+    }
+}
+
+TEST_CASE("CLAP bypass pass-through is a zero-delay copy when latency is zero",
+          "[clap][bypass][latency][pdc]") {
+    // The bug only exists for latency > 0; a 0-latency plugin keeps the
+    // original verbatim pass-through with no warm-up delay.
+    g_pending_bypass_latency = 0;
+    Harness h(make_bypass_latency);
+    REQUIRE(h.plugin.bypass_param_id == BypassLatencyProcessor::kBypassId);
+
+    h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+    for (uint32_t i = 0; i < Harness::kFrames; ++i) {
+        h.in_left[i]  = 0.1f + static_cast<float>(i);
+        h.in_right[i] = -(0.1f + static_cast<float>(i));
+    }
+    InputEventList empty;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(h.out_left == h.in_left);
+    REQUIRE(h.out_right == h.in_right);
 }
