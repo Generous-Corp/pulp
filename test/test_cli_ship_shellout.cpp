@@ -318,6 +318,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         INFO("ship help missing subcommand: " << sub);
         REQUIRE(contains(r.stdout_output, sub));
     }
+    REQUIRE(contains(r.stdout_output, "--path <artifact>"));
+    REQUIRE(contains(r.stdout_output, ".pkg is signed by package"));
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,

@@ -62,7 +62,7 @@ bundles), so the artifact in `artifacts/` is Gatekeeper-ready.
 
 Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android` operates on existing APK/AAB files in `artifacts/` — use `package --target android` to build from Gradle.
 
-- `pulp ship sign --path MyApp.app` — sign one explicit `.app`/`.dmg`/bundle (not the whole build dir)
+- `pulp ship sign --path MyApp.app` — sign one explicit desktop artifact (macOS `.app`/`.dmg`/bundle, Windows `.exe`/bundle; not `.pkg`)
 
 **Notarization (macOS only):**
 - `pulp ship notarize --path MyPlugin-1.0.pkg` — picks credentials up from config/env/notary.env

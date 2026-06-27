@@ -42,7 +42,7 @@ Advisory only — never blocks. Full contract + override knobs live in the
 
 | Command | Platform | What It Does |
 |---------|----------|-------------|
-| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit `.app`/`.dmg`/bundle |
+| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit desktop artifact (macOS `.app`/`.dmg`/bundle, Windows `.exe`/bundle; not `.pkg`) |
 | `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.zip` (repeatable), not a raw `.app` |
 | `package` | All | Create .pkg/.dmg (macOS), NSIS (Windows), APK+AAB (Android) |
 | `release` | macOS only | One command: sign → package → **notarize + staple the .pkg/.dmg it builds** → verify |
@@ -167,7 +167,7 @@ it. Two defenses now exist:
   bypass it.)
 
 The composable primitives underneath:
-- `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
+- `pulp ship sign --path <artifact>` — sign exactly one desktop artifact (`.pkg` installers are signed by `package`).
 - `pulp ship notarize --path <dmg|pkg|zip>` — notarize + staple one artifact (repeatable). Use `share` for a raw `.app`.
 
 **Do not confuse with the production release.** `share`/`release`/`sign`/

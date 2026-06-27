@@ -90,7 +90,7 @@ commands:
             required: false
           - name: --path
             required: false
-            description: Sign one explicit artifact (.app/.dmg/bundle) instead of scanning build dirs
+            description: Sign one explicit desktop artifact (macOS .app/.dmg/bundle, Windows .exe/bundle; .pkg is signed at package time) instead of scanning build dirs
           - name: --entitlements
             required: false
           - name: --target
