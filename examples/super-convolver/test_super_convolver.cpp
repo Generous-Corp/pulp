@@ -142,7 +142,11 @@ TEST_CASE("SuperConvolver Size knob swaps the IR live", "[golden][superconvolver
 }
 
 TEST_CASE("SuperConvolver mix=0 and bypass pass the dry signal", "[golden][superconvolver]") {
-    constexpr std::size_t BLOCK = 256;
+    // The re-blocking FIFO delays the path by kInternalBlock; the dry path is
+    // delayed to match (so dry/wet stay phase-aligned, reported via
+    // latency_samples()). With BLOCK == kInternalBlock the dry probe re-emerges,
+    // sample-exact, in the NEXT block.
+    constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
     pulp::format::HeadlessHost host(create_super_convolver);
     host.prepare(48000.0, static_cast<int>(BLOCK));
     host.state().set_value(kSize, 0.1f);
@@ -151,16 +155,74 @@ TEST_CASE("SuperConvolver mix=0 and bypass pass the dry signal", "[golden][super
     std::vector<float> probe(BLOCK);
     for (std::size_t i = 0; i < BLOCK; ++i) probe[i] = std::sin(0.05f * i);
 
-    SECTION("mix=0 is dry") {
+    SECTION("mix=0 is dry (delayed by the reported latency)") {
         host.state().set_value(kBypass, 0.0f);
         host.state().set_value(kMix, 0.0f);
-        const auto out = render(host, BLOCK, 1, probe);
-        for (std::size_t i = 0; i < BLOCK; ++i) REQUIRE(std::abs(out[i] - probe[i]) < 1e-5f);
+        const auto out = render(host, BLOCK, 2, probe);   // probe in block 0, silence block 1
+        for (std::size_t i = 0; i < BLOCK; ++i)
+            REQUIRE(std::abs(out[BLOCK + i] - probe[i]) < 1e-6f);
     }
-    SECTION("bypass is dry") {
+    SECTION("bypass is dry (delayed by the reported latency)") {
         host.state().set_value(kBypass, 1.0f);
         host.state().set_value(kMix, 100.0f);
-        const auto out = render(host, BLOCK, 1, probe);
-        for (std::size_t i = 0; i < BLOCK; ++i) REQUIRE(std::abs(out[i] - probe[i]) < 1e-5f);
+        const auto out = render(host, BLOCK, 2, probe);
+        for (std::size_t i = 0; i < BLOCK; ++i)
+            REQUIRE(std::abs(out[BLOCK + i] - probe[i]) < 1e-6f);
     }
+}
+
+TEST_CASE("SuperConvolver convolves correctly under variable host blocks",
+          "[golden][superconvolver]") {
+    // Regression guard: the convolver needs fixed-size blocks, but real hosts
+    // (and the standalone, which floors max_buffer_size well above the device
+    // pull) deliver smaller, varying blocks. Prepare for a large max block, then
+    // drive irregular smaller blocks and confirm the reverb still reproduces the
+    // IR (peak-aligned), proving the internal re-blocking FIFO works.
+    constexpr double SR = 48000.0;
+    constexpr float SIZE = 0.05f;
+    const std::size_t len = static_cast<std::size_t>(SIZE * SR);
+
+    pulp::format::HeadlessHost host(create_super_convolver);
+    host.state().set_value(kSize, SIZE);
+    host.state().set_value(kMix, 100.0f);
+    host.state().set_value(kGain, 0.0f);
+    host.state().set_value(kBypass, 0.0f);
+    host.prepare(SR, 4096);   // host advertises a large max block...
+
+    // ...but feeds these irregular, smaller blocks.
+    const std::vector<std::size_t> blocks = {1, 127, 200, 64, 333, 512, 96, 256, 500, 333};
+    std::size_t total = 0; for (auto b : blocks) total += b;
+    while (total < len + 4096) { for (auto b : blocks) total += b; }  // enough to flush the tail
+
+    const std::vector<float> ir = make_reverb_ir(len);
+    std::vector<float> out_all;
+    bool impulse_sent = false;
+    std::size_t produced = 0;
+    while (produced < total) {
+        for (std::size_t blk : blocks) {
+            std::vector<float> in_l(blk, 0.0f), in_r(blk, 0.0f), o_l(blk, 0.0f), o_r(blk, 0.0f);
+            if (!impulse_sent) { in_l[0] = 1.0f; in_r[0] = 1.0f; impulse_sent = true; }
+            const float* ip[2] = {in_l.data(), in_r.data()};
+            float* op[2] = {o_l.data(), o_r.data()};
+            pulp::audio::BufferView<const float> iv(ip, 2, blk);
+            pulp::audio::BufferView<float> ov(op, 2, blk);
+            host.process(ov, iv);
+            out_all.insert(out_all.end(), o_l.begin(), o_l.end());
+            produced += blk;
+        }
+    }
+
+    std::size_t lag = 0; float peak = 0.0f;
+    for (std::size_t i = 0; i < out_all.size(); ++i)
+        if (std::abs(out_all[i]) > peak) { peak = std::abs(out_all[i]); lag = i; }
+    REQUIRE(peak > 0.9f);   // NOT dry-passed: a real convolved onset survived
+
+    double sxy = 0, sxx = 0, syy = 0;
+    for (std::size_t i = 0; i < len && lag + i < out_all.size(); ++i) {
+        const double x = out_all[lag + i], y = ir[i];
+        sxy += x * y; sxx += x * x; syy += y * y;
+    }
+    const double corr = sxy / std::sqrt(sxx * syy + 1e-30);
+    INFO("variable-block corr=" << corr);
+    REQUIRE(corr > 0.9999);   // reverb is the IR even though host blocks != prepared block
 }

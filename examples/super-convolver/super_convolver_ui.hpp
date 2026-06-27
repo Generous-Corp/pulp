@@ -83,7 +83,7 @@ public:
         canvas.fill_text("SuperConvolver", 20 * s, 32 * s);
         canvas.set_fill_color(sc_palette::text_dim);
         canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text("GPU convolution reverb — live impulse response & spectrum",
+        canvas.fill_text("Convolution reverb · GPU-rendered UI — live impulse response & spectrum",
                          20 * s, 50 * s);
 
         read_spectrum();
