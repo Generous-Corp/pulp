@@ -1,22 +1,26 @@
 # GPU audio runtime (developer guide)
 
-> Status: experimental, default-OFF. Built on `develop/gpu-audio-runtime`; not in
-> a public release until human-reviewed. Requires a Skia/Dawn GPU build
-> (`-DPULP_ENABLE_GPU=ON`); every path has a CPU fallback so plugins degrade on
-> unsupported devices.
+> Status: experimental, default-OFF. Requires a Skia/Dawn GPU build
+> (`-DPULP_ENABLE_GPU=ON`); every path has a CPU fallback so plugins keep
+> working on unsupported devices.
 
-Pulp's GPU audio runtime lets you run heavy, block-based DSP on the GPU without
-touching the audio thread. This guide is the developer-facing surface: the
-primitives, the real-time transport, and the ready-made processors.
+This is **not** "run your audio on the GPU." It's a runtime that lets a plugin
+selectively accelerate *computationally expensive* DSP on the GPU **while
+preserving real-time audio guarantees and seamless CPU compatibility** — the
+audio thread is never blocked on the GPU, and anything the GPU can't do (or
+can't keep up with) falls back to the CPU. This guide is the developer surface:
+the compute primitives, the real-time transport, and the ready-made processors.
 
 ## The model in one paragraph
 
-GPU compute is fast but the CPU↔GPU round-trip is slow, so **the audio thread
-never talks to the GPU**. A non-real-time worker runs GPU work and the audio
-thread reads results a fixed number of blocks later (plugin delay compensation).
-Keep intermediates GPU-resident, read back once, and amortize the round-trip by
-batching. Small/low-latency DSP stays on the CPU; the GPU does the coarse, heavy,
-batched, latency-tolerant work.
+The bottleneck isn't GPU compute — it's **CPU↔GPU communication**, so the whole
+runtime is built around that. The audio thread **never talks to the GPU**: it
+hands work to a non-real-time worker and reads results a fixed number of blocks
+later (reported to the host as plugin delay compensation). To make that pay off,
+batch lots of work together, keep intermediates GPU-resident, do **one** readback
+instead of many, and add predictable latency instead of blocking. Small/
+low-latency DSP stays on the CPU; the GPU does the coarse, heavy, batched,
+latency-tolerant work — and a CPU fallback always covers it.
 
 ## Honest tradeoffs (read this first)
 
@@ -171,6 +175,10 @@ latency-delayed output, never blocking. On a miss the node's `MissPolicy`
 4. Test against a CPU reference (golden / frequency-domain) and assert RT-safety
    (no alloc/lock/block on the audio thread).
 
-See `planning/2026-06-27-gpu-audio-compute-runtime.md` for the architecture and
-`...-demo-plugins.md` for the flagship example plugins (SuperConvolver, GPU NAM,
-Spectral Lab).
+The flagship example is `examples/super-convolver` — a convolution reverb with a
+CPU default and an opt-in GPU engine, demonstrating the layered authoring above.
+
+> In one line: **Pulp lets plugin developers selectively accelerate
+> computationally expensive DSP on the GPU while preserving real-time audio
+> guarantees and seamless CPU compatibility** — rather than "plugins run on the
+> GPU." That's the accurate, and more valuable, framing.
