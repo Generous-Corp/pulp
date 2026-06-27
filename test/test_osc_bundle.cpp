@@ -542,7 +542,7 @@ TEST_CASE("Malformed address patterns fail closed",
 }
 
 TEST_CASE("Address pattern alternatives reject empty branches",
-          "[osc][bundle][pattern][coverage][phase3-github]") {
+          "[osc][bundle][pattern][coverage]") {
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefix"));
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefixSuffix"));
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefixOther"));

@@ -1514,7 +1514,7 @@ TEST_CASE("OSC encode is deterministic for identical messages",
 }
 
 TEST_CASE("OSC encode preserves moved string and blob arguments",
-          "[osc][codec][coverage][phase3-github]") {
+          "[osc][codec][coverage]") {
     std::string label = "moved-label";
     std::vector<uint8_t> payload{0x10, 0x20, 0x30, 0x40};
 
@@ -1643,7 +1643,7 @@ TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][iss
 }
 
 TEST_CASE("OSC decode keeps explicit defaults for out-of-range access",
-          "[osc][message][coverage][phase3-github]") {
+          "[osc][message][coverage]") {
     Message msg("/defaults");
     msg.add(12).add(std::string("name"));
 

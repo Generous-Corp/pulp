@@ -42,7 +42,7 @@ TEST_CASE("Interpolator hermite impulse response spans adjacent samples", "[sign
 }
 
 TEST_CASE("Interpolator hermite preserves affine sample ramps",
-          "[signal][interp][coverage][phase3]") {
+          "[signal][interp][coverage]") {
     REQUIRE_THAT(Interpolator::hermite(0.25f, -1.0f, 1.0f, 3.0f, 5.0f),
                  WithinAbs(1.5f, 0.001f));
     REQUIRE_THAT(Interpolator::hermite(0.75f, -1.0f, 1.0f, 3.0f, 5.0f),
@@ -67,7 +67,7 @@ TEST_CASE("Interpolator lagrange for linear data", "[signal][interp]") {
 }
 
 TEST_CASE("Interpolator lagrange preserves quadratic curves",
-          "[signal][interp][coverage][phase3]") {
+          "[signal][interp][coverage]") {
     // Samples from f(x) = x^2 at x=-1,0,1,2.
     REQUIRE_THAT(Interpolator::lagrange(0.25f, 1.0f, 0.0f, 1.0f, 4.0f),
                  WithinAbs(0.0625f, 0.001f));

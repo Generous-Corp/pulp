@@ -268,7 +268,7 @@ TEST_CASE("OscChannel close uses the latest registered closed callback",
 }
 
 TEST_CASE("OscChannel routes close callbacks through custom executor",
-          "[osc_channel][lifecycle][coverage][phase3]") {
+          "[osc_channel][lifecycle][coverage]") {
     std::vector<std::function<void()>> queued;
     OscChannelOptions options;
     options.executor = [&](std::function<void()> fn) {
@@ -401,7 +401,7 @@ TEST_CASE("OscChannel message callback replacement uses latest callback",
 }
 
 TEST_CASE("OscChannel routes received messages through custom executor",
-          "[osc_channel][raw][coverage][phase3]") {
+          "[osc_channel][raw][coverage]") {
     std::mutex queue_mu;
     std::vector<std::function<void()>> queued;
     OscChannelOptions options;

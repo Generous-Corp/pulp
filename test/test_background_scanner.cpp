@@ -89,7 +89,7 @@ TEST_CASE("BackgroundScanner: empty worker still completes",
 }
 
 TEST_CASE("BackgroundScanner: worker may finish without completion callback",
-          "[host][bg-scan][coverage][phase3]") {
+          "[host][bg-scan][coverage]") {
     BackgroundScanner bs;
     std::atomic<bool> worker_ran{false};
     std::atomic<int> progress_calls{0};
@@ -124,7 +124,7 @@ TEST_CASE("BackgroundScanner: idle cancel and join are no-ops",
 }
 
 TEST_CASE("BackgroundScanner: destructor requests cancel and joins active worker",
-          "[host][bg-scan][coverage][phase3]") {
+          "[host][bg-scan][coverage]") {
     std::atomic<bool> started{false};
     std::atomic<bool> worker_saw_cancel{false};
     std::atomic<bool> completed{false};

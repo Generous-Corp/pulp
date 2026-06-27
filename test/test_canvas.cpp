@@ -314,7 +314,7 @@ TEST_CASE("RecordingCanvas transforms", "[canvas]") {
 }
 
 TEST_CASE("RecordingCanvas restores save stack and transform snapshots",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas][coverage]") {
     RecordingCanvas canvas;
 
     canvas.translate(5.0f, 7.0f);
@@ -346,7 +346,7 @@ TEST_CASE("RecordingCanvas restores save stack and transform snapshots",
 }
 
 TEST_CASE("RecordingCanvas captures Canvas2D state and media command payloads",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas][coverage]") {
     RecordingCanvas canvas;
     const float dash[] = {2.0f, 4.0f, 6.0f};
     const uint8_t pixels[] = {
@@ -414,7 +414,7 @@ TEST_CASE("RecordingCanvas captures Canvas2D state and media command payloads",
 }
 
 TEST_CASE("RecordingCanvas captures remaining path primitive payloads",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas][coverage]") {
     RecordingCanvas canvas;
 
     canvas.begin_path();

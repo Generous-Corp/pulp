@@ -109,7 +109,7 @@ TEST_CASE("CodeEditor insert appends in read-only fallback mode",
 }
 
 TEST_CASE("CodeEditor marker API is a stable no-op in native fallback mode",
-          "[gui][code-editor][coverage][phase3]") {
+          "[gui][code-editor][coverage]") {
     CodeEditor editor;
     editor.set_text("alpha\nbeta");
     editor.set_markers({{1, "warn"}, {2, "error"}});
