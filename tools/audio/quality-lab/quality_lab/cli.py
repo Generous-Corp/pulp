@@ -57,7 +57,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_engine(args: argparse.Namespace) -> int:
-    report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
+    if args.input:
+        report = pipeline.run_real_audio(args.input, ratio=args.ratio, character=args.character)
+    else:
+        report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
     if report["verdict"] == "SKIPPED":
         print(f"[quality-lab engine] SKIPPED — {report['reason']} "
               f"(build: cmake --build build --target stretchcli)")
@@ -122,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     rn.set_defaults(func=_cmd_run)
 
     re = sub.add_parser("engine", help="validate the REAL Pulp stretch engine (stretchcli)")
+    re.add_argument("--input", default="", help="a REAL audio WAV (reference-free dry-input check); "
+                    "omit to use the synthetic drum corpus")
     re.add_argument("--ratio", type=float, default=2.0)
     re.add_argument("--character", default="clean",
                     choices=["clean", "varispeed", "phase_vocoder", "granular"])

@@ -87,6 +87,29 @@ brightness (spectral_centroid fires), matching the skill's "slowing down warms +
 note. The engine adapter is opt-in: `stretchcli` is discovered at the build path or via
 `PULP_STRETCHCLI`, and skips cleanly when absent (public CI doesn't build it).
 
+### Real audio (any WAV — reference-free)
+
+Real audio has no synthetic "ideal" reference, so the lab checks it **reference-free**:
+a faithful time-stretch preserves the *source* spectrum (timing changes, timbre
+shouldn't), so the global spectral detectors compare the engine output's LTAS to the
+source's.
+
+```bash
+python -m quality_lab.cli engine --input yourfile.wav --ratio 2.0 --character varispeed
+```
+
+Works on any developer-supplied WAV. The **committed corpus stays synthetic / license-
+clean**; real audio is developer-local (your CC0 files, or quick local material). For a
+fast license-clean demo on macOS, synthesize real speech with `say`:
+
+```bash
+say -o /tmp/vox.aiff "She sells sea shells; the sustained vowel rings on."
+python -m quality_lab.cli engine --input /tmp/vox.aiff --character varispeed  # formants drop ~58% -> centroid fires
+python -m quality_lab.cli engine --input /tmp/vox.aiff --character clean       # faithful -> CLEAN
+```
+
+(`say` voices are Apple-proprietary — fine to *use* locally, do **not** commit the audio.)
+
 ## Credibility — why this isn't circular
 
 A detector validated only against a degradation written by the same author is
