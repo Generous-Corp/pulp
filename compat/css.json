@@ -1996,7 +1996,7 @@
     },
     "css/listStyleType": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal / decimal-leading-zero / lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian). Marker glyph paint is deferred — `decimal` additionally needs sibling-index resolution from the parent's children, and the counter-style keywords need glyph rendering before they become visually distinct from disc.",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal / decimal-leading-zero / lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian). Marker glyph paint is deferred \u2014 `decimal` additionally needs sibling-index resolution from the parent's children, and the counter-style keywords need glyph rendering before they become visually distinct from disc.",
       "supportedValues": [
         "none",
         "disc",
@@ -2015,7 +2015,7 @@
         "georgian"
       ],
       "unsupportedValues": [
-        "cjk-decimal / hebrew / hiragana / katakana / etc. (other CSS Counter Styles Level 3 keywords — storage-only follow-up)"
+        "cjk-decimal / hebrew / hiragana / katakana / etc. (other CSS Counter Styles Level 3 keywords \u2014 storage-only follow-up)"
       ],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
@@ -2024,7 +2024,7 @@
         "packages/pulp-react/test/prop-applier-list-style.test.ts",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1514 — Bridge stores the type keyword on a View::ListStyleType enum slot; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup — decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene. Counter-style extension (lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian / decimal-leading-zero) is storage-only today; paint-side glyph rendering remains the follow-up.",
+      "notes": "pulp #1514 \u2014 Bridge stores the type keyword on a View::ListStyleType enum slot; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup \u2014 decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene. Counter-style extension (lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian / decimal-leading-zero) is storage-only today; paint-side glyph rendering remains the follow-up.",
       "issue": "1514"
     },
     "css/margin": {

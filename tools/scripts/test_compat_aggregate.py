@@ -76,6 +76,14 @@ class SliceAssembleTests(unittest.TestCase):
         blocks = ca.slice_aggregate(SAMPLE_AGGREGATE)
         self.assertEqual(ca.assemble_aggregate(blocks), SAMPLE_AGGREGATE)
 
+    def test_round_trip_preserves_trailing_newline_when_requested(self) -> None:
+        raw = SAMPLE_AGGREGATE + "\n"
+        blocks = ca.slice_aggregate(raw)
+        self.assertEqual(
+            ca.assemble_aggregate(blocks, trailing_newline=True),
+            raw,
+        )
+
     def test_all_top_level_keys_present(self) -> None:
         blocks = ca.slice_aggregate(SAMPLE_AGGREGATE)
         self.assertEqual(set(blocks), set(ca.ALL_KEYS_ORDER))
@@ -202,6 +210,31 @@ class CliRoundTripTests(unittest.TestCase):
                 agg.read_text(encoding="utf-8"), original,
                 "build must regenerate a byte-identical compat.json",
             )
+            self.assertEqual(self._run("check", root).returncode, 0)
+
+    def test_split_build_check_preserves_trailing_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agg = root / "compat.json"
+            agg.write_text(SAMPLE_AGGREGATE + "\n", encoding="utf-8")
+            original = agg.read_text(encoding="utf-8")
+
+            self.assertEqual(self._run("split", root).returncode, 0)
+            self.assertEqual(self._run("build", root).returncode, 0)
+            self.assertEqual(agg.read_text(encoding="utf-8"), original)
+            self.assertEqual(self._run("check", root).returncode, 0)
+
+    def test_build_creates_new_aggregate_with_trailing_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agg = root / "compat.json"
+            agg.write_text(SAMPLE_AGGREGATE, encoding="utf-8")
+            self.assertEqual(self._run("split", root).returncode, 0)
+
+            agg.unlink()
+
+            self.assertEqual(self._run("build", root).returncode, 0)
+            self.assertEqual(agg.read_text(encoding="utf-8"), SAMPLE_AGGREGATE + "\n")
             self.assertEqual(self._run("check", root).returncode, 0)
 
     def test_check_detects_drift(self) -> None:
