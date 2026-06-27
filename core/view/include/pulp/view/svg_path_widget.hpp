@@ -54,7 +54,7 @@ public:
     void set_fill_color(canvas::Color c);
     void clear_fill();
 
-    /// pulp #932 / #1737 — gradient fill as a CSS linear-gradient
+    /// Gradient fill as a CSS linear-gradient
     /// string. When set (non-empty), `paint()` overrides the solid
     /// fill_color_ with the parsed gradient — calls
     /// `canvas.set_fill_gradient_linear(...)` before
@@ -85,7 +85,7 @@ public:
     /// Stroke width in SVG path-coords (i.e. viewBox space). Default 1.
     void set_stroke_width(float w);
 
-    /// pulp #3656 — fill winding rule, mirroring SVG's `fill-rule`
+    /// Fill winding rule, mirroring SVG's `fill-rule`
     /// (`nonzero` | `evenodd`). Default `nonzero` matches the SVG /
     /// Canvas2D default. `evenodd` is what compound annular paths need:
     /// frameworks that lower a stroked ellipse to a two-subpath
@@ -110,7 +110,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
-    /// pulp #72 — expose the viewBox as the natural / intrinsic size so
+    /// Expose the viewBox as the natural / intrinsic size so
     /// Yoga can use it as flex-basis when the host doesn't set explicit
     /// dimensions. Without these, an `<svg viewBox="0 0 24 24"><path/></svg>`
     /// dropped into a flex container collapses to 0×0 and `paint()` early-
@@ -128,9 +128,9 @@ private:
     std::vector<SvgPathSegment> segments_;
     canvas::Color fill_color_{0.0f, 0.0f, 0.0f, 1.0f};
     canvas::Color stroke_color_{0.0f, 0.0f, 0.0f, 1.0f};
-    std::string   fill_gradient_;  // pulp #932 — non-empty overrides solid fill
+    std::string   fill_gradient_;  // non-empty overrides solid fill
     float stroke_width_ = 1.0f;
-    canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;  // pulp #3656
+    canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"
     float viewbox_h_ = 0.0f;
     bool has_fill_ = true;

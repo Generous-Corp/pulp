@@ -838,7 +838,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     target_scroll_y_ += dy;
     clamp_scroll_targets();
 
-    // pulp #1737 — honor CSS `scroll-behavior`. CSS
+    // Honor CSS `scroll-behavior`. CSS
     // default is `auto` (instant); Pulp's historic default has been
     // smooth, so we treat empty / `smooth` / anything-else as smooth
     // (preserves the existing scroll feel for callers that don't set
@@ -980,7 +980,7 @@ View* ScrollView::hit_test(Point local_point) {
     if (!visible() || !enabled() || !hit_testable()) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
-    // React Native pointerEvents parity (pulp #1170):
+    // React Native pointerEvents parity:
     // ScrollView shadows the base View::hit_test, so without this honor the
     // setPointerEvents(box-only/box-none/none) path silently no-ops on
     // scrollables. Mirror View::hit_test's policy here.
@@ -1013,7 +1013,7 @@ View* ScrollView::hit_test(Point local_point) {
                                  local_point.y + sy - child->bounds().y};
 
             // overflow:visible: expand hit area symmetrically on all four
-            // sides for popovers that extend in any direction (pulp #1148).
+            // sides for popovers that extend in any direction.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();

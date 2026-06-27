@@ -199,7 +199,7 @@ public:
     // visible window.
     virtual std::vector<uint8_t> capture_png() { return {}; }
 
-    // Capture the host's own back-buffer as a PNG image (issue #2001).
+    // Capture the host's own back-buffer as a PNG image.
     //
     // Semantics: "host-managed pixels, deterministically." Implementations
     // MUST NOT call show()/makeKeyAndOrderFront/etc., and MUST bypass any
@@ -287,7 +287,7 @@ public:
     /// aspect on user drag and letterbox bars only appear as a backstop
     /// during in-flight drag.
     ///
-    /// Why this exists (pulp #59 / #63 / #64 / #65 — 2026-05-14):
+    /// Why this exists:
     /// the "obvious" alternatives all failed for native-react renderers
     /// like Spectr:
     ///   * Per-child set_scale() on root children scales chrome but

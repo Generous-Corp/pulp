@@ -13,7 +13,7 @@ namespace pulp::view {
 
 namespace {
 
-// pulp #932 — minimal CSS linear-gradient parser used by SvgPathWidget
+// Minimal CSS linear-gradient parser used by SvgPathWidget
 // for `fill="url(#g)"` resolution. Mirrors the parser in skia_canvas.cpp
 // but emits structured stops + endpoint coords instead of an SkShader,
 // because SvgPathWidget paints through Canvas::set_fill_gradient_linear
@@ -726,7 +726,7 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     }
 
     if (has_fill_) {
-        // pulp #932 / #1737 PR-4 — gradient fill takes precedence over
+        // Gradient fill takes precedence over
         // solid fill_color_ when set. Parse the CSS linear-gradient
         // string against the LOCAL bounds (not the viewBox-scaled
         // path coords) — the gradient endpoints span the widget's

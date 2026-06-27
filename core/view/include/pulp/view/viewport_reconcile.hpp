@@ -1,4 +1,4 @@
-// pulp #1899 — viewport reconciliation for runtime-imported content.
+// Viewport reconciliation for runtime-imported content.
 //
 // Header-only helper for clamping oversize absolute-positioned
 // descendants to fit a viewport. Generic enough to live in core/view
@@ -65,7 +65,7 @@ inline void clamp_oversize_absolute_view(pulp::view::View& view,
     // opposite edge isn't anchored — i.e. the source said "size me
     // explicitly", not "stretch me from edge to edge".
     //
-    // pulp #1906 — distinguish `right:auto` from explicit
+    // Distinguish `right:auto` from explicit
     // `right:0`. The previous predicate `(!has_right() || right==0)`
     // treated `auto` and `0` identically, so an oversize child pinned
     // with explicit `right:0` / `bottom:0` got force-clamped even

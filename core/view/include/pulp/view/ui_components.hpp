@@ -44,7 +44,7 @@ public:
         set_access_role(AccessRole::slider);
     }
 
-    // pulp #1818 — clear the static `active_popup_` slot if this dying
+    // Clear the static `active_popup_` slot if this dying
     // ComboBox holds it. Without this, an unmounted React dropdown leaves
     // a dangling pointer that the platform window host dereferences on
     // the next mouseDown (PAC failure on the vtable load — exact crash

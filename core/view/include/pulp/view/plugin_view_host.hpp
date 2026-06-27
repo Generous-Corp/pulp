@@ -157,7 +157,7 @@ public:
     }
 
     // Capture the host's current back buffer as a PNG (mirrors
-    // `WindowHost::capture_back_buffer_png`, issue #2001). GPU hosts read
+    // `WindowHost::capture_back_buffer_png`). GPU hosts read
     // back the rendered Skia frame via `SkiaSurface::read_current_rgba`;
     // hosts that cannot capture return an empty vector. Used by the
     // embedded-editor host smoke tests.
@@ -223,7 +223,7 @@ public:
     // (0, 0) to disable.
     //
     // This mirrors `WindowHost::set_design_viewport` (see that method's
-    // docs for the design rationale, pulp #59/#63/#64/#65) so that an
+    // docs for the design rationale) so that an
     // editor that already paints correctly in the standalone window host
     // paints identically when embedded by a DAW. Default no-op for hosts
     // that do not implement design-viewport scaling.
@@ -277,7 +277,7 @@ public:
 };
 
 // Install the built-in platform PluginViewHost factory (and matching headless
-// screenshot provider) on non-Apple platforms (#3329 Win/Linux parity).
+// screenshot provider) on non-Apple platforms (Win/Linux parity).
 //
 // Idempotent and thread-safe: the first call registers the platform factory via
 // PluginViewHost::set_factory(); subsequent calls are no-ops. A host that wants

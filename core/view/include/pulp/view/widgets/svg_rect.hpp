@@ -6,7 +6,7 @@
 /// fill="#f00" /></svg>` — common for band-shape thumbnails and other
 /// chart-style SVG primitives in React/HTML bundles.
 ///
-/// Mirrors the SvgPathWidget API (pulp #965 / #994 / #1291): fill +
+/// Mirrors the SvgPathWidget API: fill +
 /// stroke + stroke-width plumbing kept consistent so JS/JSX consumers
 /// see the same surface across the SVG primitives.
 

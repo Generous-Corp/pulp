@@ -11,10 +11,10 @@ void walk(const View& v, int depth,
     snap.role  = v.access_role();
     snap.label = v.access_label();
     snap.value = v.access_value();
-    // pulp #1737 — surface ARIA state attributes through the cross-
+    // Surface ARIA state attributes through the cross-
     // platform snapshot so AT bridges (and offline tests) see the state
     // alongside role/label/value. Platform bridges (NSAccessibility
-    // here; AT-SPI / UIA when wired per #217) read the same View slots
+    // here; AT-SPI / UIA when wired) read the same View slots
     // directly; the snapshot is the cross-platform mirror.
     snap.pressed  = v.access_pressed();
     snap.checked  = v.access_checked();
@@ -49,7 +49,7 @@ snapshot_accessibility_tree(const View& root) {
     // and iOS (accessibility_ios.mm) VoiceOver bridges iterate
     // root.child_count() and never push the root; including it here
     // created false cross-platform parity failures when the root had a
-    // non-none role (e.g. group). Fix per #192 review.
+    // non-none role (e.g. group).
     std::vector<AccessibilityNodeSnapshot> out;
     for (std::size_t i = 0; i < root.child_count(); ++i) {
         if (const View* child = root.child_at(i)) {

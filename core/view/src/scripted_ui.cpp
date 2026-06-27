@@ -102,7 +102,7 @@ bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::stri
 bool ScriptedUiSession::poll(std::string* error) {
     bool changed = false;
     if (bridge_) {
-        // pulp #1412 — host idle pump must drain BOTH async-shell results
+        // Host idle pump must drain BOTH async-shell results
         // (poll_async_results) AND timers + rAF callbacks
         // (service_frame_callbacks). Without the second call, JS
         // setTimeout / setInterval callbacks queue forever on Mac/iOS

@@ -6,9 +6,8 @@
 /// stroke="#000" stroke-width="1" /></svg>` — common for separators,
 /// chart axes, and threshold markers in React/HTML bundles.
 ///
-/// Mirrors the SvgPathWidget / SvgRectWidget API (pulp #965 / #1291 /
-/// #1416): the same fill / stroke / stroke-width plumbing across all
-/// SVG-primitive intrinsics.
+/// Mirrors the SvgPathWidget / SvgRectWidget API: the same fill /
+/// stroke / stroke-width plumbing across all SVG-primitive intrinsics.
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/view.hpp>

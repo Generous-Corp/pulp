@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// pulp #1407 — CSS `text-overflow: ellipsis` truncation helper.
+// CSS `text-overflow: ellipsis` truncation helper.
 //
 // Translates a string to its ellipsised form when its measured width
 // exceeds the available content-box. Operates on UTF-8 codepoints so
