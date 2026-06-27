@@ -118,8 +118,7 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window available — embedded host smoke skipped.");
-            return;
+            SKIP("No Cocoa window available: embedded host smoke skipped");
         }
 
         smoke::GpuEditorProcessor p;
@@ -142,10 +141,9 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
 
         if (!host->is_gpu_backed()) {
             // GPU host fell back to CPU — no Dawn/Metal adapter on this host.
-            SUCCEED("No GPU adapter — embedded GPU host smoke skipped (CPU fallback).");
             bridge.close();
             [window close];
-            return;
+            SKIP("No GPU adapter: embedded GPU host smoke skipped (CPU fallback)");
         }
 
         host->set_idle_callback(format::make_scripted_idle_pump(bridge));
@@ -197,18 +195,16 @@ TEST_CASE("CLAP gui_create/set_parent attaches the embedded editor (mac)",
         REQUIRE(gui != nullptr);
 
         if (!gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false)) {
-            SUCCEED("Cocoa GUI API not supported on this host — CLAP smoke skipped.");
             plugin->destroy(plugin);
             clap_entry.deinit();
-            return;
+            SKIP("Cocoa GUI API not supported on this host: CLAP smoke skipped");
         }
 
         if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
             // Editor still env-blocked (no window server) — soft skip.
-            SUCCEED("CLAP gui_create returned false (no window server) — skipped.");
             plugin->destroy(plugin);
             clap_entry.deinit();
-            return;
+            SKIP("CLAP gui_create returned false (no window server)");
         }
 
         NSWindow* window =
@@ -266,17 +262,15 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
         REQUIRE(gui->can_resize(plugin));
 
         if (!gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false)) {
-            SUCCEED("Cocoa GUI API not supported — CLAP resize smoke skipped.");
             plugin->destroy(plugin);
             clap_entry.deinit();
-            return;
+            SKIP("Cocoa GUI API not supported: CLAP resize smoke skipped");
         }
 
         if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
-            SUCCEED("CLAP gui_create returned false (no window server) — skipped.");
             plugin->destroy(plugin);
             clap_entry.deinit();
-            return;
+            SKIP("CLAP gui_create returned false (no window server)");
         }
 
         // ── Resize hints expose design aspect ─────────────────────────
@@ -320,11 +314,10 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — CLAP resize+capture smoke skipped.");
             gui->destroy(plugin);
             plugin->destroy(plugin);
             clap_entry.deinit();
-            return;
+            SKIP("No Cocoa window: CLAP resize+capture smoke skipped");
         }
 
         clap_window_t cw{};
@@ -344,12 +337,11 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
         if (!clap_inst->editor_host->is_gpu_backed()) {
             // GPU host fell back to CPU (no Dawn adapter) — capture path
             // is GPU-only; the structural assertions above still ran.
-            SUCCEED("No GPU adapter — CLAP capture-resize smoke partial-skip.");
             gui->destroy(plugin);
             plugin->destroy(plugin);
             clap_entry.deinit();
             [window close];
-            return;
+            SKIP("No GPU adapter: CLAP capture-resize smoke partial-skip");
         }
 
         // First capture at design size — proves the design viewport set
@@ -385,7 +377,7 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
 #else  // !(PULP_HAS_SKIA && __APPLE__)
 
 TEST_CASE("embedded GPU plugin host smoke is mac+Skia only", "[gpu][plugin-gpu-host][mac]") {
-    SUCCEED("Built without PULP_HAS_SKIA / not Apple — embedded host smoke is a no-op.");
+    SKIP("Built without PULP_HAS_SKIA / not Apple: embedded host smoke is a no-op");
 }
 
 #endif

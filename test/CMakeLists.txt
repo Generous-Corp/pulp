@@ -1699,7 +1699,7 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
             PULP_HAS_SKIA=1 PULP_CLAP_GUI=1)
         target_include_directories(pulp-test-plugin-editor-host-smoke-mac PRIVATE
             ${SKIA_INCLUDE_DIRS})
-        catch_discover_tests(pulp-test-plugin-editor-host-smoke-mac)
+        catch_discover_tests(pulp-test-plugin-editor-host-smoke-mac EXTRA_ARGS --allow-running-no-tests)
     endif()
 endif()
 
