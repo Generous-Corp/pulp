@@ -700,8 +700,8 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
 TEST_CASE("CLAP state_save loops on short writes [issue-743]",
           "[clap][entry][state][short-write]") {
     // clap-validator's `state-reproducibility-flush` caps stream writes at
-    // 23 bytes/call. Before the fix, state_save() treated a short write as
-    // failure and returned false — which the validator saw as a plugin bug.
+    // 23 bytes/call. state_save() must loop short writes instead of returning
+    // false, which the validator reports as a plugin bug.
     REQUIRE(clap_entry.init("test"));
 
     auto* factory = static_cast<const clap_plugin_factory_t*>(

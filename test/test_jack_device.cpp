@@ -1,13 +1,11 @@
 // JACK device-enumeration contract (issue #3327 / Linux catch-up L5a).
 //
-// `JackSystem::enumerate_devices()` previously wrote `DeviceInfo` fields
-// that don't exist on the struct (`default_sample_rate`, `is_default`),
-// so the JACK translation unit failed to compile whenever CMake found a
-// JACK dev package — a latent build break that only surfaced on a
-// JACK-enabled Linux configure. This suite is the regression guard: it
-// only compiles against the corrected field names (`sample_rates`,
-// `is_default_input`/`is_default_output`), so its mere existence proves
-// the TU builds, and the assertions pin the enumerated contract.
+// `JackSystem::enumerate_devices()` must populate the real `DeviceInfo`
+// fields (`sample_rates`, `is_default_input`/`is_default_output`), not
+// nonexistent fields such as `default_sample_rate` / `is_default`, which
+// previously broke JACK-enabled Linux builds. This suite is the compile guard:
+// its mere existence proves the TU builds, and the assertions pin the
+// enumerated contract.
 //
 // Linux + JACK only. The target is registered solely when CMake detected
 // JACK (PULP_JACK_AVAILABLE), so the real branch always applies there; the
@@ -39,7 +37,7 @@ TEST_CASE("JACK: enumerate_devices reports a coherent single server device",
     REQUIRE(info.id == "jack");
     REQUIRE_FALSE(info.name.empty());
 
-    // The fields that previously did not exist must now be populated.
+    // The corrected DeviceInfo fields must be populated.
     REQUIRE_FALSE(info.sample_rates.empty());
     REQUIRE(info.sample_rates.front() > 0.0);
     REQUIRE_FALSE(info.buffer_sizes.empty());
@@ -49,10 +47,9 @@ TEST_CASE("JACK: enumerate_devices reports a coherent single server device",
 
 TEST_CASE("JACK: advertised channel count matches the device open cap",
           "[audio][jack][issue-3327]") {
-    // enumerate_devices() used to advertise 64 channels while the device
-    // path (JackDevice::open) hard-caps registration at 8 ports — a host
-    // could request more channels than the device would ever create. Both
-    // sites now derive from one constant, so enumeration is honest.
+    // enumerate_devices() must not advertise more channels than the device
+    // path (JackDevice::open) can create (previously 64 vs the 8-port cap);
+    // both sites derive from the same constant, so enumeration is honest.
     JackSystem sys;
     auto devices = sys.enumerate_devices();
     REQUIRE(devices.size() == 1);

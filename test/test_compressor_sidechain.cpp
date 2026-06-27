@@ -124,8 +124,8 @@ TEST_CASE("Compressor sidechain WITHOUT HPF clearly compresses bass-driven input
 
 TEST_CASE("Compressor process(input) still works as a self-sidechain compressor",
           "[signal][compressor]") {
-    // Regression test: the original single-arg `process(input)` API
-    // must keep working with input acting as its own sidechain detector.
+    // The single-arg `process(input)` API must keep working with input acting
+    // as its own sidechain detector.
     Compressor c;
     c.set_sample_rate(48000.0f);
     Compressor::Params p;

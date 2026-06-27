@@ -576,12 +576,11 @@ TEST_CASE("CiDiscovery.notify returns 0 when on_pe_notify is unset",
     REQUIRE(n == 0);
 }
 
-// Regression: #2959 — handle_notify() used to
-// forward every parsed PropertyNotify without checking the destination MUID.
-// On a multi-device MIDI-CI bus, that meant notifications addressed to other
-// peers leaked into the local on_pe_notify callback. All other PE/CI handlers
-// (Subscribe, Discovery, Inquire/Set Property) already gate on dest-MUID;
-// Notify was the outlier.
+// #2959 — handle_notify() must not forward parsed PropertyNotify messages
+// without checking the destination MUID. On a multi-device MIDI-CI bus, that
+// leak sends notifications addressed to other peers into the local
+// on_pe_notify callback. Notify must gate on dest-MUID like the other PE/CI
+// handlers (Subscribe, Discovery, Inquire/Set Property).
 TEST_CASE("CiDiscovery PropertyNotify filtered by destination MUID",
           "[midi][ci][pe][notify][issue-2959]") {
     CiDiscovery client;
