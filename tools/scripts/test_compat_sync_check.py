@@ -85,11 +85,11 @@ class CompatJsonSatisfiedTests(unittest.TestCase):
         )
         self.assertTrue(ok)
 
-    def test_empty_section_tolerated(self) -> None:
+    def test_empty_section_fails(self) -> None:
         ok, detail = csc._compat_json_satisfied(
             "css", {"css": {}}, [], "compat.json",
         )
-        self.assertTrue(ok)
+        self.assertFalse(ok)
         self.assertIn("empty", detail.lower())
 
     def test_populated_section_satisfies(self) -> None:
@@ -97,6 +97,13 @@ class CompatJsonSatisfiedTests(unittest.TestCase):
             "css", {"css": {"color": "supported"}}, [], "compat.json",
         )
         self.assertTrue(ok)
+
+    def test_non_object_section_fails(self) -> None:
+        ok, detail = csc._compat_json_satisfied(
+            "css", {"css": []}, [], "compat.json",
+        )
+        self.assertFalse(ok)
+        self.assertIn("not an object", detail)
 
     def test_missing_section_fails(self) -> None:
         ok, detail = csc._compat_json_satisfied(
@@ -125,12 +132,12 @@ class ComputeFindingsTests(unittest.TestCase):
         findings = csc.compute_findings(
             changed=["README.md"],
             compat_map=self._stub_compat_map(),
-            compat_data={"canvas2d": {}},
+            compat_data={"canvas2d": {"drawImage": {"status": "partial"}}},
             bypasses={},
         )
         self.assertEqual(findings, [])
 
-    def test_touched_source_with_empty_section_satisfies_compat_json(self) -> None:
+    def test_touched_source_with_empty_section_fails_compat_json(self) -> None:
         findings = csc.compute_findings(
             changed=["core/view/js/web-compat-canvas.js"],
             compat_map=self._stub_compat_map(),
@@ -140,13 +147,14 @@ class ComputeFindingsTests(unittest.TestCase):
         compat_findings = [f for f in findings
                            if f.requirement.kind == "compat-json"]
         self.assertEqual(len(compat_findings), 1)
-        self.assertTrue(compat_findings[0].satisfied)
+        self.assertFalse(compat_findings[0].satisfied)
+        self.assertIn("empty", compat_findings[0].detail)
 
     def test_missing_doc_and_test_fails(self) -> None:
         findings = csc.compute_findings(
             changed=["core/view/js/web-compat-canvas.js"],
             compat_map=self._stub_compat_map(),
-            compat_data={"canvas2d": {}},
+            compat_data={"canvas2d": {"drawImage": {"status": "partial"}}},
             bypasses={},
         )
         unsatisfied = [f for f in findings if not f.satisfied
@@ -162,7 +170,7 @@ class ComputeFindingsTests(unittest.TestCase):
                 "test/test_canvas_widget.cpp",
             ],
             compat_map=self._stub_compat_map(),
-            compat_data={"canvas2d": {}},
+            compat_data={"canvas2d": {"drawImage": {"status": "partial"}}},
             bypasses={},
         )
         self.assertTrue(all(f.satisfied for f in findings))
@@ -171,7 +179,7 @@ class ComputeFindingsTests(unittest.TestCase):
         findings = csc.compute_findings(
             changed=["core/view/js/web-compat-canvas.js"],
             compat_map=self._stub_compat_map(),
-            compat_data={"canvas2d": {}},
+            compat_data={"canvas2d": {"drawImage": {"status": "partial"}}},
             bypasses={"canvas2d": "test-only PR"},
         )
         unsatisfied_with_bypass = [
@@ -197,7 +205,9 @@ class ComputeFindingsTests(unittest.TestCase):
                 ],
             }),
             compat_data={
-                "css": {}, "html": {}, "canvas2d": {},
+                "css": {"color": {"status": "supported"}},
+                "html": {"button": {"status": "partial"}},
+                "canvas2d": {"drawImage": {"status": "partial"}},
             },
             bypasses={"*": "infrastructure-only PR"},
         )
@@ -224,7 +234,10 @@ class ComputeFindingsTests(unittest.TestCase):
                 "docs/reference/compat/css.md",
             ],
             compat_map=compat_map,
-            compat_data={"css": {}, "html": {}},
+            compat_data={
+                "css": {"color": {"status": "supported"}},
+                "html": {"button": {"status": "partial"}},
+            },
             bypasses={},
         )
         # css doc must be satisfied; html doc must not be.
@@ -363,14 +376,19 @@ class IntegrationFixture:
             }, indent=2) + "\n"
         )
 
-        # Stub compat.json with all known prefixes empty — the
-        # partial-blocker tolerance should cover the compat-json
-        # requirements.
+        # Populated compat.json aggregate matching the current matrix
+        # contract. Empty sections are scaffolds and must not satisfy
+        # compat-json requirements.
         (r / "compat.json").write_text(
             json.dumps({
                 "compat-schema-version": "0.1",
-                "css": {}, "rn": {}, "yoga": {}, "react": {},
-                "html": {}, "canvas2d": {}, "imports": {},
+                "css": {"color": {"status": "supported"}},
+                "rn": {"View": {"status": "supported"}},
+                "yoga": {"flexDirection": {"status": "supported"}},
+                "react": {"hooks": {"status": "partial"}},
+                "html": {"button": {"status": "partial"}},
+                "canvas2d": {"drawImage": {"status": "partial"}},
+                "imports": {"css": {"status": "partial"}},
             }, indent=2) + "\n"
         )
 
@@ -424,8 +442,13 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(code, 1, msg=out)
         self.assertIn("canvas2d", out)
         self.assertIn("FAILED", out)
-        # Empty compat.json section should be tolerated — the failing
-        # requirements are doc + test, NOT compat-json.
+        # The populated compat.json section is already satisfied; the
+        # failing requirements are doc + test, NOT compat-json.
+        compat_lines = [
+            line for line in out.splitlines() if "compat-json" in line
+        ]
+        self.assertTrue(compat_lines, msg=out)
+        self.assertTrue(all("✓" in line for line in compat_lines), msg=out)
         self.assertIn("doc", out)
         self.assertIn("test", out)
 
@@ -476,23 +499,35 @@ class IntegrationTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
 
-    def test_empty_section_tolerance_smoke(self) -> None:
-        """Critical: an empty compat.json section must NOT false-positive."""
+    def test_empty_sections_fail_after_matrix_population(self) -> None:
+        """Critical: empty compat.json sections must NOT false-positive."""
+        compat_path = self.tmp / "compat.json"
+        compat_path.write_text(
+            json.dumps({
+                "compat-schema-version": "0.1",
+                "css": {}, "rn": {}, "yoga": {}, "react": {},
+                "html": {}, "canvas2d": {}, "imports": {},
+            }, indent=2) + "\n"
+        )
+        self.f.commit("chore: empty compat sections")
+        _git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+
         # Touch widget_bridge.cpp (wildcard prefix → expands to all
-        # KNOWN_PREFIXES). The compat-json requirement should pass
-        # for every prefix because all sections are empty stubs. The
-        # only failures should be doc/test, not compat-json.
+        # KNOWN_PREFIXES). Every empty compat-json section should fail.
         self.f.write("core/view/src/widget_bridge.cpp",
                      "// new content\n")
         self.f.commit("feat(view): bridge tweak")
         code, out = _run_script(
             self.tmp, "--mode=report", "--enforce", *self._common_args(),
         )
-        # We expect drift (doc/test missing) — but the compat-json
-        # rows must each be ✓, not ✗.
-        for line in out.splitlines():
-            if "compat-json" in line:
-                self.assertIn("✓", line, msg=line)
+        self.assertEqual(code, 1, msg=out)
+        compat_lines = [
+            line for line in out.splitlines() if "compat-json" in line
+        ]
+        self.assertTrue(compat_lines, msg=out)
+        for line in compat_lines:
+            self.assertIn("✗", line, msg=line)
+            self.assertIn("empty", line, msg=line)
 
     def test_apply_mode_adds_missing_section(self) -> None:
         # Bake the missing-canvas2d state into origin/main so the diff
@@ -535,27 +570,24 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(code, 1, msg=out)
         self.assertIn("not-real", out)
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
     def test_unknown_kind_in_map_raises_at_load(self) -> None:
         # A typo'd `kind` like "tests" used to be silently dropped, leaving
         # CI green while a required compat-artifact gate was effectively
-        # disabled. The fix raises at config-load time so the
-        # misconfiguration fails loudly.
+        # disabled. The config loader now fails loudly.
         cfg = self.tmp / "tools/scripts/compat_path_map.json"
         data = json.loads(cfg.read_text())
         data["paths"].setdefault("core/view/src/scroll_view.cpp", []).append(
-            {"kind": "tests", "glob": "test/test_scroll*.cpp"},  # <-- typo
+            {"kind": "tests", "glob": "test/test_scroll*.cpp"},
         )
         cfg.write_text(json.dumps(data, indent=2) + "\n")
         self.f.commit("chore: typo in compat_path_map kind")
         code, out = _run_script(
             self.tmp, "--mode=report", "--enforce", *self._common_args(),
         )
-        # Hard-fail: exit non-zero, name the bad kind, valid kinds in the
-        # error message so the author can correct the typo.
         self.assertNotEqual(code, 0, msg=out)
         self.assertIn("tests", out)
-        self.assertIn("compat-json", out)  # listed as a valid kind
+        self.assertIn("compat-json", out)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
