@@ -286,7 +286,7 @@ css_parity:
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
       setFillColor, setStrokeColor, setLineWidth, beginPath, moveTo, lineTo,
       quadTo, cubicTo, closePath, fillPath, strokePath, save, restore, translate,
-      scale, rotate, clipRect. Full JS canvas bridge API.
+      scale, rotate, clipRect. Image APIs are scoped separately under runtime_apis.
   opacity:
     status: usable
     notes: Per-element opacity (0.0–1.0) applied as layer alpha in paint_all.
@@ -721,9 +721,13 @@ runtime_apis:
   canvas_draw_image:
     status: partial
     notes: >
-      Canvas2D drawImage supports file-backed 3-, 5-, and 9-argument forms,
-      including source rectangles, through Skia image decode. data: URI image
-      sources still fall back to the placeholder path.
+      canvasDrawImage records Canvas2D drawImage calls. The JS shim normalizes
+      the 3-arg form to destination bounds from the image dimensions; the native
+      bridge records the 5-arg destination form and the 9-arg source-rectangle
+      form. Skia-backed canvases decode and draw file-backed images with
+      source-rect slicing and image-smoothing state; CoreGraphics/base backends,
+      missing files, unsupported encoded formats, and data-URI replay fall back
+      to the labeled placeholder.
   drag_and_drop:
     status: usable
     notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
