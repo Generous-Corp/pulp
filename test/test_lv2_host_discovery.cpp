@@ -244,7 +244,7 @@ TEST_CASE("LV2 host discovery resolves shared objects from bundle roots",
 }
 
 TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
-          "[host][lv2][coverage][phase3]") {
+          "[host][lv2][coverage]") {
     ScratchDir scratch("sparse");
     const auto missing = scratch.path / "Missing.lv2";
 

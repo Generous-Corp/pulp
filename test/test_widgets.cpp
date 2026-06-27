@@ -1222,7 +1222,7 @@ TEST_CASE("Audio widgets render declarative schemas and invalid schema fallback"
 }
 
 TEST_CASE("Audio widget schemas reject malformed dimension tokens without error fallback",
-          "[view][widget][schema][coverage][phase3]") {
+          "[view][widget][schema][coverage]") {
     Knob knob;
     knob.set_bounds({0, 0, 80, 80});
     knob.set_value(0.5f);
