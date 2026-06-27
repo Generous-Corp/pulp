@@ -44,7 +44,7 @@ Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) 
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.1.1`. | [github.com/google-labs-code/design.md @ 0.1.1](https://github.com/google-labs-code/design.md/releases/tag/0.1.1) |
+| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.3.0`. | [github.com/google-labs-code/design.md @ 0.3.0](https://github.com/google-labs-code/design.md/releases/tag/0.3.0) |
 | **Khronos Box Textured fixture** | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture at `test/fixtures/scene3d/BoxTextured/BoxTextured.glb`. | [github.com/KhronosGroup/glTF-Sample-Assets/Models/BoxTextured](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured) |
 
 ### Embedded Fonts
