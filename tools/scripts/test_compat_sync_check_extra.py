@@ -236,7 +236,10 @@ class ResolutionAndApplyTests(unittest.TestCase):
         findings = csc.compute_findings(
             changed=["src.cpp", "docs/common.md", "test/test_common.cpp"],
             compat_map=compat_map,
-            compat_data={"css": {}, "html": {}},
+            compat_data={
+                "css": {"color": {"status": "supported"}},
+                "html": {"button": {"status": "partial"}},
+            },
             bypasses={},
         )
 

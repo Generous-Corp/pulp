@@ -116,7 +116,7 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     echo "" >&2
     echo "▸ compat-sync check" >&2
-    if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report; then
+    if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce; then
         fail=1
     fi
 fi
