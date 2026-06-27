@@ -76,6 +76,29 @@ def _cmd_engine(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    from . import corpus
+    cdir = args.dir or corpus.default_corpus_dir()
+    if args.corpus_cmd == "seed":
+        m = corpus.seed(cdir)
+        print(f"[quality-lab corpus] seeded {len(m['sources'])} synthetic source(s) in {cdir}")
+    elif args.corpus_cmd == "add":
+        try:
+            e = corpus.add_source(cdir, args.file, name=args.name, material_class=args.material_class,
+                                  license_id=args.license, expected=args.expect, family=args.family)
+        except (ValueError, FileNotFoundError) as exc:
+            print(f"[quality-lab corpus] REJECTED — {exc}")
+            return 1
+        print(f"[quality-lab corpus] added '{e['name']}' ({e['material_class']}, {e['license']})")
+    else:  # list
+        m = corpus.load_manifest(cdir)
+        print(f"[quality-lab corpus] {len(m['sources'])} source(s) in {cdir}:")
+        for s in m["sources"]:
+            print(f"  {s['name']:24s} {s['material_class']:11s} {s['license']:12s} "
+                  f"{s['kind']:9s} — {s['expected_artifacts']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -104,6 +127,20 @@ def main(argv: list[str] | None = None) -> int:
                     choices=["clean", "varispeed", "phase_vocoder", "granular"])
     re.add_argument("--out", default="", help="write report.json to this path")
     re.set_defaults(func=_cmd_engine)
+
+    cp = sub.add_parser("corpus", help="manage the versioned, license-guarded corpus (P0b)")
+    cp.add_argument("--dir", default="", help="corpus directory (default: committed corpus)")
+    csub = cp.add_subparsers(dest="corpus_cmd", required=True)
+    csub.add_parser("list", help="list corpus sources")
+    csub.add_parser("seed", help="seed the synthetic families")
+    ca = csub.add_parser("add", help="add a real audio source (permissive license required)")
+    ca.add_argument("--file", required=True)
+    ca.add_argument("--name", required=True)
+    ca.add_argument("--class", dest="material_class", required=True)
+    ca.add_argument("--license", required=True)
+    ca.add_argument("--expect", required=True, help="one-line: what should sound wrong")
+    ca.add_argument("--family", default="tonal")
+    cp.set_defaults(func=_cmd_corpus)
 
     args = p.parse_args(argv)
     return args.func(args)
