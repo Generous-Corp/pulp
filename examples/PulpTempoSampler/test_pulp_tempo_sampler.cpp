@@ -650,6 +650,84 @@ TEST_CASE("LOOP toggle engages/disengages a currently-held note",
     CHECK(after < 1e-6);
 }
 
+// A MIDI panic (CC123 All Notes Off) must clear the HELD-note set, not just stop
+// voices: otherwise a later LOOP-on resurrects a phantom chord the host already
+// silenced. Mirrors the held-but-silent setup of the LOOP test, then panics.
+TEST_CASE("MIDI panic clears the held set so LOOP cannot resurrect a phantom note",
+          "[tempo-sampler][issue-loop-panic]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);                       // start one-shot
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Press + HOLD note 60 (no note-off); let the one-shot play out to silence.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double tail = 0.0;
+    for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        tail = block_energy(l); }
+    REQUIRE(tail < 1e-6);   // one-shot finished + silent, key still "held" (no note-off)
+
+    // Host panic: All Notes Off. The held set must clear here.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 123, 0));
+      process_midi(*f.proc, 120.0, m, l, r); }
+
+    // Engage LOOP. With the held set cleared, there is nothing to resurrect -> silent.
+    f.store.set_value(kTempoLoop, 1.0f);
+    double after = 0.0;
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);   // no phantom loop (without the panic-clear this rings)
+}
+
+// CC120 (All Sound Off) hard-stops every voice immediately (vs CC123's release)
+// AND clears the held set — a ringing looped note is silenced at once and cannot
+// be resurrected by a later LOOP-on.
+TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set",
+          "[tempo-sampler][issue-loop-panic]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 1.0f);                      // loop so the voice keeps ringing
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Hold note 60; let the loop establish a steady ring.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double ringing = 0.0;
+    for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        ringing += block_energy(l); }
+    REQUIRE(ringing > 1e-3);                                  // actively looping
+
+    // All Sound Off: immediate silence (next block), no release tail.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 120, 0));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double after = 0.0;
+    for (int b = 0; b < 4; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);                                      // hard-stopped at once
+
+    // Held set cleared too: toggling LOOP off then on must not resurrect note 60.
+    f.store.set_value(kTempoLoop, 0.0f);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    f.store.set_value(kTempoLoop, 1.0f);
+    double resurrected = 0.0;
+    for (int b = 0; b < 200; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        resurrected += block_energy(l); }
+    CHECK(resurrected < 1e-6);
+}
+
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
 // guard) and every cut snapped to a zero-crossing so slice edges don't click.
 TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",

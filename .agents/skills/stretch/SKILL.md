@@ -134,6 +134,14 @@ resample, no EQ) vs `--character clean` (time-stretch).
   `kHeadEps`) or the PV didn't lose the attack (`kHeadRatio`). Runs tempo_stretch →
   relocate → **restore_onset_head** → match_spectral_rms (the make-up's interior-RMS
   window excludes the head; its soft-clip bounds the grafted peak).
+  - **The head length tracks the window, not a fixed 10 ms.** The PV ramp it has to
+    cover is ~`fft/2` — ~10 ms only at the 1024 percussive window, but ~42 ms at the
+    4096 default and ~85 ms at 8192 for sustained/tonal material. A fixed-10 ms head
+    hands the crossfade back to a still-ramping PV and scoops the envelope between the
+    head and the body, so `head = min(out, in, max(kHeadMs·sr, engine_.fft_size()/2))`.
+    `match_spectral_rms` floors its interior-RMS edge guard at that same head span
+    (`head_guard`), so the graft never skews the make-up gain on short (<~80 ms)
+    outputs. Both read `engine_.fft_size()` (==0 ⇒ engine default 4096).
 
 ## Fine-tune + share a preset (`StretchPreset`)
 

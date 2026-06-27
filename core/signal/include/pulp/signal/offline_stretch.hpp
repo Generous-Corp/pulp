@@ -414,8 +414,17 @@ private:
     }
     void match_spectral_rms(const float* const* in, long in_frames,
                             float* const* out, long out_frames) const noexcept {
-        auto interior_rms = [this](const float* const* b, long n) {
-            const long lo = std::min<long>(n / 8, 4096), hi = n - lo;
+        // Guard the make-up window past the onset-head graft as well as the edges.
+        // restore_onset_head (tempo path) replaces up to ~fft/2 leading samples; for
+        // SHORT outputs that graft reaches past n/8 into the interior window and skews
+        // the gain. Floor the edge guard at the head span so the make-up is measured
+        // over the steady body only. Harmless on the no-graft paths (a larger edge
+        // guard). fft_size_<=0 means the engine default (4096).
+        const long fft = engine_.fft_size() > 0 ? engine_.fft_size() : 4096;
+        const long head_guard = std::max<long>(
+            static_cast<long>(std::llround(kHeadMs * sample_rate_)), fft / 2);
+        auto interior_rms = [this, head_guard](const float* const* b, long n) {
+            const long lo = std::min<long>(std::max<long>(n / 8, head_guard), 4096), hi = n - lo;
             if (hi <= lo) return 0.0;
             double s = 0.0; long cnt = 0;
             for (int c = 0; c < channels_; ++c)
@@ -793,7 +802,18 @@ private:
     // soft-clip still bounds any grafted peak).
     void restore_onset_head(const float* const* in, long in_frames,
                             float* const* out, long out_frames) const noexcept {
-        const long head_span = static_cast<long>(std::llround(kHeadMs * sample_rate_));
+        // The PV ramp the graft has to cover is ~fft/2 samples, which is only ~10 ms
+        // at the percussive window (1024) but grows with the window — ~42 ms at the
+        // 4096 default, ~85 ms at 8192 for sustained/tonal material. A fixed 10 ms
+        // head hands the crossfade back to a PV that is still ramping for the larger
+        // windows, leaving an envelope dip between the head and the PV body. Scale
+        // the head to the actual ramp (floor it at ~10 ms) so the crossfade always
+        // reaches a fully-recovered PV. fft_size_<=0 means the engine default (4096).
+        // head_span is hoisted to long first to avoid an initializer-list narrowing
+        // conversion from std::llround's long long (MSVC release build).
+        const long fft = engine_.fft_size() > 0 ? engine_.fft_size() : 4096;
+        const long ramp = std::max<long>(1, fft / 2);
+        const long head_span = std::max<long>(static_cast<long>(std::llround(kHeadMs * sample_rate_)), ramp);
         const long head = std::min<long>({out_frames, in_frames, head_span});
         if (head < 2) return;
         float in_peak = 0.0f, out_peak = 0.0f;

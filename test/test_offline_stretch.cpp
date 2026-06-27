@@ -432,6 +432,47 @@ TEST_CASE("tempo stretch keeps the sample-0 onset present (no soft-start)",
     CHECK(head_rms(out2.data(), m) < 0.5 * head_rms(fade.data() + ramp, n - ramp));
 }
 
+// The onset-head graft must span the PV ramp, which is ~fft/2 — far longer than a
+// fixed 10 ms at the large windows used for sustained material. A fixed head hands
+// the crossfade back to a still-ramping PV, scooping the envelope between the head
+// and the body. Force a large window and assert no scoop just past the old 10 ms.
+TEST_CASE("onset-head graft tracks the window (no envelope scoop at large fft)",
+          "[offline-stretch][transient]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0; const long n = 24000;
+    auto rms = [&](const float* x, long a, long b, long len) {
+        double s = 0.0; long c = 0;
+        for (long i = a; i < b && i < len; ++i) { s += static_cast<double>(x[i]) * x[i]; ++c; }
+        return c > 0 ? std::sqrt(s / static_cast<double>(c)) : 0.0;
+    };
+    // Constant-amplitude tone (uniform body envelope) with a hard onset at t=0.
+    std::vector<float> in(static_cast<size_t>(n), 0.0f);
+    for (long i = 0; i < n; ++i)
+        in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2 * pi * 220.0 * i / sr));
+    in[0] = 1.0f; in[1] = -0.95f; in[2] = 0.9f;
+    const float* inp[1] = {in.data()};
+
+    const double R = 2.0; const long m = offline_stretch_output_frames(n, R);
+    OfflineStretch s;
+    OfflineStretchOptions sizing; sizing.fft_size = 4096; sizing.analysis_hop = 1024;
+    s.prepare(sr, 1, sizing);                              // large window -> ~42 ms PV ramp
+    REQUIRE(s.fft_size() == 4096);
+    OfflineStretchOptions o; o.time_ratio = R;
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, op, m, o, &err));
+
+    // The region 11–16 ms (just past the OLD 10 ms head, inside the ~42 ms ramp) used
+    // to collapse toward the still-ramping PV. With the head scaled to fft/2 it stays
+    // carried by the graft. Compare against the steady body at 100–160 ms.
+    const double early = rms(out.data(), std::llround(0.011 * sr), std::llround(0.016 * sr), m);
+    const double body  = rms(out.data(), std::llround(0.100 * sr), std::llround(0.160 * sr), m);
+    INFO("early(11-16ms)=" << early << " body(100-160ms)=" << body);
+    CHECK(body > 1e-3);
+    CHECK(early >= 0.55 * body);                           // no scoop (was ~0.4x at fixed 10 ms head)
+}
+
 TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
     constexpr double pi = 3.14159265358979323846;
     const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;

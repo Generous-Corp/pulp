@@ -545,6 +545,13 @@ public:
         store_.prepare();
         engine_.prepare(ctx.sample_rate, 2); // default [0.25x,4x] / ±24 st
         for (auto& voice : voices_) voice.reset();
+        // Reactivation (sample-rate change / re-prepare) can arrive without the host
+        // first sending note-offs. Clear the held-note set + edge-detect state so a
+        // later LOOP-on can't resurrect a phantom chord from a stale held velocity.
+        std::fill(std::begin(held_velocity_), std::end(held_velocity_), 0.0f);
+        loop_prev_ = false;
+        sustain_prev_ = false;
+        sustain_pedal_.store(false, std::memory_order_relaxed);
         publish_audio_acknowledgement(store_.read_published_view());
         start_worker();
     }
@@ -1329,7 +1336,14 @@ public:
                             v.renderer.set_playback_mode(audio::LoopPlaybackMode::Forward);
                             has = true;
                         }
-                    if (!has && can_trigger)
+                    // Re-trigger a finished one-shot ONLY into a free voice. Stealing
+                    // voices_[0] here would clobber a voice we just switched to looping
+                    // earlier in this same scan (and bounds the per-block trigger
+                    // fan-out). A held note with no spare voice simply isn't re-looped —
+                    // no worse than before LOOP engaged.
+                    bool free_voice = false;
+                    for (auto& v : voices_) if (!v.active) { free_voice = true; break; }
+                    if (!has && free_voice && can_trigger)
                         trigger_note(n, held_velocity_[static_cast<size_t>(n)], published, params);
                 }
             } else {
@@ -1369,6 +1383,16 @@ public:
                 const float v = static_cast<float>(event.message.getControllerValue()) / 127.0f;
                 if (cc == 1) modulation_.store(v, std::memory_order_relaxed);
                 else if (cc == 64) sustain_pedal_.store(v >= 0.5f, std::memory_order_relaxed);
+                else if (cc == 120 || cc == 123) {
+                    // Panic: All Sound Off (120) hard-stops every voice; All Notes Off
+                    // (123) releases them. Either way the held set MUST clear, or a
+                    // later LOOP-on would resurrect a phantom chord the host already
+                    // silenced.
+                    for (auto& voice : voices_)
+                        if (voice.active) { if (cc == 120) voice.reset(); else voice.release(); }
+                    std::fill(std::begin(held_velocity_), std::end(held_velocity_), 0.0f);
+                    if (cc == 120) sustain_pedal_.store(false, std::memory_order_relaxed);
+                }
             } else if (event.message.isPitchWheel()) {
                 // 14-bit pitch wheel: LSB | (MSB<<7), center 8192 -> -1..+1.
                 const std::uint8_t* d = event.message.data();
