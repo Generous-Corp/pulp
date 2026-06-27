@@ -106,15 +106,33 @@ separated from its run folder.
 
 ## Detectors
 
-| Detector | Catches | Method |
-|----------|---------|--------|
-| `transient_sharpness` | PV attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned |
-| `spectral_centroid` | brightness loss / dulling (e.g. STN noise-morph) | LTAS centroid shift, candidate vs reference (global, alignment-free) |
-| `hf_fizz` | added metallic HF sizzle | added HF (>8 kHz) energy fraction vs reference (global) |
+| Detector | Catches | Method | Family |
+|----------|---------|--------|--------|
+| `transient_sharpness` | PV attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
+| `spectral_centroid` | brightness loss / dulling (e.g. STN noise-morph) | LTAS centroid shift, candidate vs reference (global) | any |
+| `hf_fizz` | added metallic HF sizzle | added HF (>8 kHz) energy fraction vs reference (global) | any |
+| `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral flux increase (global) | tonal / sustained |
 
-The two spectral detectors are **global LTAS metrics** — alignment-free and
-scale-invariant, so they are robust on any material (no onset-matching fragility).
-Each fires on its own artifact and stays quiet on the others and on identity.
+The spectral detectors are **global** metrics — alignment-free and scale-invariant.
+`spectral_flux` belongs to the **tonal** family: on transient-heavy drums the onset
+flux dominates and it can't discriminate graininess, so it is exercised on sustained
+material (where graininess is actually heard).
+
+## Case families (§3.5 — the harness serves more than drums)
+
+The lab's unit of work is a `QualityCase` with `family` / `reference_policy` /
+`alignment_policy` / `detector_tags`, so time-stretch is *one* family, not the
+ontology. Two families ship today:
+
+| Family | Stimulus | Alignment | Detectors |
+|--------|----------|-----------|-----------|
+| **time-stretch** (percussive) | synthetic drum break | onset-map | transient_sharpness, spectral_centroid, hf_fizz |
+| **tonal** (sustained) | synthetic vocal/pad (harmonics + formants + vibrato) | identity | spectral_centroid, hf_fizz, spectral_flux |
+
+```bash
+python -m quality_lab.cli run --case tonal --degradation grainy   # fires spectral_flux
+python -m quality_lab.cli run --case drum  --degradation smear     # fires transient_sharpness
+```
 
 ## Deferred detectors (honest status)
 
