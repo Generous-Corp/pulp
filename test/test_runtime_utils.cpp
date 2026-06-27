@@ -795,7 +795,7 @@ TEST_CASE("DynamicLibrary missing symbol records an error while staying open",
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.is_open());
 
-    REQUIRE(lib.find_symbol("pulp_missing_symbol_for_phase3_coverage") == nullptr);
+    REQUIRE(lib.find_symbol("pulp_missing_symbol_for_dynlib_error") == nullptr);
     REQUIRE_FALSE(lib.error().empty());
     REQUIRE(lib.is_open());
 

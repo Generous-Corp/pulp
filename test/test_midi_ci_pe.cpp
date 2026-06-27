@@ -557,13 +557,10 @@ TEST_CASE("CiDiscovery.notify with no subscribers is a no-op",
     REQUIRE(fires == 0);
 }
 
-// Regression: #2959 — notify() documented its
-// return as "number of subscribers notified", but returned
-// `subscribers.size()` even when `on_pe_notify` was unset (nothing
-// emitted). Callers using the return for delivery accounting / retry
-// were told everything succeeded when zero were sent. Fix: return the
-// actual callback-invocation count, which is 0 when no callback is set.
-TEST_CASE("CiDiscovery.notify returns 0 when on_pe_notify is unset (#2959)",
+// notify() documents its return as "number of subscribers notified", so
+// delivery accounting must report the actual callback-invocation count,
+// including 0 when `on_pe_notify` is unset.
+TEST_CASE("CiDiscovery.notify returns 0 when on_pe_notify is unset",
           "[midi][ci][pe][notify][issue-2959]") {
     CiDiscovery server;
     CiDeviceInfo srv_info;

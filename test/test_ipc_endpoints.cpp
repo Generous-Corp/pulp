@@ -125,7 +125,7 @@ TEST_CASE("IPC socket endpoint failure can be reset with disconnect",
 }
 
 TEST_CASE("IPC socket client rejects hostless numeric endpoints",
-          "[events][ipc][endpoint][codecov]") {
+          "[events][ipc][endpoint]") {
     const std::vector<std::string_view> endpoints = {
         "0",
         "1",

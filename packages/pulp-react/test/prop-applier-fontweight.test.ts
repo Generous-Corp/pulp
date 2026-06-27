@@ -5,8 +5,9 @@
 // Raw Number(...) coercion would turn keyword weights into NaN before
 // the bridge's defensive default maps them back to 400. This translation
 // must stay aligned with compat.json (`css/fontWeight`) and the JS CSS
-// shim (`web-compat-style-decl.js`) so design-tool exports and React-Native
-// style objects produce the same Label::font_weight() result.
+// shim (`web-compat-style-decl.js`) so design-tool exports and
+// React-Native style objects produce the same Label::font_weight()
+// result.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
