@@ -6,28 +6,28 @@
 
 namespace pulp::render {
 
-/// Decoded texture data from KTX2 container.
+/// Parsed texture data from a KTX2 container.
 struct DecodedTexture {
-    std::vector<uint8_t> pixels;   ///< RGBA8 pixel data (after transcoding)
+    std::vector<uint8_t> pixels;   ///< Pixel data when a transcoding backend provides it.
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t mip_levels = 1;
-    std::string format;            ///< GPU format string (e.g., "rgba8unorm", "bc7-rgba-unorm")
+    std::string format;            ///< Preferred GPU format hint.
     bool compressed = false;       ///< Whether pixels are GPU-compressed (BC7/ASTC/ETC2)
     bool success = false;
 };
 
 /// Detect the optimal GPU texture compression format for the current platform.
-/// Returns "bc7" on Windows/Linux desktop, "astc" on Apple Silicon, "etc2" on mobile.
+/// Returns "astc" on Apple targets, "bc7" on Windows/Linux-family targets,
+/// and "rgba8" for the fallback path.
 std::string optimal_gpu_format();
 
-/// Decode a KTX2 texture to the optimal GPU format.
-/// If the KTX2 contains Basis Universal supercompressed data, transcodes
-/// to the platform's preferred GPU format.
-/// If no native KTX2 library is available, returns uncompressed RGBA8.
+/// Validate and parse KTX2 header metadata.
+/// The current built-in path does not transcode Basis Universal payloads, so
+/// `pixels` can be empty even when `success` is true.
 DecodedTexture decode_ktx2(const uint8_t* data, size_t size);
 
-/// Check if KTX2 decoding is available (native library linked).
+/// Check if a KTX2 transcoding backend was compiled in.
 bool ktx2_available();
 
 } // namespace pulp::render

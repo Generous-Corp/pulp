@@ -15,9 +15,8 @@ std::string optimal_gpu_format() {
 #endif
 }
 
-// KTX2 decoding stub — returns uncompressed when libktx is not available.
-// When PULP_HAS_KTX2 is defined, this would use libktx's ktxTexture2_TranscodeBasis()
-// to transcode Basis Universal data to the optimal GPU format.
+// KTX2 metadata parser. Full Basis Universal payload transcoding would use a
+// real KTX2 backend such as libktx's ktxTexture2_TranscodeBasis().
 
 DecodedTexture decode_ktx2(const uint8_t* data, size_t size) {
     DecodedTexture result;
@@ -46,8 +45,7 @@ DecodedTexture decode_ktx2(const uint8_t* data, size_t size) {
     result.mip_levels = std::max(1u, read_u32(32)); // levelCount
     result.format = optimal_gpu_format();
 
-    // Without libktx, we can't transcode Basis Universal data.
-    // Return header info but empty pixels (caller should check success flag).
+    // Without a KTX2 transcoder, return header info but no decoded pixels.
     result.success = (result.width > 0 && result.height > 0);
 
     return result;

@@ -236,7 +236,7 @@ Compute pipeline for Three.js PBR materials:
 - **Storage buffers**: Bind group serialization with GPU buffer creation
 - **Cube textures**: 6-face textures with mip levels for environment maps
 - **DRACO**: Native C++ mesh decoder (Apache 2.0, optional via `PULP_ENABLE_DRACO`)
-- **KTX2**: Texture header parser with platform-optimal format detection (ASTC/BC7/ETC2)
+- **KTX2**: Texture header parser and native-gap classifier; Basis Universal payload transcoding remains deferred
 - **Binary transfer**: Native buffer registration for zero-copy GPU upload
 
 ## Asset Embedding
