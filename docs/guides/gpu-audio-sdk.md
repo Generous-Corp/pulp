@@ -175,8 +175,96 @@ latency-delayed output, never blocking. On a miss the node's `MissPolicy`
 4. Test against a CPU reference (golden / frequency-domain) and assert RT-safety
    (no alloc/lock/block on the audio thread).
 
-The flagship example is `examples/super-convolver` — a convolution reverb with a
-CPU default and an opt-in GPU engine, demonstrating the layered authoring above.
+### A minimal GPU node, end to end
+
+A `GpuAudioNode` is the whole integration surface. Implement four methods — what
+you are, how to set up, the worker-side work, and an RT-safe fallback — then let
+the transport schedule it:
+
+```cpp
+#include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include <pulp/render/gpu_compute.hpp>
+
+using namespace pulp;
+
+// 1. The node: heavy, batched work that runs on the transport's worker thread.
+class MyGpuNode : public gpu_audio::GpuAudioNode {
+public:
+    MyGpuNode(uint32_t channels, uint32_t block, uint32_t sr)
+        : channels_(channels), block_(block), sr_(sr) {}
+
+    gpu_audio::GpuAudioNodeDescriptor descriptor() const override {
+        gpu_audio::GpuAudioNodeDescriptor d;
+        d.name = "MyGpuNode";
+        d.input_channels = channels_;
+        d.output_channels = channels_;
+        d.block_size = block_;
+        d.sample_rate = sr_;
+        d.latency_blocks = 1;                              // fixed PDC the host gets
+        d.miss_policy = gpu_audio::MissPolicy::CpuFallback; // seamless if the worker is late
+        d.supports_cpu_fallback = true;
+        return d;
+    }
+
+    // Non-RT setup: create the device + upload static data here, never in process_block.
+    bool prepare() override {
+        gpu_ = render::GpuCompute::create();
+        if (!gpu_ || !gpu_->initialize_standalone()) { gpu_.reset(); return false; }
+        // ... prepare Layer-1 plans (FFTs, convolution, matmul) on gpu_ ...
+        return true;
+    }
+
+    // Worker thread: may touch the GPU and block on readback. NEVER the audio thread.
+    void process_block(const audio::BufferView<const float>& in,
+                       audio::BufferView<float>& out, uint32_t n) override {
+        // ... call gpu_->fft_forward / convolve / matmul, write `out` ...
+    }
+
+    // RT-safe: runs on the audio thread for a missed block. No alloc/lock/block.
+    void process_cpu_fallback(const audio::BufferView<const float>& in,
+                              audio::BufferView<float>& out, uint32_t n) noexcept override {
+        // ... your signal::* CPU path; the default is a dry passthrough ...
+    }
+private:
+    uint32_t channels_, block_, sr_;
+    std::unique_ptr<render::GpuCompute> gpu_;
+};
+
+// 2. Wire it into your Processor. prepare() once; process() per block, RT-safe.
+class MyPlugin : public format::Processor {
+    MyGpuNode node_{2, 256, 48000};
+    gpu_audio::GpuAudioTransport transport_;
+
+    void prepare(const format::PrepareContext&) {
+        node_.prepare();
+        transport_.prepare(&node_, {/*ring_blocks*/ 8, /*run_worker_thread*/ true});
+        // Report transport_.latency_samples() to the host for plugin-delay comp.
+    }
+    void process(audio::BufferView<float>& out,
+                 const audio::BufferView<const float>& in, /*...*/) {
+        transport_.process(in, out, out.num_frames());  // writes input, reads delayed output — never blocks
+    }
+};
+```
+
+That is the entire contract: the audio thread only ever calls `transport_.process()`
+(lock-free), the GPU work happens on the worker a fixed number of blocks behind,
+and a missed block degrades via your `MissPolicy` instead of glitching.
+
+### Worked examples
+
+Both ship as buildable plugins (VST3/AU/CLAP/Standalone) with a CPU default and
+an opt-in GPU engine, a CPU-reference correctness test, and a benchmark:
+
+- **`examples/super-convolver`** — multi-room convolution reverb. Shows batching
+  *many distinct IRs* into one GPU submit (`GpuMultiConvolver`), the live CPU↔GPU
+  engine switch, and a live status line (backend, blocks, µs/block, real-time
+  headroom). The clearest read for the transport + live-rebuild lifecycle.
+- **`examples/spectral-lab`** — N-layer spectral freeze/morph "cloud". Shows
+  authoring your own `GpuAudioNode` (`gpu_spectral_cloud_node.hpp`) over a
+  GPU-resident spectral stack, and reusing the same status-line + headroom
+  telemetry. The clearest read for writing a node from scratch.
 
 > In one line: **Pulp lets plugin developers selectively accelerate
 > computationally expensive DSP on the GPU while preserving real-time audio
