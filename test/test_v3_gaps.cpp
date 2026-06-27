@@ -49,7 +49,7 @@ TEST_CASE("Bias reports state and processes separate buffers",
 }
 
 TEST_CASE("Bias zero and negative length buffers are no-ops",
-          "[signal][bias][coverage]") {
+          "[signal][bias]") {
     pulp::signal::Bias bias;
     bias.set_bias(2.0f);
 
@@ -68,7 +68,7 @@ TEST_CASE("Bias zero and negative length buffers are no-ops",
 }
 
 TEST_CASE("Bias handles zero-length in-place buffers",
-          "[signal][bias][coverage][large]") {
+          "[signal][bias]") {
     pulp::signal::Bias bias;
     bias.set_bias(2.0f);
 
@@ -353,7 +353,7 @@ TEST_CASE("is_prime known values", "[runtime][primes]") {
 }
 
 TEST_CASE("is_prime rejects small and square composites",
-          "[runtime][primes][coverage]") {
+          "[runtime][primes]") {
     REQUIRE_FALSE(pulp::runtime::is_prime(0));
     REQUIRE_FALSE(pulp::runtime::is_prime(1));
     REQUIRE_FALSE(pulp::runtime::is_prime(9));
@@ -368,14 +368,14 @@ TEST_CASE("generate_prime", "[runtime][primes]") {
 }
 
 TEST_CASE("generate_prime rejects unsupported bit widths",
-          "[runtime][primes][coverage]") {
+          "[runtime][primes]") {
     REQUIRE(pulp::runtime::generate_prime(0) == 0);
     REQUIRE(pulp::runtime::generate_prime(1) == 0);
     REQUIRE(pulp::runtime::generate_prime(63) == 0);
 }
 
 TEST_CASE("generate_prime covers smallest supported bit widths",
-          "[runtime][primes][coverage][large]") {
+          "[runtime][primes]") {
     auto two_bit = pulp::runtime::generate_prime(2);
     REQUIRE(two_bit >= 2);
     REQUIRE(two_bit <= 3);
@@ -396,7 +396,7 @@ TEST_CASE("sieve_primes", "[runtime][primes]") {
 }
 
 TEST_CASE("sieve_primes handles small limits",
-          "[runtime][primes][coverage]") {
+          "[runtime][primes]") {
     REQUIRE(pulp::runtime::sieve_primes(0).empty());
     REQUIRE(pulp::runtime::sieve_primes(1).empty());
     REQUIRE(pulp::runtime::sieve_primes(2) == std::vector<uint32_t>{2});
@@ -404,7 +404,7 @@ TEST_CASE("sieve_primes handles small limits",
 }
 
 TEST_CASE("sieve_primes handles composite square boundaries",
-          "[runtime][primes][coverage][large]") {
+          "[runtime][primes]") {
     auto primes = pulp::runtime::sieve_primes(49);
 
     REQUIRE(primes.size() == 15);
@@ -496,7 +496,7 @@ TEST_CASE("Expression rejects malformed calls and trailing tokens", "[runtime][e
 }
 
 TEST_CASE("Expression rejects malformed numeric and grouping syntax",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     REQUIRE_FALSE(pulp::runtime::evaluate("").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate(".").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("1e").has_value());
@@ -508,7 +508,7 @@ TEST_CASE("Expression rejects malformed numeric and grouping syntax",
 }
 
 TEST_CASE("Expression covers unary and nested function combinations",
-          "[runtime][expression][coverage]") {
+          "[runtime][expression]") {
     REQUIRE_THAT(*pulp::runtime::evaluate("-(-4)"), WithinAbs(4.0, 1e-10));
     REQUIRE_THAT(*pulp::runtime::evaluate("max(min(9, 4), abs(-3))"),
                  WithinAbs(4.0, 1e-10));

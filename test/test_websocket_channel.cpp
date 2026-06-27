@@ -250,7 +250,7 @@ TEST_CASE("WebSocket accept_key rejects empty input gracefully",
 }
 
 TEST_CASE("WebSocketChannel rejects null and closed streams before handshake",
-          "[websocket][handshake][coverage]") {
+          "[websocket][handshake]") {
     REQUIRE(WebSocketChannel::connect(nullptr, "127.0.0.1", "/") == nullptr);
     REQUIRE(WebSocketChannel::accept(nullptr) == nullptr);
 
@@ -478,7 +478,7 @@ TEST_CASE("WebSocketChannel delivers binary send as binary message",
 }
 
 TEST_CASE("WebSocketChannel assembles fragmented text frames",
-          "[websocket][frame-kind][coverage]") {
+          "[websocket][frame-kind]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47701);
@@ -541,7 +541,7 @@ TEST_CASE("WebSocketChannel assembles fragmented text frames",
 }
 
 TEST_CASE("WebSocketChannel reports unknown frame opcodes",
-          "[websocket][frame-kind][coverage]") {
+          "[websocket][frame-kind]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47801);
@@ -598,7 +598,7 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
 }
 
 TEST_CASE("WebSocketChannel replies to ping frames with pong",
-          "[websocket][frame-kind][coverage]") {
+          "[websocket][frame-kind]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47901);
@@ -647,7 +647,7 @@ TEST_CASE("WebSocketChannel replies to ping frames with pong",
 }
 
 TEST_CASE("WebSocketChannel echoes close frames and closes",
-          "[websocket][frame-kind][coverage]") {
+          "[websocket][frame-kind]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 48001);

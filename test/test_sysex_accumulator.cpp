@@ -469,7 +469,7 @@ TEST_CASE("SysexAccumulator: reserved 0xF9/0xFD pass through mid-sysex",
 }
 
 TEST_CASE("SysexAccumulator: every realtime byte passes through mid-sysex",
-          "[midi][sysex][coverage]") {
+          "[midi][sysex]") {
     SysexAccumulator acc;
     Emit e;
     auto cb = make_callback(e);
@@ -492,7 +492,7 @@ TEST_CASE("SysexAccumulator: every realtime byte passes through mid-sysex",
 }
 
 TEST_CASE("SysexAccumulator: range feed reclassifies aborting status once",
-          "[midi][sysex][coverage]") {
+          "[midi][sysex]") {
     SysexAccumulator acc;
     Emit e;
     auto cb = make_callback(e);

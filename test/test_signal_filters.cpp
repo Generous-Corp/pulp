@@ -160,7 +160,7 @@ TEST_CASE("SVF covers bandpass notch buffer and reset paths",
 }
 
 TEST_CASE("SVF ignores nonpositive buffer lengths",
-          "[signal][svf][coverage]") {
+          "[signal][svf]") {
     Svf filter;
     filter.set_sample_rate(48000.0f);
     filter.set_frequency(1000.0f);
@@ -224,7 +224,7 @@ TEST_CASE("LadderFilter resets buffer state and clamps resonance inputs",
 }
 
 TEST_CASE("LadderFilter reset restores fresh-filter impulse response",
-          "[signal][ladder][coverage]") {
+          "[signal][ladder]") {
     auto impulse_response = [] {
         LadderFilter filter;
         filter.set_sample_rate(48000.0f);
@@ -256,7 +256,7 @@ TEST_CASE("LadderFilter reset restores fresh-filter impulse response",
 }
 
 TEST_CASE("LadderFilter ignores nonpositive buffer lengths",
-          "[signal][ladder][coverage]") {
+          "[signal][ladder]") {
     LadderFilter ladder;
     ladder.set_sample_rate(44100.0f);
     ladder.set_frequency(1200.0f);
@@ -352,7 +352,7 @@ TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
 }
 
 TEST_CASE("LinkwitzRiley retuning after active history stays finite",
-          "[signal][lr][coverage]") {
+          "[signal][lr]") {
     LinkwitzRiley lr;
     lr.set_frequency(300.0f, 48000.0f);
     for (int i = 0; i < 32; ++i) {

@@ -45,7 +45,7 @@ TEST_CASE("Timer one-shot deactivates after firing and can be restarted",
 }
 
 TEST_CASE("Timer start is idempotent while active",
-          "[events][timer][coverage]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> calls{0};
     Timer timer(loop, 10ms, [&] { calls.fetch_add(1); }, false);
@@ -63,7 +63,7 @@ TEST_CASE("Timer start is idempotent while active",
 }
 
 TEST_CASE("Timer stop cancels queued one-shot callback",
-          "[events][timer][coverage]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> calls{0};
     Timer timer(loop, 25ms, [&] { calls.fetch_add(1); }, false);
@@ -78,7 +78,7 @@ TEST_CASE("Timer stop cancels queued one-shot callback",
 }
 
 TEST_CASE("Timer interval can be changed before restart",
-          "[events][timer][coverage]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> calls{0};
     Timer timer(loop, 100ms, [&] { calls.fetch_add(1); }, false);
@@ -93,7 +93,7 @@ TEST_CASE("Timer interval can be changed before restart",
 }
 
 TEST_CASE("Timer with empty callback still tracks one-shot lifecycle",
-          "[events][timer][coverage]") {
+          "[events][timer]") {
     EventLoop loop;
     Timer timer(loop, 5ms, {}, false);
 
@@ -103,7 +103,7 @@ TEST_CASE("Timer with empty callback still tracks one-shot lifecycle",
 }
 
 TEST_CASE("Timer restart invalidates stale queued dispatches",
-          "[events][timer][coverage][issue-687]") {
+          "[events][timer][issue-687]") {
     EventLoop loop;
     std::atomic<int> calls{0};
     Timer timer(loop, 75ms, [&] { calls.fetch_add(1); }, false);
@@ -127,7 +127,7 @@ TEST_CASE("Timer restart invalidates stale queued dispatches",
 }
 
 TEST_CASE("Repeating timer can stop itself from its callback",
-          "[events][timer][coverage]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> calls{0};
     Timer* self = nullptr;

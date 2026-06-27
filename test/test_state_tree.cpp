@@ -1011,7 +1011,7 @@ TEST_CASE("CachedProperty destruction removes its StateTree listener",
 }
 
 TEST_CASE("CachedProperty bool ignores mismatched refresh values",
-          "[state][cached][large]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     tree->set("enabled", true);
     CachedProperty<bool> enabled(tree, "enabled", false);
@@ -1028,7 +1028,7 @@ TEST_CASE("CachedProperty bool ignores mismatched refresh values",
 }
 
 TEST_CASE("CachedProperty int64 move tracks later tree updates",
-          "[state][cached][large]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     tree->set("voices", int64_t(8));
     CachedProperty<int64_t> voices(tree, "voices", 1);

@@ -92,7 +92,7 @@ TEST_CASE("ABCompare: clear + snapshot access", "[ui][ab-compare]") {
 }
 
 TEST_CASE("ABCompare: null store operations fail closed",
-          "[ui][ab-compare][coverage]") {
+          "[ui][ab-compare]") {
     ABCompare ab(nullptr);
 
     REQUIRE(ab.current() == ABCompare::Slot::A);
@@ -111,7 +111,7 @@ TEST_CASE("ABCompare: null store operations fail closed",
 }
 
 TEST_CASE("ABCompare: copy to same slot leaves snapshot unchanged",
-          "[ui][ab-compare][coverage]") {
+          "[ui][ab-compare]") {
     state::StateStore store;
     populate(store);
     ABCompare ab(&store);
@@ -132,7 +132,7 @@ TEST_CASE("ABCompare: copy to same slot leaves snapshot unchanged",
 }
 
 TEST_CASE("ABCompare: swapping empty and populated slots moves availability",
-          "[ui][ab-compare][coverage]") {
+          "[ui][ab-compare]") {
     state::StateStore store;
     populate(store);
     ABCompare ab(&store);

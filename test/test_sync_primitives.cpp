@@ -18,7 +18,7 @@ struct TransportState {
 };
 
 TEST_CASE("SeqLock default constructor publishes value-initialized snapshots",
-          "[runtime][seqlock][coverage]") {
+          "[runtime][seqlock]") {
     SeqLock<TransportState> lock;
 
     auto result = lock.read();
@@ -46,7 +46,7 @@ TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
 }
 
 TEST_CASE("SeqLock default value is readable before first write",
-          "[runtime][seqlock][coverage]") {
+          "[runtime][seqlock]") {
     SeqLock<TransportState> lock;
 
     auto result = lock.read();
@@ -58,7 +58,7 @@ TEST_CASE("SeqLock default value is readable before first write",
 }
 
 TEST_CASE("SeqLock explicit initial value is readable before first write",
-          "[runtime][seqlock][coverage]") {
+          "[runtime][seqlock]") {
     TransportState init;
     init.tempo = 96.0;
     init.beat_position = 12.25;
@@ -113,7 +113,7 @@ TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
 }
 
 TEST_CASE("SpscQueue failed push preserves queued item",
-          "[runtime][spsc][coverage]") {
+          "[runtime][spsc]") {
     SpscQueue<int, 1> q;
 
     REQUIRE(q.empty());
@@ -134,7 +134,7 @@ TEST_CASE("SpscQueue failed push preserves queued item",
 // ── TripleBuffer tests ────────────────────────────────────────────────────
 
 TEST_CASE("TripleBuffer default constructor exposes value-initialized front buffer",
-          "[runtime][triple_buffer][coverage]") {
+          "[runtime][triple_buffer]") {
     TripleBuffer<TransportState> buf;
 
     const auto& initial = buf.read();
@@ -155,7 +155,7 @@ TEST_CASE("TripleBuffer basic read/write", "[runtime][triple_buffer]") {
 }
 
 TEST_CASE("TripleBuffer default and initial reads are stable without dirty swaps",
-          "[runtime][triple_buffer][coverage]") {
+          "[runtime][triple_buffer]") {
     TripleBuffer<int> default_buf;
     REQUIRE(default_buf.read() == 0);
     REQUIRE(default_buf.read() == 0);
@@ -196,7 +196,7 @@ TEST_CASE("TripleBuffer reader gets latest value", "[runtime][triple_buffer]") {
 }
 
 TEST_CASE("TripleBuffer default and clean reads are stable",
-          "[runtime][triple_buffer][coverage]") {
+          "[runtime][triple_buffer]") {
     struct Snapshot {
         float left = 0.0f;
         float right = 0.0f;
@@ -270,7 +270,7 @@ TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
 // ── SpscQueue tests ───────────────────────────────────────────────────────
 
 TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
-          "[runtime][spsc_queue][coverage]") {
+          "[runtime][spsc_queue]") {
     SpscQueue<int, 4> queue;
 
     REQUIRE(queue.capacity() == 4);
@@ -293,7 +293,7 @@ TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
 }
 
 TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
-          "[runtime][spsc_queue][coverage]") {
+          "[runtime][spsc_queue]") {
     SpscQueue<int, 2> queue;
 
     REQUIRE(queue.try_push(1));
@@ -312,7 +312,7 @@ TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
 }
 
 TEST_CASE("SpscQueue full small buffer drains and reuses slots",
-          "[runtime][spsc][coverage]") {
+          "[runtime][spsc]") {
     SpscQueue<int, 2> queue;
 
     REQUIRE(queue.empty());
@@ -339,7 +339,7 @@ TEST_CASE("SpscQueue full small buffer drains and reuses slots",
 }
 
 TEST_CASE("SpscQueue supports rvalue item pushes",
-          "[runtime][spsc_queue][coverage]") {
+          "[runtime][spsc_queue]") {
     struct MoveTracked {
         int value = 0;
     };

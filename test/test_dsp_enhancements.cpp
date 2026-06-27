@@ -13,7 +13,7 @@ using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
 TEST_CASE("FastMath clamps saturation helper boundaries",
-          "[dsp][fast_math][coverage][large]") {
+          "[dsp][fast_math]") {
     REQUIRE_THAT(FastMath::clamp_unit(-2.0f), WithinAbs(-1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::clamp_unit(-0.25f), WithinAbs(-0.25f, 1e-6f));
     REQUIRE_THAT(FastMath::clamp_unit(0.25f), WithinAbs(0.25f, 1e-6f));
@@ -21,7 +21,7 @@ TEST_CASE("FastMath clamps saturation helper boundaries",
 }
 
 TEST_CASE("FastMath soft clip covers linear and saturated regions",
-          "[dsp][fast_math][coverage][large]") {
+          "[dsp][fast_math]") {
     REQUIRE_THAT(FastMath::soft_clip(-2.0f), WithinAbs(-1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::soft_clip(2.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::soft_clip(0.0f), WithinAbs(0.0f, 1e-6f));
@@ -30,7 +30,7 @@ TEST_CASE("FastMath soft clip covers linear and saturated regions",
 }
 
 TEST_CASE("FastMath dB conversion covers silent and unity cases",
-          "[dsp][fast_math][coverage][large]") {
+          "[dsp][fast_math]") {
     REQUIRE_THAT(FastMath::db_to_gain(0.0f), WithinAbs(1.0f, 1e-5f));
     REQUIRE(FastMath::gain_to_db(0.0f) == -200.0f);
     REQUIRE(FastMath::gain_to_db(-1.0f) == -200.0f);
@@ -38,7 +38,7 @@ TEST_CASE("FastMath dB conversion covers silent and unity cases",
 }
 
 TEST_CASE("FastMath tanh covers clamps and odd symmetry",
-          "[dsp][fast_math][coverage][large]") {
+          "[dsp][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::tanh(0.0f), WithinAbs(0.0f, 1e-6f));
@@ -49,7 +49,7 @@ TEST_CASE("FastMath tanh covers clamps and odd symmetry",
 }
 
 TEST_CASE("FastMath pow and reciprocal helpers cover scalar edges",
-          "[dsp][fast_math][coverage][large]") {
+          "[dsp][fast_math]") {
     REQUIRE_THAT(FastMath::pow(0.0f, 2.0f), WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(FastMath::pow(-2.0f, 3.0f), WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(FastMath::pow(4.0f, 0.5f), WithinAbs(2.0f, 0.02f));
@@ -165,7 +165,7 @@ TEST_CASE("DryWetMixer latency delays dry path and reset clears history", "[dsp]
 }
 
 TEST_CASE("DryWetMixer can enable latency after prepare and leaves unmatched wet channels",
-          "[dsp][dry_wet][codecov]") {
+          "[dsp][dry_wet]") {
     DryWetMixer mixer;
     mixer.prepare(2, 4);
     mixer.set_wet_latency(1);
@@ -187,7 +187,7 @@ TEST_CASE("DryWetMixer can enable latency after prepare and leaves unmatched wet
 }
 
 TEST_CASE("DryWetMixer retuning latency clears stale delay history",
-          "[dsp][dry_wet][codecov]") {
+          "[dsp][dry_wet]") {
     DryWetMixer mixer;
     mixer.set_mix(0.0f);
     mixer.set_wet_latency(2);
@@ -225,7 +225,7 @@ TEST_CASE("DryWetMixer retuning latency clears stale delay history",
 }
 
 TEST_CASE("DryWetMixer handles nonpositive and over-channel latency edges",
-          "[dsp][dry_wet][codecov]") {
+          "[dsp][dry_wet]") {
     DryWetMixer mixer;
     mixer.set_mix(0.0f);
     mixer.set_wet_latency(-8);
@@ -276,7 +276,7 @@ TEST_CASE("DryWetMixer handles nonpositive and over-channel latency edges",
 }
 
 TEST_CASE("DryWetMixer handles empty dry pushes and grows prepared dry storage",
-          "[dsp][dry_wet][codecov]") {
+          "[dsp][dry_wet]") {
     DryWetMixer mixer;
     mixer.set_mix(0.0f);
     mixer.prepare(1, 2);
@@ -406,7 +406,7 @@ TEST_CASE("ProcessorDuplicator bounds channels and exposes channel state",
 }
 
 TEST_CASE("ProcessorDuplicator treats nonpositive channel prepares as empty",
-          "[dsp][duplicator][coverage]") {
+          "[dsp][duplicator]") {
     ProcessorDuplicator<CountingGain> dup;
     dup.prepare(-2, 44100.0f);
 
@@ -430,7 +430,7 @@ TEST_CASE("ProcessorDuplicator treats nonpositive channel prepares as empty",
 }
 
 TEST_CASE("ProcessorDuplicator skips null channels without disturbing neighbors",
-          "[dsp][duplicator][coverage]") {
+          "[dsp][duplicator]") {
     ProcessorDuplicator<CountingGain> dup;
     dup.prepare(3, 44100.0f);
     dup.for_each([](CountingGain& g) { g.gain = 2.0f; });
@@ -454,7 +454,7 @@ TEST_CASE("ProcessorDuplicator skips null channels without disturbing neighbors"
 }
 
 TEST_CASE("ProcessorDuplicator ignores null and nonpositive single-channel work",
-          "[dsp][duplicator][coverage]") {
+          "[dsp][duplicator]") {
     ProcessorDuplicator<CountingGain> dup;
     dup.prepare(2, 48000.0f);
     dup[0].gain = 3.0f;
@@ -479,7 +479,7 @@ TEST_CASE("ProcessorDuplicator ignores null and nonpositive single-channel work"
 }
 
 TEST_CASE("ProcessorDuplicator reapplies channel layout and sample rate on prepare",
-          "[dsp][duplicator][coverage]") {
+          "[dsp][duplicator]") {
     ProcessorDuplicator<CountingGain> dup;
     dup.prepare(2, 44100.0f);
     dup[0].gain = 0.5f;
@@ -515,7 +515,7 @@ TEST_CASE("ProcessorDuplicator reapplies channel layout and sample rate on prepa
 }
 
 TEST_CASE("ProcessorDuplicator reset visits every prepared channel",
-          "[dsp][duplicator][coverage]") {
+          "[dsp][duplicator]") {
     ProcessorDuplicator<CountingGain> dup;
     dup.prepare(3, 48000.0f);
 
@@ -637,7 +637,7 @@ TEST_CASE("Matrix4 scale and rotations transform vectors",
 }
 
 TEST_CASE("Matrix affine helpers compose transforms and preserve row-major layout",
-          "[dsp][matrix][coverage]") {
+          "[dsp][matrix]") {
     auto translate = translation_matrix(2.0f, -3.0f, 4.0f);
     auto scale = scale_matrix(3.0f, 4.0f, 5.0f);
     auto composed = translate * scale;
@@ -662,7 +662,7 @@ TEST_CASE("Matrix affine helpers compose transforms and preserve row-major layou
 }
 
 TEST_CASE("Matrix arithmetic covers cancellation, determinant signs, and inequality",
-          "[dsp][matrix][coverage]") {
+          "[dsp][matrix]") {
     Matrix2 a;
     a(0, 0) = 2.0f;  a(0, 1) = -3.0f;
     a(1, 0) = 4.0f;  a(1, 1) = 5.0f;

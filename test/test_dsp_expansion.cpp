@@ -27,7 +27,7 @@ using Catch::Matchers::WithinRel;
 // ── Gain and simple mixing ───────────────────────────────────────────────
 
 TEST_CASE("Gain converts dB and processes scalar and buffers",
-          "[signal][gain][codecov]") {
+          "[signal][gain]") {
     REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(db_to_linear(6.0f), WithinRel(1.99526f, 1e-4f));
     REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0f, 1e-6f));
@@ -47,7 +47,7 @@ TEST_CASE("Gain converts dB and processes scalar and buffers",
 }
 
 TEST_CASE("SimpleMixer clamps mix and processes arrays",
-          "[signal][gain][mixer][codecov]") {
+          "[signal][gain][mixer]") {
     SimpleMixer mixer;
     mixer.set_mix(-1.0f);
     REQUIRE_THAT(mixer.mix(), WithinAbs(0.0f, 1e-6f));
@@ -70,7 +70,7 @@ TEST_CASE("SimpleMixer clamps mix and processes arrays",
 // ── WindowFunction ──────────────────────────────────────────────────────
 
 TEST_CASE("WindowFunction generates all supported window families",
-          "[signal][window][codecov]") {
+          "[signal][window]") {
     const auto rectangular = WindowFunction::generate(8, WindowFunction::Type::rectangular);
     REQUIRE(rectangular.size() == 8);
     for (float value : rectangular)
@@ -98,7 +98,7 @@ TEST_CASE("WindowFunction generates all supported window families",
 }
 
 TEST_CASE("WindowFunction applies bounded windows in place",
-          "[signal][window][codecov]") {
+          "[signal][window]") {
     float buffer[] = {1.0f, 2.0f, 3.0f, 4.0f};
     const std::vector<float> window = {1.0f, 0.5f, 0.25f};
 
@@ -113,7 +113,7 @@ TEST_CASE("WindowFunction applies bounded windows in place",
 // ── Oscillator ──────────────────────────────────────────────────────────
 
 TEST_CASE("Oscillator sine phase advances wraps and reset restores phase",
-          "[signal][oscillator][codecov]") {
+          "[signal][oscillator]") {
     Oscillator osc;
     osc.set_sample_rate(4.0f);
     osc.set_frequency(1.0f);
@@ -135,7 +135,7 @@ TEST_CASE("Oscillator sine phase advances wraps and reset restores phase",
 }
 
 TEST_CASE("Oscillator waveforms produce finite bounded startup samples",
-          "[signal][oscillator][codecov]") {
+          "[signal][oscillator]") {
     Oscillator osc;
     osc.set_sample_rate(16.0f);
     osc.set_frequency(1.0f);
@@ -157,7 +157,7 @@ TEST_CASE("Oscillator waveforms produce finite bounded startup samples",
 }
 
 TEST_CASE("Oscillator polyBLEP handles late-cycle discontinuities",
-          "[signal][oscillator][coverage]") {
+          "[signal][oscillator]") {
     Oscillator osc;
     osc.set_sample_rate(10.0f);
     osc.set_frequency(3.0f);
@@ -257,7 +257,7 @@ TEST_CASE("FirFilter empty coefficients pass samples through and reset safely",
 }
 
 TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
-          "[signal][fir][coverage]") {
+          "[signal][fir]") {
     FirFilter fir;
     fir.set_coefficients({0.5f, 0.5f});
     REQUIRE_THAT(fir.process(1.0f), WithinAbs(0.5f, 1e-6f));
@@ -269,7 +269,7 @@ TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
 }
 
 TEST_CASE("FirFilter highpass spectral inversion boosts center tap",
-          "[signal][fir][coverage]") {
+          "[signal][fir]") {
     auto lowpass = FirFilter::lowpass(5, 1000.0f, 48000.0f);
     auto highpass = FirFilter::highpass(5, 1000.0f, 48000.0f);
 
@@ -358,7 +358,7 @@ TEST_CASE("BallisticsFilter clamps time constants and processes buffers",
 }
 
 TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state",
-          "[signal][ballistics][coverage]") {
+          "[signal][ballistics]") {
     BallisticsFilter env;
     env.prepare(0.0f);
     env.set_attack_ms(10.0f);
@@ -372,7 +372,7 @@ TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state"
 }
 
 TEST_CASE("BallisticsFilter mode switch reports current envelope consistently",
-          "[signal][ballistics][coverage]") {
+          "[signal][ballistics]") {
     BallisticsFilter env;
     env.prepare(1000.0f);
     env.set_attack_ms(0.01f);
@@ -428,7 +428,7 @@ TEST_CASE("LogRampedValue skip advances correctly", "[signal][log_ramp]") {
 }
 
 TEST_CASE("SmoothedValue supports double ramps and terminal skips",
-          "[signal][smooth][coverage]") {
+          "[signal][smooth]") {
     SmoothedValue<double> value(2.0);
     value.set_ramp_time(0.004, 1000.0);
     value.set_target(10.0);
@@ -447,7 +447,7 @@ TEST_CASE("SmoothedValue supports double ramps and terminal skips",
 }
 
 TEST_CASE("SmoothedValue handles immediate ramps and inert skips",
-          "[signal][smooth][coverage]") {
+          "[signal][smooth]") {
     SmoothedValue<float> immediate(1.0f);
     immediate.set_ramp_time(0.0f, 48000.0f);
     immediate.set_target(4.0f);
@@ -488,7 +488,7 @@ TEST_CASE("LogRampedValue jumps for non-positive endpoints",
 }
 
 TEST_CASE("LogRampedValue ignores non-positive skips",
-          "[signal][log_ramp][coverage]") {
+          "[signal][log_ramp]") {
     LogRampedValue v(100.0f);
     v.set_ramp_time(0.01f, 1000.0f);
     v.set_target(200.0f);
@@ -503,7 +503,7 @@ TEST_CASE("LogRampedValue ignores non-positive skips",
 }
 
 TEST_CASE("LogRampedValue skip to exact ramp end snaps to target",
-          "[signal][log_ramp][coverage]") {
+          "[signal][log_ramp]") {
     LogRampedValue value(100.0f);
     value.set_ramp_time(0.004f, 1000.0f);
     value.set_target(1600.0f);
@@ -556,7 +556,7 @@ TEST_CASE("WaveShaper processes buffers in-place", "[signal][waveshaper][issue-6
 }
 
 TEST_CASE("WaveShaper invalid curve falls back to driven input",
-          "[signal][waveshaper][coverage]") {
+          "[signal][waveshaper]") {
     WaveShaper shaper;
     shaper.set_drive(1.5f);
     shaper.set_curve(static_cast<WaveShaper::Curve>(99));
@@ -638,7 +638,7 @@ TEST_CASE("ProcessorChain reset skips processors without reset methods",
 }
 
 TEST_CASE("ProcessorChain zero and negative length buffers are no-ops",
-          "[signal][chain][coverage]") {
+          "[signal][chain]") {
     ProcessorChain<ScaleBy2, AddOne> chain;
     float samples[] = {1.0f, 2.0f};
 
@@ -726,7 +726,7 @@ TEST_CASE("LookupTable indexed access clamps and zero-length buffers are no-ops"
 }
 
 TEST_CASE("LookupTable interpolates between adjacent entries",
-          "[signal][lookup][coverage]") {
+          "[signal][lookup]") {
     LookupTable table(3, 0.0f, 2.0f, [](float x) { return x * 10.0f; });
 
     REQUIRE(table.size() == 3);
@@ -736,7 +736,7 @@ TEST_CASE("LookupTable interpolates between adjacent entries",
 }
 
 TEST_CASE("LookupTable degenerate tables stay finite and indexable",
-          "[signal][lookup][coverage][large]") {
+          "[signal][lookup]") {
     LookupTable single(1, 4.0f, 9.0f, [](float x) { return x * 2.0f; });
     REQUIRE(single.size() == 1);
     REQUIRE_THAT(single.process(-100.0f), WithinAbs(8.0f, 1e-6f));
@@ -751,7 +751,7 @@ TEST_CASE("LookupTable degenerate tables stay finite and indexable",
 }
 
 TEST_CASE("LookupTable accepts reversed input ranges",
-          "[signal][lookup][coverage][large]") {
+          "[signal][lookup]") {
     LookupTable reversed(5, 1.0f, -1.0f, [](float x) { return x; });
 
     REQUIRE_THAT(reversed.process(-2.0f), WithinAbs(-1.0f, 1e-6f));
@@ -831,7 +831,7 @@ TEST_CASE("TptFilter cutoff clamping", "[signal][tpt]") {
 }
 
 TEST_CASE("TptFilter combined output resets to initial impulse response",
-          "[signal][tpt][coverage]") {
+          "[signal][tpt]") {
     TptFilter filter;
     filter.prepare(48000.0f);
     filter.set_cutoff(1200.0f);
@@ -850,7 +850,7 @@ TEST_CASE("TptFilter combined output resets to initial impulse response",
 // ── Visualization helpers ───────────────────────────────────────────────
 
 TEST_CASE("ColorMapper clamps values and switches color ramps",
-          "[signal][spectrogram][codecov]") {
+          "[signal][spectrogram]") {
     ColorMapper mapper(ColorRamp::grayscale);
 
     auto black = mapper.map(-1.0f);
@@ -880,7 +880,7 @@ TEST_CASE("ColorMapper clamps values and switches color ramps",
 }
 
 TEST_CASE("FrequencyAxis maps linear logarithmic and mel scales",
-          "[signal][spectrogram][codecov]") {
+          "[signal][spectrogram]") {
     FrequencyAxis axis;
     axis.configure(1024, 48000.0f, FrequencyScale::linear);
     REQUIRE(axis.num_bins() == 513);
@@ -905,7 +905,7 @@ TEST_CASE("FrequencyAxis maps linear logarithmic and mel scales",
 }
 
 TEST_CASE("Spectrogram helpers cover fallback ramps scales and zero-bin columns",
-          "[signal][spectrogram][coverage]") {
+          "[signal][spectrogram]") {
     ColorMapper mapper(static_cast<ColorRamp>(99));
     auto gray = mapper.map(0.5f);
     REQUIRE(gray.r == gray.g);
@@ -927,7 +927,7 @@ TEST_CASE("Spectrogram helpers cover fallback ramps scales and zero-bin columns"
 }
 
 TEST_CASE("SpectrogramBuffer scrolls columns and maps dB ranges",
-          "[signal][spectrogram][codecov]") {
+          "[signal][spectrogram]") {
     SpectrogramBuffer buffer;
     ColorMapper mapper(ColorRamp::grayscale);
     buffer.configure(3, 2);
@@ -990,7 +990,7 @@ TEST_CASE("SpectrogramBuffer clamps dimensions and tolerates missing magnitudes"
 }
 
 TEST_CASE("STFT emits frames converts dB and resets state",
-          "[signal][stft][codecov]") {
+          "[signal][stft]") {
     StftConfig config;
     config.fft_size = 256;
     config.hop_size = 64;
@@ -1026,7 +1026,7 @@ TEST_CASE("STFT emits frames converts dB and resets state",
 }
 
 TEST_CASE("AlignedBuffer resizes moves clears and copies bounded input",
-          "[signal][simd][codecov]") {
+          "[signal][simd]") {
     AlignedBuffer empty;
     REQUIRE(empty.empty());
     REQUIRE(empty.data() == nullptr);
@@ -1062,7 +1062,7 @@ TEST_CASE("AlignedBuffer resizes moves clears and copies bounded input",
 }
 
 TEST_CASE("AlignedBuffer partial copy preserves untouched suffix",
-          "[signal][simd][coverage]") {
+          "[signal][simd]") {
     AlignedBuffer buffer(4);
     float initial[] = {1.0f, 2.0f, 3.0f, 4.0f};
     buffer.copy_from(initial, 4);
@@ -1077,7 +1077,7 @@ TEST_CASE("AlignedBuffer partial copy preserves untouched suffix",
 }
 
 TEST_CASE("AlignedBuffer resize to same size preserves allocation contents",
-          "[signal][simd][coverage]") {
+          "[signal][simd]") {
     AlignedBuffer buffer(2);
     buffer[0] = 0.25f;
     buffer[1] = -0.5f;
@@ -1091,7 +1091,7 @@ TEST_CASE("AlignedBuffer resize to same size preserves allocation contents",
 }
 
 TEST_CASE("AlignedBuffer exposes const iteration and self move assignment",
-          "[signal][simd][coverage]") {
+          "[signal][simd]") {
     AlignedBuffer empty;
     empty.clear();
     REQUIRE(empty.empty());
@@ -1121,7 +1121,7 @@ TEST_CASE("AlignedBuffer exposes const iteration and self move assignment",
 }
 
 TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
-          "[signal][interp][codecov]") {
+          "[signal][interp]") {
     REQUIRE_THAT(Interpolator::linear(0.0f, 2.0f, 6.0f), WithinAbs(2.0f, 1e-6f));
     REQUIRE_THAT(Interpolator::linear(1.0f, 2.0f, 6.0f), WithinAbs(6.0f, 1e-6f));
     REQUIRE_THAT(Interpolator::linear(0.25f, 2.0f, 6.0f), WithinAbs(3.0f, 1e-6f));
@@ -1140,7 +1140,7 @@ TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
 }
 
 TEST_CASE("Special functions cover sinc and Lanczos boundaries",
-          "[signal][math][coverage]") {
+          "[signal][math]") {
     REQUIRE_THAT(sinc(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(sinc(1.0f), WithinAbs(0.0f, 1e-6f));
 
@@ -1151,7 +1151,7 @@ TEST_CASE("Special functions cover sinc and Lanczos boundaries",
 }
 
 TEST_CASE("Special functions convert gain and MIDI reference points",
-          "[signal][math][coverage]") {
+          "[signal][math]") {
     REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 1e-6f));
@@ -1162,7 +1162,7 @@ TEST_CASE("Special functions convert gain and MIDI reference points",
 }
 
 TEST_CASE("Special functions wrap standard gamma and error functions",
-          "[signal][math][coverage]") {
+          "[signal][math]") {
     REQUIRE_THAT(bessel_i0(0.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE(bessel_i0(2.0f) > 2.0f);
 

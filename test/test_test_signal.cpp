@@ -163,7 +163,7 @@ TEST_CASE("TestSignalSource: reset clears state", "[format][test_signal]") {
 }
 
 TEST_CASE("TestSignalSource: active flag follows config type",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     REQUIRE_FALSE(src.is_active());
 
@@ -178,7 +178,7 @@ TEST_CASE("TestSignalSource: active flag follows config type",
 }
 
 TEST_CASE("TestSignalSource: config returns the last audio-thread-applied config",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     auto initial = src.config();
     REQUIRE(initial.type == TestSignalType::none);
@@ -199,7 +199,7 @@ TEST_CASE("TestSignalSource: config returns the last audio-thread-applied config
 }
 
 TEST_CASE("TestSignalSource: deterministic sine samples at quarter-cycle boundaries",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_sample_rate(4.0);
     src.set_config({TestSignalType::sine, 1.0f, 0.75f});
@@ -215,7 +215,7 @@ TEST_CASE("TestSignalSource: deterministic sine samples at quarter-cycle boundar
 }
 
 TEST_CASE("TestSignalSource: amplitude-only config changes keep phase continuity",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_sample_rate(4.0);
     src.set_config({TestSignalType::sine, 1.0f, 1.0f});
@@ -234,7 +234,7 @@ TEST_CASE("TestSignalSource: amplitude-only config changes keep phase continuity
 }
 
 TEST_CASE("TestSignalSource: frequency changes reset sine phase",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_sample_rate(4.0);
     src.set_config({TestSignalType::sine, 1.0f, 1.0f});
@@ -253,7 +253,7 @@ TEST_CASE("TestSignalSource: frequency changes reset sine phase",
 }
 
 TEST_CASE("TestSignalSource: zero-amplitude sine stays active but silent",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_sample_rate(48000.0);
     src.set_config({TestSignalType::sine, 440.0f, 0.0f});
@@ -270,7 +270,7 @@ TEST_CASE("TestSignalSource: zero-amplitude sine stays active but silent",
 }
 
 TEST_CASE("TestSignalSource: zero-sized fills apply pending config without writing",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_sample_rate(4.0);
     src.set_config({TestSignalType::sine, 1.0f, 0.5f});
@@ -289,7 +289,7 @@ TEST_CASE("TestSignalSource: zero-sized fills apply pending config without writi
 }
 
 TEST_CASE("TestSignalSource: file mode without loaded data is silent and not playing",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     src.set_config({TestSignalType::file, 440.0f, 1.0f});
     REQUIRE(src.is_active());
@@ -309,7 +309,7 @@ TEST_CASE("TestSignalSource: file mode without loaded data is silent and not pla
 }
 
 TEST_CASE("TestSignalSource: loop flag toggles independently of loaded file state",
-          "[format][test_signal][coverage]") {
+          "[format][test_signal]") {
     TestSignalSource src;
     REQUIRE_FALSE(src.is_looping());
 
@@ -359,7 +359,7 @@ TEST_CASE("TestSignalSource: invalid file load and unload reset playback state",
 }
 
 TEST_CASE("TestSignalSource: loading a new file rewinds and stops existing playback",
-          "[format][test_signal][file][coverage]") {
+          "[format][test_signal][file]") {
     TestSignalSource src;
     src.set_config({TestSignalType::file, 440.0f, 1.0f});
 
@@ -391,7 +391,7 @@ TEST_CASE("TestSignalSource: loading a new file rewinds and stops existing playb
 }
 
 TEST_CASE("TestSignalSource: reset stops file playback and rewinds without unloading",
-          "[format][test_signal][file][coverage]") {
+          "[format][test_signal][file]") {
     TestSignalSource src;
     src.set_config({TestSignalType::file, 440.0f, 1.0f});
 

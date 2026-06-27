@@ -149,7 +149,7 @@ TEST_CASE("MpeConfig identifies lower and upper zone member boundaries",
 }
 
 TEST_CASE("MpeZone rejects disabled and non-standard manager layouts",
-          "[midi][mpe][codecov]") {
+          "[midi][mpe]") {
     MpeZone disabled_lower{0, 0};
     REQUIRE(disabled_lower.is_lower());
     REQUIRE_FALSE(disabled_lower.contains_channel(1));

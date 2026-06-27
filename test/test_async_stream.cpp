@@ -232,7 +232,7 @@ TEST_CASE("AsyncStream cancel drains pending writes with Closed", "[async_stream
 }
 
 TEST_CASE("AsyncStream write on pre-closed stream completes without queuing",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     backing->close();
 
@@ -325,7 +325,7 @@ TEST_CASE("AsyncStream zero-byte write dispatches completion without worker", "[
 }
 
 TEST_CASE("AsyncStream rejects null non-empty writes via callback",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
 
     AsyncStream::Options opts;
@@ -349,7 +349,7 @@ TEST_CASE("AsyncStream rejects null non-empty writes via callback",
 }
 
 TEST_CASE("AsyncStream start after stop refreshes cancellation state",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
 
@@ -381,7 +381,7 @@ TEST_CASE("AsyncStream start after stop refreshes cancellation state",
 }
 
 TEST_CASE("AsyncStream write on a closed backing stream completes without queueing",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
     raw->close();
@@ -409,7 +409,7 @@ TEST_CASE("AsyncStream write on a closed backing stream completes without queuei
 }
 
 TEST_CASE("AsyncStream write without a backing stream completes as closed",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     AsyncStream::Options opts;
     opts.auto_read = false;
     AsyncStream stream(nullptr, opts);
@@ -450,7 +450,7 @@ TEST_CASE("CancellationToken sharing and idempotent cancel", "[async_stream]") {
 }
 
 TEST_CASE("AsyncStream cancellation token mirrors stream cancellation",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     AsyncStream::Options opts;
     opts.auto_read = false;
@@ -505,7 +505,7 @@ TEST_CASE("AsyncStream executor routes callbacks off worker", "[async_stream]") 
 }
 
 TEST_CASE("AsyncStream repeated start and stop keep close callback single-shot",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
 
     AsyncStream::Options opts;
@@ -527,7 +527,7 @@ TEST_CASE("AsyncStream repeated start and stop keep close callback single-shot",
 }
 
 TEST_CASE("AsyncStream retries WouldBlock and partial writes before draining",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
     raw->set_write_chunk_limit(2);
@@ -574,7 +574,7 @@ TEST_CASE("AsyncStream retries WouldBlock and partial writes before draining",
 }
 
 TEST_CASE("AsyncStream reports partial write errors and stops writer",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
     raw->set_write_chunk_limit(2);
@@ -615,7 +615,7 @@ TEST_CASE("AsyncStream reports partial write errors and stops writer",
 }
 
 TEST_CASE("AsyncStream read loop backs off on zero-byte reads before data",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
     raw->set_read_zero_ok_count(3);
@@ -644,7 +644,7 @@ TEST_CASE("AsyncStream read loop backs off on zero-byte reads before data",
 }
 
 TEST_CASE("AsyncStream read errors fire on_error and close fires once on stop",
-          "[async_stream][coverage]") {
+          "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
     raw->set_read_io_error(true);

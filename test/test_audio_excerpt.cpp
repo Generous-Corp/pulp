@@ -264,7 +264,7 @@ TEST_CASE("AudioSubsectionReader handles empty and past-end ranges",
 }
 
 TEST_CASE("AudioSubsectionReader zero-length ranges retain source shape",
-          "[audio][subsection][coverage]") {
+          "[audio][subsection]") {
     AudioFileData audio;
     audio.sample_rate = 96000;
     audio.channels = {{0.0f, 0.5f}, {1.0f, 1.5f}};

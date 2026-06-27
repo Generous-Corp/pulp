@@ -112,7 +112,7 @@ TEST_CASE("XmlDocument invalid XML", "[runtime][xml]") {
 }
 
 TEST_CASE("XmlDocument parse failure marks invalid and later success clears error",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     XmlDocument doc;
     REQUIRE(doc.parse(R"(<root name="before"><child>old</child></root>)"));
     REQUIRE(doc.is_valid());
@@ -131,7 +131,7 @@ TEST_CASE("XmlDocument parse failure marks invalid and later success clears erro
 }
 
 TEST_CASE("XmlDocument load_file failure clears prior state and save_file reports bad paths",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     TemporaryFile tmp(".xml");
 
     XmlDocument doc;
@@ -151,7 +151,7 @@ TEST_CASE("XmlDocument load_file failure clears prior state and save_file report
 }
 
 TEST_CASE("XmlDocument empty document queries are inert",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     XmlDocument doc;
 
     REQUIRE_FALSE(doc.is_valid());
@@ -168,7 +168,7 @@ TEST_CASE("XmlDocument empty document queries are inert",
 }
 
 TEST_CASE("XmlDocument move construction and assignment preserve parsed state",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     XmlDocument original;
     REQUIRE(original.parse(R"(<root name="first"><child>value</child></root>)"));
 
@@ -206,7 +206,7 @@ TEST_CASE("xml_generate creates document", "[runtime][xml]") {
 }
 
 TEST_CASE("xml_generate handles empty and repeated elements",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     auto xml = xml_generate("metadata", {
         {"tag", "alpha"},
         {"tag", "beta"},
@@ -242,7 +242,7 @@ TEST_CASE("xml_generate escapes text content", "[runtime][xml]") {
 }
 
 TEST_CASE("xml_generate supports empty roots and escaped element names from callers",
-          "[runtime][xml][coverage]") {
+          "[runtime][xml]") {
     auto empty = xml_generate("empty", {});
     XmlDocument empty_doc;
     REQUIRE(empty_doc.parse(empty));
@@ -288,7 +288,7 @@ TEST_CASE("gzip empty input", "[runtime][zip]") {
 }
 
 TEST_CASE("gzip_compress writes a deterministic empty RFC 1952 member",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     auto compressed = gzip_compress("", 9);
     REQUIRE(compressed.has_value());
     REQUIRE(compressed->size() >= 18);
@@ -358,7 +358,7 @@ TEST_CASE("gzip binary data round-trip", "[runtime][zip]") {
 }
 
 TEST_CASE("gzip_decompress_string preserves embedded NUL bytes",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::vector<uint8_t> original = {
         'p', 'u', 'l', 'p', 0x00, 'b', 'i', 'n', 0x00, 0xff,
     };
@@ -372,7 +372,7 @@ TEST_CASE("gzip_decompress_string preserves embedded NUL bytes",
 }
 
 TEST_CASE("deflate compression levels round-trip edge settings",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string payload = "level check level check level check";
     for (int level : {0, 9}) {
         INFO("level: " << level);
@@ -387,7 +387,7 @@ TEST_CASE("deflate compression levels round-trip edge settings",
 }
 
 TEST_CASE("zip helpers reject malformed deflate and zlib input",
-          "[runtime][zip][coverage][large]") {
+          "[runtime][zip]") {
     const uint8_t malformed[] = {0xde, 0xad, 0xbe, 0xef};
     const std::vector<uint8_t> malformed_raw = {0xff, 0x00, 0x7a, 0x13, 0x42};
     REQUIRE_FALSE(deflate_decompress(malformed, sizeof(malformed)).has_value());
@@ -396,7 +396,7 @@ TEST_CASE("zip helpers reject malformed deflate and zlib input",
 }
 
 TEST_CASE("deflate empty payload round-trips through raw helpers",
-          "[runtime][zip][coverage][large]") {
+          "[runtime][zip]") {
     auto compressed = deflate_compress(nullptr, 0);
     REQUIRE(compressed.has_value());
 
@@ -406,7 +406,7 @@ TEST_CASE("deflate empty payload round-trips through raw helpers",
 }
 
 TEST_CASE("deflate_decompress rejects truncated raw streams",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string payload = "truncated raw deflate payload";
     auto compressed = deflate_compress(
         reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
@@ -418,7 +418,7 @@ TEST_CASE("deflate_decompress rejects truncated raw streams",
 }
 
 TEST_CASE("deflate_decompress rejects empty raw streams without growth",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     REQUIRE_FALSE(deflate_decompress(nullptr, 0).has_value());
 
     const uint8_t unused = 0;
@@ -426,7 +426,7 @@ TEST_CASE("deflate_decompress rejects empty raw streams without growth",
 }
 
 TEST_CASE("deflate_decompress grows for highly compressed raw streams",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string payload(96 * 1024, 'z');
     const auto* bytes = reinterpret_cast<const uint8_t*>(payload.data());
 
@@ -442,7 +442,7 @@ TEST_CASE("deflate_decompress grows for highly compressed raw streams",
 }
 
 TEST_CASE("gzip_decompress grows for highly compressed RFC 1952 members",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string payload(128 * 1024, 'g');
 
     auto compressed = gzip_compress(payload, 9);
@@ -464,7 +464,7 @@ TEST_CASE("gzip_decompress grows for highly compressed RFC 1952 members",
 }
 
 TEST_CASE("gzip_decompress rejects tiny gzip-looking prefixes",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const uint8_t unused = 0;
     REQUIRE_FALSE(gzip_decompress(&unused, 0).has_value());
 
@@ -481,7 +481,7 @@ TEST_CASE("gzip_decompress rejects tiny gzip-looking prefixes",
 }
 
 TEST_CASE("gzip_decompress rejects complete headers without trailers",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::vector<uint8_t> fixed_header_only = {
         0x1f, 0x8b, 0x08, 0x00,
         0x00, 0x00, 0x00, 0x00,
@@ -501,7 +501,7 @@ TEST_CASE("gzip_decompress rejects complete headers without trailers",
 }
 
 TEST_CASE("gzip_decompress rejects suffixes that start like partial members",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     auto compressed = gzip_compress(std::string{"suffix boundary"});
     REQUIRE(compressed.has_value());
     REQUIRE(compressed->size() > 18);
@@ -611,7 +611,7 @@ TEST_CASE("gzip_decompress accepts optional RFC 1952 header fields", "[runtime][
 }
 
 TEST_CASE("gzip_decompress accepts FTEXT flag and empty optional strings",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string original = "text flag payload";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -690,7 +690,7 @@ TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer ISIZE", "[run
 }
 
 TEST_CASE("gzip_decompress rejects truncated member trailers and empty members",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     const std::string original = "truncated gzip trailer payload";
     auto compressed = gzip_compress(original);
     REQUIRE(compressed.has_value());
@@ -758,7 +758,7 @@ TEST_CASE("gzip_decompress rejects trailing garbage after the last member",
 }
 
 TEST_CASE("gzip_decompress rejects an invalid concatenated member header",
-          "[runtime][zip][coverage]") {
+          "[runtime][zip]") {
     auto first = gzip_compress(std::string{"first"});
     REQUIRE(first.has_value());
 

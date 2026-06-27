@@ -262,13 +262,13 @@ TEST_CASE("BigInteger large numbers", "[crypto][bigint]") {
 }
 
 TEST_CASE("BigInteger invalid decimal and hex parse as zero",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     REQUIRE(BigInteger::from_string("not-a-number").is_zero());
     REQUIRE(BigInteger::from_hex("not-hex").is_zero());
     REQUIRE(BigInteger::from_string("").is_zero());
 }
 
-TEST_CASE("BigInteger copy move hex and bit-count helpers", "[crypto][bigint][coverage][issue-656]") {
+TEST_CASE("BigInteger copy move hex and bit-count helpers", "[crypto][bigint][issue-656]") {
     auto value = BigInteger::from_hex("0100");
     REQUIRE(value.to_string() == "256");
     REQUIRE(value.to_hex() == "0100");
@@ -290,7 +290,7 @@ TEST_CASE("BigInteger copy move hex and bit-count helpers", "[crypto][bigint][co
 }
 
 TEST_CASE("BigInteger hex bit count and copy assignment",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     auto value = BigInteger::from_hex("0100");
     REQUIRE(value.to_hex() == "0100");
     REQUIRE(value.bit_count() == 9);
@@ -302,7 +302,7 @@ TEST_CASE("BigInteger hex bit count and copy assignment",
 }
 
 TEST_CASE("BigInteger move construction and move assignment leave values usable",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     BigInteger source(1234);
     BigInteger moved(std::move(source));
     REQUIRE(moved.to_string() == "1234");
@@ -315,7 +315,7 @@ TEST_CASE("BigInteger move construction and move assignment leave values usable"
 }
 
 TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     BigInteger value(144);
     auto& same = value;
 
@@ -332,7 +332,7 @@ TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
 }
 
 TEST_CASE("BigInteger parses case-insensitive hex and decimal leading zeroes",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     auto hex = BigInteger::from_hex("00ff");
     REQUIRE(hex.to_string() == "255");
     REQUIRE(hex.to_hex() == "FF");
@@ -343,7 +343,7 @@ TEST_CASE("BigInteger parses case-insensitive hex and decimal leading zeroes",
 }
 
 TEST_CASE("BigInteger uint64 constructor preserves unsigned high values",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     BigInteger max_value(std::numeric_limits<std::uint64_t>::max());
 
     REQUIRE(max_value.to_string() == "18446744073709551615");
@@ -353,7 +353,7 @@ TEST_CASE("BigInteger uint64 constructor preserves unsigned high values",
 }
 
 TEST_CASE("BigInteger ordering covers equal and greater comparisons",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     BigInteger low(99);
     BigInteger same_low(99);
     BigInteger high(100);
@@ -366,7 +366,7 @@ TEST_CASE("BigInteger ordering covers equal and greater comparisons",
 }
 
 TEST_CASE("BigInteger comparison covers equal and greater-than paths",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     BigInteger low(255);
     auto same = BigInteger::from_hex("FF");
     BigInteger high(256);
@@ -380,7 +380,7 @@ TEST_CASE("BigInteger comparison covers equal and greater-than paths",
 }
 
 TEST_CASE("BigInteger preserves negative decimal values through arithmetic",
-          "[crypto][bigint][coverage]") {
+          "[crypto][bigint]") {
     auto negative = BigInteger::from_string("-42");
     auto positive = BigInteger(50);
 
@@ -407,7 +407,7 @@ TEST_CASE("LicenseValidator rejects undecodable payload", "[crypto][license]") {
 }
 
 TEST_CASE("LicenseValidator rejects impossible base64 payload lengths",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     REQUIRE(validator.validate("A.sig") == LicenseStatus::InvalidFormat);
     REQUIRE_FALSE(validator.validate_and_parse("A.sig"));
@@ -426,7 +426,7 @@ TEST_CASE("LicenseValidator parse payload", "[crypto][license]") {
 }
 
 TEST_CASE("LicenseValidator invalid public key keeps valid payload unsigned",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     validator.set_public_key("not a pem public key");
 
@@ -450,7 +450,7 @@ TEST_CASE("LicenseValidator validate_and_parse extracts info", "[crypto][license
 }
 
 TEST_CASE("LicenseValidator validate_and_parse includes optional machine and expiry fields",
-          "[crypto][license][coverage][issue-656]") {
+          "[crypto][license][issue-656]") {
     LicenseValidator validator;
 
     std::string payload = "{\"product_id\":\"PulpSuite\",\"email\":\"user@example.com\","
@@ -492,7 +492,7 @@ TEST_CASE("LicenseValidator validate_and_parse rejects malformed numeric timesta
 }
 
 TEST_CASE("LicenseValidator parse_payload handles optional fields and bad integers",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
 
     std::string payload =
@@ -535,7 +535,7 @@ TEST_CASE("LicenseValidator file not found", "[crypto][license]") {
 }
 
 TEST_CASE("LicenseValidator empty license file is invalid format",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     TemporaryFile tmp(".license");
 
     LicenseValidator validator;
@@ -558,7 +558,7 @@ TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license
 }
 
 TEST_CASE("LicenseValidator validate_file trims repeated CRLF endings",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
     std::string key = base64_encode(payload) + "." + base64_encode("signature") + "\r\n\n";
@@ -596,7 +596,7 @@ TEST_CASE("LicenseValidator validate rejects empty payload section",
 }
 
 TEST_CASE("LicenseValidator validate rejects an empty signature section",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpSynth\"}";
 
@@ -604,14 +604,14 @@ TEST_CASE("LicenseValidator validate rejects an empty signature section",
 }
 
 TEST_CASE("LicenseValidator validate rejects malformed signature encoding",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
     REQUIRE(validator.validate(base64_encode(payload) + ".###") == LicenseStatus::InvalidSignature);
 }
 
 TEST_CASE("LicenseValidator validate rejects decoded payload missing product id",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"email\":\"user@example.com\",\"issued\":1700000000}";
     REQUIRE(validator.validate(base64_encode(payload) + "." + base64_encode("sig")) ==
@@ -620,7 +620,7 @@ TEST_CASE("LicenseValidator validate rejects decoded payload missing product id"
 }
 
 TEST_CASE("LicenseValidator validate_and_parse accepts minimal product payload",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     auto info = validator.validate_and_parse(base64_encode("{\"product_id\":\"PulpMini\"}") + ".sig");
     REQUIRE(info.has_value());
@@ -631,7 +631,7 @@ TEST_CASE("LicenseValidator validate_and_parse accepts minimal product payload",
 }
 
 TEST_CASE("LicenseValidator validate_and_parse ignores an empty signature section",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     auto info = validator.validate_and_parse(base64_encode("{\"product_id\":\"PulpParseOnly\"}") + ".");
 
@@ -640,7 +640,7 @@ TEST_CASE("LicenseValidator validate_and_parse ignores an empty signature sectio
 }
 
 TEST_CASE("LicenseValidator validate_and_parse keeps first dotted payload split",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpDot\"}";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig.with.dots");
@@ -650,7 +650,7 @@ TEST_CASE("LicenseValidator validate_and_parse keeps first dotted payload split"
 }
 
 TEST_CASE("LicenseValidator validate_and_parse rejects partial optional integers",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpMini\",\"issued\":123junk,\"expiry\":not-a-number}";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
@@ -658,7 +658,7 @@ TEST_CASE("LicenseValidator validate_and_parse rejects partial optional integers
 }
 
 TEST_CASE("LicenseValidator validate_and_parse accepts whitespace after optional integers",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpMini\",\"issued\":123 \t,\"expiry\":456 }";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
@@ -674,7 +674,7 @@ TEST_CASE("LicenseValidator validate_and_parse accepts whitespace after optional
 }
 
 TEST_CASE("LicenseValidator validate_and_parse accepts whitespace before optional integers",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpMini\",\"issued\": \n\t123,\"expiry\": 456}";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
@@ -688,7 +688,7 @@ TEST_CASE("LicenseValidator validate_and_parse accepts whitespace before optiona
 }
 
 TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\"}";
     std::string key = base64_encode(payload) + "." + base64_encode("sig") + "\n\n";
@@ -704,7 +704,7 @@ TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
 }
 
 TEST_CASE("LicenseValidator validate_file preserves leading whitespace",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\"}";
     std::string key = " " + base64_encode(payload) + "." + base64_encode("sig") + "\n";
@@ -720,7 +720,7 @@ TEST_CASE("LicenseValidator validate_file preserves leading whitespace",
 }
 
 TEST_CASE("LicenseValidator machine check accepts copied machine id",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseValidator validator;
     LicenseInfo info;
     info.machine_id = std::string(machine_id());
@@ -728,7 +728,7 @@ TEST_CASE("LicenseValidator machine check accepts copied machine id",
 }
 
 TEST_CASE("LicenseGenerator emits nullopt for empty private key with complete info",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpSynth";
     info.user_email = "user@example.com";
@@ -742,7 +742,7 @@ TEST_CASE("LicenseGenerator emits nullopt for empty private key with complete in
 }
 
 TEST_CASE("LicenseGenerator signs complete licenses that validate on this machine",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpSynth";
     info.user_email = "user@example.com";
@@ -781,7 +781,7 @@ TEST_CASE("LicenseGenerator signs complete licenses that validate on this machin
 }
 
 TEST_CASE("LicenseValidator reports signed expiry and machine mismatch statuses",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseGenerator generator;
     generator.set_private_key(kTestPrivateKey);
 
@@ -807,7 +807,7 @@ TEST_CASE("LicenseValidator reports signed expiry and machine mismatch statuses"
 }
 
 TEST_CASE("LicenseGenerator signs minimal licenses without optional fields",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpMiniSigned";
     info.issued_timestamp = 1700000000;
@@ -831,7 +831,7 @@ TEST_CASE("LicenseGenerator signs minimal licenses without optional fields",
 }
 
 TEST_CASE("LicenseValidator rejects tampered signed payloads",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpTamper";
     info.issued_timestamp = 1700000000;
@@ -861,7 +861,7 @@ TEST_CASE("LicenseValidator rejects tampered signed payloads",
 }
 
 TEST_CASE("LicenseValidator validate_file accepts signed keys with trailing CRLF",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpFileSigned";
     info.issued_timestamp = 1700000000;
@@ -884,14 +884,14 @@ TEST_CASE("LicenseValidator validate_file accepts signed keys with trailing CRLF
 }
 
 TEST_CASE("OnlineActivation treats empty server URL as failed request",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     REQUIRE_FALSE(OnlineActivation::activate("", "serial", "product"));
     REQUIRE_FALSE(OnlineActivation::deactivate("", "license"));
     REQUIRE(OnlineActivation::check_status("", "license") == LicenseStatus::NotFound);
 }
 
 TEST_CASE("OnlineActivation activate returns loopback license response",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     auto exchange = serve_loopback_http_response("license-key");
 
     auto license = OnlineActivation::activate(exchange.base_url, "serial-123", "PulpSynth");
@@ -905,7 +905,7 @@ TEST_CASE("OnlineActivation activate returns loopback license response",
 }
 
 TEST_CASE("OnlineActivation deactivate accepts successful loopback response",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     auto exchange = serve_loopback_http_response(R"({"ok":true})");
 
     REQUIRE(OnlineActivation::deactivate(exchange.base_url, "license-key"));
@@ -916,7 +916,7 @@ TEST_CASE("OnlineActivation deactivate accepts successful loopback response",
 }
 
 TEST_CASE("OnlineActivation check_status maps loopback response bodies",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     {
         auto exchange = serve_loopback_http_response(R"({"status":"valid"})");
         REQUIRE(OnlineActivation::check_status(exchange.base_url, "valid-key") == LicenseStatus::Valid);
@@ -941,7 +941,7 @@ TEST_CASE("OnlineActivation check_status maps loopback response bodies",
 }
 
 TEST_CASE("OnlineActivation treats non-2xx loopback responses as activation failures",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     {
         auto exchange = serve_loopback_http_status(403, R"({"error":"denied"})");
         REQUIRE_FALSE(OnlineActivation::activate(exchange.base_url, "serial", "product"));
@@ -977,14 +977,14 @@ TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]")
     REQUIRE_FALSE(generator.generate(info).has_value());
 }
 
-TEST_CASE("OnlineActivation rejects malformed server URLs without network", "[crypto][license][coverage][issue-656]") {
+TEST_CASE("OnlineActivation rejects malformed server URLs without network", "[crypto][license][issue-656]") {
     REQUIRE_FALSE(OnlineActivation::activate("not-a-url", "serial", "product").has_value());
     REQUIRE_FALSE(OnlineActivation::deactivate("not-a-url", "license"));
     REQUIRE(OnlineActivation::check_status("not-a-url", "license") == LicenseStatus::NotFound);
 }
 
 TEST_CASE("OnlineActivation handles successful loopback activation flows",
-          "[crypto][license][coverage]") {
+          "[crypto][license]") {
     httplib::Server server;
     server.Post("/activate", [](const httplib::Request&, httplib::Response& response) {
         response.set_content("license-key", "text/plain");
