@@ -193,11 +193,10 @@ TEST_CASE("View: border", "[view][w3c]") {
 }
 
 TEST_CASE("View: overflow default is visible (CSS default, pulp #972)", "[view][w3c][issue-972]") {
-    // pulp #972 — Pulp previously defaulted overflow to `hidden`, which
-    // clipped absolutely-positioned children (popovers, dropdowns) to
-    // their parent's content bounds and made them invisible. CSS default
-    // is `overflow: visible`. Plugins that intentionally want clipping
-    // must call set_overflow(Overflow::hidden) explicitly.
+    // pulp #972 — Pulp previously defaulted overflow to `hidden`, which clipped
+    // absolutely-positioned children (popovers, dropdowns) to their parent's
+    // content bounds and made them invisible. CSS default is `overflow: visible`.
+    // Plugins that intentionally want clipping must call set_overflow(Overflow::hidden) explicitly.
     View v;
     REQUIRE(v.overflow() == View::Overflow::visible);
 }
@@ -484,7 +483,7 @@ TEST_CASE("Layout: max-width 0% clamps a growing child to zero (issue-2704)",
 
 TEST_CASE("Grid: parse_template 'none' is empty and never throws (issue-2704)",
           "[layout][grid][issue-2704]") {
-    // `none` is the CSS initial value for grid-template-* — std::stof("none")
+    // `none` is the CSS initial value for grid-template-*; std::stof("none")
     // used to throw out of WidgetBridge::load_script. It must yield no tracks.
     REQUIRE_NOTHROW(GridStyle::parse_template("none"));
     REQUIRE(GridStyle::parse_template("none").empty());
@@ -545,7 +544,7 @@ TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
     child->flex().dim_width = Dimension{0.0f, DimensionUnit::percent};  // width: 0%
     root.add_child(std::move(child));
     root.layout_children();
-    // 0% must win over the intrinsic 100 (previously the >0 guard dropped 0%).
+    // 0% must win over the intrinsic 100; the pre-fix >0 guard dropped 0%.
     REQUIRE(root.child_at(0)->bounds().width == 0.0f);
 }
 

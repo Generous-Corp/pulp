@@ -43,7 +43,7 @@ TEST_CASE("ComboBox: click opens, click item selects", "[combo]") {
     open_click.position = {70, 14}; // center of combo header
     open_click.is_down = true;
     combo.on_mouse_event(open_click);
-    // Should be open now (internal state)
+    // Internal state should be open.
 
     // Click on second item (y = 30 + 24 = ~54)
     MouseEvent select_click;
@@ -160,7 +160,7 @@ TEST_CASE("ComboBox: keyboard navigation moves the row highlight while open",
     REQUIRE_FALSE(combo.is_open());
 }
 
-// ── Regression: dropdown overlay click routing ───────────────────────────
+// ── Dropdown overlay click routing ───────────────────────────────────────
 //
 // The ComboBox dropdown is a paint-only overlay (queued via
 // View::overlay_queue() inside paint()). It has no view backing in the
@@ -377,8 +377,8 @@ TEST_CASE("ComboBox: close_active_popup is focus-independent [issue-68]",
 
 
 TEST_CASE("ComboBox: closed-stepper arrow keys skip separators (no separator commit)", "[combo]") {
-    // Regression: when closed, Up/Down must step OVER "---" separator rows rather
-    // than committing a separator index (which would fire on_change with an empty
+    // When closed, Up/Down must step OVER "---" separator rows rather than
+    // committing a separator index (which would fire on_change with an empty
     // selection). Items: 0=A, 1="---", 2=B.
     ComboBox combo;
     combo.set_items({"A", "---", "B"});

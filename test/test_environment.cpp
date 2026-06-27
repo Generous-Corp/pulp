@@ -515,11 +515,9 @@ TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
         [&](const EnvironmentState&, EnvironmentChange) { ++b_calls; });
 
     // Subscribe a listener that tears down `b`'s subscription while
-    // the publish is iterating the copied listener list. Before the
-    // #403 fix, `b`'s callback still fired once because publish held
-    // a copy that didn't re-check registration. After the fix, the
-    // atomic `active` flag is flipped before erase and the second
-    // invocation is skipped.
+    // publish is iterating the copied listener list. Before #403, `b`
+    // fired once because publish held a copy that didn't re-check
+    // registration; the atomic `active` flag is now flipped before erase.
     Environment::Token killer = Environment::instance().subscribe(
         [&](const EnvironmentState&, EnvironmentChange) { b.reset(); });
 
@@ -532,7 +530,7 @@ TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
     // clears it — so b_calls should be 1 for this first publish.
     REQUIRE(b_calls == 1);
 
-    // Second publish — `b` is now unsubscribed. `a` still fires,
+    // Second publish — `b` is unsubscribed. `a` still fires,
     // `b` must not fire again (the bug would have it fire once more
     // if the listener list were copied without the active flag).
     Environment::inject_for_test(make_state(ColorScheme::light));

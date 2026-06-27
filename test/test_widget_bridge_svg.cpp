@@ -650,8 +650,8 @@ TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
     auto* child = bridge.widget("child");
     REQUIRE(child != nullptr);
 
-    // FlexStyle.dim_width / dim_height now carry the percent unit, so
-    // yoga_layout.cpp will emit YGNodeStyleSetWidthPercent/HeightPercent.
+    // FlexStyle.dim_width / dim_height carry the percent unit, so
+    // yoga_layout.cpp emits YGNodeStyleSetWidthPercent/HeightPercent.
     const auto& f = child->flex();
     REQUIRE(f.dim_width.unit == DimensionUnit::percent);
     REQUIRE_THAT(f.dim_width.value, WithinAbs(100.0f, 0.001f));
@@ -666,9 +666,9 @@ TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
 }
 
 // pulp #1423 — px values still work after the percent-aware refactor.
-// Regression guard: the old code path stored only `preferred_width`;
-// the new path also stores into `dim_width.unit = px`. Layout must keep
-// using the px size when no percent was specified.
+// Regression guard: the old code path stored only `preferred_width`; px
+// values now also store `dim_width.unit = px`. Layout must keep using the
+// px size when no percent was specified.
 TEST_CASE("CSS width/height px paths unchanged by percent support",
           "[view][bridge][css][issue-1423]") {
     ScriptEngine engine;
@@ -724,8 +724,8 @@ TEST_CASE("CSS top/right/bottom/left percent strings propagate to Yoga",
     auto* child = bridge.widget("child");
     REQUIRE(child != nullptr);
 
-    // View::top_unit_ / etc. now carry the percent unit, so
-    // yoga_layout.cpp will emit YGNodeStyleSetPositionPercent.
+    // View::top_unit_ / etc. carry the percent unit, so
+    // yoga_layout.cpp emits YGNodeStyleSetPositionPercent.
     REQUIRE(child->has_top());
     REQUIRE(child->top_unit() == DimensionUnit::percent);
     REQUIRE_THAT(child->top(), WithinAbs(50.0f, 0.001f));
