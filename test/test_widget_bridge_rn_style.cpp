@@ -35,7 +35,7 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1026: React Native style-prop bridge primitives ──────────────────
+// ── React Native style-prop bridge primitives ─────────────────────────────
 
 TEST_CASE("WidgetBridge setShadow lowers RN-shaped args onto setBoxShadow",
           "[view][bridge][issue-1026]") {
@@ -238,7 +238,7 @@ TEST_CASE("WidgetBridge per-side setBorder*Color / Width route to BorderSide",
     REQUIRE(w->border_bottom_color().r8() == 0xff);
 }
 
-// pulp #1027 / #1166 — Interleaved single-attribute border setters MUST
+// Interleaved single-attribute border setters MUST
 // preserve siblings. The `el.style.borderRadius='8px';
 // el.style.borderColor='red'` sequence used to silently drop radius
 // back to 0, because both lowered to setBorder(id, color, width, radius)
@@ -331,7 +331,7 @@ TEST_CASE("WidgetBridge interleaved setBorderColor/Width/Radius preserves siblin
     }
 }
 
-// pulp #1027 — JS shim regression test: el.style.borderColor must NOT
+// JS shim regression test: el.style.borderColor must NOT
 // clobber el.style.borderRadius. This walks the actual web-compat-style-decl.js
 // path (CSSStyleDeclaration._applyProperty) so we'd catch any future
 // regression where the shim re-routes to setBorder(id, c, w, r).
@@ -381,7 +381,7 @@ TEST_CASE("CSS shim: setting borderRadius then borderColor preserves radius",
     REQUIRE_THAT(w->corner_radius(), WithinAbs(12.0f, 1e-5f)); // preserved
 }
 
-// pulp #1027 / #1166 — CSS per-side flat props must NOT clobber the
+// CSS per-side flat props must NOT clobber the
 // unrelated attribute. The JS shim used to lower `borderTopWidth: '2px'`
 // to `setBorderSide(id, 'top', 2, "")` (resetting the side's color) and
 // `borderTopColor: 'red'` to `setBorderSide(id, 'top', 0, 'red')`
@@ -431,7 +431,7 @@ TEST_CASE("CSS shim: per-side flat props preserve unset attribute",
     REQUIRE(w->border_bottom_color().b8() == 0xee);
 }
 
-// pulp #1027 — `border:` CSS shorthand must preserve a previously-set
+// `border:` CSS shorthand must preserve a previously-set
 // border-radius (CSS L3 spec: shorthand sets only width/style/color).
 TEST_CASE("CSS shim: 'border:' shorthand preserves border-radius",
           "[view][bridge][web-compat][issue-1027][issue-1166]") {
@@ -459,7 +459,7 @@ TEST_CASE("CSS shim: 'border:' shorthand preserves border-radius",
     REQUIRE_THAT(w->corner_radius(), WithinAbs(10.0f, 1e-5f));
 }
 
-// pulp #1148 — generalized overlay-click routing. The bridge must expose
+// Generalized overlay-click routing. The bridge must expose
 // claimOverlay(id) / releaseOverlay(id) so @pulp/react's `<View overlay>`
 // JSX prop can opt a widget in as the active click-eligible overlay.
 TEST_CASE("WidgetBridge claimOverlay / releaseOverlay drive View::active_overlay_",
@@ -496,7 +496,7 @@ TEST_CASE("WidgetBridge claimOverlay / releaseOverlay drive View::active_overlay
     pulp::view::View::active_overlay_ = nullptr;
 }
 
-// pulp #1361 — claimOverlay must install on_overlay_dismissed so React
+// claimOverlay must install on_overlay_dismissed so React
 // `<View overlay onDismissed>` consumers can flip setOpen(false) when the
 // framework dismisses the overlay via ESC or outside-click.
 TEST_CASE("WidgetBridge claimOverlay installs dismiss callback that fires "
@@ -552,7 +552,7 @@ TEST_CASE("WidgetBridge claimOverlay installs dismiss callback that fires "
     pulp::view::View::active_overlay_ = nullptr;
 }
 
-// pulp #1420 — `display` CSS values translate to native bridge calls.
+// `display` CSS values translate to native bridge calls.
 // Five display values are observed in imports: flex, block, inline-block,
 // none, inline-flex. inline-block and inline-flex were previously dropped;
 // they now collapse to inline-block ≡ block and inline-flex ≡ flex
