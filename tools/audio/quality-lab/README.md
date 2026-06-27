@@ -68,6 +68,25 @@ in later phases.
 | `quality_lab/pipeline.py` | pure stages: generate → level-match → align → detect → report |
 | `quality_lab/cli.py` | parse + dispatch only |
 
+## Validate the REAL Pulp stretch engine (strongest credibility)
+
+The lab can run the detectors against the **actual product engine** (`stretchcli`
+driving `pulp::signal::OfflineStretch`), not just the in-tree reference phase vocoder:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
+cmake --build build --target stretchcli
+python -m quality_lab.cli engine --ratio 2.0 --character clean      # real engine output
+python -m quality_lab.cli engine --ratio 2.0 --character varispeed  # different character
+```
+
+This renders a source, stretches it with the real engine, and runs the detectors
+against a transient-faithful reference. It catches the engine's documented artifacts —
+`clean` smears attacks (transient_sharpness fires 1.0); `varispeed` additionally dulls
+brightness (spectral_centroid fires), matching the skill's "slowing down warms + dulls"
+note. The engine adapter is opt-in: `stretchcli` is discovered at the build path or via
+`PULP_STRETCHCLI`, and skips cleanly when absent (public CI doesn't build it).
+
 ## Credibility — why this isn't circular
 
 A detector validated only against a degradation written by the same author is

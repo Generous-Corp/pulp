@@ -56,6 +56,26 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_engine(args: argparse.Namespace) -> int:
+    report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
+    if report["verdict"] == "SKIPPED":
+        print(f"[quality-lab engine] SKIPPED — {report['reason']} "
+              f"(build: cmake --build build --target stretchcli)")
+        return 0
+    if report["verdict"] == "ERROR":
+        print(f"[quality-lab engine] ERROR — {report['engine'].get('reason')}")
+        return 1
+    print(f"[quality-lab engine] REAL OfflineStretch ratio={args.ratio} "
+          f"character={args.character} verdict={report['verdict']}")
+    for d in report["detectors"]:
+        flag = "FIRE" if d["fired"] else "ok"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(json.dumps(report, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -77,6 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--smear-ms", type=float, default=8.0, dest="smear_ms")
     rn.add_argument("--latency-ms", type=float, default=5.0, dest="latency_ms")
     rn.set_defaults(func=_cmd_run)
+
+    re = sub.add_parser("engine", help="validate the REAL Pulp stretch engine (stretchcli)")
+    re.add_argument("--ratio", type=float, default=2.0)
+    re.add_argument("--character", default="clean",
+                    choices=["clean", "varispeed", "phase_vocoder", "granular"])
+    re.add_argument("--out", default="", help="write report.json to this path")
+    re.set_defaults(func=_cmd_engine)
 
     args = p.parse_args(argv)
     return args.func(args)
