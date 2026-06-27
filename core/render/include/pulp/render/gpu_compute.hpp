@@ -61,6 +61,30 @@ public:
     virtual bool batch_magnitude(const float* complex_frames, float* magnitude_frames,
                                  uint32_t bins_per_frame, uint32_t num_frames) = 0;
 
+    // ── FFT ──────────────────────────────────────────────────────────────
+    //
+    // GPU radix-2 FFT (Stockham auto-sort, no bit-reversal pass). Operates on
+    // interleaved complex data [re0, im0, re1, im1, ...] of length `n` complex
+    // values (2*n floats in and out). `n` must be a power of two and small
+    // enough that 2*n*sizeof(float) fits the device storage-buffer limit.
+    // Not for the audio callback — these build/cache a per-`n` plan and block
+    // on readback. Validated against a direct DFT and pulp::signal::Fft
+    // (magnitude parity + round-trip identity); see test/test_gpu_compute.cpp.
+    //
+    // Thread-safety: like the rest of GpuCompute, a single instance is NOT
+    // safe for concurrent use — call all methods from one thread (e.g. the
+    // GPU worker). The plan/pipeline caches are unsynchronized by design.
+
+    /// Forward DFT: X[k] = sum_n x[n] exp(-2*pi*i*k*n/N). Unnormalized.
+    /// Returns false if `n` is not a power of two, exceeds the buffer limit,
+    /// either pointer is null, or dispatch fails.
+    virtual bool fft_forward(const float* complex_in, float* complex_out, uint32_t n) = 0;
+
+    /// Inverse DFT, normalized by 1/N (so ifft(fft(x)) == x within tolerance).
+    /// Returns false if `n` is not a power of two, exceeds the buffer limit,
+    /// either pointer is null, or dispatch fails.
+    virtual bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) = 0;
+
     // ── Device sharing verification ──────────────────────────────────────
 
     struct DeviceSharingReport {

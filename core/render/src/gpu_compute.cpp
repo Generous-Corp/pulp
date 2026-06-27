@@ -12,10 +12,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef PULP_BENCHMARK
@@ -72,6 +75,62 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kFftStockhamShader = R"wgsl(
+// One radix-2 Stockham auto-sort FFT pass over interleaved complex data.
+// Result is naturally ordered (no separate bit-reversal pass). log2(N) passes
+// ping-pong between two buffers; `ns` doubles each pass (1, 2, 4, ... N/2).
+// sign = -1 forward, +1 inverse (the host applies the 1/N inverse scale).
+// Reference: Lloyd/Boyd/Govindaraju, "Fast Computation of General Fourier
+// Transforms on GPUs" (Stockham radix-2 formulation).
+
+struct FftParams {
+    n    : u32,
+    ns   : u32,
+    sign : f32,
+    pad  : f32,
+};
+
+@group(0) @binding(0) var<storage, read>       src    : array<f32>;
+@group(0) @binding(1) var<storage, read_write> dst    : array<f32>;
+@group(0) @binding(2) var<uniform>             params : FftParams;
+
+const PI : f32 = 3.1415926535897932;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let j = gid.x;
+    let half = params.n / 2u;
+    if (j >= half) {
+        return;
+    }
+
+    let v0_re = src[2u * j];
+    let v0_im = src[2u * j + 1u];
+    let k = j + half;
+    let v1_re = src[2u * k];
+    let v1_im = src[2u * k + 1u];
+
+    let angle = params.sign * 2.0 * PI * f32(j % params.ns) / f32(params.ns * 2u);
+    let tw_re = cos(angle);
+    let tw_im = sin(angle);
+
+    // u1 = twiddle * v1
+    let u1_re = tw_re * v1_re - tw_im * v1_im;
+    let u1_im = tw_re * v1_im + tw_im * v1_re;
+
+    let y0_re = v0_re + u1_re;
+    let y0_im = v0_im + u1_im;
+    let y1_re = v0_re - u1_re;
+    let y1_im = v0_im - u1_im;
+
+    let idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
+    dst[2u * idxD]                   = y0_re;
+    dst[2u * idxD + 1u]              = y0_im;
+    dst[2u * (idxD + params.ns)]     = y1_re;
+    dst[2u * (idxD + params.ns) + 1u] = y1_im;
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 static double now_us() {
@@ -89,8 +148,11 @@ public:
         // Release pool buffers before the device is torn down — their
         // destructors call into Dawn internals and need a live device.
         pool_.reset();
+        fft_plans_.clear();
+        pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
+        fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
         instance_ = nullptr;
@@ -310,6 +372,16 @@ public:
         // Treat as one large magnitude computation — the shader is element-wise
         uint32_t total_bins = bins_per_frame * num_frames;
         return compute_magnitude(complex_frames, magnitude_frames, total_bins);
+    }
+
+    // ── FFT ──────────────────────────────────────────────────────────────
+
+    bool fft_forward(const float* complex_in, float* complex_out, uint32_t n) override {
+        return fft_run(complex_in, complex_out, n, /*sign=*/-1.0f, /*normalize=*/false);
+    }
+
+    bool fft_inverse(const float* complex_in, float* complex_out, uint32_t n) override {
+        return fft_run(complex_in, complex_out, n, /*sign=*/+1.0f, /*normalize=*/true);
     }
 
     // ── Device sharing verification ─────────────────────────────────────
@@ -610,6 +682,30 @@ private:
 
     wgpu::ComputePipeline magnitude_pipeline_;
     wgpu::ComputePipeline complex_mul_pipeline_;
+    wgpu::ComputePipeline fft_pipeline_;
+
+    // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
+    // canvas RuntimeEffectCache (cache-by-source), but per-instance, not a
+    // global singleton: compute pipelines are device-specific and cannot be
+    // shared across devices. Keyed by the full source (not just a hash) so
+    // there is no collision risk. create_pipeline() routes through this so
+    // repeated kernels compile once per device.
+    std::unordered_map<std::string, wgpu::ComputePipeline> pipeline_cache_;
+
+    // Persistent per-N FFT plan: two ping-pong complex buffers (2*N floats),
+    // a uniform for the per-pass params, both bind-group orientations, and a
+    // readback buffer. Built lazily on first use of a given N and reused.
+    struct FftPlan {
+        uint32_t n = 0;
+        uint32_t log2n = 0;
+        wgpu::Buffer buf_a;       // Storage | CopyDst | CopySrc
+        wgpu::Buffer buf_b;       // Storage | CopyDst | CopySrc
+        wgpu::Buffer uniform;     // Uniform | CopyDst (FftParams)
+        wgpu::Buffer readback;    // CopyDst | MapRead
+        wgpu::BindGroup bg_ab;    // src=a, dst=b
+        wgpu::BindGroup bg_ba;    // src=b, dst=a
+    };
+    std::unordered_map<uint32_t, FftPlan> fft_plans_;
 
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
@@ -628,6 +724,9 @@ private:
         complex_mul_pipeline_ = create_pipeline("complex_multiply", kComplexMultiplyShader);
         if (!complex_mul_pipeline_) return false;
 
+        fft_pipeline_ = create_pipeline("fft_stockham", kFftStockhamShader);
+        if (!fft_pipeline_) return false;
+
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
         // hot path. Default cap of 8 covers typical GPU dispatch depth (3-4 in
@@ -642,6 +741,11 @@ private:
     }
 
     wgpu::ComputePipeline create_pipeline(const char* label, const char* wgsl) {
+        std::string key(wgsl);
+        if (auto it = pipeline_cache_.find(key); it != pipeline_cache_.end()) {
+            return it->second;
+        }
+
         wgpu::ShaderSourceWGSL wgsl_source{};
         wgsl_source.code = wgsl;
 
@@ -665,8 +769,90 @@ private:
         auto pipeline = device_.CreateComputePipeline(&pipe_desc);
         if (!pipeline) {
             runtime::log_error("GpuCompute: failed to create pipeline '{}'", label);
+            return pipeline;
         }
+        pipeline_cache_.emplace(key, pipeline);
         return pipeline;
+    }
+
+    static bool is_power_of_two(uint32_t n) {
+        return n != 0u && (n & (n - 1u)) == 0u;
+    }
+
+    // Build (or fetch) the persistent ping-pong plan for a given FFT size.
+    // Returns nullptr if any GPU resource fails to allocate.
+    FftPlan* get_or_create_fft_plan(uint32_t n) {
+        if (auto it = fft_plans_.find(n); it != fft_plans_.end()) {
+            return &it->second;
+        }
+
+        FftPlan plan;
+        plan.n = n;
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+
+        const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const auto buf_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                             | wgpu::BufferUsage::CopySrc;
+        plan.buf_a = create_storage_buffer(bytes, buf_usage);
+        plan.buf_b = create_storage_buffer(bytes, buf_usage);
+
+        wgpu::BufferDescriptor udesc{};
+        udesc.size = 16;  // FftParams: u32 n, u32 ns, f32 sign, f32 pad
+        udesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        plan.uniform = device_.CreateBuffer(&udesc);
+
+        plan.readback = create_readback_buffer(bytes);
+        if (!plan.buf_a || !plan.buf_b || !plan.uniform || !plan.readback) return nullptr;
+
+        plan.bg_ab = create_bind_group(fft_pipeline_, {plan.buf_a, plan.buf_b, plan.uniform});
+        plan.bg_ba = create_bind_group(fft_pipeline_, {plan.buf_b, plan.buf_a, plan.uniform});
+        if (!plan.bg_ab || !plan.bg_ba) return nullptr;
+
+        auto inserted = fft_plans_.emplace(n, std::move(plan));
+        return &inserted.first->second;
+    }
+
+    // Multi-pass Stockham FFT. sign = -1 forward, +1 inverse; `normalize`
+    // applies the 1/N inverse scale on readback. Not real-time safe.
+    bool fft_run(const float* complex_in, float* complex_out, uint32_t n,
+                 float sign, bool normalize) {
+        // Upper bound keeps 2*n*sizeof(float) well within uint32_t and within
+        // typical WebGPU storage-buffer limits (here: 32 MiB per complex
+        // buffer). Larger transforms are rejected rather than silently
+        // overflowing the byte count and under-allocating GPU buffers.
+        static constexpr uint32_t kMaxFftN = 1u << 22;
+        if (!initialized_ || !complex_in || !complex_out) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+
+        FftPlan* plan = get_or_create_fft_plan(n);
+        if (!plan) return false;
+
+        const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
+        queue_.WriteBuffer(plan->buf_a, 0, complex_in, bytes);
+
+        const uint32_t half = n / 2u;
+        const uint32_t workgroups = (half + 255u) / 256u;
+        bool src_is_a = true;
+        for (uint32_t s = 0; s < plan->log2n; ++s) {
+            struct FftParams { uint32_t n; uint32_t ns; float sign; float pad; };
+            FftParams params{n, 1u << s, sign, 0.0f};
+            queue_.WriteBuffer(plan->uniform, 0, &params, sizeof(params));
+            dispatch(fft_pipeline_, src_is_a ? plan->bg_ab : plan->bg_ba, workgroups);
+            src_is_a = !src_is_a;
+        }
+
+        // After log2(N) ping-pong passes the result lives in buf_b for odd
+        // log2(N), buf_a for even (we always start reading buf_a).
+        wgpu::Buffer& result = (plan->log2n & 1u) ? plan->buf_b : plan->buf_a;
+        copy_buffer(result, plan->readback, bytes);
+        if (!read_back(plan->readback, complex_out, bytes)) return false;
+
+        if (normalize) {
+            const float inv = 1.0f / static_cast<float>(n);
+            for (uint32_t i = 0; i < n * 2u; ++i) complex_out[i] *= inv;
+        }
+        return true;
     }
 
     wgpu::Buffer create_storage_buffer(uint32_t size, wgpu::BufferUsage usage) {

@@ -152,6 +152,137 @@ TEST_CASE("GpuCompute matches CPU FFT magnitude", "[render][gpu][compute]") {
     }
 }
 
+// ── FFT Tests ─────────────────────────────────────────────────────────────
+
+TEST_CASE("GpuCompute FFT forward magnitude matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 1024;
+    Fft fft(static_cast<int>(N));
+
+    std::vector<std::complex<float>> sig(N);
+    for (uint32_t i = 0; i < N; ++i) {
+        const float t = static_cast<float>(i);
+        const float v = std::sin(2.0f * 3.14159265f * 5.0f * t / N)
+                      + 0.5f * std::cos(2.0f * 3.14159265f * 17.0f * t / N);
+        sig[i] = std::complex<float>(v, 0.0f);
+    }
+
+    std::vector<std::complex<float>> cpu = sig;  // in-place forward
+    fft.forward(cpu.data());
+
+    std::vector<float> in(N * 2), out(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        in[i * 2]     = sig[i].real();
+        in[i * 2 + 1] = sig[i].imag();
+    }
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+
+    // Compare magnitudes (independent of the library's sign convention).
+    for (uint32_t i = 0; i < N; ++i) {
+        const float gpu_mag = std::sqrt(out[i * 2] * out[i * 2]
+                                      + out[i * 2 + 1] * out[i * 2 + 1]);
+        const float cpu_mag = std::abs(cpu[i]);
+        REQUIRE(std::abs(gpu_mag - cpu_mag) < 1e-2f * (1.0f + cpu_mag));
+    }
+}
+
+TEST_CASE("GpuCompute FFT impulse and DC", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 256;
+    std::vector<float> in(N * 2, 0.0f), out(N * 2, 0.0f);
+
+    // Unit impulse at n=0 → flat spectrum: every bin = (1, 0).
+    in[0] = 1.0f;
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+    for (uint32_t i = 0; i < N; ++i) {
+        REQUIRE(std::abs(out[i * 2]     - 1.0f) < 1e-3f);
+        REQUIRE(std::abs(out[i * 2 + 1] - 0.0f) < 1e-3f);
+    }
+
+    // DC (all ones) → X[0] = (N, 0), all other bins ≈ 0.
+    std::fill(in.begin(), in.end(), 0.0f);
+    for (uint32_t i = 0; i < N; ++i) in[i * 2] = 1.0f;
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+    REQUIRE(std::abs(out[0] - static_cast<float>(N)) < 1e-2f);
+    REQUIRE(std::abs(out[1]) < 1e-2f);
+    for (uint32_t i = 1; i < N; ++i) {
+        REQUIRE(std::abs(out[i * 2])     < 1e-2f);
+        REQUIRE(std::abs(out[i * 2 + 1]) < 1e-2f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT round-trip identity", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 512;
+    std::vector<float> in(N * 2), fwd(N * 2), back(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        in[i * 2]     = std::sin(2.0f * 3.14159265f * 7.0f * i / N);
+        in[i * 2 + 1] = 0.3f * std::cos(2.0f * 3.14159265f * 3.0f * i / N);
+    }
+    REQUIRE(compute->fft_forward(in.data(), fwd.data(), N));
+    REQUIRE(compute->fft_inverse(fwd.data(), back.data(), N));
+    for (uint32_t i = 0; i < N * 2; ++i) {
+        REQUIRE(std::abs(back[i] - in[i]) < 2e-3f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT matches direct DFT (complex, phase-exact)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr uint32_t N = 8;
+
+    // Complex input with nonzero real AND imaginary parts so the test would
+    // catch a conjugation, a wrong bin permutation, or a sign flip — things
+    // the magnitude/impulse/round-trip tests cannot see.
+    std::vector<std::complex<float>> x(N);
+    for (uint32_t n = 0; n < N; ++n) {
+        x[n] = std::complex<float>(0.5f + 0.1f * n, -0.2f + 0.3f * n);
+    }
+
+    // Direct DFT with the documented forward convention:
+    //   X[k] = sum_n x[n] * exp(-2*pi*i*k*n/N)
+    std::vector<std::complex<float>> ref(N);
+    for (uint32_t k = 0; k < N; ++k) {
+        std::complex<double> acc(0.0, 0.0);
+        for (uint32_t n = 0; n < N; ++n) {
+            const double ang = -2.0 * kPi * static_cast<double>(k * n) / N;
+            acc += std::complex<double>(x[n].real(), x[n].imag())
+                 * std::complex<double>(std::cos(ang), std::sin(ang));
+        }
+        ref[k] = std::complex<float>(static_cast<float>(acc.real()),
+                                     static_cast<float>(acc.imag()));
+    }
+
+    std::vector<float> in(N * 2), out(N * 2);
+    for (uint32_t n = 0; n < N; ++n) {
+        in[n * 2]     = x[n].real();
+        in[n * 2 + 1] = x[n].imag();
+    }
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+
+    for (uint32_t k = 0; k < N; ++k) {
+        REQUIRE(std::abs(out[k * 2]     - ref[k].real()) < 1e-3f);
+        REQUIRE(std::abs(out[k * 2 + 1] - ref[k].imag()) < 1e-3f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+    std::vector<float> in(200, 0.0f), out(200, 0.0f);
+    REQUIRE_FALSE(compute->fft_forward(in.data(), out.data(), 100));
+    REQUIRE_FALSE(compute->fft_inverse(in.data(), out.data(), 100));
+}
+
 // ── Device Sharing Tests ────────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]") {
