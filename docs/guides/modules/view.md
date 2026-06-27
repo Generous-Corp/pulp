@@ -109,11 +109,18 @@ engine.evaluate(R"(
 
 ### Hot-Reload
 
-The HotReloader watches JS files and re-evaluates them when they change:
+`ScriptedUiSession` owns the usual JS UI reload path: pass
+`enable_hot_reload = true`, call `poll()` from the host idle tick, and it will
+rebuild the widget bridge while preserving widget values. The lower-level
+`HotReloader` only watches files and delivers changed JS to a callback:
 
 ```cpp
-HotReloader reloader(engine, "ui/");
-// Edit ui/main.js → changes appear instantly
+HotReloader reloader("ui/main.js", [&](const std::string& code) {
+    // Probe or rebuild the widget tree with the new code, then repaint.
+});
+
+// From the UI thread / host idle tick:
+reloader.poll_reload();
 ```
 
 ## Audio Bridge
