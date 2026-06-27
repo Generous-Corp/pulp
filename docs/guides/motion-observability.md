@@ -43,13 +43,15 @@ regardless of which surface launched the trace.
   inspector-wire quick start. From any Pulp source tree:
   `pulp build && PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview`.
   Dedicated `pulp motion *` subcommands cover every Motion.* method
-  end-to-end (pulp [#2153](https://github.com/danielraffel/pulp/issues/2153)):
+  end-to-end:
   `record` / `stop` / `snapshot` / `list-traces` / `load-fixture` /
   `scrub` / `play` / `pause` / `cost {enable|disable}`. Quick example
   — kick off a background record alongside the host:
   ```bash
   PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
   pulp motion record --view Card --out card-fade.jsonl
+  # → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
+  #   in the app or test when you need an on-disk JSONL artifact.
   # → trace started — trace_id=1
   pulp motion stop --trace-id 1
   ```
@@ -58,7 +60,7 @@ regardless of which surface launched the trace.
   screenshots, evaluate) and a first-class `pulp_motion_*` wrapper set covering
   every Motion.* inspector method (start_trace / stop_trace / snapshot /
   list_traces / load_fixture / scrub_to / play / pause / enable_cost /
-  disable_cost — pulp [#2153](https://github.com/danielraffel/pulp/issues/2153)).
+  disable_cost).
   Agents on MCP can call these directly without driving the JS bridge through
   `pulp_inspect_evaluate` or shelling out to `nc localhost 9147`. Example
   tools/call payload for the equivalent of the inspector-wire start_trace
@@ -132,7 +134,7 @@ env var.
 
 | Command | Forwards to | Common use |
 |---|---|---|
-| `pulp motion record [--view NAME] [--out FIXTURE.jsonl] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Kick off a trace from a terminal. Default probe is a window-space presentation geometry on a node id matching `--view`. Multiple `--metrics` accepted; each is `kind:name:node_id[:p1,p2,...][:space][:source]` short-form or `'{...}'` raw JSON. |
+| `pulp motion record [--view NAME] [--out FIXTURE.jsonl] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Kick off a trace from a terminal. Default probe is a window-space presentation geometry on a node id matching `--view`. Multiple `--metrics` accepted; each is `kind:name:node_id[:p1,p2,...][:space][:source]` short-form or `'{...}'` raw JSON. `--out` names the intended fixture path and prints sink guidance; it does not write JSONL itself. |
 | `pulp motion stop [--trace-id N]` | `Motion.stopTrace` | Release the trace returned by `record`. |
 | `pulp motion snapshot` | `Motion.snapshot` | One-shot view of `tracing_enabled`, `firehose`, `active_traces`, `inspector_traces`, `emitted_events`, `cost_enabled`, `cost_samples_emitted`. |
 | `pulp motion list-traces` | `Motion.listTraces` | Enumerate inspector-owned trace IDs. |
@@ -150,10 +152,12 @@ pretty-printed line plus the raw JSON for human readers.
 # Background the host + record from a terminal.
 PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
 pulp motion record --view Card --fps 60 --out card-fade.jsonl
+# →   note: --out is a fixture-path hint; use make_fixture_sink(path)
+#       in the app or test to create the on-disk JSONL.
 # → trace started — trace_id=1
 # →   stop with: pulp motion stop --trace-id 1
 
-# Replay a captured fixture in the scrubber.
+# Replay an existing captured fixture in the scrubber.
 pulp motion load-fixture test/motion/goldens/card-open.motion.jsonl
 pulp motion scrub 30
 pulp motion play
