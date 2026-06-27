@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05070"></a>
+## [0.507.0] - 2026-06-26
+
+- feat(signal): onset-boundary soft-start (restore the attack at sample 0) ([#4986](https://github.com/danielraffel/pulp/pull/4986))
+- feat(sampler): LOOP toggle engages/disengages currently-held notes ([#4975](https://github.com/danielraffel/pulp/pull/4975))
+- refactor(host): extract the legacy serial walk into a reference-runner TU ([#4961](https://github.com/danielraffel/pulp/pull/4961))
+
 <a id="v05060"></a>
 ## [0.506.0] - 2026-06-26
 
@@ -5301,6 +5308,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.507.0]: https://github.com/danielraffel/pulp/releases/tag/v0.507.0
 [0.506.0]: https://github.com/danielraffel/pulp/releases/tag/v0.506.0
 [0.505.0]: https://github.com/danielraffel/pulp/releases/tag/v0.505.0
 [0.504.0]: https://github.com/danielraffel/pulp/releases/tag/v0.504.0
