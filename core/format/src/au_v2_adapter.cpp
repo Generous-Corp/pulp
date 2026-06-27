@@ -350,6 +350,14 @@ OSStatus PulpAUEffect::Initialize()
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    // Pre-size the per-channel pointer vectors so the render-time resize() never
+    // grows capacity (and thus never allocates) in steady state. The render
+    // block resizes to the host-supplied buffer count, which is at most the
+    // configured channel count in AU's non-interleaved float model; reserving to
+    // it up front turns the first render / reconfig resize into a no-op realloc.
+    input_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+    output_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
     return noErr;
@@ -499,11 +507,12 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // and host params flow via store_ as before. Set it anyway so a Processor
     // always sees a non-null queue. Only the process call is wrapped in
     // ScopedNoAlloc. The MIDI drain above no longer allocates (the buffers are
-    // bridge-reserved members reset with clear()/clear_sysex(), and SysEx is
-    // copied into the pre-reserved payload pool). The remaining preamble can
-    // still allocate on the FIRST render or a channel-count change — the
-    // input_ptrs_/output_ptrs_ resize() — but is a no-op realloc in steady
-    // state; that one-time path is intentionally outside the no-alloc scope.
+    // member buffers reset with clear()/clear_sysex(), and SysEx is copied into
+    // the pre-reserved payload pool). The input_ptrs_/output_ptrs_ resize() in
+    // the preamble is a no-op realloc in steady state — Initialize() reserves
+    // both vectors to the channel count — so the only path that could still
+    // allocate is a host that grows the buffer count beyond the configured
+    // channels, which the AU non-interleaved float model does not do.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
     std::array<ProcessBusBufferView<const float>, 1> input_buses{{

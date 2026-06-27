@@ -198,6 +198,24 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 // whichever thread set the store, so set + check always pair on one thread.
 static thread_local bool g_au_v3_host_writing = false;
 
+// RAII guard for g_au_v3_host_writing. SAVES and RESTORES the previous value
+// (rather than unconditionally clearing it) so an early return, an ObjC
+// exception, or a nested guarded write can't leave the flag stuck. The flag is
+// thread_local and the StateStore listener it guards is registered
+// ListenerThread::Audio — i.e. it runs SYNCHRONOUSLY on the same thread that
+// wrote the store (see the listener-registration comment near
+// add_listener(..., ListenerThread::Audio) below). So a save/restore pair
+// always brackets exactly the synchronous notify it is meant to suppress.
+struct ScopedAuV3HostWriting {
+    bool previous_;
+    ScopedAuV3HostWriting() noexcept : previous_(g_au_v3_host_writing) {
+        g_au_v3_host_writing = true;
+    }
+    ~ScopedAuV3HostWriting() noexcept { g_au_v3_host_writing = previous_; }
+    ScopedAuV3HostWriting(const ScopedAuV3HostWriting&) = delete;
+    ScopedAuV3HostWriting& operator=(const ScopedAuV3HostWriting&) = delete;
+};
+
 } // namespace pulp::format::au
 
 // ── AUAudioUnit subclass ───────────────────────────────────────────────────
@@ -454,11 +472,13 @@ static thread_local bool g_au_v3_host_writing = false;
         // dispatch lambda allocation on a possibly-audio thread.
         //
         // Guard the inline UI→host listener (below): this is the host's (or our
-        // own -setValue:) write, so it must NOT be echoed back to the host.
-        pulp::format::au::g_au_v3_host_writing = true;
+        // own -setValue:) write, so it must NOT be echoed back to the host. The
+        // RAII guard save/restores the thread_local flag so a nested write or an
+        // early return can't leave it stuck (the listener it suppresses runs
+        // synchronously on this thread — ListenerThread::Audio, below).
+        pulp::format::au::ScopedAuV3HostWriting host_writing;
         strongSelf->_bridge.store.set_value_rt(
             static_cast<pulp::state::ParamID>(param.address), value);
-        pulp::format::au::g_au_v3_host_writing = false;
     };
 
     tree.implementorValueProvider = ^AUValue(AUParameter *param) {
@@ -496,8 +516,10 @@ static thread_local bool g_au_v3_host_writing = false;
     // Audio (inline) listener so it runs synchronously on whichever thread set
     // the store: a UI edit fires it on the main thread (where -setValue: is
     // valid), and a host write fires it with g_au_v3_host_writing set so it is
-    // suppressed. The render thread never writes the store outside the guarded
-    // implementorValueObserver, so -setValue: is never called from audio.
+    // suppressed. Every render-thread store write is bracketed by the RAII guard
+    // (both implementorValueObserver and the render block's
+    // AURenderEventParameter handler), so this listener early-returns there and
+    // -setValue: is never called from audio.
     _automationListener = _bridge.store.add_listener(
         [weakSelf](pulp::state::ParamID id, float value) {
             if (pulp::format::au::g_au_v3_host_writing) return;
@@ -506,12 +528,14 @@ static thread_local bool g_au_v3_host_writing = false;
             AUParameter* p =
                 [s->_parameterTree parameterWithAddress:static_cast<AUParameterAddress>(id)];
             if (!p) return;
-            pulp::format::au::g_au_v3_host_writing = true;
+            // Suppress re-entry through implementorValueObserver while -setValue:
+            // pushes back to the host. RAII so an ObjC exception out of
+            // -setValue: restores the flag rather than leaving it stuck.
+            pulp::format::au::ScopedAuV3HostWriting host_writing;
             [p setValue:value
               originator:s->_automationToken
                atHostTime:0
                 eventType:AUParameterAutomationEventTypeValue];
-            pulp::format::au::g_au_v3_host_writing = false;
         },
         pulp::state::ListenerThread::Audio);
 
@@ -794,141 +818,156 @@ static thread_local bool g_au_v3_host_writing = false;
         // not leak last block's sysex into this one.
         pulp::midi::MidiBuffer& midi_in = bridge->midi_in;
         pulp::midi::MidiBuffer& midi_out = bridge->midi_out;
-        midi_in.clear();
-        midi_in.clear_sysex();
-        midi_out.clear();
-        midi_out.clear_sysex();
-        const AURenderEvent* event = realtimeEventListHead;
-        while (event) {
-            if (event->head.eventType == AURenderEventParameter ||
-                event->head.eventType == AURenderEventParameterRamp) {
-                const AUParameterEvent& p = event->parameter;
-                const auto param_id =
-                    static_cast<pulp::state::ParamID>(p.parameterAddress);
-                const auto sample_offset =
-                    pulp::format::au::block_relative_sample_offset(
-                        p.eventSampleTime, timestamp, frameCount);
-                bridge->param_events.push({
-                    param_id,
-                    sample_offset,
-                    static_cast<float>(p.value),
-                    event->head.eventType == AURenderEventParameterRamp
-                        ? static_cast<int32_t>(p.rampDurationSampleFrames)
-                        : 0,
-                });
-                // This is the host playing back automation, so it must NOT echo
-                // back to the host: guard the inline UI→host automation listener
-                // exactly like implementorValueObserver does. `set_value_rt` →
-                // notify_rt fires _automationListener SYNCHRONOUSLY on this
-                // render thread; g_au_v3_host_writing is thread_local, so setting
-                // it true here short-circuits that same-thread listener (its
-                // `if (g_au_v3_host_writing) return;` guard) — no -setValue:
-                // (lock-taking / allocating Foundation ObjC) on the audio thread,
-                // and no value echoed straight back into the pass the host is
-                // already recording.
-                pulp::format::au::g_au_v3_host_writing = true;
-                bridge->store.set_value_rt(param_id, static_cast<float>(p.value));
-                pulp::format::au::g_au_v3_host_writing = false;
-            } else if (event->head.eventType == AURenderEventMIDI) {
-                const AUMIDIEvent& m = event->MIDI;
-                // A well-formed short MIDI message has a status byte
-                // (MSB set) and total length 1..3. Skip anything else.
-                if (m.length >= 1 && m.length <= 3 && (m.data[0] & 0x80)) {
-                    pulp::midi::MidiEvent me;
-                    me.message = choc::midi::ShortMessage(
-                        m.data[0],
-                        m.length > 1 ? m.data[1] : uint8_t(0),
-                        m.length > 2 ? m.data[2] : uint8_t(0));
-                    me.sample_offset =
-                        static_cast<int32_t>(event->head.eventSampleTime);
-                    midi_in.add(me);
-                }
-            } else if (event->head.eventType == AURenderEventMIDIEventList) {
-                // AUMIDIEventList delivers UMP-encoded events. The
-                // UMP message-type nibble (bits 28-31 of word 0) identifies
-                // the message class; nibble 0x3 is sysex7 and reassembly is
-                // delegated to the shared UmpSysex7Reassembler in core/midi.
-                //
-                // The reassembler emits each completed logical sysex
-                // exactly once; we tag the resulting payload with the
-                // surrounding MIDIEventList's event sample time.
-                const auto& elist = event->MIDIEventsList;
-                const MIDIEventList* packets = &elist.eventList;
-                if (packets) {
-                    struct EmitCtx {
-                        pulp::midi::MidiBuffer* sink;
-                        int32_t sample_offset;
-                    };
-                    EmitCtx ctx{
-                        &midi_in,
-                        static_cast<int32_t>(event->head.eventSampleTime),
-                    };
-                    // add_sysex_copy (not add_sysex(vector)) so the payload is
-                    // copied into the buffer's pre-reserved realtime payload
-                    // pool — add_sysex(std::vector) takes the vector by value and
-                    // would allocate a fresh heap vector per sysex on the audio
-                    // thread.
-                    auto emit = [](const std::vector<uint8_t>& payload,
-                                   void* user) {
-                        auto* c = static_cast<EmitCtx*>(user);
-                        c->sink->add_sysex_copy(payload.data(), payload.size(),
-                                                c->sample_offset, 0.0);
-                    };
+        // No-alloc tripwire over the adapter-owned MIDI input translation: the
+        // buffer reset, the render-event parse loop (short MIDI, UMP sysex7
+        // reassembly into the pre-reserved payload pool), the guarded param
+        // store-writes, and the event sort. All of this is pre-reserved /
+        // capacity-limited, so it must not allocate. (The host transport
+        // callbacks that follow — musicalContextBlock / transportStateBlock —
+        // are Apple framework calls outside our control and are deliberately
+        // outside this scope; process() gets its own scope below.)
+        {
+            pulp::runtime::ScopedNoAlloc midi_in_no_alloc;
+            midi_in.clear();
+            midi_in.clear_sysex();
+            midi_out.clear();
+            midi_out.clear_sysex();
+            const AURenderEvent* event = realtimeEventListHead;
+            while (event) {
+                if (event->head.eventType == AURenderEventParameter ||
+                    event->head.eventType == AURenderEventParameterRamp) {
+                    const AUParameterEvent& p = event->parameter;
+                    const auto param_id =
+                        static_cast<pulp::state::ParamID>(p.parameterAddress);
+                    const auto sample_offset =
+                        pulp::format::au::block_relative_sample_offset(
+                            p.eventSampleTime, timestamp, frameCount);
+                    bridge->param_events.push({
+                        param_id,
+                        sample_offset,
+                        static_cast<float>(p.value),
+                        event->head.eventType == AURenderEventParameterRamp
+                            ? static_cast<int32_t>(p.rampDurationSampleFrames)
+                            : 0,
+                    });
+                    // This is the host playing back automation, so it must NOT echo
+                    // back to the host: guard the inline UI→host automation listener
+                    // exactly like implementorValueObserver does. `set_value_rt` →
+                    // notify_rt fires _automationListener SYNCHRONOUSLY on this
+                    // render thread (it is registered ListenerThread::Audio); the
+                    // guard flag is thread_local, so bracketing this write
+                    // short-circuits that same-thread listener (its
+                    // `if (g_au_v3_host_writing) return;` guard) — no -setValue:
+                    // (lock-taking / allocating Foundation ObjC) on the audio thread,
+                    // and no value echoed straight back into the pass the host is
+                    // already recording. RAII so the flag is restored even if a
+                    // nested write or early-out intervenes.
+                    {
+                        pulp::format::au::ScopedAuV3HostWriting host_writing;
+                        bridge->store.set_value_rt(param_id,
+                                                   static_cast<float>(p.value));
+                    }
+                } else if (event->head.eventType == AURenderEventMIDI) {
+                    const AUMIDIEvent& m = event->MIDI;
+                    // A well-formed short MIDI message has a status byte
+                    // (MSB set) and total length 1..3. Skip anything else.
+                    if (m.length >= 1 && m.length <= 3 && (m.data[0] & 0x80)) {
+                        pulp::midi::MidiEvent me;
+                        me.message = choc::midi::ShortMessage(
+                            m.data[0],
+                            m.length > 1 ? m.data[1] : uint8_t(0),
+                            m.length > 2 ? m.data[2] : uint8_t(0));
+                        me.sample_offset =
+                            static_cast<int32_t>(event->head.eventSampleTime);
+                        midi_in.add(me);
+                    }
+                } else if (event->head.eventType == AURenderEventMIDIEventList) {
+                    // AUMIDIEventList delivers UMP-encoded events. The
+                    // UMP message-type nibble (bits 28-31 of word 0) identifies
+                    // the message class; nibble 0x3 is sysex7 and reassembly is
+                    // delegated to the shared UmpSysex7Reassembler in core/midi.
+                    //
+                    // The reassembler emits each completed logical sysex
+                    // exactly once; we tag the resulting payload with the
+                    // surrounding MIDIEventList's event sample time.
+                    const auto& elist = event->MIDIEventsList;
+                    const MIDIEventList* packets = &elist.eventList;
+                    if (packets) {
+                        struct EmitCtx {
+                            pulp::midi::MidiBuffer* sink;
+                            int32_t sample_offset;
+                        };
+                        EmitCtx ctx{
+                            &midi_in,
+                            static_cast<int32_t>(event->head.eventSampleTime),
+                        };
+                        // add_sysex_copy (not add_sysex(vector)) so the payload is
+                        // copied into the buffer's pre-reserved realtime payload
+                        // pool — add_sysex(std::vector) takes the vector by value and
+                        // would allocate a fresh heap vector per sysex on the audio
+                        // thread.
+                        auto emit = [](const std::vector<uint8_t>& payload,
+                                       void* user) {
+                            auto* c = static_cast<EmitCtx*>(user);
+                            c->sink->add_sysex_copy(payload.data(), payload.size(),
+                                                    c->sample_offset, 0.0);
+                        };
 
-                    // Reuse the bridge's pre-reserved reassembler rather than
-                    // constructing one per event (its accumulator/scratch are
-                    // already sized). reset() clears any partial stream left by
-                    // a previous event/block so an orphaned continue/end can't
-                    // bleed across logical sysex boundaries.
-                    auto& reassembler = bridge->sysex_reassembler;
-                    reassembler.reset();
-                    const MIDIEventPacket* pkt = &packets->packet[0];
+                        // Reuse the bridge's pre-reserved reassembler rather than
+                        // constructing one per event (its accumulator/scratch are
+                        // already sized). reset() clears any partial stream left by
+                        // a previous event/block so an orphaned continue/end can't
+                        // bleed across logical sysex boundaries.
+                        auto& reassembler = bridge->sysex_reassembler;
+                        reassembler.reset();
+                        const MIDIEventPacket* pkt = &packets->packet[0];
 
-                    for (UInt32 i = 0; i < packets->numPackets; ++i) {
-                        UInt32 w = 0;
-                        while (w < pkt->wordCount) {
-                            const uint32_t word0 = pkt->words[w];
-                            const uint8_t mt = (word0 >> 28) & 0x0F;
+                        for (UInt32 i = 0; i < packets->numPackets; ++i) {
+                            UInt32 w = 0;
+                            while (w < pkt->wordCount) {
+                                const uint32_t word0 = pkt->words[w];
+                                const uint8_t mt = (word0 >> 28) & 0x0F;
 
-                            // UMP message word length by type. Types
-                            // not listed default to 1 so we still
-                            // advance past unknown messages safely.
-                            // Each type-3 message is 2 UMP words; the cursor
-                            // advances by `ump_words`, not 1, so word1 cannot
-                            // masquerade as a fresh message header.
-                            UInt32 ump_words = 1;
-                            switch (mt) {
-                                case 0x0: case 0x1: case 0x2:
-                                    ump_words = 1; break;
-                                case 0x3: case 0x4:
-                                case 0x8: case 0x9: case 0xA:
-                                    ump_words = 2; break;
-                                case 0xB: case 0xC:
-                                    ump_words = 3; break;
-                                case 0x5: case 0xD: case 0xE:
-                                    ump_words = 4; break;
-                                default:
-                                    ump_words = 1; break;
+                                // UMP message word length by type. Types
+                                // not listed default to 1 so we still
+                                // advance past unknown messages safely.
+                                // Each type-3 message is 2 UMP words; the cursor
+                                // advances by `ump_words`, not 1, so word1 cannot
+                                // masquerade as a fresh message header.
+                                UInt32 ump_words = 1;
+                                switch (mt) {
+                                    case 0x0: case 0x1: case 0x2:
+                                        ump_words = 1; break;
+                                    case 0x3: case 0x4:
+                                    case 0x8: case 0x9: case 0xA:
+                                        ump_words = 2; break;
+                                    case 0xB: case 0xC:
+                                        ump_words = 3; break;
+                                    case 0x5: case 0xD: case 0xE:
+                                        ump_words = 4; break;
+                                    default:
+                                        ump_words = 1; break;
+                                }
+                                if (w + ump_words > pkt->wordCount) break;
+
+                                if (mt == 0x3) {
+                                    const uint32_t word1 = pkt->words[w + 1];
+                                    reassembler.feed_packet(word0, word1, emit, &ctx);
+                                }
+
+                                w += ump_words;
                             }
-                            if (w + ump_words > pkt->wordCount) break;
-
-                            if (mt == 0x3) {
-                                const uint32_t word1 = pkt->words[w + 1];
-                                reassembler.feed_packet(word0, word1, emit, &ctx);
-                            }
-
-                            w += ump_words;
+                            pkt = reinterpret_cast<const MIDIEventPacket*>(
+                                reinterpret_cast<const uint8_t*>(pkt) +
+                                sizeof(MIDIEventPacket) +
+                                (pkt->wordCount > 0 ? (pkt->wordCount - 1) * sizeof(UInt32) : 0));
                         }
-                        pkt = reinterpret_cast<const MIDIEventPacket*>(
-                            reinterpret_cast<const uint8_t*>(pkt) +
-                            sizeof(MIDIEventPacket) +
-                            (pkt->wordCount > 0 ? (pkt->wordCount - 1) * sizeof(UInt32) : 0));
                     }
                 }
+                event = event->head.next;
             }
-            event = event->head.next;
-        }
-        bridge->param_events.sort();
+            bridge->param_events.sort();
+        } // end MIDI-input no-alloc scope
 
         // Bypass short-circuit. Consult the plugin's Bypass parameter when it
         // has one; otherwise the bridge-local atomic the host wrote via
@@ -1080,11 +1119,13 @@ static thread_local bool g_au_v3_host_writing = false;
 
         bridge->processor->set_param_events(&bridge->param_events);
         {
-            // The render path is allocation-free from here: MIDI buffers are
-            // pre-reserved + capacity-limited, param events are bounded, and the
-            // Processor honours the no-alloc contract. Mark the scope so the
-            // RT-safety tripwire (test builds / sanitizers) traps any stray
-            // allocation. Matches VST3/CLAP/AU v2.
+            // Adapter-owned DSP region: MIDI buffers are pre-reserved +
+            // capacity-limited, param events are bounded, and the Processor
+            // honours the no-alloc contract — so this must not allocate. The
+            // tripwire (test builds / sanitizers) traps any stray allocation.
+            // Matches VST3/CLAP/AU v2. The MIDI-output emit below stays OUTSIDE
+            // the scope because it calls the host's MIDIOutputEventBlock (a
+            // framework block outside our control).
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
             bridge->processor->process(process_buffers, midi_in, midi_out, ctx);
         }

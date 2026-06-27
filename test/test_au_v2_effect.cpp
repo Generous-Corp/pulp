@@ -20,6 +20,7 @@
 #include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK (AUMusicLookup)
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/midi/ump_sysex7_reassembler.hpp>
 
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioUnit.h>
@@ -317,6 +318,128 @@ TEST_CASE("AU adapters: capacity-limited MidiBuffer drops past reserve without "
     const auto sysex_before = midi_in.sysex_size();
     REQUIRE_FALSE(midi_in.add_sysex_copy(oversize.data(), oversize.size()));
     REQUIRE(midi_in.sysex_size() == sysex_before);
+}
+
+// The AU v3 render block reassembles a multi-packet UMP sysex7 stream through a
+// bridge-owned, pre-reserved UmpSysex7Reassembler and emits each completed
+// logical sysex via add_sysex_copy into the pre-reserved payload pool, calling
+// reset() before each MIDIEventList event. This guards that:
+//   * a sysex split across start → continue → end packets is reassembled and
+//     emitted EXACTLY ONCE, complete, with NO capacity growth on the buffer or
+//     the reassembler, and
+//   * reset() after an incomplete (never-ended) stream clears the partial so the
+//     next message is not poisoned by the dropped one.
+namespace {
+// Build a UMP type-0x3 (sysex7) word0: message-type nibble 0x3 in bits 28-31,
+// status nibble in bits 20-23, byte-count in bits 16-19, first two payload
+// bytes in bits 8-15 and 0-7.
+constexpr uint32_t make_sysex7_word0(uint8_t status, uint8_t count,
+                                     uint8_t b0, uint8_t b1) {
+    return (uint32_t{0x3} << 28) | (uint32_t{status} << 20) |
+           (uint32_t{count} << 16) | (uint32_t{b0} << 8) | uint32_t{b1};
+}
+// Remaining four payload bytes pack into word1 (bits 24-31, 16-23, 8-15, 0-7).
+constexpr uint32_t make_sysex7_word1(uint8_t b2, uint8_t b3,
+                                     uint8_t b4, uint8_t b5) {
+    return (uint32_t{b2} << 24) | (uint32_t{b3} << 16) |
+           (uint32_t{b4} << 8) | uint32_t{b5};
+}
+}  // namespace
+
+TEST_CASE("AU v3 UMP sysex7: multi-packet reassembly emits once, no growth; "
+          "reset clears a dropped partial",
+          "[au][midi][au-v3][sysex][realtime][capacity]")
+{
+    constexpr std::size_t kSysexBytes = 64;
+    midi::MidiBuffer sink;
+    sink.reserve(/*events=*/8, /*sysex=*/8, /*payload=*/kSysexBytes);
+    sink.set_realtime_capacity_limit(true);
+
+    midi::UmpSysex7Reassembler reassembler;
+    reassembler.reserve(kSysexBytes);
+    const std::size_t event_cap = sink.event_capacity();
+    const std::size_t sysex_cap = sink.sysex_capacity();
+    const std::size_t payload_cap = sink.sysex_copy_payload_capacity();
+
+    // Mirror the adapter's emit: copy the reassembled payload into the buffer's
+    // pre-reserved pool (never add_sysex(vector)).
+    auto emit = [](const std::vector<uint8_t>& payload, void* user) {
+        auto* s = static_cast<midi::MidiBuffer*>(user);
+        s->add_sysex_copy(payload.data(), payload.size(), /*sample_offset=*/0, 0.0);
+    };
+
+    SECTION("start → continue → end reassembles to one complete payload") {
+        reassembler.reset();
+        // 14-byte logical payload split 6 / 6 / 2 across three packets.
+        // Status 0x1 = start, 0x2 = continue, 0x3 = end.
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x1, 6, 0x01, 0x02),
+                    make_sysex7_word1(0x03, 0x04, 0x05, 0x06), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::start);
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x2, 6, 0x07, 0x08),
+                    make_sysex7_word1(0x09, 0x0A, 0x0B, 0x0C), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::continued);
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x3, 2, 0x0D, 0x0E),
+                    make_sysex7_word1(0, 0, 0, 0), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::ended);
+
+        // Emitted exactly once, complete, in order.
+        REQUIRE(sink.sysex_size() == 1);
+        const std::vector<uint8_t> expected{0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+                                            0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+                                            0x0D, 0x0E};
+        REQUIRE(sink.sysex()[0].data == expected);
+        REQUIRE_FALSE(reassembler.in_progress());
+
+        // No capacity growth anywhere on the hot path.
+        REQUIRE(sink.event_capacity() == event_cap);
+        REQUIRE(sink.sysex_capacity() == sysex_cap);
+        REQUIRE(sink.sysex_copy_payload_capacity() == payload_cap);
+        REQUIRE(sink.dropped_sysex_count() == 0);
+    }
+
+    SECTION("reset() after an incomplete stream does not poison the next message") {
+        // Start a stream and never close it (host hands us a truncated group).
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x1, 6, 0xAA, 0xBB),
+                    make_sysex7_word1(0xCC, 0xDD, 0xEE, 0xFF), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::start);
+        REQUIRE(reassembler.in_progress());
+        REQUIRE(reassembler.partial_size() == 6);
+        REQUIRE(sink.sysex_size() == 0);  // nothing emitted yet
+
+        // Adapter calls reset() before the next MIDIEventList event. The partial
+        // must be discarded — not prepended to the next message.
+        reassembler.reset();
+        REQUIRE_FALSE(reassembler.in_progress());
+        REQUIRE(reassembler.partial_size() == 0);
+
+        // A fresh single-packet sysex (status 0x0) now emits clean.
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x0, 3, 0x11, 0x22),
+                    make_sysex7_word1(0x33, 0, 0, 0), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::single_packet);
+        REQUIRE(sink.sysex_size() == 1);
+        const std::vector<uint8_t> expected{0x11, 0x22, 0x33};
+        REQUIRE(sink.sysex()[0].data == expected);  // not poisoned by 0xAA..0xFF
+        REQUIRE(sink.sysex_copy_payload_capacity() == payload_cap);
+    }
+
+    SECTION("orphan continue/end without a start is dropped, leaving state clean") {
+        reassembler.reset();
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x2, 4, 0x77, 0x88),
+                    make_sysex7_word1(0x99, 0xAA, 0, 0), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::dropped);
+        REQUIRE(reassembler.feed_packet(
+                    make_sysex7_word0(0x3, 2, 0x55, 0x66),
+                    make_sysex7_word1(0, 0, 0, 0), emit, &sink) ==
+                midi::UmpSysex7Reassembler::Status::dropped);
+        REQUIRE_FALSE(reassembler.in_progress());
+        REQUIRE(sink.sysex_size() == 0);  // nothing emitted from orphans
+    }
 }
 
 TEST_CASE("AU v2 render context is explicit realtime for effects and instruments",
