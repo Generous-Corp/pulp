@@ -50,7 +50,7 @@ TEST_CASE("Compressor with lookahead delays the dry signal by the same amount",
     buf[0] = 1.0f;
     c.process(buf.data(), 256);
 
-    // With lookahead = 48 samples, the impulse should now appear at
+    // With lookahead = 48 samples, the impulse should appear at
     // sample ~48 in the output (the dry signal was delayed by the
     // lookahead amount).
     int found = -1;

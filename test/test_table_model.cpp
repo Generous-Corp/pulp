@@ -205,10 +205,9 @@ TEST_CASE("clear_sort restores original insertion order",
 
 TEST_CASE("adding rows after sort then clear_sort restores insertion order",
           "[ui][table-model]") {
-    // Regression: original_order_ bookkeeping must survive add_row
-    // after a sort so clear_sort() returns to true insertion order.
-    // Without the fix, new rows ended up on top of a stale identity
-    // permutation and clear_sort() either no-op'd or stayed on the
+    // original_order_ bookkeeping must survive add_row after a sort so
+    // clear_sort() returns to true insertion order. New rows over a stale
+    // identity permutation make clear_sort() either no-op or stay on the
     // post-sort layout.
     auto m = make_preset_table();
     m.sort_by(0, TableSortOrder::Ascending);

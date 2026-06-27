@@ -299,8 +299,8 @@ TEST_CASE("PresetManager writes valid JSON even for non-finite param values",
     std::string content((std::istreambuf_iterator<char>(f)),
                         std::istreambuf_iterator<char>());
 
-    // The bug streamed bare `nan`/`inf` tokens, which are NOT valid JSON, so
-    // choc::json::parse would throw. Parsing must now succeed.
+    // Bare `nan`/`inf` tokens are NOT valid JSON, so choc::json::parse would
+    // throw. Parsing must succeed.
     auto doc = choc::json::parse(content);  // throws on the old bare-token output
     REQUIRE(doc.isObject());
     REQUIRE(doc.hasObjectMember("parameters"));

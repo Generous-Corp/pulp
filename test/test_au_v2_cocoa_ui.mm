@@ -1,12 +1,11 @@
 // test_au_v2_cocoa_ui.mm — AU v2 Cocoa editor-view advertisement.
 //
-// Regression test for the bug ChainerSynth surfaced: no AU v2 adapter
-// advertised kAudioUnitProperty_CocoaUI, so hosts (Logic, auval) never learned
-// the plugin had a custom editor and showed their own generic param view. The
-// fix wires a cross-TU filler hook (g_cocoa_view_info_filler) that the
-// per-target Cocoa view module registers at static-init, and gives the factory
-// class a per-plugin-unique name (PULP_AU_COCOA_VIEW_CLASS) so two Pulp AUs in
-// one host don't collide on a process-global ObjC class name.
+// AU v2 adapters must advertise kAudioUnitProperty_CocoaUI so hosts (Logic,
+// auval) learn the plugin has a custom editor instead of showing a generic
+// param view. The cross-TU filler hook (g_cocoa_view_info_filler) is registered
+// by the per-target Cocoa view module at static-init, and the factory class gets
+// a per-plugin-unique name (PULP_AU_COCOA_VIEW_CLASS) so two Pulp AUs in one
+// host don't collide on a process-global ObjC class name.
 //
 // This test compiles au_v2_cocoa_view.mm with PULP_AU_GUI + a test-unique
 // class name and asserts the registration + the advertised view info, without
