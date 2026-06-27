@@ -37,11 +37,12 @@ def _cmd_run_p0a(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    case = pipeline.TONAL_CASE if args.case == "tonal" else pipeline.P0A_CASE
     if args.out_dir:
-        report = pipeline.run_and_export(args.degradation, args.out_dir,
+        report = pipeline.run_and_export(args.degradation, args.out_dir, case=case,
                                          latency_ms=args.latency_ms, smear_ms=args.smear_ms)
     else:
-        report = pipeline.run(args.degradation,
+        report = pipeline.run(args.degradation, case=case,
                               latency_ms=args.latency_ms, smear_ms=args.smear_ms)
     if args.out:
         with open(args.out, "w") as f:
@@ -67,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     rp.set_defaults(func=_cmd_run_p0a)
 
     rn = sub.add_parser("run", help="run all detectors on a degradation; optionally export clips")
-    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz"], default="smear")
+    rn.add_argument("--case", choices=["drum", "tonal"], default="drum",
+                    help="which QualityCase family to run (drum=percussive, tonal=sustained pad)")
+    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy"], default="smear")
     rn.add_argument("--out", default="", help="write report.json to this path")
     rn.add_argument("--out-dir", default="", dest="out_dir",
                     help="write reference/candidate WAVs + worst-region clip pairs here")

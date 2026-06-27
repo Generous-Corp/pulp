@@ -78,6 +78,34 @@ def render_drum_break(
     return (y / peak * 0.7), onsets
 
 
+def render_tonal(
+    sr: int = 48000, dur_s: float = 2.5, seed: int = 0, f0: float = 220.0
+) -> tuple[np.ndarray, list[float]]:
+    """A sustained vocal/pad-like tone — the TONAL corpus family (§3.5: the harness
+    serves more than drums). Harmonic stack + two formants + vibrato + slow tremolo, so
+    it has LOW baseline spectral flux (graininess shows) and a definite brightness/HF
+    profile (dulling / fizz show). No onsets (sustained); returns []. Deterministic.
+    """
+    rng = np.random.default_rng(seed)
+    n = int(dur_s * sr)
+    t = np.arange(n) / sr
+    vib = 1.0 + 0.01 * np.sin(2 * np.pi * 5.0 * t + rng.uniform(0, 6.28))  # ~5 Hz vibrato
+    phase = 2 * np.pi * np.cumsum(f0 * vib) / sr
+    y = np.zeros(n, dtype=np.float64)
+    for k in range(1, 14):
+        hz = f0 * k
+        formant = np.exp(-(((hz - 700.0) / 400.0) ** 2)) + 0.7 * np.exp(-(((hz - 1800.0) / 600.0) ** 2))
+        amp = (1.0 / k) * (0.35 + formant)
+        y += amp * np.sin(k * phase)
+    y *= 0.85 + 0.15 * np.sin(2 * np.pi * 0.7 * t)  # slow tremolo
+    ar = int(0.05 * sr)
+    env = np.ones(n)
+    env[:ar] = np.linspace(0, 1, ar)
+    env[-ar:] = np.linspace(1, 0, ar)
+    y *= env
+    return (y / (np.max(np.abs(y)) + 1e-12) * 0.5), []
+
+
 def smear_transients(
     y: np.ndarray, onset_times: list[float], sr: int, ms: float = 8.0
 ) -> np.ndarray:
@@ -99,6 +127,29 @@ def smear_transients(
         seg = out[lo:hi]
         out[lo:hi] = np.convolve(seg, kernel, mode="same")
     return out
+
+
+def grainy(y: np.ndarray, sr: int, amount: float = 0.18, rate_hz: float = 500.0) -> np.ndarray:
+    """Add fast-gated mid-band noise — a controlled stand-in for the frame-to-frame
+    spectral churn (graininess) a phase vocoder / granular path adds, for the
+    spectral_flux detector's positive control. Band-limited so it isn't HF fizz. On a
+    SUSTAINED tone this raises spectral flux decisively (it doesn't on transient-heavy
+    drums, where transient flux dominates — see the deferred-detector note). Seeded."""
+    y = np.asarray(y, dtype=np.float64)
+    rng = np.random.default_rng(777)
+    noise = rng.standard_normal(len(y))
+    dt, rc = 1.0 / sr, 1.0 / (2 * np.pi * 6000.0)
+    a = dt / (rc + dt)
+    lp = np.empty_like(noise)
+    acc = 0.0
+    for i in range(len(noise)):
+        acc += a * (noise[i] - acc)
+        lp[i] = acc
+    n_gate = max(2, int(len(y) / sr * rate_hz))
+    gate = (rng.uniform(0.0, 1.0, n_gate) > 0.5).astype(np.float64)
+    gate_env = np.interp(np.linspace(0, n_gate - 1, len(y)), np.arange(n_gate), gate)
+    env_y = float(np.sqrt(np.mean(y * y) + 1e-20))
+    return y + amount * env_y * lp * gate_env
 
 
 def dull(y: np.ndarray, sr: int, cutoff_hz: float = 3500.0) -> np.ndarray:

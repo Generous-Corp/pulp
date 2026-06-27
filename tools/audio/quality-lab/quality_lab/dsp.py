@@ -45,6 +45,30 @@ def ltas(y: np.ndarray, sr: int, n_fft: int = 2048, hop: int = 512):
     return np.fft.rfftfreq(n_fft, 1.0 / sr), acc / n
 
 
+def mean_spectral_flux(y: np.ndarray, sr: int, n_fft: int = 1024, hop: int = 256) -> float:
+    """Mean frame-to-frame spectral flux (L1 magnitude change), energy-normalized so it
+    is level-invariant. Higher = more frame-to-frame churn (graininess / instability). A
+    global statistic, no alignment needed. NOTE: on transient-heavy material the
+    onset flux dominates and this is not a good graininess discriminator — it is meant
+    for sustained / tonal material (where graininess is actually heard)."""
+    y = np.asarray(y, dtype=np.float64)
+    win = np.hanning(n_fft)
+    n = max(0, (len(y) - n_fft) // hop + 1)
+    if n < 2:
+        return 0.0
+    prev = None
+    flux = 0.0
+    norm = 0.0
+    for i in range(n):
+        s = i * hop
+        mag = np.abs(np.fft.rfft(y[s : s + n_fft] * win))
+        if prev is not None:
+            flux += float(np.sum(np.abs(mag - prev)))
+            norm += float(np.sum(mag))
+        prev = mag
+    return flux / (norm + 1e-20)
+
+
 def spectral_centroid_hz(freqs: np.ndarray, mag: np.ndarray) -> float:
     """Energy-weighted mean frequency (brightness). Scale-invariant, so silence padding
     and level differences don't move it — only timbre does."""
