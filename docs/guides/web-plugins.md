@@ -1,12 +1,16 @@
 # Web Plugin Formats: WAMv2 and WebCLAP
 
-Pulp plugins can run in browsers through two complementary web standards. This guide explains how they work, how to build them, and how to try the live demo.
+Pulp has experimental browser-format scaffolding through two complementary web
+standards. This guide explains the current build outputs, adapter pieces, and
+local browser-host scaffold.
 
 ## Browser Host Availability
 
 The Pulp Browser Host is currently a local tool in `tools/browser-host/`. The
 repo does not yet publish a canonical repo-owned Pages deployment for it, so
 browser-host examples should be treated as local-run instructions for now.
+The host is not yet a runtime-validated WAMv2/WebCLAP demo for the checked-in
+generated plug-in outputs.
 
 ## Two Paths to the Browser
 
@@ -96,7 +100,9 @@ emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The output is a `.js` + `.wasm` pair for the checked-in demo plugins. The root
+The output is a `.js` + `.wasm` pair for the checked-in demo plugins. These
+outputs are useful for browser-integration work, but the repo does not yet
+claim end-to-end browser-host audio validation for them. The root
 `tools/cmake/PulpWasm.cmake` helper is available for projects that include it
 explicitly, but the root Pulp build does not currently create WAM targets from
 `-DPULP_WASM=ON` alone.
@@ -146,10 +152,13 @@ The `PULP_WCLAP_PLUGIN()` macro handles all of this automatically.
 
 ## Pulp Browser Host
 
-The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML app that can:
+The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML scaffold
+for browser integration work. It currently provides:
 
-- Load WAMv2 modules via ES module import
-- Route audio through the plugin (file playback or microphone)
+- Local file/URL controls and basic file-playback or microphone routing UI
+- A WAMv2 ES module import path for modules exposing `default.createInstance(audioCtx)`
+- A raw `.wasm` fetch/compile path that still needs the AudioWorklet bridge file
+  and generated-output wiring
 - Display auto-generated parameter controls
 - Provide an on-screen MIDI keyboard for instruments
 - Show a real-time oscilloscope
@@ -157,6 +166,9 @@ The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML app that 
 
 The host currently recognizes WCLAP URLs and files, but the `.wclap.tar.gz`
 unpack/instantiate path is still a placeholder until `wclap-host-js` is wired.
+The checked-in WAM demo outputs are Emscripten module factories with `wam_*`
+exports, so they should be treated as generated-output fixtures until the host
+bridge is wired and browser-validated against them.
 
 ### Publishing Status
 
@@ -181,7 +193,7 @@ python3 -m http.server 8080
 |--------|-----------|---------|-------------|----------|-----|
 | CLAP | CMake | Native | ✅ Direct | ❌ | clap.gui (NSView/HWND) |
 | WebCLAP | WASI SDK | WASM | Experimental via wclap-bridge | Experimental via external wclap-host-js; Pulp browser-host loading not wired yet | clap.webview |
-| WAMv2 | Emscripten | WASM | ❌ | ✅ AudioWorklet | HTML/CSS/JS |
+| WAMv2 | Emscripten | WASM | ❌ | Experimental generated-output lane; Pulp browser-host runtime validation pending | HTML/CSS/JS |
 
 ## What Runs Where
 

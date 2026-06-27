@@ -17,7 +17,7 @@ platforms:
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: experimental
-    notes: WAMv2, WebCLAP adapters, Emscripten build pipeline, browser test host. Not yet runtime-validated in browser.
+    notes: WAMv2/WebCLAP adapter scaffolding, Emscripten generated-output lane, and local browser-host scaffold. Not yet runtime-validated end-to-end in browser.
 
 formats:
   vst3:
@@ -47,8 +47,10 @@ formats:
     linux: experimental
   wam_v2:
     web: experimental
+    notes: Emscripten demo outputs and adapter bridge exist; Pulp browser-host runtime validation is pending.
   webclap:
     web: experimental
+    notes: WASI helper path exists for project-defined targets; browser-host unpack/instantiate wiring is not yet implemented.
   aax:
     macos: experimental
     windows: experimental

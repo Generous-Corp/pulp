@@ -1,8 +1,13 @@
 # Pulp Web Demos
 
-Pulp audio plugins compiled to WebAssembly and running in the browser.
+Pulp audio plugins compiled to WebAssembly for the experimental browser-host
+integration lane.
 
 ## Quick Start
+
+The commands below build the checked-in Emscripten outputs and open the local
+browser-host scaffold. The repo does not yet claim end-to-end browser audio
+validation for these generated outputs.
 
 ```bash
 # 1. Build the WASM plugins (requires Emscripten)
@@ -57,7 +62,8 @@ cmake -S ../.. -B build-wclap \
 
 ## How It Works
 
-Each plugin is compiled to WebAssembly using Emscripten. The WASM module exports C functions that the browser host calls from an `AudioWorkletProcessor`:
+Each plugin is compiled to WebAssembly using Emscripten. The WASM module exports
+C functions intended for the browser AudioWorklet bridge:
 
 ```
 Browser (JS)                    WASM Module (C++)
@@ -69,7 +75,11 @@ AudioWorkletProcessor  ──────►  wam_init(sampleRate, blockSize)
   getDescriptor        ──────►  wam_descriptor() → JSON
 ```
 
-The C++ side uses `WamProcessorBridge` which wraps a standard Pulp `Processor`. PulpPluck reuses the native example processor source that runs as VST3, AU v2, or CLAP on the desktop; PulpGain and PulpChorus use the same adapter shape for their web-demo processors.
+The C++ side uses `WamProcessorBridge` which wraps a standard Pulp `Processor`.
+PulpPluck reuses the native example processor source that runs as VST3, AU v2,
+or CLAP on the desktop; PulpGain and PulpChorus use the same adapter shape for
+their web-demo processors. The current browser host still needs runtime bridge
+wiring before these generated outputs are treated as a validated in-browser demo.
 
 ## File Structure
 
@@ -109,7 +119,7 @@ The same Pulp Processor runs as:
 | VST3 | macOS, Windows, Linux | CMake (native) |
 | AU v2 | macOS | CMake (native) |
 | CLAP | macOS, Windows, Linux | CMake (native) |
-| **WAMv2** | **Browser** | **Emscripten** |
+| **WAMv2** | **Browser scaffold** | **Emscripten output; runtime validation pending** |
 | **WebCLAP** | **Native + Browser** | **WASI SDK helper; no checked-in demo target yet** |
 
 ## Acknowledgments
