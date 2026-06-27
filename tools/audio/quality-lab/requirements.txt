@@ -1,0 +1,10 @@
+# Audio Quality Lab — OPT-IN dependencies (Tier 1, permissive only).
+#
+# These are NOT required to run Pulp's basic audio tests (plain `ctest`,
+# examples/offline-stretch/eval/ab_compare.py). Install them only to run the
+# Quality Lab (the additive feature layer). See the plan's §4 "Additive-by-default".
+numpy>=1.21
+soundfile>=0.11
+
+# Test-only (install to run the lab's own pytest suite):
+#   pytest>=7
