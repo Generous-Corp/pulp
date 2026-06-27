@@ -247,13 +247,17 @@ at `--sample-rate` — no resampling), `--param <id>=<value>[@frame]`, and
 
 **`--param` values are PLAIN domain** (the parameter's native `min..max`), **not
 normalized `[0,1]`** — matching `PluginSlot::set_parameter` /
-`ParameterEvent::value`. Parameters are delivered block-quantized via
-`set_parameter` (forwarding the per-block queue too would double-apply each
-change on loaders that honor sample-accurate events); MIDI stays sample-accurate.
-The block stepper is a deliberate, callback-driven parallel to
-`OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse
-the core renderer directly); a block-partition-invariance test guards the two
-against drift.
+`ParameterEvent::value`. Parameters are delivered **sample-accurately**: the
+stepper windows each block's events with per-block sample offsets and the queue
+is forwarded straight to `PluginSlot::process`, which every loader applies at the
+event offset (CLAP/VST3/AU sample-accurate; LV2 block-rate by its control-port
+contract). We do NOT also call `set_parameter` — that would double-apply each
+change (once at offset 0, once at its real offset). MIDI is likewise
+sample-accurate. (A plugin that reads its own params once per block still steps
+at block boundaries — that is the plugin's rate, not the CLI's.) The block
+stepper is a deliberate, callback-driven parallel to `OfflineRenderHost::render`
+(PluginSlot has no `ProcessContext`, so it can't reuse the core renderer
+directly); a block-partition-invariance test guards the two against drift.
 
 ## Live capture-to-WAV — two modes, both LANDED
 
@@ -281,9 +285,9 @@ The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
 render` (offline plugin render), `pulp run --audio-capture-wav` (earliest-window
 int16), and `pulp run --audio-capture-rolling` (last-N float). The live realtime
 output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
-inspection* above). Remaining ideas are additive — e.g. a 24-bit-int capture
-alongside the float WAV, and sample-accurate (not block-quantized) `--param`
-automation in `render`.
+inspection* above). `render`'s `--param @frame` automation is sample-accurate
+(forwarded queue; see above). Remaining ideas are additive — e.g. a 24-bit-int
+capture alongside the float WAV.
 
 ## Sibling: the Audio Quality Lab (reference-vs-candidate perceptual artifacts)
 

@@ -64,7 +64,8 @@ void print_render_usage() {
         "  --input-signal silence|sine:<hz>[,<dbfs>]   (sine dbfs default: -6)\n\n"
         "Automation (repeatable):\n"
         "  --param <id>=<value>[@frame] Parameter change in the PLAIN domain (native\n"
-        "                               min..max, NOT normalized); @frame is block-quantized\n"
+        "                               min..max, NOT normalized); @frame is sample-accurate\n"
+        "                               (block-rate on LV2 by its control-port nature)\n"
         "  --midi note:<note>,<vel>,<on>[,<off>]   Note on at <on>, optional off at <off>\n\n"
         "Output:\n"
         "  --manifest <file.json>       Write the metrics manifest to a file\n"
@@ -227,23 +228,21 @@ int cmd_audio_render(const std::vector<std::string>& args) {
 
     audio::Buffer<float> output;
     audio_render::StepStats stats;
-    const state::ParameterEventQueue kEmptyQueue;
     const auto process = [&](audio::BufferView<float>& out,
                              const audio::BufferView<const float>& in,
                              const midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                              const state::ParameterEventQueue& pq, int n) {
-        // Parameters are delivered BLOCK-QUANTIZED via set_parameter only — the
-        // value for each event takes effect at the start of the block it lands
-        // in. We deliberately do NOT forward the per-block event queue to
-        // process(): a loader that honors sample-accurate events would then see
-        // each change twice (once at offset 0 from set_parameter, once at its
-        // real offset), applying it too early and defeating the accuracy it was
-        // meant to provide. set_parameter reaches every loader (CLAP/VST3 queue
-        // it internally at time 0; LV2/AU set it immediately). Sample-accurate
-        // parameter automation is not wired here; MIDI stays sample-accurate.
-        for (const auto& e : pq.events())
-            slot->set_parameter(e.param_id, e.value);
-        slot->process(out, in, midi_in, midi_out, kEmptyQueue, n);
+        // Parameters are delivered SAMPLE-ACCURATELY: the stepper has already
+        // windowed this block's events with per-block sample offsets, so we
+        // forward the queue straight to process(). Every loader consumes it at
+        // the event offset — CLAP (clap_event_param_value at header.time), VST3
+        // (IParameterChanges addPoint at the sample offset), AU
+        // (AudioUnitScheduleParameters bufferOffset); LV2 applies the value
+        // block-rate, which is LV2's control-port contract, not a loss here.
+        // We do NOT also call set_parameter: that would double-deliver each
+        // change (once at offset 0, once at its real offset) and smear the
+        // automation the queue exists to make precise.
+        slot->process(out, in, midi_in, midi_out, pq, n);
     };
 
     if (!audio_render::render_blocks(spec, input.view(), events, output, stats, process)) {
