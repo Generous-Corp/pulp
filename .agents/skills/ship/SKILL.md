@@ -223,10 +223,12 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 pulp ship auv3-xcodeproj MyPlugin --sdk iphoneos --open
 ```
 
-Generates a separate CMake Xcode build directory for an AUv3 target. `--sdk`
-accepts `iphonesimulator`, `iphoneos`, or `macosx`; the default output is
-`build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake invocation
-without requiring Xcode.
+Generates a separate CMake Xcode build directory for a project containing an
+AUv3 target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; the
+default output is `build/xcode/<target>-<sdk>`. The generated build hint targets
+`<target>_AUv3`. Use `--dry-run` to print the CMake invocation and build hint
+without requiring Xcode. For macOS AUv3 work, the generated project also
+contains the runnable containing-app target `<target>_AUv3Host`.
 
 ### macOS: Build → Sign → Package → Notarize → Appcast
 

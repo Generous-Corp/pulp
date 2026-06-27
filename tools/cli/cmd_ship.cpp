@@ -1193,12 +1193,12 @@ int cmd_ship(const std::vector<std::string>& args) {
 
     // ── auv3-xcodeproj (one-click Xcode flow) ───────────────────────────────
     //
-    // Thin wrapper around `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` that
-    // generates an Xcode project ready to "Run" on an iOS Simulator or a
-    // connected iOS device. Picks the right SDK + the right entitlements
-    // template from `tools/templates/auv3/iOS-{Simulator,Device}-
-    // Entitlements.plist.template` (shipped in PR #2938 alongside the
-    // CMake template wiring).
+    // Thin wrapper around `cmake -G Xcode` that generates a separate Xcode
+    // build tree ready to build the requested `<target>_AUv3` target for an
+    // iOS Simulator, connected iOS device, or macOS. Picks the right SDK +
+    // the right entitlements template from
+    // `tools/templates/auv3/iOS-{Simulator,Device}-Entitlements.plist.template`
+    // (shipped in PR #2938 alongside the CMake template wiring).
     //
     // Usage:
     //   pulp ship auv3-xcodeproj <target>           # iphonesimulator (default)
@@ -1210,10 +1210,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     // The wrapper intentionally writes to a separate build dir (default
     // `build/xcode/<target>-<sdk>`) so it does not collide with the user's
     // normal `build/` Ninja/Makefile cache. The full Xcode-project
-    // generation requires Xcode and the matching iOS SDK to be installed;
-    // when they are missing we emit a clear scaffold message + exit 0 so
-    // CI / sandboxed environments can still exercise the wrapper without a
-    // real Xcode install.
+    // generation requires Xcode and the matching iOS SDK to be installed.
+    // `--dry-run` still exits 0 before those checks so CI / sandboxed
+    // environments can exercise the wrapper without a real Xcode install.
     if (sub == "auv3-xcodeproj") {
 #ifndef __APPLE__
         std::cerr << "pulp ship auv3-xcodeproj: macOS-only (requires Xcode + iOS SDKs).\n";
@@ -1248,7 +1247,7 @@ int cmd_ship(const std::vector<std::string>& args) {
                 "[--sdk iphonesimulator|iphoneos|macosx] "
                 "[--output <dir>] [--open] [--dry-run]\n"
                 "Generates an Xcode project for an AUv3 target ready to "
-                "Run on the iOS Simulator or a connected device.\n";
+                "build for the iOS Simulator, a connected device, or macOS.\n";
             return 2;
         }
 
@@ -1282,8 +1281,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string configure_cmd =
             "cmake -S " + shell_quote(root.string()) +
             " -B " + shell_quote(output_dir) +
-            " -G Xcode" +
-            " -DPULP_AUV3_TARGET=" + shell_quote(target_name);
+            " -G Xcode";
         if (!toolchain.empty()) {
             // Only require the toolchain on disk when we're actually
             // going to invoke cmake. `--dry-run` is allowed to print
@@ -1308,8 +1306,15 @@ int cmd_ship(const std::vector<std::string>& args) {
                   << "  sdk    = " << sdk << "\n"
                   << "  output = " << output_dir << "\n";
 
+        // Configure is target-agnostic: CMake generates the project, and the
+        // build hint selects the conventional AUv3 target that CMake creates.
+        const std::string build_hint =
+            "cmake --build " + shell_quote(output_dir) +
+            " --target " + shell_quote(target_name + "_AUv3");
+
         if (dry_run) {
             std::cout << "  cmake  = " << configure_cmd << "\n";
+            std::cout << "  build  = " << build_hint << "\n";
             std::cout << "(--dry-run: no cmake invocation)\n";
             return 0;
         }
@@ -1369,8 +1374,7 @@ int cmd_ship(const std::vector<std::string>& args) {
 
         std::cout << "\nXcode project: " << xcodeproj.string() << "\n";
         std::cout << "  open in Xcode: open " << shell_quote(xcodeproj.string()) << "\n";
-        std::cout << "  build from CLI: cmake --build " << shell_quote(output_dir)
-                  << " --target " << target_name << "_AUv3\n";
+        std::cout << "  build from CLI: " << build_hint << "\n";
 
         if (open_after) {
             std::string open_cmd = "open " + shell_quote(xcodeproj.string());

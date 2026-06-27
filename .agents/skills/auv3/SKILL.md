@@ -1103,15 +1103,17 @@ pulp ship auv3-xcodeproj <target> --sdk iphoneos     # device
 pulp ship auv3-xcodeproj <target> --sdk macosx       # macOS lane
 pulp ship auv3-xcodeproj <target> --output build/xcode/MyPlugin
 pulp ship auv3-xcodeproj <target> --open             # open in Xcode after gen
-pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation only
+pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation + build hint
 ```
 
-The wrapper runs `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` against
-a **separate build dir** (default `build/xcode/<target>-<sdk>`) so
-it doesn't collide with the user's normal Ninja/Makefile cache. iOS
+The wrapper runs `cmake -G Xcode` against a **separate build dir**
+(default `build/xcode/<target>-<sdk>`) so it doesn't collide with the
+user's normal Ninja/Makefile cache. The generated build hint selects
+`<target>_AUv3`; CMake configure still generates the project normally. iOS
 SDKs pull in `tools/cmake/ios.toolchain.cmake` with the correct
-`IOS_PLATFORM` (OS for device, SIMULATOR64 for simulator). This is
-the supported Xcode iteration path for AU v3 targets.
+`IOS_PLATFORM` (OS for device, SIMULATOR64 for simulator). On macOS, the
+generated project also includes `<target>_AUv3Host`, the runnable containing
+app. This is the supported Xcode iteration path for AU v3 targets.
 
 ### Install + cache-clear gotcha
 
