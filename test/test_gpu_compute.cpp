@@ -547,6 +547,38 @@ TEST_CASE("GpuCompute matmul matches CPU", "[render][gpu][compute]") {
     REQUIRE_FALSE(compute->matmul(a.data(), b.data(), c.data(), 0, K, N));  // invalid
 }
 
+TEST_CASE("GpuCompute additive synth produces the requested partials",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 2048;
+    constexpr float SR = 48000.0f;
+    constexpr uint32_t K1 = 10, K2 = 20, K3 = 40;  // exact FFT bins (integer cycles)
+    std::vector<float> partials = {
+        K1 * SR / N, 1.00f, 0.0f,
+        K2 * SR / N, 0.50f, 0.0f,
+        K3 * SR / N, 0.25f, 0.0f,
+    };
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->additive_synth(partials.data(), out.data(), 3, N, SR, 0.0f));
+
+    std::vector<std::complex<float>> s(N);
+    for (uint32_t i = 0; i < N; ++i) s[i] = std::complex<float>(out[i], 0.0f);
+    pulp::signal::Fft fft(static_cast<int>(N));
+    fft.forward(s.data());
+    auto mag = [&](uint32_t k) { return std::abs(s[k]); };
+
+    // Sharp peaks at exactly K1/K2/K3, magnitudes in the amplitude ratio.
+    REQUIRE(mag(K1) > 50.0f * mag(K1 + 5));
+    REQUIRE(mag(K1) > mag(K2));
+    REQUIRE(mag(K2) > mag(K3));
+    REQUIRE(std::abs(mag(K2) / mag(K1) - 0.5f) < 0.05f);
+    REQUIRE(std::abs(mag(K3) / mag(K1) - 0.25f) < 0.05f);
+
+    REQUIRE_FALSE(compute->additive_synth(partials.data(), out.data(), 0, N, SR, 0.0f));
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {

@@ -134,6 +134,18 @@ public:
     virtual bool matmul(const float* a, const float* b, float* c,
                         uint32_t m, uint32_t k, uint32_t n) = 0;
 
+    // ── Synthesis ──────────────────────────────────────────────────────────
+
+    /// GPU additive synthesis: out[s] = Σ_p amp_p · sin(2π·freq_p·(t0+s)/sr +
+    /// phase_p), one thread per output sample summing all partials. `partials`
+    /// is num_partials × [freq(Hz), amp, phase(rad)] (3·num_partials floats).
+    /// Thousands of partials parallelize cleanly — the basis for additive /
+    /// spectral resynthesis. `t0_samples` is the absolute start sample (block
+    /// continuity). Not real-time-safe. Returns false on invalid args.
+    virtual bool additive_synth(const float* partials, float* out,
+                                uint32_t num_partials, uint32_t num_samples,
+                                float sample_rate, float t0_samples) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

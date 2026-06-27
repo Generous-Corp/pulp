@@ -192,6 +192,36 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kAdditiveSynthShader = R"wgsl(
+// GPU additive synthesis: one thread per output sample, summing all partials.
+// partials: num_partials × [freq, amp, phase]. out[s] = Σ amp·sin(2π·f·t + ph).
+
+struct AddParams { num_partials : u32, num_samples : u32, sample_rate : f32, t0 : f32 };
+
+@group(0) @binding(0) var<storage, read>       partials : array<f32>;
+@group(0) @binding(1) var<storage, read_write> out      : array<f32>;
+@group(0) @binding(2) var<uniform>             p        : AddParams;
+
+const TWO_PI : f32 = 6.2831853071795864;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let s = gid.x;
+    if (s >= p.num_samples) {
+        return;
+    }
+    let t = (p.t0 + f32(s)) / p.sample_rate;
+    var acc = 0.0;
+    for (var i = 0u; i < p.num_partials; i = i + 1u) {
+        let f  = partials[i * 3u];
+        let a  = partials[i * 3u + 1u];
+        let ph = partials[i * 3u + 2u];
+        acc = acc + a * sin(TWO_PI * f * t + ph);
+    }
+    out[s] = acc;
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 // Largest power-of-two complex FFT the GPU path accepts: keeps
@@ -236,6 +266,7 @@ public:
         complex_mul_pipeline_ = nullptr;
         conv_bmul_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
+        additive_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -724,6 +755,38 @@ public:
         return read_back(rb, c, cb);
     }
 
+    // ── Synthesis ──────────────────────────────────────────────────────────
+
+    bool additive_synth(const float* partials, float* out, uint32_t num_partials,
+                        uint32_t num_samples, float sample_rate, float t0_samples) override {
+        if (!initialized_ || partials == nullptr || out == nullptr) return false;
+        if (num_partials == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
+        if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
+            static_cast<uint64_t>(num_partials) > (1u << 22)) return false;
+
+        const uint32_t pbytes = num_partials * 3u * 4u;
+        const uint32_t obytes = num_samples * 4u;
+        auto p_buf = create_storage_buffer(pbytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto o_buf = create_storage_buffer(obytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto rb = create_readback_buffer(obytes);
+        wgpu::BufferDescriptor ud{};
+        ud.size = 16;
+        ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        auto u_buf = device_.CreateBuffer(&ud);
+        if (!p_buf || !o_buf || !rb || !u_buf) return false;
+
+        struct AddParams { uint32_t num_partials; uint32_t num_samples; float sample_rate; float t0; };
+        AddParams ap{num_partials, num_samples, sample_rate, t0_samples};
+        queue_.WriteBuffer(p_buf, 0, partials, pbytes);
+        queue_.WriteBuffer(u_buf, 0, &ap, sizeof(ap));
+
+        auto bg = create_bind_group(additive_pipeline_, {p_buf, o_buf, u_buf});
+        if (!bg) return false;
+        dispatch(additive_pipeline_, bg, (num_samples + 255u) / 256u);
+        copy_buffer(o_buf, rb, obytes);
+        return read_back(rb, out, obytes);
+    }
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     CapabilityReport capabilities() const override {
@@ -1067,6 +1130,7 @@ private:
     wgpu::ComputePipeline complex_mul_pipeline_;
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
     wgpu::ComputePipeline matmul_pipeline_;
+    wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -1156,6 +1220,9 @@ private:
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;
+
+        additive_pipeline_ = create_pipeline("additive_synth", kAdditiveSynthShader);
+        if (!additive_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
