@@ -115,6 +115,16 @@ public:
     /// called, args are invalid, or dispatch fails.
     virtual bool convolve(const float* in_complex, float* out_complex, uint32_t n) = 0;
 
+    /// Batched fused convolution: `batch` independent length-`n` blocks
+    /// convolved with the same resident IR, in ONE submit with ONE readback —
+    /// amortizing the dominant round-trip across all blocks. in/out hold
+    /// `batch` back-to-back interleaved-complex blocks (length 2*n*batch).
+    /// Returns false if prepare_convolution_batch(n, _, batch) was not called.
+    virtual bool prepare_convolution_batch(uint32_t n, const float* ir_spec,
+                                           uint32_t batch) = 0;
+    virtual bool convolve_batch(const float* in_complex, float* out_complex,
+                                uint32_t n, uint32_t batch) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

@@ -84,10 +84,10 @@ static constexpr const char* kFftStockhamShader = R"wgsl(
 // Transforms on GPUs" (Stockham radix-2 formulation).
 
 struct FftParams {
-    n    : u32,
-    ns   : u32,
-    sign : f32,
-    pad  : f32,
+    n     : u32,
+    ns    : u32,
+    sign  : f32,
+    batch : u32,   // number of independent transforms packed back-to-back
 };
 
 @group(0) @binding(0) var<storage, read>       src    : array<f32>;
@@ -96,19 +96,25 @@ struct FftParams {
 
 const PI : f32 = 3.1415926535897932;
 
+// Batched radix-2 Stockham pass. Each of `batch` transforms occupies a
+// contiguous n-complex span; thread tid maps to (transform b, butterfly j).
+// batch == 1 is bit-for-bit identical to the single-transform path.
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
-    let j = gid.x;
     let half = params.n / 2u;
-    if (j >= half) {
+    let tid = gid.x;
+    if (tid >= params.batch * half) {
         return;
     }
+    let b = tid / half;
+    let j = tid - b * half;
+    let base = b * params.n;   // complex-element offset of this transform
 
-    let v0_re = src[2u * j];
-    let v0_im = src[2u * j + 1u];
+    let v0_re = src[2u * (base + j)];
+    let v0_im = src[2u * (base + j) + 1u];
     let k = j + half;
-    let v1_re = src[2u * k];
-    let v1_im = src[2u * k + 1u];
+    let v1_re = src[2u * (base + k)];
+    let v1_im = src[2u * (base + k) + 1u];
 
     let angle = params.sign * 2.0 * PI * f32(j % params.ns) / f32(params.ns * 2u);
     let tw_re = cos(angle);
@@ -124,10 +130,38 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let y1_im = v0_im - u1_im;
 
     let idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
-    dst[2u * idxD]                   = y0_re;
-    dst[2u * idxD + 1u]              = y0_im;
-    dst[2u * (idxD + params.ns)]     = y1_re;
-    dst[2u * (idxD + params.ns) + 1u] = y1_im;
+    dst[2u * (base + idxD)]                   = y0_re;
+    dst[2u * (base + idxD) + 1u]              = y0_im;
+    dst[2u * (base + idxD + params.ns)]       = y1_re;
+    dst[2u * (base + idxD + params.ns) + 1u]  = y1_im;
+}
+)wgsl";
+
+static constexpr const char* kComplexMulBroadcastShader = R"wgsl(
+// Element-wise complex multiply with the second operand BROADCAST: result has
+// `batch` blocks of `ir` pairs; each block is multiplied by the same `ir`.
+// result[p] = a[p] * ir[p % ir_pairs]. (batch == 1 reduces to a plain multiply.)
+
+@group(0) @binding(0) var<storage, read>       a      : array<f32>;
+@group(0) @binding(1) var<storage, read>       ir     : array<f32>;
+@group(0) @binding(2) var<storage, read_write> result : array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let idx = gid.x;
+    let total = arrayLength(&result) / 2u;
+    if (idx >= total) {
+        return;
+    }
+    let ir_pairs = arrayLength(&ir) / 2u;
+    let ii = (idx % ir_pairs) * 2u;
+    let base = idx * 2u;
+    let a_re = a[base];
+    let a_im = a[base + 1u];
+    let b_re = ir[ii];
+    let b_im = ir[ii + 1u];
+    result[base]      = a_re * b_re - a_im * b_im;
+    result[base + 1u] = a_re * b_im + a_im * b_re;
 }
 )wgsl";
 
@@ -169,9 +203,11 @@ public:
         pool_.reset();
         fft_plans_.clear();
         conv_plans_.clear();
+        batch_conv_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
+        conv_bmul_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -450,7 +486,7 @@ public:
         // groups; both ping-pong starting from buf_a. Uniforms are constant per
         // pass, so write them once here.
         for (uint32_t s = 0; s < plan.log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; float pad; };
+            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
             const bool src_is_a = (s % 2u == 0u);
             for (int dir = 0; dir < 2; ++dir) {
                 const float sign = (dir == 0) ? -1.0f : 1.0f;
@@ -459,7 +495,7 @@ public:
                 ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
                 wgpu::Buffer u = device_.CreateBuffer(&ud);
                 if (!u) return false;
-                FftParams p{n, 1u << s, sign, 0.0f};
+                FftParams p{n, 1u << s, sign, 1u};
                 queue_.WriteBuffer(u, 0, &p, sizeof(p));
                 wgpu::BindGroup bg = create_bind_group(
                     fft_pipeline_,
@@ -521,6 +557,103 @@ public:
 
         const float inv = 1.0f / static_cast<float>(n);  // inverse-FFT normalization
         for (uint32_t i = 0; i < n * 2u; ++i) out_complex[i] *= inv;
+        return true;
+    }
+
+    bool prepare_convolution_batch(uint32_t n, const float* ir_spec, uint32_t batch) override {
+        if (!initialized_ || ir_spec == nullptr || batch == 0) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+        // Cap total packed size so batch*2*n*sizeof(float) stays within uint32_t
+        // and a sane storage-buffer budget (here batch*n <= kMaxFftN → ≤32 MiB).
+        if (static_cast<uint64_t>(batch) * n > kMaxFftN) return false;
+
+        BatchConvPlan plan;
+        plan.n = n;
+        plan.batch = batch;
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+
+        const uint32_t big = batch * n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t irb = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                      | wgpu::BufferUsage::CopySrc;
+        plan.buf_a = create_storage_buffer(big, sc);
+        plan.buf_b = create_storage_buffer(big, sc);
+        plan.buf_c = create_storage_buffer(big, sc);
+        plan.irspec = create_storage_buffer(irb,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.readback = create_readback_buffer(big);
+        if (!plan.buf_a || !plan.buf_b || !plan.buf_c || !plan.irspec || !plan.readback) {
+            return false;
+        }
+
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
+            const bool src_is_a = (s % 2u == 0u);
+            for (int dir = 0; dir < 2; ++dir) {
+                const float sign = (dir == 0) ? -1.0f : 1.0f;
+                wgpu::BufferDescriptor ud{};
+                ud.size = 16;
+                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+                wgpu::Buffer u = device_.CreateBuffer(&ud);
+                if (!u) return false;
+                FftParams p{n, 1u << s, sign, batch};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(
+                    fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.buf_a, plan.buf_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.buf_b, plan.buf_a, u});
+                if (!bg) return false;
+                if (dir == 0) { plan.fwd_u.push_back(std::move(u)); plan.fwd_bgs.push_back(std::move(bg)); }
+                else          { plan.inv_u.push_back(std::move(u)); plan.inv_bgs.push_back(std::move(bg)); }
+            }
+        }
+
+        wgpu::Buffer& fwd_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
+        plan.bmul_bg = create_bind_group(conv_bmul_pipeline_,
+                                         {fwd_buf, plan.irspec, plan.buf_c});
+        if (!plan.bmul_bg) return false;
+
+        queue_.WriteBuffer(plan.irspec, 0, ir_spec, irb);
+        batch_conv_plans_.insert_or_assign(n, std::move(plan));
+        return true;
+    }
+
+    bool convolve_batch(const float* in_complex, float* out_complex,
+                        uint32_t n, uint32_t batch) override {
+        if (!initialized_ || in_complex == nullptr || out_complex == nullptr) return false;
+        auto it = batch_conv_plans_.find(n);
+        if (it == batch_conv_plans_.end() || it->second.batch != batch) return false;
+        BatchConvPlan& plan = it->second;
+
+        const uint32_t big = batch * n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t fft_wg = ((batch * (n / 2u)) + 255u) / 256u;  // batched butterflies
+        const uint32_t mul_wg = ((batch * n) + 255u) / 256u;         // batched pairs
+
+        queue_.WriteBuffer(plan.buf_a, 0, in_complex, big);
+
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(conv_bmul_pipeline_);
+            pass.SetBindGroup(0, plan.bmul_bg);
+            pass.DispatchWorkgroups(mul_wg);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.buf_c, 0, plan.buf_a, 0, big);
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
+        encoder.CopyBufferToBuffer(inv_buf, 0, plan.readback, 0, big);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        if (!read_back(plan.readback, out_complex, big)) return false;
+
+        const float inv = 1.0f / static_cast<float>(n);
+        for (uint32_t i = 0; i < batch * n * 2u; ++i) out_complex[i] *= inv;
         return true;
     }
 
@@ -865,6 +998,7 @@ private:
 
     wgpu::ComputePipeline magnitude_pipeline_;
     wgpu::ComputePipeline complex_mul_pipeline_;
+    wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -914,6 +1048,21 @@ private:
     };
     std::unordered_map<uint32_t, ConvPlan> conv_plans_;
 
+    // Batched convolution plan: a/b/c/readback sized batch*2n, irspec resident
+    // (2n, broadcast). Forward/inverse uniforms carry batch=batch; the
+    // complex-mul uses the broadcast kernel. One submit + one readback covers
+    // all `batch` blocks. Keyed by n; rebuilt if the batch count changes.
+    struct BatchConvPlan {
+        uint32_t n = 0;
+        uint32_t log2n = 0;
+        uint32_t batch = 0;
+        wgpu::Buffer buf_a, buf_b, buf_c, irspec, readback;
+        std::vector<wgpu::Buffer> fwd_u, inv_u;
+        std::vector<wgpu::BindGroup> fwd_bgs, inv_bgs;
+        wgpu::BindGroup bmul_bg;
+    };
+    std::unordered_map<uint32_t, BatchConvPlan> batch_conv_plans_;
+
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
     // to eliminate allocator churn. Created lazily in create_pipelines().
@@ -933,6 +1082,9 @@ private:
 
         fft_pipeline_ = create_pipeline("fft_stockham", kFftStockhamShader);
         if (!fft_pipeline_) return false;
+
+        conv_bmul_pipeline_ = create_pipeline("conv_bmul", kComplexMulBroadcastShader);
+        if (!conv_bmul_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
@@ -1095,8 +1247,8 @@ private:
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         queue_.WriteBuffer(plan->buf_a, 0, complex_in, bytes);
         for (uint32_t s = 0; s < plan->log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; float pad; };
-            FftParams params{n, 1u << s, sign, 0.0f};
+            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
+            FftParams params{n, 1u << s, sign, 1u};
             queue_.WriteBuffer(plan->uniforms[s], 0, &params, sizeof(params));
         }
 

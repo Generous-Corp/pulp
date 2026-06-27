@@ -406,6 +406,123 @@ TEST_CASE("GpuCompute fused convolve vs 3-call readback cost",
                 N, fused_us, three_us, three_us / fused_us);
 }
 
+TEST_CASE("GpuCompute batched convolve matches single", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 256, B = 5;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        irspec[i * 2]     = 0.5f * std::cos(0.10f * i);
+        irspec[i * 2 + 1] = 0.3f * std::sin(0.07f * i);
+    }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    std::vector<float> in(N * 2 * B, 0.0f), out_batch(N * 2 * B, 0.0f);
+    for (uint32_t b = 0; b < B; ++b)
+        for (uint32_t i = 0; i < N; ++i)
+            in[(b * N + i) * 2] = std::sin(0.05f * (i + b * 7));
+
+    REQUIRE(compute->convolve_batch(in.data(), out_batch.data(), N, B));
+
+    // Each batched block must equal the same block run through single convolve().
+    for (uint32_t b = 0; b < B; ++b) {
+        std::vector<float> single(N * 2, 0.0f);
+        REQUIRE(compute->convolve(in.data() + b * N * 2, single.data(), N));
+        for (uint32_t i = 0; i < N * 2; ++i) {
+            REQUIRE(std::abs(out_batch[b * N * 2 + i] - single[i])
+                    < 1e-3f * (1.0f + std::abs(single[i])));
+        }
+    }
+
+    // Wrong batch count is rejected.
+    REQUIRE_FALSE(compute->convolve_batch(in.data(), out_batch.data(), N, B + 1));
+}
+
+TEST_CASE("GpuCompute batched convolve isolates batches", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 128, B = 4;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { irspec[i * 2] = 0.7f; irspec[i * 2 + 1] = -0.2f; }
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    // Only batch index 2 has a nonzero input (an impulse). With zero inputs in
+    // the other batches, any cross-transform bleed would show as nonzero output
+    // there.
+    std::vector<float> in(N * 2 * B, 0.0f), out(N * 2 * B, 0.0f);
+    in[(2u * N + 0u) * 2] = 1.0f;  // batch 2, sample 0, real
+    REQUIRE(compute->convolve_batch(in.data(), out.data(), N, B));
+
+    for (uint32_t b : {0u, 1u, 3u}) {
+        for (uint32_t i = 0; i < N * 2; ++i) {
+            REQUIRE(std::abs(out[b * N * 2 + i]) < 1e-4f);
+        }
+    }
+    double energy = 0.0;
+    for (uint32_t i = 0; i < N * 2; ++i) energy += std::abs(out[2u * N * 2 + i]);
+    REQUIRE(energy > 0.1);  // batch 2 actually produced output
+}
+
+TEST_CASE("GpuCompute convolve_batch B=1 equals single convolve", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 512;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        irspec[i * 2]     = 0.3f * std::cos(0.02f * i);
+        irspec[i * 2 + 1] = 0.4f * std::sin(0.03f * i);
+    }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), 1));
+
+    std::vector<float> in(N * 2), single(N * 2), batched(N * 2);
+    for (uint32_t i = 0; i < N; ++i) in[i * 2] = std::sin(0.05f * i);
+    REQUIRE(compute->convolve(in.data(), single.data(), N));
+    REQUIRE(compute->convolve_batch(in.data(), batched.data(), N, 1));
+    for (uint32_t i = 0; i < N * 2; ++i) {
+        REQUIRE(std::abs(batched[i] - single[i]) < 1e-4f * (1.0f + std::abs(single[i])));
+    }
+}
+
+TEST_CASE("GpuCompute batched convolve amortizes readback",
+          "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 2048, B = 16;
+    std::vector<float> irspec(N * 2, 0.0f);
+    for (uint32_t i = 0; i < N; ++i) { irspec[i * 2] = 0.4f; irspec[i * 2 + 1] = 0.1f; }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    std::vector<float> in(N * 2 * B), out(N * 2 * B), one(N * 2);
+    for (uint32_t i = 0; i < N * B; ++i) in[i * 2] = std::sin(0.01f * i);
+
+    constexpr int iters = 10;
+    compute->convolve_batch(in.data(), out.data(), N, B);  // warm
+
+    auto s0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it)
+        for (uint32_t b = 0; b < B; ++b) compute->convolve(in.data() + b * N * 2, one.data(), N);
+    auto s1 = std::chrono::high_resolution_clock::now();
+    const double single_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(s1 - s0).count() / 1000.0 / (iters * B);
+
+    auto b0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) compute->convolve_batch(in.data(), out.data(), N, B);
+    auto b1 = std::chrono::high_resolution_clock::now();
+    const double batch_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(b1 - b0).count() / 1000.0 / (iters * B);
+
+    std::printf("\n  Convolution (N=%u, batch=%u): single = %.1f us/block | "
+                "batched = %.1f us/block | speedup %.2fx\n",
+                N, B, single_us, batch_us, single_us / batch_us);
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
