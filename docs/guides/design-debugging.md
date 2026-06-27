@@ -174,10 +174,13 @@ Relevant local checks:
 
 ```bash
 for m in examples/design-tool/design-tool-*.js; do node --check "$m"; done
-ctest --test-dir build -R "Design tool:|WidgetBridge"
+cmake --build build --target pulp-test-design-debug-contracts
+ctest --test-dir build -R "design-debug|Design tool:|WidgetBridge"
 ./build/tools/design/pulp-design-debug --prompt "make the gain knob look like premium brushed aluminum" --target k1 --capture-backend live-gpu --response-file saved-response.json
 ```
 
-Those tests cover the prompt builder, provider/model selector behavior, debug-state
-capture, and the widget-restyling bridge APIs. The live-gpu command above is the
-best local smoke test when you want a report bundle from the actual GPU-backed app.
+The design-debug contract tests cover the prompt builder, provider/model selector
+behavior, debug-state capture, artifact reports, and response-file replay. The
+design-tool and WidgetBridge tests cover the widget-restyling bridge APIs. The
+live-gpu command above is the best local smoke test when you want a report bundle
+from the actual GPU-backed app.
