@@ -36,16 +36,44 @@ def _cmd_run_p0a(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run(args: argparse.Namespace) -> int:
+    if args.out_dir:
+        report = pipeline.run_and_export(args.degradation, args.out_dir,
+                                         latency_ms=args.latency_ms, smear_ms=args.smear_ms)
+    else:
+        report = pipeline.run(args.degradation,
+                              latency_ms=args.latency_ms, smear_ms=args.smear_ms)
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(json.dumps(report, indent=2))
+    print(f"[quality-lab] degradation={args.degradation} verdict={report['verdict']}")
+    for d in report["detectors"]:
+        flag = "FIRE" if d["fired"] else "ok"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+    if report.get("listening", {}).get("regions"):
+        print(f"  listening: {len(report['listening']['regions'])} region clip(s) in {args.out_dir}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab (P0a)")
+    p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    rp = sub.add_parser("run-p0a", help="run the P0a drum-break slice")
+    rp = sub.add_parser("run-p0a", help="run the P0a drum-break gate slice")
     rp.add_argument("--out", default="", help="write report.json to this path")
     rp.add_argument("--mode", choices=["good", "bad"], default="bad")
     rp.add_argument("--smear-ms", type=float, default=8.0, dest="smear_ms")
     rp.add_argument("--latency-ms", type=float, default=5.0, dest="latency_ms")
     rp.set_defaults(func=_cmd_run_p0a)
+
+    rn = sub.add_parser("run", help="run all detectors on a degradation; optionally export clips")
+    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz"], default="smear")
+    rn.add_argument("--out", default="", help="write report.json to this path")
+    rn.add_argument("--out-dir", default="", dest="out_dir",
+                    help="write reference/candidate WAVs + worst-region clip pairs here")
+    rn.add_argument("--smear-ms", type=float, default=8.0, dest="smear_ms")
+    rn.add_argument("--latency-ms", type=float, default=5.0, dest="latency_ms")
+    rn.set_defaults(func=_cmd_run)
 
     args = p.parse_args(argv)
     return args.func(args)

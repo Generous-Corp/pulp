@@ -35,6 +35,11 @@ pip install -r requirements.txt   # numpy + soundfile (both permissive); pytest 
 # from this directory
 python -m quality_lab.cli run-p0a --mode bad  --out report.json   # smeared candidate → FIRES + localizes
 python -m quality_lab.cli run-p0a --mode good                     # identity candidate → CLEAN
+
+# run all detectors on a degradation and EXPORT listenable artifacts:
+python -m quality_lab.cli run --degradation smear --out-dir out --out out/report.json
+# writes out/reference.wav, out/candidate.wav, and a ref/candidate clip PAIR around each
+# worst region (region-NN-<detector>-<t>.{ref,cand}.wav) so you can hear the artifact.
 ```
 
 ## Test

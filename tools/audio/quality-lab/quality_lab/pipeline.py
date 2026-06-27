@@ -80,34 +80,30 @@ def make_p0a_signals(smear: bool, latency_ms: float = 5.0, smear_ms: float = 8.0
     return make_signals("smear" if smear else "identity", latency_ms, smear_ms, case)
 
 
-def run(
-    degradation: str,
-    detectors: list[str] | None = None,
-    latency_ms: float = 5.0,
-    smear_ms: float = 8.0,
-    case: QualityCase = P0A_CASE,
-) -> dict[str, Any]:
-    """Run the pipeline (generate -> level-match -> align -> detect -> report)."""
+def _execute(degradation, detectors, latency_ms, smear_ms, case):
+    """Core pipeline shared by run() and run_and_export(): generate -> level-match ->
+    align -> detect. Returns everything the report (and artifact export) needs."""
     reference, candidate, sr, _ = make_signals(degradation, latency_ms, smear_ms, case)
     detectors = detectors or case.detector_tags
 
-    # Stage: level-match (rule #1) before any measurement.
-    candidate = audio_io.level_match(candidate, reference)
+    candidate = audio_io.level_match(candidate, reference)  # rule #1, before any measurement
 
-    # Stage: align (onset-map) — required because candidate carries latency.
     ref_onsets = align.detect_onsets(reference, sr)
     cand_onsets = align.detect_onsets(candidate, sr)
     pairs = align.map_onsets(ref_onsets, cand_onsets, len(reference) / sr, len(candidate) / sr)
 
-    # Stage: detect (each selected detector, independent).
     results = [_DETECTORS[name](reference, candidate, sr, pairs) for name in detectors]
 
-    # Stage: report.
     determinism = {
         "level_match": "rms",
         "alignment": case.alignment_policy,
         "onset_detector": {"win": 256, "hop": 128, "thresh_rel": 0.15},
         "sample_rate": sr,
+        "onset_match": {
+            "ref_onsets": len(ref_onsets),
+            "cand_onsets": len(cand_onsets),
+            "matched_pairs": len(pairs),
+        },
     }
     recipe = {
         "case": case.case_id,
@@ -117,21 +113,65 @@ def run(
         "latency_ms": latency_ms,
         "seed": case.params["seed"],
     }
-    # A "clean" verdict is only trustworthy if the detectors actually saw enough
-    # onsets. Low coverage (boundary skips, failed matches) reads UNCERTAIN, not CLEAN
-    # — a detector that measured nothing must never masquerade as a pass.
+    # A "clean" verdict is only trustworthy if the detectors saw enough onsets. Low
+    # coverage reads UNCERTAIN, not CLEAN — a detector that measured nothing must never
+    # masquerade as a pass.
     if any(r.fired for r in results):
         verdict = "FIRED"
     elif any(r.low_coverage for r in results):
         verdict = "UNCERTAIN"
     else:
         verdict = "CLEAN"
-    determinism["onset_match"] = {
-        "ref_onsets": len(ref_onsets),
-        "cand_onsets": len(cand_onsets),
-        "matched_pairs": len(pairs),
+    return {
+        "reference": reference,
+        "candidate": candidate,
+        "sr": sr,
+        "results": results,
+        "determinism": determinism,
+        "recipe": recipe,
+        "verdict": verdict,
     }
-    return build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
+
+
+def run(
+    degradation: str,
+    detectors: list[str] | None = None,
+    latency_ms: float = 5.0,
+    smear_ms: float = 8.0,
+    case: QualityCase = P0A_CASE,
+) -> dict[str, Any]:
+    """Run the pipeline (generate -> level-match -> align -> detect -> report)."""
+    x = _execute(degradation, detectors, latency_ms, smear_ms, case)
+    return build_report(
+        case, x["results"], provenance.build(x["recipe"], x["determinism"]),
+        x["determinism"], x["verdict"],
+    )
+
+
+def run_and_export(
+    degradation: str,
+    out_dir: str,
+    detectors: list[str] | None = None,
+    latency_ms: float = 5.0,
+    smear_ms: float = 8.0,
+    case: QualityCase = P0A_CASE,
+) -> dict[str, Any]:
+    """Run the pipeline AND write listenable artifacts to `out_dir`: full reference /
+    candidate WAVs, plus a short clip pair around each localized worst region so a
+    developer (or an audio-capable model) can hear exactly what's wrong. Adds a
+    `listening` block of relative paths to the report."""
+    from . import regions
+
+    x = _execute(degradation, detectors, latency_ms, smear_ms, case)
+    listening = regions.export_artifacts(
+        out_dir, x["reference"], x["candidate"], x["sr"], x["results"]
+    )
+    report = build_report(
+        case, x["results"], provenance.build(x["recipe"], x["determinism"]),
+        x["determinism"], x["verdict"],
+    )
+    report["listening"] = listening
+    return report
 
 
 def run_p0a(smear: bool, latency_ms: float = 5.0, smear_ms: float = 8.0,
