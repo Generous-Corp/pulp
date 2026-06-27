@@ -11,7 +11,7 @@
     },
     {
       "command": "cmake",
-      "expected_count": 15,
+      "expected_count": 12,
       "owner": "build-tooling",
       "reason": "CTest entries use the generic cmake command for mixed CMake, AU validator, install-layout, SDK guard, and Three.js capture checks. Command basename alone is not enough to infer product ownership.",
       "next_action": "Add script/test-name aware mapping or explicit module labels for each cmake-backed test before assigning them to modules."
@@ -25,7 +25,7 @@
     },
     {
       "command": "bash",
-      "expected_count": 9,
+      "expected_count": 8,
       "owner": "tooling-release",
       "reason": "Shell-backed tests span install, signing, MCP launcher, Spectr capture, workspace freshness, retry logic, GPU requirement checks, and auval coverage. The shell command is not a useful module signal.",
       "next_action": "Map shell-backed tests by script path/test name or replace generic shell commands with labelled CTest wrappers."
@@ -43,13 +43,6 @@
       "owner": "view-webcompat-import",
       "reason": "Spectr regressions appear view/WebCompat-adjacent, but they need explicit import/runtime guarantee wording before being absorbed by the broad view/UI module.",
       "next_action": "Review Spectr regression names and map each to a view/WebCompat guarantee or a separate import-regression capability."
-    },
-    {
-      "command": "<unknown>",
-      "expected_count": 2,
-      "owner": "build-tooling",
-      "reason": "These are NOT_BUILT placeholder CTest entries with no usable command. They should be handled as build/registration placeholders, not normal module coverage.",
-      "next_action": "Decide whether NOT_BUILT entries should stay registered, be labelled as disabled placeholders, or be excluded from module coverage accounting."
     },
     {
       "command": "pulp-test-headless",
@@ -78,6 +71,20 @@
       "owner": "view-platform",
       "reason": "This demo executable is a smoke/platform-view signal rather than a focused unit-test module contract.",
       "next_action": "Classify demo executable coverage as smoke/platform/view or replace it with narrower tests that state the product guarantee."
+    },
+    {
+      "command": "pulp-test-baked-graph-processor-parity",
+      "expected_count": 5,
+      "owner": "graph-bake-hosting",
+      "reason": "BakedGraphProcessor parity, refusal, and RT-safety coverage crosses graph execution, host baking, and processor ownership. It needs explicit module ownership before being mapped to one product area.",
+      "next_action": "Define whether graph baking belongs under graph scheduling, host/plugin assembly, or a dedicated graph-bake module, then map these tests by guarantee."
+    },
+    {
+      "command": "pulp-test-coreaudio-default-follow",
+      "expected_count": 1,
+      "owner": "macos-audio-device",
+      "reason": "The live CoreAudio default-device switch guard is hardware/env-gated and protects macOS standalone audio behavior, not a normal always-on module test lane.",
+      "next_action": "Classify this as platform/audio-device coverage with an explicit capability or move it to a manual hardware integration tier."
     }
   ]
 }
