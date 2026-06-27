@@ -16,9 +16,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <string>
+#include <thread>
 #include <vector>
 
 int main(int argc, char** argv) {
@@ -51,12 +53,18 @@ int main(int argc, char** argv) {
     ctx.max_buffer_size = BLOCK;
     proc.prepare(ctx);
 
-    // Push a few blocks of decaying noise so the spectrum bus has live content.
+    // Push blocks of decaying noise so the spectrum bus has live content. When
+    // capturing the GPU engine, pace the blocks at ~real-time (sleep one block's
+    // worth between calls) so the non-RT GPU worker gets the wall-clock gap it
+    // has in a live host — otherwise an offline rush reports misses that never
+    // happen in real time.
     std::uint32_t s = 0xC0FFEE11u;
     std::vector<float> l(BLOCK), r(BLOCK), ol(BLOCK), orr(BLOCK);
     midi::MidiBuffer min, mout;
     format::ProcessContext pctx;
-    for (int b = 0; b < 8; ++b) {
+    const bool pace = std::getenv("SC_GPU") != nullptr;
+    const int nblocks = pace ? 64 : 8;
+    for (int b = 0; b < nblocks; ++b) {
         for (int i = 0; i < BLOCK; ++i) {
             s = s * 1664525u + 1013904223u;
             const float white = static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
@@ -67,6 +75,8 @@ int main(int argc, char** argv) {
         audio::BufferView<const float> in(inp, 2, BLOCK);
         audio::BufferView<float> ob(outp, 2, BLOCK);
         proc.process(ob, in, min, mout, pctx);
+        if (pace) std::this_thread::sleep_for(
+            std::chrono::microseconds(static_cast<long>(BLOCK / SR * 1e6)));
     }
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
