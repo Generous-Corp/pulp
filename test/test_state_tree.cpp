@@ -2159,3 +2159,94 @@ TEST_CASE("StateTree non-reentrant listener and child notifications still fire",
     REQUIRE(added_calls == 1);
     REQUIRE(removed_calls == 1);
 }
+
+TEST_CASE("StateTree sole self-removing listener with a heap capture is safe",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int self_id = -1;
+    // A heap-sized capture defeats std::function's small-object optimization,
+    // so removing the listener mid-callback frees the closure body. The
+    // running lambda reads the capture AFTER removing itself: a copy of the
+    // executing std::function must keep that memory alive.
+    std::string payload(256, 'x');
+    int calls = 0;
+    char observed = 0;
+
+    self_id = t->add_listener(
+        [&, payload](StateTree& node, std::string_view,
+                     const PropertyValue&, const PropertyValue&) {
+            ++calls;
+            node.remove_listener(self_id);   // frees this closure on the slow path
+            observed = payload.empty() ? '!' : payload.back();  // read after free?
+        });
+
+    REQUIRE_NOTHROW(t->set("k", int64_t(1)));
+    REQUIRE(calls == 1);
+    REQUIRE(observed == 'x');
+    // Listener removed itself; a second set fires nothing.
+    t->set("k", int64_t(2));
+    REQUIRE(calls == 1);
+}
+
+// ── ObservableValue re-entrancy safety ──────────────────────────────────
+
+TEST_CASE("ObservableValue listener removing a sibling during set is not "
+          "invoked for it",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int a_calls = 0;
+    int b_calls = 0;
+    int b_id = -1;
+
+    v.add_listener([&](const int&, const int&) {
+        ++a_calls;
+        v.remove_listener(b_id);
+    });
+    b_id = v.add_listener([&](const int&, const int&) { ++b_calls; });
+
+    v.set(1);
+    REQUIRE(a_calls == 1);
+    REQUIRE(b_calls == 0);
+}
+
+TEST_CASE("ObservableValue sole self-removing listener with a heap capture is "
+          "safe",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int self_id = -1;
+    std::string payload(256, 'y');
+    int calls = 0;
+    char observed = 0;
+
+    self_id = v.add_listener([&, payload](const int&, const int&) {
+        ++calls;
+        v.remove_listener(self_id);
+        observed = payload.empty() ? '!' : payload.back();
+    });
+
+    REQUIRE_NOTHROW(v.set(1));
+    REQUIRE(calls == 1);
+    REQUIRE(observed == 'y');
+    v.set(2);
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("ObservableValue listener added during set is not called for the "
+          "in-flight set",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int late_calls = 0;
+    bool added = false;
+
+    v.add_listener([&](const int&, const int&) {
+        if (!added) {
+            added = true;
+            v.add_listener([&](const int&, const int&) { ++late_calls; });
+        }
+    });
+
+    v.set(1);
+    REQUIRE(late_calls == 0);
+    v.set(2);
+    REQUIRE(late_calls == 1);
+}

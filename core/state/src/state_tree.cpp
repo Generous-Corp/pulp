@@ -184,8 +184,12 @@ void StateTree::notify_property_changed(std::string_view name,
                                         const PropertyValue& old_val,
                                         const PropertyValue& new_val) {
     if (listeners_.size() == 1) {
-        auto& e = listeners_.front();
-        if (e.fn) e.fn(*this, name, old_val, new_val);
+        // Copy the callable before invoking: a sole listener that removes
+        // itself mid-callback would otherwise free the std::function whose
+        // body is still executing (heap-use-after-free for heap-captured
+        // callables). The copy keeps the executing closure alive.
+        auto fn = listeners_.front().fn;
+        if (fn) fn(*this, name, old_val, new_val);
         return;
     }
     auto snapshot = listeners_;
@@ -200,8 +204,9 @@ void StateTree::notify_property_changed(std::string_view name,
 
 void StateTree::notify_child_added(StateTree& child, int index) {
     if (child_added_listeners_.size() == 1) {
-        auto& e = child_added_listeners_.front();
-        if (e.second) e.second(*this, child, index);
+        // Copy before invoking — see notify_property_changed for why.
+        auto fn = child_added_listeners_.front().second;
+        if (fn) fn(*this, child, index);
         return;
     }
     auto snapshot = child_added_listeners_;
@@ -216,8 +221,9 @@ void StateTree::notify_child_added(StateTree& child, int index) {
 
 void StateTree::notify_child_removed(StateTree& child, int index) {
     if (child_removed_listeners_.size() == 1) {
-        auto& e = child_removed_listeners_.front();
-        if (e.second) e.second(*this, child, index);
+        // Copy before invoking — see notify_property_changed for why.
+        auto fn = child_removed_listeners_.front().second;
+        if (fn) fn(*this, child, index);
         return;
     }
     auto snapshot = child_removed_listeners_;
