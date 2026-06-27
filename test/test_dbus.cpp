@@ -205,13 +205,11 @@ TEST_CASE("DBus object-server honest-fails without a bus",
 TEST_CASE("DBus connect_a11y_bus honest-fails without an a11y daemon",
           "[platform][dbus][objectserver][a11y][issue-L7a2]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
     DBus bus;
     if (!bus.connect_session()) {
-        SUCCEED("skipped: no session bus (run under dbus-run-session)");
-        return;
+        SKIP("no session bus (run under dbus-run-session)");
     }
     REQUIRE(bus.connected());
     REQUIRE_FALSE(bus.a11y_connected());
@@ -224,7 +222,6 @@ TEST_CASE("DBus connect_a11y_bus honest-fails without an a11y daemon",
         // contract still holds — the active connection is now the a11y bus.
         REQUIRE(bus.a11y_connected());
         REQUIRE(bus.connected());
-        SUCCEED("a11y bus reachable: switched over");
         return;
     }
     // Honest-fail path: declined, but the session connection is untouched.
@@ -287,15 +284,13 @@ struct RawClient {
 TEST_CASE("DBus object-server loopback round-trips a method call",
           "[platform][dbus][objectserver][issue-L7a1][linux]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
 
     // Server connection: exports /pulp/test answering Echo(s)->s and Fail()->error.
     DBus server;
     if (!server.connect_session()) {
-        SUCCEED("skipped: no session bus (run under dbus-run-session)");
-        return;
+        SKIP("no session bus (run under dbus-run-session)");
     }
     REQUIRE(server.connected());
     const std::string server_name = server.unique_name();
@@ -396,7 +391,7 @@ TEST_CASE("DBus object-server loopback round-trips a method call",
 #else  // ── object-server loopback: Linux-only runtime; stub elsewhere ────────
 TEST_CASE("DBus object-server loopback round-trips a method call",
           "[platform][dbus][objectserver][issue-L7a1]") {
-    SUCCEED("D-Bus object server is a Linux-only runtime backend");
+    SKIP("D-Bus object server is a Linux-only runtime backend");
 }
 #endif
 
@@ -409,15 +404,13 @@ TEST_CASE("DBus object-server loopback round-trips a method call",
 TEST_CASE("DBus signal subscription receives a matching broadcast",
           "[platform][dbus][system][signal][issue-3801][linux]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
 
     DBus subscriber;
     DBus emitter;
     if (!subscriber.connect_session() || !emitter.connect_session()) {
-        SUCCEED("skipped: no session bus (run under dbus-run-session)");
-        return;
+        SKIP("no session bus (run under dbus-run-session)");
     }
     REQUIRE(subscriber.connected());
     REQUIRE(emitter.connected());
@@ -488,15 +481,13 @@ TEST_CASE("DBus signal subscription receives a matching broadcast",
 TEST_CASE("DBus get_managed_objects walks a mock ObjectManager reply",
           "[platform][dbus][system][objectmanager][issue-3801][linux]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
 
     DBus server;
     DBus client;
     if (!server.connect_session() || !client.connect_session()) {
-        SUCCEED("skipped: no session bus (run under dbus-run-session)");
-        return;
+        SKIP("no session bus (run under dbus-run-session)");
     }
     const std::string server_name = server.unique_name();
     REQUIRE_FALSE(server_name.empty());
@@ -587,12 +578,10 @@ TEST_CASE("Linux portal backend honest-fails when no portal is running",
     // Gated on PULP_TEST_LINUX_PORTAL_ABSENT so we never raise a real (blocking)
     // dialog on a portal-equipped developer desktop. The tartci VM sets it.
     if (std::getenv("PULP_TEST_LINUX_PORTAL_ABSENT") == nullptr) {
-        SUCCEED("skipped: set PULP_TEST_LINUX_PORTAL_ABSENT on a host without xdg-desktop-portal");
-        return;
+        SKIP("set PULP_TEST_LINUX_PORTAL_ABSENT on a host without xdg-desktop-portal");
     }
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
 
     FileDialog::clear_backend();

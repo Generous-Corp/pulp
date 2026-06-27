@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-font-gpu-skip-report.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-dbus-skip-report.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 388,
+    "succeed": 376,
     "require_true": 16,
-    "skip": 423
+    "skip": 434
   },
   "classifications": {
-    "needs-review": 713,
+    "needs-review": 722,
     "placeholder": 4,
-    "skip-as-pass": 94,
+    "skip-as-pass": 84,
     "unconditional-true": 16
   },
   "notes": [

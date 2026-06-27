@@ -1955,7 +1955,7 @@ catch_discover_tests(pulp-test-clipboard
 pulp_add_test_suite(pulp-test-file-dialog LIBRARIES pulp::platform)
 
 # D-Bus client + Linux xdg-desktop-portal file-dialog backend (#301 / L6)
-pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
 
 # Platform tests
 pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
