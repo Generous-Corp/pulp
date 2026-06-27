@@ -47,6 +47,22 @@ functions:
       - VERSION
     docs: reference/cmake.md#pulp_add_app
 
+  - name: pulp_app_icon
+    status: usable
+    summary: Attach app icon assets to a standalone application or generated app bundle target.
+    required:
+      - target
+    optional:
+      - SOURCE
+      - MACOS
+      - WINDOWS
+      - IOS
+      - ANDROID
+      - LINUX
+      - DEBUG_ICON
+      - RELEASE_ICON
+    docs: reference/cmake.md#pulp_app_icon
+
   - name: pulp_use_kit_ui
     status: experimental
     summary: Attach reviewed UI-kit script, optional token/theme file, and reviewed asset roots from a generated kit interface target to an existing plugin's format targets.
