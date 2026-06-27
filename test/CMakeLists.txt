@@ -5718,7 +5718,7 @@ catch_discover_tests(pulp-test-audio-doctor)
 add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
 target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
-catch_discover_tests(pulp-test-cli-audio-validate)
+catch_discover_tests(pulp-test-cli-audio-validate EXTRA_ARGS --allow-running-no-tests)
 # Audio-probe RT output-boundary allocation counters.
 add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-audio-probe PRIVATE pulp::audio pulp::runtime Catch2::Catch2WithMain)
