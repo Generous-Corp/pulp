@@ -470,7 +470,9 @@ The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative
 
 ## Legacy: pulp ci-local
 
-`tools/local-ci/local_ci.py` is the previous CI controller. It remains available as a fallback but is scheduled for removal (see issue #120).
+`tools/local-ci/local_ci.py` is the previous CI controller. It remains
+available as a fallback while the Shipyard path finishes replacing it, but it
+is scheduled for removal.
 
 ## TL;DR
 
@@ -647,8 +649,8 @@ Important constraints in the current phase:
 
 ## Fast-CI vs full-CI (`build.yml`)
 
-Issue #1589 split the `Build and Test` workflow into two test
-trajectories without forking the YAML:
+The `Build and Test` workflow has two test trajectories without forking the
+YAML:
 
 - **Fast-CI** runs on `pull_request` events. The ctest invocation
   excludes BOTH the `validation` and `slow` CTest labels, dropping the
@@ -787,9 +789,9 @@ The three macOS sanitizers (ASan/TSan/UBSan) carry a `--deny-labels
 pulp-build,pulp-build-vm` guard in `sanitizers.yml`'s resolver, so a
 sanitizer can **never** be misrouted onto the required-gate pool (the
 resolver hard-fails). They no longer read `PULP_NAMESPACE_BUILD_MACOS_*`
-either — the per-sanitizer var is the single switch (#4101).
+either; the per-sanitizer variable is the single switch.
 
-**Capacity finding (#4101) — localize at most one, and only TSan.**
+**Capacity finding: localize at most one sanitizer, and only TSan.**
 macOS allows only **two running macOS guests per host** (Apple's limit),
 and both belong to the required `macos` build gate. A local sanitizer VM
 is a *third* guest, so localizing is gated on the **tartci idle-gate**:
@@ -1642,6 +1644,9 @@ Launch behavior:
 - Repo-local executable paths in the first command token are rewritten into the prepared root automatically.
 - The current exact-SHA workflow is a `--command` lane. Do not assume `--bundle-id` participates in exact-SHA source preparation.
 
+`pulp-ui-preview` is currently Apple-desktop-only, so the Linux and Windows
+source-build examples below use the cross-platform PulpGain standalone target.
+
 Examples:
 
 ```bash
@@ -1653,23 +1658,19 @@ pulp ci-local desktop inspect mac \
   --prepare-command 'cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target pulp-ui-preview' \
   --pulp-app-automation
 
-# Ubuntu xvfb exact-SHA click
-pulp ci-local desktop click ubuntu \
-  --command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' \
-  --click-view-id bypass-toggle \
-  --capture-ui-snapshot \
+# Ubuntu xvfb exact-SHA smoke against a Linux-supported standalone
+pulp ci-local desktop smoke ubuntu \
+  --command './build-desktop-automation/examples/pulp-gain/PulpGain' \
   --source-mode exact-sha \
   --sha <commit-sha> \
-  --prepare-command 'cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target pulp-ui-preview' \
-  --pulp-app-automation
+  --prepare-command 'cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target PulpGain_Standalone'
 
 # Windows session-agent exact-SHA smoke
 pulp ci-local desktop smoke windows \
-  --command '.\\build-desktop-automation\\examples\\ui-preview\\pulp-ui-preview.exe' \
+  --command '.\\build-desktop-automation\\examples\\pulp-gain\\Debug\\PulpGain.exe' \
   --source-mode exact-sha \
   --sha <commit-sha> \
-  --prepare-command 'cmake -S . -B build-desktop-automation -G \"Visual Studio 17 2022\"; cmake --build build-desktop-automation --target pulp-ui-preview --config Debug' \
-  --pulp-app-automation
+  --prepare-command 'cmake -S . -B build-desktop-automation -G \"Visual Studio 17 2022\"; cmake --build build-desktop-automation --target PulpGain_Standalone --config Debug'
 
 # Windows generic live inspect
 pulp ci-local desktop inspect windows \
