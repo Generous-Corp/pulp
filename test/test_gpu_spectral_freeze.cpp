@@ -1,20 +1,20 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/gpu_audio/gpu_spectral_freeze.hpp>
-#include <pulp/signal/fft.hpp>
+
+#include "support/gpu_audio_test_helpers.hpp"
 
 #include <cmath>
-#include <complex>
 #include <vector>
 
 using namespace pulp::gpu_audio;
+using namespace pulp::gpu_audio_test;
 
-TEST_CASE("GpuSpectralFreeze sustains the captured spectrum", "[gpu_audio][spectral][gpu]") {
-    constexpr uint32_t FFT = 512;
-    constexpr uint32_t K0 = 20;  // sine at an integer bin → clean capture
+TEST_CASE("GpuSpectralFreeze sustains pitch with an evolving phase", "[gpu_audio][spectral][gpu]") {
+    constexpr uint32_t FFT = 512, HOP = 128, K0 = 21;  // K0 not a multiple of 4 → phase evolves
 
     GpuSpectralFreeze fz;
-    REQUIRE(fz.prepare(FFT));
+    REQUIRE(fz.prepare(FFT, HOP));
     if (!fz.gpu_available()) return;
 
     std::vector<float> frame(FFT);
@@ -28,31 +28,47 @@ TEST_CASE("GpuSpectralFreeze sustains the captured spectrum", "[gpu_audio][spect
     REQUIRE(fz.render(out1.data()));
     REQUIRE(fz.render(out2.data()));
 
-    // Deterministic sustain: the same frozen spectrum renders identically.
-    for (uint32_t i = 0; i < FFT; ++i) REQUIRE(std::abs(out1[i] - out2[i]) < 1e-6f);
+    // The freeze sustains the captured frequency across hops...
+    REQUIRE(peak_bin(out1) == K0);
+    REQUIRE(peak_bin(out2) == K0);
 
-    // The rendered frame carries real energy and its dominant frequency is K0.
-    double energy = 0.0;
-    for (uint32_t i = 0; i < FFT; ++i) energy += std::abs(out1[i]);
-    REQUIRE(energy > 1.0);
-
-    std::vector<std::complex<float>> spec(FFT);
-    for (uint32_t i = 0; i < FFT; ++i) spec[i] = std::complex<float>(out1[i], 0.0f);
-    pulp::signal::Fft fft(static_cast<int>(FFT));
-    fft.forward(spec.data());
-
-    uint32_t peak = 0;
-    float peak_mag = 0.0f;
-    for (uint32_t k = 1; k < FFT / 2; ++k) {
-        const float m = std::abs(spec[k]);
-        if (m > peak_mag) { peak_mag = m; peak = k; }
+    // ...while the phase-vocoder advance makes successive frames evolve (a
+    // seamless loop, not a static repeat) and carry real energy.
+    double diff = 0.0, energy = 0.0;
+    for (uint32_t i = 0; i < FFT; ++i) {
+        diff += std::abs(out1[i] - out2[i]);
+        energy += std::abs(out1[i]);
     }
-    REQUIRE(peak == K0);
+    REQUIRE(energy > 1.0);
+    REQUIRE(diff > 0.01 * energy);
+}
+
+TEST_CASE("GpuSpectralFreeze jitter stays real and on-pitch", "[gpu_audio][spectral][gpu]") {
+    // Phase jitter is applied conjugate-symmetrically; a broken pairing would
+    // make the spectrum non-Hermitian and the real-part output collapse/corrupt.
+    constexpr uint32_t FFT = 512, HOP = 128, K0 = 21;
+    GpuSpectralFreeze fz;
+    REQUIRE(fz.prepare(FFT, HOP));
+    if (!fz.gpu_available()) return;
+
+    std::vector<float> frame(FFT);
+    for (uint32_t i = 0; i < FFT; ++i)
+        frame[i] = std::sin(2.0f * 3.14159265f * K0 * i / FFT);
+    REQUIRE(fz.capture(frame.data()));
+
+    std::vector<float> out(FFT);
+    for (int r = 0; r < 4; ++r) REQUIRE(fz.render(out.data(), /*phase_jitter=*/0.5f));
+
+    // Energy preserved (no Hermitian-break collapse) and pitch still dominant.
+    double energy = 0.0;
+    for (uint32_t i = 0; i < FFT; ++i) energy += std::abs(out[i]);
+    REQUIRE(energy > 1.0);
+    REQUIRE(peak_bin(out) == K0);
 }
 
 TEST_CASE("GpuSpectralFreeze render before capture fails", "[gpu_audio][spectral][gpu]") {
     GpuSpectralFreeze fz;
-    REQUIRE(fz.prepare(256));
+    REQUIRE(fz.prepare(256, 128));
     if (!fz.gpu_available()) return;
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(fz.render(out.data()));
