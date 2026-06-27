@@ -151,13 +151,26 @@ formats when their SDK/header dependencies are enabled.
 
 ### Linux Packages
 
-`pulp ship package` does not currently provide `.deb`, `.tar.gz`, or AppImage
-generation on Linux. Build artifacts are produced by CMake; package them with
-your distribution tooling or archive the format bundles directly.
+After `pulp build`, `pulp ship package --version <version>` packages the built
+VST3, CLAP, and LV2 bundles from `build/{VST3,CLAP,LV2}` as a `.deb` in
+`artifacts/` using `dpkg-deb`. If `dpkg-deb` is not available, the command
+falls back to a `.tar.gz` archive of the available plugin format directories.
+
+If no VST3, CLAP, or LV2 bundles are present, the Linux package path fails
+instead of creating an empty artifact summary.
 
 ### AppImage
 
-Pulp does not currently generate AppImage bundles.
+Standalone Linux apps can be wrapped as AppImage bundles by passing the built
+executable explicitly:
+
+```bash
+pulp ship package --version 1.0.0 --format appimage \
+  --binary build/examples/myapp/MyApp_Standalone
+```
+
+The AppImage path requires `appimagetool` on `PATH`. It packages standalone
+executables only; plugins ship through the `.deb` or `.tar.gz` package path.
 
 ## CI/CD (GitHub Actions)
 
