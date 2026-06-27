@@ -3,19 +3,19 @@
 /// @file host_quirks/cubase.hpp
 /// Per-host quirks for Steinberg Cubase + Nuendo (treated identically).
 ///
-/// Cubase 10 vintage — DAW-quirks rows 1, 2, 3 (macOS plan item 5.2):
+/// Cubase 10 vintage — DAW-quirks rows 1, 2, 3:
 ///   * row 1: async window resize after `IPlugView::onSize()` returns.
 ///   * row 2: parameter automation ordering — value-set must precede
 ///     gesture-edit notification within the same dispatch cycle.
 ///   * row 3: integer-rounded `setContentScaleFactor()` requires
 ///     plugin-side residual correction on fractional-DPI displays.
 ///
-/// Cubase 9 vintage — DAW-quirks row 4 (macOS plan item 5.3):
+/// Cubase 9 vintage — DAW-quirks row 4:
 ///   * row 4: state-blob stream reports the wrong size; the adapter
 ///     must validate the actual read count rather than trusting the
 ///     host-reported size.
 ///
-/// Cubase 13+ vintage — 2026-05-26 iPlug2-audit batch (Pulp #3047):
+/// Cubase 13+ vintage — VST3 MIDI CC parameter-ID stability:
 ///   * MIDI CC parameter IDs must stay stable across project reloads;
 ///     Cubase 12 was forgiving but Cubase 13 binds automation lanes
 ///     to the IDs at save-time. Plug-ins that synthesize CC IDs from
@@ -58,15 +58,15 @@ inline void apply_cubase(HostQuirks& q, HostVersion v) {
     if (v.is_at_least(9, 0) && v.is_before(10, 0)) {
         q.cubase9_state_blob_size_validation = true;
     }
-    // 2026-05-26 iPlug2-audit batch (Pulp #3047) — Cubase 13+ tightened
-    // its handling of VST3 MIDI CC parameter IDs: project automation
-    // lanes are bound to the parameter IDs at save-time and the host
-    // refuses to re-map them on reload. Plug-ins that synthesize CC
-    // parameter IDs from dynamic state (e.g. preset-driven parameter
-    // counts) will see automation lanes orphaned on the 13.x line. The
-    // VST3 adapter must derive CC parameter IDs from a stable hash
-    // (not the runtime parameter index) when this flag is set. Cubase
-    // 12 was forgiving so the flag stays off on 12.x and earlier.
+    // Cubase 13+ tightened its handling of VST3 MIDI CC parameter IDs:
+    // project automation lanes are bound to the parameter IDs at
+    // save-time and the host refuses to re-map them on reload. Plug-ins
+    // that synthesize CC parameter IDs from dynamic state (e.g.
+    // preset-driven parameter counts) will see automation lanes
+    // orphaned on the 13.x line. The VST3 adapter must derive CC
+    // parameter IDs from a stable hash (not the runtime parameter
+    // index) when this flag is set. Cubase 12 was forgiving so the flag
+    // stays off on 12.x and earlier.
     if (v.is_at_least(13, 0)) {
         q.cubase13_midi_cc_param_id_stable = true;
     }

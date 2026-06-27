@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file host_quirks/logic_pro.hpp
-/// Per-host quirks for Apple Logic Pro + GarageBand (macOS plan
-/// item 5.10).
+/// Per-host quirks for Apple Logic Pro + GarageBand.
 ///
 /// DAW-quirks rows 19 + 20 (AU v1 / v2):
 ///   * row 19: Logic hangs when the AU plugin probes for more than 8

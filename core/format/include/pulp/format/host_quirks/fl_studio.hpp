@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/fl_studio.hpp
-/// Per-host quirks for Image-Line FL Studio (macOS plan item 5.7).
+/// Per-host quirks for Image-Line FL Studio.
 ///
 /// DAW-quirks rows 13 + 14 (VST3):
 ///   * row 13: FL's Patcher routing layer violates the VST3 activation

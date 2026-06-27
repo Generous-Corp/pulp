@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/pro_tools.hpp
-/// Per-host quirks for Avid Pro Tools (macOS plan item 5.9).
+/// Per-host quirks for Avid Pro Tools.
 ///
 /// Pro Tools is the lone AAX host in Pulp's catalog, and AAX is a
 /// developer-supplied SDK lane (`PULP_AAX_SDK` is opt-in). The flags
@@ -34,7 +34,7 @@
 ///   when declaring sidechain support. The AAX adapter presents only a
 ///   mono variant in its descriptor when sidechain is declared.
 ///
-/// Plus the iPlug2-audit lesson layered on top:
+/// Plus the vendor-version-unknown lesson layered on top:
 ///
 /// * `aax_vendor_version_unknown` — the AAX wrapper does not reliably
 ///   surface its host vendor version through the AAX specification
@@ -55,15 +55,15 @@
 /// ## Tier status
 ///
 /// All three AAX-quirk rows (16-18) are tagged `Speculative` in
-/// `HostQuirksMeta` as of this header extraction: they are documented
+/// `HostQuirksMeta`: they are documented
 /// from Avid AAX documentation + reproducer reports, with per-symptom
 /// isolation tests in `test/test_host_quirks.cpp` pinning the dispatch
 /// — but the in-DAW bench evidence (driving real Pro Tools sessions
 /// through Pulp's AAX adapter) is still pending and is itself gated on
 /// the Avid SDK being present. Promote to `Validated` when the bench
 /// rows ship under `PULP_AAX_SDK`. `aax_vendor_version_unknown`
-/// remains `LessonOnly` since it ships as a 2026-05-25 iPlug2-audit
-/// catalog lesson without an in-tree bench yet.
+/// remains `LessonOnly` since it ships as a catalog lesson without
+/// an in-tree bench yet.
 ///
 /// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.9
 /// docs=Avid AAX SDK documentation (developer-supplied; opt-in lane)
@@ -91,9 +91,9 @@ inline void apply_pro_tools(HostQuirks& q, HostVersion /*v*/) {
 }
 
 /// Populate the AAX vendor-version-unknown lesson onto `q`. Layered on
-/// top of `apply_pro_tools(...)` so the iPlug2-audit lesson can stay
-/// at a different validation tier (LessonOnly today) without changing
-/// the rest of the Pro Tools dispatch (Speculative).
+/// top of `apply_pro_tools(...)` so the vendor-version-unknown lesson
+/// can stay at a different validation tier (LessonOnly today) without
+/// changing the rest of the Pro Tools dispatch (Speculative).
 inline void apply_pro_tools_aax_vendor_version_unknown(HostQuirks& q,
                                                       HostVersion /*v*/) {
     q.aax_vendor_version_unknown = true;

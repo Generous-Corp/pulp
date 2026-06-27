@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/auv3_cross_host.hpp
-/// AU v3 cross-host quirks (macOS plan item 5.11).
+/// AU v3 cross-host quirks.
 ///
 /// DAW-quirks rows 21 + 22 — these are not specific to any single AU v3
 /// host; they're contract-level accommodations every AU v3 wrapper

@@ -31,11 +31,10 @@
 ///
 /// ## Tier status
 ///
-/// `LessonOnly` as of the 2026-05-26 iPlug2-audit batch — documented
-/// from Steinberg's VST3 SDK + MOTU Digital Performer Plug-Ins Guide,
-/// no in-tree bench yet. Promote to `Speculative` after the
-/// per-symptom isolation tests ship; promote to `Validated` after
-/// Digital Performer bench evidence lands.
+/// `LessonOnly` — documented from Steinberg's VST3 SDK + MOTU Digital
+/// Performer Plug-Ins Guide, no in-tree bench yet. Promote to
+/// `Speculative` after the per-symptom isolation tests ship; promote to
+/// `Validated` after Digital Performer bench evidence lands.
 ///
 /// **Reference-Lineage**: cleanroom reproducer=#3046
 /// docs=https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Workflow+Diagrams/Edit+Controller+Call+Sequence.html

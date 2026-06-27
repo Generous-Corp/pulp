@@ -33,9 +33,9 @@
 ///
 /// ## Tier status
 ///
-/// `LessonOnly` as of the 2026-05-26 iPlug2-audit batch — documented
-/// from Steinberg's VST3 SDK threading contract + PreSonus user-forum
-/// reports, no in-tree bench yet. Promote to `Speculative` after the
+/// `LessonOnly` — documented from Steinberg's VST3 SDK threading
+/// contract + PreSonus user-forum reports, no in-tree bench yet.
+/// Promote to `Speculative` after the
 /// per-symptom isolation tests ship; promote to `Validated` after
 /// Studio One bench evidence lands.
 ///

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/bitwig.hpp
-/// Per-host quirks for Bitwig Studio (macOS plan item 5.5).
+/// Per-host quirks for Bitwig Studio.
 ///
 /// DAW-quirks rows 8 + 9 (VST3):
 ///   * row 8: on Linux / BSD, Bitwig does not auto-invalidate after a

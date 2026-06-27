@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/ableton_live.hpp
-/// Per-host quirks for Ableton Live (macOS plan item 5.4).
+/// Per-host quirks for Ableton Live.
 ///
 /// DAW-quirks rows 5 + 6 (VST3):
 ///   * row 5: Live calls `checkSizeConstraint()` even when the plugin

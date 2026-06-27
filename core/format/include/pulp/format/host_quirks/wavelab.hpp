@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file host_quirks/wavelab.hpp
-/// Per-host quirks for Steinberg Wavelab (macOS plan item 5.6).
+/// Per-host quirks for Steinberg Wavelab.
 ///
 /// DAW-quirks rows 10 + 11 (VST3):
 ///   * row 10: Wavelab 11.1+ calls `setBusArrangements()` re-entrantly

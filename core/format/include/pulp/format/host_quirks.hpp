@@ -302,9 +302,9 @@ struct HostQuirksMeta {
     QuirkStatus au_v3_bypass_dual_tracking = QuirkStatus::Speculative;
     QuirkStatus au_v3_host_id_from_wrapper = QuirkStatus::Speculative;
 
-    // Documented from each host's vendor docs + reproducer issue (Pulp
-    // #3044 / #3045 / #3046 / #3047), no in-tree bench yet →
-    // LessonOnly. Cubase 13+ MIDI CC ID stability lands as Speculative
+    // Documented from each host's vendor docs + a reproducer issue, no
+    // in-tree bench yet → LessonOnly. Cubase 13+ MIDI CC ID stability
+    // lands as Speculative
     // because it has a per-host header + per-symptom isolation test,
     // mirroring the rest of the Cubase rows.
     QuirkStatus reaper_auv3_in_process_preferred_size_sync = QuirkStatus::LessonOnly;

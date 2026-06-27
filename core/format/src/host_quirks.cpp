@@ -108,10 +108,10 @@ void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
     // Layer the keyboard-only-space lesson on top so its LessonOnly
     // tier can evolve independently of the rest of the REAPER dispatch.
     host_quirks::apply_reaper_keyboard(q, v);
-    // Pulp #3044: REAPER hosts AU v3 in-process and needs
-    // preferredContentSize set synchronously during audioUnitInitialized.
-    // Layered separately so the LessonOnly tier can evolve independently
-    // of the rest of the REAPER dispatch.
+    // REAPER hosts AU v3 in-process and needs preferredContentSize set
+    // synchronously during audioUnitInitialized. Layered separately so
+    // the LessonOnly tier can evolve independently of the rest of the
+    // REAPER dispatch.
     host_quirks::apply_reaper_auv3_in_process(q, v);
 }
 
