@@ -162,7 +162,7 @@ TEST_CASE("FontResolver: LRU hit promotes entry past eviction line",
 }
 
 TEST_CASE("FontResolver: explicit generation splits otherwise identical cache keys",
-          "[font][axes][coverage]") {
+          "[font][axes]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(8);
@@ -196,7 +196,7 @@ TEST_CASE("FontResolver: explicit generation splits otherwise identical cache ke
 }
 
 TEST_CASE("FontResolver: empty family stack uses a distinct default cache key",
-          "[font][axes][coverage]") {
+          "[font][axes]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(8);

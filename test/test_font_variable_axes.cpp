@@ -85,7 +85,7 @@ TEST_CASE("Variable axes: tag construction is byte-stable", "[font][axes]") {
 }
 
 TEST_CASE("FontOptions hash includes render policy and fallback fields",
-          "[font][options][codecov]") {
+          "[font][options]") {
     FontOptions base;
     base.family_stack = {"Inter", "system"};
     base.size = 15.0f;
@@ -108,7 +108,7 @@ TEST_CASE("FontOptions hash includes render policy and fallback fields",
 }
 
 TEST_CASE("FontOptions hash includes synthesis flags and scope ids",
-          "[font][options][codecov]") {
+          "[font][options]") {
     FontOptions base;
     base.family_stack = {"Inter"};
 

@@ -84,7 +84,7 @@ TEST_CASE("ComboBox paint produces draw commands", "[view][combo]") {
 }
 
 TEST_CASE("ComboBox paint truncates long selected text",
-          "[view][combo][coverage]") {
+          "[view][combo]") {
     ComboBox combo;
     combo.set_items({"SuperLongOscillatorName"});
     combo.set_bounds({0, 0, 75, 28});
@@ -121,7 +121,7 @@ TEST_CASE("ComboBox key up/down changes selection", "[view][combo]") {
     REQUIRE(combo.selected() == 1);
 }
 
-TEST_CASE("ComboBox helper edges and keyboard popup controls", "[view][combo][coverage]") {
+TEST_CASE("ComboBox helper edges and keyboard popup controls", "[view][combo]") {
     ComboBox::close_active_popup();
 
     ComboBox empty;
@@ -180,7 +180,7 @@ TEST_CASE("ComboBox helper edges and keyboard popup controls", "[view][combo][co
 }
 
 TEST_CASE("ComboBox popup overlay paints separators hover and selection guards",
-          "[view][combo][coverage]") {
+          "[view][combo]") {
     ComboBox::close_active_popup();
     View::overlay_queue().clear();
 
@@ -223,7 +223,7 @@ TEST_CASE("ComboBox popup overlay paints separators hover and selection guards",
 }
 
 TEST_CASE("ComboBox mouse selection and hover guard paths",
-          "[view][combo][coverage]") {
+          "[view][combo]") {
     ComboBox::close_active_popup();
 
     ComboBox combo;
@@ -260,7 +260,7 @@ TEST_CASE("ComboBox mouse selection and hover guard paths",
 }
 
 TEST_CASE("ComboBox returns false for unrelated key presses",
-          "[view][combo][coverage]") {
+          "[view][combo]") {
     ComboBox combo;
     combo.set_items({"One", "Two"});
 
@@ -328,7 +328,7 @@ TEST_CASE("ComboBox opening another popup closes the previous one",
 }
 
 TEST_CASE("ComboBox destructor clears active popup slot",
-          "[view][combo][coverage]") {
+          "[view][combo]") {
     ComboBox::close_active_popup();
 
     {
@@ -593,7 +593,7 @@ TEST_CASE("ScrollView scroll_x clamped", "[view][scroll]") {
 }
 
 TEST_CASE("ScrollView scrollbar paint hit test and drag update offsets",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_direction(ScrollView::Direction::both);
     sv.set_bounds({0, 0, 100, 100});
@@ -632,7 +632,7 @@ TEST_CASE("ScrollView scrollbar paint hit test and drag update offsets",
 }
 
 TEST_CASE("ScrollView wheel respects horizontal direction and track clicks",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView horizontal;
     horizontal.set_direction(ScrollView::Direction::horizontal);
     horizontal.set_bounds({0, 0, 100, 100});
@@ -699,7 +699,7 @@ TEST_CASE("ScrollView vertical wheel leave and horizontal track click edges",
 }
 
 TEST_CASE("ScrollView auto scroll behavior updates immediately",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_direction(ScrollView::Direction::both);
     sv.set_bounds({0, 0, 100, 100});
@@ -714,7 +714,7 @@ TEST_CASE("ScrollView auto scroll behavior updates immediately",
 }
 
 TEST_CASE("ScrollView layout children restores viewport bounds",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_bounds({3, 4, 100, 50});
     sv.set_content_size({220, 180});
@@ -729,7 +729,7 @@ TEST_CASE("ScrollView layout children restores viewport bounds",
 }
 
 TEST_CASE("ScrollView paint_all applies opacity reset path",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_direction(ScrollView::Direction::both);
     sv.set_bounds({0, 0, 100, 50});
@@ -743,7 +743,7 @@ TEST_CASE("ScrollView paint_all applies opacity reset path",
 }
 
 TEST_CASE("ScrollView box-none suppresses scrollbar self hits",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_direction(ScrollView::Direction::both);
     sv.set_bounds({0, 0, 100, 100});
@@ -756,7 +756,7 @@ TEST_CASE("ScrollView box-none suppresses scrollbar self hits",
 }
 
 TEST_CASE("ScrollView both-direction wheel preserves both deltas",
-          "[view][scroll][coverage]") {
+          "[view][scroll]") {
     ScrollView sv;
     sv.set_direction(ScrollView::Direction::both);
     sv.set_bounds({0, 0, 100, 100});
@@ -890,7 +890,7 @@ TEST_CASE("ListBox paint with selection", "[view][listbox]") {
 }
 
 TEST_CASE("ListBox wheel scrolling double-click and enter activation",
-          "[view][listbox][coverage]") {
+          "[view][listbox]") {
     ListBox list;
     list.set_bounds({0, 0, 120, 48});
     list.set_items({"Alpha", "Beta", "Gamma", "Delta", "Epsilon"});

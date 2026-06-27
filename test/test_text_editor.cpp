@@ -216,7 +216,7 @@ TEST_CASE("TextEditor text input inserts characters", "[view][text_editor]") {
 }
 
 TEST_CASE("TextEditor text input replaces the active selection",
-          "[view][text_editor][coverage]") {
+          "[view][text_editor]") {
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("alpha beta");
@@ -254,7 +254,7 @@ TEST_CASE("TextEditor numeric mode rejects non-digits", "[view][text_editor]") {
 }
 
 TEST_CASE("TextEditor numeric mode rejects mixed text atomically",
-          "[view][text_editor][coverage]") {
+          "[view][text_editor]") {
     TextEditor editor;
     editor.numeric_only = true;
     editor.on_focus_changed(true);
@@ -972,7 +972,7 @@ TEST_CASE("TextEditor marked text selected range can convert native UTF-16 offse
 }
 
 TEST_CASE("TextEditor empty marked text clears the previous composition",
-          "[view][text_editor][ime][coverage]") {
+          "[view][text_editor][ime]") {
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("base");

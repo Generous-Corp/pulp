@@ -95,7 +95,7 @@ TEST_CASE("utf8 helpers count and advance over leading bytes correctly",
 }
 
 TEST_CASE("utf8 helpers skip stray continuation bytes without spending codepoint budget",
-          "[view][text-overflow][issue-1407][coverage]") {
+          "[view][text-overflow][issue-1407]") {
     const std::string leading = std::string("\x80", 1) + "abc";
     const std::string doubled = std::string("\x80\x81", 2) + "abc";
     const std::string middle = std::string("a") + std::string("\x80", 1) + "bc";
@@ -141,7 +141,7 @@ TEST_CASE("utf8 helpers skip stray continuation bytes without spending codepoint
 }
 
 TEST_CASE("truncate_to_width ignores stray continuation bytes when choosing prefix",
-          "[view][text-overflow][issue-1407][coverage]") {
+          "[view][text-overflow][issue-1407]") {
     RecordingCanvas canvas;
     const std::string leading = std::string("\x80", 1) + "abcdef";
     const std::string doubled = std::string("\x80\x81", 2) + "abcdef";
@@ -163,7 +163,7 @@ TEST_CASE("truncate_to_width ignores stray continuation bytes when choosing pref
 }
 
 TEST_CASE("utf8 helpers handle continuation three-byte and four-byte paths",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     const std::string stray_continuation("\x80" "abc", 4);
     REQUIRE(utf8_codepoint_count(stray_continuation) == 3);
     REQUIRE(utf8_advance(stray_continuation, 1) == 2);
@@ -181,7 +181,7 @@ TEST_CASE("utf8 helpers handle continuation three-byte and four-byte paths",
 }
 
 TEST_CASE("utf8 helpers clamp truncated multibyte sequences",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     const std::string truncated_two_byte("\xc3", 1);
     REQUIRE(utf8_codepoint_count(truncated_two_byte) == 1);
     REQUIRE(utf8_advance(truncated_two_byte, 1) == 1);
@@ -197,7 +197,7 @@ TEST_CASE("utf8 helpers clamp truncated multibyte sequences",
 }
 
 TEST_CASE("truncate_to_width respects exact text and ellipsis boundaries",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     RecordingCanvas canvas;
 
     REQUIRE(truncate_to_width(canvas, "abc", 21.0f) == "abc");
@@ -214,7 +214,7 @@ TEST_CASE("truncate_to_width respects exact text and ellipsis boundaries",
 }
 
 TEST_CASE("truncate_to_width handles empty text in collapsed boxes",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     RecordingCanvas canvas;
 
     REQUIRE(truncate_to_width(canvas, "", 0.0f) == kEllipsis);
@@ -224,7 +224,7 @@ TEST_CASE("truncate_to_width handles empty text in collapsed boxes",
 }
 
 TEST_CASE("truncate_to_width preserves full multibyte prefixes",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     RecordingCanvas canvas;
 
     const std::string input = "\xe2\x82\xac" "\xf0\x9f\x98\x80" "abcd";
@@ -241,7 +241,7 @@ TEST_CASE("truncate_to_width preserves full multibyte prefixes",
 }
 
 TEST_CASE("truncate_to_width keeps exact multibyte fits unmodified",
-          "[view][text-overflow][coverage]") {
+          "[view][text-overflow]") {
     RecordingCanvas canvas;
 
     const std::string text = "\xe2\x82\xac" "\xf0\x9f\x98\x80";

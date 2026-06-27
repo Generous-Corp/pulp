@@ -469,7 +469,7 @@ TEST_CASE("AtlasPacker occupancy is zero for a degenerate atlas",
 }
 
 TEST_CASE("AtlasPacker clamps degenerate capacity and used-area introspection",
-          "[render][atlas][coverage][introspection]") {
+          "[render][atlas][introspection]") {
     AtlasPacker zero_width(0, 64);
     AtlasPacker zero_height(64, 0);
     AtlasPacker negative_width(-16, 64);
@@ -612,7 +612,7 @@ TEST_CASE("AtlasInventory aggregates across multiple atlases",
 }
 
 TEST_CASE("AtlasInventory clamps malformed page counts and occupancy inputs",
-          "[render][atlas][coverage][inventory]") {
+          "[render][atlas][inventory]") {
     AtlasInventory inv;
     inv.add({AtlasKind::image, "negative pages", 10, 20, -5, 2u, -0.25f});
     inv.add({AtlasKind::glyph, "zero pages", 5, 7, 0, 3u, 1.25f});
@@ -633,7 +633,7 @@ TEST_CASE("AtlasInventory clamps malformed page counts and occupancy inputs",
 }
 
 TEST_CASE("AtlasInfo texel capacity clamps negative dimensions to zero",
-          "[render][atlas][coverage][inventory]") {
+          "[render][atlas][inventory]") {
     AtlasInfo negative_width;
     negative_width.width = -10;
     negative_width.height = 20;
@@ -660,7 +660,7 @@ TEST_CASE("AtlasInfo texel capacity clamps negative dimensions to zero",
 }
 
 TEST_CASE("AtlasInventory gradient snapshots clamp invalid ramp width",
-          "[render][atlas][coverage][inventory]") {
+          "[render][atlas][inventory]") {
     GradientAtlas ga;
     int row = -1;
     REQUIRE(ga.allocate(1, row));
