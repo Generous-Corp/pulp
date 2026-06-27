@@ -257,12 +257,11 @@ void WidgetBridge::register_asset_loading_api() {
 void WidgetBridge::register_font_assets_api() {
     BridgeApiContext api{engine_};
 
-    // Font loading: loadFont(path) -> success boolean.
+    // Font loading: loadFont(path) is an existence probe. It does not register
+    // the file with the renderer; use registerFont(family, path) for bundled
+    // faces that need to resolve through style.fontFamily / canvas.set_font().
     register_bridge_function(api, "loadFont", [](choc::javascript::ArgumentList args) {
         auto path = args.get<std::string>(0, "");
-        // Font loading is platform-dependent; this registers the font path
-        // for use by canvas.set_font() and Label font_family
-        // Currently a stub that acknowledges the request
         bool exists = !path.empty() && std::filesystem::exists(path);
         return choc::value::createBool(exists);
     });

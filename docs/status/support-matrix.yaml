@@ -371,8 +371,8 @@ css_parity:
     status: partial
     notes: CSS text-shadow parsed (offset, blur, color). Bridge stub — rendering planned.
   font_family:
-    status: partial
-    notes: CSS font-family property parsed. Bridge stub — font selection planned.
+    status: usable
+    notes: CSS font-family forwards to setFontFamily. Label/View cascade stores the full CSS family list and the renderer resolves registered, bundled, and platform fallback families. Validated by widget-bridge CSS font-family tests.
 
 widgets:
   image_view:
@@ -707,7 +707,7 @@ runtime_apis:
     notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
   font_loading:
     status: partial
-    notes: loadFont(path) bridge validates existence. Full Skia font registration planned.
+    notes: loadFont(path) validates existence only. registerFont(family, path) registers bundled .ttf/.otf files with the canvas font registry; FontFace and document.fonts remain unsupported.
   webgpu_shaders:
     status: usable
     notes: >
