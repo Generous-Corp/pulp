@@ -110,6 +110,21 @@ python -m quality_lab.cli engine --input /tmp/vox.aiff --character clean       #
 
 (`say` voices are Apple-proprietary — fine to *use* locally, do **not** commit the audio.)
 
+### Regression gate on the real engine
+
+The lab freezes the detector scalars the *current* engine produces (across a ratio x
+character matrix) as a committed baseline, and flags when a future engine build deviates:
+
+```bash
+python -m quality_lab.cli engine-baseline            # check current engine vs baseline
+python -m quality_lab.cli engine-baseline --capture  # re-freeze after an intentional change
+```
+
+This is the lab's core promise made concrete: *did this engine change make it worse?*
+`transient_sharpness` going up is flagged as **WORSE**; any deviation is surfaced for
+review (guard the invariant, not the exact sound). The comparison logic is unit-tested
+in CI; the live check needs a built `stretchcli`.
+
 ## Credibility — why this isn't circular
 
 A detector validated only against a degradation written by the same author is
