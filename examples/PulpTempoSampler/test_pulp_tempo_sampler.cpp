@@ -728,6 +728,70 @@ TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set
     CHECK(resurrected < 1e-6);
 }
 
+// Every slice plays at the SAME speed (native rate 1.0): the loop is time-
+// stretched ONCE into a single host-tempo buffer and each slice is a [start,end)
+// region into it, so no slice can play faster/slower than another. Prove it by
+// triggering the shortest + longest slice one-shot and asserting each plays for ~
+// its region length — a per-slice rate bug would make duration not track length.
+TEST_CASE("all slices play back at the same (native) rate — none faster/slower",
+          "[tempo-sampler][issue-slice-rate]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 6);            // 48k loop into 48k host -> R=1 at matched tempo
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);              // one-shot so a voice stops at region end
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // host==loop -> R=1
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 3; }));
+
+    std::vector<float> mono; float sr = 0.0f; std::vector<long> slices;
+    REQUIRE(f.proc->snapshot_for_view(mono, sr, slices));
+    REQUIRE(slices.size() >= 4);
+    const int root = static_cast<int>(f.store.get_value(kRootNote));
+
+    // Play a slice one-shot and count samples until it falls silent (2 silent blocks).
+    auto play_len = [&](int idx) -> long {
+        std::vector<float> ll(512), rr(512);
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, root + idx, 100));
+          process_midi(*f.proc, 120.0, m, ll, rr); }
+        long active = 512; int silent = 0;
+        for (int b = 0; b < 400 && silent < 2; ++b) {
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, ll, rr);
+            if (block_energy(ll) > 1e-7) { active = static_cast<long>(b + 2) * 512; silent = 0; }
+            else ++silent;
+        }
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, root + idx));
+          process_midi(*f.proc, 120.0, m, ll, rr); }
+        for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, ll, rr); } // drain
+        return active;
+    };
+
+    // Shortest + longest slice region (seed from slice 0 so no <climits> needed).
+    int si = 0, li = 0; long smin = slices[1] - slices[0], smax = smin;
+    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+        const long len = slices[i + 1] - slices[i];
+        if (len < smin) { smin = len; si = static_cast<int>(i); }
+        if (len > smax) { smax = len; li = static_cast<int>(i); }
+    }
+    REQUIRE(smax > smin);
+    const long played_short = play_len(si);
+    const long played_long  = play_len(li);
+    INFO("short slice " << si << " region=" << smin << " played=" << played_short);
+    INFO("long  slice " << li << " region=" << smax << " played=" << played_long);
+
+    // Each slice plays for ~its own region length (rate ≈ 1.0, not 0.5x/2x). A
+    // generous band absorbs the ~5 ms release fade + 512-sample block granularity.
+    auto within_rate1 = [](long played, long region) {
+        return played >= region * 6 / 10 && played <= region * 16 / 10 + 1200;
+    };
+    CHECK(within_rate1(played_short, smin));
+    CHECK(within_rate1(played_long, smax));
+    // And the longer region genuinely plays longer — the SAME rate orders them.
+    CHECK(played_long > played_short);
+}
+
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
 // guard) and every cut snapped to a zero-crossing so slice edges don't click.
 TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",
