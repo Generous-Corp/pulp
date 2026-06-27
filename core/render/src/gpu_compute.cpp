@@ -222,6 +222,37 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kModalStrikeShader = R"wgsl(
+// GPU struck modal synthesis: one thread per sample, summing decaying modes.
+// modes: num_modes × [freq, amp, decay, phase]. out[s] = Σ amp·e^(-decay·t)·sin(2π·f·t+ph).
+
+struct ModalParams { num_modes : u32, num_samples : u32, sample_rate : f32, t0 : f32 };
+
+@group(0) @binding(0) var<storage, read>       modes : array<f32>;
+@group(0) @binding(1) var<storage, read_write> out   : array<f32>;
+@group(0) @binding(2) var<uniform>             p     : ModalParams;
+
+const TWO_PI : f32 = 6.2831853071795864;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let s = gid.x;
+    if (s >= p.num_samples) {
+        return;
+    }
+    let t = (p.t0 + f32(s)) / p.sample_rate;
+    var acc = 0.0;
+    for (var i = 0u; i < p.num_modes; i = i + 1u) {
+        let f  = modes[i * 4u];
+        let a  = modes[i * 4u + 1u];
+        let d  = modes[i * 4u + 2u];
+        let ph = modes[i * 4u + 3u];
+        acc = acc + a * exp(-d * t) * sin(TWO_PI * f * t + ph);
+    }
+    out[s] = acc;
+}
+)wgsl";
+
 // ── Timing helper ───────────────────────────────────────────────────────────
 
 // Largest power-of-two complex FFT the GPU path accepts: keeps
@@ -267,6 +298,7 @@ public:
         conv_bmul_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
+        modal_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
@@ -787,6 +819,36 @@ public:
         return read_back(rb, out, obytes);
     }
 
+    bool modal_strike(const float* modes, float* out, uint32_t num_modes,
+                      uint32_t num_samples, float sample_rate, float t0_samples) override {
+        if (!initialized_ || modes == nullptr || out == nullptr) return false;
+        if (num_modes == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
+        if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
+            static_cast<uint64_t>(num_modes) > (1u << 22)) return false;
+
+        const uint32_t mbytes = num_modes * 4u * 4u;  // 4 floats/mode
+        const uint32_t obytes = num_samples * 4u;
+        auto m_buf = create_storage_buffer(mbytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto o_buf = create_storage_buffer(obytes, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto rb = create_readback_buffer(obytes);
+        wgpu::BufferDescriptor ud{};
+        ud.size = 16;
+        ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        auto u_buf = device_.CreateBuffer(&ud);
+        if (!m_buf || !o_buf || !rb || !u_buf) return false;
+
+        struct ModalParams { uint32_t num_modes; uint32_t num_samples; float sample_rate; float t0; };
+        ModalParams mp{num_modes, num_samples, sample_rate, t0_samples};
+        queue_.WriteBuffer(m_buf, 0, modes, mbytes);
+        queue_.WriteBuffer(u_buf, 0, &mp, sizeof(mp));
+
+        auto bg = create_bind_group(modal_pipeline_, {m_buf, o_buf, u_buf});
+        if (!bg) return false;
+        dispatch(modal_pipeline_, bg, (num_samples + 255u) / 256u);
+        copy_buffer(o_buf, rb, obytes);
+        return read_back(rb, out, obytes);
+    }
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     CapabilityReport capabilities() const override {
@@ -1131,6 +1193,7 @@ private:
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
+    wgpu::ComputePipeline modal_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
 
     // Per-device pipeline cache keyed by the WGSL source string. Mirrors the
@@ -1223,6 +1286,9 @@ private:
 
         additive_pipeline_ = create_pipeline("additive_synth", kAdditiveSynthShader);
         if (!additive_pipeline_) return false;
+
+        modal_pipeline_ = create_pipeline("modal_strike", kModalStrikeShader);
+        if (!modal_pipeline_) return false;
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute

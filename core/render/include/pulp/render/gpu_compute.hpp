@@ -146,6 +146,14 @@ public:
                                 uint32_t num_partials, uint32_t num_samples,
                                 float sample_rate, float t0_samples) = 0;
 
+    /// GPU struck modal synthesis: out[s] = Σ_m amp_m·exp(-decay_m·t)·
+    /// sin(2π·freq_m·t + phase_m), t=(t0+s)/sr. `modes` is num_modes ×
+    /// [freq(Hz), amp, decay(1/s), phase(rad)] (4·num_modes floats) — a
+    /// struck/plucked modal object (bell / string / body) as a bank of decaying
+    /// resonant modes. Thousands of modes parallelize. Not real-time-safe.
+    virtual bool modal_strike(const float* modes, float* out, uint32_t num_modes,
+                              uint32_t num_samples, float sample_rate, float t0_samples) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

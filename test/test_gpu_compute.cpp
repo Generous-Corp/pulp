@@ -579,6 +579,46 @@ TEST_CASE("GpuCompute additive synth produces the requested partials",
     REQUIRE_FALSE(compute->additive_synth(partials.data(), out.data(), 0, N, SR, 0.0f));
 }
 
+TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 8192;
+    constexpr float SR = 48000.0f;
+    const float fA = 300.0f, fB = 1200.0f;
+    // [freq, amp, decay, phase]; fB decays much faster than fA. Decay rates
+    // chosen so the strike clearly decays >2x across the ~0.17 s buffer.
+    std::vector<float> modes = {fA, 1.0f, 12.0f, 0.0f, fB, 1.0f, 40.0f, 0.0f};
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->modal_strike(modes.data(), out.data(), 2, N, SR, 0.0f));
+
+    auto rms = [&](uint32_t a, uint32_t b) {
+        double e = 0.0; for (uint32_t i = a; i < b; ++i) e += out[i] * out[i];
+        return std::sqrt(e / (b - a));
+    };
+    const float early = rms(0, 1024), late = rms(N - 1024, N);
+    REQUIRE(early > 0.01f);
+    REQUIRE(early > late * 2.0f);  // the strike decays
+
+    std::vector<std::complex<float>> s(N);
+    for (uint32_t i = 0; i < N; ++i) s[i] = std::complex<float>(out[i], 0.0f);
+    pulp::signal::Fft fft(static_cast<int>(N));
+    fft.forward(s.data());
+    auto band = [&](uint32_t c) {
+        float m = 0.0f;
+        for (int k = static_cast<int>(c) - 3; k <= static_cast<int>(c) + 3; ++k)
+            m = std::max(m, std::abs(s[static_cast<uint32_t>(k)]));
+        return m;
+    };
+    const uint32_t binA = static_cast<uint32_t>(fA * N / SR + 0.5f);
+    const uint32_t binB = static_cast<uint32_t>(fB * N / SR + 0.5f);
+    REQUIRE(band(binA) > 5.0f * band(binA + 60));   // clear resonance at fA
+    REQUIRE(band(binB) > band(binB + 60));          // energy at fB too
+
+    REQUIRE_FALSE(compute->modal_strike(modes.data(), out.data(), 0, N, SR, 0.0f));
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
