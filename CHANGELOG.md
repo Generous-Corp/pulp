@@ -8,6 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05111"></a>
+## [0.511.1] - 2026-06-27
+
+- perf(format): flush denormals across all real-time adapter callbacks ([#5059](https://github.com/danielraffel/pulp/pull/5059))
+- feature/source comment hygiene ui render 20260627 ([#5058](https://github.com/danielraffel/pulp/pull/5058))
+- docs(test): clean audio signal selector tags ([#5057](https://github.com/danielraffel/pulp/pull/5057))
+- feat(quality-lab): opt-in ViSQOL adapter + self-describing provenance ([#5055](https://github.com/danielraffel/pulp/pull/5055))
+- docs(test): clean format host selector tags ([#5054](https://github.com/danielraffel/pulp/pull/5054))
+- feat(quality-lab): worst-region clip export + general run CLI ([#5045](https://github.com/danielraffel/pulp/pull/5045))
+- docs: codify diff-driven version bumps + full-build-for-struct-layout rules ([#5052](https://github.com/danielraffel/pulp/pull/5052))
+- docs(test): clean view coverage selector tags ([#5049](https://github.com/danielraffel/pulp/pull/5049))
+- docs(test): clean CLI coverage selector tags ([#5047](https://github.com/danielraffel/pulp/pull/5047))
+
 <a id="v05110"></a>
 ## [0.511.0] - 2026-06-27
 
@@ -5361,6 +5374,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.511.1]: https://github.com/danielraffel/pulp/releases/tag/v0.511.1
 [0.511.0]: https://github.com/danielraffel/pulp/releases/tag/v0.511.0
 [0.510.0]: https://github.com/danielraffel/pulp/releases/tag/v0.510.0
 [0.509.3]: https://github.com/danielraffel/pulp/releases/tag/v0.509.3
