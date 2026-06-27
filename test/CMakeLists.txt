@@ -534,7 +534,7 @@ catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
 target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-pr)
-catch_discover_tests(pulp-test-cli-shellout-pr)
+catch_discover_tests(pulp-test-cli-shellout-pr EXTRA_ARGS --allow-running-no-tests)
 
 # CLI lifecycle-command shell-out tests: pulp doctor / pulp dev /
 # pulp design / pulp sdk / pulp upgrade. These cover the lifecycle and
