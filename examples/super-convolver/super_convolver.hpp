@@ -82,7 +82,7 @@ public:
             .name = "SuperConvolver",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.superconvolver",
-            .version = "1.0.2",
+            .version = "1.0.3",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
@@ -146,6 +146,16 @@ public:
 
     /// Native GPU front-end (live IR waveform + frequency display + controls).
     std::unique_ptr<view::View> create_view() override;
+
+    /// Declare a resizable editor with a real design size. Without this the base
+    /// default is a tiny 400x300 with min=0, which CLAP's gui_can_resize (and the
+    /// AU preferred-size path) read as "fixed, non-resizable" — so AU/CLAP in
+    /// Logic open small and won't resize. view_size_from_design() derives the
+    /// min/max/aspect so hosts allow aspect-locked proportional resize; the UI is
+    /// fully proportional (scale() = height/560), so any size looks right.
+    format::ViewSize view_size() const override {
+        return format::view_size_from_design(820, 560);
+    }
 
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
