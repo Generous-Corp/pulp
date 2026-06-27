@@ -3,9 +3,12 @@
 #include <pulp/format/headless.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/gpu_audio/gpu_multi_convolver.hpp>
+#include <pulp/signal/convolver.hpp>
 
 #include "super_convolver.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -257,6 +260,7 @@ TEST_CASE("SuperConvolver GPU engine convolves through the GPU transport",
     store.set_value(kGain, 0.0f);
     store.set_value(kBypass, 0.0f);
     store.set_value(kEngine, 1.0f);  // request the GPU engine
+    store.set_value(kRooms, 1.0f);   // single-IR GPU path (this case covers it)
 
     pulp::format::PrepareContext ctx;
     ctx.sample_rate = SR;
@@ -321,4 +325,207 @@ TEST_CASE("SuperConvolver GPU engine convolves through the GPU transport",
     const double corr = sxy / std::sqrt(sxx * syy + 1e-30);
     INFO("GPU corr=" << corr << " scored=" << scored << " lag=" << lag);
     REQUIRE(corr > 0.99);   // GPU f32 FFT reproduces the IR (looser bar than CPU)
+}
+
+namespace {
+
+// Normalized cross-correlation of two equal-length signals over [0, len).
+double xcorr(const float* a, const float* b, std::size_t len) {
+    double sxy = 0, sxx = 0, syy = 0;
+    for (std::size_t i = 0; i < len; ++i) {
+        sxy += static_cast<double>(a[i]) * b[i];
+        sxx += static_cast<double>(a[i]) * a[i];
+        syy += static_cast<double>(b[i]) * b[i];
+    }
+    return sxy / std::sqrt(sxx * syy + 1e-30);
+}
+
+}  // namespace
+
+// Correctness of the multi-IR GPU mode: an impulse through N panned rooms must
+// reproduce, per channel, the panned sum of the N impulse responses (because
+// convolving an impulse with IR_k yields IR_k). Validated by normalized
+// cross-correlation > 0.99 against the CPU-built reference. Skips cleanly with
+// no GPU device.
+TEST_CASE("GpuMultiConvolver matches the CPU panned-IR-sum reference",
+          "[gpu][superconvolver]") {
+    constexpr uint32_t BLOCK = 512;
+    constexpr uint32_t SR = 48000;
+    constexpr uint32_t N = 8;
+    const std::size_t ir_len = static_cast<std::size_t>(0.05 * SR);  // short, fast
+
+    std::vector<std::vector<float>> irs(N);
+    for (uint32_t k = 0; k < N; ++k)
+        irs[k] = make_reverb_ir(ir_len, 0x2000u + k * 2654435761u);
+
+    pulp::gpu_audio::GpuMultiConvolver mc(BLOCK, SR, irs);
+    if (!mc.prepare() || !mc.gpu_available()) {
+        WARN("GPU compute unavailable — skipping GpuMultiConvolver correctness test.");
+        return;
+    }
+
+    // CPU reference: out_ch[i] = sum_k pan_ch[k] * IR_k[i] (impulse response).
+    const auto& pl = mc.pan_l();
+    const auto& pr = mc.pan_r();
+    std::vector<double> ref_l(ir_len, 0.0), ref_r(ir_len, 0.0);
+    for (uint32_t k = 0; k < N; ++k)
+        for (std::size_t i = 0; i < ir_len; ++i) {
+            ref_l[i] += static_cast<double>(pl[k]) * irs[k][i];
+            ref_r[i] += static_cast<double>(pr[k]) * irs[k][i];
+        }
+
+    // Drive an impulse and collect enough blocks to flush the full IR.
+    const int nblocks = static_cast<int>((ir_len + BLOCK) / BLOCK) + 2;
+    std::vector<float> got_l, got_r;
+    std::vector<float> in(BLOCK, 0.0f), ol(BLOCK), orr(BLOCK);
+    for (int b = 0; b < nblocks; ++b) {
+        std::fill(in.begin(), in.end(), 0.0f);
+        if (b == 0) in[0] = 1.0f;
+        REQUIRE(mc.convolve_stereo(in.data(), ol.data(), orr.data(), BLOCK));
+        got_l.insert(got_l.end(), ol.begin(), ol.end());
+        got_r.insert(got_r.end(), orr.begin(), orr.end());
+    }
+
+    std::vector<float> rl(ir_len), rr(ir_len);
+    for (std::size_t i = 0; i < ir_len; ++i) {
+        rl[i] = static_cast<float>(ref_l[i]);
+        rr[i] = static_cast<float>(ref_r[i]);
+    }
+    const double cl = xcorr(got_l.data(), rl.data(), ir_len);
+    const double cr = xcorr(got_r.data(), rr.data(), ir_len);
+    INFO("multi-IR corr L=" << cl << " R=" << cr << " N=" << N);
+    REQUIRE(cl > 0.99);
+    REQUIRE(cr > 0.99);
+    // The two channels are genuinely different (distinct pans) — not a mono dupe.
+    REQUIRE(xcorr(rl.data(), rr.data(), ir_len) < 0.999);
+}
+
+// The structural GPU win: at scale (many rooms) the batched GPU multi-convolution
+// must beat N independent CPU partitioned convolvers for the same work. We assert
+// the GPU median is faster than the CPU median at a regime the bench shows wins
+// by a wide margin (~3-4x), so the assertion is robust to host load. Skips with
+// no GPU device.
+TEST_CASE("GpuMultiConvolver beats N CPU convolvers at scale",
+          "[gpu][superconvolver][perf]") {
+    constexpr uint32_t BLOCK = 512;
+    constexpr uint32_t SR = 48000;
+    constexpr uint32_t N = 64;
+    const std::size_t ir_len = static_cast<std::size_t>(0.5 * SR);
+
+    std::vector<std::vector<float>> irs(N);
+    for (uint32_t k = 0; k < N; ++k)
+        irs[k] = make_reverb_ir(ir_len, 0x3000u + k * 2654435761u);
+
+    pulp::gpu_audio::GpuMultiConvolver mc(BLOCK, SR, irs);
+    if (!mc.prepare() || !mc.gpu_available()) {
+        WARN("GPU compute unavailable — skipping GpuMultiConvolver perf test.");
+        return;
+    }
+
+    const auto& pl = mc.pan_l();
+    const auto& pr = mc.pan_r();
+
+    // CPU baseline: N panned partitioned convolvers.
+    std::vector<pulp::signal::PartitionedConvolver> cpu(N);
+    for (uint32_t k = 0; k < N; ++k)
+        cpu[k].load_ir(irs[k].data(), irs[k].size(), BLOCK);
+
+    std::vector<float> x(BLOCK), y(BLOCK), aL(BLOCK), aR(BLOCK), wl(BLOCK), wr(BLOCK);
+    for (uint32_t i = 0; i < BLOCK; ++i) x[i] = std::sin(0.013f * i) * 0.5f;
+
+    auto med = [](std::vector<double>& v) {
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+    constexpr int iters = 40, warm = 5;
+
+    std::vector<double> cpu_t, gpu_t;
+    for (int it = 0; it < iters + warm; ++it) {
+        auto t0 = std::chrono::steady_clock::now();
+        std::fill(aL.begin(), aL.end(), 0.0f);
+        std::fill(aR.begin(), aR.end(), 0.0f);
+        for (uint32_t k = 0; k < N; ++k) {
+            cpu[k].process(x.data(), y.data(), BLOCK);
+            for (uint32_t i = 0; i < BLOCK; ++i) { aL[i] += pl[k] * y[i]; aR[i] += pr[k] * y[i]; }
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        REQUIRE(mc.convolve_stereo(x.data(), wl.data(), wr.data(), BLOCK));
+        auto t2 = std::chrono::steady_clock::now();
+        if (it >= warm) {
+            cpu_t.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+            gpu_t.push_back(std::chrono::duration<double, std::micro>(t2 - t1).count());
+        }
+    }
+    const double cpu_med = med(cpu_t), gpu_med = med(gpu_t);
+    INFO("N=" << N << " ir=0.5s  CPU=" << cpu_med << "us  GPU=" << gpu_med
+         << "us  speedup=" << cpu_med / gpu_med << "x");
+    REQUIRE(gpu_med < cpu_med);  // the batched GPU mode genuinely wins at scale
+}
+
+// Integration: with Engine=GPU and Rooms>1 the processor selects the batched
+// multi-room GPU node (not the single-IR path), and produces real wet audio
+// through the transport. Deterministic (no async timing assertion); skips with
+// no GPU device.
+TEST_CASE("SuperConvolver selects the multi-room GPU node when Rooms>1",
+          "[gpu][superconvolver]") {
+    using P = SuperConvolverProcessor;
+    constexpr std::size_t BLOCK = P::kInternalBlock;
+    constexpr double SR = 48000.0;
+
+    P proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, 0.1f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 1.0f);
+    store.set_value(kRooms, 8.0f);
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    if (!proc.gpu_engine_active()) {
+        WARN("GPU engine unavailable — skipping multi-room selection test.");
+        proc.release();
+        return;
+    }
+
+    REQUIRE(proc.gpu_multi_active());
+    REQUIRE(proc.gpu_rooms() == 8);
+    INFO("backend=" << proc.gpu_backend());
+
+    // Drive a sine and confirm real wet energy emerges (the transport worker
+    // produces blocks; sleep a little to let it catch up across the run).
+    std::vector<float> in_l(BLOCK), in_r(BLOCK), out_l(BLOCK), out_r(BLOCK);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = SR;
+    pctx.num_samples = static_cast<int>(BLOCK);
+    double energy = 0.0;
+    for (int b = 0; b < 64; ++b) {
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            in_l[i] = std::sin(0.05f * static_cast<float>(b * BLOCK + i)) * 0.5f;
+            in_r[i] = in_l[i];
+        }
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+        pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+        proc.process(ov, iv, mi, mo, pctx);
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        for (std::size_t i = 0; i < BLOCK; ++i)
+            energy += out_l[i] * out_l[i] + out_r[i] * out_r[i];
+    }
+    const auto stats = proc.gpu_block_stats();
+    INFO("produced=" << stats.first << " misses=" << stats.second
+         << " energy=" << energy);
+    REQUIRE(energy > 1e-3);          // real wet audio came out
+    REQUIRE(stats.first > 0);        // the GPU worker genuinely produced blocks
+    proc.release();
 }

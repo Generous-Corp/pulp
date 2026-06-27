@@ -165,6 +165,72 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kMultiIrMulShader = R"wgsl(
+// Multi-IR frequency-domain multiply: ONE input spectrum broadcast across
+// `num_ir` distinct IR spectra. prod has `num_ir` blocks of n complex; the
+// single input spectrum x (n complex) is reused for every block, and each
+// block multiplies by its OWN IR spectrum (ir is num_ir blocks of n complex).
+//   prod[idx] = x[idx % n] * ir[idx]
+// This is the inverse of conv_bmul (one IR, many inputs): here it is one input,
+// many IRs — so the forward FFT runs ONCE and is shared across all rooms.
+
+@group(0) @binding(0) var<storage, read>       x    : array<f32>;   // 2n
+@group(0) @binding(1) var<storage, read>       ir   : array<f32>;   // 2n*num_ir
+@group(0) @binding(2) var<storage, read_write> prod : array<f32>;   // 2n*num_ir
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let idx = gid.x;
+    let total = arrayLength(&prod) / 2u;
+    if (idx >= total) {
+        return;
+    }
+    let n_pairs = arrayLength(&x) / 2u;
+    let xi = (idx % n_pairs) * 2u;
+    let base = idx * 2u;
+    let xr  = x[xi];
+    let xim = x[xi + 1u];
+    let br  = ir[base];
+    let bim = ir[base + 1u];
+    prod[base]      = xr * br - xim * bim;
+    prod[base + 1u] = xr * bim + xim * br;
+}
+)wgsl";
+
+static constexpr const char* kMultiIrCombineShader = R"wgsl(
+// Pan-combine reduce: collapse `num_ir` time-domain room results into a stereo
+// pair using per-room constant-power pan weights, applying the inverse-FFT 1/n
+// normalization. rooms holds num_ir blocks of n complex (the real part is the
+// convolution result). Output layout: outlr[0..n) = L, outlr[n..2n) = R.
+// Doing the reduction on the GPU means only 2n floats (one stereo block) are
+// read back per block instead of the full 2n*num_ir room buffer.
+
+struct CombineParams { n : u32, num_ir : u32, inv : f32, pad : u32 };
+
+@group(0) @binding(0) var<storage, read>       rooms : array<f32>;  // 2n*num_ir
+@group(0) @binding(1) var<storage, read>       panl  : array<f32>;  // num_ir
+@group(0) @binding(2) var<storage, read>       panr  : array<f32>;  // num_ir
+@group(0) @binding(3) var<storage, read_write> outlr : array<f32>;  // 2n
+@group(0) @binding(4) var<uniform>             p     : CombineParams;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let i = gid.x;
+    if (i >= p.n) {
+        return;
+    }
+    var l = 0.0;
+    var r = 0.0;
+    for (var k = 0u; k < p.num_ir; k = k + 1u) {
+        let v = rooms[(k * p.n + i) * 2u] * p.inv;  // real part, normalized
+        l = l + panl[k] * v;
+        r = r + panr[k] * v;
+    }
+    outlr[i]        = l;
+    outlr[p.n + i]  = r;
+}
+)wgsl";
+
 static constexpr const char* kMatmulShader = R"wgsl(
 // Dense matmul C[M*N] = A[M*K] * B[K*N], all row-major. One thread per output
 // element. Foundational primitive for GPU neural inference (dense / LSTM gates).
@@ -362,10 +428,13 @@ public:
         fft_plans_.clear();
         conv_plans_.clear();
         batch_conv_plans_.clear();
+        multi_conv_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
         conv_bmul_pipeline_ = nullptr;
+        multi_ir_mul_pipeline_ = nullptr;
+        multi_ir_combine_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
@@ -818,6 +887,175 @@ public:
         const float inv = 1.0f / static_cast<float>(n);
         for (uint32_t i = 0; i < batch * n * 2u; ++i) out_complex[i] *= inv;
         return true;
+    }
+
+    // ── Multi-IR convolution ────────────────────────────────────────────────
+
+    bool prepare_multi_convolution(uint32_t n, const float* ir_specs,
+                                   uint32_t num_ir) override {
+        if (!initialized_ || ir_specs == nullptr || num_ir == 0) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+        // The batched intermediates (big_a/big_b/irspecs) are 2*num_ir*n floats
+        // each — the storage-buffer-binding-limited resource. Gate on the
+        // device's real limit (not the conservative single-transform kMaxFftN),
+        // and keep the byte math within uint32 (buffer sizes below are uint32_t).
+        const uint64_t big_bytes =
+            static_cast<uint64_t>(num_ir) * n * 2ull * sizeof(float);
+        if (big_bytes > 0xFFFFFFFFull) return false;
+        wgpu::Limits limits{};
+        uint64_t max_bind = 0;
+        if (device_.GetLimits(&limits) == wgpu::Status::Success)
+            max_bind = limits.maxStorageBufferBindingSize;
+        if (max_bind == 0)
+            max_bind = static_cast<uint64_t>(kMaxFftN) * 2ull * sizeof(float);
+        // Strictly under the per-binding limit: a buffer AT the limit creates a
+        // Dawn error buffer (operations silently no-op), so leave headroom.
+        if (big_bytes >= max_bind) return false;
+
+        MultiConvPlan plan;
+        plan.n = n;
+        plan.num_ir = num_ir;
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
+        const uint32_t big = num_ir * small;                                    // 2n*num_ir
+        const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                      | wgpu::BufferUsage::CopySrc;
+        plan.fx_a = create_storage_buffer(small, sc);
+        plan.fx_b = create_storage_buffer(small, sc);
+        plan.big_a = create_storage_buffer(big, sc);
+        plan.big_b = create_storage_buffer(big, sc);
+        plan.irspecs = create_storage_buffer(big,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.panl = create_storage_buffer(num_ir * 4u,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.panr = create_storage_buffer(num_ir * 4u,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.out_lr = create_storage_buffer(small, sc);
+        plan.readback = create_readback_buffer(small);
+        wgpu::BufferDescriptor cud{};
+        cud.size = 16;
+        cud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        plan.cuniform = device_.CreateBuffer(&cud);
+        if (!plan.fx_a || !plan.fx_b || !plan.big_a || !plan.big_b || !plan.irspecs ||
+            !plan.panl || !plan.panr || !plan.out_lr || !plan.readback || !plan.cuniform) {
+            return false;
+        }
+
+        // Forward passes: a single n-point transform ping-ponging fx_a/fx_b
+        // (batch=1). Inverse passes: num_ir transforms ping-ponging big_a/big_b
+        // (batch=num_ir).
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
+            const bool src_is_a = (s % 2u == 0u);
+            // forward (sign=-1, batch=1) over fx_a/fx_b
+            {
+                wgpu::BufferDescriptor ud{};
+                ud.size = 16;
+                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+                wgpu::Buffer u = device_.CreateBuffer(&ud);
+                if (!u) return false;
+                FftParams p{n, 1u << s, -1.0f, 1u};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(
+                    fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.fx_a, plan.fx_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.fx_b, plan.fx_a, u});
+                if (!bg) return false;
+                plan.fwd_u.push_back(std::move(u));
+                plan.fwd_bgs.push_back(std::move(bg));
+            }
+            // inverse (sign=+1, batch=num_ir) over big_a/big_b
+            {
+                wgpu::BufferDescriptor ud{};
+                ud.size = 16;
+                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+                wgpu::Buffer u = device_.CreateBuffer(&ud);
+                if (!u) return false;
+                FftParams p{n, 1u << s, 1.0f, num_ir};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(
+                    fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.big_a, plan.big_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.big_b, plan.big_a, u});
+                if (!bg) return false;
+                plan.inv_u.push_back(std::move(u));
+                plan.inv_bgs.push_back(std::move(bg));
+            }
+        }
+
+        // Forward result lands in fx_b for odd log2n, fx_a for even. The
+        // multiply broadcasts it across num_ir IR spectra into big_a (the
+        // inverse start buffer — fx_* and big_* are disjoint so write-after-read
+        // is safe without an intermediate copy).
+        wgpu::Buffer& fwd_buf = (plan.log2n & 1u) ? plan.fx_b : plan.fx_a;
+        plan.mul_bg = create_bind_group(multi_ir_mul_pipeline_,
+                                        {fwd_buf, plan.irspecs, plan.big_a});
+        if (!plan.mul_bg) return false;
+
+        // Inverse result lands in big_b for odd log2n, big_a for even. The
+        // combine reduces it to the stereo out_lr.
+        wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.big_b : plan.big_a;
+        plan.combine_bg = create_bind_group(multi_ir_combine_pipeline_,
+            {inv_buf, plan.panl, plan.panr, plan.out_lr, plan.cuniform});
+        if (!plan.combine_bg) return false;
+
+        struct CombineParams { uint32_t n; uint32_t num_ir; float inv; uint32_t pad; };
+        CombineParams cp{n, num_ir, 1.0f / static_cast<float>(n), 0u};
+        queue_.WriteBuffer(plan.cuniform, 0, &cp, sizeof(cp));
+        queue_.WriteBuffer(plan.irspecs, 0, ir_specs, big);
+
+        multi_conv_plans_.insert_or_assign(n, std::move(plan));
+        return true;
+    }
+
+    bool multi_convolve(const float* in_complex, const float* pan_l,
+                        const float* pan_r, float* out_lr, uint32_t n,
+                        uint32_t num_ir) override {
+        if (!initialized_ || !in_complex || !pan_l || !pan_r || !out_lr) return false;
+        auto it = multi_conv_plans_.find(n);
+        if (it == multi_conv_plans_.end() || it->second.num_ir != num_ir) return false;
+        MultiConvPlan& plan = it->second;
+
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t fwd_wg = ((n / 2u) + 255u) / 256u;             // 1 transform
+        const uint32_t inv_wg = ((num_ir * (n / 2u)) + 255u) / 256u;  // num_ir transforms
+        const uint32_t mul_wg = ((num_ir * n) + 255u) / 256u;         // num_ir*n pairs
+        const uint32_t comb_wg = (n + 255u) / 256u;                   // n output samples
+
+        queue_.WriteBuffer(plan.fx_a, 0, in_complex, small);
+        queue_.WriteBuffer(plan.panl, 0, pan_l, num_ir * 4u);
+        queue_.WriteBuffer(plan.panr, 0, pan_r, num_ir * 4u);
+
+        // One command buffer: forward FFT (shared) → broadcast multiply across
+        // all rooms → batched inverse FFT → GPU pan-combine to stereo → copy the
+        // single stereo block to readback. Only 2n floats leave the GPU.
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        encode_fft_passes(encoder, plan.fwd_bgs, fwd_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(multi_ir_mul_pipeline_);
+            pass.SetBindGroup(0, plan.mul_bg);
+            pass.DispatchWorkgroups(mul_wg);
+            pass.End();
+        }
+        encode_fft_passes(encoder, plan.inv_bgs, inv_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(multi_ir_combine_pipeline_);
+            pass.SetBindGroup(0, plan.combine_bg);
+            pass.DispatchWorkgroups(comb_wg);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        return read_back(plan.readback, out_lr, small);
     }
 
     // ── Linear algebra ─────────────────────────────────────────────────────
@@ -1333,6 +1571,8 @@ private:
     wgpu::ComputePipeline magnitude_pipeline_;
     wgpu::ComputePipeline complex_mul_pipeline_;
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
+    wgpu::ComputePipeline multi_ir_mul_pipeline_;      // one input × many IRs
+    wgpu::ComputePipeline multi_ir_combine_pipeline_;  // pan-combine reduce → stereo
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
@@ -1402,6 +1642,28 @@ private:
     };
     std::unordered_map<uint32_t, BatchConvPlan> batch_conv_plans_;
 
+    // Multi-IR convolution plan: one input spectrum (fx_a/fx_b, 2n) broadcast
+    // across num_ir resident IR spectra (irspecs, 2n*num_ir), inverse-FFT'd in
+    // big_a/big_b (2n*num_ir), then GPU-reduced to a stereo block (out_lr, 2n)
+    // with per-room pan weights (panl/panr). One submit + one 2n readback covers
+    // all rooms. Keyed by n; rebuilt if num_ir changes.
+    struct MultiConvPlan {
+        uint32_t n = 0;
+        uint32_t log2n = 0;
+        uint32_t num_ir = 0;
+        wgpu::Buffer fx_a, fx_b;          // forward FFT ping-pong (2n)
+        wgpu::Buffer big_a, big_b;        // multiply out / inverse ping-pong (2n*num_ir)
+        wgpu::Buffer irspecs;             // resident IR spectra (2n*num_ir)
+        wgpu::Buffer panl, panr;          // per-room pan gains (num_ir)
+        wgpu::Buffer out_lr;              // stereo result (2n)
+        wgpu::Buffer cuniform;            // CombineParams
+        wgpu::Buffer readback;            // 2n
+        std::vector<wgpu::Buffer> fwd_u, inv_u;
+        std::vector<wgpu::BindGroup> fwd_bgs, inv_bgs;
+        wgpu::BindGroup mul_bg, combine_bg;
+    };
+    std::unordered_map<uint32_t, MultiConvPlan> multi_conv_plans_;
+
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
     // to eliminate allocator churn. Created lazily in create_pipelines().
@@ -1424,6 +1686,13 @@ private:
 
         conv_bmul_pipeline_ = create_pipeline("conv_bmul", kComplexMulBroadcastShader);
         if (!conv_bmul_pipeline_) return false;
+
+        multi_ir_mul_pipeline_ = create_pipeline("multi_ir_mul", kMultiIrMulShader);
+        if (!multi_ir_mul_pipeline_) return false;
+
+        multi_ir_combine_pipeline_ =
+            create_pipeline("multi_ir_combine", kMultiIrCombineShader);
+        if (!multi_ir_combine_pipeline_) return false;
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;
@@ -1783,10 +2052,23 @@ private:
                 ok = (status == wgpu::MapAsyncStatus::Success);
             });
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        // Drive the event loop until the map completes. Spin (yield) for the
+        // first few ms — GPU compute jobs here complete well within that, and a
+        // fixed 1ms sleep per iteration otherwise imposes a poll-granularity
+        // latency floor that dwarfs the actual GPU time. Back off to a 1ms sleep
+        // after the spin budget so a stuck/long job never burns a core. Never
+        // called on the audio thread (worker/offline only), so a short spin is
+        // safe.
+        const auto start = std::chrono::steady_clock::now();
+        const auto spin_until = start + std::chrono::milliseconds(4);
+        const auto deadline = start + std::chrono::seconds(2);
         while (!mapped && std::chrono::steady_clock::now() < deadline) {
             instance_.ProcessEvents();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (mapped) break;
+            if (std::chrono::steady_clock::now() < spin_until)
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
         if (!mapped || !ok) return false;

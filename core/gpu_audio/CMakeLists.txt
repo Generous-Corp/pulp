@@ -33,7 +33,7 @@ target_link_libraries(pulp-gpu-audio
 # device (GpuCompute::create() returns null → CPU fallback).
 if(TARGET pulp::render)
     target_sources(pulp-gpu-audio PRIVATE
-        src/gpu_convolver.cpp src/gpu_stft.cpp
+        src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
         src/gpu_hyper_freeze.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)

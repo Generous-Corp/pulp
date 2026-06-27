@@ -28,6 +28,17 @@ if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
     target_include_directories(super-convolver-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
+# Honest CPU-vs-GPU convolution benchmark. macOS + GPU only (it instantiates the
+# real GpuCompute device); gated like the screenshot target so the advisory Linux
+# lane never tries to pull in the windowing/GPU stack. Not registered as a CTest —
+# it is a measurement tool, run by hand: ./build/.../super-convolver-bench.
+if(APPLE AND TARGET pulp::gpu-audio AND PULP_ENABLE_GPU)
+    add_executable(super-convolver-bench bench.cpp)
+    target_link_libraries(super-convolver-bench
+        PRIVATE pulp::format pulp::signal pulp::gpu-audio)
+    target_include_directories(super-convolver-bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
 # Plugin (VST3, AU v2, CLAP, Standalone)
 pulp_add_plugin(SuperConvolver
     FORMATS           VST3 AU CLAP Standalone

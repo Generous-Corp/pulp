@@ -125,6 +125,36 @@ public:
     virtual bool convolve_batch(const float* in_complex, float* out_complex,
                                 uint32_t n, uint32_t batch) = 0;
 
+    // ── Multi-IR convolution (one input → many distinct IRs → stereo) ───────
+    //
+    // The mass-parallel regime: convolve ONE input block against `num_ir`
+    // DISTINCT IR spectra ("rooms"/"taps") in ONE submit, then reduce the
+    // num_ir results to a stereo pair on the GPU with per-room pan weights —
+    // so only one stereo block (2*n floats) is read back regardless of num_ir.
+    // The forward FFT runs once and is shared across all rooms; each room gets
+    // its own complex-multiply and inverse FFT, all batched. On the CPU this is
+    // num_ir independent convolutions; on the GPU it is one batched job — the
+    // structural win that scales past real time on the CPU while the GPU holds.
+    // Not real-time-safe (blocks on the single readback); the amortizable
+    // building block for a GPU multi-room convolution reverb.
+
+    /// Build the multi-IR plan for size `n` (power of two) and upload
+    /// `ir_specs` — `num_ir` back-to-back interleaved-complex IR spectra
+    /// (length 2*n*num_ir). Call once before multi_convolve(n, num_ir).
+    /// Returns false on invalid args / GPU failure.
+    virtual bool prepare_multi_convolution(uint32_t n, const float* ir_specs,
+                                           uint32_t num_ir) = 0;
+
+    /// Run the multi-IR convolution for a prepared (n, num_ir). `in_complex` is
+    /// one zero-padded interleaved-complex input block (length 2*n). `pan_l` /
+    /// `pan_r` are per-room linear gains (length num_ir) applied in the GPU
+    /// reduce. `out_lr` receives the stereo result: out_lr[0..n) = L,
+    /// out_lr[n..2n) = R (length 2*n). Returns false if prepare_multi_convolution
+    /// was not called for (n, num_ir), args are invalid, or dispatch fails.
+    virtual bool multi_convolve(const float* in_complex, const float* pan_l,
+                                const float* pan_r, float* out_lr, uint32_t n,
+                                uint32_t num_ir) = 0;
+
     // ── Linear algebra ─────────────────────────────────────────────────────
 
     /// Dense matrix multiply C[M×N] = A[M×K] · B[K×N], all row-major f32.

@@ -35,6 +35,7 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
 #include <memory>
@@ -61,6 +62,7 @@ enum SuperConvolverParams : state::ParamID {
     kGain    = 3,  // output gain, dB
     kBypass  = 4,
     kEngine  = 5,  // 0 = CPU (default), 1 = GPU
+    kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
 };
 
 // Live wet-output magnitude spectrum (dB), published lock-free from the audio
@@ -120,6 +122,14 @@ public:
         // CPU is the default — the live GPU path is opt-in by governance.
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // Rooms: with Engine=GPU and Rooms>1, the input is convolved against
+        // this many DISTINCT impulse responses ("rooms"), each panned to its own
+        // stereo position, in ONE batched GPU submit per block — a dense
+        // multi-room convolution reverb that is the GPU's structural win over the
+        // CPU (which would need Rooms× independent convolvers). Rooms=1 keeps the
+        // single-IR GPU path. No effect when Engine=CPU.
+        store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
+                             .range = {1.0f, 64.0f, 16.0f, 1.0f}});
     }
 
     // The active engine's total latency, chosen once at prepare(): the re-block
@@ -137,8 +147,18 @@ public:
     /// The live GPU compute backend ("Metal"/"D3D12"/"Vulkan") when the GPU
     /// engine is active, else "". UI/main-thread only.
     std::string gpu_backend() const {
-        return gpu_engine_active_ && gpu_node_ ? gpu_node_->backend() : std::string();
+        if (!gpu_engine_active_) return std::string();
+        if (gpu_multi_node_) return gpu_multi_node_->backend();
+        return gpu_node_ ? gpu_node_->backend() : std::string();
     }
+
+    /// Number of GPU convolution rooms in the live audio path (1 for the single
+    /// IR path, >1 for the batched multi-room mode), or 0 when the GPU engine is
+    /// not active. UI/main-thread only.
+    int gpu_rooms() const { return gpu_engine_active_ ? gpu_rooms_ : 0; }
+
+    /// True when the live path is the batched multi-room GPU reverb.
+    bool gpu_multi_active() const { return gpu_engine_active_ && gpu_multi_node_ != nullptr; }
 
     /// Live {GPU blocks produced, blocks missed (CPU-filled)} so the UI can show
     /// whether the GPU is actually carrying the work or mostly falling back.
@@ -154,7 +174,9 @@ public:
         // it holds a pointer into the node).
         gpu_transport_.release();
         gpu_node_.reset();
+        gpu_multi_node_.reset();
         gpu_engine_active_ = false;
+        gpu_rooms_ = 1;
 
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
@@ -199,7 +221,9 @@ public:
         stop_worker();
         gpu_transport_.release();   // transport before node (it points at the node)
         gpu_node_.reset();
+        gpu_multi_node_.reset();
         gpu_engine_active_ = false;
+        gpu_rooms_ = 1;
         for (auto& c : conv_) c.reset();
     }
 
@@ -336,30 +360,61 @@ private:
 
     // Build + start the GPU engine. On any failure (no GPU device, transport
     // prepare rejected) leaves gpu_engine_active_ == false so process() uses CPU.
+    // With Rooms>1 the live path is the batched multi-room GPU reverb
+    // (gpu_audio::GpuMultiConvolver); with Rooms==1 it is the single-IR
+    // gpu_audio::GpuConvolver. Both are GpuAudioNodes driven by the same
+    // transport, so the RT path (fill_wet_gpu) is identical.
     void try_enable_gpu_engine() {
-        auto ir = make_reverb_ir(ir_length_for(current_size()));
-        gpu_node_ = std::make_unique<gpu_audio::GpuConvolver>(
-            static_cast<uint32_t>(kChannels), static_cast<uint32_t>(kInternalBlock),
-            static_cast<uint32_t>(sample_rate_), std::move(ir));
-        bool ok = gpu_node_->prepare() && gpu_node_->gpu_available();
+        const int rooms = static_cast<int>(std::lround(state().get_value(kRooms)));
+        gpu_audio::GpuAudioNode* node = nullptr;
+
+        if (rooms > 1) {
+            // N decorrelated rooms from the current Size, distinct per-room seeds.
+            const std::size_t len = ir_length_for(current_size());
+            std::vector<std::vector<float>> irs;
+            irs.reserve(static_cast<std::size_t>(rooms));
+            for (int k = 0; k < rooms; ++k)
+                irs.push_back(make_reverb_ir(
+                    len, 0x51C04711u + static_cast<std::uint32_t>(k) * 2654435761u));
+            gpu_multi_node_ = std::make_unique<gpu_audio::GpuMultiConvolver>(
+                static_cast<uint32_t>(kInternalBlock),
+                static_cast<uint32_t>(sample_rate_), std::move(irs));
+            if (gpu_multi_node_->prepare() && gpu_multi_node_->gpu_available())
+                node = gpu_multi_node_.get();
+            else
+                gpu_multi_node_.reset();
+        } else {
+            auto ir = make_reverb_ir(ir_length_for(current_size()));
+            gpu_node_ = std::make_unique<gpu_audio::GpuConvolver>(
+                static_cast<uint32_t>(kChannels), static_cast<uint32_t>(kInternalBlock),
+                static_cast<uint32_t>(sample_rate_), std::move(ir));
+            if (gpu_node_->prepare() && gpu_node_->gpu_available())
+                node = gpu_node_.get();
+            else
+                gpu_node_.reset();
+        }
+
+        bool ok = node != nullptr;
         if (ok) {
             gpu_audio::GpuAudioTransport::Config cfg;
             cfg.ring_blocks = 8;
             cfg.run_worker_thread = true;
-            ok = gpu_transport_.prepare(gpu_node_.get(), cfg);
+            ok = gpu_transport_.prepare(node, cfg);
         }
         if (ok) {
             for (std::size_t ch = 0; ch < kChannels; ++ch)
                 gpu_wet_[ch].assign(kInternalBlock, 0.0f);
             gpu_engine_active_ = true;
+            gpu_rooms_ = rooms > 1 ? rooms : 1;
         } else {
             runtime::log_info(
                 "SuperConvolver: GPU engine requested but unavailable "
-                "(gpu_available={}); falling back to CPU convolution.",
-                gpu_node_ ? gpu_node_->gpu_available() : false);
+                "(rooms={}); falling back to CPU convolution.", rooms);
             gpu_transport_.release();
             gpu_node_.reset();
+            gpu_multi_node_.reset();
             gpu_engine_active_ = false;
+            gpu_rooms_ = 1;
         }
     }
 
@@ -470,9 +525,11 @@ private:
     // transport must be released before the node. gpu_wet_ is the per-channel
     // B-sized scratch the transport writes each stereo block into.
     std::unique_ptr<gpu_audio::GpuConvolver> gpu_node_;
+    std::unique_ptr<gpu_audio::GpuMultiConvolver> gpu_multi_node_;
     gpu_audio::GpuAudioTransport gpu_transport_;
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     bool gpu_engine_active_ = false;
+    int gpu_rooms_ = 1;
     int latency_samples_ = static_cast<int>(kInternalBlock);
 
     // Worker / live-IR-swap state.

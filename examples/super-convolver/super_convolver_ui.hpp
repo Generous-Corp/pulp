@@ -107,6 +107,14 @@ public:
         if (proc_.gpu_engine_active()) {
             const std::string b = proc_.gpu_backend();
             audio_status = b.empty() ? "Audio: GPU" : ("Audio: GPU · " + b);
+            // Live proof the GPU is carrying the audio: room count + blocks the
+            // GPU worker produced vs blocks it missed (CPU/silence-filled).
+            const auto st = proc_.gpu_block_stats();
+            if (proc_.gpu_multi_active())
+                audio_status += " · " + std::to_string(proc_.gpu_rooms()) + " rooms";
+            audio_status += " · " + std::to_string(st.first) + " blocks";
+            if (st.second > 0)
+                audio_status += ", " + std::to_string(st.second) + " misses";
         }
         canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 12.0f * s);
