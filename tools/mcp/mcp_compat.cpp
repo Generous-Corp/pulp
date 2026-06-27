@@ -189,8 +189,10 @@ struct ToolMinSdk {
 };
 static const ToolMinSdk TOOL_MIN_SDK_TABLE[] = {
     // Format: {"pulp_<tool>", "x.y.z"}.
-    // Currently empty — every existing tool runs against any project SDK.
-    // Future tools that require a specific SDK API floor declare it here.
+    // `pulp_audio_render` shells out to `pulp audio render`. The command
+    // appeared in 0.500.0, but the MCP schema promises sample-accurate
+    // `param @frame` behavior, which landed in 0.513.0.
+    {"pulp_audio_render", "0.513.0"},
     {nullptr, nullptr},
 };
 
