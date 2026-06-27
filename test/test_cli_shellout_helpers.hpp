@@ -107,6 +107,34 @@ inline ProcessResult run_pulp(const std::vector<std::string>& args,
     return exec(bin.string(), args, timeout_ms);
 }
 
+class ScopedCurrentPath {
+public:
+    explicit ScopedCurrentPath(const fs::path& next)
+        : previous_(fs::current_path()) {
+        fs::current_path(next);
+    }
+
+    ~ScopedCurrentPath() {
+        std::error_code ec;
+        fs::current_path(previous_, ec);
+    }
+
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+private:
+    fs::path previous_;
+};
+
+inline ProcessResult run_pulp_in_directory(const fs::path& dir,
+                                           const std::vector<std::string>& args,
+                                           int timeout_ms = 10000) {
+    const auto bin = fs::absolute(pulp_binary());
+    REQUIRE(fs::exists(bin));
+    ScopedCurrentPath cwd(dir);
+    return exec(bin.string(), args, timeout_ms);
+}
+
 inline bool binary_exists() { return fs::exists(pulp_binary()); }
 
 inline std::string read_file(const fs::path& path) {
