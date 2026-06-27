@@ -1007,9 +1007,8 @@ Element.prototype.setAttribute = function(name, value) {
         }
     }
     // The split element prelude is the runtime path for
-    // document.createElement(); keep it in lockstep
-    // with the legacy web-compat.js bundle so HTML `dir` attributes
-    // reach the same View::WritingDirection slot as CSS `direction`.
+    // document.createElement(); forward supported HTML `dir` values to
+    // the same View::WritingDirection slot as CSS `direction`.
     else if (name === "dir" && typeof setDirection !== "undefined") {
         var dv = String(value).toLowerCase();
         if (dv === "rtl" || dv === "ltr" || dv === "auto") {
