@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
@@ -35,6 +36,8 @@ public:
 
     /// True if the GPU compute device initialized (process_block uses the GPU).
     bool gpu_available() const { return gpu_ != nullptr; }
+    /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
+    std::string backend() const { return gpu_ ? gpu_->capabilities().backend : std::string(); }
     uint32_t fft_size() const { return fft_size_; }
 
 private:

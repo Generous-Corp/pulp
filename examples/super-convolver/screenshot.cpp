@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@ int main(int argc, char** argv) {
     store.set_value(examples::kMix, 45.0f);
     store.set_value(examples::kGain, 0.0f);
     store.set_value(examples::kBypass, 0.0f);
+    store.set_value(examples::kEngine, std::getenv("SC_GPU") ? 1.0f : 0.0f);  // SC_GPU=1 → GPU engine
 
     constexpr int BLOCK = 512;
     constexpr double SR = 48000.0;

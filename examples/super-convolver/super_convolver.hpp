@@ -46,7 +46,9 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace pulp::view { class View; }
@@ -131,6 +133,20 @@ public:
     /// the GPU was requested but unavailable, this is false — the processor fell
     /// back to the CPU engine. Read after prepare().
     bool gpu_engine_active() const { return gpu_engine_active_; }
+
+    /// The live GPU compute backend ("Metal"/"D3D12"/"Vulkan") when the GPU
+    /// engine is active, else "". UI/main-thread only.
+    std::string gpu_backend() const {
+        return gpu_engine_active_ && gpu_node_ ? gpu_node_->backend() : std::string();
+    }
+
+    /// Live {GPU blocks produced, blocks missed (CPU-filled)} so the UI can show
+    /// whether the GPU is actually carrying the work or mostly falling back.
+    std::pair<std::uint64_t, std::uint64_t> gpu_block_stats() const {
+        if (!gpu_engine_active_) return {0, 0};
+        const auto s = gpu_transport_.stats();
+        return {s.produced_blocks, s.miss_blocks};
+    }
 
     void prepare(const format::PrepareContext& ctx) override {
         stop_worker();

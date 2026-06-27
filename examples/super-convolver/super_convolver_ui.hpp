@@ -100,9 +100,17 @@ public:
         canvas.set_fill_color(pal_.text);
         canvas.set_font("Inter", 21.0f * s);
         canvas.fill_text("SuperConvolver", 20 * s, 32 * s);
+        // Subtitle carries the live engine status so it's always clear whether
+        // the AUDIO is on the GPU (the UI is GPU-rendered either way). When the
+        // GPU engine is active it names the backend; otherwise it says CPU.
+        std::string audio_status = "Audio: CPU";
+        if (proc_.gpu_engine_active()) {
+            const std::string b = proc_.gpu_backend();
+            audio_status = b.empty() ? "Audio: GPU" : ("Audio: GPU · " + b);
+        }
         canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text("Convolution reverb · GPU-rendered UI — live impulse response & spectrum",
+        canvas.fill_text("Convolution reverb · GPU-rendered UI · " + audio_status,
                          20 * s, 50 * s);
 
         read_spectrum();
