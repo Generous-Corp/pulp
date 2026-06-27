@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 #include <pulp/audio/buffer.hpp>
@@ -28,7 +30,12 @@ public:
     // The node's descriptor is the single source of truth for channels, block
     // size, and latency. Config only carries transport knobs.
     struct Config {
-        uint32_t ring_blocks = 4;      // ring capacity, in blocks (>= latency+2)
+        uint32_t ring_blocks = 4;        // ring capacity, in blocks (>= latency+2)
+        // Spawn an internal non-RT worker thread that drives pump(). The worker
+        // POLLS the input ring (the audio thread never signals it), so the RT
+        // path stays fully decoupled and lock-free. When false, the caller
+        // drives pump() (deterministic tests / custom worker integration).
+        bool run_worker_thread = false;
     };
 
     struct Stats {
@@ -92,6 +99,14 @@ private:
 
     std::atomic<std::uint64_t> produced_blocks_{0};
     std::atomic<std::uint64_t> miss_blocks_{0};
+    std::atomic<std::uint64_t> input_dropped_blocks_{0};  // whole-block input drops
+
+    // Optional internal worker. The worker polls the input ring; the RT path
+    // never touches these.
+    void worker_loop() noexcept;
+    std::thread worker_;
+    std::atomic<bool> worker_running_{false};
+    std::chrono::microseconds poll_interval_{200};
 };
 
 } // namespace pulp::gpu_audio

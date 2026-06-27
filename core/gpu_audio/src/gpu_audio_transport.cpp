@@ -58,11 +58,38 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
 
     produced_blocks_.store(0, std::memory_order_relaxed);
     miss_blocks_.store(0, std::memory_order_relaxed);
+    input_dropped_blocks_.store(0, std::memory_order_relaxed);
     prepared_ = true;
+
+    if (config.run_worker_thread) {
+        // Poll a few times per block so the worker reliably keeps the output
+        // ring filled within the latency budget; clamp to a sane range.
+        const double block_us = (desc.sample_rate > 0)
+            ? (1.0e6 * static_cast<double>(block_size_) / desc.sample_rate)
+            : 800.0;
+        long iv = static_cast<long>(block_us / 4.0);
+        if (iv < 50) iv = 50;
+        if (iv > 2000) iv = 2000;
+        poll_interval_ = std::chrono::microseconds(iv);
+        worker_running_.store(true, std::memory_order_release);
+        worker_ = std::thread([this] { worker_loop(); });
+    }
     return true;
 }
 
+void GpuAudioTransport::worker_loop() noexcept {
+    while (worker_running_.load(std::memory_order_acquire)) {
+        pump();
+        std::this_thread::sleep_for(poll_interval_);
+    }
+    pump();  // final drain of any input left at stop
+}
+
 void GpuAudioTransport::release() noexcept {
+    // Stop the worker before tearing down the rings/buffers it touches.
+    worker_running_.store(false, std::memory_order_release);
+    if (worker_.joinable()) worker_.join();
+
     input_ring_.release();
     output_ring_.release();
     in_fptrs_.clear();
@@ -85,9 +112,16 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
         return;
     }
 
-    // Hand the input block to the worker. A full ring drops it (telemetry in
-    // ring stats) rather than blocking.
-    input_ring_.write(input, n);
+    // Hand the input block to the worker as a WHOLE block (all-or-nothing) so
+    // the ring stays block-aligned — a partial write would split a block and
+    // misalign every later block-sized read. Single-producer, so a free-space
+    // check that passes here still holds at write time (the worker only frees
+    // more). A full ring drops the whole block (telemetry) rather than blocking.
+    if (input_ring_.free_frames() >= n) {
+        input_ring_.write(input, n);
+    } else {
+        input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // Read the latency-delayed output produced earlier by the worker.
     if (output_ring_.read(output, n)) return;
@@ -135,7 +169,8 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     Stats s;
     s.produced_blocks = produced_blocks_.load(std::memory_order_relaxed);
     s.miss_blocks = miss_blocks_.load(std::memory_order_relaxed);
-    s.input_dropped_frames = input_ring_.stats().dropped_write_frames;
+    s.input_dropped_frames =
+        input_dropped_blocks_.load(std::memory_order_relaxed) * block_size_;
     return s;
 }
 

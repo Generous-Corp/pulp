@@ -4,6 +4,8 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 using namespace pulp::gpu_audio;
@@ -163,6 +165,43 @@ TEST_CASE("GpuAudioTransport rejects invalid descriptor / config", "[gpu_audio][
         GpuAudioTransport t;
         REQUIRE_FALSE(t.prepare(nullptr, {8}));
     }
+}
+
+TEST_CASE("GpuAudioTransport background worker drains the pipeline", "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 2, BS = 64, L = 2, RING = 32;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING, /*run_worker_thread=*/true}));
+
+    Block in(CH, BS), out(CH, BS);
+    constexpr int N = 200;
+    for (int k = 0; k < N; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        std::this_thread::sleep_for(std::chrono::microseconds(300));  // ~ worker poll pace
+    }
+
+    // Liveness: give the worker a bounded grace period to drain the backlog.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto s = t.stats();
+        if (s.produced_blocks + s.input_dropped_frames / BS >= static_cast<std::uint64_t>(N)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    const auto s = t.stats();
+    REQUIRE(s.produced_blocks > 0);  // the worker actually ran
+    // Exact, timing-independent invariant: every fed block was produced or
+    // dropped whole (no partial/misaligned blocks).
+    REQUIRE(s.produced_blocks + s.input_dropped_frames / BS == static_cast<std::uint64_t>(N));
+
+    // release() must cleanly stop + join the worker (no hang / no crash).
+    t.release();
+    REQUIRE_FALSE(t.is_prepared());
 }
 
 TEST_CASE("GpuAudioTransport silences mismatched / too-small views", "[gpu_audio][transport]") {

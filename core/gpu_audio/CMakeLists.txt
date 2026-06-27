@@ -18,8 +18,11 @@ target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 # primitives and the lock-free runtime. Later slices add pulp::signal (CPU
 # fallbacks like PartitionedConvolver) and pulp::render (GPU nodes) when the
 # code actually uses them.
+find_package(Threads REQUIRED)
 target_link_libraries(pulp-gpu-audio
     PUBLIC
         pulp::audio
         pulp::runtime
+    PRIVATE
+        Threads::Threads
 )
