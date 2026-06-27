@@ -1031,7 +1031,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     // target, not a no-op CMake cache variable.
     REQUIRE(contains(combined, "-G Xcode"));
     REQUIRE(contains(combined, "build/xcode/MyPlugin-iphonesimulator"));
-    REQUIRE(contains(combined, "--target MyPlugin_AUv3"));
+    REQUIRE(contains(combined, "--target \"MyPlugin_AUv3\""));
     REQUIRE(contains(combined, "ios.toolchain.cmake"));
     REQUIRE(contains(combined, "SIMULATOR64"));
     REQUIRE_FALSE(contains(combined, "PULP_AUV3_TARGET"));
