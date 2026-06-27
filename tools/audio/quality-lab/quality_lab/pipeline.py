@@ -160,17 +160,27 @@ def run_and_export(
     candidate WAVs, plus a short clip pair around each localized worst region so a
     developer (or an audio-capable model) can hear exactly what's wrong. Adds a
     `listening` block of relative paths to the report."""
-    from . import regions
+    import os
+
+    from . import perceptual, regions
 
     x = _execute(degradation, detectors, latency_ms, smear_ms, case)
     listening = regions.export_artifacts(
         out_dir, x["reference"], x["candidate"], x["sr"], x["results"]
     )
-    report = build_report(
-        case, x["results"], provenance.build(x["recipe"], x["determinism"]),
-        x["determinism"], x["verdict"],
-    )
+    prov = provenance.build(x["recipe"], x["determinism"])
+
+    # Self-describing samples: drop a provenance sidecar next to the rendered WAVs so a
+    # liked sample maps back to its commit + recipe even if separated from the folder.
+    ref_wav = os.path.join(out_dir, listening["reference"])
+    cand_wav = os.path.join(out_dir, listening["candidate"])
+    provenance.write_sidecar(ref_wav, prov)
+    provenance.write_sidecar(cand_wav, prov)
+
+    report = build_report(case, x["results"], prov, x["determinism"], x["verdict"])
     report["listening"] = listening
+    # Layer B perceptual models (advisory; skipped unless the developer opts in via env).
+    report["perceptual"] = perceptual.evaluate(ref_wav, cand_wav)
     return report
 
 

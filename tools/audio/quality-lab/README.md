@@ -81,6 +81,29 @@ not just a matched kernel. (`tests/test_real_pv_evidence.py`.)
 Detectors also report **coverage** (onsets actually measured / offered); a "clean"
 verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 
+## Perceptual models (Layer B — opt-in, license-fenced)
+
+A full-reference perceptual MOS predictor is a *coarse global guard* complementary to
+the Layer-A detectors — advisory, never a gate. **ViSQOL** (Apache-2.0) is reached
+ONLY via an explicit env-path you set, never bundled or auto-downloaded:
+
+```bash
+export PULP_VISQOL_BIN=/path/to/visqol   # opt-in; unset → the report's perceptual block is "skipped"
+python -m quality_lab.cli run --degradation smear --out-dir out
+```
+
+When unset (the default, and always in public CI), the perceptual block degrades to
+`skipped` with a reason — never an error. PEAQ / AQUATK (GPL, Tier-3, developer-
+supplied) plug in the same way behind their own env-paths; no copyleft code is ever
+imported or bundled (see `NOTICE.md` and the plan's §4 license fence).
+
+## Self-describing samples (provenance)
+
+`run --out-dir` writes a `<wav>.provenance.json` sidecar next to each rendered WAV,
+carrying the engine commit, recipe, determinism context, and the WAV's SHA-256 — so a
+sample you liked maps back to exactly how it was made ("same-recipe" tier), even if
+separated from its run folder.
+
 ## Detectors
 
 | Detector | Catches | Method |
