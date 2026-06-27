@@ -1878,15 +1878,18 @@ pulp ship auv3-xcodeproj <target> --sdk iphoneos     # device
 pulp ship auv3-xcodeproj <target> --sdk macosx       # macOS lane
 pulp ship auv3-xcodeproj <target> --output build/xcode/MyPlugin
 pulp ship auv3-xcodeproj <target> --open             # open in Xcode after gen
-pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation only
+pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation + build hint
 ```
 
-Default output dir is `build/xcode/<target>-<sdk>`. iOS SDKs include
-`tools/cmake/ios.toolchain.cmake` with the correct `IOS_PLATFORM`
-(OS for device, SIMULATOR64 for simulator). The full Xcode-project
-generation flow plus device entitlement templates live in the `auv3`
-skill — this section just pins the CLI surface so the slash command,
-docs, and skill stay in lockstep.
+Default output dir is `build/xcode/<target>-<sdk>`. The generated build
+hint targets `<target>_AUv3`; configure does not use a separate
+target-selector cache variable. iOS SDKs include
+`tools/cmake/ios.toolchain.cmake` with the correct `IOS_PLATFORM` (OS for
+device, SIMULATOR64 for simulator). macOS projects also contain the runnable
+containing-app target `<target>_AUv3Host`. The full Xcode-project generation
+flow plus device entitlement templates live in the `auv3` skill — this section
+just pins the CLI surface so the slash command, docs, and skill stay in
+lockstep.
 
 ## `pulp identity` — committed plugin identity lockfile
 

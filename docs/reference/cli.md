@@ -938,10 +938,12 @@ app-signing entitlements.
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
 
-`auv3-xcodeproj` generates a separate CMake Xcode build directory for an AUv3
-target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; default
-output is `build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake
-invocation without requiring Xcode.
+`auv3-xcodeproj` generates a separate CMake Xcode build directory for a project
+that contains an AUv3 target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or
+`macosx`; default output is `build/xcode/<target>-<sdk>`. The generated build
+hint targets `<target>_AUv3`. Use `--dry-run` to print the CMake invocation and
+build hint without requiring Xcode. For the macOS lane, the generated project
+also contains the runnable containing-app target `<target>_AUv3Host`.
 
 #### `pulp ship notarize`
 

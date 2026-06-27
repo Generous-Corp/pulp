@@ -1026,12 +1026,15 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
     auto combined = r.stdout_output + r.stderr_output;
-    // Resolved cmake invocation must include the Xcode generator, the
-    // target name, and the simulator toolchain.
+    // Resolved output must include the Xcode generator, the target build
+    // hint, and the simulator toolchain. The target selector is the build
+    // target, not a no-op CMake cache variable.
     REQUIRE(contains(combined, "-G Xcode"));
-    REQUIRE(contains(combined, "MyPlugin"));
+    REQUIRE(contains(combined, "build/xcode/MyPlugin-iphonesimulator"));
+    REQUIRE(contains(combined, "--target MyPlugin_AUv3"));
     REQUIRE(contains(combined, "ios.toolchain.cmake"));
     REQUIRE(contains(combined, "SIMULATOR64"));
+    REQUIRE_FALSE(contains(combined, "PULP_AUV3_TARGET"));
 
     fs::remove_all(root);
 }
