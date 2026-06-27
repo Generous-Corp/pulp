@@ -182,7 +182,7 @@ pulp ship package --version 1.0.0
 The installer:
 - Installs VST3 to `%COMMONFILES%\VST3\`
 - Installs CLAP to `%COMMONFILES%\CLAP\`
-- Creates Start Menu shortcuts and uninstaller
+- Creates an uninstaller; plugin-only installers do not create Start Menu shortcuts
 - Registers with Windows Add/Remove Programs
 
 ### Per-User Installation

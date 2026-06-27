@@ -889,7 +889,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
-| `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
+| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
@@ -902,7 +902,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 `--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
 `.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary.
+`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
