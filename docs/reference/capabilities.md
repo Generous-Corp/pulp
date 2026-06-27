@@ -452,8 +452,8 @@ The `pulp` CLI wraps common development workflows.
 | Appcast XML parsing | usable | ship | |
 | Ed25519 update signing | usable | ship | Sparkle appcast signatures via `sign_file_ed25519()` and `pulp ship appcast --sign-key` |
 | Semantic version comparison | usable | ship | |
-| Windows code signing | partial | ship | Stub exists |
-| Linux packaging | partial | ship | Stub exists |
+| Windows code signing | partial | ship | [windows](../guides/platforms/windows.md) — Authenticode via Windows SDK `signtool`; signing is implemented, but certificate provisioning and real signing validation remain host-owned |
+| Linux packaging | usable | ship | [linux](../guides/platforms/linux.md) — tested `.deb` path with `.tar.gz` fallback independent of runtime platform maturity, plus standalone AppImage wrapping when `appimagetool` is installed |
 
 Key headers: `pulp/ship/codesign.hpp`, `pulp/ship/appcast.hpp`
 
