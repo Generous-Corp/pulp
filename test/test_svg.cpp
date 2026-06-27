@@ -131,19 +131,16 @@ TEST_CASE("SvgImage move semantics", "[canvas][svg]") {
     REQUIRE_FALSE(img1.is_valid());
 }
 
-// pulp #72 — preset previews (Spectr's band-shape thumbnails were the
-// live-traffic example) render through SvgImage::render() into a Canvas,
-// not through nsvgRasterize() directly. These previews need two path-level
+// Preset previews render through SvgImage::render() into a Canvas, not
+// through nsvgRasterize() directly. These previews need two path-level
 // contracts: fill-only paths emit fill commands, and Bezier curves remain
 // curves instead of being flattened into handle-connecting polylines.
-// A path with `fill="#abc"` and no stroke would render NOTHING — which
-// is what the user observed as "preset preview blank."
 //
 // These regression tests enforce both contracts at the RecordingCanvas
 // level so a refactor that drops the path-API calls fails CI before the
 // user sees blank thumbnails again.
-TEST_CASE("SvgImage::render emits fill_current_path for fill-only path [issue-72]",
-          "[canvas][svg][issue-72]") {
+TEST_CASE("SvgImage::render emits fill_current_path for fill-only path",
+          "[canvas][svg]") {
     // Filled rect with NO stroke — this still needs a fill path.
     auto img = SvgImage::from_string(R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10">
@@ -161,8 +158,8 @@ TEST_CASE("SvgImage::render emits fill_current_path for fill-only path [issue-72
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
 }
 
-TEST_CASE("SvgImage::render emits cubic_to for curved paths [issue-72]",
-          "[canvas][svg][issue-72]") {
+TEST_CASE("SvgImage::render emits cubic_to for curved paths",
+          "[canvas][svg]") {
     // A cubic Bezier curve — the band-shape preview pattern. Rendering must
     // preserve the curve instead of stepping through control points as lines.
     auto img = SvgImage::from_string(R"(
@@ -182,8 +179,8 @@ TEST_CASE("SvgImage::render emits cubic_to for curved paths [issue-72]",
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
 }
 
-TEST_CASE("SvgImage::render forwards evenodd fill-rule [issue-72]",
-          "[canvas][svg][issue-72]") {
+TEST_CASE("SvgImage::render forwards evenodd fill-rule",
+          "[canvas][svg]") {
     // Paths with `fill-rule="evenodd"` are common in preset-thumbnail
     // SVGs that use cutouts/holes. The fill
     // rule must reach Canvas's path API, not be hardcoded to nonzero.
@@ -229,8 +226,8 @@ TEST_CASE("SvgImage::render forwards evenodd fill-rule [issue-72]",
     REQUIRE(saw_nonzero);
 }
 
-TEST_CASE("SvgImage::render emits both fill + stroke for filled+stroked path [issue-72]",
-          "[canvas][svg][issue-72]") {
+TEST_CASE("SvgImage::render emits both fill + stroke for filled+stroked path",
+          "[canvas][svg]") {
     auto img = SvgImage::from_string(R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <circle cx="50" cy="50" r="40" fill="#f00" stroke="#000" stroke-width="2"/>

@@ -1471,7 +1471,7 @@ public:
 }  // namespace
 
 TEST_CASE("View::last_paint_self_ns reports non-zero after a paint cycle",
-          "[view][paint-timing][phase3d]") {
+          "[view][paint-timing]") {
     auto v = std::make_unique<CountingPaintView>();
     v->set_bounds({0, 0, 100, 100});
 
@@ -1487,7 +1487,7 @@ TEST_CASE("View::last_paint_self_ns reports non-zero after a paint cycle",
 }
 
 TEST_CASE("View::last_paint_with_children_ns covers child cost too",
-          "[view][paint-timing][phase3d]") {
+          "[view][paint-timing]") {
     // Parent with two CountingPaintView children — parent's
     // with_children must be >= sum of children's self timings.
     auto parent = std::make_unique<pulp::view::View>();
@@ -1519,7 +1519,7 @@ TEST_CASE("View::last_paint_with_children_ns covers child cost too",
 }
 
 TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
-          "[view][paint-timing][phase3d]") {
+          "[view][paint-timing]") {
     // Two paint cycles should produce two recorded samples (the second
     // overwrites the first — we don't keep history).
     auto v = std::make_unique<CountingPaintView>();
@@ -1537,14 +1537,14 @@ TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
     REQUIRE(v->last_paint_self_ns() > 0u);
 }
 
-// Regression (#2338): paint timing must cover framework-owned
-// drawing (background fills, borders, gradients, layer setup) — not
-// just the paint(canvas) override. A styled View with no paint()
-// override should still report non-zero last_paint_self_ns because
-// background_color painting + layer setup runs inside paint_all().
+// Paint timing must cover framework-owned drawing (background fills,
+// borders, gradients, layer setup), not just the paint(canvas) override.
+// A styled View with no paint() override should still report non-zero
+// last_paint_self_ns because background_color painting + layer setup runs
+// inside paint_all().
 TEST_CASE("View::last_paint_self_ns covers framework drawing on no-override views "
-          "(#2338 regression)",
-          "[view][paint-timing][phase3d][regression]") {
+          "without a paint override",
+          "[view][paint-timing][regression]") {
     // Use the BASE pulp::view::View (no paint() override) but set a
     // background color so the framework's background fill runs in
     // paint_all() between save() and the (no-op) paint() call. Timing

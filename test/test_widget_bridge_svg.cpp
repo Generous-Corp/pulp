@@ -119,14 +119,14 @@ TEST_CASE("WidgetBridge setSvgFillRule selects winding rule on SvgPathWidget",
     REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
 }
 
-// pulp #968 — canvasRect / canvasStrokeRect must honour the active fill /
-// stroke style when no color arg is passed. Validates the JS bridge path:
+// canvasRect / canvasStrokeRect must honour the active fill / stroke style
+// when no color arg is passed. Validates the JS bridge path:
 //   1. five-arg canvasRect → fillStyle (color or gradient) wins
 //   2. six-arg canvasRect with explicit color → explicit color wins
 //   3. linear gradient set, then five-arg canvasRect → gradient wins
 //   4. five-arg canvasStrokeRect → strokeStyle wins
-TEST_CASE("WidgetBridge canvasRect with no color uses active fillStyle (issue-968)",
-          "[view][bridge][canvas][issue-968]") {
+TEST_CASE("WidgetBridge canvasRect with no color uses active fillStyle",
+          "[view][bridge][canvas]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -191,8 +191,8 @@ TEST_CASE("WidgetBridge canvasRect with no color uses active fillStyle (issue-96
     REQUIRE(second_is_cyan);
 }
 
-TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradient (issue-968)",
-          "[view][bridge][canvas][issue-968]") {
+TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradient",
+          "[view][bridge][canvas]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -247,8 +247,8 @@ TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradien
     REQUIRE(is_red);
 }
 
-TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle (issue-968)",
-          "[view][bridge][canvas][issue-968]") {
+TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle",
+          "[view][bridge][canvas]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});

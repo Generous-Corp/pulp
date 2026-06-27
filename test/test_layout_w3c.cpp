@@ -192,10 +192,9 @@ TEST_CASE("View: border", "[view][w3c]") {
     REQUIRE(v.corner_radius() == 8.0f);
 }
 
-TEST_CASE("View: overflow default is visible (CSS default, pulp #972)", "[view][w3c][issue-972]") {
-    // pulp #972 — Pulp previously defaulted overflow to `hidden`, which clipped
-    // absolutely-positioned children (popovers, dropdowns) to their parent's
-    // content bounds and made them invisible. CSS default is `overflow: visible`.
+TEST_CASE("View: overflow default is visible (CSS default)", "[view][w3c]") {
+    // Absolutely-positioned children (popovers, dropdowns) must not be clipped
+    // to their parent's content bounds by default. CSS default is `overflow: visible`.
     // Plugins that intentionally want clipping must call set_overflow(Overflow::hidden) explicitly.
     View v;
     REQUIRE(v.overflow() == View::Overflow::visible);
@@ -466,10 +465,10 @@ TEST_CASE("KeyframeAnimation: multi-step keyframes", "[animation]") {
 // CSS Grid Layout Level 1
 // ═══════════════════════════════════════════════════════════════════
 
-TEST_CASE("Layout: max-width 0% clamps a growing child to zero (issue-2704)",
-          "[layout][w3c][issue-2704]") {
+TEST_CASE("Layout: max-width 0% clamps a growing child to zero",
+          "[layout][w3c]") {
     // A flex-grow child with max-width:0% must be clamped to 0 — the percent
-    // max path also used the >0 guard that dropped 0%.
+    // max path must not drop zero-valued percent constraints.
     View root;
     root.set_bounds({0, 0, 400, 50});
     root.flex().direction = FlexDirection::row;
@@ -481,10 +480,10 @@ TEST_CASE("Layout: max-width 0% clamps a growing child to zero (issue-2704)",
     REQUIRE(root.child_at(0)->bounds().width == 0.0f);
 }
 
-TEST_CASE("Grid: parse_template 'none' is empty and never throws (issue-2704)",
-          "[layout][grid][issue-2704]") {
+TEST_CASE("Grid: parse_template 'none' is empty and never throws",
+          "[layout][grid]") {
     // `none` is the CSS initial value for grid-template-*; std::stof("none")
-    // used to throw out of WidgetBridge::load_script. It must yield no tracks.
+    // must not escape from WidgetBridge::load_script. It yields no tracks.
     REQUIRE_NOTHROW(GridStyle::parse_template("none"));
     REQUIRE(GridStyle::parse_template("none").empty());
     // Unparseable tokens are skipped, not thrown; valid tracks still parse.
@@ -534,8 +533,8 @@ TEST_CASE("Grid: parse_template caps recursion on pathologically nested repeat",
     REQUIRE(shallow.size() == 6);
 }
 
-TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
-          "[layout][w3c][issue-2704]") {
+TEST_CASE("Layout: width 0% lays out at zero, not intrinsic",
+          "[layout][w3c]") {
     View root;
     root.set_bounds({0, 0, 300, 50});
     root.flex().direction = FlexDirection::row;
@@ -544,15 +543,14 @@ TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
     child->flex().dim_width = Dimension{0.0f, DimensionUnit::percent};  // width: 0%
     root.add_child(std::move(child));
     root.layout_children();
-    // 0% must win over the intrinsic 100; the pre-fix >0 guard dropped 0%.
+    // 0% must win over the intrinsic 100.
     REQUIRE(root.child_at(0)->bounds().width == 0.0f);
 }
 
-TEST_CASE("Layout: flex-basis 0% is honored, not treated as auto (issue-2704)",
-          "[layout][w3c][issue-2704]") {
+TEST_CASE("Layout: flex-basis 0% is honored, not treated as auto",
+          "[layout][w3c]") {
     // Two flex:1 children with different intrinsic widths but flex-basis:0%
-    // should split the row EQUALLY (the classic `flex: 1` behavior). With the
-    // old >0 guard, 0% basis was dropped and the unequal intrinsics leaked in.
+    // should split the row equally (the classic `flex: 1` behavior).
     View root;
     root.set_bounds({0, 0, 300, 50});
     root.flex().direction = FlexDirection::row;

@@ -190,7 +190,7 @@ TEST_CASE("ComboBox: keyboard navigation moves the row highlight while open",
 // with real bounds), update this test AND every window_host_*.{mm,cpp}
 // that special-cases active_popup_.
 
-TEST_CASE("ComboBox: active_popup_ + hit_test gap forces platform bypass [issue-overlay]",
+TEST_CASE("ComboBox: active_popup_ + hit_test gap forces platform bypass",
           "[combo][regression]") {
     // Reset global state — other tests in this binary may leave it set.
     ComboBox::close_active_popup();
@@ -231,7 +231,7 @@ TEST_CASE("ComboBox: active_popup_ + hit_test gap forces platform bypass [issue-
     REQUIRE(ComboBox::active_popup_ == nullptr);
 }
 
-TEST_CASE("ComboBox: notify_global_click on combo itself keeps popup open [issue-overlay]",
+TEST_CASE("ComboBox: notify_global_click on combo itself keeps popup open",
           "[combo][regression]") {
     ComboBox::close_active_popup();
     ComboBox combo;
@@ -253,7 +253,7 @@ TEST_CASE("ComboBox: notify_global_click on combo itself keeps popup open [issue
     ComboBox::close_active_popup();
 }
 
-TEST_CASE("ComboBox: opening a second dropdown closes the first [issue-overlay]",
+TEST_CASE("ComboBox: opening a second dropdown closes the first",
           "[combo][regression]") {
     ComboBox::close_active_popup();
     ComboBox a; a.set_items({"x"}); a.set_bounds({0, 0, 100, 28});
@@ -275,14 +275,13 @@ TEST_CASE("ComboBox: opening a second dropdown closes the first [issue-overlay]"
     ComboBox::close_active_popup();
 }
 
-// pulp #1818 — when a ComboBox is destroyed while its dropdown is open,
-// `~ComboBox` MUST clear the static `active_popup_` slot. Otherwise the
-// platform window host dereferences a dangling pointer on the next
-// mouseDown (PAC failure on the vtable load — exact crash signature in
-// the issue report). Reproducer: open dropdown (sets active_popup_),
-// drop the ComboBox, assert the slot is nullptr.
-TEST_CASE("ComboBox: dtor clears active_popup_ when destroyed while open [issue-1818]",
-          "[combo][regression][issue-1818]") {
+// When a ComboBox is destroyed while its dropdown is open, `~ComboBox`
+// must clear the static `active_popup_` slot. Otherwise the platform window
+// host dereferences a dangling pointer on the next mouseDown. Reproducer:
+// open dropdown (sets active_popup_), drop the ComboBox, assert the slot is
+// nullptr.
+TEST_CASE("ComboBox: dtor clears active_popup_ when destroyed while open",
+          "[combo][regression]") {
     ComboBox::close_active_popup();
     REQUIRE(ComboBox::active_popup_ == nullptr);
 
@@ -310,12 +309,11 @@ TEST_CASE("ComboBox: dtor clears active_popup_ when destroyed while open [issue-
     REQUIRE(ComboBox::active_popup_ == nullptr);
 }
 
-// pulp #1818 — same shape for `View::active_overlay_`. This regression
-// guard mirrors the pulp #1148 fix already present in `~View()` but
-// asserts it explicitly so a future refactor that drops the clear is
-// caught immediately rather than at the next user click.
-TEST_CASE("View: dtor clears active_overlay_ when destroyed while claimed [issue-1818]",
-          "[view][regression][issue-1818]") {
+// Same cleanup contract for `View::active_overlay_`: assert the `~View()`
+// clear explicitly so a future refactor that drops it is caught immediately
+// rather than at the next user click.
+TEST_CASE("View: dtor clears active_overlay_ when destroyed while claimed",
+          "[view][regression]") {
     REQUIRE(pulp::view::View::active_overlay_ == nullptr);
 
     {
@@ -344,8 +342,8 @@ TEST_CASE("View: dtor clears active_overlay_ when destroyed while claimed [issue
 // A regression that gated close_active_popup on focus ownership would
 // silently break the host-level ESC path and surface only as "ESC
 // doesn't close popovers" in the live host. This test fences that.
-TEST_CASE("ComboBox: close_active_popup is focus-independent [issue-68]",
-          "[combo][regression][issue-68]") {
+TEST_CASE("ComboBox: close_active_popup is focus-independent",
+          "[combo][regression]") {
     ComboBox::close_active_popup();
     REQUIRE(ComboBox::active_popup_ == nullptr);
 

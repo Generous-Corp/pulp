@@ -3,9 +3,9 @@
 // Pins the per-View `View::active_overlay_` mechanism that the platform
 // window host (window_host_mac.mm and platform siblings) consults
 // AFTER `ComboBox::active_popup_` and BEFORE the regular tree
-// `hit_test`. The ComboBox path is pinned separately by
-// test_combo_dropdown.cpp [issue-overlay] — these tests cover the
-// generic mechanism React popovers use.
+// `hit_test`. The ComboBox path is pinned separately in
+// test_combo_dropdown.cpp; these tests cover the generic mechanism React
+// popovers use.
 //
 // Contract under test:
 //   1. claim_overlay() / release_overlay() toggle the global slot

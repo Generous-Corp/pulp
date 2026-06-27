@@ -511,8 +511,8 @@ static void install_app_menu(NSString* appName) {
         // Generalized overlay-click routing for React popovers.
         // Any View that called `claim_overlay()` (e.g. via @pulp/react's
         // `<View overlay>` JSX prop) is checked AFTER the ComboBox path
-        // (which stays exact-as-was per regression test in
-        // test_combo_dropdown.cpp [issue-overlay]) and BEFORE the regular
+        // (which stays exact-as-was per regression tests in
+        // test_combo_dropdown.cpp) and BEFORE the regular
         // tree hit_test. If the click falls inside the overlay's window
         // rect we route it directly there so absolutely-positioned popover
         // children get the click instead of whatever sibling/ancestor view
