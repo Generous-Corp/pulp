@@ -1,4 +1,4 @@
-// Shell-out integration test for the zero-copy benchmark mode (Slice 0 of #516).
+// Shell-out integration test for the zero-copy benchmark mode.
 //
 // Spawns `pulp-ui-preview --benchmark-seconds=2 --widget=oscilloscope
 // --output=<tmp>.json`, parses the emitted JSON, and asserts the

@@ -1,4 +1,4 @@
-// Item 1.3 — AudioPlayHead transport-extension adapter wiring helpers.
+// AudioPlayHead transport-extension adapter wiring helpers.
 //
 // `detail::derive_bar_from_beats` and `detail::compute_playhead_changes`
 // are the two pieces of pure logic the VST3, AU v2 / v3, and CLAP
@@ -8,10 +8,8 @@
 // `CallHostMusicalTimeLocation` / `CallHostTransportState`, AU v3
 // `musicalContextBlock` / `transportStateBlock`, CLAP
 // `clap_event_transport`) and feeds the populated context through the
-// two helpers — so pinning the helpers covers the cross-adapter
-// contract end-to-end. Per-host validation that actually drives a real
-// DAW (Logic, Cubase, Bitwig, Reaper) is captured as a follow-up under
-// item 1.3 of the macOS plan.
+// two helpers — so pinning the helpers covers the shared cross-adapter
+// contract.
 //
 // The adapter wiring itself is exercised by:
 //   * test_clap_entry.cpp / test_clap_host_validation.cpp — CLAP
@@ -22,8 +20,7 @@
 //   * test_au_plugin_state.mm — AU v3 state surface.
 // Those tests don't drive the host's playhead push API (no host is
 // running), so the field-population path here lives behind a host
-// driver. That gap is the planned 1.3 acceptance test once a real-DAW
-// harness exists.
+// driver and needs a real-DAW harness for full end-to-end coverage.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,7 +34,7 @@ using pulp::format::detail::compute_playhead_changes;
 using pulp::format::detail::derive_bar_from_beats;
 
 TEST_CASE("derive_bar_from_beats: 4/4 maps every 4 beats to one bar",
-          "[format][playhead][item-13][derive-bar]") {
+          "[format][playhead][derive-bar]") {
     ProcessContext ctx;
     ctx.time_sig_numerator = 4;
     ctx.time_sig_denominator = 4;
@@ -60,7 +57,7 @@ TEST_CASE("derive_bar_from_beats: 4/4 maps every 4 beats to one bar",
 }
 
 TEST_CASE("derive_bar_from_beats: 3/4 maps every 3 beats to one bar",
-          "[format][playhead][item-13][derive-bar]") {
+          "[format][playhead][derive-bar]") {
     ProcessContext ctx;
     ctx.time_sig_numerator = 3;
     ctx.time_sig_denominator = 4;
@@ -83,7 +80,7 @@ TEST_CASE("derive_bar_from_beats: 3/4 maps every 3 beats to one bar",
 }
 
 TEST_CASE("derive_bar_from_beats: 6/8 maps every 3 quarter notes to one bar",
-          "[format][playhead][item-13][derive-bar]") {
+          "[format][playhead][derive-bar]") {
     // 6/8 = 6 eighths per bar = 3 quarter notes per bar.
     ProcessContext ctx;
     ctx.time_sig_numerator = 6;
@@ -107,7 +104,7 @@ TEST_CASE("derive_bar_from_beats: 6/8 maps every 3 quarter notes to one bar",
 }
 
 TEST_CASE("derive_bar_from_beats: degenerate time signatures stay at bar 0",
-          "[format][playhead][item-13][derive-bar][edge]") {
+          "[format][playhead][derive-bar][edge]") {
     ProcessContext ctx;
     ctx.position_beats = 17.0;
 
@@ -134,7 +131,7 @@ TEST_CASE("derive_bar_from_beats: degenerate time signatures stay at bar 0",
 }
 
 TEST_CASE("compute_playhead_changes: first call after construction reports no changes",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     REQUIRE_FALSE(snapshot.has_previous);
 
@@ -163,7 +160,7 @@ TEST_CASE("compute_playhead_changes: first call after construction reports no ch
 }
 
 TEST_CASE("compute_playhead_changes: second identical call still reports no changes",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext ctx;
     ctx.tempo_bpm = 120.0;
@@ -179,7 +176,7 @@ TEST_CASE("compute_playhead_changes: second identical call still reports no chan
 }
 
 TEST_CASE("compute_playhead_changes: tempo bump flips tempo_changed only",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.tempo_bpm = 120.0;
@@ -197,7 +194,7 @@ TEST_CASE("compute_playhead_changes: tempo bump flips tempo_changed only",
 }
 
 TEST_CASE("compute_playhead_changes: time-sig numerator change flips time_sig_changed",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.time_sig_numerator = 4;
@@ -216,7 +213,7 @@ TEST_CASE("compute_playhead_changes: time-sig numerator change flips time_sig_ch
 }
 
 TEST_CASE("compute_playhead_changes: time-sig denominator change flips time_sig_changed",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.time_sig_numerator = 4;
@@ -235,7 +232,7 @@ TEST_CASE("compute_playhead_changes: time-sig denominator change flips time_sig_
 }
 
 TEST_CASE("compute_playhead_changes: is_playing flip raises transport_changed",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.is_playing = false;
@@ -254,7 +251,7 @@ TEST_CASE("compute_playhead_changes: is_playing flip raises transport_changed",
 }
 
 TEST_CASE("compute_playhead_changes: is_recording or is_looping flip raises transport_changed",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     compute_playhead_changes(seed, snapshot);
@@ -281,7 +278,7 @@ TEST_CASE("compute_playhead_changes: is_recording or is_looping flip raises tran
 }
 
 TEST_CASE("compute_playhead_changes: multiple fields can flip in the same block",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.tempo_bpm = 100.0;
@@ -303,7 +300,7 @@ TEST_CASE("compute_playhead_changes: multiple fields can flip in the same block"
 }
 
 TEST_CASE("compute_playhead_changes: returning to previous values clears the flags",
-          "[format][playhead][item-13][change-flags]") {
+          "[format][playhead][change-flags]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.tempo_bpm = 120.0;
@@ -330,7 +327,7 @@ TEST_CASE("compute_playhead_changes: returning to previous values clears the fla
 }
 
 TEST_CASE("compute_playhead_changes: continuous sample-position advance is not a jump",
-          "[format][playhead][phase2][transport-jump]") {
+          "[format][playhead][transport-jump]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.sample_rate = 48000.0;
@@ -350,7 +347,7 @@ TEST_CASE("compute_playhead_changes: continuous sample-position advance is not a
 }
 
 TEST_CASE("compute_playhead_changes: playing sample-position discontinuity is a jump",
-          "[format][playhead][phase2][transport-jump]") {
+          "[format][playhead][transport-jump]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.sample_rate = 48000.0;
@@ -371,7 +368,7 @@ TEST_CASE("compute_playhead_changes: playing sample-position discontinuity is a 
 }
 
 TEST_CASE("compute_playhead_changes: stopped sample-position change is a jump",
-          "[format][playhead][phase2][transport-jump]") {
+          "[format][playhead][transport-jump]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.position_samples = 2048;
@@ -388,7 +385,7 @@ TEST_CASE("compute_playhead_changes: stopped sample-position change is a jump",
 }
 
 TEST_CASE("compute_playhead_changes: transport edge with continuous sample advance is not a jump",
-          "[format][playhead][phase2][transport-jump]") {
+          "[format][playhead][transport-jump]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.sample_rate = 48000.0;
@@ -409,7 +406,7 @@ TEST_CASE("compute_playhead_changes: transport edge with continuous sample advan
 }
 
 TEST_CASE("compute_playhead_changes: beat-position fallback distinguishes continuous advance",
-          "[format][playhead][phase2][transport-jump]") {
+          "[format][playhead][transport-jump]") {
     PlayheadSnapshot snapshot;
     ProcessContext seed;
     seed.sample_rate = 48000.0;

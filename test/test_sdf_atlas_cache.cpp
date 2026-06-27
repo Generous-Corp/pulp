@@ -23,7 +23,7 @@ TEST_CASE("SdfAtlasCache duplicate seed glyphs produce one resident entry",
 }
 
 TEST_CASE("SdfAtlasCache can initialize an empty resident set",
-          "[canvas][cache][issue-650]") {
+          "[canvas][cache][empty-seed]") {
     SdfAtlasCache cache;
     REQUIRE_FALSE(cache.initialize("", {}, 24, 4, 512));
     REQUIRE(cache.size() == 0);
@@ -32,7 +32,7 @@ TEST_CASE("SdfAtlasCache can initialize an empty resident set",
 }
 
 TEST_CASE("SdfAtlasCache failed initialize clears prior resident glyphs",
-          "[canvas][cache][issue-641]") {
+          "[canvas][cache][initialize-failure]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A'}, 32, 0, 32));
     REQUIRE(cache.size() == 1);
@@ -46,7 +46,7 @@ TEST_CASE("SdfAtlasCache failed initialize clears prior resident glyphs",
 }
 
 TEST_CASE("SdfAtlasCache reinitialize stamps new glyphs at current frame",
-          "[canvas][cache][issue-641]") {
+          "[canvas][cache][reinitialize]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A'}, 24, 4, 512));
     cache.next_frame();
@@ -62,7 +62,7 @@ TEST_CASE("SdfAtlasCache reinitialize stamps new glyphs at current frame",
 }
 
 TEST_CASE("SdfAtlasCache touching resident glyph updates recency without clearing dirty",
-          "[canvas][cache][issue-650]") {
+          "[canvas][cache][recency]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
 
@@ -113,7 +113,7 @@ TEST_CASE("SdfAtlasCache evicts glyphs unused beyond max_age",
 }
 
 TEST_CASE("SdfAtlasCache eviction keeps glyphs at the exact age threshold",
-          "[canvas][cache][issue-641]") {
+          "[canvas][cache][eviction]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
 
@@ -146,7 +146,7 @@ TEST_CASE("SdfAtlasCache ensure grows the atlas on demand",
 }
 
 TEST_CASE("SdfAtlasCache ensure failure preserves existing cache state",
-          "[canvas][cache][issue-641]") {
+          "[canvas][cache][ensure-failure]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A'}, 32, 0, 32));
     REQUIRE(cache.size() == 1);
@@ -160,7 +160,7 @@ TEST_CASE("SdfAtlasCache ensure failure preserves existing cache state",
 }
 
 TEST_CASE("SdfAtlasCache ensure rebuild preserves glyph recency",
-          "[canvas][cache][issue-641]") {
+          "[canvas][cache][ensure-rebuild]") {
     SdfAtlasCache cache;
     REQUIRE(cache.initialize("", {U'A'}, 24, 4, 512));
 

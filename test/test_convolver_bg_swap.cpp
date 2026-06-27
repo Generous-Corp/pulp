@@ -1,5 +1,4 @@
-// Background-IR-swap tests for PartitionedConvolver / ConvolverIrSwapper
-// (macOS plugin authoring plan item 2.3, Slice A).
+// Background-IR-swap tests for PartitionedConvolver / ConvolverIrSwapper.
 //
 // Validates:
 //   - lock-free atomic IR hand-off from worker thread to audio thread,
@@ -233,12 +232,10 @@ TEST_CASE("PartitionedConvolver: try_swap_ir on an unloaded convolver",
     REQUIRE_FALSE(swapper.has_retired());
 }
 
-TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly (#2881)",
+TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly",
           "[signal][convolver][bg-swap][regression]") {
-    // The earlier impl used a single-slot retired_ atomic. Two swaps
-    // between drain_old() calls meant the displaced IR fell back to
-    // an inline delete on the audio thread — soft RT violation.
-    // The fix:
+    // Two swaps between drain_old() calls must not fall back to an inline
+    // delete on the audio thread — soft RT violation. The contract:
     //   1. retired_ is now a fixed-size SPSC ring (kRetireRingCapacity).
     //   2. try_swap_ir gates on has_retire_capacity() BEFORE consuming
     //      pending. If the ring is full, the swap refuses cleanly;

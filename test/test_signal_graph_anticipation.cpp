@@ -1,5 +1,5 @@
-// Acceptance coverage for anticipative rendering wired into SignalGraph::process
-// (masterwork Phase 6): with anticipation enabled, the eligible latent interior is
+// Acceptance coverage for anticipative rendering wired into SignalGraph::process:
+// with anticipation enabled, the eligible latent interior is
 // pre-rendered ahead of the deadline off the audio thread and spliced into the
 // live graph, so the audio block never runs the interior itself. The result must
 // be bit-identical to the canonical (interior-live) executor render, and a

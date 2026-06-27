@@ -10,7 +10,7 @@ using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
 // ────────────────────────────────────────────────────────────────────────
-// macOS plan item 2.6 — Wavetable oscillator with band-switching.
+// Wavetable oscillator with band-switching.
 //
 // Pulp's `Wavetable` keeps a stack of pre-bandlimited single-cycle
 // tables. The selected band tracks the playback frequency, and band
@@ -247,7 +247,7 @@ TEST_CASE("Wavetable explicit band construction with empty samples is rejected",
     REQUIRE_NOTHROW(wt.next());
 }
 
-TEST_CASE("Wavetable rapid retune preserves crossfade continuity (#2865)",
+TEST_CASE("Wavetable rapid retune preserves crossfade continuity",
           "[signal][wavetable][regression]") {
     auto wt = Wavetable::make_saw(/*bands=*/10);
     wt.set_sample_rate(48000.0f);
@@ -261,11 +261,9 @@ TEST_CASE("Wavetable rapid retune preserves crossfade continuity (#2865)",
     for (std::size_t i = 0; i < Wavetable::kCrossfadeSamples / 2; ++i) (void)wt.next();
     REQUIRE(wt.is_crossfading());
 
-    // …then retune again before the first fade finishes. Earlier impl
-    // captured `crossfade_source = target_band` (the in-flight target,
-    // not the actually-audible mix), causing the new fade to JUMP from
-    // the audible sample to the in-flight target → click. Fix blends
-    // FROM the in-flight mix.
+    // …then retune again before the first fade finishes. The next fade
+    // must start from the currently audible in-flight mix, not from the
+    // target band alone, or the retune can click.
     const float sample_before_second_retune = wt.next();
     wt.set_frequency(7000.0f);
 
@@ -282,12 +280,10 @@ TEST_CASE("Wavetable rapid retune preserves crossfade continuity (#2865)",
     REQUIRE(max_delta < 2.0f);
 }
 
-TEST_CASE("Wavetable factories reject non-positive reference sample rate (#2865)",
+TEST_CASE("Wavetable factories reject non-positive reference sample rate",
           "[signal][wavetable][regression]") {
-    // Earlier impl passed `reference_sample_rate <= 0` through to
-    // std::floor(nyquist / clamped_ceiling) and then size_t-cast the
-    // result, which is undefined for negative / NaN floats. Fix
-    // short-circuits to an empty Wavetable.
+    // Invalid `reference_sample_rate` must short-circuit before any
+    // std::floor(nyquist / clamped_ceiling) result can be size_t-cast.
     auto sine_zero = Wavetable::make_sine(/*table_length=*/64, /*sr=*/0.0f);
     REQUIRE(sine_zero.band_count() == 0);
     REQUIRE(sine_zero.next() == 0.0f);

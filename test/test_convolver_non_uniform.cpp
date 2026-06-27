@@ -1,5 +1,4 @@
-// NonUniformPartitionedConvolver tests (macOS plugin authoring
-// plan item 2.3, Slice B).
+// NonUniformPartitionedConvolver tests.
 //
 // Validates:
 //   - block_size = audio callback size; head + tail partitions stitch

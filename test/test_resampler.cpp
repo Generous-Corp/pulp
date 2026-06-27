@@ -11,7 +11,7 @@ using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
 // ────────────────────────────────────────────────────────────────────────
-// macOS plan item 1.7 — Resampler (arbitrary-ratio polyphase).
+// Resampler (arbitrary-ratio polyphase).
 //
 // Pulp's `Resampler` runs a Kaiser-window polyphase FIR with linear
 // inter-phase interpolation so a single design supports rational

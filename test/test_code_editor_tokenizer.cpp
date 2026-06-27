@@ -1,5 +1,4 @@
 // CodeEditor language-tokenizer tests
-// (closes the gap-doc Phase 4 row "CodeEditor language coverage").
 //
 // Validates the per-language regex-lite tokenizers used by the
 // CodeEditor's native paint path:

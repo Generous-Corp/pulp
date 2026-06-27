@@ -641,7 +641,7 @@ private:
 } // namespace
 
 TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
-          "[vst3][issue-493]") {
+          "[vst3][metadata][lifecycle]") {
     TestVst3Config config;
     config.add_bypass_param = true;
     config.latency_samples = 128;
@@ -781,7 +781,7 @@ TEST_CASE("VST3 trigger param raised on a bypassed block still auto-resets",
 }
 
 TEST_CASE("VST3 latency and tail report processor runtime contract",
-          "[vst3][latency][tail][phase2]") {
+          "[vst3][latency][tail]") {
     HostApp host_app;
 
     SECTION("finite latency and tail samples are reported directly") {
@@ -1110,7 +1110,7 @@ TEST_CASE("VST3 a restart callback queued past terminate() is a safe no-op",
 }
 
 TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
-          "[vst3][transport][reset][phase2]") {
+          "[vst3][transport][reset]") {
     reset_test_processor();
 
     HostApp host_app;
@@ -1182,7 +1182,7 @@ TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
 }
 
 TEST_CASE("VST3 editor creation is disabled by automation env",
-          "[vst3][editor][issue-2515]") {
+          "[vst3][editor][automation-env]") {
     ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
@@ -1222,7 +1222,7 @@ TEST_CASE("VST3 editor creation is disabled by automation env",
 }
 
 TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
-          "[vst3][process][issue-493]") {
+          "[vst3][process][host-events]") {
     TestVst3Config config;
     config.mutate_gain_in_process = true;
     config.emit_midi_out = true;
@@ -1713,11 +1713,9 @@ TEST_CASE("VST3 leaves a secondary output bus silent for a single-output process
 
 TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
           "[vst3][process][realtime][perf]") {
-    // A1: the adapter's per-block MidiBuffers are reused members reserved +
+    // The adapter's per-block MidiBuffers are reused members reserved +
     // realtime-capacity-limited in setupProcessing(), so translating note and
-    // SysEx events into them on the audio thread must not allocate. Previously
-    // the buffers were block-local, allocating on the first add() of any block
-    // carrying MIDI.
+    // SysEx events into them on the audio thread must not allocate.
     TestVst3Config config;
     config.descriptor.accepts_midi = true;
     config.descriptor.produces_midi = true;
@@ -1753,8 +1751,8 @@ TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
     // Build the event list + ProcessData ONCE, outside the probe scope, so the
     // only thing measured is process() itself (EventList's ctor allocates). The
     // adapter reads input events read-only via getEvent(), so the same data is
-    // safe to reuse across blocks. A block carries a note pair + a SysEx payload
-    // — the allocation-prone path before A1.
+    // safe to reuse across blocks. A block carries a note pair + a SysEx payload,
+    // the allocation-sensitive path this test pins.
     Steinberg::Vst::EventList input_events(8);
     Steinberg::Vst::Event note_on{};
     note_on.type = Steinberg::Vst::Event::kNoteOnEvent;
@@ -1795,8 +1793,7 @@ TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
     // Differential measurement isolates the MIDI-translation cost from any
     // unrelated per-block allocation elsewhere in process() (or in the test
     // processor): a block carrying note + SysEx events must allocate no more
-    // than an otherwise-identical block with no events. Before A1 the MIDI
-    // block allocated (block-local MidiBuffers); after A1 the two are equal.
+    // than an otherwise-identical block with no events.
     auto allocs_for = [&](Steinberg::Vst::IEventList* events) -> std::size_t {
         data.inputEvents = events;
         REQUIRE(processor.process(data) == Steinberg::kResultOk);  // warm
@@ -1811,18 +1808,16 @@ TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
     INFO("baseline=" << baseline << ", notes=" << with_notes
          << ", notes+sysex=" << with_sysex);
 
-    // Core A1 win: note/CC translation into the reused, reserved MidiBuffer adds
-    // ZERO allocations on the audio thread (was a per-block allocation when the
-    // buffers were block-local). Notes/CC are the overwhelming majority of MIDI.
+    // Note/CC translation into the reused, reserved MidiBuffer adds ZERO
+    // allocations on the audio thread. Notes/CC are the overwhelming majority
+    // of MIDI.
     REQUIRE(with_notes == baseline);
 
-    // Known residual (tracked follow-up, NOT regressed by A1): the SysEx pooled-
-    // copy path (MidiBuffer::add_sysex_copy realtime) still incurs one allocation
-    // per block carrying SysEx — the cost lives inside MidiBuffer's SysexEvent
-    // payload handling (core/midi/buffer.hpp), not this adapter. A1 already routes
-    // SysEx through the pooled copy (no per-event std::vector ctor); fully
-    // eliminating the residual is a separate core/midi slice. Asserted as a
-    // no-regression upper bound so the contract is explicit, not silently ignored.
+    // The SysEx pooled-copy path (MidiBuffer::add_sysex_copy realtime) may
+    // still incur one allocation per block carrying SysEx. The cost lives inside
+    // MidiBuffer's SysexEvent payload handling (core/midi/buffer.hpp), not this
+    // adapter. Assert a no-regression upper bound so the contract is explicit,
+    // not silently ignored.
     REQUIRE(with_sysex <= baseline + 1);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
@@ -1830,9 +1825,9 @@ TEST_CASE("VST3 adapter process() translates MIDI without heap allocation",
 
 TEST_CASE("VST3 adapter clears SysEx between reused process blocks",
           "[vst3][process][regression]") {
-    // The per-block MidiBuffers are reused members (A1). MidiBuffer::clear()
-    // empties only the short-event store, so the adapter must ALSO clear_sysex()
-    // each block — otherwise a SysEx payload from one block leaks into the next.
+    // The per-block MidiBuffers are reused members. MidiBuffer::clear() empties
+    // only the short-event store, so the adapter must ALSO clear_sysex() each
+    // block — otherwise a SysEx payload from one block leaks into the next.
     // Process a SysEx block, then
     // an event-free block, and assert the processor sees no stale SysEx.
     TestVst3Config config;
@@ -2077,7 +2072,7 @@ TEST_CASE("VST3 getState/setState fail cleanly without a live processor",
     }
 }
 
-// ── Item 3.2 — VST3 processBlockBypassed pass-through ──────────────────────
+// ── VST3 processBlockBypassed pass-through ────────────────────────────────
 //
 // Pins three contract points:
 //   * initialize() caches the StateStore ParamID of the "Bypass"
@@ -2086,12 +2081,12 @@ TEST_CASE("VST3 getState/setState fail cleanly without a live processor",
 //     process(), the adapter short-circuits to in→out copy and does NOT
 //     call Processor::process().
 //   * Plugins without a Bypass parameter see the short-circuit only when
-//     the synthesize_bypass_parameter host-quirk is enforced (P3b), which
-//     injects an automatable Bypass param the detection pass then adopts.
+//     the synthesize_bypass_parameter host-quirk is enforced, which injects
+//     an automatable Bypass param the detection pass then adopts.
 //     With PULP_HOST_QUIRKS=off no param is synthesized.
 
 TEST_CASE("VST3 processBlockBypassed copies input to output without calling Processor::process",
-          "[vst3][bypass][item-3.2]") {
+          "[vst3][bypass][pass-through]") {
     TestVst3Config config;
     config.add_bypass_param = true;
     reset_test_processor(config);
@@ -2338,10 +2333,10 @@ TEST_CASE("VST3 bypass pass-through is a zero-delay copy when latency is zero",
 }
 
 TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
-          "[vst3][bypass][item-3.2]") {
-    // Since host-quirks P3b the adapter SYNTHESIZES a Bypass param by
-    // default, so the "no bypass surface at all" scenario this test pins
-    // only exists when synthesize_bypass_parameter is disabled.
+          "[vst3][bypass][no-surface]") {
+    // The adapter synthesizes a Bypass param by default, so the "no bypass
+    // surface at all" scenario this test pins only exists when
+    // synthesize_bypass_parameter is disabled.
     pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
 
     TestVst3Config config; // add_bypass_param defaults to false
@@ -2360,17 +2355,17 @@ TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// host-quirks P3b — synthesize_bypass_parameter, end-to-end (VST3).
+// synthesize_bypass_parameter host quirk, end-to-end (VST3).
 //
 // A plugin that declares NO Bypass parameter: with the quirk enforced the
 // adapter synthesizes an automatable "Bypass" param (reserved ID), the
 // existing detection tags it kIsBypass, and process() honors it with the
 // pass-through short-circuit. With PULP_HOST_QUIRKS=off nothing is
-// synthesized (original behavior).
+// synthesized, preserving the no-quirk behavior.
 // ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("VST3 synthesizes an automatable Bypass param when the plugin declares none",
-          "[vst3][host-quirks][p3][bypass]") {
+          "[vst3][host-quirks][bypass]") {
     pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
 
     TestVst3Config config;
@@ -2439,7 +2434,7 @@ TEST_CASE("VST3 synthesizes an automatable Bypass param when the plugin declares
 }
 
 TEST_CASE("VST3 does NOT synthesize a Bypass param when the quirk is off",
-          "[vst3][host-quirks][p3][bypass]") {
+          "[vst3][host-quirks][bypass]") {
     pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
 
     TestVst3Config config;
@@ -2457,18 +2452,17 @@ TEST_CASE("VST3 does NOT synthesize a Bypass param when the quirk is off",
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// host-quirks P3c — silence_unsupported_bus_arrangements, end-to-end.
+// silence_unsupported_bus_arrangements host quirk, end-to-end.
 //
 // Empirical proof the VST3 adapter RESPECTS the quirk: with it enforced
 // (default), setBusArrangements accepts an arrangement the processor does
 // NOT natively support (6-ch 5.1) instead of failing, the processor still
 // runs at its prepared (stereo) channel count, and the host's extra output
-// channels are silenced. With PULP_HOST_QUIRKS=off the original
-// reject-the-proposal behavior is preserved exactly.
+// channels are silenced. With PULP_HOST_QUIRKS=off the proposal is rejected.
 // ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("VST3 accepts an unsupported arrangement and silences extras when the quirk is enforced",
-          "[vst3][host-quirks][p3][bus-arrangement]") {
+          "[vst3][host-quirks][bus-arrangement]") {
     pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // all tiers → quirk on
 
     TestVst3Config config;  // stereo in / stereo out
@@ -2549,7 +2543,7 @@ TEST_CASE("VST3 accepts an unsupported arrangement and silences extras when the 
 }
 
 TEST_CASE("VST3 rejects an unsupported arrangement when silence accommodation is off",
-          "[vst3][host-quirks][p3][bus-arrangement]") {
+          "[vst3][host-quirks][bus-arrangement]") {
     pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
 
     TestVst3Config config;
@@ -2573,11 +2567,9 @@ TEST_CASE("VST3 rejects an unsupported arrangement when silence accommodation is
     pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
-// Self-sweep hardening (2026-05-30): the bypass pass-through must null-check
-// the destination channel pointer. A VST3 bus can report numChannels > 0
-// while an individual channelBuffers32[ch] is null (#178); without the guard
-// the bypass short-circuit dereferenced null on the audio thread — a crash
-// P3b widened by making the short-circuit reachable for synthesized bypass.
+// Bypass pass-through must null-check the destination channel pointer. A VST3
+// bus can report numChannels > 0 while an individual channelBuffers32[ch] is
+// null; the bypass short-circuit must not dereference it on the audio thread.
 TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
           "[vst3][bypass][regression]") {
     TestVst3Config config;
@@ -2632,13 +2624,12 @@ TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
     }
 }
 
-// Regression (#3235): the silence accommodation must NOT override a
-// processor's veto of a mono/stereo layout (a real contract, e.g. linked
-// main/sidechain counts) — there are no extra channels to silence, so
-// running process() under it would be a correctness bug. The veto is
-// honored even with the quirk enforced (pre-P3c behavior for mono/stereo).
+// The silence accommodation must NOT override a processor's veto of a
+// mono/stereo layout (a real contract, e.g. linked main/sidechain counts).
+// There are no extra channels to silence, so running process() under it would
+// be a correctness bug. The veto is honored even with the quirk enforced.
 TEST_CASE("VST3 honors a processor mono/stereo bus-layout veto even with the quirk on",
-          "[vst3][host-quirks][p3][bus-arrangement]") {
+          "[vst3][host-quirks][bus-arrangement]") {
     pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
     TestVst3Config config;
     config.veto_bus_layout = true;  // processor rejects every proposed layout

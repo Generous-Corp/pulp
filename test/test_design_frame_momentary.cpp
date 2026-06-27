@@ -1,5 +1,4 @@
-// Phase 1 of the faithful-playable Musical Typing Keyboard contract: the
-// DesignFrameView `Kind::momentary` press/release primitive. Covers the five
+// DesignFrameView `Kind::momentary` press/release primitive. Covers the
 // locked edges — note semantics, smallest-area hit tiebreak, per-view scoping,
 // release-on-mode-switch, glissando — plus set_element_value lighting.
 
