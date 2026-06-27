@@ -146,11 +146,28 @@ TEST_CASE("SuperConvolver Size knob swaps the IR live", "[golden][superconvolver
     REQUIRE(tail > 1e-3);
 }
 
+// Helper: the dry path is a pure delay (the reported latency), so at mix=0 /
+// bypass the output IS an exact delayed copy of the probe. The reported latency
+// depends on the engine config (kInternalBlock, plus the GPU transport's fixed
+// delay whenever a GPU device exists — applied to BOTH engines so a live switch
+// keeps it stable), so locate the delayed probe rather than hardcode the lag.
+namespace {
+std::size_t find_dry_lag(const std::vector<float>& out, const std::vector<float>& probe) {
+    std::size_t best_d = 0;
+    double best_err = 1e300;
+    for (std::size_t d = 0; d + probe.size() <= out.size(); ++d) {
+        double e = 0;
+        for (std::size_t i = 0; i < probe.size(); ++i) {
+            const double diff = static_cast<double>(out[d + i]) - probe[i];
+            e += diff * diff;
+        }
+        if (e < best_err) { best_err = e; best_d = d; }
+    }
+    return best_d;
+}
+}  // namespace
+
 TEST_CASE("SuperConvolver mix=0 and bypass pass the dry signal", "[golden][superconvolver]") {
-    // The re-blocking FIFO delays the path by kInternalBlock; the dry path is
-    // delayed to match (so dry/wet stay phase-aligned, reported via
-    // latency_samples()). With BLOCK == kInternalBlock the dry probe re-emerges,
-    // sample-exact, in the NEXT block.
     constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
     pulp::format::HeadlessHost host(create_super_convolver);
     host.prepare(48000.0, static_cast<int>(BLOCK));
@@ -160,19 +177,24 @@ TEST_CASE("SuperConvolver mix=0 and bypass pass the dry signal", "[golden][super
     std::vector<float> probe(BLOCK);
     for (std::size_t i = 0; i < BLOCK; ++i) probe[i] = std::sin(0.05f * i);
 
+    // Render enough blocks to cover the dry delay under either engine config.
+    constexpr int NBLOCKS = 6;
+
     SECTION("mix=0 is dry (delayed by the reported latency)") {
         host.state().set_value(kBypass, 0.0f);
         host.state().set_value(kMix, 0.0f);
-        const auto out = render(host, BLOCK, 2, probe);   // probe in block 0, silence block 1
+        const auto out = render(host, BLOCK, NBLOCKS, probe);
+        const std::size_t lag = find_dry_lag(out, probe);
         for (std::size_t i = 0; i < BLOCK; ++i)
-            REQUIRE(std::abs(out[BLOCK + i] - probe[i]) < 1e-6f);
+            REQUIRE(std::abs(out[lag + i] - probe[i]) < 1e-6f);
     }
     SECTION("bypass is dry (delayed by the reported latency)") {
         host.state().set_value(kBypass, 1.0f);
         host.state().set_value(kMix, 100.0f);
-        const auto out = render(host, BLOCK, 2, probe);
+        const auto out = render(host, BLOCK, NBLOCKS, probe);
+        const std::size_t lag = find_dry_lag(out, probe);
         for (std::size_t i = 0; i < BLOCK; ++i)
-            REQUIRE(std::abs(out[BLOCK + i] - probe[i]) < 1e-6f);
+            REQUIRE(std::abs(out[lag + i] - probe[i]) < 1e-6f);
     }
 }
 
@@ -527,5 +549,228 @@ TEST_CASE("SuperConvolver selects the multi-room GPU node when Rooms>1",
          << " energy=" << energy);
     REQUIRE(energy > 1e-3);          // real wet audio came out
     REQUIRE(stats.first > 0);        // the GPU worker genuinely produced blocks
+    proc.release();
+}
+
+namespace {
+
+// Process one stereo block (channel 0 = `mono`, channel 1 = same) and return
+// channel 0 of the output. `mono` length must equal block.
+struct DirectDriver {
+    SuperConvolverProcessor& proc;
+    std::size_t block;
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx;
+    std::vector<float> in_l, in_r, out_l, out_r;
+
+    DirectDriver(SuperConvolverProcessor& p, std::size_t b, double sr)
+        : proc(p), block(b), in_l(b, 0.0f), in_r(b, 0.0f), out_l(b), out_r(b) {
+        pctx.sample_rate = sr;
+        pctx.num_samples = static_cast<int>(b);
+    }
+
+    // Drive `in` (mono → both channels) for one block, return channel-0 output.
+    std::vector<float> block_io(const std::vector<float>& in, int sleep_ms) {
+        for (std::size_t i = 0; i < block; ++i) {
+            in_l[i] = i < in.size() ? in[i] : 0.0f;
+            in_r[i] = in_l[i];
+        }
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, block);
+        pulp::audio::BufferView<float> ov(op, 2, block);
+        proc.process(ov, iv, mi, mo, pctx);
+        if (sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+        return {out_l.begin(), out_l.end()};
+    }
+
+    void pump(int nblocks, int sleep_ms) {
+        static const std::vector<float> z;
+        for (int b = 0; b < nblocks; ++b) block_io(z, sleep_ms);
+    }
+};
+
+// Pump silent blocks until `pred()` is true or `max_iter` is exhausted.
+template <class F>
+bool pump_until(DirectDriver& d, int max_iter, int sleep_ms, F pred) {
+    for (int i = 0; i < max_iter && !pred(); ++i) d.pump(1, sleep_ms);
+    return pred();
+}
+
+// Peak-aligned normalized cross-correlation of an impulse response capture
+// against the reference IR over [0, len).
+double corr_to_ir(const std::vector<float>& out, const std::vector<float>& ir,
+                  std::size_t len) {
+    std::size_t lag = 0; float peak = 0.0f;
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (std::abs(out[i]) > peak) { peak = std::abs(out[i]); lag = i; }
+    double sxy = 0, sxx = 0, syy = 0;
+    for (std::size_t i = 0; i < len && lag + i < out.size(); ++i) {
+        const double x = out[lag + i], y = ir[i];
+        sxy += x * y; sxx += x * x; syy += y * y;
+    }
+    return sxy / std::sqrt(sxx * syy + 1e-30);
+}
+
+}  // namespace
+
+// The core fix: Engine (CPU<->GPU) is switchable LIVE, with no reload. Start on
+// CPU, switch to GPU (worker builds + publishes the stack), confirm the GPU
+// carries the audio, then switch back to CPU and confirm the CPU engine resumes
+// producing the correct convolution. Skips cleanly with no GPU device.
+TEST_CASE("SuperConvolver switches Engine CPU<->GPU live without reload",
+          "[gpu][superconvolver]") {
+    using P = SuperConvolverProcessor;
+    constexpr std::size_t BLOCK = P::kInternalBlock;
+    constexpr double SR = 48000.0;
+    constexpr float SIZE = 0.05f;
+    const std::size_t len = static_cast<std::size_t>(SIZE * SR);
+
+    P proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, SIZE);
+    store.set_value(kMix, 100.0f);   // fully wet → output == convolution
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);  // START on CPU
+    store.set_value(kRooms, 4.0f);
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+    REQUIRE_FALSE(proc.gpu_engine_active());   // CPU at prepare
+
+    DirectDriver d(proc, BLOCK, SR);
+    const std::vector<float> ir = make_reverb_ir(len);
+    std::vector<float> impulse(BLOCK, 0.0f);
+    impulse[0] = 1.0f;
+
+    // --- Switch CPU -> GPU live. The worker (5 ms loop) sees the request and
+    //     publishes the pre-built stack; the audio thread picks it up. ---
+    store.set_value(kEngine, 1.0f);
+    const bool went_gpu =
+        pump_until(d, 150, 8, [&] { return proc.gpu_engine_active(); });
+    if (!went_gpu) {
+        WARN("GPU engine unavailable in this environment — skipping live-switch "
+             "test (CPU golden tests still cover audio).");
+        proc.release();
+        return;
+    }
+    REQUIRE(proc.gpu_engine_active());
+    REQUIRE(proc.gpu_rooms() == 4);          // honors the requested Rooms
+    REQUIRE(proc.gpu_multi_active());
+
+    // The GPU path carries real audio: drive an impulse and confirm non-silent,
+    // IR-correct output.
+    std::vector<float> gpu_out;
+    {
+        const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 24;
+        for (int b = 0; b < nblocks; ++b) {
+            const auto o = d.block_io(b == 0 ? impulse : std::vector<float>{}, 8);
+            gpu_out.insert(gpu_out.end(), o.begin(), o.end());
+        }
+    }
+    double gpu_energy = 0.0;
+    for (float v : gpu_out) gpu_energy += static_cast<double>(v) * v;
+    INFO("gpu_energy=" << gpu_energy << " produced=" << proc.gpu_block_stats().first);
+    REQUIRE(gpu_energy > 1e-3);               // non-silent
+    REQUIRE(proc.gpu_block_stats().first > 0);
+
+    // --- Switch GPU -> CPU live. The worker unpublishes gpu_active_. ---
+    store.set_value(kEngine, 0.0f);
+    const bool went_cpu =
+        pump_until(d, 100, 5, [&] { return !proc.gpu_engine_active(); });
+    REQUIRE(went_cpu);
+    REQUIRE_FALSE(proc.gpu_engine_active());
+
+    // Flush any residual GPU tail, then probe the CPU engine: it must reproduce
+    // the IR (the live path is genuinely the CPU convolver again).
+    d.pump(40, 0);
+    std::vector<float> cpu_out;
+    {
+        const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 6;
+        for (int b = 0; b < nblocks; ++b) {
+            auto o = d.block_io(b == 0 ? impulse : std::vector<float>{}, 0);
+            cpu_out.insert(cpu_out.end(), o.begin(), o.end());
+        }
+    }
+    const double cpu_corr = corr_to_ir(cpu_out, ir, len);
+    INFO("cpu_corr after switch-back=" << cpu_corr);
+    REQUIRE(cpu_corr > 0.99);                 // CPU engine resumed, output correct
+
+    // --- Switch back to GPU once more — proves the toggle is repeatable. ---
+    store.set_value(kEngine, 1.0f);
+    REQUIRE(pump_until(d, 150, 8, [&] { return proc.gpu_engine_active(); }));
+    proc.release();
+}
+
+// Live Rooms change: with Engine=GPU, raising Rooms rebuilds the GPU stack off
+// the audio thread (atomic pointer swap, old stack retired) without a crash, and
+// the GPU keeps producing real audio. Skips cleanly with no GPU device.
+TEST_CASE("SuperConvolver changes Rooms live (16->64) without crashing",
+          "[gpu][superconvolver]") {
+    using P = SuperConvolverProcessor;
+    constexpr std::size_t BLOCK = P::kInternalBlock;
+    constexpr double SR = 48000.0;
+
+    P proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, 0.1f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 1.0f);
+    store.set_value(kRooms, 16.0f);
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    DirectDriver d(proc, BLOCK, SR);
+    if (!pump_until(d, 150, 8, [&] { return proc.gpu_engine_active(); })) {
+        WARN("GPU engine unavailable — skipping live Rooms-change test.");
+        proc.release();
+        return;
+    }
+    REQUIRE(proc.gpu_rooms() == 16);
+    REQUIRE(proc.gpu_multi_active());
+
+    // Drive a sine and confirm real wet energy at 16 rooms.
+    auto drive_sine = [&](int nblocks) {
+        double energy = 0.0;
+        for (int b = 0; b < nblocks; ++b) {
+            std::vector<float> in(BLOCK);
+            for (std::size_t i = 0; i < BLOCK; ++i)
+                in[i] = std::sin(0.05f * static_cast<float>(b * BLOCK + i)) * 0.5f;
+            const auto o = d.block_io(in, 4);
+            for (float v : o) energy += static_cast<double>(v) * v;
+        }
+        return energy;
+    };
+    REQUIRE(drive_sine(48) > 1e-3);
+
+    // Raise Rooms to 64 — the worker rebuilds the stack (retiring the old one)
+    // and republishes. Confirm the live room count tracks the change.
+    store.set_value(kRooms, 64.0f);
+    const bool rebuilt =
+        pump_until(d, 200, 8, [&] { return proc.gpu_rooms() == 64; });
+    REQUIRE(rebuilt);
+    REQUIRE(proc.gpu_rooms() == 64);
+    REQUIRE(proc.gpu_multi_active());
+    REQUIRE(proc.gpu_engine_active());
+
+    // Still producing correct, non-silent audio after the live rebuild.
+    REQUIRE(drive_sine(48) > 1e-3);
+    REQUIRE(proc.gpu_block_stats().first > 0);
     proc.release();
 }
