@@ -98,7 +98,8 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "hr") {
         createCol(id, "");
         setFlex(id, "height", 1);
-        setBackground(id, "#666666");
+        var hrColor = "#666666";
+        setBackground(id, hrColor);
     } else if (tag === "img") {
         createLabel(id, "", ""); // placeholder until image loading
     } else if (tag === "details") {
@@ -952,7 +953,8 @@ function _reparentNative(child, parentId) {
     } else if (tag === "hr") {
         createCol(id, parentId);
         setFlex(id, "height", 1);
-        setBackground(id, "#666666");
+        var childHrColor = "#666666";
+        setBackground(id, childHrColor);
     } else if (tag === "img") {
         createLabel(id, "", parentId);
     } else if (tag === "dialog") {
