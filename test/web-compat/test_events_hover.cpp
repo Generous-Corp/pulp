@@ -93,9 +93,13 @@ TEST_CASE("Hover: JS registerHover dispatches events", "[events][hover]") {
 
 TEST_CASE("Hover: no callback set does not crash", "[events][hover]") {
     View v;
+    REQUIRE_FALSE(v.is_hovered());
+
     v.set_hovered(true);
+    REQUIRE(v.is_hovered());
+
     v.set_hovered(false);
-    REQUIRE(true);
+    REQUIRE_FALSE(v.is_hovered());
 }
 
 TEST_CASE("Hover: hit_test finds correct target for enter", "[events][hover]") {

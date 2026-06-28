@@ -113,7 +113,8 @@ TEST_CASE("Focus: on_text_input default does not crash", "[events][focus]") {
     TextInputEvent te;
     te.text = "x";
     v.on_text_input(te); // Should not crash
-    REQUIRE(true);
+    REQUIRE(te.text == "x");
+    REQUIRE_FALSE(v.has_focus());
 }
 
 TEST_CASE("Focus: focus cycle wraps around", "[events][focus]") {
