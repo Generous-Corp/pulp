@@ -57,7 +57,7 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.5.0";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.5.1";
 
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
@@ -1343,7 +1343,7 @@ public:
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 162, 322, 86, 16);
+            place(*fader, 162, 322, 62, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -1367,11 +1367,11 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(344, 324, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        label(322, 324, 46, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 396, 322, 80, 16);
+            place(*fader, 366, 322, 64, 16);
             fader->set_value(bpm_to_norm(effective_bpm()));
             // Dragging engages a manual target tempo — which auto-UNLINKS from the
             // host (set_target_bpm sets the override). The FrameTick re-syncs the
@@ -1395,7 +1395,7 @@ public:
                 std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
                 return std::string(buf);
             };
-            place(*live, 480, 320, 56, 18);
+            place(*live, 434, 320, 56, 18);
             root->add_child(std::move(live));
         }
         // TEMPO LINK toggle: ON = follow the reference tempo (host transport in a
@@ -1415,7 +1415,7 @@ public:
             linkBtn->set_off_border_color(faint);
             linkBtn->set_on(tempo_linked());
             linkBtn->on_toggle = [this](bool on) { set_tempo_linked(on); };
-            place(*linkBtn, 542, 316, 64, 26);
+            place(*linkBtn, 492, 316, 46, 26);
             root->link_btn = linkBtn.get();
             root->add_child(std::move(linkBtn));
         }
@@ -1427,7 +1427,7 @@ public:
             live->font_family = mono;
             live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 252, 320, 84, 18);
+            place(*live, 230, 320, 84, 18);
             root->add_child(std::move(live));
         }
 
@@ -1464,7 +1464,8 @@ public:
                 state().end_gesture(kDirection);
             };
             auto* dirPtr = dir.get();
-            place(*dir, 614, 316, 62, 26);
+            label(544, 324, 24, 18, "DIR", faint, 10, 600, LabelAlign::left, true);
+            place(*dir, 572, 316, 62, 26);
             root->listeners.push_back(state().add_listener(
                 [this, dirPtr](state::ParamID id, float v) {
                     if (id == kDirection) dirPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
@@ -1499,7 +1500,8 @@ public:
                 }
             };
             auto* loopPtr = combo.get();
-            place(*combo, 678, 316, 62, 26);
+            label(640, 324, 28, 18, "LOOP", faint, 10, 600, LabelAlign::left, true);
+            place(*combo, 672, 316, 68, 26);
             root->listeners.push_back(state().add_listener(
                 [this, loopPtr, sel_for_state](state::ParamID id, float) {
                     if (id == kTempoLoop || id == kLoopMode) loopPtr->set_selected_silent(sel_for_state());
