@@ -181,6 +181,32 @@ TEST_CASE("WebCompat: Element.animate pause and cancel stop queued frames",
     env.eval("__playAgain.cancel(); __resume.cancel();");
 }
 
+TEST_CASE("WebCompat: Element.animate can play again after cancel",
+          "[webcompat][browser][animation]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __replayEl = document.createElement('div');
+        document.body.appendChild(__replayEl);
+        __replayEl.style.opacity = '0.3';
+        var __replayNow = 1000;
+        performance.now = function() { return __replayNow; };
+        var __replay = __replayEl.animate(
+            { opacity: '1' },
+            { duration: 1000, fill: 'forwards' }
+        );
+        __replay.cancel();
+        __replayEl.style.opacity = '0.6';
+        __replay.play();
+        var __replayStateAfterPlay = __replay.playState;
+        __replayNow = 1500;
+    )JS");
+    env.bridge->poll_async_results();
+
+    REQUIRE(std::string(env.engine.evaluate("__replayStateAfterPlay").getWithDefault<std::string_view>("")) == "running");
+    REQUIRE(std::string(env.engine.evaluate("__replayEl.style.opacity").getWithDefault<std::string_view>("")) == "0.8");
+    env.eval("__replay.cancel();");
+}
+
 TEST_CASE("WebCompat: Element.animate finish applies final keyframe immediately",
           "[webcompat][browser][animation]") {
     TestEnvironment env;

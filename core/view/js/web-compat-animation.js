@@ -52,7 +52,7 @@
     }
 
     function unitPart(value) {
-        var unit = String(value).replace(/^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?/i, "");
+        var unit = String(value).replace(/^[+-]?(?:\d*\.\d+|\d+)(?:e[+-]?\d+)?/i, "");
         return unit || "";
     }
 
@@ -161,7 +161,13 @@
     };
 
     Animation.prototype.play = function() {
-        if (this._cancelled) return;
+        if (this._cancelled) {
+            this._cancelled = false;
+            this._finished = false;
+            this._elapsedBeforePause = 0;
+            this._startTime = null;
+            this._startProps = null;
+        }
         if (this.playState === "running") return;
         var wasPaused = this.playState === "paused";
         if (this._finished) {
