@@ -925,25 +925,40 @@ public:
     static constexpr double kTargetBpmMin = 20.0;
     static constexpr double kTargetBpmMax = 400.0;
 
-    // A clean loop is an integer number of BEATS, but the analyzer reports an
-    // INTEGER bpm — and a loop's true tempo is usually fractional, so stretching to
-    // the rounded value makes the loop tile slightly short/long ("ends a bit early",
-    // worse when slowed). Use the rough bpm only to infer the beat COUNT, then derive
-    // the exact tempo that makes the file an exact musical length, so it loops
-    // perfectly at ANY host tempo. Only snaps when the file is already close to a
-    // whole-beat length (a real loop); otherwise keeps the raw estimate so non-loop
-    // one-shots aren't distorted. Pure + static so it is unit-testable in isolation.
-    static double bar_snap_bpm(double rough_bpm, long frames, double sr) {
-        if (rough_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return rough_bpm;
-        const double dur_sec = static_cast<double>(frames) / sr;
-        if (dur_sec <= 0.0) return rough_bpm;
-        const double beats = dur_sec * rough_bpm / 60.0;
-        const double nearest = std::round(beats);
-        if (nearest < 1.0) return rough_bpm;                      // too short to be a loop
-        if (std::abs(beats - nearest) > 0.25) return rough_bpm;   // not a clean whole-beat loop
-        const double exact = nearest * 60.0 / dur_sec;            // tempo that tiles exactly
-        if (exact < kTargetBpmMin || exact > kTargetBpmMax) return rough_bpm;
-        return exact;
+    // Derive the EXACT loop tempo so the loop tiles the bar grid perfectly at any
+    // host tempo. A loop is a whole number of beats, but the analyzer reports an
+    // integer (usually fractional-off) bpm, AND it can land an octave off (half /
+    // double tempo). Strategy:
+    //   1. Infer the analyzer's beat COUNT (round(dur·bpm/60)).
+    //   2. Consider that count and its octave neighbours (×¼…×4); each implies an
+    //      EXACT tempo N·60/dur that tiles the loop perfectly.
+    //   3. Pick the candidate whose tempo is closest to a REFERENCE in octave (log2)
+    //      space — the host transport when known, else the analyzer estimate. The
+    //      host prior resolves the half/double ambiguity (a loop dropped in a 120
+    //      project must be within an octave of 120) and lands the stretch near the
+    //      host tempo (R≈1, best quality).
+    // The result always makes raw_frames·loop_bpm == N·60·sr, so published_frames =
+    // round(N·60·sr / host) is an exact N beats at ANY host tempo. Pure + static so
+    // it is unit-testable. `reference_bpm <= 0` ⇒ no host hint (use the analyzer).
+    static double bar_exact_bpm(long frames, double sr, double reference_bpm,
+                                double analyzer_bpm) {
+        if (analyzer_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return analyzer_bpm;
+        const double dur = static_cast<double>(frames) / sr;
+        if (dur <= 0.0) return analyzer_bpm;
+        const double base_beats = std::round(dur * analyzer_bpm / 60.0);
+        if (base_beats < 1.0) return analyzer_bpm;                // too short to be a loop
+        const double ref = reference_bpm > 0.0 ? reference_bpm : analyzer_bpm;
+        const double mults[] = {0.25, 0.5, 1.0, 2.0, 4.0};        // octave neighbours
+        double best = 0.0, best_d = 1e30;
+        for (double m : mults) {
+            const double beats = std::round(base_beats * m);
+            if (beats < 1.0) continue;
+            const double t = beats * 60.0 / dur;                  // tempo that tiles exactly
+            if (t < kTargetBpmMin || t > kTargetBpmMax) continue;
+            const double d = std::abs(std::log2(t / ref));        // octave-aware distance
+            if (d < best_d) { best_d = d; best = t; }
+        }
+        return best > 0.0 ? best : analyzer_bpm;
     }
     void set_target_bpm(double bpm) {
         const double clamped = std::clamp(bpm, kTargetBpmMin, kTargetBpmMax);
@@ -1667,8 +1682,12 @@ private:
     // so it loops perfectly at ANY host tempo. Only snaps when the file is already
     // close to a whole-beat length (a real loop); otherwise keeps the raw estimate
     // so non-loop one-shots aren't distorted. raw_mutex_ is held by analyze_locked.
-    double snap_loop_bpm(double rough_bpm) const {
-        return bar_snap_bpm(rough_bpm, raw_frames_, raw_sr_);
+    double snap_loop_bpm(double analyzer_bpm) const {
+        // The last host transport tempo (project tempo in a DAW) is the prior that
+        // resolves the half/double-tempo ambiguity; 0 in a fresh standalone falls
+        // back to the analyzer estimate inside bar_exact_bpm.
+        return bar_exact_bpm(raw_frames_, raw_sr_,
+                             pending_host_bpm_.load(std::memory_order_relaxed), analyzer_bpm);
     }
 
     void analyze_locked() {

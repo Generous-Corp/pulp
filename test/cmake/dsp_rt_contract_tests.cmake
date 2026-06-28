@@ -44,3 +44,7 @@ pulp_add_test_suite(pulp-test-ump-buffer-conversion
 pulp_add_test_suite(pulp-test-mpe-buffer
     SOURCES test_mpe_buffer.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::format)
+
+pulp_add_test_suite(pulp-test-midi-subblock
+    SOURCES test_midi_subblock.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
