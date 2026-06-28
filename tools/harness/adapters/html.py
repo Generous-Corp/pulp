@@ -74,11 +74,10 @@ class HtmlAdapter(AdapterBase):
         self._oracle = self._load_oracle()
         # Element.prototype.* lives across multiple shim files. The dispatch
         # is split between web-compat-element.js (most accessors / methods),
-        # web-compat-dom-ops.js (the four DOM-mutation methods —
-        # appendChild/removeChild/insertBefore/replaceChild — patched as a
-        # second pass after element.js loads), and the legacy
-        # web-compat.js bundle (still hosts a few entries). Concatenate
-        # them once so the prototype-evidence regex sees the full surface.
+        # web-compat-dom-ops.js (the four DOM-mutation methods), the
+        # animation shim, and the legacy web-compat.js bundle (still hosts a
+        # few entries). Concatenate them once so the prototype-evidence regex
+        # sees the full surface.
         # web-compat-element-events.js hosts Element.prototype's Event +
         # Pointer-capture methods (addEventListener / removeEventListener /
         # dispatchEvent / setPointerCapture / releasePointerCapture /
@@ -97,6 +96,7 @@ class HtmlAdapter(AdapterBase):
                 "core/view/js/web-compat-element.js",
                 "core/view/js/web-compat-element-events.js",
                 "core/view/js/web-compat-dom-ops.js",
+                "core/view/js/web-compat-animation.js",
                 "core/view/js/web-compat.js",
                 "core/view/js/web-compat-selector.js",
                 "core/view/js/web-compat-runtime-apis.js",

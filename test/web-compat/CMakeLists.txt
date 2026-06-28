@@ -86,6 +86,22 @@ elseif(UNIX)
 endif()
 catch_discover_tests(pulp-test-web-compat-prelude)
 
+# Browser Animation API shim tests
+add_executable(pulp-test-web-compat-animation
+    test_web_compat_animation.cpp
+)
+target_link_libraries(pulp-test-web-compat-animation PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-web-compat-animation PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-web-compat-animation PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-web-compat-animation PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-web-compat-animation PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-web-compat-animation)
+
 # iOS-D.3c (#3217) — WebGPU mock GPUBuffer mapped-write + writeBuffer contract.
 # Runs under the default engine (no V8 / GPU / three.iife), so it executes in
 # every CI configuration and guards the geometry-upload round-trip that the

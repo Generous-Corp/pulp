@@ -420,10 +420,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_style_decl_typography", preludes::web_compat_style_decl_typography);
     eval_or_throw(engine_, "web_compat_style_decl_transform", preludes::web_compat_style_decl_transform);
     eval_or_throw(engine_, "web_compat_style_decl_misc", preludes::web_compat_style_decl_misc);
-    // CSSStyleDeclaration helper installation must eval after style_decl so the
-    // constructor and _applyProperty prototype method exist when the IIFE walks
-    // __cssProperties__ and installs per-property reflection.
+    // CSSStyleDeclaration helper installation needs the style constructor and
+    // _applyProperty prototype before it walks __cssProperties__.
     eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
+    eval_or_throw(engine_, "web_compat_animation", preludes::web_compat_animation);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
     // CSS selector engine must eval after document and Element so the
     // selector helpers are resolvable when document.querySelector /
