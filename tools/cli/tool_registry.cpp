@@ -114,6 +114,8 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("license")) tool.license = v->as_string();
             if (auto v = val.get("install_method")) tool.install_method = v->as_string();
             if (auto v = val.get("pip_package")) tool.pip_package = v->as_string();
+            if (auto v = val.get("source_dir")) tool.source_dir = v->as_string();
+            if (auto v = val.get("module")) tool.module = v->as_string();
             if (auto v = val.get("npm_package_root")) tool.npm_package_root = v->as_string();
             if (auto v = val.get("npm_default_script")) tool.npm_default_script = v->as_string();
             if (auto v = val.get("pinned_version")) tool.pinned_version = v->as_string();
@@ -649,10 +651,46 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
 
 // ── Python Tool Install ──
 
+std::string python_pip_install_spec(const ToolDescriptor& tool,
+                                    const fs::path& repo_root) {
+    // An IN-TREE tool sets `source_dir` (a repo-relative package directory with
+    // a pyproject.toml); we pip-install that directory so the tool's own code +
+    // its declared deps land in the venv. A classic PyPI tool installs
+    // `<pip_package>==<version>` instead.
+    if (!tool.source_dir.empty()) {
+        return (repo_root / tool.source_dir).string();
+    }
+    return tool.pip_package + "==" + tool.pinned_version;
+}
+
+std::string python_run_module(const ToolDescriptor& tool) {
+    // The run wrapper invokes `python -m <module>`. `module` lets an in-tree
+    // package expose a CLI submodule (e.g. quality_lab.cli) that differs from
+    // its distribution name; it defaults to pip_package for classic PyPI tools.
+    return tool.module.empty() ? tool.pip_package : tool.module;
+}
+
 ToolInstallResult install_python_tool(const ToolDescriptor& tool,
                                        const ToolRegistry& registry,
+                                       const fs::path& registry_path,
                                        bool force) {
     ToolInstallResult result;
+
+    // An in-tree tool installs from `<repo_root>/<source_dir>`. Resolve the repo
+    // root from the registry that defined this tool (not a fresh cwd walk), and
+    // fail fast — before touching uv or creating a venv — with a clear message
+    // if the source tree isn't present (e.g. a user who installed only the
+    // `pulp` binary with no Pulp checkout).
+    const fs::path repo_root = repo_root_from_registry(registry_path);
+    if (!tool.source_dir.empty()) {
+        const fs::path src = repo_root / tool.source_dir;
+        if (!fs::exists(src / "pyproject.toml")) {
+            result.error = tool.display_name + " installs from its in-tree source ("
+                + tool.source_dir + "), which was not found at " + src.string()
+                + ". This tool requires a Pulp source checkout.";
+            return result;
+        }
+    }
 
     // Ensure UV is installed first
     auto uv_it = registry.tools.find("uv");
@@ -698,8 +736,7 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         return result;
     }
 
-    // Install pip package
-    std::string pip_spec = tool.pip_package + "==" + tool.pinned_version;
+    const std::string pip_spec = python_pip_install_spec(tool, repo_root);
     std::cout << "  Installing " << pip_spec << "...\n";
 
 #ifdef _WIN32
@@ -713,19 +750,21 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         {"pip", "install", "--python", python_path, pip_spec}, 300000);
 
     if (pip_result.exit_code != 0) {
-        result.error = "Failed to install " + tool.pip_package + ": " + pip_result.stderr_output;
+        result.error = "Failed to install " + pip_spec + ": " + pip_result.stderr_output;
         return result;
     }
+
+    const std::string run_module = python_run_module(tool);
 
     // Create wrapper script
 #ifdef _WIN32
     auto wrapper_path = venv_dir / "run.bat";
     std::string wrapper = "@echo off\n\"" + python_path + "\" -m "
-                        + tool.pip_package + " %*\n";
+                        + run_module + " %*\n";
 #else
     auto wrapper_path = venv_dir / "run.sh";
     std::string wrapper = "#!/bin/sh\nexec '" + python_path + "' -m "
-                        + tool.pip_package + " \"$@\"\n";
+                        + run_module + " \"$@\"\n";
 #endif
 
     write_file(wrapper_path, wrapper);
@@ -740,7 +779,10 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
              << "  \"tool_id\": \"" << tool.id << "\",\n"
              << "  \"version\": \"" << tool.pinned_version << "\",\n"
              << "  \"method\": \"python_pip\",\n"
-             << "  \"pip_package\": \"" << tool.pip_package << "\",\n"
+             << "  \"source\": \"" << (tool.source_dir.empty()
+                                          ? json_escape(tool.pip_package)
+                                          : json_escape(tool.source_dir)) << "\",\n"
+             << "  \"module\": \"" << json_escape(run_module) << "\",\n"
              << "  \"venv_path\": \"" << venv_path.string() << "\"\n"
              << "}\n";
     write_file(venv_dir / "manifest.json", manifest.str());
@@ -1103,7 +1145,7 @@ int cmd_tool(const std::vector<std::string>& args) {
                     if (dep_it->second.install_method == "binary_download")
                         dep_result = install_binary_tool(dep_it->second);
                     else if (dep_it->second.install_method == "python_pip")
-                        dep_result = install_python_tool(dep_it->second, reg);
+                        dep_result = install_python_tool(dep_it->second, reg, reg_path);
                     if (!dep_result.ok) {
                         print_fail("Failed to install dependency " + dep + ": " + dep_result.error);
                         return 1;
@@ -1115,7 +1157,7 @@ int cmd_tool(const std::vector<std::string>& args) {
             if (tool.install_method == "binary_download")
                 result = install_binary_tool(tool, force);
             else if (tool.install_method == "python_pip")
-                result = install_python_tool(tool, reg, force);
+                result = install_python_tool(tool, reg, reg_path, force);
             else if (tool.install_method == "npm_package")
                 result = install_npm_tool(tool, reg_path, force, artifact_manifest);
             else {
