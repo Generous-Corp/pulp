@@ -172,15 +172,22 @@ TEST_CASE("AudioFocusRegistry: callback that drops its own token does not deadlo
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();
     std::unique_ptr<AudioFocusRegistry::Token> token;
+    int callback_count = 0;
     token = std::make_unique<AudioFocusRegistry::Token>(
         AudioFocusRegistry::instance().subscribe(
-            [&](AudioFocusState) { token.reset(); }));
+            [&](AudioFocusState state) {
+                REQUIRE(state == AudioFocusState::duck);
+                ++callback_count;
+                token.reset();
+            }));
 
     // If publish held the mutex during dispatch, token.reset() would
     // re-enter unsubscribe() and deadlock. The copy-and-dispatch-out-of-
     // lock pattern in publish() prevents that.
     AudioFocusRegistry::instance().publish(AudioFocusState::duck);
-    SUCCEED("no deadlock");
+    REQUIRE(callback_count == 1);
+    REQUIRE(token == nullptr);
+    REQUIRE(AudioFocusRegistry::instance().current() == AudioFocusState::duck);
 }
 
 TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
@@ -293,7 +300,8 @@ TEST_CASE("AudioFocusRegistry: reset_for_test clears subscribers and state",
     // The stale token's dtor is a no-op at this point (reset cleared cbs_
     // so unsubscribe can't find its id); just don't crash.
     token.reset();
-    SUCCEED("no crash on stale token reset");
+    REQUIRE(token.id() == 0);
+    REQUIRE(AudioFocusRegistry::instance().current() == AudioFocusState::lost);
 }
 
 TEST_CASE("AudioFocusRegistry: stale tokens cannot unsubscribe post-reset subscribers",
