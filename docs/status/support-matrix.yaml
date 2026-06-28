@@ -993,8 +993,12 @@ widgets:
   graph_editor_view: { status: usable, header: graph_editor_view.hpp,
                        notes: "Canvas-based node editor driving SignalGraph." }
   canvas_widget:    { status: usable, header: canvas_widget.hpp }
-  table:            { status: partial, header: table.hpp,
-                      notes: "Basic rows; sortable columns + virtualization planned." }
+  table:
+    status: partial
+    header: table.hpp
+    notes: >
+      Rows, themed cells, and click-to-sort columns are implemented; built-in
+      table scrolling/scrollbar remains planned.
   modulation_matrix:   { status: usable, header: modulation_matrix_widget.hpp,
                           notes: "Source-to-destination route widget backed by ModulationMatrix; focused data-model and widget interaction tests exist." }
   ab_compare:          { status: planned, notes: "Planned A/B comparison widget." }
