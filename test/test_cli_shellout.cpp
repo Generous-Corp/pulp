@@ -2227,9 +2227,8 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     fs::path repo_root = fs::current_path() / ".." / "..";
     repo_root = fs::weakly_canonical(repo_root);
     if (!fs::exists(repo_root / "mkdocs.yml")) {
-        SUCCEED("mkdocs.yml not at expected repo root — likely non-standard "
-                "build layout; skipping");
-        return;
+        SKIP("mkdocs.yml not at expected repo root — likely non-standard "
+             "build layout");
     }
     fs::path subdir = repo_root / "tools";
     REQUIRE(fs::exists(subdir));
@@ -2463,9 +2462,7 @@ TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
         "pulp-cli-run-fixture";
 #endif
     if (!fs::exists(fixture_src)) {
-        SUCCEED("fixture binary not built at " + fixture_src.string()
-                + "; skipping");
-        return;
+        SKIP("fixture binary not built at " + fixture_src.string());
     }
 
     // Build a fake project tree that cmd_run can navigate.
