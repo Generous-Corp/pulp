@@ -42,6 +42,15 @@
       "owner": "test-quality",
       "reason": "Fixture strings used to test scanner and JSON contract behavior, not executable product assertions.",
       "max_count_impact": 7
+    },
+    {
+      "path": "tools/harness/tests/test_validate_test_ref.py",
+      "kind": "require_true",
+      "classification": "unconditional-true",
+      "text_regex": "REQUIRE\\(true\\);",
+      "owner": "test-harness",
+      "reason": "Fixture C++ snippets used by the test-reference validator to exercise TEST_CASE tag/name extraction, not executable product assertions.",
+      "max_count_impact": 4
     }
   ]
 }
