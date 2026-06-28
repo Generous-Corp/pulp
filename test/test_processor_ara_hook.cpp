@@ -63,11 +63,14 @@ TEST_CASE("default AraDocumentController reports no ARA support and empty factor
     REQUIRE_FALSE(base.is_ara_supported());
     REQUIRE(base.ara_factory_name().empty());
     REQUIRE(base.supported_roles() == 0);
-    // Default begin/end editing + audio-source-notify are no-ops.
-    base.begin_editing();
-    base.end_editing();
-    base.notify_audio_source_content_changed(42);
-    SUCCEED("default AraDocumentController virtuals complete without UB");
+    // Default begin/end editing + audio-source-notify are no-ops that must stay
+    // exception-safe and must not flip the adapter-facing opt-in state.
+    REQUIRE_NOTHROW(base.begin_editing());
+    REQUIRE_NOTHROW(base.notify_audio_source_content_changed(42));
+    REQUIRE_NOTHROW(base.end_editing());
+    REQUIRE_FALSE(base.is_ara_supported());
+    REQUIRE(base.ara_factory_name().empty());
+    REQUIRE(base.supported_roles() == 0);
 }
 
 TEST_CASE("repeated create_ara_document_controller calls yield distinct owned instances",
