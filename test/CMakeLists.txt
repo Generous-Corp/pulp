@@ -1175,6 +1175,9 @@ pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
 # DSP hot reload — build-fingerprint gate (Phase 0)
 pulp_add_test_suite(pulp-test-build-fingerprint LIBRARIES pulp::format)
 
+# DSP hot reload — RT-safe processor hot-swap slot (Phase 0)
+pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
