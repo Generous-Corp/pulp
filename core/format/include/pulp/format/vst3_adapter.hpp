@@ -21,6 +21,7 @@
 
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstevents.h>
+#include <pluginterfaces/vst/ivstmidicontrollers.h>
 #include <pluginterfaces/base/ibstream.h>
 
 #include <pulp/events/plugin_main_thread.hpp>
@@ -36,13 +37,41 @@ namespace pulp::format::vst3 {
 
 // The VST3 combined processor + controller
 // Wraps a pulp::format::Processor for the VST3 host
-class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect {
+//
+// Also implements IMidiMapping so MIDI controllers (CCs, mod wheel,
+// sustain, channel aftertouch, pitch bend) reach instruments. VST3 has no
+// raw MIDI controller events: the host queries getMidiControllerAssignment
+// for the ParamID each controller maps to, then delivers them as ordinary
+// parameter changes. The adapter reserves a private ParamID range for these
+// controllers (see detail/vst3_midi_mapping.hpp) and decodes them back into
+// MIDI messages in process().
+class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
+                          public Steinberg::Vst::IMidiMapping {
 public:
     PulpVst3Processor(ProcessorFactory factory);
+
+    // FUnknown — expose IMidiMapping alongside the SingleComponentEffect
+    // interfaces. Refcounting is inherited from EditControllerEx1 via the
+    // base; only queryInterface needs the extra interface.
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                 void** obj) override;
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return Steinberg::Vst::SingleComponentEffect::addRef();
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return Steinberg::Vst::SingleComponentEffect::release();
+    }
 
     // IPluginBase
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
+
+    // IMidiMapping — report which ParamID each (bus, channel, controller)
+    // maps to. Only populated when the descriptor accepts MIDI input.
+    Steinberg::tresult PLUGIN_API getMidiControllerAssignment(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::Vst::CtrlNumber midiControllerNumber,
+        Steinberg::Vst::ParamID& id) override;
 
     // IEditController — editor view creation
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
@@ -107,6 +136,28 @@ private:
     // Cached parameter ID of the VST3 bypass parameter. 0 when none is
     // available, so process() never short-circuits.
     state::ParamID bypass_param_id_ = 0;
+
+    // True when the descriptor accepts MIDI input, so the adapter has
+    // registered the reserved hidden controller parameters and
+    // getMidiControllerAssignment / the process()-side controller decode
+    // are live. Mirrors the accepts_midi gating on the event input bus.
+    bool midi_controller_mapping_active_ = false;
+
+    // Membership bitmap over the reserved controller ParamID range, indexed
+    // by (id - kVst3MidiCcParamBase). A slot is true only if the adapter
+    // ACTUALLY registered that ID as a hidden controller parameter — i.e.
+    // the ID did not collide with a real plug-in parameter. Registration,
+    // getMidiControllerAssignment, and the process()-side diversion all use
+    // this one predicate, so a real plug-in parameter that happens to fall
+    // in the reserved range is never reported as a controller assignment and
+    // never diverted to MIDI (its host param-changes still reach store_).
+    // Sized once at init; the process()-thread lookup is O(1) and never
+    // allocates. Empty when MIDI mapping is inactive.
+    std::vector<bool> registered_controller_ids_;
+
+    // True iff `id` was registered as a hidden controller parameter. O(1),
+    // allocation-free — safe to call on the audio thread.
+    bool is_registered_controller(state::ParamID id) const;
 
     // Per-output-channel dry delay used during the bypass pass-through.
     // A plugin that reports latency gets host plugin-delay-compensation on

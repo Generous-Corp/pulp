@@ -577,6 +577,10 @@ bool SignalGraph::audio_rate_modulation_lane(const Connection& connection,
 }
 
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
+    // Pin the live snapshot for the whole dereference: this control-thread API
+    // is not the prepare/release thread, so without the guard a concurrent
+    // prepare()/release()/invalidate could retire+free `cg` mid-use.
+    ProcessReadGuard read_guard{*this};
     auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
@@ -597,6 +601,9 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
 }
 
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
+    // Pin the live snapshot for the whole dereference (see inject_midi). const
+    // method: ProcessReadGuard only touches the mutable atomic counter.
+    ProcessReadGuard read_guard{*this};
     auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
@@ -704,6 +711,8 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 }
 
 int SignalGraph::node_latency_samples(NodeId id) const {
+    // Pin the live snapshot for the whole dereference (see inject_midi).
+    ProcessReadGuard read_guard{*this};
     const auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return 0;
     auto it = cg->runtime.find(id);
@@ -1713,17 +1722,11 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                                const audio::BufferView<const float>& input,
                                int num_samples,
                                const format::ProcessContext* transport) {
-    struct ProcessReadGuard {
-        explicit ProcessReadGuard(SignalGraph& owner) noexcept : owner_(owner) {
-            // See prune_retired_snapshots_(): this reader count and the raw
-            // snapshot pointer form one RCU-style lifetime handshake.
-            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
-        }
-        ~ProcessReadGuard() noexcept {
-            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
-        }
-        SignalGraph& owner_;
-    } read_guard{*this};
+    // See prune_retired_snapshots_(): this reader count and the raw snapshot
+    // pointer form one RCU-style lifetime handshake. ProcessReadGuard is a
+    // private nested struct (signal_graph.hpp) so the control-thread snapshot
+    // readers can pin the same way.
+    ProcessReadGuard read_guard{*this};
 
     auto* cg = live_raw_.load(std::memory_order_seq_cst);
     // Negative or zero block sizes mean "nothing to do" — return without
@@ -1980,6 +1983,11 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     auto* n = const_cast<GraphNode*>(node(id));
     if (!n) return false;
     n->gain = linear_gain;
+    // Pin the live snapshot around the load + the per-runtime gain store: this
+    // UI-thread-owned API is not the prepare/release thread, so without the
+    // guard a concurrent prepare()/release() could retire+free `cg` between the
+    // load and the store (use-after-free).
+    ProcessReadGuard read_guard{*this};
     auto* cg = live_raw_.load(std::memory_order_acquire);
     if (cg) {
         auto it = cg->runtime.find(id);

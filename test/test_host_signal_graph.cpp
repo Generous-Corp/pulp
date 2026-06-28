@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -812,6 +813,98 @@ TEST_CASE("SignalGraph release waits for in-flight snapshot process",
 
     REQUIRE(release_called.load(std::memory_order_acquire));
     REQUIRE_FALSE(release_during_process.load(std::memory_order_acquire));
+}
+
+TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
+          "[host][graph][race][rt-safety][tsan]") {
+    // The control-thread snapshot readers (inject_midi / extract_midi /
+    // node_latency_samples / set_node_gain) load live_raw_ and dereference the
+    // CompiledGraph (cg->runtime / cg->shapes / per-runtime gain atomic). They
+    // run on a different thread than prepare()/release(), so they must pin the
+    // snapshot via the same reader-count handshake the audio path uses;
+    // otherwise a concurrent prepare()/release()/invalidate can retire+free the
+    // snapshot mid-dereference (use-after-free). The reader thread below touches
+    // ONLY the frozen snapshot (never the control-owned nodes_/connections_
+    // vectors), so the only cross-thread sharing under test is the snapshot
+    // lifetime — exactly what ProcessReadGuard protects. The retirer churns
+    // snapshots via prepare()/release()/topology edits. Definitive proof is
+    // under ThreadSanitizer: without the guards TSan flags a UAF on the retired
+    // CompiledGraph; with them it is clean.
+    //
+    // Note: set_node_gain ALSO writes the control-owned GraphNode::gain scalar
+    // and scans nodes_, which is a separate control-thread-vs-prepare ordering
+    // concern (a real host serializes structural edits against prepare) and is
+    // out of scope for the snapshot-lifetime fix. To keep this test focused on
+    // the snapshot UAF, set_node_gain's snapshot store is exercised separately
+    // below rather than raced against prepare()'s nodes_ read.
+    SignalGraph graph;
+    auto in   = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out  = graph.add_output_node(1, "out");
+    auto mi   = graph.add_midi_input_node("keys");
+    auto mo   = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.connect_midi(mi, mo));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    // set_node_gain's snapshot half (the per-runtime gain atomic store) is
+    // pinned by ProcessReadGuard; cover it directly so all four methods are
+    // represented even though it is not raced against prepare() below.
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+
+    pulp::midi::MidiBuffer in_events;
+    auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 0;
+    in_events.add(note);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> saw_crash{false};
+    std::atomic<long> reader_iterations{0};
+    std::atomic<long> retire_iterations{0};
+
+    // Reader thread: continuously dereference the live snapshot through the
+    // three pure-snapshot readers. None must crash or read freed memory while
+    // the retirer churns snapshots underneath them.
+    std::thread reader_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.inject_midi(mi, in_events);
+            pulp::midi::MidiBuffer arrived;
+            graph.extract_midi(mo, arrived);
+            const int latency = graph.node_latency_samples(gain);
+            if (latency < 0) saw_crash.store(true, std::memory_order_relaxed);
+            reader_iterations.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    // Retirer thread: force snapshot retirement + free. prepare() retires the
+    // previous snapshot; a topology edit invalidates+retires the live one;
+    // release() retires and waits. Each prune frees the retired CompiledGraph,
+    // which would dangle the reader's loaded pointer absent the guard.
+    std::thread retirer_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.prepare(48000.0, 64);
+            graph.disconnect(gain, 0, out, 0);
+            graph.connect(gain, 0, out, 0);
+            graph.release();
+            graph.prepare(48000.0, 64);
+            retire_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    reader_thread.join();
+    retirer_thread.join();
+
+    REQUIRE_FALSE(saw_crash.load(std::memory_order_relaxed));
+    REQUIRE(reader_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(retire_iterations.load(std::memory_order_relaxed) > 0);
 }
 
 TEST_CASE("SignalGraph retired snapshots do not own removed plugins",
