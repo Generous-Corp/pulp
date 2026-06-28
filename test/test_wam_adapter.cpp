@@ -48,18 +48,29 @@ TEST_CASE("WAM bridge clamps oversized blocks instead of overrunning", "[wam][rt
 
     std::vector<float> in(2 * 256, 0.25f), out(2 * 256, -99.0f);
     REQUIRE_NOTHROW(bridge.process(in.data(), out.data(), 2, 256)); // 256 > 128
+    REQUIRE_NOTHROW(bridge.process(in.data(), out.data(), 2, 0));   // <= 0 guard
 
     for (int i = 0; i < 2 * 128; ++i) REQUIRE(std::isfinite(out[i]));
 }
 
-TEST_CASE("WAM descriptor JSON escapes quotes and backslashes", "[wam]") {
+TEST_CASE("WAM descriptor JSON escapes quotes, backslashes, and controls", "[wam]") {
     WamDescriptorData d;
     d.name = "Ev\"il\\Name";
     d.vendor = "Acme\tInc";
     std::string json = d.to_json();
-
     REQUIRE(json.find("Ev\\\"il\\\\Name") != std::string::npos);
     REQUIRE(json.find("Ev\"il") == std::string::npos); // no raw unescaped quote
+
+    // Exercise every control-escape branch.
+    WamDescriptorData c;
+    c.name = std::string("a\bb\fc\nd\re\tf\x01g");
+    const std::string cj = c.to_json();
+    REQUIRE(cj.find("\\b") != std::string::npos);
+    REQUIRE(cj.find("\\f") != std::string::npos);
+    REQUIRE(cj.find("\\n") != std::string::npos);
+    REQUIRE(cj.find("\\r") != std::string::npos);
+    REQUIRE(cj.find("\\t") != std::string::npos);
+    REQUIRE(cj.find("\\u0001") != std::string::npos); // control char < 0x20
 }
 
 TEST_CASE("WAM bridge exposes parameter metadata as JSON", "[wam]") {
