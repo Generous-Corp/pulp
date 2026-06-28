@@ -89,7 +89,7 @@ CanvasWidget/SkiaCanvas pipeline below.
 When adding a new Canvas2D method, audit:
 
 1. Does the bridge expose a matching `canvas*` function in
-   `core/view/src/widget_bridge.cpp`? If not, add it.
+   `core/view/src/widget_bridge/canvas2d_api.cpp`? If not, add it.
 2. Is the path expressed as path-construction (records into the
    current Skia path) vs immediate-mode (draws now)? Match the spec —
    `arc()` is path-construction, not a stroke.
@@ -471,7 +471,7 @@ state, follow this checklist or you'll land a silent no-op:
    GState pops the value, so the post-restore draw must re-flush.
    Forgetting this is a one-frame lag invisible in single-frame
    tests.
-6. **Bridge fn registration** in `core/view/src/widget_bridge.cpp`
+6. **Bridge fn registration** in `core/view/src/widget_bridge/canvas2d_api.cpp`
    — record a `CanvasDrawCmd` with the right `int_val` / `extra`
    / `text` field per the enum docstring.
 7. **Dispatch + `cmd_type_to_string`** in
