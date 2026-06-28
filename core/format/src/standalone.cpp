@@ -2,6 +2,7 @@
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/format/detail/standalone_one_shot_action.hpp>
+#include <pulp/format/detail/standalone_output_tap.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/editor_ui.hpp>
@@ -327,17 +328,13 @@ bool StandaloneApp::start() {
 
 #if PULP_ENABLE_AUDIO_PROBES
         auto analyze_output_probe = [&]() noexcept {
-            const size_t out_ch = output.num_channels();
-            for (size_t c = 0; c < out_ch && c < output_probe_ptrs_.size(); ++c)
-                output_probe_ptrs_[c] = output.channel_ptr(c);
-            const size_t probe_ch = std::min(out_ch, output_probe_ptrs_.size());
-            const audio::BufferView<const float> out_view(
-                output_probe_ptrs_.data(), probe_ch, output.num_samples());
-            output_probe_.analyze_output(out_view);
-            // Same tap feeds the rolling last-N capture (RT-safe append).
-            detail::append_standalone_rolling_capture_output(
-                rolling_capture_active_, rolling_capture_, rolling_capture_channels_,
-                out_view);
+            detail::analyze_standalone_output_tap(
+                output, output_probe_ptrs_,
+                [this](const audio::BufferView<const float>& out_view) {
+                    output_probe_.analyze_output(out_view);
+                },
+                rolling_capture_active_, rolling_capture_,
+                rolling_capture_channels_);
         };
 #endif
 

@@ -12,6 +12,7 @@
 #include <pulp/audio/rolling_audio_capture_buffer.hpp>
 #include <pulp/format/detail/standalone_audio_capture_rolling_wav.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
+#include <pulp/format/detail/standalone_output_tap.hpp>
 #include <pulp/format/detail/standalone_rolling_capture.hpp>
 #include <pulp/format/standalone.hpp>
 
@@ -262,6 +263,89 @@ TEST_CASE("standalone rolling capture append tap publishes delivered channels",
     CHECK(materialized_view.channel_ptr(0)[3] == mono[3]);
     CHECK(materialized_view.channel_ptr(1)[0] == 0.0f);
     CHECK(materialized_view.channel_ptr(1)[3] == 0.0f);
+}
+
+TEST_CASE("standalone output tap analyzes the delivered output view",
+          "[standalone][audio-capture-rolling]") {
+    constexpr int kPrepared = 2;
+    constexpr int kFrames = 4;
+
+    pulp::audio::Buffer<float> output(1, kFrames);
+    auto output_view = output.view();
+    for (int i = 0; i < kFrames; ++i)
+        output_view.channel_ptr(0)[i] = 0.5f + static_cast<float>(i);
+
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::audio::RollingAudioCaptureBufferConfig rc;
+    rc.num_channels = kPrepared;
+    rc.max_frames = 8;
+    REQUIRE(rolling.prepare(rc));
+
+    float stale = 0.0f;
+    std::vector<const float*> probe_ptrs(2, &stale);
+    std::atomic<int> delivered{99};
+    bool analyzed = false;
+
+    pulp::format::detail::analyze_standalone_output_tap(
+        output_view, probe_ptrs,
+        [&](const pulp::audio::BufferView<const float>& view) {
+            analyzed = true;
+            CHECK(view.num_channels() == 1u);
+            CHECK(view.num_samples() == static_cast<size_t>(kFrames));
+            CHECK(view.channel_ptr(0) == output_view.channel_ptr(0));
+            CHECK(view.channel_ptr(0)[3] == output_view.channel_ptr(0)[3]);
+        },
+        true, rolling, delivered);
+
+    REQUIRE(analyzed);
+    CHECK(probe_ptrs[0] == output_view.channel_ptr(0));
+    CHECK(probe_ptrs[1] == &stale);
+    CHECK(delivered.load(std::memory_order_relaxed) == 1);
+
+    pulp::audio::Buffer<float> materialized(kPrepared, kFrames);
+    const auto hold = rolling.hold_last(kFrames);
+    REQUIRE(hold.valid());
+    const auto result = rolling.materialize_held(hold, materialized.view());
+    REQUIRE(result.status ==
+            pulp::audio::RollingAudioCaptureMaterializeStatus::Ok);
+    const auto materialized_view = materialized.view();
+    CHECK(materialized_view.channel_ptr(0)[0] == output_view.channel_ptr(0)[0]);
+    CHECK(materialized_view.channel_ptr(0)[3] == output_view.channel_ptr(0)[3]);
+    CHECK(materialized_view.channel_ptr(1)[0] == 0.0f);
+    CHECK(materialized_view.channel_ptr(1)[3] == 0.0f);
+}
+
+TEST_CASE("standalone output tap still analyzes when rolling capture is inactive",
+          "[standalone][audio-capture-rolling]") {
+    constexpr int kFrames = 2;
+
+    pulp::audio::Buffer<float> output(1, kFrames);
+    auto output_view = output.view();
+    output_view.channel_ptr(0)[0] = 0.25f;
+    output_view.channel_ptr(0)[1] = 0.5f;
+
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::audio::RollingAudioCaptureBufferConfig rc;
+    rc.num_channels = 1;
+    rc.max_frames = 4;
+    REQUIRE(rolling.prepare(rc));
+
+    std::vector<const float*> probe_ptrs(1, nullptr);
+    std::atomic<int> delivered{7};
+    bool analyzed = false;
+
+    pulp::format::detail::analyze_standalone_output_tap(
+        output_view, probe_ptrs,
+        [&](const pulp::audio::BufferView<const float>& view) {
+            analyzed = true;
+            CHECK(view.num_channels() == 1u);
+            CHECK(view.channel_ptr(0)[1] == 0.5f);
+        },
+        false, rolling, delivered);
+
+    REQUIRE(analyzed);
+    CHECK(delivered.load(std::memory_order_relaxed) == 7);
+    CHECK_FALSE(rolling.snapshot_last(1).valid);
 }
 
 TEST_CASE("a rolling-capture-only headless run does not require a screenshot",
