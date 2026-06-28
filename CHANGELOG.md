@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05310"></a>
+## [0.531.0] - 2026-06-28
+
+- docs(cli): list operator commands in rust help ([#5247](https://github.com/danielraffel/pulp/pull/5247))
+- docs(view): refresh CSS compat narrative counts ([#5246](https://github.com/danielraffel/pulp/pull/5246))
+- feature/param designation ([#5243](https://github.com/danielraffel/pulp/pull/5243))
+- docs(host): remove stale automation smoothing TODO ([#5240](https://github.com/danielraffel/pulp/pull/5240))
+
 <a id="v05300"></a>
 ## [0.530.0] - 2026-06-28
 
@@ -5554,6 +5562,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.531.0]: https://github.com/danielraffel/pulp/releases/tag/v0.531.0
 [0.530.0]: https://github.com/danielraffel/pulp/releases/tag/v0.530.0
 [0.529.0]: https://github.com/danielraffel/pulp/releases/tag/v0.529.0
 [0.528.2]: https://github.com/danielraffel/pulp/releases/tag/v0.528.2

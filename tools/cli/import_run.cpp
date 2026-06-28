@@ -687,17 +687,17 @@ int run_emit(const ImportOptions& o) {
     };
     std::cout << "  formats:        " << join(manifest.formats) << "\n";
     std::cout << "  deferred:       " << join(manifest.deferred_formats) << "\n";
-    std::cout << "  unresolved:     " << manifest.unresolved.size()
-              << " item(s) to migrate (search for TODO(import))\n";
+    std::cout << "  unresolved:     " << ie::format_unresolved_summary(manifest)
+              << "\n";
     if (!manifest.verdict.empty())
         std::cout << "  verdict:        " << manifest.verdict << "\n";
     std::cout << "\nNext steps:\n";
     std::cout << "  1. Build it:   cmake -S " << o.output.string()
               << " -B " << (o.output / "build").string() << " && cmake --build "
               << (o.output / "build").string() << "\n";
-    std::cout << "  2. Fill the TODO(import) stubs in src/ — the scaffold builds "
-                 "and loads, but DSP/UI parity is up to you.\n";
-    std::cout << "  3. Review migration_status.json for the full unresolved list.\n";
+    std::cout << "  2. " << ie::format_parity_review_step(manifest) << "\n";
+    std::cout << "  3. Implement the missing parity work in src/ and rebuild/test; "
+                 "any TODO(import) markers are importer-emitted hints.\n";
     return 0;
 }
 
