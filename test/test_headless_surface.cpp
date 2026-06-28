@@ -124,14 +124,14 @@ TEST_CASE("HeadlessSurface renders a deterministic clear-only frame",
     if (!surface) {
         // No Dawn/Graphite on this host — that's the documented
         // soft-skip path the CI lane uses when the runner lacks a GPU.
-        SUCCEED("HeadlessSurface unavailable: " + err);
+        SKIP("HeadlessSurface unavailable: " + err);
         return;
     }
     REQUIRE(surface->is_ready());
 
     auto frame_a = surface->render_rgba(nullptr);
     if (frame_a.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
+        SKIP("GPU readback unavailable: " + surface->last_error());
         return;
     }
     REQUIRE(frame_a.width == kW);
@@ -181,7 +181,7 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
+        SKIP("HeadlessSurface unavailable: " + err);
         return;
     }
 
@@ -194,7 +194,7 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
 
     auto rgba = surface->render_rgba(paint_red_band);
     if (rgba.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
+        SKIP("GPU readback unavailable: " + surface->last_error());
         return;
     }
     REQUIRE(rgba.width == kW);
@@ -208,9 +208,9 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
     // PNG round-trip via the convenience entry point.
     auto png = surface->render_png(paint_red_band);
     if (png.empty()) {
-        SUCCEED("PNG encode failed: " + surface->last_error());
-        return;
+        INFO("PNG encode failed: " << surface->last_error());
     }
+    REQUIRE_FALSE(png.empty());
     REQUIRE(png.size() >= 8u);
     // PNG magic: 89 50 4E 47 0D 0A 1A 0A
     static constexpr uint8_t kMagic[8] = {0x89, 0x50, 0x4E, 0x47,
@@ -232,10 +232,10 @@ TEST_CASE("HeadlessSurface skips runtime cases when Skia/Apple unavailable",
     // err is populated so callers can soft-skip.
     if (!surface) {
         REQUIRE_FALSE(err.empty());
-        SUCCEED("HeadlessSurface unavailable on this build: " + err);
+        SKIP("HeadlessSurface unavailable on this build: " + err);
         return;
     }
-    SUCCEED("HeadlessSurface available on a non-Apple Skia build — runtime cases skipped");
+    SKIP("HeadlessSurface runtime cases are compile-gated to Apple Skia builds");
 }
 
 #endif  // PULP_HAS_SKIA && __APPLE__
