@@ -999,7 +999,32 @@ private:
     // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
-    std::atomic<std::uint32_t> active_process_readers_{0};
+    // mutable: const snapshot readers (extract_midi / node_latency_samples) must
+    // bump this reader pin via ProcessReadGuard. Pinning does not change logical
+    // const-ness of the graph.
+    mutable std::atomic<std::uint32_t> active_process_readers_{0};
+
+    // RCU-style read pin for the live CompiledGraph snapshot. Any thread that
+    // dereferences live_raw_ must hold one of these for the entire duration of
+    // the dereference so prune_retired_snapshots_() / wait_for_retired_snapshots_()
+    // can see it and defer the free. The audio process path uses it; so do the
+    // control-thread snapshot readers (inject_midi / extract_midi /
+    // node_latency_samples / set_node_gain) — none of which run on the
+    // prepare/release thread, so without the pin a concurrent prepare()/release()
+    // could retire+free the snapshot mid-dereference (use-after-free). The seq_cst
+    // add/sub pairs with prune/wait's seq_cst load (see prune_retired_snapshots_()).
+    struct ProcessReadGuard {
+        explicit ProcessReadGuard(const SignalGraph& owner) noexcept
+            : owner_(owner) {
+            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
+        }
+        ~ProcessReadGuard() noexcept {
+            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
+        }
+        ProcessReadGuard(const ProcessReadGuard&) = delete;
+        ProcessReadGuard& operator=(const ProcessReadGuard&) = delete;
+        const SignalGraph& owner_;
+    };
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};
