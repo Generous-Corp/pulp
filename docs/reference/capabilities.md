@@ -257,7 +257,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | ScrollView (smooth scroll, fade bars) | usable | [view](modules.md#view) | |
 | Meter (RMS + peak hold), ProgressBar | usable | [view](modules.md#view) | |
 | XYPad, WaveformView, SpectrumView | usable | [view](modules.md#view) | |
-| ImageView | usable | [view](modules.md#view) | Placeholder rendering |
+| ImageView | usable | [view](modules.md#view) | File-backed decode with placeholder fallback |
 | TreeView, Tooltip, Panel, Icon | usable | [view](modules.md#view) | |
 | SpectrogramView (scrolling STFT) | usable | [view](modules.md#view) | |
 | MultiMeter, CorrelationMeter | usable | [view](modules.md#view) | |
