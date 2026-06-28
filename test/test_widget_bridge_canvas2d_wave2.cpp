@@ -1,16 +1,10 @@
-// WidgetBridge Canvas2D Wave 2 tests for compat.json entries that flipped
-// from partial → supported:
+// WidgetBridge recovered Canvas2D/CSS compatibility tests.
 //
-//   1. canvas2d/fill   — `ctx.fill('evenodd')` reaches
-//                        Canvas::fill_current_path with FillRule::evenodd
-//   2. canvas2d/clip   — `ctx.clip('evenodd')` honours FillRule::evenodd
-//   3. canvas2d/roundRect — 4-corner non-uniform radii thread through to
-//                           canvasPathRoundRect with 8 distinct floats
-//   4. canvas2d/ellipse — non-zero rotation routes to path_ellipse on the
-//                         RecordingCanvas as a single contour
-//   5. canvas2d/strokeText — strokeText routes to the dedicated
-//                            stroke_text command (not fillText with
-//                            strokeStyle as fill)
+// The canonical Wave 2 Canvas2D cheap-wiring tests live in
+// `test_widget_bridge_wave2_cheap.cpp`: fill/clip evenodd,
+// roundRect radii, ellipse rotation, and strokeText dedicated-command
+// routing. This split keeps recovered CSS cases and later Canvas2D
+// bridge regressions that were separated from the original merge cleanup.
 //
 // Each test goes JS → bridge → CanvasWidget::paint(RecordingCanvas) →
 // asserts on the recorded Canvas API call so a regression anywhere in
@@ -34,7 +28,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <numbers>
 #include <thread>
 
 using namespace pulp::view;
@@ -55,41 +48,12 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
 }
 } // namespace
 
-// ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
-//
-// These tests close the loop on the five compat.json entries that flipped
-// from partial → supported in the Wave 2 sweep. Each test goes JS → bridge
-// → CanvasWidget::paint(RecordingCanvas) → assert on the recorded Canvas
-// API call so a regression anywhere in the chain surfaces here.
-//
-// Scope:
-//   1. canvas2d/fill   — `ctx.fill('evenodd')` reaches Canvas::fill_current_path
-//                        with FillRule::evenodd (replayed via cmd.f[0] == 1).
-//   2. canvas2d/clip   — `ctx.clip('evenodd')` reaches Canvas::clip with
-//                        FillRule::evenodd.
-//   3. canvas2d/roundRect — 4-corner non-uniform radii thread through to
-//                           canvasPathRoundRect with 8 distinct floats so
-//                           SkRRect::setRectRadii sees per-corner geometry.
-//   4. canvas2d/ellipse — non-zero rotation reaches the bridge and produces a
-//                         single-contour replay (path_ellipse on the
-//                         RecordingCanvas; tests confirm one moveTo follows).
-//   5. canvas2d/strokeText — strokeText routes to the dedicated stroke_text
-//                            command (not fillText with strokeStyle as fill).
-//
-// The Skia / CG paint-side honouring of FillRule and kStroke_Style is unit-
-// tested at the Canvas backend layer; here we focus on the bridge ↔ Canvas
-// API contract that the harness adapter scores.
+// ── Recovered bridge compatibility regressions ───────────────────────────
 
-// pulp #1638 baseline-corruption: this title says canvas2d-fill but
-// the body actually tests css mixBlendMode plus-lighter / plus-darker
-// (a #1638 css.9 wiring). Renamed to match the body so the test
-// reports honestly while the canonical canvas2d-fill case is
-// reconstructed in a follow-up.
 // Wave 5 css.5 audit — recover the corrupted Wave 2 css.9 plus-lighter
 // title/body that was interleaved with an arcTo opener in #1638. The
 // body is the canonical mixBlendMode plus-lighter / plus-darker test;
-// the duplicate is dropped above. The arcTo coverage exists in a
-// separate Wave 3 canvas2d block below.
+// arcTo coverage exists in a separate Wave 3 canvas2d block below.
 TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker maps to BM::lighter (Wave 2 css.9)",
           "[view][bridge][css][wave2-css][wave5-recovered]") {
     using BM = pulp::canvas::Canvas::BlendMode;
@@ -119,26 +83,6 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker maps to B
     REQUIRE(b->has_non_default_blend_mode());
 }
 
-// pulp #1638/#1636 baseline-corruption (filed as separate issue): The
-// title here got paired with a bare-JS body that was never wrapped in
-// bridge.load_script(R"(...)"). Stubbed out so the file compiles
-// while the full test suite reconstruction is tracked separately.
-TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: this title was paired with bare JS
-// body (no bridge.load_script wrapper) and the actual evenodd-fill
-// canvas2d test got lost in the merge. The canonical borderWidth
-// thin/medium/thick test is the next TEST_CASE below. Stubbed to
-// allow file compilation; reconstruct evenodd-fill canvas test in a
-// follow-up. Wave 5 audit cleanup.
-TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick (Wave 2)",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body had bare JS outside string literal; the canonical thin/medium/thick test is below");
-}
-
 TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
           "[view][bridge][css][wave2-css]") {
     // Wave 2 css.2 — CSS Backgrounds & Borders L3 named widths.
@@ -164,24 +108,6 @@ TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
     REQUIRE_THAT(bridge.widget("thin")->border_width(),  WithinAbs(1.0f, 0.001f));
     REQUIRE_THAT(bridge.widget("med")->border_width(),   WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(bridge.widget("thick")->border_width(), WithinAbs(4.0f, 0.001f));
-}
-
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: this title was paired with a nested
-// (improperly-merged) TEST_CASE opener for evenodd-clip. The canonical
-// fontStyle oblique→italic test is the next TEST_CASE below. Stubbed to
-// allow compile; the evenodd-clip canvas2d coverage exists in the
-// dedicated Wave 2 canvas2d block. Wave 5 cleanup.
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic (Wave 2 dup)",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("title duplicated; canonical body is in the next TEST_CASE below");
 }
 
 TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
@@ -212,23 +138,6 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
     REQUIRE(lb->font_style() == 1);   // italic (angle ignored)
 }
 
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: title was paired with a nested
-// roundRect TEST_CASE opener. Stubbed for compile; canonical em/vh
-// test is below; canonical roundRect test is in the Wave 2 canvas2d
-// block. Wave 5 cleanup.
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport (Wave 2 dup)",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("title duplicated; canonical body is in the next TEST_CASE below");
-}
-
 TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
           "[view][bridge][css][wave2-css]") {
     // Wave 2 css.2 — em/rem default to 14 px, vh/vw default to a
@@ -257,71 +166,6 @@ TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport"
     REQUIRE_THAT(bridge.widget("b")->left(), WithinAbs(21.0f, 0.05f));
     REQUIRE_THAT(bridge.widget("c")->top(),  WithinAbs(300.0f, 0.05f));
     REQUIRE_THAT(bridge.widget("d")->left(), WithinAbs(200.0f, 0.05f));
-}
-
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638/#1636 baseline-corruption: this title's body got
-// interleaved with another opener. Stubbed for compile; the canonical
-// strokeText test exists in the Wave 2 canvas2d block above. Wave 5
-// cleanup.
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command (dup)",
-          "[view][bridge][canvas][wave2-canvas2d][.skip-corrupt-1638]") {
-    SUCCEED("title duplicated; the canonical strokeText test is at line ~8511 above");
-}
-
-TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command (dup)",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'ellipse-rot';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        // 45 degrees in radians, full sweep.
-        ctx.ellipse(50, 50, 30, 15, Math.PI / 4, 0, Math.PI * 2, false);
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "ellipse-rot");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    int ellipseCount = 0;
-    pulp::canvas::DrawCommand eCmd{};
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::ellipse) {
-            ellipseCount++;
-            eCmd = cmd;
-        }
-    }
-    // Single ellipse command — the JS shim must NOT decompose into multiple
-    // arc segments when rotation is non-zero (pre-Wave-2 the rotation arg
-    // was ignored entirely, which would have collapsed the call to either
-    // `arc` or a no-op).
-    REQUIRE(ellipseCount == 1);
-    REQUIRE_THAT(eCmd.f[0], WithinAbs(50.0f, 1e-5f));   // cx
-    REQUIRE_THAT(eCmd.f[1], WithinAbs(50.0f, 1e-5f));   // cy
-    REQUIRE_THAT(eCmd.f[2], WithinAbs(30.0f, 1e-5f));   // rx
-    REQUIRE_THAT(eCmd.f[3], WithinAbs(15.0f, 1e-5f));   // ry
-    // f[4] = rotation (radians) — confirm it was forwarded, not zeroed.
-    REQUIRE_THAT(eCmd.f[4], WithinAbs(std::numbers::pi_v<float> / 4.0f, 1e-4f));
 }
 
 TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
