@@ -79,6 +79,29 @@ class CliShelloutLabelGuardTests(unittest.TestCase):
         self.assertEqual(add_test_names, labelled_names)
 
 
+class CapabilityLabelGuardTests(unittest.TestCase):
+    def test_network_capability_suites_keep_explicit_labels(self) -> None:
+        cmake = (REPO_ROOT / "test" / "CMakeLists.txt").read_text(encoding="utf-8")
+        targets = [
+            "pulp-test-network-stream",
+            "pulp-test-websocket-channel",
+            "pulp-test-osc-channel",
+            "pulp-test-ipc",
+            "pulp-test-ipc-endpoints",
+            "pulp-test-network-service-discovery",
+        ]
+
+        for target in targets:
+            blocks = re.findall(
+                rf"pulp_add_test_suite\(\s*{re.escape(target)}\b(?P<body>.*?)\n\)",
+                cmake,
+                flags=re.DOTALL,
+            )
+            self.assertTrue(blocks, f"missing pulp_add_test_suite block for {target}")
+            for block in blocks:
+                self.assertIn("requires-network", block, f"{target} lacks requires-network")
+
+
 class CTestExecutionLogTests(unittest.TestCase):
     def test_parse_last_test_log_counts_selected_and_outcomes(self) -> None:
         with tempfile.TemporaryDirectory() as td:

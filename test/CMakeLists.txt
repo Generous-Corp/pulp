@@ -1142,14 +1142,24 @@ pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
 # Network Stream tests
-pulp_add_test_suite(pulp-test-network-stream LIBRARIES pulp::runtime pulp-cpp-httplib DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests PROPERTIES RESOURCE_LOCK network-stream)
+pulp_add_test_suite(pulp-test-network-stream
+    LIBRARIES pulp::runtime pulp-cpp-httplib
+    LABELS "requires-network"
+    DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests
+    PROPERTIES RESOURCE_LOCK network-stream)
 
 # MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
 
-pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
+pulp_add_test_suite(pulp-test-websocket-channel
+    LIBRARIES pulp::runtime
+    LABELS "requires-network"
+    DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
 
-pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
+pulp_add_test_suite(pulp-test-osc-channel
+    LIBRARIES pulp::osc
+    LABELS "requires-network"
+    DISCOVERY_ARGS EXTRA_ARGS --allow-running-no-tests)
 
 pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 
@@ -1775,15 +1785,19 @@ target_link_libraries(pulp-connected-child-process-fixture PRIVATE pulp::events)
 if(WIN32)
     pulp_add_test_suite(pulp-test-ipc
         LIBRARIES pulp::events pulp::runtime
-        LABELS "windows-pr-quarantine")
+        LABELS "requires-network;windows-pr-quarantine")
 else()
-    pulp_add_test_suite(pulp-test-ipc LIBRARIES pulp::events pulp::runtime)
+    pulp_add_test_suite(pulp-test-ipc
+        LIBRARIES pulp::events pulp::runtime
+        LABELS "requires-network")
 endif()
 add_dependencies(pulp-test-ipc pulp-connected-child-process-fixture)
 target_compile_definitions(pulp-test-ipc PRIVATE
     "PULP_TEST_CONNECTED_CHILD_FIXTURE=\"$<TARGET_FILE:pulp-connected-child-process-fixture>\"")
 
-pulp_add_test_suite(pulp-test-ipc-endpoints LIBRARIES pulp::events pulp::runtime)
+pulp_add_test_suite(pulp-test-ipc-endpoints
+    LIBRARIES pulp::events pulp::runtime
+    LABELS "requires-network")
 
 # AttributedString and TextLayout tests
 pulp_add_test_suite(pulp-test-attributed-string LIBRARIES pulp::canvas)
@@ -5901,7 +5915,9 @@ endif()
 pulp_add_test_suite(pulp-test-graph-serializer LIBRARIES pulp::host)
 
 # NetworkServiceDiscovery backend-dispatch tests (#302)
-pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-network-service-discovery
+    LIBRARIES pulp::events
+    LABELS "requires-network")
 
 # WAMv2 + WebCLAP format adapter tests
 add_executable(pulp-test-wam-wclap test_wam_wclap.cpp
