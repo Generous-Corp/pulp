@@ -410,7 +410,9 @@ measureText(text, fontSize)       // Returns { width, ascent, descent, lineHeigh
 ```js
 // Context menus
 registerContextMenu(id, callbackName) // Register right-click handler: callbackName(x, y)
-showContextMenu(itemsJSON, x, y)      // Show native popup menu, returns selected id or -1
+showContextMenu(itemsJSON, x, y)      // Request platform popup menu; returns selected id only
+                                      // when the backend reports one, otherwise -1.
+                                      // Current in-tree backends do not report selection.
                                       // itemsJSON: '[{"id":1,"label":"Cut"},{"separator":true}]'
 
 // Keyboard shortcuts
