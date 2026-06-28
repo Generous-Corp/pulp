@@ -158,8 +158,7 @@ TEST_CASE("cli_version_check helper prints banner when CLI is behind plugin min"
           "[cli][shellout][skill][issue-551]") {
     HelperCtx ctx;
     if (!ctx.enabled) {
-        SUCCEED("skipped: repo root or helper not available in this run");
-        return;
+        SKIP("repo root or cli_version_check helper not available in this run");
     }
     write_pulp_shim(ctx.bin_dir, "0.20.0", "0.31.0");
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
@@ -181,7 +180,9 @@ TEST_CASE("cli_version_check helper prints banner when CLI is behind plugin min"
 TEST_CASE("cli_version_check helper is silent when CLI is ahead",
           "[cli][shellout][skill][issue-551]") {
     HelperCtx ctx;
-    if (!ctx.enabled) { SUCCEED("skipped"); return; }
+    if (!ctx.enabled) {
+        SKIP("repo root or cli_version_check helper not available in this run");
+    }
     write_pulp_shim(ctx.bin_dir, "0.31.0", "0.20.0");
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
                                ctx.helper, /*disable=*/false);
@@ -199,7 +200,9 @@ TEST_CASE("cli_version_check helper banners at most once per session",
     // second call in the same driver should NOT re-emit the banner
     // even though the skew condition still holds.
     HelperCtx ctx;
-    if (!ctx.enabled) { SUCCEED("skipped"); return; }
+    if (!ctx.enabled) {
+        SKIP("repo root or cli_version_check helper not available in this run");
+    }
     write_pulp_shim(ctx.bin_dir, "0.20.0", "0.31.0");
 
     // Driver that invokes the check twice and records each run's stderr
@@ -246,7 +249,9 @@ TEST_CASE("cli_version_check helper banners at most once per session",
 TEST_CASE("cli_version_check helper honours PULP_SKEW_CHECK_DISABLE",
           "[cli][shellout][skill][issue-551]") {
     HelperCtx ctx;
-    if (!ctx.enabled) { SUCCEED("skipped"); return; }
+    if (!ctx.enabled) {
+        SKIP("repo root or cli_version_check helper not available in this run");
+    }
     write_pulp_shim(ctx.bin_dir, "0.20.0", "0.31.0");
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
                                ctx.helper, /*disable=*/true);

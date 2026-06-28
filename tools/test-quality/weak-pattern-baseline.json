@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-wasapi-share-skip-report.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-cli-skew-skip-report.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 340,
+    "succeed": 336,
     "require_true": 16,
-    "skip": 471
+    "skip": 475
   },
   "classifications": {
-    "needs-review": 748,
+    "needs-review": 752,
     "placeholder": 4,
-    "skip-as-pass": 59,
+    "skip-as-pass": 55,
     "unconditional-true": 16
   },
   "notes": [
