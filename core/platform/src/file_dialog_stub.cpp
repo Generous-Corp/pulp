@@ -1,12 +1,12 @@
 // File dialog common + non-Apple implementation.
 //
 // The backend registration API (set_backend/clear_backend/has_backend)
-// is compiled on every platform — on mac/iOS it's a no-op since those
-// platforms have a native built-in impl in file_dialog_mac.mm. On
-// non-Apple platforms (Windows, Linux, Android) the open/save/folder
-// dialog methods route through
-// the registered backend; without one every call returns an explicit
-// "no selection" so the JS bridge can distinguish "user cancelled" from
+// is compiled on every platform. macOS has a native built-in impl in
+// file_dialog_mac.mm. Windows and Linux can install their built-in backends
+// explicitly via FileDialog::install_native_backend(). iOS and Android have no
+// built-in backend yet. On backend-routed platforms, open/save/folder dialog
+// methods return explicit "no selection" until a host or opt-in native backend
+// is installed, so the JS bridge can distinguish "user cancelled" from
 // "platform unsupported".
 
 #include <pulp/platform/file_dialog.hpp>

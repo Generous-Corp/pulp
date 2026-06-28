@@ -155,7 +155,7 @@ TEST_CASE("TreeView ignores mouse up and misses", "[view][tree]") {
 }
 
 TEST_CASE("TreeView skips selection callback for non-selectable rows",
-          "[view][tree][coverage]") {
+          "[view][tree]") {
     TreeView tree;
     auto& header = tree.root().add_child("Header");
     header.selectable = false;
@@ -347,7 +347,7 @@ TEST_CASE("TreeView row_height and indent configurable", "[view][tree]") {
 }
 
 TEST_CASE("TreeView collapsed children are hidden from paint and hit testing",
-          "[view][tree][coverage][issue-654]") {
+          "[view][tree][issue-654]") {
     TreeView tree;
     auto& group = tree.root().add_child("Group");
     group.add_child("Hidden child");
@@ -369,7 +369,7 @@ TEST_CASE("TreeView collapsed children are hidden from paint and hit testing",
 }
 
 TEST_CASE("TreeView expanded child activation and selected paint paths",
-          "[view][tree][coverage][issue-654]") {
+          "[view][tree][issue-654]") {
     TreeView tree;
     tree.set_bounds({0, 0, 240, 160});
     tree.set_row_height(20.0f);
@@ -393,7 +393,7 @@ TEST_CASE("TreeView expanded child activation and selected paint paths",
 }
 
 TEST_CASE("TreeView left key on collapsed parent is handled without toggling",
-          "[view][tree][coverage][issue-654]") {
+          "[view][tree][issue-654]") {
     TreeView tree;
     auto& group = tree.root().add_child("Group");
     group.add_child("Child");

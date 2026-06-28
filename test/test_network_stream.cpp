@@ -182,7 +182,7 @@ TEST_CASE("IPv4 validation accepts private network examples",
 }
 
 TEST_CASE("IPv4 validation rejects non-canonical numeric address forms",
-          "[network_stream][ip-address][coverage]") {
+          "[network_stream][ip-address]") {
     REQUIRE_FALSE(is_valid_ipv4("127.1"));
     REQUIRE_FALSE(is_valid_ipv4("127.0.1"));
     REQUIRE_FALSE(is_valid_ipv4("0300.0250.0001.0001"));
@@ -191,7 +191,7 @@ TEST_CASE("IPv4 validation rejects non-canonical numeric address forms",
 }
 
 TEST_CASE("IPv4 validation accepts canonical public resolver examples",
-          "[network_stream][ip-address][coverage]") {
+          "[network_stream][ip-address]") {
     REQUIRE(is_valid_ipv4("1.1.1.1"));
     REQUIRE(is_valid_ipv4("8.8.8.8"));
     REQUIRE(is_valid_ipv4("9.9.9.9"));
@@ -678,7 +678,7 @@ TEST_CASE("TcpStream zero-byte I/O succeeds while connected",
 }
 
 TEST_CASE("TcpStream rejects null buffers while connected",
-          "[network_stream][tcp][coverage]") {
+          "[network_stream][tcp]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
 
@@ -715,7 +715,7 @@ TEST_CASE("TcpStream rejects null buffers while connected",
 // ── Socket edge cases ───────────────────────────────────────────────────
 
 TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket receiver;
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp_ephemeral(receiver);
@@ -739,7 +739,7 @@ TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
 }
 
 TEST_CASE("Socket UDP send_to and receive_from fail before create",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket socket;
     std::array<std::uint8_t, 4> buffer{};
     std::string from_address = "unchanged";
@@ -752,7 +752,7 @@ TEST_CASE("Socket UDP send_to and receive_from fail before create",
 }
 
 TEST_CASE("Socket local_port reports bound UDP ephemeral port",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket socket;
     REQUIRE(socket.local_port() == 0);
     REQUIRE(socket.create(SocketType::UDP));
@@ -762,7 +762,7 @@ TEST_CASE("Socket local_port reports bound UDP ephemeral port",
 }
 
 TEST_CASE("Socket TCP loopback send receive and close",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
 
@@ -806,7 +806,7 @@ TEST_CASE("Socket TCP loopback send receive and close",
 }
 
 TEST_CASE("Socket move construction transfers open UDP handle",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket original;
     REQUIRE(original.create(SocketType::UDP));
     REQUIRE(original.is_open());
@@ -820,7 +820,7 @@ TEST_CASE("Socket move construction transfers open UDP handle",
 }
 
 TEST_CASE("Socket move assignment closes old handle and adopts new one",
-          "[network_stream][socket][coverage]") {
+          "[network_stream][socket]") {
     Socket old_socket;
     REQUIRE(old_socket.create(SocketType::UDP));
     REQUIRE(old_socket.bind("127.0.0.1", 0));
@@ -868,7 +868,7 @@ TEST_CASE("HttpStream status_code is 0 before fetch",
 }
 
 TEST_CASE("HttpStream reads a successful local response body in chunks",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = try_bind_loopback_ephemeral(listener);
@@ -927,7 +927,7 @@ TEST_CASE("HttpStream reads a successful local response body in chunks",
 }
 
 TEST_CASE("http_get defaults missing URL path to slash",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = try_bind_loopback_ephemeral(listener);
@@ -964,7 +964,7 @@ TEST_CASE("http_get defaults missing URL path to slash",
 }
 
 TEST_CASE("HttpStream post factory reads a successful local response",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = try_bind_loopback_ephemeral(listener);
@@ -1010,7 +1010,7 @@ TEST_CASE("HttpStream post factory reads a successful local response",
 }
 
 TEST_CASE("http_download writes a successful local response to disk",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = try_bind_loopback_ephemeral(listener);
@@ -1055,7 +1055,7 @@ TEST_CASE("http_download writes a successful local response to disk",
 }
 
 TEST_CASE("HttpStream default state supports zero reads and idempotent close",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     HttpStream stream;
     REQUIRE_FALSE(stream.is_open());
     REQUIRE(stream.eof());
@@ -1081,7 +1081,7 @@ TEST_CASE("HttpStream default state supports zero reads and idempotent close",
 }
 
 TEST_CASE("HttpStream rejects null read buffers before transport errors",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     HttpStream::Request req;
     req.url = "ftp://127.0.0.1/nope";
     req.timeout_seconds = 1;
@@ -1096,7 +1096,7 @@ TEST_CASE("HttpStream rejects null read buffers before transport errors",
 }
 
 TEST_CASE("HttpStream factories and refetch reset closed state to request results",
-          "[network_stream][http][codecov]") {
+          "[network_stream][http]") {
     auto get_stream = HttpStream::get("http://", 1);
     REQUIRE(get_stream);
     REQUIRE_FALSE(get_stream->is_open());
@@ -1125,7 +1125,7 @@ TEST_CASE("HttpStream factories and refetch reset closed state to request result
 }
 
 TEST_CASE("http helpers reject invalid explicit ports",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     const auto zero_port = http_get("http://127.0.0.1:0/path", 1);
     REQUIRE(zero_port.status_code == 0);
     REQUIRE(zero_port.body.empty());
@@ -1150,7 +1150,7 @@ TEST_CASE("http helpers reject invalid explicit ports",
 }
 
 TEST_CASE("http helpers parse default ports without explicit port text",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     const auto default_http = http_get("http://127.0.0.1", 1);
     REQUIRE(default_http.body.find('\0') == std::string::npos);
     REQUIRE(default_http.error.find('\0') == std::string::npos);
@@ -1168,7 +1168,7 @@ TEST_CASE("http helpers parse default ports without explicit port text",
 }
 
 TEST_CASE("http_post reports connection failure on refused loopback port",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     const auto response = http_post("http://127.0.0.1:1/post",
                                     R"({"ok":false})",
                                     "application/json",
@@ -1181,7 +1181,7 @@ TEST_CASE("http_post reports connection failure on refused loopback port",
 }
 
 TEST_CASE("HttpResponse ok accepts only successful status codes",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     HttpResponse response;
     response.status_code = 199;
     REQUIRE_FALSE(response.ok());
@@ -1196,7 +1196,7 @@ TEST_CASE("HttpResponse ok accepts only successful status codes",
 }
 
 TEST_CASE("http_download returns false for non-ok responses and unwritable paths",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     REQUIRE_FALSE(http_download("http://127.0.0.1:0/artifact",
                                 (std::filesystem::temp_directory_path() /
                                  "pulp-invalid-download.bin").string(),
@@ -1235,7 +1235,7 @@ TEST_CASE("http_download returns false for non-ok responses and unwritable paths
 }
 
 TEST_CASE("HttpStream reads successful GET responses in chunks",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     httplib::Server server;
     server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
         response.status = 204;
@@ -1279,7 +1279,7 @@ TEST_CASE("HttpStream reads successful GET responses in chunks",
 }
 
 TEST_CASE("HttpStream POST factory exposes successful response bodies",
-          "[network_stream][http][coverage]") {
+          "[network_stream][http]") {
     httplib::Server server;
     server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
         response.status = 204;

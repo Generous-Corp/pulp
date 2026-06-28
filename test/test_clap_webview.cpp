@@ -45,7 +45,7 @@ TEST_CASE("WebviewProvider message callback", "[format][webview]") {
 }
 
 TEST_CASE("WebviewProvider defaults and outbound callback are stable",
-          "[format][webview][coverage][phase3]") {
+          "[format][webview]") {
     class TestProvider : public WebviewProvider {
     public:
         WebviewContent get_webview_content() const override {

@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6124,
-      "note": "shared test registration hotspot; bumped for explicit network capability labels"
+      "max_loc": 6126,
+      "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
@@ -52,8 +52,8 @@
     },
     {
       "path": "test/test_design_import_sources.cpp",
-      "max_loc": 1203,
-      "note": "design-import source parser test split"
+      "max_loc": 1199,
+      "note": "design-import source parser test split; lowered after comment-hygiene cleanup"
     },
     {
       "path": "test/test_renderer3d_shared.hpp",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1236,
-      "note": "CLI common cleanup candidate"
+      "max_loc": 1138,
+      "note": "CLI common cleanup candidate; lowered after delegate extraction"
     },
     {
       "path": "tools/cli/kit_commands.cpp",

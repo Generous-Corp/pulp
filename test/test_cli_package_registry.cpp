@@ -393,7 +393,7 @@ targets = ["Linux-x64"]
 }
 
 TEST_CASE("project targets cover alternate valid architectures and platform rewrite",
-          "[cli][package-registry][targets][coverage]") {
+          "[cli][package-registry][targets]") {
     auto linux_x86_64 = PlatformTarget::parse("Linux-x86_64");
     REQUIRE(linux_x86_64);
     REQUIRE(linux_x86_64->to_string() == "Linux-x86_64");
@@ -449,7 +449,7 @@ name = "DemoPlugin"
 }
 
 TEST_CASE("project target parsing prefers targets over later platforms key",
-          "[cli][package-registry][targets][coverage]") {
+          "[cli][package-registry][targets]") {
     TempDir tmp;
     write_file(tmp.path / "pulp.toml", R"([project]
 targets = ["Linux-x64"]
@@ -461,7 +461,7 @@ platforms = ["macOS"]
 }
 
 TEST_CASE("lock files tolerate sparse package entries and escaped package ids",
-          "[cli][package-registry][lock][coverage]") {
+          "[cli][package-registry][lock]") {
     TempDir tmp;
     write_file(tmp.path / "sparse-lock.json", R"({
   "lockfile_version": 4,
@@ -563,7 +563,7 @@ TEST_CASE("licenses, semver, and quality scoring classify local registry metadat
 }
 
 TEST_CASE("semver and quality cover boundary tiers",
-          "[cli][package-registry][quality][coverage]") {
+          "[cli][package-registry][quality]") {
     auto rc1 = *SemVer::parse("1.2.3-rc1");
     auto rc2 = *SemVer::parse("1.2.3-rc2");
     auto next_minor = *SemVer::parse("1.3.0");
@@ -636,7 +636,7 @@ TEST_CASE("package registry queries rank search hits and detect unsupported targ
 }
 
 TEST_CASE("package registry search covers category description and no-platform fallbacks",
-          "[cli][package-registry][search][coverage]") {
+          "[cli][package-registry][search]") {
     TempDir tmp;
     auto loaded = load_registry(write_registry_fixture(tmp.path));
     REQUIRE(loaded.error.empty());
@@ -669,7 +669,7 @@ TEST_CASE("package registry search covers category description and no-platform f
 }
 
 TEST_CASE("remote registry retries corrupt fresh cache before stale fallback",
-          "[cli][package-registry][remote][cache][coverage]") {
+          "[cli][package-registry][remote][cache]") {
     TempDir tmp;
     write_file(tmp.path / "registry-cache.json", "[]");
 

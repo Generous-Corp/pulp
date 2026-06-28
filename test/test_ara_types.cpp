@@ -20,7 +20,7 @@ TEST_CASE("AudioSourceContentChange is a bitset", "[ara][types]") {
 }
 
 TEST_CASE("AudioSourceContentChange supports combined invalidation masks",
-          "[ara][types][coverage][phase3]") {
+          "[ara][types]") {
     auto flags = AudioSourceContentChange::Notes
                | AudioSourceContentChange::Tempo
                | AudioSourceContentChange::Tuning

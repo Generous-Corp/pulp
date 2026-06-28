@@ -277,6 +277,202 @@ TEST_CASE("transient refractory gate collapses a hit's decay to one reset",
     CHECK(gated <= legacy / 2);         // refractory collapses the decay re-fires
 }
 
+TEST_CASE("verbatim relocation grafts only the high band (low end stays clean PV)",
+          "[offline-stretch][transient]") {
+    // The transient graft re-injects only the HIGH-frequency attack; the low end is
+    // left to the continuous phase vocoder. (Grafting full-band low frequencies onto
+    // the phase-mismatched PV body across the short seam blew out deep kicks at
+    // stretch.) Guard it: relocate-on vs relocate-off must differ ONLY above the
+    // crossover — their low-passed outputs should be nearly identical.
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0;
+    const long n = 48000;
+    // Low sustained tone (80 Hz, below the graft crossover) + periodic broadband
+    // clicks (fire the onset detector so the graft runs).
+    std::vector<float> in(static_cast<size_t>(n), 0.0f);
+    for (long i = 0; i < n; ++i)
+        in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * pi * 80.0 * i / sr));
+    for (long c = 0; c < n; c += 8000) {                 // clicks every ~167 ms
+        if (c < n) in[static_cast<size_t>(c)] += 0.9f;
+        if (c + 1 < n) in[static_cast<size_t>(c + 1)] -= 0.8f;
+    }
+    const float* inp[1] = {in.data()};
+
+    const long m = offline_stretch_output_frames(n, 1.5);
+    auto render = [&](bool relocate) {
+        OfflineStretch s; s.prepare(sr, 1);
+        OfflineStretchOptions o; o.time_ratio = 1.5; o.relocate_transients = relocate;
+        std::vector<float> out(static_cast<size_t>(m));
+        float* outp[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, outp, m, o, &err));
+        return out;
+    };
+    const std::vector<float> on = render(true);
+    const std::vector<float> off = render(false);
+
+    // Low-pass the difference at 150 Hz (below the 300 Hz graft crossover). A graft
+    // that touched the low band would leave low-frequency residue here.
+    std::vector<float> diff(static_cast<size_t>(m));
+    for (long i = 0; i < m; ++i) diff[static_cast<size_t>(i)] = on[static_cast<size_t>(i)] - off[static_cast<size_t>(i)];
+    const double f0 = 150.0, q = 0.7071, w0 = 2.0 * pi * f0 / sr;
+    const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+    const double b0 = (1.0 - cw) * 0.5, b1 = 1.0 - cw, b2 = (1.0 - cw) * 0.5;
+    const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+    const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+    double z1 = 0.0, z2 = 0.0, lo_diff = 0.0, tot = 0.0;
+    for (long i = 0; i < m; ++i) {
+        const double x = diff[static_cast<size_t>(i)];
+        const double y = nb0 * x + z1; z1 = nb1 * x - na1 * y + z2; z2 = nb2 * x - na2 * y;
+        lo_diff += y * y;
+        tot += static_cast<double>(off[static_cast<size_t>(i)]) * off[static_cast<size_t>(i)];
+    }
+    // The low band of the graft's effect is negligible vs the signal energy.
+    CHECK(std::sqrt(lo_diff / (tot + 1e-12)) < 0.02);
+}
+
+TEST_CASE("tempo-stretch makes up the PV energy loss without clipping",
+          "[offline-stretch][energy]") {
+    const double sr = 48000.0;
+    const long n = 48000;
+    auto rms = [](const float* x, long lo, long hi) {
+        double s = 0.0; for (long i = lo; i < hi; ++i) s += static_cast<double>(x[i]) * x[i];
+        return hi > lo ? std::sqrt(s / static_cast<double>(hi - lo)) : 0.0;
+    };
+
+    // Broadband material (deterministic LCG noise) — the phase vocoder's incoherent
+    // overlap loses the most energy here, so the make-up has the most to restore.
+    std::vector<float> noise(static_cast<size_t>(n));
+    unsigned long st = 99991UL;
+    for (long i = 0; i < n; ++i) {
+        st = st * 1103515245UL + 12345UL;
+        noise[static_cast<size_t>(i)] = (static_cast<float>((st >> 16) & 0x7fff) / 16384.0f - 1.0f) * 0.4f;
+    }
+    const float* inp[1] = {noise.data()};
+    const double ri = rms(noise.data(), 8000, n - 8000);
+    for (double R : {0.75, 1.5, 2.0}) {
+        OfflineStretch s; s.prepare(sr, 1);
+        OfflineStretchOptions o; o.time_ratio = R;
+        const long m = offline_stretch_output_frames(n, R);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* op[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, op, m, o, &err));
+        const double ro = rms(out.data(), 8000, m - 8000);
+        const double db = 20.0 * std::log10(ro / ri);
+        INFO("ratio " << R << " RMS " << db << " dB vs source");
+        CHECK(std::abs(db) < 1.5);                 // energy restored to ~source (was -3..-4 dB)
+        float peak = 0.0f; for (float v : out) peak = std::max(peak, std::fabs(v));
+        CHECK(peak <= 1.0f);                        // never clips (soft-clip ceiling)
+    }
+
+    // Coherent material (pure sine) reconstructs at full level already, so the make-up
+    // must be ~unity — it must NOT inflate a tonal signal.
+    std::vector<float> sine(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        sine[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * i / sr));
+    const float* sp[1] = {sine.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+    OfflineStretchOptions o; o.time_ratio = 1.5;
+    const long m = offline_stretch_output_frames(n, 1.5);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(sp, n, op, m, o, &err));
+    const double rs_in = rms(sine.data(), 8000, n - 8000);
+    const double rs_out = rms(out.data(), 8000, m - 8000);
+    CHECK(std::abs(20.0 * std::log10(rs_out / rs_in)) < 1.5);  // tonal level preserved, not inflated
+}
+
+TEST_CASE("tempo stretch keeps the sample-0 onset present (no soft-start)",
+          "[offline-stretch][transient]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0; const long n = 24000;
+    auto head_rms = [&](const float* x, long len) {
+        const long h = std::llround(0.005 * sr);            // first 5 ms
+        double s = 0.0; long c = 0;
+        for (long i = 0; i < h && i < len; ++i) { s += static_cast<double>(x[i]) * x[i]; ++c; }
+        return c > 0 ? std::sqrt(s / static_cast<double>(c)) : 0.0;
+    };
+
+    // Full-scale transient AT t=0 + a decaying body. The PV ramps the head up; the
+    // graft must make the first 5 ms carry the attack instead.
+    std::vector<float> in(static_cast<size_t>(n), 0.0f);
+    for (long i = 0; i < n; ++i)
+        in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2 * pi * 220.0 * i / sr) *
+                                                        std::exp(-3.0 * i / sr));
+    in[0] = 1.0f; in[1] = -0.95f; in[2] = 0.9f;
+    const float* inp[1] = {in.data()};
+    const double in_head = head_rms(in.data(), n);
+
+    const double R = 2.0; const long m = offline_stretch_output_frames(n, R);
+    OfflineStretch s; s.prepare(sr, 1);
+    OfflineStretchOptions o; o.time_ratio = R;             // boundary onset; relocate off
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, op, m, o, &err));
+    INFO("in head " << in_head << " out head " << head_rms(out.data(), m));
+    CHECK(head_rms(out.data(), m) >= 0.5 * in_head);       // attack present, not ramped (was ~0.1-0.2x)
+
+    // No-op guard: an input that FADES IN from silence (no attack at 0) must keep a
+    // quiet head — the graft must not inject energy.
+    std::vector<float> fade(static_cast<size_t>(n), 0.0f);
+    const long ramp = std::llround(0.050 * sr);            // 50 ms fade-in
+    for (long i = 0; i < n; ++i) {
+        const float env = i < ramp ? static_cast<float>(i) / static_cast<float>(ramp) : 1.0f;
+        fade[static_cast<size_t>(i)] = env * static_cast<float>(0.5 * std::sin(2 * pi * 220.0 * i / sr));
+    }
+    const float* fp[1] = {fade.data()};
+    OfflineStretch s2; s2.prepare(sr, 1);
+    std::vector<float> out2(static_cast<size_t>(m));
+    float* op2[1] = {out2.data()};
+    REQUIRE(s2.process(fp, n, op2, m, o, &err));
+    // The faded-in head stays much quieter than the steady body (graft didn't fire).
+    CHECK(head_rms(out2.data(), m) < 0.5 * head_rms(fade.data() + ramp, n - ramp));
+}
+
+// The onset-head graft must span the PV ramp, which is ~fft/2 — far longer than a
+// fixed 10 ms at the large windows used for sustained material. A fixed head hands
+// the crossfade back to a still-ramping PV, scooping the envelope between the head
+// and the body. Force a large window and assert no scoop just past the old 10 ms.
+TEST_CASE("onset-head graft tracks the window (no envelope scoop at large fft)",
+          "[offline-stretch][transient]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0; const long n = 24000;
+    auto rms = [&](const float* x, long a, long b, long len) {
+        double s = 0.0; long c = 0;
+        for (long i = a; i < b && i < len; ++i) { s += static_cast<double>(x[i]) * x[i]; ++c; }
+        return c > 0 ? std::sqrt(s / static_cast<double>(c)) : 0.0;
+    };
+    // Constant-amplitude tone (uniform body envelope) with a hard onset at t=0.
+    std::vector<float> in(static_cast<size_t>(n), 0.0f);
+    for (long i = 0; i < n; ++i)
+        in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2 * pi * 220.0 * i / sr));
+    in[0] = 1.0f; in[1] = -0.95f; in[2] = 0.9f;
+    const float* inp[1] = {in.data()};
+
+    const double R = 2.0; const long m = offline_stretch_output_frames(n, R);
+    OfflineStretch s;
+    OfflineStretchOptions sizing; sizing.fft_size = 4096; sizing.analysis_hop = 1024;
+    s.prepare(sr, 1, sizing);                              // large window -> ~42 ms PV ramp
+    REQUIRE(s.fft_size() == 4096);
+    OfflineStretchOptions o; o.time_ratio = R;
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, op, m, o, &err));
+
+    // The region 11–16 ms (just past the OLD 10 ms head, inside the ~42 ms ramp) used
+    // to collapse toward the still-ramping PV. With the head scaled to fft/2 it stays
+    // carried by the graft. Compare against the steady body at 100–160 ms.
+    const double early = rms(out.data(), std::llround(0.011 * sr), std::llround(0.016 * sr), m);
+    const double body  = rms(out.data(), std::llround(0.100 * sr), std::llround(0.160 * sr), m);
+    INFO("early(11-16ms)=" << early << " body(100-160ms)=" << body);
+    CHECK(body > 1e-3);
+    CHECK(early >= 0.55 * body);                           // no scoop (was ~0.4x at fixed 10 ms head)
+}
+
 TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
     constexpr double pi = 3.14159265358979323846;
     const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;
@@ -695,8 +891,13 @@ TEST_CASE("StretchPreset parsing is tolerant", "[offline-stretch][preset]") {
 TEST_CASE("verbatim transient relocation restores attack peaks; tonal is a no-op",
           "[offline-stretch][issue-110]") {
     const long sr = 48000, n = sr; // 1 s
+    // Skip the first ~12 ms: the onset soft-start restores the sample-0 attack on
+    // BOTH renders, so measure relocate's INTERIOR restoration (the later clicks),
+    // not the shared head.
     auto peak = [](const std::vector<float>& v) {
-        float m = 0.0f; for (float x : v) m = std::max(m, std::abs(x)); return m;
+        float m = 0.0f;
+        for (std::size_t i = 600; i < v.size(); ++i) m = std::max(m, std::abs(v[i]));
+        return m;
     };
 
     // Percussive: 6 sharp exponentially-decaying clicks.

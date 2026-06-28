@@ -8,7 +8,7 @@ MIT-licensed. No royalties. No copyleft.
 - **Formats**: VST3, AU v2, AUv3, CLAP, LV2, WAMv2, WebCLAP, standalone, headless
 - **Platforms**: macOS, Windows (WASAPI, NSIS), Linux (ALSA, JACK, LV2), Browser (WASM)
 - **Audio**: CoreAudio, WASAPI, ALSA, JACK, Web Audio API — device I/O, buffer processing, file read/write
-- **MIDI**: CoreMIDI, Win32 MIDI, ALSA MIDI, Web MIDI, MIDI 2.0 UMP, MPE
+- **MIDI**: CoreMIDI, Win32 MIDI, ALSA MIDI, MIDI 2.0 UMP, MPE; Web MIDI is scaffolded but not wired into shipped WASM builds
 - **DSP**: 30+ signal processors (oscillator, biquad, SVF, ladder, FIR, TPT, compressor, reverb, delay, chorus, phaser, FFT, convolver, and more)
 - **Parameters**: thread-safe, automatable, serializable, with CLAP modulation, presets, undo/redo
 - **GPU rendering**: Dawn (Metal/D3D12/Vulkan) + Skia Graphite on all platforms
@@ -37,7 +37,7 @@ MIT-licensed. No royalties. No copyleft.
 
 - [Building](guides/build.md) — requirements, options, platform notes
 - [Testing](guides/testing.md) — running tests, validation, writing tests
-- [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser demos
+- [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser-host status
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code
 

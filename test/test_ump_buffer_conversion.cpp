@@ -28,7 +28,7 @@ TEST_CASE("UmpBuffer sort + clear", "[midi][ump]") {
 }
 
 TEST_CASE("UmpBuffer accepts moved events and exposes const iteration",
-          "[midi][ump][coverage][phase3]") {
+          "[midi][ump]") {
     UmpBuffer buf;
     UmpEvent event{UmpPacket::note_on_2(2, 3, 60, 0x4000), 48};
     buf.add(std::move(event));
@@ -47,7 +47,7 @@ TEST_CASE("UmpBuffer accepts moved events and exposes const iteration",
 }
 
 TEST_CASE("UmpPacket size_for_type covers supported packet classes",
-          "[midi][ump][coverage][phase3]") {
+          "[midi][ump]") {
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Utility) == 1);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::System) == 1);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Midi1ChannelVoice) == 1);

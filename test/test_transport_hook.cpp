@@ -134,7 +134,7 @@ TEST_CASE("exception thrown by transport hook propagates to the caller",
 }
 
 TEST_CASE("tempo hook override receives host tempo changes",
-          "[processor][transport][coverage][phase3]") {
+          "[processor][transport]") {
     TempoAwareProcessor p;
 
     p.on_host_tempo_changed(120.0);
@@ -146,14 +146,14 @@ TEST_CASE("tempo hook override receives host tempo changes",
 }
 
 TEST_CASE("default tempo hook is a no-op",
-          "[processor][transport][coverage][phase3]") {
+          "[processor][transport]") {
     PlainProcessor p;
     REQUIRE_NOTHROW(p.on_host_tempo_changed(60.0));
     REQUIRE_NOTHROW(p.on_host_tempo_changed(240.0));
 }
 
 TEST_CASE("exception thrown by tempo hook propagates to the caller",
-          "[processor][transport][coverage][phase3]") {
+          "[processor][transport]") {
     class ThrowingTempoProcessor : public PlainProcessor {
     public:
         void on_host_tempo_changed(double) override {

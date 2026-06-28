@@ -430,7 +430,7 @@ TEST_CASE("AAX model exposes stem mapping helpers for supported and unknown layo
     REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::surround_6_0)) == "unknown");
 }
 
-TEST_CASE("AAX model carries descriptor and parameter metadata into definitions", "[aax][model][coverage][issue-648]") {
+TEST_CASE("AAX model carries descriptor and parameter metadata into definitions", "[aax][model][issue-648]") {
     auto codes = valid_codes();
     auto descriptor = descriptor_with_buses(
         {{"Main In", 2, false}},

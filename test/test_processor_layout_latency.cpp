@@ -164,8 +164,8 @@ TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
 
 TEST_CASE("Processor::process is declared with float-precision BufferView. "
           "All four adapters today route only float buffers; double-"
-          "precision support is opt-in per future Processor overload.",
-          "[processor][precision][item-3.8]") {
+          "precision support requires a deliberate Processor overload.",
+          "[processor][precision]") {
     // The single virtual `process()` on pulp::format::Processor is
     // `BufferView<float>` only — there is
     // no `BufferView<double>` overload. Adapters wire float input ↔
@@ -183,9 +183,8 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     static_assert(std::is_same_v<decltype(static_cast<ProcessSig>(&Processor::process)),
                                  ProcessSig>,
                   "Processor::process() must remain a float-precision "
-                  "virtual until item 3.8's follow-up adds a double "
-                  "overload deliberately; do not silently change the "
-                  "element type.");
+                  "virtual unless a double overload is added deliberately; "
+                  "do not silently change the element type.");
 
     // Runtime proof: invoke the virtual through the adapter-facing float
     // signature and assert the processor observes/mutates the float buffers.

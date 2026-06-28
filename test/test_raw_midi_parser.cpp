@@ -8,8 +8,8 @@
 //
 //   - multi-read sysex spanning separate parse() calls
 //   - realtime bytes interleaved INSIDE a sysex run (MIDI 1.0 §3.1)
-//   - aborted sysex recovery (#406): a non-realtime status
-//     byte arriving mid-F0 must not swallow the next real message
+//   - aborted sysex recovery: a non-realtime status byte arriving
+//     mid-F0 must not swallow the next real message
 //   - runaway sysex cap (kRawMidiSysexLimit)
 
 #include <catch2/catch_test_macros.hpp>
@@ -335,7 +335,7 @@ TEST_CASE("raw_midi_parser undefined system statuses clear running state",
 }
 
 TEST_CASE("raw_midi_parser recovers when short-message data is another status",
-          "[midi][raw_midi_parser][codecov]") {
+          "[midi][raw_midi_parser]") {
     auto c = parse({0x90, 0x40,       // malformed Note On: next byte is status
                     0x91, 0x41, 0x7F,
                     0xC2,             // malformed Program Change: next byte is status
@@ -352,7 +352,7 @@ TEST_CASE("raw_midi_parser recovers when short-message data is another status",
 }
 
 TEST_CASE("raw_midi_parser recovers after status interrupts short data",
-          "[midi][raw_midi_parser][coverage][phase3-large]") {
+          "[midi][raw_midi_parser]") {
     auto c = parse({
         0x90, 0x40, 0xF8,  // realtime byte does not interrupt pending Note On
         0x41, 0x7F,        // first byte completes the Note On; second starts running status
@@ -402,7 +402,7 @@ TEST_CASE("raw_midi_parser accumulates sysex across calls",
 }
 
 TEST_CASE("raw_midi_parser carries partial short messages across calls",
-          "[midi][raw_midi_parser][coverage]") {
+          "[midi][raw_midi_parser]") {
     RawMidiParserState state;
     Captured c;
     auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) {
@@ -429,7 +429,7 @@ TEST_CASE("raw_midi_parser carries partial short messages across calls",
 }
 
 TEST_CASE("raw_midi_parser accepts null zero-length input",
-          "[midi][raw_midi_parser][coverage]") {
+          "[midi][raw_midi_parser]") {
     RawMidiParserState state;
     state.sysex_in_progress = true;
     state.sysex_buffer = {0xF0, 0x7D};
@@ -450,7 +450,7 @@ TEST_CASE("raw_midi_parser accepts null zero-length input",
 }
 
 TEST_CASE("raw_midi_parser empty reads preserve pending sysex state",
-          "[midi][raw_midi_parser][coverage][phase3]") {
+          "[midi][raw_midi_parser]") {
     RawMidiParserState state;
     Captured c;
     auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) {
@@ -477,7 +477,7 @@ TEST_CASE("raw_midi_parser empty reads preserve pending sysex state",
 }
 
 TEST_CASE("raw_midi_parser restarts sysex when F0 interrupts partial sysex",
-          "[midi][raw_midi_parser][coverage]") {
+          "[midi][raw_midi_parser]") {
     auto c = parse({0xF0, 0x7D, 0x01,
                     0xF0, 0x7E, 0x7F, 0xF7});
 
@@ -497,7 +497,7 @@ TEST_CASE("raw_midi_parser emits realtime inside sysex without terminating",
 }
 
 TEST_CASE("raw_midi_parser restarts sysex when a new F0 arrives mid-stream",
-          "[midi][raw_midi_parser][coverage][phase3]") {
+          "[midi][raw_midi_parser]") {
     auto c = parse({
         0xF0, 0x7D, 0x01,  // abandoned vendor sysex
         0xF0, 0x7E, 0x02, 0xF7,
@@ -522,7 +522,7 @@ TEST_CASE("raw_midi_parser tolerates omitted callbacks",
     REQUIRE(state.sysex_buffer.empty());
 }
 
-TEST_CASE("raw_midi_parser recovers from aborted sysex (#406)",
+TEST_CASE("raw_midi_parser recovers from aborted sysex",
           "[midi][raw_midi_parser][issue-406]") {
     // Device sends F0 7E <partial> then sends a Note On (0x90) without
     // ever emitting F7. Before the fix, the Note On + its data bytes
@@ -540,7 +540,7 @@ TEST_CASE("raw_midi_parser recovers from aborted sysex (#406)",
 }
 
 TEST_CASE("raw_midi_parser restarts sysex on nested start byte",
-          "[midi][raw_midi_parser][coverage][phase3]") {
+          "[midi][raw_midi_parser]") {
     auto c = parse({
         0xF0, 0x7E, 0x00,  // abandoned sysex prefix
         0xF0, 0x01, 0xF7,  // fresh complete sysex

@@ -118,7 +118,7 @@ TEST_CASE("pulp run --frames rejects non-positive and non-integer values",
 }
 
 TEST_CASE("pulp run --frames rejects overflow and plus-prefixed values",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     REQUIRE_FALSE(parse_run_options({"--frames", "999999999999999999999"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames=999999999999999999999"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames", "+5"}).error.empty());
@@ -181,7 +181,7 @@ TEST_CASE("pulp run forwards arguments after `--` verbatim",
 }
 
 TEST_CASE("pulp run forwards all tokens after separator including known flags",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({"target", "--", "--headless", "--frames", "9"});
     REQUIRE(r.target_name == "target");
     REQUIRE_FALSE(r.headless);
@@ -195,14 +195,14 @@ TEST_CASE("pulp run forwards all tokens after separator including known flags",
 }
 
 TEST_CASE("pulp run ignores repeated separator tokens before pass-through",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({"target", "--", "--", "--frames=4"});
     REQUIRE(r.target_name == "target");
     REQUIRE(r.user_pass_through == std::vector<std::string>{"--frames=4"});
 }
 
 TEST_CASE("pulp run treats additional positionals as pass-through",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({"primary-target", "secondary", "third"});
     REQUIRE(r.target_name == "primary-target");
     REQUIRE(r.user_pass_through == std::vector<std::string>{"secondary", "third"});
@@ -236,7 +236,7 @@ TEST_CASE("pulp run --frames default does not appear in launch args",
 }
 
 TEST_CASE("pulp run keeps last repeated scalar flag values",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({
         "--frames", "2",
         "--screenshot", "/tmp/first.png",
@@ -257,7 +257,7 @@ TEST_CASE("pulp run keeps last repeated scalar flag values",
 }
 
 TEST_CASE("pulp run preserves pass-through ordering after launcher flags",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({
         "demo",
         "--headless",
@@ -282,7 +282,7 @@ TEST_CASE("pulp run preserves pass-through ordering after launcher flags",
 }
 
 TEST_CASE("pulp run records launcher flags before a separator only",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({
         "--screenshot=/tmp/before.png",
         "--",
@@ -312,7 +312,7 @@ TEST_CASE("pulp run records launcher flags before a separator only",
 }
 
 TEST_CASE("pulp run help stops before later invalid flags",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto long_help = parse_run_options({"--help", "--frames", "bad"});
     REQUIRE(long_help.help);
     REQUIRE(long_help.error.empty());
@@ -325,7 +325,7 @@ TEST_CASE("pulp run help stops before later invalid flags",
 }
 
 TEST_CASE("pulp run reports screenshot path shape errors without consuming later tokens",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto flag_like = parse_run_options({"--screenshot", "-out.png"});
     REQUIRE(flag_like.error == "--screenshot requires a path argument");
     REQUIRE(flag_like.headless);
@@ -338,7 +338,7 @@ TEST_CASE("pulp run reports screenshot path shape errors without consuming later
 }
 
 TEST_CASE("pulp run reports frame count shape errors precisely",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto missing = parse_run_options({"--frames"});
     REQUIRE(missing.error == "--frames requires an integer argument");
     REQUIRE(missing.frames == 1);
@@ -357,7 +357,7 @@ TEST_CASE("pulp run reports frame count shape errors precisely",
 }
 
 TEST_CASE("pulp run accepts boundary frame count values",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto single = parse_run_options({"--frames", "1"});
     REQUIRE(single.error.empty());
     REQUIRE(single.frames == 1);
@@ -529,9 +529,12 @@ TEST_CASE("pulp run --audio-capture-rolling implies headless and forwards the pa
     REQUIRE(eq.error.empty());
     REQUIRE(eq.audio_capture_rolling_path == "/tmp/roll2.wav");
     REQUIRE(eq.headless);
+    REQUIRE(eq.audio_capture_rolling_int24 == false);  // float is the default
     auto eq_args = assemble_launch_args(eq);
     REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-frames")
             == eq_args.end());
+    REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-format")
+            == eq_args.end());  // default float not forwarded
 
     auto eq_frames = parse_run_options({"--audio-capture-rolling=/tmp/roll3.wav",
                                         "--audio-capture-rolling-frames=2048"});
@@ -543,6 +546,28 @@ TEST_CASE("pulp run --audio-capture-rolling implies headless and forwards the pa
                       "--audio-capture-rolling-frames") != eq_frame_args.end());
     REQUIRE(std::find(eq_frame_args.begin(), eq_frame_args.end(), "2048")
             != eq_frame_args.end());
+}
+
+TEST_CASE("pulp run --audio-capture-rolling-format int24 parses and forwards",
+          "[cli][run][audio-capture-rolling]") {
+    auto r = parse_run_options({"--audio-capture-rolling", "/tmp/r.wav",
+                                "--audio-capture-rolling-format", "int24"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_capture_rolling_int24);
+    auto args = assemble_launch_args(r);
+    REQUIRE(std::find(args.begin(), args.end(), "--audio-capture-rolling-format") != args.end());
+    REQUIRE(std::find(args.begin(), args.end(), "int24") != args.end());
+
+    // Explicit float, = form.
+    auto f = parse_run_options({"--audio-capture-rolling=/tmp/r.wav",
+                                "--audio-capture-rolling-format=float"});
+    REQUIRE(f.error.empty());
+    REQUIRE(f.audio_capture_rolling_int24 == false);
+
+    // Invalid value and requires-rolling are rejected.
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling", "/tmp/r.wav",
+                                     "--audio-capture-rolling-format", "int32"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-format", "int24"}).error.empty());
 }
 
 TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mode contention",
@@ -570,7 +595,7 @@ TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mo
 }
 
 TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
-          "[cli][run][coverage]") {
+          "[cli][run]") {
     auto r = parse_run_options({"--standalone", "demo"});
     REQUIRE(r.target_name == "demo");
     REQUIRE(r.user_pass_through == std::vector<std::string>{"--standalone"});

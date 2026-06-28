@@ -97,7 +97,7 @@ TEST_CASE("empty matrix round-trips", "[view][mod-matrix]") {
 }
 
 TEST_CASE("typed modulation lanes accept compatible scoped routes",
-          "[state][modulation][lane][phase3]") {
+          "[state][modulation][lane]") {
     ModulationLane lane{
         .source = {
             .id = 1,
@@ -121,7 +121,7 @@ TEST_CASE("typed modulation lanes accept compatible scoped routes",
 }
 
 TEST_CASE("typed modulation lanes reject invalid source and target metadata",
-          "[state][modulation][lane][phase3]") {
+          "[state][modulation][lane]") {
     ModulationLane lane{
         .source = {.id = 1},
         .target = {.param_id = 100},
@@ -152,7 +152,7 @@ TEST_CASE("typed modulation lanes reject invalid source and target metadata",
 }
 
 TEST_CASE("typed modulation lanes validate source and target scope",
-          "[state][modulation][lane][scope][phase3]") {
+          "[state][modulation][lane][scope]") {
     ModulationLane lane{
         .source = {
             .id = 10,
@@ -176,7 +176,7 @@ TEST_CASE("typed modulation lanes validate source and target scope",
 }
 
 TEST_CASE("typed modulation lanes reject audio-rate sources for control-rate targets",
-          "[state][modulation][lane][rate][phase3]") {
+          "[state][modulation][lane][rate]") {
     ModulationLane lane{
         .source = {
             .id = 77,
@@ -199,7 +199,7 @@ TEST_CASE("typed modulation lanes reject audio-rate sources for control-rate tar
 }
 
 TEST_CASE("typed modulation lanes accept per-voice expression routes",
-          "[state][modulation][lane][voice][phase3]") {
+          "[state][modulation][lane][voice]") {
     ModulationLane lane{
         .source = {
             .id = 11,

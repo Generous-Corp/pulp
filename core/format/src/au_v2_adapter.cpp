@@ -16,6 +16,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
 #include <cstring>
@@ -94,8 +95,9 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
             // ProcessBufferLists can honor it with a pass-through.
             maybe_synthesize_bypass(store_, host_quirks_);
             for (const auto& p : store_.all_params()) {
-                if (p.name == "Bypass" && p.range.step >= 1.0f &&
-                    p.range.min == 0.0f && p.range.max == 1.0f) {
+                // Declared designation wins; falls back to the legacy
+                // name/range heuristic for params that declare none.
+                if (state::is_bypass_param(p)) {
                     bypass_param_id_ = p.id;
                     break;
                 }
@@ -299,6 +301,20 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
         outWritable = false;
         return noErr;
     }
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(CFArrayRef);
+        outWritable = false;  // read: host queries the output name list
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AUMIDIOutputCallbackStruct);
+        outWritable = true;  // write: host installs the delivery callback
+        return noErr;
+    }
     return AUMIDIEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
 }
 
@@ -319,7 +335,89 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         if (!outData) return kAudioUnitErr_InvalidProperty;
         return g_cocoa_view_info_filler(outData) ? noErr : kAudioUnitErr_InvalidProperty;
     }
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        // One MIDI output stream named after the plugin. The host owns the array
+        // and its element (it releases them), so create with +1 retain.
+        CFStringRef name = CFStringCreateWithCString(
+            kCFAllocatorDefault,
+            processor_ ? processor_->descriptor().name.c_str() : "MIDI Out",
+            kCFStringEncodingUTF8);
+        CFStringRef values[1] = {name};
+        CFArrayRef array = CFArrayCreate(kCFAllocatorDefault,
+                                         reinterpret_cast<const void**>(values),
+                                         1, &kCFTypeArrayCallBacks);
+        if (name) CFRelease(name);  // the array retained it
+        *static_cast<CFArrayRef*>(outData) = array;
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        // Reflect the currently published pair (acquire-load the snapshot).
+        auto* out = static_cast<AUMIDIOutputCallbackStruct*>(outData);
+        const auto* pair =
+            midi_output_callback_.load(std::memory_order_acquire);
+        if (pair) {
+            out->midiOutputCallback = pair->callback;
+            out->userData = pair->user_data;
+        } else {
+            out->midiOutputCallback = nullptr;
+            out->userData = nullptr;
+        }
+        return noErr;
+    }
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
+}
+
+OSStatus PulpAUEffect::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                                   AudioUnitElement inElement, const void* inData,
+                                   UInt32 inDataSize)
+{
+    // The host installs (or clears) the MIDI-output delivery callback here on the
+    // main thread; the render thread reads it each block. Publish the
+    // (callback, userData) pair atomically via a double-buffered slot so the
+    // render thread never observes a torn pair (a fresh callback paired with a
+    // stale userData). Write the inactive slot, then release-store the pointer to
+    // it; the render side acquire-loads a single, internally-consistent pair.
+    if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!inData || inDataSize < sizeof(AUMIDIOutputCallbackStruct))
+            return kAudioUnitErr_InvalidPropertyValue;
+        const auto* in = static_cast<const AUMIDIOutputCallbackStruct*>(inData);
+        const std::uint8_t slot =
+            midi_output_callback_write_slot_.load(std::memory_order_relaxed);
+        midi_output_callback_slots_[slot].callback = in->midiOutputCallback;
+        midi_output_callback_slots_[slot].user_data = in->userData;
+        // Publish the freshly written slot, then flip the write cursor so the
+        // next SetProperty writes the other slot (never the one the render thread
+        // may still be reading).
+        midi_output_callback_.store(&midi_output_callback_slots_[slot],
+                                    std::memory_order_release);
+        midi_output_callback_write_slot_.store(slot ^ 1,
+                                               std::memory_order_relaxed);
+        return noErr;
+    }
+    return AUMIDIEffectBase::SetProperty(inID, inScope, inElement, inData, inDataSize);
+}
+
+UInt32 PulpAUEffect::SupportedNumChannels(const AUChannelInfo** outInfo)
+{
+    if (!processor_) return 0;
+    // Fill the per-instance member table so the returned pointer outlives the
+    // call (the host reads it after we return) without per-call allocation.
+    const UInt32 count =
+        build_channel_info(processor_->descriptor(), channel_info_.data());
+    if (outInfo) *outInfo = channel_info_.data();
+    return count;
+}
+
+bool PulpAUEffect::plugin_produces_midi() const noexcept
+{
+    return processor_ && processor_->descriptor().produces_midi;
 }
 
 OSStatus PulpAUEffect::Initialize()
@@ -339,6 +437,23 @@ OSStatus PulpAUEffect::Initialize()
         // from define_parameters, or the values RestoreState wrote). Pulling
         // Globals here would clobber a restored preset with construction defaults.
     }
+
+    // Pre-size the per-block MIDI buffers so the render drain loop appends
+    // without heap allocation. Capacity-limited: add()/add_sysex_copy() drop
+    // past the reserved bound instead of growing the underlying vectors
+    // (matches the VST3/CLAP adapters).
+    midi_in_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_out_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_in_.set_realtime_capacity_limit(true);
+    midi_out_.set_realtime_capacity_limit(true);
+
+    // Pre-size the per-channel pointer vectors so the render-time resize() never
+    // grows capacity (and thus never allocates) in steady state. The render
+    // block resizes to the host-supplied buffer count, which is at most the
+    // configured channel count in AU's non-interleaved float model; reserving to
+    // it up front turns the first render / reconfig resize into a no-op realloc.
+    input_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+    output_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
 
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
@@ -390,6 +505,12 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         }
         return noErr;
     }
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
 
     // Max-frames contract guard (generic — protects EVERY Pulp AU plugin). The
     // Processor and all its scratch buffers were sized in prepare() to
@@ -444,6 +565,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         // dropped with the block.
         while (midi_in_queue_.try_pop()) {}
         while (sysex_in_queue_.try_pop()) {}
+        // Trigger reset is a single-exit invariant: settle Reset/trigger params
+        // even on the bypass short-circuit, so a panic/reset raised while
+        // bypassed clears this block instead of firing on the next active one.
+        // GetParameter reads the store directly, so the host sees it settled.
+        store_.reset_triggers_rt();
         return noErr;
     }
 
@@ -452,16 +578,26 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     audio::BufferView<float> output_view(
         output_ptrs_.data(), out_channels, inFramesToProcess);
 
-    midi::MidiBuffer midi_in, midi_out;
+    // Reuse the member MIDI buffers (pre-reserved + capacity-limited in
+    // Initialize); reset them rather than constructing new ones each block.
+    // clear() empties the event list; clear_sysex() recycles the pooled sysex
+    // payloads so last block's sysex does not leak into this one.
+    midi::MidiBuffer& midi_in = midi_in_;
+    midi::MidiBuffer& midi_out = midi_out_;
+    midi_in.clear();
+    midi_in.clear_sysex();
+    midi_out.clear();
+    midi_out.clear_sysex();
     // Drain the lock-free MIDI queues filled by HandleMIDIEvent / HandleSysEx.
     // Wait-free on the audio thread — no mutex. aumf-typed effects receive MIDI
-    // here; aufx-typed effects simply find the queues empty.
+    // here; aufx-typed effects simply find the queues empty. add_sysex_copy
+    // (not add_sysex(vector)) copies into the buffer's pre-reserved realtime
+    // payload pool instead of allocating a fresh heap vector per message.
     while (auto ev = midi_in_queue_.try_pop())
         midi_in.add(*ev);
     while (auto sx = sysex_in_queue_.try_pop())
-        midi_in.add_sysex(
-            std::vector<uint8_t>(sx->bytes.begin(), sx->bytes.begin() + sx->length),
-            /*sample_offset=*/0);
+        midi_in.add_sysex_copy(sx->bytes.data(), sx->length,
+                               /*sample_offset=*/0);
     midi_in.sort();
 
     ProcessContext ctx = make_render_process_context(
@@ -471,8 +607,14 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     // AU v2 has no scheduled-parameter event source, so this queue is empty
     // and host params flow via store_ as before. Set it anyway so a Processor
-    // always sees a non-null queue. Wrap only the process call in
-    // ScopedNoAlloc; the preamble above legitimately allocates.
+    // always sees a non-null queue. Only the process call is wrapped in
+    // ScopedNoAlloc. The MIDI drain above no longer allocates (the buffers are
+    // member buffers reset with clear()/clear_sysex(), and SysEx is copied into
+    // the pre-reserved payload pool). The input_ptrs_/output_ptrs_ resize() in
+    // the preamble is a no-op realloc in steady state — Initialize() reserves
+    // both vectors to the channel count — so the only path that could still
+    // allocate is a host that grows the buffer count beyond the configured
+    // channels, which the AU non-interleaved float model does not do.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
     std::array<ProcessBusBufferView<const float>, 1> input_buses{{
@@ -510,6 +652,35 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in, midi_out, ctx);
+    }
+
+    // Return trigger / momentary params (panic, reset, tap) to their default
+    // now that the Processor has observed this block. GetParameter reads the
+    // store directly, so the host sees the control settle back automatically.
+    store_.reset_triggers_rt();
+
+    // Deliver any MIDI the Processor emitted this block to the host via the
+    // installed kAudioUnitProperty_MIDIOutputCallback. Outside the ScopedNoAlloc
+    // scope above because the callback is host code we don't control; the packet
+    // list itself is built into pre-reserved storage (no allocation). The
+    // (callback, userData) pair is read via a single atomic acquire-load so a
+    // concurrent SetProperty on the main thread can never hand us a torn pair.
+    // When no callback is installed (host hasn't wired the MIDI output, or this
+    // is a plain audio effect), this is a cheap no-op. Packet timestamps are
+    // sample offsets within the block, clamped to it; the host callback receives
+    // the current render time as its base, the documented contract.
+    const auto* midi_cb =
+        midi_output_callback_.load(std::memory_order_acquire);
+    if (midi_cb != nullptr && midi_cb->callback != nullptr &&
+        (midi_out.size() > 0 || midi_out.sysex_size() > 0)) {
+        const MIDIPacketList* list =
+            midi_out_packet_builder_.build(midi_out, inFramesToProcess);
+        if (list != nullptr) {
+            midi_cb->callback(midi_cb->user_data,
+                              &CurrentRenderTime(),
+                              /*midiOutNum=*/0,
+                              list);
+        }
     }
 
     // No plugin→host parameter diff/push here. Because GetParameter reads the

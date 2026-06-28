@@ -46,7 +46,7 @@ GraphRuntimeConnectionSpec connect(NodeId source,
                                    std::uint32_t source_port,
                                    NodeId dest,
                                    std::uint32_t dest_port) {
-    return {source, source_port, dest, dest_port, false, false};
+    return {source, source_port, dest, dest_port, false};
 }
 
 GraphCommand command(std::uint64_t sequence_id,

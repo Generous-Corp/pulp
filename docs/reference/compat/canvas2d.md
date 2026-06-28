@@ -27,8 +27,8 @@ Harness verdict counts after evidence validation:
 
 | Verdict | Count |
 | --- | ---: |
-| PASS | 11 |
-| SUPPORTED-NO-EVIDENCE | 55 |
+| PASS | 18 |
+| SUPPORTED-NO-EVIDENCE | 48 |
 | DIVERGE | 0 |
 | NO-OP | 0 |
 | NOT-IMPL | 0 |
@@ -61,7 +61,7 @@ the rows that currently demote to `SUPPORTED-NO-EVIDENCE`:
 | --- | --- |
 | Broad bridge backfill rows such as `_native_canvasFillCircle`, `fillRect`, `beginPath`, `getLineDash` | `test/test_widget_bridge.cpp [issue-1711][evidence-backfill]` |
 | Shim expansion rows such as `arc`, `bezierCurveTo`, `lineCap`, `lineJoin`, `transform` | `test/test_canvas2d_shim.cpp [issue-1526]` or adjacent stale issue tags |
-| Former gotcha rows such as `arcTo`, `ellipse`, `filter`, `direction` | catalog entries are supported, but evidence anchors need a current test tag or explicit removal |
+| Former gotcha rows such as `arcTo`, `filter`, `direction` | catalog entries are supported, but evidence anchors need a current test tag or explicit removal |
 
 Do not reintroduce `partial` or `DIVERGE` just because evidence tags are
 stale. Use `SUPPORTED-NO-EVIDENCE` until the evidence references are

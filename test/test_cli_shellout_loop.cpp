@@ -12,6 +12,8 @@
 
 #include "test_cli_shellout_helpers.hpp"
 
+#include <fstream>
+
 using namespace pulp::platform;
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
@@ -138,7 +140,7 @@ TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
 }
 
 TEST_CASE("pulp loop validates value options before focus state changes",
-          "[cli][shellout][loop][coverage][phase3]") {
+          "[cli][shellout][loop]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-loop-parser-errors");
@@ -245,6 +247,86 @@ TEST_CASE("pulp loop --status reports persisted focus platform",
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("focus platform: linux") != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    fs::remove_all(tmp_home);
+}
+
+TEST_CASE("pulp loop ignores invalid persisted focus platform",
+          "[cli][shellout][loop]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-loop-invalid-focus");
+    fs::create_directories(tmp_home);
+    {
+        std::ofstream cfg(tmp_home / "config.toml");
+        cfg << "[loop]\nfocus_platform = \"solaris\"\n";
+    }
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+#if defined(_WIN32)
+    const char* detected = "windows";
+#elif defined(__APPLE__)
+    const char* detected = "macos";
+#else
+    const char* detected = "linux";
+#endif
+
+    auto r = run_pulp({"loop", "--no-watch"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("ignoring unknown persisted focus platform 'solaris'")
+            != std::string::npos);
+    REQUIRE(r.stdout_output.find(std::string("focus mode active on ") + detected)
+            != std::string::npos);
+
+    auto status = run_pulp({"loop", "--status"});
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find(std::string("focus platform: ") + detected)
+            != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    fs::remove_all(tmp_home);
+}
+
+TEST_CASE("pulp loop reuses persisted focus platform until overridden",
+          "[cli][shellout][loop]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-loop-persisted-focus");
+    fs::create_directories(tmp_home);
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+#if defined(_WIN32)
+    const char* pinned = "macos";
+#elif defined(__APPLE__)
+    const char* pinned = "linux";
+#else
+    const char* pinned = "macos";
+#endif
+
+    auto set = run_pulp({"loop", "--platform", pinned, "--no-watch"});
+    REQUIRE_FALSE(set.timed_out);
+    REQUIRE(set.exit_code == 0);
+    REQUIRE(set.stdout_output.find(std::string("focus mode active on ") + pinned)
+            != std::string::npos);
+
+    auto reuse = run_pulp({"loop", "--no-watch"});
+    REQUIRE_FALSE(reuse.timed_out);
+    REQUIRE(reuse.exit_code == 0);
+    REQUIRE(reuse.stdout_output.find(std::string("focus mode active on ") + pinned)
+            != std::string::npos);
+
+    auto status = run_pulp({"loop", "--status"});
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find(std::string("focus platform: ") + pinned)
+            != std::string::npos);
 
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");

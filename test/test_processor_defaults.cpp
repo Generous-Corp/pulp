@@ -251,7 +251,7 @@ TEST_CASE("PluginDescriptor bus helpers read only the first bus",
 }
 
 TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
-          "[format][processor-defaults][process-buffers][phase2]") {
+          "[format][processor-defaults][process-buffers]") {
     std::array<ProcessBusBufferView<const float>, 2> inputs{{
         {
             .info = {
@@ -311,7 +311,7 @@ TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
 }
 
 TEST_CASE("ProcessBuffers rejects active null channel pointers",
-          "[format][processor-defaults][process-buffers][phase2]") {
+          "[format][processor-defaults][process-buffers]") {
     std::array<float, 4> left{};
     const float* active_input_channels[] = {left.data(), nullptr};
 
@@ -345,7 +345,7 @@ TEST_CASE("ProcessBuffers rejects active null channel pointers",
 }
 
 TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
-          "[format][processor-defaults][process-buffers][phase2]") {
+          "[format][processor-defaults][process-buffers]") {
     std::array<float, 4> sidechain{};
     const float* sidechain_channels[] = {sidechain.data()};
 
@@ -381,7 +381,7 @@ TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
 }
 
 TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
-          "[format][processor-defaults][process-buffers][phase2][instrument][multi-output]") {
+          "[format][processor-defaults][process-buffers][instrument][multi-output]") {
     std::array<float, 8> main_front_left{};
     std::array<float, 8> main_front_right{};
     std::array<float, 8> main_center{};
@@ -465,7 +465,7 @@ TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
 }
 
 TEST_CASE("Processor rich process renders multi-output instrument buses",
-          "[format][processor-defaults][process-buffers][phase3][instrument][multi-output]") {
+          "[format][processor-defaults][process-buffers][instrument][multi-output]") {
     MultiOutputInstrumentProcessor processor;
     const auto desc = processor.descriptor();
     REQUIRE(desc.category == PluginCategory::Instrument);
@@ -610,7 +610,7 @@ TEST_CASE("PluginDescriptor effective_capabilities ORs legacy and node fields",
 }
 
 TEST_CASE("PluginDescriptor preserves optional vendor contact metadata",
-          "[format][processor-defaults][metadata][coverage][phase3]") {
+          "[format][processor-defaults][metadata]") {
     PluginDescriptor d;
     d.vendor_url = "https://example.test/pulp";
     d.vendor_email = "support@example.test";
@@ -640,7 +640,7 @@ TEST_CASE("PrepareContext defaults match the headless stereo render path",
 }
 
 TEST_CASE("Prepare resource usage totals persistent and block scratch bytes",
-          "[format][processor-defaults][prepare-budget][phase2]") {
+          "[format][processor-defaults][prepare-budget]") {
     PrepareResourceUsage usage;
     usage.persistent_bytes = 1024;
     usage.block_scratch_bytes = 256;
@@ -649,7 +649,7 @@ TEST_CASE("Prepare resource usage totals persistent and block scratch bytes",
 }
 
 TEST_CASE("Prepare resource limits default to unlimited",
-          "[format][processor-defaults][prepare-budget][phase2]") {
+          "[format][processor-defaults][prepare-budget]") {
     PrepareResourceUsage usage;
     usage.persistent_bytes = 1'000'000;
     usage.block_scratch_bytes = 2'000'000;
@@ -665,7 +665,7 @@ TEST_CASE("Prepare resource limits default to unlimited",
 }
 
 TEST_CASE("Prepare resource helper reports the first exceeded budget",
-          "[format][processor-defaults][prepare-budget][phase2]") {
+          "[format][processor-defaults][prepare-budget]") {
     PrepareResourceUsage usage;
     usage.persistent_bytes = 2048;
     usage.block_scratch_bytes = 1024;
@@ -727,7 +727,7 @@ TEST_CASE("Prepare resource helper reports the first exceeded budget",
 }
 
 TEST_CASE("Processor prepare resource estimates can be checked against host limits",
-          "[format][processor-defaults][prepare-budget][phase2]") {
+          "[format][processor-defaults][prepare-budget]") {
     ResourceReportingProcessor p;
     p.persistent_bytes = 4096;
     p.block_scratch_bytes = 1024;
@@ -763,7 +763,7 @@ TEST_CASE("Processor prepare resource estimates can be checked against host limi
 }
 
 TEST_CASE("Processor memory pressure can shrink rebuildable prepare caches",
-          "[format][processor-defaults][prepare-budget][memory-pressure][phase2]") {
+          "[format][processor-defaults][prepare-budget][memory-pressure]") {
     MemoryPressureReportingProcessor p;
     p.prepared_core_bytes = 4096;
     p.advisory_cache_bytes = 2048;
@@ -921,7 +921,7 @@ TEST_CASE("Processor default view_size reflects an overridden editor_size",
 }
 
 TEST_CASE("Processor custom view_size can provide resize bounds and aspect ratio",
-          "[format][processor-defaults][editor][coverage][phase3]") {
+          "[format][processor-defaults][editor]") {
     CustomViewSizeProcessor p;
     const auto hints = p.view_size();
 
@@ -971,7 +971,7 @@ TEST_CASE("view_size_from_design derives sensible bounds + aspect from preferred
 }
 
 TEST_CASE("Processor has_editor override can disable default editor contract",
-          "[format][processor-defaults][editor][coverage][phase3]") {
+          "[format][processor-defaults][editor]") {
     EditorlessProcessor p;
 
     REQUIRE_FALSE(p.has_editor());
@@ -993,7 +993,7 @@ TEST_CASE("Processor default latency and plugin-owned state hooks are inert",
 }
 
 TEST_CASE("Processor default lifecycle hooks are callable no-ops",
-          "[format][processor-defaults][lifecycle][coverage][phase3]") {
+          "[format][processor-defaults][lifecycle]") {
     PlainProcessor p;
     pulp::view::View view;
 
@@ -1011,7 +1011,7 @@ TEST_CASE("Processor default lifecycle hooks are callable no-ops",
 }
 
 TEST_CASE("Processor prepare receives the exact host context",
-          "[format][processor-defaults][context][coverage][phase3]") {
+          "[format][processor-defaults][context]") {
     PlainProcessor p;
     PrepareContext context;
     context.sample_rate = 96000.0;
@@ -1029,7 +1029,7 @@ TEST_CASE("Processor prepare receives the exact host context",
 }
 
 TEST_CASE("Processor process receives the exact transport context",
-          "[format][processor-defaults][context][coverage][phase3]") {
+          "[format][processor-defaults][context]") {
     PlainProcessor p;
     float out_samples[4] = {};
     float* out_channels[1] = {out_samples};
@@ -1133,7 +1133,7 @@ TEST_CASE("Processor sidechain, MPE, and UMP sidecar pointers can be set and cle
 }
 
 TEST_CASE("Processor sidecar pointers replace independently between blocks",
-          "[format][processor-defaults][sidecars][coverage]") {
+          "[format][processor-defaults][sidecars]") {
     PlainProcessor p;
 
     const float first_samples[2] = {0.1f, 0.2f};
@@ -1276,7 +1276,7 @@ TEST_CASE("for_each_subblock invokes one full block for null or empty queues",
 }
 
 TEST_CASE("for_each_subblock skips zero-sample buffers",
-          "[format][params][subblock][coverage][phase3]") {
+          "[format][params][subblock]") {
     pulp::state::StateStore store;
     store.add_parameter({
         .id = 3,
@@ -1307,7 +1307,7 @@ TEST_CASE("for_each_subblock skips zero-sample buffers",
 }
 
 TEST_CASE("for_each_subblock ignores boundary events and slices input with output",
-          "[format][params][subblock][coverage][phase3]") {
+          "[format][params][subblock]") {
     pulp::state::StateStore store;
     store.add_parameter({
         .id = 9,
@@ -1462,7 +1462,7 @@ TEST_CASE("ControlRateParamSmoother is bit-exact off and ramps when opted in",
 }
 
 TEST_CASE("ControlRateParamSmoother handles invalid rates reset and skip",
-          "[format][params][smoothing][coverage][phase3]") {
+          "[format][params][smoothing]") {
     pulp::state::ParamInfo info;
     info.smoothing_ramp_seconds = 0.004f;
 

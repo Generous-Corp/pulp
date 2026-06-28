@@ -153,7 +153,7 @@ TEST_CASE("PluginViewHost::Size custom values", "[ios][view]") {
 
 // ── Platform-specific feature flags ─────────────────────────────────────────
 
-// ── AUv3 HostApp template shape (PR #3095) ─────────────────────────────────
+// AUv3 HostApp template shape regression coverage.
 //
 // Regression test for templates/ios-auv3/HostApp/ContentView.swift:99:
 // "Match the embedded component descriptor exactly". The previous template

@@ -171,7 +171,7 @@ TEST_CASE("audio model registry resolves known models and checkpoint URLs",
 }
 
 TEST_CASE("audio model registry preserves direct URLs and rejects incomplete refs",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     REQUIRE(resolve_checkpoint_url("https://cdn.example.test/models/clap.pt?download=1")
             == "https://cdn.example.test/models/clap.pt?download=1");
     REQUIRE(resolve_checkpoint_url("hf://org/repo/checkpoints/music.pt")
@@ -183,7 +183,7 @@ TEST_CASE("audio model registry preserves direct URLs and rejects incomplete ref
 }
 
 TEST_CASE("audio model registry exposes stable CLAP model metadata",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     const auto& first = registered_models();
     const auto& second = registered_models();
     REQUIRE(&first == &second);
@@ -210,7 +210,7 @@ TEST_CASE("audio model registry exposes stable CLAP model metadata",
 }
 
 TEST_CASE("audio model registry lookup is exact and non-mutating",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     const auto& models = registered_models();
     const auto* model = find_registered_model("clap_music_audioset_v1");
     REQUIRE(model != nullptr);
@@ -229,7 +229,7 @@ TEST_CASE("audio model registry lookup is exact and non-mutating",
 }
 
 TEST_CASE("audio model registry resolves Hugging Face refs with nested files",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url("hf://org/repo/model.pt")
             == "https://huggingface.co/org/repo/resolve/main/model.pt");
     REQUIRE(resolve_checkpoint_url("hf://org/repo/checkpoints/music/model.bin")
@@ -243,7 +243,7 @@ TEST_CASE("audio model registry resolves Hugging Face refs with nested files",
 }
 
 TEST_CASE("audio model registry rejects malformed checkpoint refs",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url("hf://").empty());
     REQUIRE(resolve_checkpoint_url("hf:///repo/model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org").empty());
@@ -259,7 +259,7 @@ TEST_CASE("audio model registry rejects malformed checkpoint refs",
 }
 
 TEST_CASE("audio model registry rejects unsafe Hugging Face file paths",
-          "[audio][tools][model-registry][coverage][requested]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url(std::string("hf://org/repo/path/")
                                    + static_cast<char>(0x1f) + "model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/\rmodel.pt").empty());
@@ -278,7 +278,7 @@ TEST_CASE("audio model registry rejects unsafe Hugging Face file paths",
 }
 
 TEST_CASE("audio model registry rejects unsafe Hugging Face owner and repo names",
-          "[audio][tools][model-registry][coverage][requested]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url(std::string("hf://org/re")
                                    + static_cast<char>(0x01)
                                    + "po/model.pt").empty());
@@ -289,7 +289,7 @@ TEST_CASE("audio model registry rejects unsafe Hugging Face owner and repo names
 }
 
 TEST_CASE("audio model registry preserves direct HTTP URLs byte-for-byte",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url("https://example.test/model.pt")
             == "https://example.test/model.pt");
     REQUIRE(resolve_checkpoint_url("http://example.test/model.pt")
@@ -302,7 +302,7 @@ TEST_CASE("audio model registry preserves direct HTTP URLs byte-for-byte",
 }
 
 TEST_CASE("audio model registry preserves URL bytes and rejects partial protocols",
-          "[audio][tools][model-registry][coverage]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url("https://cdn.example.test/model.pt#sha256")
             == "https://cdn.example.test/model.pt#sha256");
     REQUIRE(resolve_checkpoint_url("http://localhost:8080/checkpoints/music.pt?download=1")
@@ -318,7 +318,7 @@ TEST_CASE("audio model registry preserves URL bytes and rejects partial protocol
 }
 
 TEST_CASE("audio model registry preserves concrete Hugging Face file paths",
-          "[audio][tools][model-registry][coverage][requested]") {
+          "[audio][tools][model-registry]") {
     REQUIRE(resolve_checkpoint_url(" hf://org/repo/model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo//").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/\t").empty());
@@ -330,7 +330,7 @@ TEST_CASE("audio model registry preserves concrete Hugging Face file paths",
 }
 
 TEST_CASE("excerpt service validates request shape before scanning inputs",
-          "[audio][tools][excerpt-service][coverage][requested]") {
+          "[audio][tools][excerpt-service]") {
     TempDir temp;
     install_active_clap_model(temp);
     fs::create_directories(temp.path / "inputs");
@@ -469,7 +469,7 @@ TEST_CASE("audio model list reports registry and install state", "[audio][tools]
 }
 
 TEST_CASE("audio model registry resolves checkpoint URLs and lookup misses",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     const auto& models = registered_models();
     REQUIRE_FALSE(models.empty());
     REQUIRE(models[0].model_id == "clap_music_audioset_v1");
@@ -527,7 +527,7 @@ TEST_CASE("audio model status reports configured checkpoint loadability", "[audi
 }
 
 TEST_CASE("audio model status reports malformed state files",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     write_text(temp.path / "audio" / "model-state.json", "{ not-json");
 
@@ -540,7 +540,7 @@ TEST_CASE("audio model status reports malformed state files",
 }
 
 TEST_CASE("audio model status reports incomplete state shapes",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
   "backend": "clap"
@@ -577,7 +577,7 @@ TEST_CASE("audio model status reports incomplete state shapes",
 }
 
 TEST_CASE("audio model status reads legacy model.json and installed metadata fallbacks",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -629,7 +629,7 @@ TEST_CASE("audio model activate writes state from installed metadata", "[audio][
 }
 
 TEST_CASE("audio model activate falls back to registered metadata",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -687,7 +687,7 @@ TEST_CASE("audio model activate rejects installed metadata with missing checkpoi
 }
 
 TEST_CASE("audio model store accepts overrides and legacy checkpoint metadata",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "legacy-clap.pt";
     write_text(checkpoint, "stub");
@@ -720,7 +720,7 @@ TEST_CASE("audio model store accepts overrides and legacy checkpoint metadata",
 }
 
 TEST_CASE("audio model store treats malformed install metadata as unloadable",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json",
                "{ not-json");
@@ -735,7 +735,7 @@ TEST_CASE("audio model store treats malformed install metadata as unloadable",
 }
 
 TEST_CASE("audio model store reads active id aliases in priority order",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
   "configured_model_id": "configured",
@@ -769,7 +769,7 @@ TEST_CASE("audio model store reads active id aliases in priority order",
 }
 
 TEST_CASE("audio model and bundle JSON serializers include stable fields",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     ModelListResult list;
     list.pulp_home = "/tmp/pulp-home";
     list.active_model_id = "clap_music_audioset_v1";
@@ -958,7 +958,7 @@ TEST_CASE("excerpt bundle reader fills defaults from model and ranked result fil
 }
 
 TEST_CASE("excerpt bundle reader honors manifest file overrides and numeric fallbacks",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto bundle = temp.path / "bundle";
     fs::create_directories(bundle / "metadata");
@@ -1020,7 +1020,7 @@ TEST_CASE("excerpt bundle reader honors manifest file overrides and numeric fall
 }
 
 TEST_CASE("excerpt bundle reader reports empty and missing ranked inputs",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     auto empty = read_excerpt_bundle({});
     REQUIRE_FALSE(empty.ok);
     REQUIRE(empty.error == "bundle path is required");
@@ -1040,7 +1040,7 @@ TEST_CASE("excerpt bundle reader reports empty and missing ranked inputs",
 }
 
 TEST_CASE("excerpt bundle reader reports malformed manifests and result objects",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto bundle = temp.path / "bundle";
     fs::create_directories(bundle);
@@ -1121,7 +1121,7 @@ TEST_CASE("excerpt find writes a deterministic WAV-first bundle", "[audio][tools
 }
 
 TEST_CASE("excerpt find materializes bundle metadata, skipped inputs, and excerpt WAVs",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -1187,7 +1187,7 @@ TEST_CASE("excerpt find materializes bundle metadata, skipped inputs, and excerp
 }
 
 TEST_CASE("excerpt find validates required request fields before model loading",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto input = temp.path / "input.wav";
     REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
@@ -1225,7 +1225,7 @@ TEST_CASE("excerpt find validates required request fields before model loading",
 }
 
 TEST_CASE("excerpt find reports unsupported inputs after resolving a model",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -1258,7 +1258,7 @@ TEST_CASE("excerpt find reports unsupported inputs after resolving a model",
 }
 
 TEST_CASE("excerpt find JSON serializer includes results and skipped files",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     ExcerptFindResult result;
     result.ok = true;
     result.bundle_path = "/tmp/bundle";
@@ -1283,7 +1283,7 @@ TEST_CASE("excerpt find JSON serializer includes results and skipped files",
 }
 
 TEST_CASE("excerpt find reports explicit unknown models",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto input = temp.path / "input.wav";
     REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
@@ -1300,7 +1300,7 @@ TEST_CASE("excerpt find reports explicit unknown models",
 }
 
 TEST_CASE("excerpt find reports inactive and unavailable installed models",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto input = temp.path / "input.wav";
     REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
@@ -1334,7 +1334,7 @@ TEST_CASE("excerpt find reports inactive and unavailable installed models",
 }
 
 TEST_CASE("excerpt find collects uppercase WAV files and records unsupported siblings",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
 
@@ -1368,7 +1368,7 @@ TEST_CASE("excerpt find collects uppercase WAV files and records unsupported sib
 }
 
 TEST_CASE("excerpt find recursively scans sorted WAV inputs and caps final ranks",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
 
@@ -1399,7 +1399,7 @@ TEST_CASE("excerpt find recursively scans sorted WAV inputs and caps final ranks
 }
 
 TEST_CASE("excerpt find can dry-run with all candidates below min score",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
     auto input = temp.path / "input.wav";
@@ -1425,7 +1425,7 @@ TEST_CASE("excerpt find can dry-run with all candidates below min score",
 }
 
 TEST_CASE("excerpt find skips WAV files that cannot produce excerpt windows",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
 
@@ -1488,7 +1488,7 @@ TEST_CASE("excerpt find deterministic scores use a stable hash", "[audio][tools]
 }
 
 TEST_CASE("excerpt find dry-run returns ranked metadata without bundle writes",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = install_active_clap_model(temp);
     auto input = temp.path / "dry-run.wav";
@@ -1520,7 +1520,7 @@ TEST_CASE("excerpt find dry-run returns ranked metadata without bundle writes",
 }
 
 TEST_CASE("excerpt find explicit model id overrides unrelated active state",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -1552,7 +1552,7 @@ TEST_CASE("excerpt find explicit model id overrides unrelated active state",
 }
 
 TEST_CASE("excerpt find nonrecursive directories ignore nested WAV-only inputs",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
     fs::create_directories(temp.path / "nested");
@@ -1580,7 +1580,7 @@ TEST_CASE("excerpt find nonrecursive directories ignore nested WAV-only inputs",
 }
 
 TEST_CASE("excerpt find applies per-file candidate caps before global ranking",
-          "[audio][tools][codecov]") {
+          "[audio][tools]") {
     TempDir temp;
     install_active_clap_model(temp);
     auto first = temp.path / "first.wav";
@@ -1698,7 +1698,7 @@ TEST_CASE("excerpt find reports unsupported inputs after model resolution",
 }
 
 TEST_CASE("excerpt find records unreadable WAV inputs without writing dry-run bundles",
-          "[audio][tools][excerpt-service][coverage][requested]") {
+          "[audio][tools][excerpt-service]") {
     TempDir temp;
     auto checkpoint = install_active_clap_model(temp);
     auto corrupt_wav = temp.path / "corrupt.wav";
@@ -1729,7 +1729,7 @@ TEST_CASE("excerpt find records unreadable WAV inputs without writing dry-run bu
 }
 
 TEST_CASE("excerpt find reports bundle directory creation failures after ranking",
-          "[audio][tools][excerpt-service][coverage]") {
+          "[audio][tools][excerpt-service]") {
     TempDir temp;
     install_active_clap_model(temp);
     auto input = temp.path / "input.wav";
@@ -1758,7 +1758,7 @@ TEST_CASE("excerpt find reports bundle directory creation failures after ranking
 }
 
 TEST_CASE("excerpt find JSON serializer preserves failure diagnostics",
-          "[audio][tools][excerpt-service][coverage]") {
+          "[audio][tools][excerpt-service]") {
     ExcerptFindResult result;
     result.query = "missing model";
     result.requested_model_id = "clap_music_audioset_v1";
@@ -1782,7 +1782,7 @@ TEST_CASE("excerpt find JSON serializer preserves failure diagnostics",
 }
 
 TEST_CASE("excerpt find JSON serializer preserves ranked bundle metadata",
-          "[audio][tools][excerpt-service][coverage][requested]") {
+          "[audio][tools][excerpt-service]") {
     ExcerptFindResult result;
     result.ok = true;
     result.bundle_path = "/tmp/pulp-audio-bundle";
@@ -1827,7 +1827,7 @@ TEST_CASE("excerpt find JSON serializer preserves ranked bundle metadata",
 }
 
 TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
-          "[audio][tools][excerpt-service][model-registry][coverage][requested]") {
+          "[audio][tools][excerpt-service][model-registry]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
     write_text(checkpoint, "stub");
@@ -1881,7 +1881,7 @@ TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
 
 #if !defined(_WIN32)
 TEST_CASE("excerpt find rejects special files before model resolution",
-          "[audio][tools][excerpt-service][coverage][requested]") {
+          "[audio][tools][excerpt-service]") {
     TempDir temp;
     auto pipe_path = temp.path / "input.wav";
     REQUIRE(::mkfifo(pipe_path.c_str(), 0600) == 0);
@@ -1905,7 +1905,7 @@ TEST_CASE("excerpt find rejects special files before model resolution",
 #endif
 
 TEST_CASE("excerpt find writes stereo excerpt audio and manifest sidecars",
-          "[audio][tools][excerpt-service][coverage][requested]") {
+          "[audio][tools][excerpt-service]") {
     TempDir temp;
     auto checkpoint = install_active_clap_model(temp);
     auto input = temp.path / "Stereo Loop!.wav";

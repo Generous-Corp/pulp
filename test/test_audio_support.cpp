@@ -1,13 +1,13 @@
-// test_audio_support.cpp — tests for the PR 1A audio harness helpers
-// (test/support/audio_metrics + audio_assertions). These test the helpers
+// test_audio_support.cpp — tests for the audio harness helpers
+// (audio_metrics + audio_assertions). These test the helpers
 // THEMSELVES against synthetic buffers with known ground truth; existing
-// golden/matrix tests are converted in PR 1B.
+// golden/matrix tests use the shared helpers.
 //
 // Analyzer Determinism Contract (declared once for the whole file, per
 // planning/2026-06-09-audio-observability-and-validation-harness-plan.md):
 //   stimulus:        synthetic sine/DC/silence buffers generated inline with
 //                    std::sin — coherence with any FFT length is irrelevant
-//                    because no FFT is used in PR 1A
+//                    because no FFT is used
 //   analysis window: none (pure time-domain arithmetic over all samples)
 //   warm-up trim:    none (stimuli are steady-state from sample 0)
 //   estimator:       positive-going zero-crossing with linear interpolation
@@ -37,7 +37,7 @@ using Catch::Matchers::WithinRel;
 // ── metrics: levels ─────────────────────────────────────────────────────
 
 TEST_CASE("audio_metrics: full-scale sine has known peak/RMS/DC",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     // 440 Hz @ 48 kHz, 4800 frames = exactly 44 cycles, so RMS is the ideal
     // 1/sqrt(2) and DC is ~0 without partial-cycle bias.
     auto buf = make_sine_f(2, 4800, 440.0f, 48000.0);
@@ -58,7 +58,7 @@ TEST_CASE("audio_metrics: full-scale sine has known peak/RMS/DC",
 }
 
 TEST_CASE("audio_metrics: dBFS conversion round-trips",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     REQUIRE_THAT(to_dbfs(1.0), WithinAbs(0.0, 1e-12));
     REQUIRE_THAT(to_dbfs(0.5), WithinAbs(-6.0206, 1e-3));
     REQUIRE_THAT(from_dbfs(to_dbfs(0.25)), WithinAbs(0.25, 1e-9));
@@ -67,7 +67,7 @@ TEST_CASE("audio_metrics: dBFS conversion round-trips",
 }
 
 TEST_CASE("audio_metrics: DC offset is reported",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     pulp::audio::Buffer<float> buf(1, 1000);
     for (auto& s : buf.channel(0)) s = 0.25f;
     auto m = analyze(buf, 48000.0);
@@ -78,7 +78,7 @@ TEST_CASE("audio_metrics: DC offset is reported",
 // ── metrics: defects ────────────────────────────────────────────────────
 
 TEST_CASE("audio_metrics: NaN and Inf samples are counted, not propagated",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     auto buf = make_sine_f(1, 1024, 440.0f, 48000.0, 0.5f);
     buf.channel(0)[10] = std::numeric_limits<float>::quiet_NaN();
     buf.channel(0)[20] = std::numeric_limits<float>::infinity();
@@ -99,7 +99,7 @@ TEST_CASE("audio_metrics: NaN and Inf samples are counted, not propagated",
 }
 
 TEST_CASE("audio_metrics: clipped samples are counted at the threshold",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     pulp::audio::Buffer<float> buf(1, 100);
     for (auto& s : buf.channel(0)) s = 0.9f;
     buf.channel(0)[5] = 1.0f;   // exactly at threshold — counts
@@ -115,7 +115,7 @@ TEST_CASE("audio_metrics: clipped samples are counted at the threshold",
 }
 
 TEST_CASE("audio_metrics: silence runs are measured",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     auto buf = make_sine_f(1, 1000, 440.0f, 48000.0, 0.5f);
     // Insert a 200-sample dropout (the plan's "standalone boundary went
     // silent for N consecutive blocks" signature, in miniature).
@@ -130,7 +130,7 @@ TEST_CASE("audio_metrics: silence runs are measured",
 // ── assertions: silence / level ─────────────────────────────────────────
 
 TEST_CASE("audio_assertions: silence and non-silence",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     pulp::audio::Buffer<float> silent(2, 512);
     silent.clear();
     auto silent_m = analyze(silent, 48000.0);
@@ -147,7 +147,7 @@ TEST_CASE("audio_assertions: silence and non-silence",
 }
 
 TEST_CASE("audio_assertions: peak and RMS ranges",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     // -6 dBFS sine: peak ≈ -6 dBFS, RMS ≈ -9 dBFS.
     auto buf = make_sine_f(1, 4800, 440.0f, 48000.0, 0.501187f);
     auto m = analyze(buf, 48000.0);
@@ -161,7 +161,7 @@ TEST_CASE("audio_assertions: peak and RMS ranges",
 // ── assertions: frequency ───────────────────────────────────────────────
 
 TEST_CASE("audio_assertions: frequency estimate within cents tolerance",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     // Tolerance class: numeric. The zero-crossing estimator on a clean
     // 440 Hz sine over 9600 frames (88 cycles) should land well inside
     // ±5 cents.
@@ -178,7 +178,7 @@ TEST_CASE("audio_assertions: frequency estimate within cents tolerance",
 }
 
 TEST_CASE("audio_assertions: frequency estimator reports no-estimate "
-          "honestly", "[audio-support][harness-1a]") {
+          "honestly", "[audio-support]") {
     pulp::audio::Buffer<float> dc(1, 1024);
     for (auto& s : dc.channel(0)) s = 0.5f; // no zero crossings
     auto check = assert_frequency_near(dc.channel(0), 48000.0, 440.0, 5.0);
@@ -191,7 +191,7 @@ TEST_CASE("audio_assertions: frequency estimator reports no-estimate "
 }
 
 TEST_CASE("audio_assertions: sample-rate mismatch shows as pitch shift",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     // The plan's "chipmunk" regression: a 440 Hz tone rendered at 48 kHz but
     // played/analyzed as 96 kHz reads as 880 Hz. The helpers must make that
     // visible rather than vaguely "different".
@@ -203,7 +203,7 @@ TEST_CASE("audio_assertions: sample-rate mismatch shows as pitch shift",
 // ── assertions: null + channel routing ──────────────────────────────────
 
 TEST_CASE("audio_assertions: null test detects exact and near matches",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     auto a = make_sine_f(2, 1024, 440.0f, 48000.0, 0.5f);
     auto b = make_sine_f(2, 1024, 440.0f, 48000.0, 0.5f);
 
@@ -220,7 +220,7 @@ TEST_CASE("audio_assertions: null test detects exact and near matches",
 }
 
 TEST_CASE("audio_assertions: null test rejects shape mismatch",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     auto a = make_sine_f(2, 512, 440.0f, 48000.0);
     auto b = make_sine_f(1, 512, 440.0f, 48000.0);
     auto check = assert_null_near(a, b, -120.0);
@@ -229,7 +229,7 @@ TEST_CASE("audio_assertions: null test rejects shape mismatch",
 }
 
 TEST_CASE("audio_assertions: duplicated channels are flagged",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     pulp::audio::Buffer<float> buf(2, 512);
     for (std::size_t i = 0; i < 512; ++i) {
         const float v = std::sin(2.0f * std::numbers::pi_v<float> * 440.0f *
@@ -246,7 +246,7 @@ TEST_CASE("audio_assertions: duplicated channels are flagged",
 }
 
 TEST_CASE("audio_assertions: two silent channels are not flagged as duplicated",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     // Two channels that are both silent are trivially sample-identical, but
     // there is no signal to duplicate — that is not a routing bug.
     pulp::audio::Buffer<float> silent(2, 512); // zero-initialized.
@@ -274,7 +274,7 @@ TEST_CASE("audio_assertions: two silent channels are not flagged as duplicated",
 // ── signal summary ──────────────────────────────────────────────────────
 
 TEST_CASE("audio_metrics: summarize renders the agent-readable report",
-          "[audio-support][harness-1a]") {
+          "[audio-support]") {
     auto buf = make_sine_f(2, 9600, 220.0f, 48000.0, 0.5f);
     auto m = analyze(buf, 48000.0);
     auto est = estimate_frequency(buf.channel(0), 48000.0);
@@ -288,13 +288,12 @@ TEST_CASE("audio_metrics: summarize renders the agent-readable report",
     REQUIRE(text.find("dBFS") != std::string::npos);
 }
 
-// ── end-to-end through HeadlessHost (the PR 1B conversion pattern) ──────
+// ── end-to-end through HeadlessHost ─────────────────────────────────────
 
 TEST_CASE("audio_support: HeadlessHost render analyzed by the helpers",
-          "[audio-support][harness-1a]") {
-    // Proves the helpers compose with the offline host exactly the way the
-    // PR 1B golden-test conversion will use them: render PulpGain at unity
-    // and assert signal facts instead of raw sample loops.
+          "[audio-support]") {
+    // Proves the helpers compose with the offline host: render PulpGain at
+    // unity and assert signal facts instead of raw sample loops.
     pulp::format::HeadlessHost host(pulp::examples::create_pulp_gain);
     host.prepare(48000.0, 1024);
 

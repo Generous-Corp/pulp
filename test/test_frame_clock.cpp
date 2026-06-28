@@ -172,7 +172,7 @@ TEST_CASE("FrameClock zero dt is valid", "[view][frame_clock]") {
 }
 
 TEST_CASE("FrameClock subscriber added during tick starts on the next frame",
-          "[view][frame_clock][coverage][phase3]") {
+          "[view][frame_clock]") {
     FrameClock clock;
     int first_calls = 0;
     int added_calls = 0;
@@ -201,7 +201,7 @@ TEST_CASE("FrameClock subscriber added during tick starts on the next frame",
 }
 
 TEST_CASE("FrameClock subscriber can unsubscribe itself while returning true",
-          "[view][frame_clock][coverage][phase3]") {
+          "[view][frame_clock]") {
     FrameClock clock;
     int id = 0;
     int calls = 0;
@@ -220,7 +220,7 @@ TEST_CASE("FrameClock subscriber can unsubscribe itself while returning true",
 }
 
 TEST_CASE("FrameClock false-return compaction preserves later active subscribers",
-          "[view][frame_clock][coverage][phase3]") {
+          "[view][frame_clock]") {
     FrameClock clock;
     int first = 0;
     int second = 0;

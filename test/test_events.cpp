@@ -775,7 +775,7 @@ TEST_CASE("EventLoop reports thread identity and stop state",
 }
 
 TEST_CASE("EventLoop can be stopped from its own thread",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::atomic<bool> ran_on_loop{false};
     std::atomic<bool> stop_returned{false};
@@ -819,7 +819,7 @@ TEST_CASE("EventLoop dispatch_after handles multiple ready tasks",
 }
 
 TEST_CASE("EventLoop skips empty dispatched tasks",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::atomic<int> calls{0};
 
@@ -830,7 +830,7 @@ TEST_CASE("EventLoop skips empty dispatched tasks",
 }
 
 TEST_CASE("EventLoop skips empty delayed tasks",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::atomic<int> calls{0};
 
@@ -841,7 +841,7 @@ TEST_CASE("EventLoop skips empty delayed tasks",
 }
 
 TEST_CASE("EventLoop dispatch_after runs due tasks immediately",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::atomic<int> calls{0};
 
@@ -852,7 +852,7 @@ TEST_CASE("EventLoop dispatch_after runs due tasks immediately",
 }
 
 TEST_CASE("EventLoop ignores new dispatches after stop",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     loop.stop();
 
@@ -865,7 +865,7 @@ TEST_CASE("EventLoop ignores new dispatches after stop",
 }
 
 TEST_CASE("EventLoop stops before continuing a pending task batch",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::mutex mutex;
     std::condition_variable cv;
@@ -914,7 +914,7 @@ TEST_CASE("EventLoop can be released from its own thread",
 }
 
 TEST_CASE("EventLoop runs tasks dispatched from the loop thread",
-          "[events][event_loop][codecov]") {
+          "[events][event_loop]") {
     EventLoop loop;
     std::atomic<int> calls{0};
 
@@ -1018,7 +1018,7 @@ TEST_CASE("Timer exposes interval and idempotent stop state",
 }
 
 TEST_CASE("Timer tolerates empty callbacks",
-          "[events][timer][codecov]") {
+          "[events][timer]") {
     EventLoop loop;
 
     Timer one_shot(loop, 1ms, {}, false);
@@ -1034,7 +1034,7 @@ TEST_CASE("Timer tolerates empty callbacks",
 }
 
 TEST_CASE("Timer one-shot can be restarted after firing",
-          "[events][timer][codecov]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> count{0};
     Timer timer(loop, 1ms, [&] { count.fetch_add(1); }, false);
@@ -1049,7 +1049,7 @@ TEST_CASE("Timer one-shot can be restarted after firing",
 }
 
 TEST_CASE("Timer stop before first fire permits a later restart",
-          "[events][timer][codecov]") {
+          "[events][timer]") {
     EventLoop loop;
     std::atomic<int> count{0};
     Timer timer(loop, 50ms, [&] { count.fetch_add(1); }, false);
@@ -1310,7 +1310,7 @@ TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
 }
 
 TEST_CASE("ActionBroadcaster skips empty callbacks",
-          "[events][async_updater][action_broadcaster][codecov]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -1328,7 +1328,7 @@ TEST_CASE("ActionBroadcaster skips empty callbacks",
 }
 
 TEST_CASE("ActionBroadcaster skips callbacks removed during dispatch",
-          "[events][async_updater][action_broadcaster][codecov]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int first_id = -1;
@@ -1359,7 +1359,7 @@ TEST_CASE("ActionBroadcaster skips callbacks removed during dispatch",
 }
 
 TEST_CASE("MountedVolumeListChangeDetector polls once before stop",
-          "[events][volume_detector][codecov]") {
+          "[events][volume_detector]") {
     MountedVolumeListChangeDetector detector;
     std::atomic<int> changes{0};
     detector.on_change = [&](const std::vector<std::string>&) {

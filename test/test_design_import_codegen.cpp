@@ -600,7 +600,7 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
 }
 
-TEST_CASE("parse_v0_tsx resolves indexed useState value bindings (PR #3128 review)",
+TEST_CASE("parse_v0_tsx resolves indexed useState value bindings",
           "[view][import][cpp-codegen]") {
     // Regression: value={params[0]} validated its base identifier but returned
     // the full "params[0]" expression as the lookup key, so the initial value
@@ -1124,7 +1124,7 @@ TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
 }
 
 TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
-          "[view][import][coverage]") {
+          "[view][import]") {
     auto json = R"json({
         "type": "frame",
         "name": "Rack",
@@ -1891,7 +1891,7 @@ TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
 }
 
 TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget edge branches",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
     ir.root.type = "frame";
@@ -1998,7 +1998,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget
 }
 
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::v0;
     ir.root.type = "frame";

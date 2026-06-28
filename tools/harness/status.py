@@ -1,6 +1,6 @@
 """Status taxonomy used by every adapter.
 
-The harness reduces each catalog entry to one of five outcomes. The mapping
+The harness reduces each catalog entry to one of six outcomes. The mapping
 between catalog `status` (hand-edited, today) and harness `Status` (machine-
 derived) is intentionally loose so the diff is informative — see the drift
 list emitted alongside the coverage report.
@@ -33,8 +33,8 @@ class Status(str, Enum):
 
     @property
     def is_progress(self) -> bool:
-        """PASS or DIVERGE both count as 'has an implementation surface'."""
-        return self in (Status.PASS, Status.DIVERGE)
+        """Statuses that count as having an implementation surface."""
+        return self in (Status.PASS, Status.SUPPORTED_NO_EVIDENCE, Status.DIVERGE)
 
 
 # Canonical ordering for table rendering.
@@ -72,7 +72,7 @@ class StatusCounts:
 
     @property
     def progress_pct(self) -> float:
-        """PASS+DIVERGE / total."""
+        """Statuses with an implementation surface / total."""
         if self.total == 0:
             return 0.0
         return 100.0 * (self.pass_ + self.supported_no_evidence + self.diverge) / self.total
@@ -107,12 +107,10 @@ def map_catalog_status_to_expected(catalog_status: Optional[str]) -> Status:
     The harness compares its verdict to this mapping. Disagreement is the
     drift signal we want to surface.
 
-    The `noop` status was added in pulp #1475 to close the vocabulary gap
-    discovered while triaging css/animation* and css/touchAction during
-    #1474: the bridge intentionally NO-OPs those properties (the animations
-    subsystem lands later), but no catalog status mapped to NO_OP, so every
-    css NO-OP entry registered as drift regardless of what the catalog
-    claimed.
+    The `noop` status distinguishes intentional bridge stubs from missing
+    implementations: the bridge can intentionally NO-OP a property until
+    a later subsystem lands, but no missing/not-implemented catalog status
+    should map to NO_OP.
     """
     if catalog_status is None:
         return Status.NOT_IMPL

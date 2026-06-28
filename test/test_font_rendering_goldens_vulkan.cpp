@@ -77,7 +77,7 @@
 //   4. Commit observed-actual digests as the new constants
 //      (`kVkHelloInter14`, …) once the first green run lands.
 //
-// Tag: [golden][gpu][vulkan][skia][font][issue-2257-followup][scaffold]
+// Tag: [golden][gpu][vulkan][skia][font][scaffold]
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -89,8 +89,8 @@
 // raster↔Vulkan tolerance TEST_CASE. Tolerance for the cross-backend
 // probe is ±20 % (see header rationale).
 
-TEST_CASE("font v2 Slice 3.4 — Vulkan goldens require implementation before lane enablement",
-          "[golden][gpu][vulkan][skia][font][scaffold][issue-2257-followup]") {
+TEST_CASE("font Vulkan goldens require implementation before lane enablement",
+          "[golden][gpu][vulkan][skia][font][scaffold]") {
     FAIL("Vulkan goldens are enabled without an implementation; add the "
          "Vulkan render/readback assertions before turning on this lane.");
 }

@@ -59,7 +59,7 @@ TEST_CASE("CLI design binding honors explicit build dir and script", "[cli][desi
 }
 
 TEST_CASE("CLI design binding treats positional script as script-root selector",
-          "[cli][design][coverage]") {
+          "[cli][design]") {
     DesignBindingInput input;
     input.cwd_root = "/repo";
     input.script_path = "/worktree/ui/main.js";
@@ -77,7 +77,7 @@ TEST_CASE("CLI design binding treats positional script as script-root selector",
 }
 
 TEST_CASE("CLI design binding keeps checkout root when script is in same tree",
-          "[cli][design][coverage]") {
+          "[cli][design]") {
     DesignBindingInput input;
     input.cwd_root = "/repo";
     input.script_path = "/repo/ui/main.js";
@@ -92,7 +92,7 @@ TEST_CASE("CLI design binding keeps checkout root when script is in same tree",
 }
 
 TEST_CASE("CLI design binding can select root from explicit build cache",
-          "[cli][design][coverage]") {
+          "[cli][design]") {
     DesignBindingInput input;
     input.build_dir = "/repo/build";
     input.build_dir_cache_root = "/repo";
@@ -108,7 +108,7 @@ TEST_CASE("CLI design binding can select root from explicit build cache",
 }
 
 TEST_CASE("CLI design binding defaults build dir when binary root differs",
-          "[cli][design][coverage]") {
+          "[cli][design]") {
     DesignBindingInput input;
     input.cwd_root = "/repo";
     input.binary_root = "/sdk";

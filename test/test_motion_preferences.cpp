@@ -136,7 +136,7 @@ TEST_CASE("MotionPreferences on_policy_changed fires on override transition",
 }
 
 TEST_CASE("MotionPreferences policy callback may re-enter preferences",
-          "[motion-preferences][coverage][phase3]") {
+          "[motion-preferences]") {
     PrefsScope scope;
     auto& prefs = MotionPreferences::instance();
     prefs.set_override(MotionPolicy::Full);
@@ -175,7 +175,7 @@ TEST_CASE("motion_policy_to_string / from_string round-trip",
 }
 
 TEST_CASE("apply_motion_policy_to_duration follows override and scale",
-          "[motion-preferences][coverage][phase3]") {
+          "[motion-preferences]") {
     using namespace pulp::view;
     PrefsScope scope;
     auto& prefs = MotionPreferences::instance();

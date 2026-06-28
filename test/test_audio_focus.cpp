@@ -93,7 +93,7 @@ TEST_CASE("AudioFocusRegistry: token move transfers ownership",
 }
 
 TEST_CASE("AudioFocusRegistry: move construction empties source token",
-          "[audio][focus][coverage]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
     int count = 0;
     auto source = AudioFocusRegistry::instance().subscribe(
@@ -129,7 +129,7 @@ TEST_CASE("AudioFocusRegistry: move assignment replaces an existing subscription
 }
 
 TEST_CASE("AudioFocusRegistry: token self move assignment preserves subscription",
-          "[audio][focus][coverage]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
     int count = 0;
     auto token = AudioFocusRegistry::instance().subscribe(
@@ -208,7 +208,7 @@ TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
 }
 
 TEST_CASE("AudioFocusRegistry: subscribers added during publish wait for next signal",
-          "[audio][focus][coverage]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
     int first_count = 0;
     int second_count = 0;
@@ -305,7 +305,7 @@ TEST_CASE("AudioFocusRegistry: reset_for_test clears subscribers and state",
 }
 
 TEST_CASE("AudioFocusRegistry: stale tokens cannot unsubscribe post-reset subscribers",
-          "[audio][focus][coverage]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
 
     int stale_count = 0;
@@ -337,7 +337,7 @@ TEST_CASE("AudioFocusRegistry: publish with no subscribers still updates state",
 }
 
 TEST_CASE("AudioFocusRegistry: subscriber added during publish waits for next signal",
-          "[audio][focus][coverage][large]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
 
     std::vector<AudioFocusState> first_seen;

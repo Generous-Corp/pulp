@@ -7,7 +7,7 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/lock_to_source.hpp>  // WYSIWYG T5 — reparent → source rewrite
 #include <pulp/view/widgets.hpp>
-#include <pulp/view/window_host.hpp>  // P2 scale test: compute_design_viewport_transform
+#include <pulp/view/window_host.hpp>  // Viewport-scale test: compute_design_viewport_transform
 
 #include <cstddef>
 #include <cstdint>
@@ -90,9 +90,8 @@ private:
 };
 
 // A RecordingCanvas that also serves real pixel readback over a small
-// synthetic surface — lets phase-3e tests exercise the loupe's
-// readback path (which the plain RecordingCanvas never does) and
-// assert the read rect that the loupe actually requested.
+// synthetic surface. Loupe tests use this path because the plain
+// RecordingCanvas never exercises readback or records the requested read rect.
 class ReadbackCanvas : public pulp::canvas::RecordingCanvas {
 public:
     ReadbackCanvas(int w, int h) : surface_w_(w), surface_h_(h) {}
@@ -195,7 +194,7 @@ TEST_CASE("ViewInspector type_name", "[view][inspector]") {
 }
 
 TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state",
-          "[view][inspector][window][coverage][requested]") {
+          "[view][inspector][window]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 640, 480});
@@ -220,7 +219,7 @@ TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state"
 }
 
 TEST_CASE("CollapsableSection toggles only from header mouse-down events",
-          "[view][inspector][window][coverage][requested]") {
+          "[view][inspector][window]") {
     CollapsableSection section("Layout", true);
     section.set_bounds({0, 0, 200, 120});
 
@@ -375,7 +374,7 @@ TEST_CASE("Protocol: decode invalid JSON") {
 }
 
 TEST_CASE("Protocol: response encoding preserves parseable result JSON",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto object_response = encode_message(make_response(7, R"({"root":{"id":"gain"},"count":2})"));
     REQUIRE(object_response.find(R"("id")") != std::string::npos);
     REQUIRE(object_response.find(R"("result")") != std::string::npos);
@@ -392,7 +391,7 @@ TEST_CASE("Protocol: response encoding preserves parseable result JSON",
 }
 
 TEST_CASE("Protocol: invalid JSON payloads encode as strings",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto response = encode_message(make_response(10, "{not-json"));
     REQUIRE(response.find(R"("result")") != std::string::npos);
     REQUIRE(response.find("{not-json") != std::string::npos);
@@ -409,7 +408,7 @@ TEST_CASE("Protocol: invalid JSON payloads encode as strings",
 }
 
 TEST_CASE("Protocol: empty response and default params omit payload keys",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto empty_response = encode_message(make_response(12, ""));
     REQUIRE(empty_response.find(R"("id")") != std::string::npos);
     REQUIRE(empty_response.find(R"("result")") == std::string::npos);
@@ -427,7 +426,7 @@ TEST_CASE("Protocol: empty response and default params omit payload keys",
 }
 
 TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     auto encoded = encode_message(make_error(15, "View not found: gain"));
     REQUIRE(encoded.find(R"("id")") != std::string::npos);
     REQUIRE(encoded.find(R"("error")") != std::string::npos);
@@ -446,7 +445,7 @@ TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
 }
 
 TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     InspectorMessage request;
     REQUIRE(decode_message(R"({"id":17,"method":"DOM.search","params":{"query":"Knob"}})", request));
     REQUIRE(request.id == 17);
@@ -468,7 +467,7 @@ TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",
 }
 
 TEST_CASE("Protocol: decode rejects invalid field types without partial output",
-          "[inspect][protocol][coverage]") {
+          "[inspect][protocol]") {
     InspectorMessage msg;
     msg.id = 99;
     msg.method = "stale";
@@ -1935,7 +1934,7 @@ TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][wi
 }
 
 TEST_CASE("CollapsableSection collapsed default paints and toggles predictably",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     CollapsableSection section("Theme Colors", false);
     section.set_bounds({0, 0, 220, 120});
     section.layout_children();
@@ -1992,7 +1991,7 @@ TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspec
     inspected_root.add_child(std::move(knob));
 
     InspectorWindow window(inspected_root);
-    // P3 — the window now has a tool-strip header child + the tab panel.
+    // The window now has a tool-strip header child + the tab panel.
     REQUIRE(window.child_count() == 2);
 
     auto* tabs = first_view_of_type<TabPanel>(window);
@@ -2053,7 +2052,7 @@ TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspec
 }
 
 TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     InspectorWindow window;
     REQUIRE(window.child_count() == 2);
     REQUIRE(window.active_tool() == 0);
@@ -2092,7 +2091,7 @@ TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
 }
 
 TEST_CASE("Inspector overlay and window public header toggles are direct contracts",
-          "[inspect][overlay][window][coverage][requested]") {
+          "[inspect][overlay][window]") {
     View root;
     root.set_bounds({0, 0, 320, 200});
 
@@ -2131,7 +2130,7 @@ TEST_CASE("Inspector overlay and window public header toggles are direct contrac
 }
 
 TEST_CASE("InspectorOverlay auxiliary panel toggles are stable public contracts",
-          "[inspect][overlay][coverage][requested]") {
+          "[inspect][overlay]") {
     View root;
     root.set_bounds({0, 0, 320, 200});
 
@@ -2185,7 +2184,7 @@ TEST_CASE("InspectorOverlay auxiliary panel toggles are stable public contracts"
 }
 
 TEST_CASE("InspectorWindow rebuilds tree and theme sections only from live roots",
-          "[inspect][window][coverage][headers]") {
+          "[inspect][window][headers]") {
     View first_root;
     first_root.set_id("first-root");
     first_root.set_bounds({0, 0, 480, 320});
@@ -2508,7 +2507,7 @@ TEST_CASE("WYSIWYG anchored reparent undo no-ops after the moved view "
     overlay.set_dragging_enabled(true);
     overlay.set_selected_view(moving_ptr);
 
-    // Drive the reflow reparent (mirrors the P2c reparent test).
+    // Drive the reflow reparent (mirrors the reparent test).
     const Rect mb = moving_ptr->bounds();
     MouseEvent press; press.position = {mb.x + 10, mb.y + 10}; press.is_down = true;
     REQUIRE(overlay.handle_mouse_event(press));
@@ -3018,7 +3017,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE(no_perf.params_json.find("false") != std::string::npos);
 }
 
-// ─── StateInspector ListenerToken migration (Slice 3) ───────────────────────
+// ─── StateInspector ListenerToken migration ─────────────────────────────────
 
 TEST_CASE("StateInspector records parameter changes after subscribing",
           "[inspect][state][listener]") {
@@ -3068,7 +3067,7 @@ TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
     REQUIRE_THAT(store.get_value(1), Catch::Matchers::WithinAbs(0.75, 0.001));
 }
 
-// ─── Performance.setRepaintFlash (Tier A Slice 6) ───────────────────────────
+// ─── Performance.setRepaintFlash ────────────────────────────────────────────
 
 #include <pulp/render/dirty_tracker.hpp>
 
@@ -3120,7 +3119,7 @@ TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
     REQUIRE(set_resp.is_error);
 }
 
-// ─── LiveConstant RPC (Tier A Slice 13) ─────────────────────────────────────
+// ─── LiveConstant RPC ───────────────────────────────────────────────────────
 
 #include <pulp/view/live_constant_editor.hpp>
 
@@ -3191,19 +3190,18 @@ TEST_CASE("LiveConstant.reset rolls a value back to its default",
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// P1 — overlay reachability / drill-down / minimal manipulate layer
-// P2 — drag-to-move via absolute + layout.position/left/top tweaks
+// Overlay reachability / drill-down / minimal manipulate layer
+// Drag-to-move via absolute + layout.position/left/top tweaks
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md
 // ════════════════════════════════════════════════════════════════════════════
 
-// P1 acceptance: the overlay actually receives a press-on-handle → move →
+// Overlay reachability acceptance: the overlay actually receives a press-on-handle → move →
 // release sequence and lands a layout.width tweak. Proves the gesture
 // pipeline works on the input path (the ui-preview composing hooks route
 // here). Mirrors the prerequisite's stated acceptance criterion.
-TEST_CASE("InspectorOverlay P1: handle drag lands a layout.width tweak "
+TEST_CASE("InspectorOverlay: handle drag lands a layout.width tweak "
           "(overlay receives mouse)",
-          "[inspect][overlay][p1][issue-wysiwyg-p1]") {
+          "[inspect][overlay][issue-wysiwyg-p1]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -3232,12 +3230,12 @@ TEST_CASE("InspectorOverlay P1: handle drag lands a layout.width tweak "
     REQUIRE(w->getFloat32() == 100.0f);
 }
 
-// P1 drill-down: a click resolves to the DEEPEST hittable element, not the
+// Drill-down: a click resolves to the DEEPEST hittable element, not the
 // container. Esc then DESELECTS (one press, stays active) — the maintainer's
 // requested behavior so hover + click keep working without a Cmd+I cycle.
-TEST_CASE("InspectorOverlay P1: click selects deepest nested element, "
+TEST_CASE("InspectorOverlay: click selects deepest nested element, "
           "Esc deselects and stays active",
-          "[inspect][overlay][p1][drill-down][issue-wysiwyg-p1]") {
+          "[inspect][overlay][drill-down][issue-wysiwyg-p1]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
@@ -3288,11 +3286,11 @@ TEST_CASE("InspectorOverlay P1: click selects deepest nested element, "
     REQUIRE(overlay.is_active());
 }
 
-// P1 minimal manipulate layer: in manipulate-only mode point_in_panel is
+// Minimal manipulate layer: in manipulate-only mode point_in_panel is
 // false everywhere (whole canvas is live) and paint draws only the
 // selection box + handles (no dev side-panel rows).
-TEST_CASE("InspectorOverlay P1: manipulate-only mode suppresses the dev panel",
-          "[inspect][overlay][p1][manipulate][issue-wysiwyg-p1]") {
+TEST_CASE("InspectorOverlay: manipulate-only mode suppresses the dev panel",
+          "[inspect][overlay][manipulate][issue-wysiwyg-p1]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -3324,12 +3322,12 @@ TEST_CASE("InspectorOverlay P1: manipulate-only mode suppresses the dev panel",
     REQUIRE(overlay.tweak_row_count() == 0);   // panel never laid out
 }
 
-// ── P2: drag-to-move ────────────────────────────────────────────────────────
+// ── Drag-to-move ────────────────────────────────────────────────────────────
 
 // Core acceptance: body-drag converts to absolute and writes
 // position+left+top atomically (one batch).
-TEST_CASE("InspectorOverlay P2: body-drag moves via absolute + 3 atomic tweaks",
-          "[inspect][overlay][p2][move][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: body-drag moves via absolute + 3 atomic tweaks",
+          "[inspect][overlay][move][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     root.flex().direction = FlexDirection::row;
@@ -3359,7 +3357,7 @@ TEST_CASE("InspectorOverlay P2: body-drag moves via absolute + 3 atomic tweaks",
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == child_ptr);
 
-    // Press on the BODY (not a handle) to start the move. P2c: the DEFAULT
+    // Press on the BODY (not a handle) to start the move. The default
     // body-drag is now reflow-aware; ⌘-drag is the ABSOLUTE FLOAT escape
     // hatch this test exercises, so hold Cmd on the press + drag.
     MouseEvent press;
@@ -3401,8 +3399,8 @@ TEST_CASE("InspectorOverlay P2: body-drag moves via absolute + 3 atomic tweaks",
 
 // No-visual-jump on conversion: the seeded left/top reproduce the pre-move
 // resolved position within ~1px when the drag delta is zero.
-TEST_CASE("InspectorOverlay P2: conversion seeds origin so there is no jump",
-          "[inspect][overlay][p2][move][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: conversion seeds origin so there is no jump",
+          "[inspect][overlay][move][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     root.flex().direction = FlexDirection::column;
@@ -3436,7 +3434,7 @@ TEST_CASE("InspectorOverlay P2: conversion seeds origin so there is no jump",
 
     // Start a ⌘-move (absolute float) and immediately "drag" by zero (move
     // event at the press position) — this exercises the seed without any
-    // delta. P2c: absolute float is the ⌘-drag path.
+    // delta. Absolute float is the ⌘-drag path.
     MouseEvent press;
     press.position = {before.x + 5, before.y + 5};
     press.is_down = true;
@@ -3455,8 +3453,8 @@ TEST_CASE("InspectorOverlay P2: conversion seeds origin so there is no jump",
 
 // Sibling reflow: after the moved child leaves flow (absolute), an in-flow
 // sibling shifts to fill the freed space.
-TEST_CASE("InspectorOverlay P2: moving a child reflows its in-flow sibling",
-          "[inspect][overlay][p2][move][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: moving a child reflows its in-flow sibling",
+          "[inspect][overlay][move][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 200});
     root.flex().direction = FlexDirection::row;
@@ -3484,7 +3482,7 @@ TEST_CASE("InspectorOverlay P2: moving a child reflows its in-flow sibling",
     overlay.set_dragging_enabled(true);
     overlay.set_selected_view(a_ptr);
 
-    // P2c: absolute float (the path that pulls a OUT of flow) is the
+    // Absolute float (the path that pulls a OUT of flow) is the
     // ⌘-drag escape hatch — hold Cmd so the sibling reflows.
     MouseEvent press;
     press.position = {a_ptr->bounds().x + 10, a_ptr->bounds().y + 10};
@@ -3505,8 +3503,8 @@ TEST_CASE("InspectorOverlay P2: moving a child reflows its in-flow sibling",
 }
 
 // Grid guard: a move on a grid child is refused (no tweaks, no conversion).
-TEST_CASE("InspectorOverlay P2: move is refused for a grid child",
-          "[inspect][overlay][p2][move][grid-guard][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: move is refused for a grid child",
+          "[inspect][overlay][move][grid-guard][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
 
@@ -3529,7 +3527,7 @@ TEST_CASE("InspectorOverlay P2: move is refused for a grid child",
     overlay.set_selected_view(cell_ptr);
 
     // ⌘-body-press on the grid child: absolute-float refused (grid children
-    // ignore position/top/left). P2c: only the float path is grid-guarded;
+    // ignore position/top/left). Only the float path is grid-guarded;
     // plain reflow drag-out is allowed, so the refusal test holds Cmd.
     MouseEvent press;
     press.position = {40, 40};
@@ -3550,9 +3548,9 @@ TEST_CASE("InspectorOverlay P2: move is refused for a grid child",
 
 // Resize still works alongside move (no regression): a handle press starts
 // a resize, not a move, and emits width/height tweaks.
-TEST_CASE("InspectorOverlay P2: resize handle still wins over body-move "
+TEST_CASE("InspectorOverlay: resize handle still wins over body-move "
           "(no regression)",
-          "[inspect][overlay][p2][move][regression][issue-wysiwyg-p2]") {
+          "[inspect][overlay][move][regression][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -3582,8 +3580,8 @@ TEST_CASE("InspectorOverlay P2: resize handle still wins over body-move "
 }
 
 // Nested element is movable (not just containers).
-TEST_CASE("InspectorOverlay P2: a nested element can be moved",
-          "[inspect][overlay][p2][move][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: a nested element can be moved",
+          "[inspect][overlay][move][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
 
@@ -3607,7 +3605,7 @@ TEST_CASE("InspectorOverlay P2: a nested element can be moved",
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == nested_ptr);
 
-    // P2c: absolute float via ⌘-drag.
+    // Absolute float via ⌘-drag.
     MouseEvent press; press.position = {45, 38}; press.is_down = true;
     press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));
@@ -3625,8 +3623,8 @@ TEST_CASE("InspectorOverlay P2: a nested element can be moved",
 // gesture math in logical (post-inverse) space, so the host inverse-maps
 // before dispatch. This test reproduces that wiring with
 // compute_design_viewport_transform and asserts the logical delta.
-TEST_CASE("InspectorOverlay P2: drag delta is in logical space under viewport scale",
-          "[inspect][overlay][p2][move][scale][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: drag delta is in logical space under viewport scale",
+          "[inspect][overlay][move][scale][issue-wysiwyg-p2]") {
     // Design surface 300×200 shown in a 600×400 window → scale 2.0.
     const float design_w = 300, design_h = 200;
     const float window_w = 600, window_h = 400;
@@ -3663,7 +3661,7 @@ TEST_CASE("InspectorOverlay P2: drag delta is in logical space under viewport sc
     MouseEvent press;
     press.position = to_logical(press_screen.x, press_screen.y);
     press.is_down = true;
-    press.modifiers = kModCmd;  // P2c: absolute float via ⌘-drag
+    press.modifiers = kModCmd;  // Absolute float via ⌘-drag
     REQUIRE(overlay.handle_mouse_event(press));
 
     // Drag +100 SCREEN px in x, +60 SCREEN px in y → at scale 2.0 that is
@@ -3686,8 +3684,8 @@ TEST_CASE("InspectorOverlay P2: drag delta is in logical space under viewport sc
 
 // Two-IR-worlds shim: a move tweak (layout.* namespace) is consumable by the
 // C++/native apply path via apply_move_tweak_to_view.
-TEST_CASE("InspectorOverlay P2: move tweak round-trips on the C++ apply path",
-          "[inspect][overlay][p2][move][round-trip][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: move tweak round-trips on the C++ apply path",
+          "[inspect][overlay][move][round-trip][issue-wysiwyg-p2]") {
     View v;
     // Apply the three move-tweak property paths the gesture emits.
     REQUIRE(apply_move_tweak_to_view(v, "layout.position",
@@ -3771,8 +3769,8 @@ TEST_CASE("compute_badge_placement flips below near the window top",
 
 // Re-import round-trip: a moved element's tweaks survive an apply pass — the
 // TweakStore values reconstruct an absolute view at the moved left/top.
-TEST_CASE("InspectorOverlay P2: move tweaks reconstruct absolute view on re-apply",
-          "[inspect][overlay][p2][move][round-trip][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: move tweaks reconstruct absolute view on re-apply",
+          "[inspect][overlay][move][round-trip][issue-wysiwyg-p2]") {
     // Simulate: gesture wrote tweaks; a fresh import re-creates the view and
     // re-applies the stored tweaks by anchor.
     TweakStore store;
@@ -3799,17 +3797,16 @@ TEST_CASE("InspectorOverlay P2: move tweaks reconstruct absolute view on re-appl
     REQUIRE(fresh.top() == 75.0f);
 }
 
-// ── P2a: undo safety net ────────────────────────────────────────────────────
+// ── Undo safety net ─────────────────────────────────────────────────────────
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md § R2.2.
 // Every committed manipulation gesture becomes ONE undoable EditHistory
 // entry whose undo restores BOTH the live View layout inputs AND the
 // TweakStore. These drive the real handle_mouse_event() gesture path
 // (press → move → release) with an EditHistory attached, then assert
 // undo/redo behavior.
 
-TEST_CASE("InspectorOverlay P2a: resize gesture is one undoable unit",
-          "[inspect][overlay][p2a][undo][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: resize gesture is one undoable unit",
+          "[inspect][overlay][undo][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -3883,8 +3880,8 @@ TEST_CASE("InspectorOverlay P2a: resize gesture is one undoable unit",
     REQUIRE(store.lookup("figma:0:42", "layout.height")->getFloat32() == 55.0f);
 }
 
-TEST_CASE("InspectorOverlay P2a: resize undo restores a PRIOR tweak value",
-          "[inspect][overlay][p2a][undo][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: resize undo restores a PRIOR tweak value",
+          "[inspect][overlay][undo][issue-wysiwyg-p2]") {
     // When a width tweak already exists, undo must RESTORE it (not remove
     // it) — proving the prior-value capture path, not just the remove path.
     View root;
@@ -3940,8 +3937,8 @@ TEST_CASE("InspectorOverlay P2a: resize undo restores a PRIOR tweak value",
     REQUIRE(h->getFloat32() == 40.0f);
 }
 
-TEST_CASE("InspectorOverlay P2a: move gesture undo reverts all 3 tweaks atomically",
-          "[inspect][overlay][p2a][undo][move][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: move gesture undo reverts all 3 tweaks atomically",
+          "[inspect][overlay][undo][move][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     root.flex().direction = FlexDirection::row;
@@ -3972,7 +3969,7 @@ TEST_CASE("InspectorOverlay P2a: move gesture undo reverts all 3 tweaks atomical
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == child_ptr);
 
-    // P2c: absolute float (3 tweaks) is the ⌘-drag path.
+    // Absolute float (3 tweaks) is the ⌘-drag path.
     MouseEvent press;
     press.position = {before.x + 20, before.y + 20};
     press.is_down = true;
@@ -4018,8 +4015,8 @@ TEST_CASE("InspectorOverlay P2a: move gesture undo reverts all 3 tweaks atomical
     REQUIRE(store.lookup("anchor-move", "layout.left").has_value());
 }
 
-TEST_CASE("InspectorOverlay P2a: gestures behave normally when no EditHistory",
-          "[inspect][overlay][p2a][undo][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: gestures behave normally when no EditHistory",
+          "[inspect][overlay][undo][issue-wysiwyg-p2]") {
     // Guard: without an EditHistory wired, the resize gesture still applies
     // live + emits tweaks exactly as before (the safety net is additive).
     View root;
@@ -4060,8 +4057,8 @@ TEST_CASE("InspectorOverlay P2a: gestures behave normally when no EditHistory",
     REQUIRE(store.lookup("a", "layout.width")->getFloat32() == 100.0f);
 }
 
-TEST_CASE("InspectorOverlay P2a: Cmd+Z / Cmd+Shift+Z drive undo and redo",
-          "[inspect][overlay][p2a][undo][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: Cmd+Z / Cmd+Shift+Z drive undo and redo",
+          "[inspect][overlay][undo][issue-wysiwyg-p2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -4122,13 +4119,13 @@ TEST_CASE("InspectorOverlay P2a: Cmd+Z / Cmd+Shift+Z drive undo and redo",
     REQUIRE(child_ptr->flex().preferred_width == 100.0f);
 }
 
-TEST_CASE("InspectorOverlay P2a: tweak-panel delete is undoable",
-          "[inspect][overlay][p2a][undo][delete][issue-wysiwyg-p2]") {
+TEST_CASE("InspectorOverlay: tweak-panel delete is undoable",
+          "[inspect][overlay][undo][delete][issue-wysiwyg-p2]") {
     // Drive the REAL panel delete-icon click path through
     // handle_mouse_event() (the TweakAction::remove branch that builds the
     // EditHistory entry), then undo to restore the deleted tweak. The icon
     // hit-rects are private, so we sweep the known delete-icon column the
-    // same way the Phase 2.5 panel tests do.
+    // same way the tweak-panel tests do.
     View root;
     root.set_bounds({0, 0, 600, 600});
     TweakStore store;
@@ -4177,12 +4174,11 @@ TEST_CASE("InspectorOverlay P2a: tweak-panel delete is undoable",
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// P2c — WYSIWYG "Figma feel" pivot
+// Reflow-aware manipulation pivot
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md § Refinement 2.
 //   - Reflow-aware MOVE is the DEFAULT body-drag (reorder among siblings /
 //     reparent into a container); ⌘-drag is the absolute-float escape hatch
-//     (covered by the P2 tests above, now Cmd-gated).
+//     (covered by the absolute-move tests above, now Cmd-gated).
 //   - Proportional RESIZE via Shift + handle-drag (scales content).
 //   - Selection comes ONLY from the canvas; the floating window reflects.
 // ════════════════════════════════════════════════════════════════════════════
@@ -4191,8 +4187,8 @@ TEST_CASE("InspectorOverlay P2a: tweak-panel delete is undoable",
 // sibling's midpoint rewrites flex().order so the dragged child re-sequences,
 // WITHOUT converting to absolute. Asserts the resolved child order changed and
 // the gesture is undoable.
-TEST_CASE("InspectorOverlay P2c: reflow drag reorders flex siblings via order",
-          "[inspect][overlay][p2c][reflow][move][issue-wysiwyg-p2c]") {
+TEST_CASE("InspectorOverlay: reflow drag reorders flex siblings via order",
+          "[inspect][overlay][reflow][move][issue-wysiwyg-p2c]") {
     View root;
     root.set_bounds({0, 0, 600, 200});
     root.flex().direction = FlexDirection::row;
@@ -4275,12 +4271,12 @@ TEST_CASE("InspectorOverlay P2c: reflow drag reorders flex siblings via order",
     REQUIRE(a_ptr->bounds().x < b_ptr->bounds().x);
 }
 
-// WYSIWYG sweep P1 — a same-parent reflow REORDER must PERSIST the new order as
+// Reflow regression — a same-parent reflow REORDER must PERSIST the new order as
 // a layout.order tweak (it was previously live-only; the "persisted elsewhere"
 // comment was wrong). The moved child AND any normalized sibling whose order
 // changed get a tweak keyed by their OWN anchor, and the value round-trips
 // through lock_tweak_into_source as `el.style.order`.
-TEST_CASE("InspectorOverlay sweep P1: same-parent reorder emits a layout.order "
+TEST_CASE("InspectorOverlay reflow: same-parent reorder emits a layout.order "
           "tweak that round-trips",
           "[inspect][overlay][reflow][reorder][issue-wysiwyg-reflow-slot]") {
     View root;
@@ -4358,10 +4354,10 @@ TEST_CASE("InspectorOverlay sweep P1: same-parent reorder emits a layout.order "
             != std::string::npos);
 }
 
-// WYSIWYG sweep P1 — a cross-parent reflow drop must carry the insertion SLOT
+// Reflow regression — a cross-parent reflow drop must carry the insertion SLOT
 // (preceding-sibling anchor) through the ReparentSourceEdit so the source
 // rewrite lands the moved block at the dragged position, not always first-child.
-TEST_CASE("InspectorOverlay sweep P1: cross-parent reflow drop carries the "
+TEST_CASE("InspectorOverlay reflow: cross-parent reflow drop carries the "
           "insertion slot to the source sink",
           "[inspect][overlay][reflow][reparent][issue-wysiwyg-reflow-slot]") {
     View root;
@@ -4436,9 +4432,9 @@ TEST_CASE("InspectorOverlay sweep P1: cross-parent reflow drop carries the "
 // Reflow reparent: a plain body-drag of a node whose cursor ends INSIDE a
 // different container reparents the node into that container, and undo
 // restores the original parent.
-TEST_CASE("InspectorOverlay P2c: reflow drag reparents a node into another "
+TEST_CASE("InspectorOverlay: reflow drag reparents a node into another "
           "container, undo restores parent",
-          "[inspect][overlay][p2c][reflow][reparent][move][issue-wysiwyg-p2c]") {
+          "[inspect][overlay][reflow][reparent][move][issue-wysiwyg-p2c]") {
     View root;
     root.set_bounds({0, 0, 600, 300});
     root.flex().direction = FlexDirection::row;
@@ -4619,7 +4615,7 @@ TEST_CASE("InspectorOverlay T5: reflow reparent locks the structural edit to "
     // Before: moving's block sits under left (precedes right's block).
     REQUIRE(pos("a-moving") < pos("a-right"));
 
-    // ── Drive the reflow reparent gesture (mirror the P2c reparent test). ──
+    // ── Drive the reflow reparent gesture (mirror the reparent test). ──
     const Rect mb = moving_ptr->bounds();
     MouseEvent press;
     press.position = {mb.x + 10, mb.y + 10};
@@ -4745,8 +4741,8 @@ TEST_CASE("InspectorOverlay T5: reflow reparent without a source sink is "
 // Proportional resize: Shift + corner-handle drag SCALES the container's
 // content (View::set_scale) rather than just stretching the box, and the
 // scale is undoable.
-TEST_CASE("InspectorOverlay P2c: Shift + handle drag scales content proportionally",
-          "[inspect][overlay][p2c][resize][proportional][issue-wysiwyg-p2c]") {
+TEST_CASE("InspectorOverlay: Shift + handle drag scales content proportionally",
+          "[inspect][overlay][resize][proportional][issue-wysiwyg-p2c]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -4806,14 +4802,14 @@ TEST_CASE("InspectorOverlay P2c: Shift + handle drag scales content proportional
     REQUIRE(child_ptr->scale() == Catch::Approx(scaled));
 }
 
-// Read-only mode is the supported OPT-OUT (the default is two-way, P2e). In
+// Read-only mode is the supported OPT-OUT (the default is two-way selection). In
 // read-only mode a tree-row "click" (firing the tree's on_select) shows the
 // node's properties but does NOT change the shared selection / fire
 // on_view_selected. reflect_selection() never fires the callback either (it is
 // the no-feedback canvas → window mirror).
-TEST_CASE("InspectorWindow P2e: read-only mode opt-out suppresses the select "
+TEST_CASE("InspectorWindow: read-only mode opt-out suppresses the select "
           "callback",
-          "[inspect][window][p2e][readonly][issue-wysiwyg-p2e]") {
+          "[inspect][window][readonly][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_bounds({0, 0, 400, 300});
     auto child = std::make_unique<View>();
@@ -4849,17 +4845,17 @@ TEST_CASE("InspectorWindow P2e: read-only mode opt-out suppresses the select "
     REQUIRE_FALSE(callback_fired);
 }
 
-// ── WYSIWYG P2d polish ──────────────────────────────────────────────────────
+// ── Drop indicator, cursor, and selection polish ───────────────────────────
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md (P2d):
-//   B. cursor affordances over the selected element (move vs resize vs none)
-//   D. drop-indicator clarity — never shown at rest, only during an active drag
-//   A. reflect-state-only — a canvas reflection must NOT highlight a tree row
+// - Cursor affordances distinguish selected-element body, handles, and outside.
+// - Drop indicators appear only during an active reflow drag.
+// - Canvas reflection highlights the matching tree row without painting a
+//   stray in-canvas selection box inside the inspector window.
 
-// P2d (D): a selected-but-idle element shows no drop indicator. The blue
+// D: a selected-but-idle element shows no drop indicator. The blue
 // insertion line / container highlight is reserved for an ACTIVE reflow drag.
-TEST_CASE("InspectorOverlay P2d: drop indicator is NOT shown when idle",
-          "[inspect][overlay][p2d][drop-indicator][issue-wysiwyg-p2d]") {
+TEST_CASE("InspectorOverlay: drop indicator is NOT shown when idle",
+          "[inspect][overlay][drop-indicator][issue-wysiwyg-p2d]") {
     View root;
     root.set_bounds({0, 0, 600, 200});
     root.flex().direction = FlexDirection::row;
@@ -4926,11 +4922,11 @@ TEST_CASE("InspectorOverlay P2d: drop indicator is NOT shown when idle",
     REQUIRE_FALSE(overlay.drop_indicator_active());
 }
 
-// P2d (D) regression: an ABSOLUTE-float (⌘-drag) move must also never raise
+// Drop-indicator regression: an ABSOLUTE-float (⌘-drag) move must also never raise
 // the reflow drop indicator (the float path moves the live element directly
 // and uses a ghost, not the insertion line).
-TEST_CASE("InspectorOverlay P2d: float (Cmd) move shows no reflow drop indicator",
-          "[inspect][overlay][p2d][drop-indicator][issue-wysiwyg-p2d]") {
+TEST_CASE("InspectorOverlay: float (Cmd) move shows no reflow drop indicator",
+          "[inspect][overlay][drop-indicator][issue-wysiwyg-p2d]") {
     View root;
     root.set_bounds({0, 0, 600, 200});
 
@@ -4967,11 +4963,11 @@ TEST_CASE("InspectorOverlay P2d: float (Cmd) move shows no reflow drop indicator
     REQUIRE_FALSE(overlay.drop_indicator_active());
 }
 
-// P2d (B): the cursor-affordance hit-test returns resize over a corner
+// B: the cursor-affordance hit-test returns resize over a corner
 // handle, move over the body, and none outside / when dragging mode is off.
-TEST_CASE("InspectorOverlay P2d: cursor affordance is move on body, resize on "
+TEST_CASE("InspectorOverlay: cursor affordance is move on body, resize on "
           "corner, none outside",
-          "[inspect][overlay][p2d][cursor][issue-wysiwyg-p2d]") {
+          "[inspect][overlay][cursor][issue-wysiwyg-p2d]") {
     using CA = InspectorOverlay::CursorAffordance;
 
     View root;
@@ -5022,15 +5018,15 @@ TEST_CASE("InspectorOverlay P2d: cursor affordance is move on body, resize on "
     REQUIRE(overlay.cursor_affordance_at({160, 110}) == CA::none);
 }
 
-// P2e (CORRECTS P2d): reflect_selection (a canvas-driven mirror) DOES
+// Reflection selection: reflect_selection (a canvas-driven mirror) DOES
 // highlight the matching tree row AND shows the node's properties — two-way
 // selection means a canvas pick highlights the corresponding row in the
 // inspector tree. (Maintainer correction: "we DO want to be able to tap and
 // select an item in the inspector as it works today." The only forbidden
 // thing is a stray selection BOX inside the inspector window — that leak is
 // fixed in the paint hook, not by stripping the row highlight.)
-TEST_CASE("InspectorWindow P2e: reflect_selection highlights the matching tree row",
-          "[inspect][window][p2e][reflect][issue-wysiwyg-p2e]") {
+TEST_CASE("InspectorWindow: reflect_selection highlights the matching tree row",
+          "[inspect][window][reflect][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_id("root");
 
@@ -5069,14 +5065,14 @@ TEST_CASE("InspectorWindow P2e: reflect_selection highlights the matching tree r
     REQUIRE(tree->selected_node() == node);
 }
 
-// P2e Fix 1 — paint-leak gate. The installed inspector paint hook must NOT
+// Paint-leak fix — paint-leak gate. The installed inspector paint hook must NOT
 // paint the in-canvas overlay when the painting root is NOT the inspected
 // root (e.g. the floating InspectorWindow painting its own root). This is the
 // root cause of the "stray box at a random coordinate inside the inspector
 // window": the global paint hook fired for every root that painted, so the
 // overlay's selection box leaked into the inspector window's surface.
-TEST_CASE("InspectorOverlay P2e: paint hook gates on the painting root",
-          "[inspect][overlay][p2e][paint-leak][issue-wysiwyg-p2e]") {
+TEST_CASE("InspectorOverlay: paint hook gates on the painting root",
+          "[inspect][overlay][paint-leak][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_bounds({0, 0, 400, 300});
     auto child = std::make_unique<View>();
@@ -5117,12 +5113,12 @@ TEST_CASE("InspectorOverlay P2e: paint hook gates on the painting root",
     View::set_inspector_mouse_hook({});
 }
 
-// P2e Fix 2 — two-way selection. A tree-row click (default, non-read-only)
+// Two-way selection fix. A tree-row click (default, non-read-only)
 // fires on_view_selected so the host can drive the SHARED canvas selection,
 // and a canvas-driven reflection highlights the matching tree row. This
 // asserts the round-trip both directions without recursing.
-TEST_CASE("InspectorWindow P2e: two-way selection (canvas <-> tree row)",
-          "[inspect][window][p2e][two-way][issue-wysiwyg-p2e]") {
+TEST_CASE("InspectorWindow: two-way selection (canvas <-> tree row)",
+          "[inspect][window][two-way][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_bounds({0, 0, 400, 300});
     auto child = std::make_unique<View>();
@@ -5131,7 +5127,7 @@ TEST_CASE("InspectorWindow P2e: two-way selection (canvas <-> tree row)",
     inspected_root.add_child(std::move(child));
 
     InspectorWindow window(inspected_root);
-    // Default (NOT read-only) — two-way selection is the P2e default.
+    // Default (NOT read-only) — two-way selection is the default.
     REQUIRE_FALSE(window.selection_readonly());
 
     auto* tabs = first_view_of_type<TabPanel>(window);
@@ -5163,16 +5159,16 @@ TEST_CASE("InspectorWindow P2e: two-way selection (canvas <-> tree row)",
     REQUIRE(tree->selected_node() == node);  // row highlighted by the reflection
 }
 
-// ── WYSIWYG P2h — interactive manipulation regressions ──────────────────────
+// ── Interactive manipulation regressions ───────────────────────────────────
 //
 // These exercise the gesture state machine with the EXPLICIT MousePhase the
 // mac host now stamps (press / drag / release / hover), which is the OPPOSITE
-// is_down convention from the legacy headless tests above. The pre-P2h
+// is_down convention from the legacy headless tests above. The pre-fix
 // machine inferred drag-vs-release from is_down alone, so a live mac drag
 // ended the gesture on the first drag tick and fell through to re-selection.
 
 namespace {
-// Build a two-child root used by the P2h move/resize cases. `a` is the
+// Build a two-child root used by the move/resize cases. `a` is the
 // element under manipulation; `b` is a second, non-overlapping element the
 // drag must NOT accidentally re-select.
 struct TwoChild {
@@ -5199,9 +5195,9 @@ std::unique_ptr<TwoChild> make_two_child() {
 }
 }  // namespace
 
-TEST_CASE("InspectorOverlay P2h: body-press of selected element begins a MOVE, "
+TEST_CASE("InspectorOverlay: body-press of selected element begins a MOVE, "
           "drag moves THAT element and never re-selects",
-          "[inspect][overlay][p2h][move][regression1]") {
+          "[inspect][overlay][move][regression1]") {
     auto tc = make_two_child();
     TweakStore store;
     InspectorOverlay overlay(tc->root);
@@ -5249,9 +5245,9 @@ TEST_CASE("InspectorOverlay P2h: body-press of selected element begins a MOVE, "
     (void)left0; (void)top0;
 }
 
-TEST_CASE("InspectorOverlay P2h: ⌘-drag float move repositions the selected "
+TEST_CASE("InspectorOverlay: ⌘-drag float move repositions the selected "
           "element (and only it)",
-          "[inspect][overlay][p2h][move][regression1]") {
+          "[inspect][overlay][move][regression1]") {
     auto tc = make_two_child();
     TweakStore store;
     InspectorOverlay overlay(tc->root);
@@ -5291,9 +5287,9 @@ TEST_CASE("InspectorOverlay P2h: ⌘-drag float move repositions the selected "
     REQUIRE(overlay.selected_view() == tc->a);
 }
 
-TEST_CASE("InspectorOverlay P2h: corner-handle press begins a RESIZE and the "
+TEST_CASE("InspectorOverlay: corner-handle press begins a RESIZE and the "
           "drag changes size (explicit phase)",
-          "[inspect][overlay][p2h][resize][regression2]") {
+          "[inspect][overlay][resize][regression2]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -5335,8 +5331,8 @@ TEST_CASE("InspectorOverlay P2h: corner-handle press begins a RESIZE and the "
     overlay.handle_mouse_event(release);
 }
 
-TEST_CASE("InspectorOverlay P2h: edge-handle press resizes a single axis",
-          "[inspect][overlay][p2h][resize][regression2][regression5]") {
+TEST_CASE("InspectorOverlay: edge-handle press resizes a single axis",
+          "[inspect][overlay][resize][regression2][regression5]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -5370,9 +5366,9 @@ TEST_CASE("InspectorOverlay P2h: edge-handle press resizes a single axis",
     REQUIRE(child_ptr->bounds().height == 40.0f);  // unchanged
 }
 
-TEST_CASE("InspectorOverlay P2h: Esc deselect leaves hover + click-to-select "
+TEST_CASE("InspectorOverlay: Esc deselect leaves hover + click-to-select "
           "working with no Cmd+I cycle",
-          "[inspect][overlay][p2h][regression3]") {
+          "[inspect][overlay][regression3]") {
     auto tc = make_two_child();
     InspectorOverlay overlay(tc->root);
     overlay.set_manipulate_only(true);
@@ -5405,9 +5401,9 @@ TEST_CASE("InspectorOverlay P2h: Esc deselect leaves hover + click-to-select "
     REQUIRE(overlay.selected_view() == tc->b);
 }
 
-TEST_CASE("InspectorOverlay P2h: a drag tick on empty canvas never mutates "
+TEST_CASE("InspectorOverlay: a drag tick on empty canvas never mutates "
           "selection (no rubber-band re-select)",
-          "[inspect][overlay][p2h][regression1]") {
+          "[inspect][overlay][regression1]") {
     auto tc = make_two_child();
     InspectorOverlay overlay(tc->root);
     overlay.set_manipulate_only(true);
@@ -5425,8 +5421,8 @@ TEST_CASE("InspectorOverlay P2h: a drag tick on empty canvas never mutates "
     REQUIRE(overlay.selected_view() == tc->a);  // selection NOT hijacked
 }
 
-TEST_CASE("InspectorOverlay P2h: context-aware resize/move cursor per zone",
-          "[inspect][overlay][p2h][regression5][cursor]") {
+TEST_CASE("InspectorOverlay: context-aware resize/move cursor per zone",
+          "[inspect][overlay][regression5][cursor]") {
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -5473,12 +5469,12 @@ TEST_CASE("InspectorOverlay P2h: context-aware resize/move cursor per zone",
     REQUIRE(overlay.cursor_style_for({500, 300}) == -1);  // default
 }
 
-TEST_CASE("InspectorOverlay P2h: legacy is_down gesture convention still works "
+TEST_CASE("InspectorOverlay: legacy is_down gesture convention still works "
           "(no explicit phase)",
-          "[inspect][overlay][p2h][regression2]") {
+          "[inspect][overlay][regression2]") {
     // Guards the headless JUCE-style convention path: press=is_down,
     // drag=!is_down, release=is_down, phase left automatic. This is the
-    // convention the pre-P2h tests use, and it must remain intact.
+    // convention the pre-fix tests use, and it must remain intact.
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();
@@ -5507,15 +5503,15 @@ TEST_CASE("InspectorOverlay P2h: legacy is_down gesture convention still works "
     REQUIRE(child_ptr->bounds().height == 55.0f);
 }
 
-// ── WYSIWYG P2i (Refinement A) ────────────────────────────────────────────
+// ── Reflow drop-indicator coverage ─────────────────────────────────────────
 // During a reflow body-drag over a flex container, resolve_drop_target() must
 // resolve a valid insertion slot for EVERY cursor position across the child
 // span (before-first, between each pair, after-last) and surface the
 // Figma-style blue insertion LINE — not a vague container highlight — at the
 // resolved boundary. The committed drop must land at the indicated slot.
-TEST_CASE("InspectorOverlay P2i: reflow drag shows an insertion LINE at every "
+TEST_CASE("InspectorOverlay: reflow drag shows an insertion LINE at every "
           "slot across a row container's children",
-          "[inspect][overlay][p2i][reflow][drop-indicator][issue-wysiwyg-p2i]") {
+          "[inspect][overlay][reflow][drop-indicator][issue-wysiwyg-p2i]") {
     View root;
     root.set_bounds({0, 0, 600, 200});
     root.flex().direction = FlexDirection::row;
@@ -5611,9 +5607,9 @@ TEST_CASE("InspectorOverlay P2i: reflow drag shows an insertion LINE at every "
 
 // Column container variant — the insertion LINE is horizontal and the slot
 // index tracks the cursor's Y across the child span.
-TEST_CASE("InspectorOverlay P2i: reflow drag shows a horizontal insertion LINE "
+TEST_CASE("InspectorOverlay: reflow drag shows a horizontal insertion LINE "
           "across a column container's children",
-          "[inspect][overlay][p2i][reflow][drop-indicator][issue-wysiwyg-p2i]") {
+          "[inspect][overlay][reflow][drop-indicator][issue-wysiwyg-p2i]") {
     View root;
     root.set_bounds({0, 0, 200, 600});
     root.flex().direction = FlexDirection::column;
@@ -5668,15 +5664,15 @@ TEST_CASE("InspectorOverlay P2i: reflow drag shows a horizontal insertion LINE "
     REQUIRE(s_after == 2);
 }
 
-// ── WYSIWYG P2i (Refinement B) ────────────────────────────────────────────
+// ── Proportional resize coverage ───────────────────────────────────────────
 // After a Shift (proportional) resize, the scaled content must stay WITHIN
 // the resize box: every direct child's scaled rect (origin-(0,0) anchored,
 // scaled by the view's scale()) must lie inside the container's box bounds —
 // no spill past any edge. Also asserts the box is clipped (overflow:hidden)
 // and the scale anchor is top-left.
-TEST_CASE("InspectorOverlay P2i: Shift-resize keeps scaled content inside the "
+TEST_CASE("InspectorOverlay: Shift-resize keeps scaled content inside the "
           "box (no spill past the selection rectangle)",
-          "[inspect][overlay][p2i][resize][proportional][issue-wysiwyg-p2i]") {
+          "[inspect][overlay][resize][proportional][issue-wysiwyg-p2i]") {
     View root;
     root.set_bounds({0, 0, 800, 600});
 
@@ -5685,7 +5681,7 @@ TEST_CASE("InspectorOverlay P2i: Shift-resize keeps scaled content inside the "
     // set manually and we do NOT call layout_children() before the gesture so
     // the box stays put (Yoga would otherwise reflow a flex child to the
     // content origin and move the resize handles). This mirrors the existing
-    // P2c proportional-resize test's setup.
+    // Proportional-resize test's setup.
     auto box = std::make_unique<View>();
     box->set_anchor_id("anchor-box");
     box->set_bounds({40, 40, 120, 80});
@@ -5771,17 +5767,15 @@ TEST_CASE("InspectorOverlay P2i: Shift-resize keeps scaled content inside the "
     REQUIRE(box_ptr->overflow() == View::Overflow::visible);
 }
 
-// ── P3: Figma-style tool palette + inline text editing ──────────────────────
+// ── Tool palette and inline text editing ───────────────────────────────────
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md
-// § "Future idea — Figma-style tool palette + inline text editing".
 // V = Select tool (default), T = Text tool. The Text tool clicks a
 // text-bearing element to edit its copy in place: Enter commits (live
 // View text + a `text` content tweak, ONE undoable EditHistory unit),
 // Esc cancels. The bare T tweak-panel toggle moved to Shift+T.
 
-TEST_CASE("InspectorOverlay P3: set_tool / V / T switch tools",
-          "[inspect][overlay][phase3][tools]") {
+TEST_CASE("InspectorOverlay: set_tool / V / T switch tools",
+          "[inspect][overlay][tools]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorOverlay overlay(root);
@@ -5811,9 +5805,9 @@ TEST_CASE("InspectorOverlay P3: set_tool / V / T switch tools",
     REQUIRE(overlay.tool() == InspectorOverlay::Tool::select);
 }
 
-TEST_CASE("InspectorOverlay P3: Text tool click begins inline edit, not "
+TEST_CASE("InspectorOverlay: Text tool click begins inline edit, not "
           "select-for-drag",
-          "[inspect][overlay][phase3][text-tool]") {
+          "[inspect][overlay][text-tool]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     auto label = std::make_unique<Label>("Hello");
@@ -5847,9 +5841,9 @@ TEST_CASE("InspectorOverlay P3: Text tool click begins inline edit, not "
     REQUIRE(store.count() == 0);
 }
 
-TEST_CASE("InspectorOverlay P3: typing + Enter commits text, emits `text` "
+TEST_CASE("InspectorOverlay: typing + Enter commits text, emits `text` "
           "tweak, undoable",
-          "[inspect][overlay][phase3][text-tool][undo]") {
+          "[inspect][overlay][text-tool][undo]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     auto label = std::make_unique<Label>("Old");
@@ -5910,8 +5904,8 @@ TEST_CASE("InspectorOverlay P3: typing + Enter commits text, emits `text` "
     REQUIRE(store.lookup("figma:label-1", "text")->getString() == "New");
 }
 
-TEST_CASE("InspectorOverlay P3: Esc cancels inline text edit, reverts copy",
-          "[inspect][overlay][phase3][text-tool]") {
+TEST_CASE("InspectorOverlay: Esc cancels inline text edit, reverts copy",
+          "[inspect][overlay][text-tool]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     auto label = std::make_unique<Label>("Keep");
@@ -6087,7 +6081,7 @@ TEST_CASE("InspectorOverlay T2: caret + selection paint as a light overlay",
 
     InspectorOverlay overlay(root);
     overlay.set_active(true);
-    overlay.set_manipulate_only(true);  // P1 manipulate layer (ui-preview path)
+    overlay.set_manipulate_only(true);  // manipulate layer (ui-preview path)
     overlay.set_tool(InspectorOverlay::Tool::text);
     REQUIRE(overlay.begin_text_edit(label));
     overlay.text_select_all();
@@ -6284,8 +6278,8 @@ TEST_CASE("InspectorOverlay QA BUG4: text-edit shows subtle outline, no handles"
     }
 }
 
-TEST_CASE("InspectorOverlay P3: Select tool clicks still select (unchanged)",
-          "[inspect][overlay][phase3][text-tool][regression]") {
+TEST_CASE("InspectorOverlay: Select tool clicks still select (unchanged)",
+          "[inspect][overlay][text-tool][regression]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     auto label = std::make_unique<Label>("Click me");
@@ -6307,8 +6301,8 @@ TEST_CASE("InspectorOverlay P3: Select tool clicks still select (unchanged)",
     REQUIRE_FALSE(overlay.text_editing());
 }
 
-TEST_CASE("InspectorOverlay P3: Text tool only edits text-bearing views",
-          "[inspect][overlay][phase3][text-tool]") {
+TEST_CASE("InspectorOverlay: Text tool only edits text-bearing views",
+          "[inspect][overlay][text-tool]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     // A plain (non-text) View.
@@ -6336,8 +6330,8 @@ TEST_CASE("InspectorOverlay P3: Text tool only edits text-bearing views",
     REQUIRE_FALSE(overlay.text_editing());
 }
 
-TEST_CASE("InspectorOverlay P3: TextEditor is also editable via the Text tool",
-          "[inspect][overlay][phase3][text-tool]") {
+TEST_CASE("InspectorOverlay: TextEditor is also editable via the Text tool",
+          "[inspect][overlay][text-tool]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     auto editor = std::make_unique<pulp::view::TextEditor>();
@@ -6618,16 +6612,16 @@ TEST_CASE("InspectorOverlay P5: editing text re-shapes — laid-out width update
     overlay.cancel_text_edit();
 }
 
-// ── P3: InspectorWindow tool strip ──────────────────────────────────────────
+// ── InspectorWindow tool strip ─────────────────────────────────────────────
 //
 // The window header carries a Figma-style tool strip wired to the overlay
 // tool BOTH ways via the host: a strip-button click fires on_tool_picked
 // (host → overlay.set_tool); a keyboard V/T flip is mirrored back by the
 // host calling set_active_tool so the strip highlights the active tool.
 
-TEST_CASE("InspectorWindow P3: tool strip is present and active-tool "
+TEST_CASE("InspectorWindow: tool strip is present and active-tool "
           "round-trips",
-          "[inspect][window][phase3][tools]") {
+          "[inspect][window][tools]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
     InspectorWindow window(root);

@@ -18,7 +18,7 @@ class PluginSlot;
 
 // Renders an anticipation sub-graph AHEAD of the audio deadline into a ring, so
 // the live graph reads the pre-computed boundary signals instead of paying the
-// sub-graph's cost on the critical block (masterwork Phase 6). Single-producer /
+// sub-graph's cost on the critical block. Single-producer /
 // single-consumer:
 //   - render_ahead() runs OFF the audio thread (a background/idle worker). It
 //     advances the interior's plugin state and pushes whole blocks into the ring.

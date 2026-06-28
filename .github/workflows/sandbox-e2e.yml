@@ -6,9 +6,8 @@
 # but gracefully handles the case where either isn't buildable on this
 # branch / OS:
 #
-#   - `experimental/pulp-rs/` only exists after Phase 8 prep lands. When
-#     the dir is absent, skip the Rust build and let the harness
-#     auto-skip any Rust-dependent test.
+#   - If `experimental/pulp-rs/` is absent, skip the Rust build and let the
+#     harness auto-skip any Rust-dependent test.
 #   - Linux needs apt deps for the C++ build (ALSA / X11 / Wayland via
 #     SDL3). We install the minimum set; if the build still fails, that
 #     regression is worth catching and not a sandbox-harness problem.

@@ -174,7 +174,7 @@ TEST_CASE("DirtyTracker ignores invalid viewport dimensions for promotion",
 }
 
 TEST_CASE("DirtyTracker invalid viewport height disables promotion",
-          "[render][dirty][coverage][large]") {
+          "[render][dirty]") {
     DirtyTracker dt;
     dt.set_viewport(100, 0, 0.01f);
     dt.clear();
@@ -212,7 +212,7 @@ TEST_CASE("DirtyTracker coalesces nearby non-overlapping rects", "[render][dirty
 }
 
 TEST_CASE("DirtyTracker coalesces sparse overlaps through the intersects path",
-          "[render][dirty][coverage][large]") {
+          "[render][dirty]") {
     DirtyTracker dt;
     dt.clear();
 
@@ -241,7 +241,7 @@ TEST_CASE("Rect intersection", "[render][dirty]") {
 }
 
 TEST_CASE("Rect intersection rejects each separating axis independently",
-          "[render][dirty][coverage][large]") {
+          "[render][dirty]") {
     DirtyTracker::Rect a{10, 10, 10, 10};
     DirtyTracker::Rect left{0, 12, 5, 5};
     DirtyTracker::Rect above{12, 0, 5, 5};

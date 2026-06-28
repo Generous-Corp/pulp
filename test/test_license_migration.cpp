@@ -1,5 +1,5 @@
 // test_license_migration.cpp — v1 (RSA) -> v2 (AES-256-GCM) license
-// format migration introduced in macOS plan item 7.2.
+// format migration coverage.
 //
 // Covers:
 //   1. Format detection (v1 vs v2 vs garbage)

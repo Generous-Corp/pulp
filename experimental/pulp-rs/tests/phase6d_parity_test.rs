@@ -129,7 +129,15 @@ fn create_help_lists_all_options() {
 
 #[test]
 fn create_rejects_without_ci_flag() {
-    let output = run_anywhere(&["create", "demo"]);
+    let td = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .current_dir(td.path())
+        .args(["create", "demo"])
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run");
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).expect("utf8");
     assert!(stderr.contains("--ci"), "expected --ci hint, got: {stderr}");
@@ -248,7 +256,14 @@ fn tool_uninstall_missing_exits_nonzero() {
 #[test]
 fn tool_install_stub_reports_unported_and_exits_nonzero() {
     let root = fixture_root("tool", "minimal_registry");
-    let output = run_in(&root, &["tool", "install", "uv"]);
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .current_dir(&root)
+        .args(["tool", "install", "uv"])
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run");
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     assert!(stdout.contains("not ported"));
@@ -261,6 +276,16 @@ fn tool_path_for_unknown_tool_errors() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     assert!(stdout.contains("not found"));
+}
+
+#[test]
+fn tool_doctor_unknown_tool_errors_without_health_header() {
+    let root = fixture_root("tool", "minimal_registry");
+    let output = run_in(&root, &["tool", "doctor", "doesnotexist"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert!(stdout.contains("Tool 'doesnotexist' not found"));
+    assert!(!stdout.contains("Tool Health"));
 }
 
 // ── cross-cutting: suggester ─────────────────────────────────────────

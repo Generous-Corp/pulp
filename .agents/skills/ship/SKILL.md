@@ -42,7 +42,7 @@ Advisory only — never blocks. Full contract + override knobs live in the
 
 | Command | Platform | What It Does |
 |---------|----------|-------------|
-| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit `.app`/`.dmg`/bundle |
+| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit desktop artifact (macOS `.app`/`.dmg`/bundle, Windows `.exe`/bundle; not `.pkg`) |
 | `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.zip` (repeatable), not a raw `.app` |
 | `package` | All | Create .pkg/.dmg (macOS), NSIS (Windows), APK+AAB (Android) |
 | `release` | macOS only | One command: sign → package → **notarize + staple the .pkg/.dmg it builds** → verify |
@@ -132,6 +132,7 @@ one-command path and is fully separate from the repo release pipeline.
 # the exact `spctl -a -t open --context context:primary-signature` Gatekeeper
 # check. Green = the recipient will NOT see "Unnotarized Developer ID".
 pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+pulp ship share MyApp.app --identity "..." --output dist --entitlements entitlements.plist
 
 pulp ship share MyApp.dmg            # already a DMG → skip the wrap step
 pulp ship share Installer.pkg        # pkg assumed installer-signed → notarize only
@@ -143,6 +144,8 @@ Gatekeeper (`source=Unnotarized Developer ID`). The cert is fine; the gap is
 notarization. `share` closes that gap in one step. Credentials resolve through
 the same chain as `pulp ship notarize` (App Store Connect API key preferred);
 without creds, the notarize step fails loudly rather than shipping unnotarized.
+For `.app` inputs, `--output <dir>` chooses where the generated DMG lands and
+`--entitlements <plist>` overrides the default app-signing entitlements.
 
 **Signed + notarized is NOT the same as portable.** A perfectly signed, notarized
 `.app` still degrades on another machine if it reads an asset (SVG / JSON / image)
@@ -164,7 +167,7 @@ it. Two defenses now exist:
   bypass it.)
 
 The composable primitives underneath:
-- `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
+- `pulp ship sign --path <artifact>` — sign exactly one desktop artifact (`.pkg` installers are signed by `package`).
 - `pulp ship notarize --path <dmg|pkg|zip>` — notarize + staple one artifact (repeatable). Use `share` for a raw `.app`.
 
 **Do not confuse with the production release.** `share`/`release`/`sign`/
@@ -220,10 +223,12 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 pulp ship auv3-xcodeproj MyPlugin --sdk iphoneos --open
 ```
 
-Generates a separate CMake Xcode build directory for an AUv3 target. `--sdk`
-accepts `iphonesimulator`, `iphoneos`, or `macosx`; the default output is
-`build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake invocation
-without requiring Xcode.
+Generates a separate CMake Xcode build directory for a project containing an
+AUv3 target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; the
+default output is `build/xcode/<target>-<sdk>`. The generated build hint targets
+`<target>_AUv3`. Use `--dry-run` to print the CMake invocation and build hint
+without requiring Xcode. For macOS AUv3 work, the generated project also
+contains the runnable containing-app target `<target>_AUv3Host`.
 
 ### macOS: Build → Sign → Package → Notarize → Appcast
 
@@ -233,6 +238,7 @@ pulp ship sign                                          # Uses identity from con
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
+pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/Plugin.pkg --sign-key <base64-key>
 ```
 
 #### Notarization credentials (`pulp ship notarize`)
@@ -616,6 +622,12 @@ creating the output directory, guard empty `parent_path()` values before calling
 `std::filesystem::create_directories`; otherwise a bare filename can throw
 instead of writing the feed. Keep this covered in
 `test/test_cli_ship_shellout.cpp`.
+
+When signing appcast entries, `--url` must be the local artifact path used for
+file size and Ed25519 signing. Use `--download-url` to write the public
+Sparkle enclosure URL into the feed. The hosted file must be byte-identical to
+the local artifact passed as `--url`; otherwise Sparkle rejects the update
+because the feed length and signature describe different bytes.
 
 ### Android package tests fail only on Windows
 

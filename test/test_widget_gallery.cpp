@@ -13,8 +13,8 @@ Theme ink_signal(bool dark) {
 }
 }  // namespace
 
-// Phase 5 — the component gallery. The structure assertions run everywhere; the
-// render assertions only where a screenshot provider exists (macOS in CI).
+// Component gallery structure assertions run everywhere; the render assertions
+// only where a screenshot provider exists (macOS in CI).
 // This is the "gallery stays current, enforced" mechanism: if the gallery stops
 // building or rendering, CI fails.
 

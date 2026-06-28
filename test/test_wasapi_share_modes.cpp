@@ -208,10 +208,10 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
     //   result for a probe issued while our own shared-mode device is
     //   still open.
     //
-    // Regression: PR #3004. The previous version of this
-    // test asserted `excl_hr != AUDCLNT_E_DEVICE_IN_USE`, which encodes
-    // the OPPOSITE of MSDN's contract and could fire false CI failures
-    // on perfectly healthy Windows hosts.
+    // Regression coverage: the previous version of this test asserted
+    // `excl_hr != AUDCLNT_E_DEVICE_IN_USE`, which encodes the OPPOSITE of
+    // MSDN's contract and could fire false CI failures on perfectly healthy
+    // Windows hosts.
     //
     // What this test actually proves: an independent exclusive probe
     // can be issued AT ALL while Pulp holds the endpoint shared — i.e.

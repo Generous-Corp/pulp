@@ -39,7 +39,7 @@ TEST_CASE("find_preset returns nullptr for unknown", "[view][presets]") {
 }
 
 TEST_CASE("preset_ids preserves library order and exact size",
-          "[view][presets][coverage][issue-651]") {
+          "[view][presets][issue-651]") {
     const auto& presets = all_presets();
     auto ids = preset_ids();
 
@@ -121,7 +121,7 @@ TEST_CASE("Derived theme JSON round-trip", "[view][presets][derive]") {
 }
 
 TEST_CASE("theme_from_preset applies variant-specific overrides",
-          "[view][presets][derive][coverage][issue-651]") {
+          "[view][presets][derive][issue-651]") {
     ThemePreset preset;
     preset.id = "custom";
     preset.name = "Custom";
@@ -151,7 +151,7 @@ TEST_CASE("theme_from_preset applies variant-specific overrides",
 }
 
 TEST_CASE("derive_theme maps semantic colors to alpha and blend tokens",
-          "[view][presets][derive][coverage]") {
+          "[view][presets][derive]") {
     SemanticColors colors{
         color_from_hex(0x102030),
         color_from_hex(0xE0D0C0),

@@ -70,6 +70,7 @@ Pulp uses WASAPI (Windows Audio Session API) for low-latency audio on Windows. T
 - **Shared low-latency**: `DeviceConfig::low_latency = true` (shared mode only) uses `IAudioClient3::InitializeSharedAudioStream` at the engine's minimum period. If `IAudioClient3` is unavailable or the call fails, Pulp degrades to the standard shared `Initialize` at the requested buffer size — never a half-open stream.
 - **Event-driven**: a background thread waits on buffer events, minimizing latency
 - **Float32 non-interleaved**: Pulp's callback receives per-channel buffers; interleaving to/from WASAPI's format is handled internally
+- **Input capture**: opening a capture endpoint delivers non-empty input buffers and an empty output buffer. Full-duplex apps open separate render and capture devices and synchronize them at the host layer.
 - **Thread priority**: the render thread runs at `THREAD_PRIORITY_TIME_CRITICAL`
 - **Device-invalidation recovery**: if the endpoint is removed or its sample rate / mix format changes (`AUDCLNT_E_DEVICE_INVALIDATED`), the I/O thread stops the stream cleanly and fires the `AudioSystem` device-change notification so the host can re-open at the new format. Pulp does not attempt a transparent in-place reopen.
 
@@ -182,7 +183,7 @@ pulp ship package --version 1.0.0
 The installer:
 - Installs VST3 to `%COMMONFILES%\VST3\`
 - Installs CLAP to `%COMMONFILES%\CLAP\`
-- Creates Start Menu shortcuts and uninstaller
+- Creates an uninstaller; plugin-only installers do not create Start Menu shortcuts
 - Registers with Windows Add/Remove Programs
 
 ### Per-User Installation

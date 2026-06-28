@@ -1,5 +1,6 @@
 #[[
-Install-layout regression for issue-905 follow-up.
+Install-layout regression for installed SDK CMake helper scripts
+(issue-905 follow-up).
 
 `pulp_add_binary_data` resolves its Python encoder via
 ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/encode_binary_data.py — adjacent
@@ -77,7 +78,7 @@ if(NOT EXISTS "${_installed_encoder}")
         "fail at build time with a missing-script error. The install rule "
         "in CMakeLists.txt must publish "
         "tools/cmake/scripts/encode_binary_data.py under "
-        "lib/cmake/Pulp/scripts/ (issue-905 follow-up).")
+        "lib/cmake/Pulp/scripts/.")
 endif()
 
 # Sanity: the script we shipped must be the same one we built against.

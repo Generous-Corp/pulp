@@ -104,7 +104,7 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         // value) at the destination's position, so it extends source liveness
         // like an audio feedforward edge — but event (MIDI) edges carry no audio.
         for (const auto& conn : plan.connections) {
-            if (conn.event) continue;
+            if (is_event(conn)) continue;
             if (conn.feedback) {
                 last_use[conn.source_index] = pinned;
             } else {
@@ -188,8 +188,8 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
                 // in latency + per-connection delay (their source is sampled per
                 // block-position and time-aligned like audio) — matching the host
                 // walk, which only skips feedback/midi/sparse-automation.
-                if (conn.feedback || conn.event ||
-                    (conn.is_automation && !conn.automation.audio_rate)) {
+                if (conn.feedback || is_event(conn) ||
+                    (is_automation_conn(conn) && !conn.automation.audio_rate)) {
                     continue;
                 }
                 max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
@@ -199,8 +199,8 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];
-            if (conn.feedback || conn.event ||
-                (conn.is_automation && !conn.automation.audio_rate)) {
+            if (conn.feedback || is_event(conn) ||
+                (is_automation_conn(conn) && !conn.automation.audio_rate)) {
                 continue;
             }
             const std::uint32_t dst_in = input_latency[conn.dest_index];

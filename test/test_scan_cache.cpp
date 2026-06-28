@@ -111,7 +111,7 @@ TEST_CASE("JSON round-trip preserves all fields", "[scan_cache]") {
     REQUIRE(e.info.format == PluginFormat::VST3);
 }
 
-TEST_CASE("JSON round-trip preserves workstream 03 slice 3.7 metadata",
+TEST_CASE("JSON round-trip preserves rich plugin metadata",
           "[scan_cache][metadata]") {
     // Covers the additive richer-metadata fields on PluginInfo —
     // scan_cache.hpp's doc promises "older cache blobs that don't
@@ -201,7 +201,7 @@ TEST_CASE("from_json rejects wrong schema version", "[scan_cache]") {
 }
 
 TEST_CASE("ScanCache from_json rejects non-object roots without replacing cache",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     cache.put("/tmp/existing.vst3", sample_info());
 
@@ -215,7 +215,7 @@ TEST_CASE("ScanCache from_json rejects non-object roots without replacing cache"
 }
 
 TEST_CASE("ScanCache from_json rejects missing schema without replacing cache",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     cache.put("/tmp/existing.vst3", sample_info());
 
@@ -268,7 +268,7 @@ TEST_CASE("ScanCache from_json skips malformed entries while loading valid entri
 }
 
 TEST_CASE("ScanCache from_json skips entries missing required fields",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache c;
     REQUIRE(c.from_json(R"({
         "schema_version": 1,
@@ -305,7 +305,7 @@ TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
 }
 
 TEST_CASE("ScanCache from_json keeps existing cache when entry fields have wrong types",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache]") {
     HostScanCache cache;
     cache.put("/tmp/existing.vst3", sample_info());
 
@@ -397,7 +397,7 @@ TEST_CASE("ScanCache load_from empty or malformed file keeps existing cache",
 }
 
 TEST_CASE("ScanCache put on a missing path records metadata but never hits",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     TempFile f;
     HostScanCache cache;
     auto info = sample_info();
@@ -418,7 +418,7 @@ TEST_CASE("ScanCache put on a missing path records metadata but never hits",
 }
 
 TEST_CASE("ScanCache erase and clear leave cache reusable",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     cache.put("/tmp/one.vst3", sample_info());
 
@@ -444,7 +444,7 @@ TEST_CASE("ScanCache erase and clear leave cache reusable",
 }
 
 TEST_CASE("ScanCache from_json rejects non-array entries without replacing cache",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     cache.put("/tmp/existing.vst3", sample_info());
 
@@ -457,7 +457,7 @@ TEST_CASE("ScanCache from_json rejects non-array entries without replacing cache
 }
 
 TEST_CASE("ScanCache duplicate JSON entries keep the last valid record",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,
@@ -509,7 +509,7 @@ TEST_CASE("ScanCache duplicate JSON entries keep the last valid record",
 }
 
 TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache]") {
     HostScanCache written;
 
     const std::vector<std::pair<PluginFormat, std::string>> formats = {
@@ -544,7 +544,7 @@ TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
 }
 
 TEST_CASE("ScanCache round-trips Audio Unit format identifiers",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache a;
 
     auto au = sample_info();
@@ -569,7 +569,7 @@ TEST_CASE("ScanCache round-trips Audio Unit format identifiers",
 }
 
 TEST_CASE("ScanCache from_json leaves features empty when features is not an array",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,
@@ -592,7 +592,7 @@ TEST_CASE("ScanCache from_json leaves features empty when features is not an arr
 }
 
 TEST_CASE("ScanCache save_to creates nested parent directories",
-          "[scan_cache][codecov]") {
+          "[scan_cache]") {
     TempFile f;
     const auto root = f.path.parent_path() / (f.path.filename().string() + "-dir");
     const auto cache_path = root / "nested" / "scan-cache.json";
@@ -612,7 +612,7 @@ TEST_CASE("ScanCache save_to creates nested parent directories",
 }
 
 TEST_CASE("ScanCache from_json loads entries without optional metadata",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,
@@ -644,7 +644,7 @@ TEST_CASE("ScanCache from_json loads entries without optional metadata",
 }
 
 TEST_CASE("ScanCache from_json keeps valid siblings around malformed records",
-          "[scan_cache][codecov][phase3]") {
+          "[scan_cache]") {
     HostScanCache cache;
     REQUIRE(cache.from_json(R"({
         "schema_version": 1,

@@ -64,7 +64,7 @@ std::string quote(const fs::path& path) {
 } // namespace
 
 TEST_CASE("Linux packaging exposes no-op signing surface honestly",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     auto signing = pulp::ship::check_codesign("/tmp/missing");
     REQUIRE_FALSE(signing.is_signed);
     REQUIRE_FALSE(signing.is_valid);
@@ -107,7 +107,7 @@ TEST_CASE("Linux packaging exposes no-op signing surface honestly",
 }
 
 TEST_CASE("Linux packaging rejects macOS installer entry points",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     REQUIRE_FALSE(pulp::ship::create_pkg("component", "out.pkg", "com.pulp.test", "1.0.0", ""));
     REQUIRE_FALSE(pulp::ship::create_dmg("source", "out.dmg", "Volume"));
 
@@ -121,7 +121,7 @@ TEST_CASE("Linux packaging rejects macOS installer entry points",
 }
 
 TEST_CASE("Linux packaging creates tarballs with only present plugin formats",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     TempDir temp("tarball");
     auto build = temp.path / "build";
     write_file(build / "VST3" / "Echo.vst3" / "Contents" / "module.txt", "vst3");
@@ -142,7 +142,7 @@ TEST_CASE("Linux packaging creates tarballs with only present plugin formats",
 }
 
 TEST_CASE("Linux packaging tarball path fails closed without plugin formats",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     TempDir temp("empty-tarball");
     auto build = temp.path / "build";
     fs::create_directories(build);
@@ -154,7 +154,7 @@ TEST_CASE("Linux packaging tarball path fails closed without plugin formats",
 }
 
 TEST_CASE("Linux packaging tarballs support LV2-only bundles",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     TempDir temp("lv2-tarball");
     auto build = temp.path / "build";
     write_file(build / "LV2" / "Pad.lv2" / "manifest.ttl", "manifest");
@@ -184,7 +184,7 @@ TEST_CASE("Linux packaging tarballs support LV2-only bundles",
 }
 
 TEST_CASE("Linux packaging tarballs preserve nested plugin payloads only",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     TempDir temp("nested-plugin-payloads");
     auto build = temp.path / "build";
     write_file(build / "VST3" / "Nested.vst3" / "Contents" / "Resources" / "preset.json", "preset");
@@ -209,7 +209,7 @@ TEST_CASE("Linux packaging tarballs preserve nested plugin payloads only",
 }
 
 TEST_CASE("Linux packaging tarballs preserve format directory boundaries",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     TempDir temp("format-boundaries");
     auto build = temp.path / "build";
     write_file(build / "VST3" / "Format.vst3" / "Contents" / "module.txt", "vst3");
@@ -234,7 +234,7 @@ TEST_CASE("Linux packaging tarballs preserve format directory boundaries",
 }
 
 TEST_CASE("Linux packaging tarballs preserve empty declared format directories",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     TempDir temp("empty-format-directories");
     auto build = temp.path / "build";
     fs::create_directories(build / "VST3");
@@ -255,7 +255,7 @@ TEST_CASE("Linux packaging tarballs preserve empty declared format directories",
 }
 
 TEST_CASE("Linux packaging tarball command quotes paths with spaces",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     TempDir temp("space-tarball");
     auto build = temp.path / "build with spaces";
     write_file(build / "VST3" / "Space Echo.vst3" / "Contents" / "module.txt", "vst3");
@@ -286,7 +286,7 @@ TEST_CASE("Linux packaging tarball command quotes paths with spaces",
 }
 
 TEST_CASE("Linux packaging tarball failures do not leave partial archives",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     TempDir temp("tarball-failures");
 
     auto missing_build_output = temp.path / "missing-build.tar.gz";
@@ -306,7 +306,7 @@ TEST_CASE("Linux packaging tarball failures do not leave partial archives",
 }
 
 TEST_CASE("Linux packaging builds deb archives and removes staging",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -341,7 +341,7 @@ TEST_CASE("Linux packaging builds deb archives and removes staging",
 }
 
 TEST_CASE("Linux packaging deb archives can carry metadata without plugin dirs",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -373,7 +373,7 @@ TEST_CASE("Linux packaging deb archives can carry metadata without plugin dirs",
 }
 
 TEST_CASE("Linux packaging deb failures remove staging and preserve inputs",
-          "[ship][linux-package][coverage]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -391,7 +391,7 @@ TEST_CASE("Linux packaging deb failures remove staging and preserve inputs",
 }
 
 TEST_CASE("Linux packaging deb generation removes stale staging before writing",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -413,7 +413,7 @@ TEST_CASE("Linux packaging deb generation removes stale staging before writing",
 }
 
 TEST_CASE("Linux packaging deb preserves recursive plugin directories only",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -443,7 +443,7 @@ TEST_CASE("Linux packaging deb preserves recursive plugin directories only",
 }
 
 TEST_CASE("Linux packaging deb control keeps package metadata literal",
-          "[ship][linux-package][coverage][requested]") {
+          "[ship][linux-package]") {
     if (!command_available("dpkg-deb"))
         SKIP("dpkg-deb is required to inspect generated deb archives");
 
@@ -474,7 +474,7 @@ TEST_CASE("Linux packaging deb control keeps package metadata literal",
 }
 
 TEST_CASE("Linux packaging reports the host Debian architecture",
-          "[ship][linux-package][coverage][issue-3327]") {
+          "[ship][linux-package][issue-3327]") {
     // The .deb `Architecture:` field must reflect the build host, not the
     // historical hardcoded "amd64" — otherwise an arm64 build produces an
     // .deb that won't install on arm64.

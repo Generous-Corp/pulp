@@ -923,9 +923,11 @@ TEST_CASE("CachedProperty refresh and numeric coercion", "[state][cached]") {
     tree->set("mix", 2.5);
     REQUIRE_THAT(mix.get(), WithinAbs(2.5, 1e-5));
 
+    // Removing the bound property reverts the cache to its default — an
+    // absent property is not "the last value forever".
     tree->remove("mix");
     mix.refresh();
-    REQUIRE_THAT(mix.get(), WithinAbs(2.5, 1e-5));
+    REQUIRE_THAT(mix.get(), WithinAbs(0.5, 1e-5));
 }
 
 TEST_CASE("CachedProperty move transfers listener ownership", "[state][cached]") {
@@ -1011,7 +1013,7 @@ TEST_CASE("CachedProperty destruction removes its StateTree listener",
 }
 
 TEST_CASE("CachedProperty bool ignores mismatched refresh values",
-          "[state][cached][large]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     tree->set("enabled", true);
     CachedProperty<bool> enabled(tree, "enabled", false);
@@ -1028,7 +1030,7 @@ TEST_CASE("CachedProperty bool ignores mismatched refresh values",
 }
 
 TEST_CASE("CachedProperty int64 move tracks later tree updates",
-          "[state][cached][large]") {
+          "[state][cached]") {
     auto tree = StateTree::create("params");
     tree->set("voices", int64_t(8));
     CachedProperty<int64_t> voices(tree, "voices", 1);
@@ -1053,6 +1055,75 @@ TEST_CASE("CachedProperty int refresh preserves cache on incompatible values",
 
     tree->set("count", int64_t(7));
     REQUIRE(count.get() == 7);
+}
+
+TEST_CASE("CachedProperty reverts to default when the property is removed",
+          "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    gain.set(0.9);
+    REQUIRE_THAT(gain.get(), WithinAbs(0.9, 1e-5));
+    REQUIRE(tree->has("gain"));
+
+    // remove() notifies through the listener — no explicit refresh needed.
+    tree->remove("gain");
+    REQUIRE_FALSE(tree->has("gain"));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+}
+
+TEST_CASE("CachedProperty set short-circuits a redundant write",
+          "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    // Materialize the property with a meaningful change.
+    gain.set(0.8);
+
+    int notifications = 0;
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        if (prop == "gain") ++notifications;
+    });
+
+    gain.set(0.8);  // unchanged — must be swallowed
+    REQUIRE(notifications == 0);
+
+    gain.set(0.9);  // meaningful change — must fire once
+    REQUIRE(notifications == 1);
+
+    gain.set(0.9);  // unchanged again — swallowed
+    REQUIRE(notifications == 1);
+
+    REQUIRE_THAT(gain.get(), WithinAbs(0.9, 1e-5));
+}
+
+TEST_CASE("CachedProperty set of the default value still materializes "
+          "an absent property", "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    // Cache equals default and the property does not yet exist in the tree.
+    REQUIRE_FALSE(tree->has("gain"));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+
+    int notifications = 0;
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        if (prop == "gain") ++notifications;
+    });
+
+    // Writing the default value must NOT be swallowed — the property has to
+    // become present, and the listener has to fire.
+    gain.set(0.5);
+    REQUIRE(notifications == 1);
+    REQUIRE(tree->has("gain"));
+    REQUIRE_THAT(tree->get_double("gain"), WithinAbs(0.5, 1e-5));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+
+    // A second write of the same value is now redundant and swallowed.
+    gain.set(0.5);
+    REQUIRE(notifications == 1);
 }
 
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
@@ -1948,4 +2019,305 @@ TEST_CASE("SyncedClone detach survives removed-and-dropped child subtree",
     // lock returns null and the entry is skipped.
     REQUIRE_NOTHROW(sync.detach());
     REQUIRE_FALSE(sync.is_attached());
+}
+
+// ── Listener re-entrancy safety ─────────────────────────────────────────
+//
+// A listener may add/remove listeners or children on the same node while it
+// runs. The fan-out snapshots before dispatch and rechecks liveness so this
+// can never invalidate the live backing vector mid-iteration.
+
+TEST_CASE("StateTree property listener removing itself during dispatch is safe",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int self_calls = 0;
+    int other_calls = 0;
+    int self_id = -1;
+
+    self_id = t->add_listener([&](StateTree& node, std::string_view,
+                                  const PropertyValue&, const PropertyValue&) {
+        ++self_calls;
+        node.remove_listener(self_id);  // remove self mid-dispatch
+    });
+    t->add_listener([&](StateTree&, std::string_view,
+                        const PropertyValue&, const PropertyValue&) {
+        ++other_calls;
+    });
+
+    t->set("k", int64_t(1));
+    t->set("k", int64_t(2));
+
+    // Self fired exactly once (removed itself on the first notification);
+    // the other listener fired on both notifications. No crash.
+    REQUIRE(self_calls == 1);
+    REQUIRE(other_calls == 2);
+}
+
+TEST_CASE("StateTree property listener removing a sibling during dispatch is "
+          "not invoked for it",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int a_calls = 0;
+    int b_calls = 0;
+    int b_id = -1;
+
+    // Listener A removes listener B. Registration order matters: A runs first.
+    t->add_listener([&](StateTree& node, std::string_view,
+                        const PropertyValue&, const PropertyValue&) {
+        ++a_calls;
+        node.remove_listener(b_id);
+    });
+    b_id = t->add_listener([&](StateTree&, std::string_view,
+                               const PropertyValue&, const PropertyValue&) {
+        ++b_calls;
+    });
+
+    t->set("k", int64_t(1));
+
+    // B was removed before its turn in the same dispatch — the liveness
+    // recheck must skip it. A fired once, B never fired.
+    REQUIRE(a_calls == 1);
+    REQUIRE(b_calls == 0);
+}
+
+TEST_CASE("StateTree listener added during dispatch is not called for the "
+          "in-flight notification",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int late_calls = 0;
+    bool added = false;
+
+    t->add_listener([&](StateTree& node, std::string_view,
+                        const PropertyValue&, const PropertyValue&) {
+        if (!added) {
+            added = true;
+            node.add_listener([&](StateTree&, std::string_view,
+                                  const PropertyValue&, const PropertyValue&) {
+                ++late_calls;
+            });
+        }
+    });
+
+    t->set("k", int64_t(1));
+    REQUIRE(late_calls == 0);  // not invoked for the notification that added it
+
+    t->set("k", int64_t(2));
+    REQUIRE(late_calls == 1);  // invoked on the next notification
+}
+
+TEST_CASE("StateTree child-added listener mutating children during dispatch is "
+          "safe",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int added_calls = 0;
+
+    t->add_child_added_listener([&](StateTree& parent, StateTree& child, int) {
+        ++added_calls;
+        // Re-enter: append another child from inside the callback exactly once.
+        if (child.type_name() != "grandchild")
+            parent.add_child(StateTree::create("grandchild"));
+    });
+
+    t->add_child(StateTree::create("child"));
+
+    // Fired for the original child and for the re-entrant grandchild add;
+    // no crash from the nested fan-out.
+    REQUIRE(added_calls == 2);
+    REQUIRE(t->child_count() == 2);
+}
+
+TEST_CASE("StateTree child-removed listener removing another child during "
+          "dispatch is safe",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    t->add_child(StateTree::create("a"));
+    t->add_child(StateTree::create("b"));
+    t->add_child(StateTree::create("c"));
+
+    int removed_calls = 0;
+    bool reentered = false;
+    t->add_child_removed_listener([&](StateTree& parent, StateTree&, int) {
+        ++removed_calls;
+        if (!reentered && parent.child_count() > 0) {
+            reentered = true;
+            parent.remove_child(0);  // remove another child mid-dispatch
+        }
+    });
+
+    REQUIRE_NOTHROW(t->remove_child(0));
+    // Two removals fired (the original and the re-entrant one); one child left.
+    REQUIRE(removed_calls == 2);
+    REQUIRE(t->child_count() == 1);
+}
+
+// ── Cycle guard ─────────────────────────────────────────────────────────
+//
+// A node may not become its own descendant. add_child / insert_child reject
+// self-parenting and ancestor-as-child, which would otherwise leak a
+// shared_ptr ring and make deep_copy() / to_json() recurse forever.
+
+TEST_CASE("StateTree add_child rejects self-parenting",
+          "[state][tree][cycle]") {
+    auto t = StateTree::create("root");
+    int added_calls = 0;
+    t->add_child_added_listener([&](StateTree&, StateTree&, int) {
+        ++added_calls;
+    });
+
+    t->add_child(t);  // self — must be rejected, tree unchanged, no listener
+
+    REQUIRE(t->child_count() == 0);
+    REQUIRE(added_calls == 0);
+    REQUIRE(t->parent() == nullptr);
+    // Serialization must terminate (would hang on a cycle).
+    REQUIRE_NOTHROW(t->to_json());
+}
+
+TEST_CASE("StateTree add_child rejects adding an ancestor as a child",
+          "[state][tree][cycle]") {
+    auto grandparent = StateTree::create("grandparent");
+    auto parent = StateTree::create("parent");
+    auto child = StateTree::create("child");
+    grandparent->add_child(parent);
+    parent->add_child(child);
+
+    int added_calls = 0;
+    child->add_child_added_listener([&](StateTree&, StateTree&, int) {
+        ++added_calls;
+    });
+
+    // child.add_child(grandparent) would make grandparent a descendant of its
+    // own descendant — reject it. Same for the direct parent.
+    child->add_child(grandparent);
+    child->insert_child(0, parent);
+
+    REQUIRE(child->child_count() == 0);
+    REQUIRE(added_calls == 0);
+    // Original structure intact.
+    REQUIRE(grandparent->child_count() == 1);
+    REQUIRE(parent->child_count() == 1);
+    REQUIRE(grandparent->child(0) == parent);
+    REQUIRE(parent->child(0) == child);
+    // deep_copy / to_json must terminate.
+    REQUIRE_NOTHROW(grandparent->deep_copy());
+    REQUIRE_NOTHROW(grandparent->to_json());
+}
+
+TEST_CASE("StateTree non-reentrant listener and child notifications still fire",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int prop_calls = 0;
+    int added_calls = 0;
+    int removed_calls = 0;
+
+    t->add_listener([&](StateTree&, std::string_view,
+                        const PropertyValue&, const PropertyValue&) {
+        ++prop_calls;
+    });
+    t->add_child_added_listener([&](StateTree&, StateTree&, int) {
+        ++added_calls;
+    });
+    t->add_child_removed_listener([&](StateTree&, StateTree&, int) {
+        ++removed_calls;
+    });
+
+    t->set("k", int64_t(1));
+    auto c = StateTree::create("c");
+    t->add_child(c);
+    t->remove_child(0);
+
+    REQUIRE(prop_calls == 1);
+    REQUIRE(added_calls == 1);
+    REQUIRE(removed_calls == 1);
+}
+
+TEST_CASE("StateTree sole self-removing listener with a heap capture is safe",
+          "[state][tree][reentrancy]") {
+    auto t = StateTree::create("root");
+    int self_id = -1;
+    // A heap-sized capture defeats std::function's small-object optimization,
+    // so removing the listener mid-callback frees the closure body. The
+    // running lambda reads the capture AFTER removing itself: a copy of the
+    // executing std::function must keep that memory alive.
+    std::string payload(256, 'x');
+    int calls = 0;
+    char observed = 0;
+
+    self_id = t->add_listener(
+        [&, payload](StateTree& node, std::string_view,
+                     const PropertyValue&, const PropertyValue&) {
+            ++calls;
+            node.remove_listener(self_id);   // frees this closure on the slow path
+            observed = payload.empty() ? '!' : payload.back();  // read after free?
+        });
+
+    REQUIRE_NOTHROW(t->set("k", int64_t(1)));
+    REQUIRE(calls == 1);
+    REQUIRE(observed == 'x');
+    // Listener removed itself; a second set fires nothing.
+    t->set("k", int64_t(2));
+    REQUIRE(calls == 1);
+}
+
+// ── ObservableValue re-entrancy safety ──────────────────────────────────
+
+TEST_CASE("ObservableValue listener removing a sibling during set is not "
+          "invoked for it",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int a_calls = 0;
+    int b_calls = 0;
+    int b_id = -1;
+
+    v.add_listener([&](const int&, const int&) {
+        ++a_calls;
+        v.remove_listener(b_id);
+    });
+    b_id = v.add_listener([&](const int&, const int&) { ++b_calls; });
+
+    v.set(1);
+    REQUIRE(a_calls == 1);
+    REQUIRE(b_calls == 0);
+}
+
+TEST_CASE("ObservableValue sole self-removing listener with a heap capture is "
+          "safe",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int self_id = -1;
+    std::string payload(256, 'y');
+    int calls = 0;
+    char observed = 0;
+
+    self_id = v.add_listener([&, payload](const int&, const int&) {
+        ++calls;
+        v.remove_listener(self_id);
+        observed = payload.empty() ? '!' : payload.back();
+    });
+
+    REQUIRE_NOTHROW(v.set(1));
+    REQUIRE(calls == 1);
+    REQUIRE(observed == 'y');
+    v.set(2);
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("ObservableValue listener added during set is not called for the "
+          "in-flight set",
+          "[state][observable][reentrancy]") {
+    ObservableValue<int> v(0);
+    int late_calls = 0;
+    bool added = false;
+
+    v.add_listener([&](const int&, const int&) {
+        if (!added) {
+            added = true;
+            v.add_listener([&](const int&, const int&) { ++late_calls; });
+        }
+    });
+
+    v.set(1);
+    REQUIRE(late_calls == 0);
+    v.set(2);
+    REQUIRE(late_calls == 1);
 }

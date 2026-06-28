@@ -1748,7 +1748,7 @@ TEST_CASE("CanvasWidget paint dispatches set_filter to the canvas",
 // proves draw_image_from_file_rect was called (the dst-only path leaves
 // `floats` empty — see test below).
 TEST_CASE("CanvasWidget::paint routes draw_image through _rect overload when has_source_rect",
-          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+          "[canvas_widget][issue-1739][canvas2d]") {
     CanvasWidget cw;
     cw.set_bounds({0, 0, 200, 100});
 
@@ -1797,7 +1797,7 @@ TEST_CASE("CanvasWidget::paint routes draw_image through _rect overload when has
 // or CG) distinguishes the two forms downstream. This pins the else
 // branch of canvas_widget.cpp's has_source_rect check.
 TEST_CASE("CanvasWidget::paint routes draw_image through dst-only path when has_source_rect is false",
-          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+          "[canvas_widget][issue-1739][canvas2d]") {
     CanvasWidget cw;
     cw.set_bounds({0, 0, 200, 100});
 
@@ -1836,7 +1836,7 @@ TEST_CASE("CanvasWidget::paint routes draw_image through dst-only path when has_
 // through to the labeled placeholder fallback. This pins the empty-src
 // early-exit edge of the new branch.
 TEST_CASE("CanvasWidget::paint draws placeholder when image path is empty even with source rect",
-          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+          "[canvas_widget][issue-1739][canvas2d]") {
     CanvasWidget cw;
     cw.set_bounds({0, 0, 200, 100});
 
@@ -1865,7 +1865,7 @@ TEST_CASE("CanvasWidget::paint draws placeholder when image path is empty even w
 }
 
 TEST_CASE("CanvasWidget paint dispatches extended text and stroke state commands",
-          "[canvas_widget][coverage]") {
+          "[canvas_widget]") {
     CanvasWidget cw;
     cw.set_bounds({0, 0, 160, 80});
 
@@ -1958,7 +1958,7 @@ TEST_CASE("CanvasWidget paint dispatches extended text and stroke state commands
 }
 
 TEST_CASE("CanvasWidget paint dispatches gradient pattern and native path commands",
-          "[canvas_widget][coverage]") {
+          "[canvas_widget]") {
     ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
 
     CanvasWidget cw;
@@ -2062,7 +2062,7 @@ TEST_CASE("CanvasWidget paint dispatches gradient pattern and native path comman
 }
 
 TEST_CASE("CanvasWidget data URI draw_image uses placeholder fallback",
-          "[canvas_widget][coverage]") {
+          "[canvas_widget]") {
     CanvasWidget cw;
     cw.set_bounds({0, 0, 80, 60});
 

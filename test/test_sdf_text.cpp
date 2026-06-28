@@ -42,7 +42,7 @@ struct FakeAtlas {
 }  // namespace
 
 TEST_CASE("SdfTextOptions default to shader contract values",
-          "[canvas][sdf][layout][coverage][issue-650]") {
+          "[canvas][sdf][layout][issue-650]") {
     SdfTextOptions opts;
     REQUIRE(opts.edge == Catch::Approx(0.5f));
     REQUIRE(opts.softness == 0.0f);
@@ -107,7 +107,7 @@ TEST_CASE("build_text_quads skips missing glyphs", "[canvas][sdf][layout]") {
 }
 
 TEST_CASE("build_text_quads handles empty text and zero render size",
-          "[canvas][sdf][layout][coverage][issue-650]") {
+          "[canvas][sdf][layout][issue-650]") {
     FakeAtlas atlas;
     REQUIRE(build_text_quads(atlas, std::u32string(), 10.0f, 20.0f, 12.0f).empty());
 
@@ -166,7 +166,7 @@ TEST_CASE("named SDF text wrappers forward to shared quad builder",
 }
 
 TEST_CASE("named SDF text wrappers forward options consistently",
-          "[canvas][sdf][layout][coverage][issue-650]") {
+          "[canvas][sdf][layout][issue-650]") {
     FakeAtlas atlas;
     SdfTextOptions opts;
     opts.snap = SdfPenSnap::Nearest;

@@ -100,7 +100,7 @@ TEST_CASE("IsolatedPluginScanner returns FormatError for an unknown extension",
 }
 
 TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",
-          "[tools][scan-worker][coverage]") {
+          "[tools][scan-worker]") {
     auto usage = pulp::platform::exec(PULP_ISOLATED_SCANNER_REAL_WORKER, {}, 5000);
     REQUIRE(usage.exit_code == 2);
     REQUIRE_THAT(usage.stderr_output, ContainsSubstring("usage: pulp-scan-worker"));
@@ -120,14 +120,14 @@ TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",
     REQUIRE(rejected.stdout_output.empty());
 }
 
-// Regression for PR #3110: when a directory contains
-// multiple `.vst3` symlinks pointing at the same real bundle, the worker must
-// preserve the requested-alias identity (lexical absolute path) instead of
-// canonicalizing through symlinks. Otherwise a request for `alias.vst3` could
-// emit a descriptor for `real.vst3` and `IsolatedPluginScanner::scan` (which
-// consumes only the first JSON line) would return or blacklist a sibling.
+// Regression coverage: when a directory contains multiple `.vst3` symlinks
+// pointing at the same real bundle, the worker must preserve the requested-alias
+// identity (lexical absolute path) instead of canonicalizing through symlinks.
+// Otherwise a request for `alias.vst3` could emit a descriptor for `real.vst3`
+// and `IsolatedPluginScanner::scan` (which consumes only the first JSON line)
+// would return or blacklist a sibling.
 TEST_CASE("pulp-scan-worker preserves requested-alias identity for symlinks",
-          "[tools][scan-worker][coverage][issue-3110]") {
+          "[tools][scan-worker][issue-3110]") {
     ScratchDir scratch("symlink-alias");
     auto real_bundle = scratch.path / "Real.vst3";
     fs::create_directories(real_bundle / "Contents" / "Resources");

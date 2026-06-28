@@ -299,7 +299,7 @@ TEST_CASE("Parallelogram contains accepts interior and edge points",
 }
 
 TEST_CASE("GlyphArrangement aggregates manual lines and clears layout state",
-          "[canvas][text_layout][codecov]") {
+          "[canvas][text_layout]") {
     TextLine first;
     first.width = 20.0f;
     first.ascent = 6.0f;
@@ -339,7 +339,7 @@ TEST_CASE("GlyphArrangement aggregates manual lines and clears layout state",
 }
 
 TEST_CASE("layout_paragraph preserves hard breaks while wrapping later glyphs",
-          "[canvas][text_layout][codecov]") {
+          "[canvas][text_layout]") {
     FontSpec font;
     font.size = 10.0f;
 
@@ -367,7 +367,7 @@ TEST_CASE("layout_paragraph preserves hard breaks while wrapping later glyphs",
 }
 
 TEST_CASE("layout_paragraph treats non-positive width as unbounded and narrow width as per-glyph wrap",
-          "[canvas][text_layout][codecov]") {
+          "[canvas][text_layout]") {
     FontSpec font;
     font.size = 10.0f;
 
@@ -390,7 +390,7 @@ TEST_CASE("layout_paragraph treats non-positive width as unbounded and narrow wi
 }
 
 TEST_CASE("Parallelogram contains accepts reverse winding and rejects exterior points",
-          "[canvas][text_layout][codecov]") {
+          "[canvas][text_layout]") {
     Parallelogram clockwise{0.0f, 0.0f, 0.0f, 10.0f, 10.0f, 10.0f, 10.0f, 0.0f};
 
     REQUIRE(clockwise.contains(5.0f, 5.0f));
@@ -573,7 +573,7 @@ TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is 
 }
 
 TEST_CASE("TextRunPlanner emits UTF-8 scalar offsets and line breaks",
-          "[canvas][text_run_planner][codecov]") {
+          "[canvas][text_run_planner]") {
     FontOptions options;
     options.family_stack = {"system"};
     options.size = 14.0f;
@@ -601,7 +601,7 @@ TEST_CASE("TextRunPlanner emits UTF-8 scalar offsets and line breaks",
 }
 
 TEST_CASE("TextRunPlanner cache clear preserves shaped output contracts",
-          "[canvas][text_run_planner][codecov]") {
+          "[canvas][text_run_planner]") {
     FontOptions options;
     options.family_stack = {"system"};
     options.size = 18.0f;

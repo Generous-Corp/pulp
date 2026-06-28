@@ -75,7 +75,7 @@ TEST_CASE("register_font_woff2: TTF/sfnt magic is rejected (not WOFF2)",
 }
 
 TEST_CASE("register_font_woff2: near-miss signatures are rejected",
-          "[font][woff2][coverage]") {
+          "[font][woff2]") {
     std::vector<std::uint8_t> lowercase = {'w', 'o', 'f', '2'};
     lowercase.resize(64, 0);
     REQUIRE_FALSE(register_font_woff2(lowercase.data(), lowercase.size(), ""));
@@ -91,7 +91,7 @@ TEST_CASE("register_font_woff2: near-miss signatures are rejected",
 }
 
 TEST_CASE("register_font_woff2: exact magic without header payload is rejected",
-          "[font][woff2][coverage]") {
+          "[font][woff2]") {
     std::array<std::uint8_t, 4> bytes = kWoff2Magic;
     REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), ""));
     REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Tiny WOFF2"));

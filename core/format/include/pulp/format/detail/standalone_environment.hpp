@@ -2,6 +2,7 @@
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 
 #include <charconv>
@@ -112,6 +113,22 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
         int parsed = 0;
         if (parse_positive_frame_delay(*frames, parsed))
             config.audio_capture_rolling_frames = parsed;
+    }
+    if (auto fmt = runtime::get_env("PULP_AUDIO_CAPTURE_ROLLING_FORMAT")) {
+        if (*fmt == "int24") {
+            config.audio_capture_rolling_int24 = true;
+        } else if (*fmt == "float") {
+            config.audio_capture_rolling_int24 = false;
+        } else {
+            // Unlike the CLI flag (which hard-rejects), an env var can't fail the
+            // launch — so warn loudly and default to float rather than silently
+            // swallowing what is almost certainly a typo.
+            runtime::log_warn(
+                "Standalone: PULP_AUDIO_CAPTURE_ROLLING_FORMAT='{}' unrecognized "
+                "(expected 'float' or 'int24'); using float",
+                *fmt);
+            config.audio_capture_rolling_int24 = false;
+        }
     }
     if (!config.audio_capture_rolling_path.empty())
         config.headless = true;

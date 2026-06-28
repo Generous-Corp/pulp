@@ -209,6 +209,134 @@ TEST_CASE("Anticipation: a live input modulating a latent plugin's param exclude
     CHECK(a.node_exclusion[3] == AnticipationExclusion::LiveAudioInput);  // the modulator
 }
 
+TEST_CASE("Anticipation: a transport-sensitive node and its cone are excluded",
+          "[host][anticipation]") {
+    // ts(transport-sensitive gen) -> gain -> out, all normal audio edges. The
+    // transport-sensitive node must observe the live playhead, so it (and its
+    // downstream cone) is excluded from the ahead-rendered interior even though
+    // nothing about the topology is live/feedback/sidechain.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),
+                                 mk(2, NodeType::Gain, 2, 2),
+                                 mk(3, NodeType::AudioOutput, 2, 0)};
+    nodes[0].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3)};
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.node_exclusion[0] == AnticipationExclusion::TransportSensitive);
+    CHECK(a.node_exclusion[1] == AnticipationExclusion::TransportSensitive);  // inherited
+    CHECK(a.node_exclusion[2] == AnticipationExclusion::TransportSensitive);  // downstream
+    CHECK_FALSE(a.any_passes_static_exclusions());
+}
+
+TEST_CASE("Anticipation: transport sensitivity propagates over a MIDI edge",
+          "[host][anticipation]") {
+    // ts(sequenced gen) --midi--> instrument -> out. The transport-sensitive
+    // exclusion crosses the MIDI event edge to the instrument and its tail.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 0),
+                                 mk(2, NodeType::Plugin, 0, 2),
+                                 mk(3, NodeType::AudioOutput, 2, 0)};
+    nodes[0].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3)};
+    conns[0].midi = true;
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.node_exclusion[0] == AnticipationExclusion::TransportSensitive);
+    CHECK(a.node_exclusion[1] == AnticipationExclusion::TransportSensitive);  // via midi edge
+    CHECK(a.node_exclusion[2] == AnticipationExclusion::TransportSensitive);  // downstream
+}
+
+TEST_CASE("Anticipation: transport sensitivity propagates over an automation edge",
+          "[host][anticipation]") {
+    // gen -> fx -> out, with ts(transport-sensitive) automating fx's param. The
+    // transport-sensitive modulation source propagates its exclusion to fx (and
+    // its tail) across the automation edge, exactly as a live modulator would.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),    // latent gen
+                                 mk(2, NodeType::Plugin, 2, 2),    // fx
+                                 mk(3, NodeType::AudioOutput, 2, 0),
+                                 mk(4, NodeType::Plugin, 0, 1)};   // ts modulator
+    nodes[3].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3)};
+    Connection mod = edge(4, 2);
+    mod.automation = true;
+    mod.automation_param_id = 1;
+    conns.push_back(mod);
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.passes_static_exclusions(0));  // the audio generator is independent
+    CHECK(a.node_exclusion[1] == AnticipationExclusion::TransportSensitive);  // via the mod edge
+    CHECK(a.node_exclusion[2] == AnticipationExclusion::TransportSensitive);  // downstream
+    CHECK(a.node_exclusion[3] == AnticipationExclusion::TransportSensitive);  // the modulator
+}
+
+TEST_CASE("Anticipation: a transport-sensitive sidechain source excludes the consumer",
+          "[host][anticipation]") {
+    // ts(transport-sensitive gen) --sidechain--> comp -> out. The consumer is
+    // excluded both by its sidechain seed and by transport-sensitivity crossing
+    // the edge; first-reason-wins keeps the sidechain seed as the diagnostic
+    // reason, but the load-bearing bit is that the consumer (and its tail) cannot
+    // be anticipated. The transport-sensitive source is itself excluded.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),   // ts sidechain gen
+                                 mk(2, NodeType::Plugin, 4, 2),   // compressor
+                                 mk(3, NodeType::AudioOutput, 2, 0)};
+    nodes[0].transport_sensitive = true;
+    std::vector<Connection> conns{edge(2, 3)};
+    Connection sc = edge(1, 2);
+    sc.dest_port = 2;
+    sc.sidechain = true;
+    conns.push_back(sc);
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.node_exclusion[0] == AnticipationExclusion::TransportSensitive);
+    CHECK_FALSE(a.passes_static_exclusions(1));  // excluded (sidechain and/or transport)
+    CHECK_FALSE(a.passes_static_exclusions(2));  // downstream
+}
+
+TEST_CASE("Anticipation: transport sensitivity coexists with an unrelated feedback edge",
+          "[host][anticipation]") {
+    // ts(transport-sensitive gen) -> g -> out, plus an unrelated self-feedback
+    // loop on a separate node `fb`. The transport-sensitive cone propagates over
+    // its normal edges; the feedback node is excluded for its own reason. Both
+    // exclusion families hold without bleeding into each other.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),   // ts gen
+                                 mk(2, NodeType::Gain, 2, 2),     // g
+                                 mk(3, NodeType::AudioOutput, 2, 0),
+                                 mk(4, NodeType::Gain, 2, 2)};     // fb (self-loop)
+    nodes[0].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3)};
+    Connection fb = edge(4, 4);
+    fb.feedback = true;
+    conns.push_back(fb);
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.node_exclusion[0] == AnticipationExclusion::TransportSensitive);
+    CHECK(a.node_exclusion[1] == AnticipationExclusion::TransportSensitive);  // inherited
+    CHECK(a.node_exclusion[2] == AnticipationExclusion::TransportSensitive);  // downstream
+    CHECK(a.node_exclusion[3] == AnticipationExclusion::Feedback);            // unrelated loop
+}
+
+TEST_CASE("Anticipation: a transport-sensitive node downstream of a feedback loop",
+          "[host][anticipation]") {
+    // gen -> a -> ts(transport-sensitive) -> out, with a self-feedback on `a`.
+    // The feedback excludes a and everything downstream; ts is downstream so it
+    // is seeded TransportSensitive AND would inherit Feedback — first-reason-wins
+    // is diagnostic, the load-bearing bit is that the whole tail is excluded.
+    std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2),
+                                 mk(2, NodeType::Gain, 2, 2),
+                                 mk(3, NodeType::Plugin, 2, 2),   // ts
+                                 mk(4, NodeType::AudioOutput, 2, 0)};
+    nodes[2].transport_sensitive = true;
+    std::vector<Connection> conns{edge(1, 2), edge(2, 3), edge(3, 4)};
+    Connection fb = edge(2, 2);
+    fb.feedback = true;
+    conns.push_back(fb);
+    const auto a = analyze_anticipation_eligibility(nodes, conns);
+    REQUIRE(a.ok);
+    CHECK(a.passes_static_exclusions(0));                          // gen upstream stays eligible
+    CHECK(a.node_exclusion[1] == AnticipationExclusion::Feedback);  // the loop
+    CHECK(a.node_exclusion[2] == AnticipationExclusion::TransportSensitive);  // its own seed wins
+    CHECK_FALSE(a.passes_static_exclusions(3));                    // tail excluded
+}
+
 TEST_CASE("Anticipation: a connection naming an absent node is malformed",
           "[host][anticipation]") {
     std::vector<GraphNode> nodes{mk(1, NodeType::Plugin, 0, 2)};

@@ -122,7 +122,7 @@ TEST_CASE("legacy slot is wrapped through the compat path",
 }
 
 TEST_CASE("legacy compat path handles null editor handles and null destroys",
-          "[host][hosted-editor][coverage][phase3]") {
+          "[host][hosted-editor]") {
     BrokenLegacySlot broken;
     auto ed = broken.create_hosted_editor(nullptr);
     REQUIRE(ed == nullptr);

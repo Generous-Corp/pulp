@@ -126,6 +126,26 @@ public:
     /// Reset all parameters to their default values.
     void reset_all_to_defaults();
 
+    /// Reset every trigger / momentary parameter to its range default.
+    ///
+    /// A trigger parameter (see `ParamInfo::is_trigger` / a `Reset`
+    /// designation) is a one-shot "do this now" control. Format adapters call
+    /// this once at the end of each process block, after the Processor has
+    /// observed the value, so the control returns to its resting default for
+    /// the next block.
+    ///
+    /// Real-time safe: writes directly to the lock-free atomic value of each
+    /// trigger parameter (no allocation, no listener dispatch, no queueing).
+    /// The set of trigger indices is cached at registration, so this is O(number
+    /// of trigger params), and a store with no triggers does no work.
+    ///
+    /// @return true if any trigger parameter was reset this call.
+    bool reset_triggers_rt();
+
+    /// True when at least one registered parameter is a trigger / momentary
+    /// control. Adapters can skip calling `reset_triggers_rt()` when false.
+    bool has_trigger_params() const { return !trigger_indices_.empty(); }
+
     /// Look up immutable metadata for a parameter.
     /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
@@ -202,6 +222,19 @@ public:
     ///                  callback through the installed @c EventLoop;
     ///                  @c ListenerThread::Audio runs it inline on the
     ///                  firing thread and asserts caller RT-safety.
+    ///
+    /// @note Main-thread listeners fed by the real-time path
+    ///       (@c set_value_rt / @c set_normalized_rt, drained by
+    ///       @c pump_listeners) are CURRENT-VALUE notifications: the
+    ///       @c float passed to the callback is a live snapshot read at
+    ///       drain time (not the value queued when the change fired), and
+    ///       deliveries are COALESCED to one call per changed parameter
+    ///       per pump. This keeps the value coherent under dense
+    ///       automation — a burst of N writes to one parameter yields a
+    ///       single callback carrying the latest value, never a sequence
+    ///       of stale intermediate values. @c ListenerThread::Audio
+    ///       listeners are unaffected: they fire inline per change with
+    ///       that change's value.
     [[nodiscard]]
     ListenerToken add_listener(ParamChangeCallback callback,
                                ListenerThread thread);
@@ -277,10 +310,21 @@ public:
     void copy_state_migrations_from(const StateStore& source);
 
 private:
+    // Member ORDER is load-bearing for the RT->main listener path. The
+    // parameter storage (id_to_index_ + values_) MUST be declared before
+    // registry_ so that, on destruction (reverse declaration order),
+    // registry_ is torn down FIRST. registry_'s value_getter captures
+    // `this` and reads id_to_index_/values_ during drain_main_listeners;
+    // destroying registry_ before that storage guarantees the getter can
+    // never run after the storage it reads is gone. Do not reorder.
     std::vector<ParamInfo> params_;
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    // Indices (into values_/params_) of trigger / momentary parameters, cached
+    // at registration so reset_triggers_rt() is allocation-free on the audio
+    // thread. Empty for the overwhelmingly common no-trigger store.
+    std::vector<std::size_t> trigger_indices_;
     std::shared_ptr<detail::ListenerRegistry> registry_;
     std::vector<ListenerToken> permanent_listener_tokens_;
     StateMigrationRegistry migrations_;

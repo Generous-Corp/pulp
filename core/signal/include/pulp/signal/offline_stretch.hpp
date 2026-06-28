@@ -59,8 +59,9 @@ enum class StretchTransientMode { phase_reset, verbatim_relocate };
 ///                   Natural, time != pitch. Best for tonal/melodic/sustained.
 ///   varispeed     — pitch+time LINKED (pure resample) + speed-scaled tape head EQ.
 ///                   Tape character, NO stretch artifacts. Pitch follows tempo.
-///   phase_vocoder — reserved for clean + verbatim transient relocation; currently
-///                   renders as `clean` until seam handling passes the quality gate.
+///   phase_vocoder — reserved character mode; currently renders through the
+///                   `clean` spectral path. Use relocate_transients for opt-in
+///                   tempo-only transient grafting.
 ///   granular      — reserved for grain/stutter texture; currently renders as `clean`.
 enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
 
@@ -296,8 +297,8 @@ public:
         // Character-mode dispatch. `varispeed` is pitch+time-linked (tape): a pure
         // resample + a speed-scaled head EQ, no phase-vocoder artifacts. The
         // `phase_vocoder` and `granular` characters are reserved modes that fall
-        // through to the clean spectral path for now (relocate_transients is a
-        // documented no-op until seam-clean relocation is enabled).
+        // through to the clean spectral path for now; the tempo-only spectral path
+        // can still opt into verbatim transient relocation.
         if (opts.character == StretchCharacter::varispeed)
             return varispeed_render(in, in_frames, out, out_frames, opts.time_ratio);
 
@@ -332,13 +333,19 @@ public:
             if ((opts.transient_mode == StretchTransientMode::verbatim_relocate ||
                  opts.relocate_transients) && opts.time_ratio != 1.0)
                 relocate_transients(in, in_frames, out, out_frames, opts.time_ratio);
+            restore_onset_head(in, in_frames, out, out_frames);  // attack at sample 0 (soft-start)
+            match_spectral_rms(in, in_frames, out, out_frames);  // restore the PV energy loss
             return true;
         }
 
         // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
-        if (opts.time_ratio == 1.0)
-            return pitch_shift(in, in_frames, out, out_frames,
-                               opts.pitch_semitones, opts.formant_mode, opts.formant_semitones);
+        if (opts.time_ratio == 1.0) {
+            if (!pitch_shift(in, in_frames, out, out_frames,
+                             opts.pitch_semitones, opts.formant_mode, opts.formant_semitones))
+                return false;
+            match_spectral_rms(in, in_frames, out, out_frames);
+            return true;
+        }
 
         // Independent R+S (time_ratio != 1 AND pitch != 0).
         const int ch = channels_;
@@ -359,6 +366,7 @@ public:
                 for (long j = 0; j < out_frames; ++j)
                     out[c][j] = sample_sinc6(inter[static_cast<size_t>(c)].data(), inter_len,
                                              static_cast<double>(j) * P);
+            match_spectral_rms(in, in_frames, out, out_frames);
             return true;
         }
 
@@ -376,10 +384,88 @@ public:
             return fail(err, "pitch stage failed");
         std::vector<const float*> cp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) cp[c] = inter[static_cast<size_t>(c)].data();
-        return tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio);
+        if (!tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio)) return false;
+        match_spectral_rms(in, in_frames, out, out_frames);
+        return true;
     }
 
 private:
+    // Condition the spectral output: (1) make up the phase-vocoder energy loss and
+    // (2) hard-guard the peak so the engine never emits a sample past full scale.
+    //
+    // (1) The WOLA normalization is unity for COHERENT overlap-add (a pure tone
+    // reconstructs at full level — proven by the spectral-engine tests), but a
+    // time-stretch overlaps phase-propagated frames of BROADBAND material partially
+    // INcoherently, so the reconstructed level sits ~3-4 dB below the source. Match
+    // the output's interior RMS back to the input with a single make-up gain
+    // (make-up only — never attenuates the body), pre-capped so the make-up alone
+    // can't push the current peak past full scale.
+    //
+    // (2) A final hard peak-limit catches ANY residual overshoot in the buffer —
+    // notably the verbatim-relocation graft, which re-injects an original attack
+    // additively and can sum a transient above full scale on its own. Guarantees
+    // |out| <= kCeiling for every downstream consumer (the engine output is clean
+    // even without a host limiter). Near-identity on coherent/tonal material; the
+    // ratio==1 identity path never reaches here.
+    float peak_abs(const float* const* b, long n) const noexcept {
+        float peak = 0.0f;
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < n; ++i) peak = std::max(peak, std::fabs(b[c][i]));
+        return peak;
+    }
+    void match_spectral_rms(const float* const* in, long in_frames,
+                            float* const* out, long out_frames) const noexcept {
+        // Guard the make-up window past the onset-head graft as well as the edges.
+        // restore_onset_head (tempo path) replaces up to ~fft/2 leading samples; for
+        // SHORT outputs that graft reaches past n/8 into the interior window and skews
+        // the gain. Floor the edge guard at the head span so the make-up is measured
+        // over the steady body only. Harmless on the no-graft paths (a larger edge
+        // guard). fft_size_<=0 means the engine default (4096).
+        const long fft = engine_.fft_size() > 0 ? engine_.fft_size() : 4096;
+        const long head_guard = std::max<long>(
+            static_cast<long>(std::llround(kHeadMs * sample_rate_)), fft / 2);
+        auto interior_rms = [this, head_guard](const float* const* b, long n) {
+            const long lo = std::min<long>(std::max<long>(n / 8, head_guard), 4096), hi = n - lo;
+            if (hi <= lo) return 0.0;
+            double s = 0.0; long cnt = 0;
+            for (int c = 0; c < channels_; ++c)
+                for (long i = lo; i < hi; ++i) { const double v = b[c][i]; s += v * v; ++cnt; }
+            return cnt > 0 ? std::sqrt(s / static_cast<double>(cnt)) : 0.0;
+        };
+        // (1) RMS make-up. The soft-clip below bounds peaks, so the make-up is the
+        // full RMS target (no whole-buffer peak cap, which would attenuate the body
+        // and undo the make-up whenever a single transient overshoots).
+        const double ri = interior_rms(in, in_frames);
+        const double ro = interior_rms(out, out_frames);
+        if (ri > 1e-9 && ro > 1e-9) {
+            const double g = ri / ro;
+            if (g > 1.0 + 1e-4) {
+                const float gf = static_cast<float>(g);
+                for (int c = 0; c < channels_; ++c)
+                    for (long i = 0; i < out_frames; ++i) out[c][i] *= gf;
+            }
+        }
+        // (2) Soft-clip every sample: transparent below the knee, smoothly bounded to
+        // +/-kCeiling above it. Tames the make-up peaks AND the verbatim-graft
+        // overshoot (an attack re-injected additively can exceed full scale) WITHOUT
+        // scaling the whole buffer down — so the RMS make-up survives and only the
+        // few overshooting transient samples are rounded.
+        if (peak_abs(out, out_frames) > kKnee) {
+            for (int c = 0; c < channels_; ++c)
+                for (long i = 0; i < out_frames; ++i) out[c][i] = soft_clip(out[c][i]);
+        }
+    }
+
+    // Transparent below +/-kKnee, smooth tanh shoulder to a hard +/-kCeiling ceiling.
+    static constexpr float kKnee = 0.9f;
+    static constexpr float kCeiling = 0.999f;
+    static float soft_clip(float x) noexcept {
+        const float a = std::fabs(x);
+        if (a <= kKnee) return x;
+        const float s = x < 0.0f ? -1.0f : 1.0f;
+        return s * (kKnee + (kCeiling - kKnee) * std::tanh((a - kKnee) / (kCeiling - kKnee)));
+    }
+
     // 6-point Blackman-Harris windowed-sinc read of `x` at fractional position
     // `pos`; out-of-range taps read as silence (edge zero-pad). Exact identity
     // when pos is integral.
@@ -682,11 +768,96 @@ private:
     // nominal position, then PEAK-ALIGN the original attack onto it. Equal-power
     // edge crossfades keep the seam click-free; only the short attack is replaced,
     // so the stretched sustain (and exact out_frames length) is intact.
+    // RBJ 2nd-order high-pass (one channel) into dst — same biquad family as the
+    // recommend_window low-band probe, complementary coefficients.
+    static void rbj_highpass(const float* src, float* dst, long n, double sr, double f0) {
+        const double q = 0.7071;
+        const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+        const double b0 = (1.0 + cw) * 0.5, b1 = -(1.0 + cw), b2 = (1.0 + cw) * 0.5;
+        const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+        const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+        double z1 = 0.0, z2 = 0.0;
+        for (long i = 0; i < n; ++i) {
+            const double in_s = src[static_cast<size_t>(i)];
+            const double out_s = nb0 * in_s + z1;
+            z1 = nb1 * in_s - na1 * out_s + z2;
+            z2 = nb2 * in_s - na2 * out_s;
+            dst[static_cast<size_t>(i)] = static_cast<float>(out_s);
+        }
+    }
+
+    // Restore the attack at the very start of the render. The phase vocoder
+    // reconstructs a hard onset at sample 0 from an EMPTY analysis history — the
+    // Hann analysis window is ~0 at its edge, so the first frames weight the onset
+    // near-zero and the attack comes up as a RAMP over ~fft/2 samples (~10 ms at the
+    // percussive window). The length-lock trim aligns input[0] to output[0] but does
+    // not remove the ramp, so the head is too quiet. relocate_transients can't fix
+    // it: detect_onsets needs a flux RISE and a sample-0 attack is already inside its
+    // first window (no rise), so the boundary onset is structurally missed.
+    // Graft the input's leading attack over the head with an equal-power crossfade
+    // back to the PV body (input[0] is the true first sample, so no peak search is
+    // needed — unlike the interior graft). No-op when the input head is silent (a
+    // real fade-in) or the PV did not actually lose the attack. Runs BEFORE
+    // match_spectral_rms (whose interior-RMS window excludes the head, and whose
+    // soft-clip still bounds any grafted peak).
+    void restore_onset_head(const float* const* in, long in_frames,
+                            float* const* out, long out_frames) const noexcept {
+        // The PV ramp the graft has to cover is ~fft/2 samples, which is only ~10 ms
+        // at the percussive window (1024) but grows with the window — ~42 ms at the
+        // 4096 default, ~85 ms at 8192 for sustained/tonal material. A fixed 10 ms
+        // head hands the crossfade back to a PV that is still ramping for the larger
+        // windows, leaving an envelope dip between the head and the PV body. Scale
+        // the head to the actual ramp (floor it at ~10 ms) so the crossfade always
+        // reaches a fully-recovered PV. fft_size_<=0 means the engine default (4096).
+        // head_span is hoisted to long first to avoid an initializer-list narrowing
+        // conversion from std::llround's long long (MSVC release build).
+        const long fft = engine_.fft_size() > 0 ? engine_.fft_size() : 4096;
+        const long ramp = std::max<long>(1, fft / 2);
+        const long head_span = std::max<long>(static_cast<long>(std::llround(kHeadMs * sample_rate_)), ramp);
+        const long head = std::min<long>({out_frames, in_frames, head_span});
+        if (head < 2) return;
+        float in_peak = 0.0f, out_peak = 0.0f;
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < head; ++i) {
+                in_peak = std::max(in_peak, std::fabs(in[c][static_cast<size_t>(i)]));
+                out_peak = std::max(out_peak, std::fabs(out[c][static_cast<size_t>(i)]));
+            }
+        if (in_peak <= kHeadEps) return;               // input head silent (fade-in) -> preserve
+        if (in_peak <= out_peak * kHeadRatio) return;  // PV didn't lose the attack -> no-op
+        constexpr double kHalfPi = 1.5707963267948966;
+        for (long i = 0; i < head; ++i) {
+            const double cw = std::cos(kHalfPi * static_cast<double>(i) / static_cast<double>(head));
+            const float w = static_cast<float>(cw * cw);  // equal-power: 1 at 0 -> 0 at head
+            for (int c = 0; c < channels_; ++c)
+                out[c][static_cast<size_t>(i)] =
+                    w * in[c][static_cast<size_t>(i)] + (1.0f - w) * out[c][static_cast<size_t>(i)];
+        }
+    }
+
     void relocate_transients(const float* const* in, long in_frames,
                              float* const* out, long out_frames, double ratio) const {
         if (in_frames <= 0 || out_frames <= 0) return;
         const long W = kReloAttack;        // grafted half-window each side of the peak
         const long xf = std::min<long>(kReloXfade, W);
+        // Graft only the HIGH band of each attack. The phase vocoder smears the
+        // high-frequency transient (the click/crack) but reconstructs sustained LOW
+        // frequencies cleanly and CONTINUOUSLY. Grafting the full-band original
+        // re-injects low-frequency energy whose phase cannot match the PV body
+        // across the short (~1 ms) seam — and a deep kick's fundamental period
+        // (~15 ms) is longer than the whole graft window, so the seam can't bridge
+        // it. That low-frequency discontinuity is the "blown-out deep hit" at
+        // stretch. High-passing both sides and swapping only the high band leaves
+        // the kick body entirely to the continuous PV low end (no seam there) while
+        // still restoring the attack's high-frequency punch.
+        std::vector<std::vector<float>> hp_in(static_cast<size_t>(channels_));
+        std::vector<std::vector<float>> hp_out(static_cast<size_t>(channels_));
+        for (int c = 0; c < channels_; ++c) {
+            hp_in[static_cast<size_t>(c)].resize(static_cast<size_t>(in_frames));
+            hp_out[static_cast<size_t>(c)].resize(static_cast<size_t>(out_frames));
+            rbj_highpass(in[c], hp_in[static_cast<size_t>(c)].data(), in_frames, sample_rate_, kReloHpHz);
+            rbj_highpass(out[c], hp_out[static_cast<size_t>(c)].data(), out_frames, sample_rate_, kReloHpHz);
+        }
         // Search +/- a fraction of the STRETCHED onset spacing for the output
         // transient peak: wide enough to cover the PV's ratio-dependent latency
         // offset, but never so wide it locks onto a neighbouring transient (which
@@ -716,10 +887,14 @@ private:
                 const long si = ip + k, di = op + k;
                 if (si < 0 || si >= in_frames || di < 0 || di >= out_frames) continue;
                 const long ak = std::llabs(k);
-                float w = 1.0f;                                  // weight for the ORIGINAL
+                float w = 1.0f;                                  // weight for the ORIGINAL high band
                 if (ak > W - xf) w = static_cast<float>(W - ak) / static_cast<float>(xf);
+                // Swap the high band only: out += w*(hp_in - hp_out) makes the center
+                // (w=1) carry the PV low band + the original high band, with the seam
+                // crossfade acting only on the high band (short periods -> clean).
                 for (int c = 0; c < channels_; ++c)
-                    out[c][di] = w * in[c][si] + (1.0f - w) * out[c][di];
+                    out[c][di] += w * (hp_in[static_cast<size_t>(c)][static_cast<size_t>(si)] -
+                                       hp_out[static_cast<size_t>(c)][static_cast<size_t>(di)]);
             }
         }
     }
@@ -800,6 +975,10 @@ private:
     static constexpr long kReloXfade = 64;           // ~1.3 ms linear edge crossfade
     static constexpr long kReloBack = 768;           // input-peak search look-back (onset lags the peak)
     static constexpr long kReloSearch = 1536;        // +/- ~32 ms output-peak search
+    static constexpr double kHeadMs = 0.010;         // onset-head graft span (~10 ms)
+    static constexpr float kHeadEps = 1e-3f;         // input head silent -> no soft-start
+    static constexpr float kHeadRatio = 1.1f;        // PV must have lost the attack to fire
+    static constexpr double kReloHpHz = 300.0;       // graft only the high band above this (low end stays on the clean PV)
     RealtimePitchTimeProcessor engine_;
     RealtimePitchTimeProcessor pitch_engine_;
     double latency_anchor_ = 0.0;

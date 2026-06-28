@@ -90,7 +90,7 @@ commands:
             required: false
           - name: --path
             required: false
-            description: Sign one explicit artifact (.app/.dmg/bundle) instead of scanning build dirs
+            description: Sign one explicit desktop artifact (macOS .app/.dmg/bundle, Windows .exe/bundle; .pkg is signed at package time) instead of scanning build dirs
           - name: --entitlements
             required: false
           - name: --target
@@ -201,13 +201,19 @@ commands:
         args:
           - name: --url
             required: true
+          - name: --download-url
+            required: false
           - name: --version
             required: false
           - name: --notes
             required: false
           - name: --output
             required: false
+          - name: --title
+            required: false
           - name: --sign-key
+            required: false
+          - name: --min-os
             required: false
       - name: check
         summary: Check signing status of built desktop plugins or Android APK/AAB artifacts
@@ -562,6 +568,9 @@ commands:
       - name: --audio-capture-rolling-frames
         kind: option
         description: Window in samples for --audio-capture-rolling (0 = as much as the ring holds, clamped). Forwarded as --audio-capture-rolling-frames <n> and PULP_AUDIO_CAPTURE_ROLLING_FRAMES=<n>.
+      - name: --audio-capture-rolling-format
+        kind: option
+        description: "Sample format for --audio-capture-rolling: float (default, full precision) or int24 (smaller, integer, ~-144 dBFS floor, universal DAW compatibility). Forwarded as --audio-capture-rolling-format <fmt> and PULP_AUDIO_CAPTURE_ROLLING_FORMAT=<fmt>."
       - name: PULP_RUN_AUDIO_NOTICE
         kind: environment
         description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.
@@ -847,15 +856,15 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX,
-      or Google DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The
-      designmd source is tokens-only (no ui.js); other sources can emit a full
-      ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
+      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
+      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
+      other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)
@@ -1687,29 +1696,29 @@ commands:
 
   - name: dev
     status: usable
-    summary: Unified development loop — watch, rebuild, and optionally test, validate, or relaunch an app on every change.
+    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice.
     args:
       - name: --test
         kind: flag
-        description: Run tests after each successful build
+        description: Run tests after each successful build in delegated watch mode, or after the one Rust fallback build pass
       - name: --test-filter
         kind: option
         description: Run only tests matching PATTERN (implies --test)
       - name: --validate
         kind: flag
-        description: Run quick plugin dlopen validation after build
+        description: Run quick plugin dlopen validation after build in the delegated C++ dev loop; Rust fallback prints a validator-not-ported notice and continues without validation
       - name: --run
         kind: option
-        description: Launch a build-dir binary and relaunch it on rebuild
+        description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
       - name: --design
         kind: option
-        description: Build pulp-design-tool and launch it with the given JS script
+        description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once
       - name: --target
         kind: option
         description: Pass --target to cmake --build
       - name: --allow-unsupported-sdk
         kind: flag
-        description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
+        description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
       - name: passthrough
         kind: passthrough
         description: Arguments after `--` are forwarded to the launched binary
@@ -1717,7 +1726,7 @@ commands:
 
   - name: loop
     status: experimental
-    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
       - name: --platform
         kind: option
@@ -1762,14 +1771,14 @@ commands:
 
   - name: scan
     status: usable
-    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.
+    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle found. Installed Rust pulp scan is filesystem-only with filename-derived names; rich PluginScanner metadata remains in pulp-cpp scan.
     args:
       - name: --format
         kind: option
         description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
       - name: --no-load
         kind: flag
-        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
+        description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host
@@ -1886,7 +1895,15 @@ commands:
       - name: run
         summary: Run the installed tool with pass-through arguments
       - name: doctor
-        summary: Health check — which tools are installed, missing, or unavailable on this platform
+        summary: Health check — which tools are installed, missing, or unavailable on this platform; with a tool id, checks one tool strictly and --run executes the resolved tool path with no args
+        args:
+          - name: tool-id
+            kind: positional
+            required: false
+          - name: --run
+            kind: flag
+            required: false
+            description: For a targeted tool check, execute the resolved tool path with no arguments and return its exit code; npm-package tools use that path as their wrapper smoke check
     docs: reference/cli.md#tool
 
   - name: audit

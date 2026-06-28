@@ -95,6 +95,15 @@ void reset_lifecycle_observations() {
     g_last_active_state = false;
 }
 
+// Captures the (unsigned) sample_offset / ramp_duration the adapter handed the
+// native core for the FIRST and LAST event in the block - used to prove
+// out-of-range int32 offsets (negative or beyond the block) are clamped into
+// range before the cast rather than wrapping or pointing past the block.
+uint32_t g_first_event_sample_offset = 0;
+uint32_t g_first_event_ramp_duration = 0;
+uint32_t g_last_event_sample_offset = 0;
+uint32_t g_last_event_ramp_duration = 0;
+
 const pulp_native_descriptor_v1* gain_descriptor() { return &g_desc; }
 const pulp_native_param_v1* gain_parameters(uint32_t* count) {
     if (count) *count = 1;
@@ -142,6 +151,14 @@ pulp_native_status gain_process(pulp_native_instance* inst,
         g_last_param_view_count = io->params->count;
         g_last_param_view_capacity = io->params->capacity;
         g_last_param_view_overflowed = io->params->overflowed;
+        if (io->params->count > 0) {
+            const auto& first = io->params->events[0];
+            const auto& last = io->params->events[io->params->count - 1];
+            g_first_event_sample_offset = first.sample_offset;
+            g_first_event_ramp_duration = first.ramp_frames;
+            g_last_event_sample_offset = last.sample_offset;
+            g_last_event_ramp_duration = last.ramp_frames;
+        }
         for (uint32_t e = 0; e < io->params->count; ++e) {
             const auto& ev = io->params->events[e];
             if (ev.param_id_hash == g_param.id_hash) {
@@ -369,6 +386,61 @@ TEST_CASE("NativeCoreProcessor forwards parameter-event overflow to native cores
     REQUIRE(g_last_param_view_count == queue.capacity());
     REQUIRE(g_last_param_view_capacity == queue.capacity());
     REQUIRE(g_last_param_view_overflowed == 1);
+}
+
+TEST_CASE("NativeCoreProcessor clamps out-of-range event offsets before the cast",
+          "[native-core-processor][params]") {
+    // ParameterEvent::sample_offset / ramp_duration_sample_frames are int32_t.
+    // The native ABI requires sample_offset in [0, frame_count) and a ramp in
+    // [0, frame_count - offset]. The adapter must clamp both into range before
+    // the unsigned cast: a NEGATIVE value would wrap to ~4.29e9, and an
+    // out-of-range POSITIVE value would point past the block — both are
+    // out-of-block offsets (OOB read/write risk inside the core).
+    format::NativeCoreProcessor proc(&g_core);
+    state::StateStore store;
+
+    constexpr std::size_t frames = 16;  // valid offsets are [0, 15]
+    prepare_gain_processor(proc, store, frames);
+    Block in(frames, 1.0f);
+    Block out(frames, 0.0f);
+    audio::BufferView<float> out_view(out.ptrs.data(), 2, frames);
+    audio::BufferView<const float> in_view(
+        const_cast<const float* const*>(in.ptrs.data()), 2, frames);
+
+    g_first_event_sample_offset = 0xDEADBEEFu;  // sentinels; must be overwritten
+    g_first_event_ramp_duration = 0xDEADBEEFu;
+    g_last_event_sample_offset = 0xDEADBEEFu;
+    g_last_event_ramp_duration = 0xDEADBEEFu;
+
+    state::ParameterEventQueue queue;
+    // Event 0: negative offset + negative ramp -> clamp both to 0.
+    REQUIRE(queue.push({/*param_id=*/0,
+                        /*offset=*/-5,
+                        /*value=*/0.5f,
+                        /*ramp=*/-3}));
+    // Event 1: huge positive offset + huge ramp -> clamp offset to
+    // frame_count-1 (15), then ramp to frame_count-offset (16-15 = 1).
+    REQUIRE(queue.push({/*param_id=*/0,
+                        /*offset=*/1000,
+                        /*value=*/0.5f,
+                        /*ramp=*/1000}));
+    proc.set_param_events(&queue);
+
+    midi::MidiBuffer min, mout;
+    format::ProcessContext pctx;
+    pctx.sample_rate = 48000.0;
+    pctx.num_samples = frames;
+    proc.process(out_view, in_view, min, mout, pctx);
+
+    REQUIRE(g_last_param_view_count == 2);
+
+    // Negative -> 0 (NOT the 0xfffffffb wrap a bare cast of -5 would produce).
+    REQUIRE(g_first_event_sample_offset == 0u);
+    REQUIRE(g_first_event_ramp_duration == 0u);
+
+    // Out-of-range positive -> clamped to the in-block maximums.
+    REQUIRE(g_last_event_sample_offset == 15u);  // frame_count - 1
+    REQUIRE(g_last_event_ramp_duration == 1u);    // frame_count - offset
 }
 
 #if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS

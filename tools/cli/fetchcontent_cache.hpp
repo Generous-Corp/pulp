@@ -4,7 +4,7 @@
 // on Windows). Powers `pulp doctor --caches[ --fix]` and the cache
 // preflight inside `pulp build` / `pulp test`.
 //
-// Issue #744. Mirrors the pattern used by `version_diag` and
+// Mirrors the pattern used by `version_diag` and
 // `projects_registry`: pure-logic core with an injected `DiscoveryEnv`
 // so unit tests don't need to touch the developer's real cache.
 //

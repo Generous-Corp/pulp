@@ -116,7 +116,7 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
 }
 
 TEST_CASE("pulp design validates owned option values before autobind",
-          "[cli][shellout][design][coverage][phase3]") {
+          "[cli][shellout][design]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     struct Case {
@@ -141,7 +141,7 @@ TEST_CASE("pulp design validates owned option values before autobind",
 }
 
 TEST_CASE("pulp dev validates value options before build or watch",
-          "[cli][shellout][dev][coverage][phase3]") {
+          "[cli][shellout][dev]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto tmp = fs::temp_directory_path() /
@@ -269,7 +269,7 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
 }
 
 TEST_CASE("pulp upgrade validates parser errors before network access",
-          "[cli][shellout][upgrade][coverage][phase3]") {
+          "[cli][shellout][upgrade]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     struct Case {
@@ -295,7 +295,7 @@ TEST_CASE("pulp upgrade validates parser errors before network access",
 }
 
 TEST_CASE("pulp sdk install validates parser errors before side effects",
-          "[cli][shellout][sdk][coverage][phase3]") {
+          "[cli][shellout][sdk]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto home = unique_temp_dir("pulp-sdk-parser-home");
@@ -329,7 +329,7 @@ TEST_CASE("pulp sdk install validates parser errors before side effects",
 }
 
 TEST_CASE("pulp sdk status and clean report cache state deterministically",
-          "[cli][shellout][sdk][coverage]") {
+          "[cli][shellout][sdk]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto home = unique_temp_dir("pulp-sdk-status-home");
@@ -384,7 +384,7 @@ TEST_CASE("pulp sdk status and clean report cache state deterministically",
 }
 
 TEST_CASE("pulp status quotes source checkout paths before reading Git metadata",
-          "[cli][shellout][status][coverage]") {
+          "[cli][shellout][status]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto root = unique_temp_dir("pulp status path with spaces and quote ' fixture");
@@ -427,7 +427,7 @@ TEST_CASE("pulp status quotes source checkout paths before reading Git metadata"
 }
 
 TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
-          "[cli][shellout][upgrade][codecov]") {
+          "[cli][shellout][upgrade]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto tmp = fs::temp_directory_path() /

@@ -1,6 +1,7 @@
-// Web MIDI API integration for WASM builds
-// Provides MidiSystem and MidiInput implementations using the Web MIDI API
-// via Emscripten's JavaScript interop.
+// Web MIDI API scaffold for WASM builds. This file is not currently wired into
+// the pulp-midi CMake target.
+// Provides MidiSystem and MidiInput scaffolding via Emscripten's JavaScript
+// interop; MIDI output is still pending.
 
 #ifdef __EMSCRIPTEN__
 
@@ -113,7 +114,8 @@ public:
     }
 
     std::vector<MidiPortInfo> enumerate_outputs() override {
-        return {{"web-midi-out", "Web MIDI Output"}};
+        // Output is not implemented yet; do not advertise a usable port.
+        return {};
     }
 
     std::unique_ptr<MidiInput> create_input() override {

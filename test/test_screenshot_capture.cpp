@@ -140,7 +140,7 @@ TEST_CASE("ScreenshotCapture default delay (30) honored when caller leaves field
 }
 
 TEST_CASE("ScreenshotCapture handles missing capture callback as empty bytes",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto path = tmp_screenshot_path("missing_capture");
     std::filesystem::remove(path);
@@ -160,7 +160,7 @@ TEST_CASE("ScreenshotCapture handles missing capture callback as empty bytes",
 }
 
 TEST_CASE("ScreenshotCapture reports empty screenshot path before writing",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto cap = h.make("", 1);
 
@@ -173,7 +173,7 @@ TEST_CASE("ScreenshotCapture reports empty screenshot path before writing",
 }
 
 TEST_CASE("ScreenshotCapture tolerates missing error callback for bad inputs",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto cap = h.make("", 1);
     cap.on_error = {};
@@ -186,7 +186,7 @@ TEST_CASE("ScreenshotCapture tolerates missing error callback for bad inputs",
 }
 
 TEST_CASE("ScreenshotCapture reports failed file writes and still closes",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto missing_dir = std::filesystem::temp_directory_path() /
                        "pulp_test_screenshot_missing_dir" /
@@ -204,7 +204,7 @@ TEST_CASE("ScreenshotCapture reports failed file writes and still closes",
 }
 
 TEST_CASE("ScreenshotCapture skips write error reporting when no handler is set",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto missing_dir = std::filesystem::temp_directory_path() /
                        "pulp_test_screenshot_missing_dir_no_error" /
@@ -221,7 +221,7 @@ TEST_CASE("ScreenshotCapture skips write error reporting when no handler is set"
 }
 
 TEST_CASE("ScreenshotCapture permits missing close callback after a successful write",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness h;
     auto path = tmp_screenshot_path("missing_close");
     std::filesystem::remove(path);
@@ -242,7 +242,7 @@ TEST_CASE("ScreenshotCapture permits missing close callback after a successful w
 }
 
 TEST_CASE("ScreenshotCapture captures immediately for non-positive delays",
-          "[issue-468][screenshot][coverage][phase3]") {
+          "[issue-468][screenshot]") {
     CaptureHarness zero_delay;
     auto zero_path = tmp_screenshot_path("zero_delay");
     std::filesystem::remove(zero_path);

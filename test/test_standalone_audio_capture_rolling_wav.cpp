@@ -144,6 +144,39 @@ TEST_CASE("rolling capture WAV keeps the LAST window and preserves float precisi
     fs::remove(path);
 }
 
+TEST_CASE("rolling capture writes int24 when requested",
+          "[standalone][audio-capture-rolling]") {
+    constexpr int kChannels = 1;
+    constexpr int kBlock = 64;
+    constexpr std::uint64_t kWindow = 128;
+
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::audio::RollingAudioCaptureBufferConfig rc;
+    rc.num_channels = kChannels;
+    rc.max_frames = kWindow;
+    REQUIRE(rolling.prepare(rc));
+    auto sig = [](int, std::uint64_t f) {
+        return 0.25f + static_cast<float>(f) * 1.0e-4f;
+    };
+    for (int b = 0; b < 2; ++b)
+        append_block(rolling, kChannels, kBlock,
+                     static_cast<std::uint64_t>(b) * kBlock, sig);
+
+    pulp::format::StandaloneConfig cfg;
+    cfg.sample_rate = 48000.0;
+    cfg.audio_capture_rolling_frames = static_cast<int>(kWindow);
+    cfg.audio_capture_rolling_int24 = true;
+    const auto path =
+        (fs::temp_directory_path() / "pulp_capture_rolling_i24.wav").string();
+    fs::remove(path);
+
+    REQUIRE(pulp::format::detail::write_audio_capture_rolling_wav_file(path, rolling, cfg));
+    const auto info = pulp::audio::read_audio_file_info(path);
+    REQUIRE(info.has_value());
+    CHECK(info->bits_per_sample == 24);
+    fs::remove(path);
+}
+
 TEST_CASE("rolling capture WAV trims to the delivered channel count",
           "[standalone][audio-capture-rolling]") {
     // The ring is prepared for 2 channels (the configured output bus), but the
@@ -364,10 +397,12 @@ TEST_CASE("standalone environment arms rolling audio capture without a screensho
     ScopedEnv screenshot("PULP_SCREENSHOT");
     ScopedEnv capture("PULP_AUDIO_CAPTURE_ROLLING");
     ScopedEnv frames("PULP_AUDIO_CAPTURE_ROLLING_FRAMES");
+    ScopedEnv format("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
     headless.unset();
     screenshot.unset();
     capture.set("/tmp/pulp-rolling-env.wav");
     frames.set("512");
+    format.set("int24");
 
     auto config =
         pulp::format::detail::standalone_config_from_environment(
@@ -375,6 +410,7 @@ TEST_CASE("standalone environment arms rolling audio capture without a screensho
 
     REQUIRE(config.audio_capture_rolling_path == "/tmp/pulp-rolling-env.wav");
     REQUIRE(config.audio_capture_rolling_frames == 512);
+    REQUIRE(config.audio_capture_rolling_int24);
     REQUIRE(config.headless);
     REQUIRE(config.screenshot_path.empty());
     REQUIRE_FALSE(pulp::format::detail::standalone_headless_requires_screenshot(config));

@@ -33,7 +33,8 @@
         "test/support/audio_contracts.*",
         "test/support/audio_doctor.*",
         "test/support/README.md",
-        "tools/audio/analysis/**"
+        "tools/audio/analysis/**",
+        "tools/audio/quality-lab/**"
       ]
     },
     "auv3": {

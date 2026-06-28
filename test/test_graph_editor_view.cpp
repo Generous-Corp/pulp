@@ -205,7 +205,7 @@ TEST_CASE("GraphEditorView modifier drags create feedback and midi edges",
 }
 
 TEST_CASE("GraphEditorView reverse modifier drags create feedback and midi edges",
-          "[view][graph_editor][coverage][issue-655]") {
+          "[view][graph_editor][issue-655]") {
     SignalGraph feedback_graph;
     const auto feedback_input = feedback_graph.add_input_node(1, "Input");
     const auto feedback_output = feedback_graph.add_output_node(1, "Output");
@@ -255,7 +255,7 @@ TEST_CASE("GraphEditorView selection and miss handling are stable",
 }
 
 TEST_CASE("GraphEditorView paints unnamed nodes and clears drag ghost after miss",
-          "[view][graph_editor][coverage][issue-655]") {
+          "[view][graph_editor][issue-655]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "");
     const auto output = graph.add_output_node(1, "Output");

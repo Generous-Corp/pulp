@@ -53,7 +53,7 @@ constexpr std::array kValidators = {
                   "cargo install clap-validator"},
 };
 
-// Build the priority list for one tool. Order matches the spec in #743:
+// Build the priority list for one tool. Order matches the validator spec:
 //   1. system binary path (e.g. /usr/bin/auval)
 //   2. cask app-bundle binary (e.g. /Applications/pluginval.app/...)
 //   3. PATH lookup (deferred to env.resolve_in_path so tests stay hermetic)
@@ -72,7 +72,7 @@ std::vector<fs::path> validator_priority_paths(const std::string& tool,
     } else if (tool == "pluginval") {
         // /usr/local/bin/pluginval is the historical Homebrew formula
         // path — it's also the path most affected by the rip-from-bundle
-        // failure mode #743 was filed for, so it stays first.
+        // failure mode, so it stays first.
         out.push_back("/usr/local/bin/pluginval");
         out.push_back("/opt/homebrew/bin/pluginval");
         out.push_back("/Applications/pluginval.app/Contents/MacOS/pluginval");
@@ -133,7 +133,7 @@ DiscoveryEnv make_default_env() {
         // Windows ownership model differs; treat everything as
         // user-owned so the safety boundary defaults to the more
         // forgiving branch. Discovery on Windows is currently
-        // out-of-scope per #743 anyway (filed-separately note).
+        // out of scope for this validator-discovery pass.
         return 0;
 #else
         struct stat st{};
@@ -156,7 +156,7 @@ DiscoveryEnv make_default_env() {
         verdict_line.clear();
 #if defined(__APPLE__)
         (void)tool_name;
-        // The failure mode this diagnostic targets (issue #743) is:
+        // The failure mode this diagnostic targets is:
         // a binary copied OUT of its .app bundle (`/usr/local/bin/pluginval`
         // copied from `/Applications/pluginval.app/Contents/MacOS/`)
         // retains a signature that references peer files inside the

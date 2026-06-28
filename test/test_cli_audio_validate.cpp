@@ -45,6 +45,30 @@ fs::path temp_wav(const std::string& name) {
     return fs::temp_directory_path() / ("pulp-cli-audio-validate-" + name);
 }
 
+std::string json_escape(const std::string& value) {
+    std::string out;
+    out.reserve(value.size() + 4);
+    constexpr char kHex[] = "0123456789abcdef";
+    for (unsigned char c : value) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    out += "\\u00";
+                    out += kHex[(c >> 4) & 0xf];
+                    out += kHex[c & 0xf];
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 TEST_CASE("audio validate summarize reports pitch and level on a sine",
@@ -115,16 +139,18 @@ TEST_CASE("audio validate assert exits nonzero on a failing assertions.json",
     if (!binary_available()) { SKIP("pulp binary not available"); }
     const auto wav = write_sine_wav(temp_wav("assert.wav"), 440.0, 48000.0,
                                     24000, 0.5f, false);
+    REQUIRE(json_escape("C:\\tmp\\pulp\\assert.wav") ==
+            "C:\\\\tmp\\\\pulp\\\\assert.wav");
 
     const auto pass_json = temp_wav("pass.json");
     write_text(pass_json,
                "{\"schema_version\":1,\"assertions\":[{\"name\":\"signal\","
-               "\"file\":\"" + wav.string() +
+               "\"file\":\"" + json_escape(wav.string()) +
                    "\",\"check\":\"not_silent\",\"min_rms_dbfs\":-60.0}]}");
     const auto fail_json = temp_wav("fail.json");
     write_text(fail_json,
                "{\"schema_version\":1,\"assertions\":[{\"name\":\"pitch\","
-               "\"file\":\"" + wav.string() +
+               "\"file\":\"" + json_escape(wav.string()) +
                    "\",\"check\":\"frequency_near\",\"expected_hz\":660.0,"
                    "\"tolerance_cents\":5.0}]}");
 

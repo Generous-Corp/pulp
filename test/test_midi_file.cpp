@@ -51,7 +51,7 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
 } // namespace
 
 TEST_CASE("MidiFileData aggregates empty and multi-track metadata",
-          "[midi][file][coverage][phase3]") {
+          "[midi][file]") {
     MidiFileData empty;
     REQUIRE(empty.duration_seconds() == Approx(0.0).margin(1e-9));
     REQUIRE(empty.total_events() == 0);
@@ -72,7 +72,7 @@ TEST_CASE("MidiFileData aggregates empty and multi-track metadata",
 }
 
 TEST_CASE("MidiFileData aggregates duration and event counts across tracks",
-          "[midi][file][coverage][phase3]") {
+          "[midi][file]") {
     MidiFileData data;
     REQUIRE(data.total_events() == 0);
     REQUIRE(data.duration_seconds() == Approx(0.0).margin(1e-9));
@@ -199,7 +199,7 @@ TEST_CASE("read_midi_file rejects truncated track chunks",
 }
 
 TEST_CASE("midi file helpers report missing and unwritable paths",
-          "[midi][file][coverage][phase3]") {
+          "[midi][file]") {
     TempDir tmp;
 
     REQUIRE_FALSE(read_midi_file((tmp.path / "missing.mid").string()).has_value());
@@ -373,7 +373,7 @@ TEST_CASE("write_midi_file preserves mixed short messages across tracks",
 }
 
 TEST_CASE("write_midi_file rejects missing parent directories",
-          "[midi][file][coverage][phase3]") {
+          "[midi][file]") {
     TempDir tmp;
     MidiFileData data;
     MidiTrack track;
@@ -386,7 +386,7 @@ TEST_CASE("write_midi_file rejects missing parent directories",
 }
 
 TEST_CASE("write_midi_file rejects directory destinations",
-          "[midi][file][coverage][phase3]") {
+          "[midi][file]") {
     TempDir tmp;
     MidiFileData data;
     MidiTrack track;

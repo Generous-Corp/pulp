@@ -11,8 +11,8 @@ namespace pulp::host {
 struct GraphNode;
 struct Connection;
 
-// Why a node may NOT be rendered ahead of the audio deadline (anticipative
-// rendering, masterwork Phase 6). Anticipation pre-computes a latent subgraph's
+// Why a node may NOT be rendered ahead of the audio deadline. Anticipation
+// pre-computes a latent subgraph's
 // output into a buffer during earlier blocks' slack so a CPU spike is absorbed
 // off the critical block — but only for work whose result for a FUTURE block can
 // be computed from inputs already available, with no dependence on live or
@@ -26,6 +26,10 @@ enum class AnticipationExclusion : std::uint8_t {
     Feedback,        // participates in, or sits downstream of, a feedback edge
                      // (its own past output gates it; can't run arbitrarily ahead)
     Sidechain,       // has, or transitively reads, a sidechain input (live signal)
+    TransportSensitive,  // is, or transitively reads, a node that consumes the
+                         // host transport (GraphNode::transport_sensitive). Such
+                         // a node must run live to observe the real playhead, so
+                         // it (and its downstream cone) cannot be rendered ahead.
 };
 
 struct AnticipationEligibility {
@@ -36,12 +40,12 @@ struct AnticipationEligibility {
     std::vector<AnticipationExclusion> node_exclusion;
     bool ok = false;
 
-    // WARNING: `passes_static_exclusions(i)` means ONLY that node i cleared the
-    // statically-detectable hard exclusions (live input / feedback / sidechain).
-    // It is NOT a blanket "safe to render ahead" clearance — host-clock-sensitive
-    // plugins are deliberately not detected here (see the function note). A
-    // renderer must apply the host-time check (or a per-node opt-out) on top of
-    // this; do not treat a true result as sufficient on its own.
+    // `passes_static_exclusions(i)` means node i cleared every exclusion: the
+    // topology hard exclusions (live input / feedback / sidechain) AND
+    // transport sensitivity (a node that opted into the host transport via
+    // GraphNode::transport_sensitive, seeded as TransportSensitive and propagated
+    // over its downstream cone). A true result is therefore sufficient for the
+    // anticipation partition to treat node i as ahead-renderable interior.
     bool passes_static_exclusions(std::size_t node_index) const {
         return node_index < node_exclusion.size() &&
                node_exclusion[node_index] == AnticipationExclusion::None;
@@ -54,22 +58,23 @@ struct AnticipationEligibility {
     }
 };
 
-// Classify each node's anticipation eligibility purely from the graph topology:
-// seed the hard-excluded roots (live AudioInput / MidiInput nodes, the endpoints
-// of every feedback edge, and any node with a sidechain inbound edge), then
-// propagate each exclusion forward along feedforward (non-feedback) edges to a
-// fixpoint, so a node downstream of anything excluded is excluded too. The first
-// reason assigned to a node wins (its own seed reason over an inherited one);
-// "excluded for some reason" is the load-bearing bit, the specific reason is
-// diagnostic. Deterministic and allocation-bounded; no prepared/live graph
+// Classify each node's anticipation eligibility from the graph topology plus the
+// per-node transport-sensitivity capability: seed the hard-excluded roots (live
+// AudioInput / MidiInput nodes, the endpoints of every feedback edge, any node
+// with a sidechain inbound edge, and any node with GraphNode::transport_sensitive
+// set), then propagate each exclusion forward along feedforward (non-feedback)
+// edges to a fixpoint, so a node downstream of anything excluded is excluded too.
+// The first reason assigned to a node wins (its own seed reason over an inherited
+// one); "excluded for some reason" is the load-bearing bit, the specific reason
+// is diagnostic. Deterministic and allocation-bounded; no prepared/live graph
 // required. Returns ok=false only on a malformed input (a connection naming a
 // node id absent from `nodes`).
 //
-// NOTE: host-clock sensitivity (a plugin whose output depends on the transport
-// playhead) is NOT statically detectable from the current node metadata, so it is
-// NOT covered here — anticipating such a node needs either a per-node opt-out flag
-// or feeding it the correct future transport. That is a deliberate follow-up; the
-// renderer that consumes this analysis must treat host-time exposure separately.
+// Transport sensitivity is the per-node opt-out for host-clock-dependent nodes:
+// `transport_sensitive` is resolved once at compile (from
+// PluginSlot::wants_transport() or a transport-aware custom callback), so seeding
+// TransportSensitive here keeps such a node — and its downstream cone — out of
+// the ahead-rendered interior, letting it run live and observe the real playhead.
 AnticipationEligibility analyze_anticipation_eligibility(
     std::span<const GraphNode> nodes, std::span<const Connection> connections);
 

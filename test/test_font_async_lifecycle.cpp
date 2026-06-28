@@ -83,7 +83,7 @@ TEST_CASE("register_font_url: file:// URL with invalid bytes → Failed",
 }
 
 TEST_CASE("register_font_url: file URL scheme matching is case-insensitive",
-          "[font][async][coverage]") {
+          "[font][async]") {
     std::string path = write_temp_dummy_font_bytes();
     auto fut = register_font_url("FiLe://" + path);
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
@@ -92,7 +92,7 @@ TEST_CASE("register_font_url: file URL scheme matching is case-insensitive",
 }
 
 TEST_CASE("register_font_url: file://localhost strips the host component",
-          "[font][async][coverage]") {
+          "[font][async]") {
     std::string path = write_temp_dummy_font_bytes();
     auto fut = register_font_url("file://localhost" + path);
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
@@ -101,7 +101,7 @@ TEST_CASE("register_font_url: file://localhost strips the host component",
 }
 
 TEST_CASE("register_font_url: bare file: scheme uses the following path",
-          "[font][async][coverage]") {
+          "[font][async]") {
     std::string path = write_temp_dummy_font_bytes();
     auto fut = register_font_url("file:" + path);
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
@@ -119,7 +119,7 @@ TEST_CASE("register_font_url: bare absolute path with invalid bytes → Failed",
 }
 
 TEST_CASE("register_font_url: unsupported schemes are treated as plain paths",
-          "[font][async][coverage]") {
+          "[font][async]") {
     auto fut = register_font_url("ftp://example.com/font.ttf");
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
     REQUIRE(fut.get() == FontState::Failed);

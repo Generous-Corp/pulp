@@ -34,7 +34,8 @@
 //!
 //! - Reader + struct model ported fully.
 //! - `locate_tool` ported — checks `$PULP_HOME/tools/<id>/` first,
-//!   then `python-envs/<id>/run.sh`, then `$PATH`.
+//!   then `python-envs/<id>/run.sh`, `npm-packages/<id>/run.sh`,
+//!   then `$PATH`.
 //! - `install` stays on the C++ delegate when available: archive
 //!   download + extraction needs `ureq` + `tar` + `zip` crates plus
 //!   platform-specific chmod, so Rust keeps an explicit fallback
@@ -197,6 +198,14 @@ pub fn tools_dir() -> PathBuf {
     pulp_home().join("tools")
 }
 
+fn wrapper_file_name() -> &'static str {
+    if cfg!(windows) {
+        "run.bat"
+    } else {
+        "run.sh"
+    }
+}
+
 /// Current platform label — matches `tool_registry.cpp`'s compile-time
 /// switch so registry lookups stay in sync across languages.
 #[must_use]
@@ -243,7 +252,7 @@ pub struct LocateResult {
 }
 
 /// Search for a tool following the same order as C++ `locate_tool`:
-/// pulp-managed directory → python-env wrapper → `$PATH`.
+/// pulp-managed directory → python-env wrapper → npm wrapper → `$PATH`.
 #[must_use]
 pub fn locate_tool(tool: &ToolDescriptor) -> LocateResult {
     // Pulp-managed binary.
@@ -265,11 +274,22 @@ pub fn locate_tool(tool: &ToolDescriptor) -> LocateResult {
     // Python-env wrapper.
     if tool.install_method == "python_pip" {
         let venv_dir = tools_dir().join("python-envs").join(&tool.id);
-        let wrapper = if cfg!(windows) {
-            venv_dir.join("run.bat")
-        } else {
-            venv_dir.join("run.sh")
-        };
+        let wrapper = venv_dir.join(wrapper_file_name());
+        if wrapper.is_file() {
+            return LocateResult {
+                found: true,
+                path: wrapper,
+                source: "pulp-managed".to_owned(),
+            };
+        }
+    }
+
+    // Repo-local npm package wrapper.
+    if tool.install_method == "npm_package" {
+        let wrapper = tools_dir()
+            .join("npm-packages")
+            .join(&tool.id)
+            .join(wrapper_file_name());
         if wrapper.is_file() {
             return LocateResult {
                 found: true,
@@ -348,12 +368,18 @@ pub fn uninstall_tool(id: &str) -> Result<bool> {
         fs::remove_dir_all(&venv).map_err(|e| CliError::io(venv, e))?;
         return Ok(true);
     }
+    let npm = tools_dir().join("npm-packages").join(id);
+    if npm.is_dir() {
+        fs::remove_dir_all(&npm).map_err(|e| CliError::io(npm, e))?;
+        return Ok(true);
+    }
     Ok(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::EnvVarGuard;
     use std::io::Write as _;
 
     fn write(p: &Path, body: &str) {
@@ -440,6 +466,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn locate_finds_npm_package_wrapper() {
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
+        let t = ToolDescriptor {
+            id: "video-proof".to_owned(),
+            install_method: "npm_package".to_owned(),
+            ..ToolDescriptor::default()
+        };
+        let wrapper = tools_dir()
+            .join("npm-packages")
+            .join(&t.id)
+            .join(wrapper_file_name());
+        write(&wrapper, "stub");
+
+        let loc = locate_tool(&t);
+        assert!(loc.found);
+        assert_eq!(loc.source, "pulp-managed");
+        assert_eq!(loc.path, wrapper);
+    }
+
     // ── Registry loading coverage ──────────────────────────────────
 
     #[test]
@@ -512,24 +559,16 @@ mod tests {
 
     #[test]
     fn pulp_home_honors_explicit_env_var() {
-        let _l = crate::test_support::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
-        std::env::set_var("PULP_HOME", td.path());
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
         assert_eq!(pulp_home(), td.path());
-        std::env::remove_var("PULP_HOME");
     }
 
     #[test]
     fn tools_dir_is_pulp_home_plus_tools() {
-        let _l = crate::test_support::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
-        std::env::set_var("PULP_HOME", td.path());
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
         assert_eq!(tools_dir(), td.path().join("tools"));
-        std::env::remove_var("PULP_HOME");
     }
 
     #[test]
@@ -543,25 +582,18 @@ mod tests {
 
     #[test]
     fn uninstall_tool_returns_false_for_missing_id() {
-        let _l = crate::test_support::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         // Point PULP_HOME at a fresh tempdir so we don't touch the
         // user's real ~/.pulp/tools tree.
         let td = tempfile::tempdir().unwrap();
-        std::env::set_var("PULP_HOME", td.path());
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
         let removed = uninstall_tool("__never_installed_xyz__").unwrap();
         assert!(!removed, "should be Ok(false), nothing to remove");
-        std::env::remove_var("PULP_HOME");
     }
 
     #[test]
     fn uninstall_tool_removes_existing_dir() {
-        let _l = crate::test_support::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
-        std::env::set_var("PULP_HOME", td.path());
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
         let tool_dir = td.path().join("tools").join("uv");
         std::fs::create_dir_all(&tool_dir).unwrap();
         std::fs::write(tool_dir.join("uv"), "stub").unwrap();
@@ -569,6 +601,22 @@ mod tests {
         let removed = uninstall_tool("uv").unwrap();
         assert!(removed);
         assert!(!tool_dir.exists());
-        std::env::remove_var("PULP_HOME");
+    }
+
+    #[test]
+    fn uninstall_tool_removes_npm_package_dir() {
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
+        let tool_dir = td
+            .path()
+            .join("tools")
+            .join("npm-packages")
+            .join("video-proof");
+        std::fs::create_dir_all(&tool_dir).unwrap();
+        std::fs::write(tool_dir.join(wrapper_file_name()), "stub").unwrap();
+        assert!(tool_dir.exists());
+        let removed = uninstall_tool("video-proof").unwrap();
+        assert!(removed);
+        assert!(!tool_dir.exists());
     }
 }

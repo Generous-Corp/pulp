@@ -55,6 +55,18 @@ using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
 
+// Transport-aware custom-node callback (additive). Identical to
+// CustomNodeProcessFn plus the host transport for the block. A custom type that
+// registers one of the transport-aware callbacks below is treated as
+// transport-sensitive: its routed binding forwards the live transport and it is
+// excluded from the anticipation interior so it always runs live (see
+// GraphNode::transport_sensitive).
+using CustomNodeTransportProcessFn =
+    std::function<void(audio::BufferView<float>& output,
+                       const audio::BufferView<const float>& input,
+                       int num_samples,
+                       const format::ProcessContext& transport)>;
+
 struct CustomNodeType {
     std::string type_id;
     int version = 1;
@@ -94,6 +106,22 @@ struct CustomNodeType {
         process_instance;
     std::function<std::vector<uint8_t>(void* /*instance*/)> save_state;
     std::function<bool(void* /*instance*/, const std::vector<uint8_t>& /*bytes*/)> load_state;
+
+    // Optional transport-aware callbacks (additive opt-in). When either is set,
+    // the node is transport-sensitive: the graph forwards the host transport to
+    // it and excludes it from the anticipation interior so it always runs live.
+    // `process_transport` is the stateless variant (used when `create` is empty);
+    // `process_instance_transport` is the stateful variant (leading instance
+    // pointer, used when an instance exists). Both default-empty == today's
+    // transport-unaware node, byte-for-byte unchanged. A type that sets a
+    // transport-aware callback alongside its plain `process`/`process_instance`
+    // gets the transport variant on the routed path; the plain one remains the
+    // fallback when no transport is available for the block.
+    CustomNodeTransportProcessFn process_transport;  // stateless
+    std::function<void(void* /*instance*/, audio::BufferView<float>& /*output*/,
+                       const audio::BufferView<const float>& /*input*/,
+                       int /*num_samples*/, const format::ProcessContext& /*transport*/)>
+        process_instance_transport;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -180,6 +208,19 @@ struct GraphNode {
     std::shared_ptr<void> custom_instance;
     std::vector<uint8_t> custom_state_blob;
     bool custom_state_pending = false;
+
+    // Cached, prepare-stable mirror of this node's transport-sensitivity
+    // capability. Resolved ONCE in compile_() — for a Plugin node from its
+    // slot's PluginSlot::wants_transport(), for a Custom node from whether its
+    // type registered a transport-aware callback — BEFORE the anticipation
+    // eligibility analysis runs, and read by BOTH the anticipation analyzer
+    // (which seeds AnticipationExclusion::TransportSensitive on a true value) and
+    // the routed binding resolution (which forwards the live transport to a
+    // true-valued node). The single shared read guarantees the partition and the
+    // bindings can never disagree. Prepare-stable: if a node's capability could
+    // change after compile, that requires a re-prepare for the graph to observe
+    // it — process() never re-polls the live slot per block.
+    bool transport_sensitive = false;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -333,7 +374,7 @@ public:
     // Source values are clamped to [0,1] then mapped linearly to
     // [range_lo, range_hi] in the plugin's plain parameter domain.
     //
-    // smoothing_ms applies a per-source linear slew before mixing (TODO).
+    // smoothing_ms applies a per-source linear slew before mix/clamp.
     // MixMode::Replace is the default; a second Replace edge targeting the
     // same (dest, param) is rejected. MixMode::Add sums multiple edges,
     // then clamps to the param's range.
@@ -433,6 +474,12 @@ public:
     // mismatch). The pointee is the snapshot's own callback (which keeps any
     // stateful instance alive); same lifetime contract as live_plugin_slot.
     const CustomNodeProcessFn* live_custom_processor(NodeId id) const noexcept;
+    // The live compiled snapshot's transport-aware custom callback for a Custom
+    // node, or nullptr when the node's type registered none. Same lifetime
+    // contract as live_custom_processor; non-null iff that node's
+    // GraphNode::transport_sensitive was resolved true.
+    const CustomNodeTransportProcessFn* live_custom_transport_processor(
+        NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
@@ -530,15 +577,19 @@ public:
     // on the live path; an underrun yields silence for that block, never a live
     // re-render (which would double-advance the producer-owned state).
     //
-    // SAFETY NOTE: the static eligibility (analyze_anticipation_eligibility) does
-    // NOT detect a host-clock-sensitive interior plugin (one whose output depends
-    // on the transport playhead). The transport process() overload therefore
-    // SUPPRESSES the supplied transport for any block where anticipation is active
-    // (counted by transport_suppressed_for_anticipation), so the ahead-render and
-    // the live render both see absent transport — exactly the safe no-transport
-    // interior render. A per-node transport-sensitivity opt-out is the precondition
-    // for letting a transport-aware interior coexist with anticipation; until that
-    // exists, suppression is the conservative guarantee.
+    // SAFETY NOTE: a host-clock-sensitive node (one whose output depends on the
+    // transport playhead) is NOT detectable from topology alone, so it opts in
+    // via PluginSlot::wants_transport() / a transport-aware custom callback. That
+    // capability is resolved once at compile into GraphNode::transport_sensitive
+    // and SEEDS AnticipationExclusion::TransportSensitive in
+    // analyze_anticipation_eligibility, which excludes the node AND its whole
+    // downstream cone from the ahead-rendered interior. A transport-sensitive
+    // node therefore always runs live/exterior, never ahead — so the live
+    // transport can stay populated on every block (the masked interior nodes are
+    // transport-insensitive by construction and ignore it). This per-node
+    // exclusion replaces the former blanket transport suppression under
+    // anticipation; transport_suppressed_for_anticipation() now counts the
+    // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
     }
@@ -575,23 +626,24 @@ public:
     // the nodes that consume it (e.g. ProcessorNode, via the routed ProcessBlock's
     // transport pointer), so a Processor sees the host playhead, mode, and
     // render-speed hint for the block. Nodes that do not consume transport are
-    // bit-identical to the no-transport overload. When anticipative rendering is
-    // active the transport is conservatively SUPPRESSED for the block (see
-    // set_anticipation_enabled / transport_suppressed_for_anticipation): an
-    // ahead-rendered interior would diverge from the live playhead, and the
-    // per-node transport-sensitivity opt-out that would let the two coexist does
-    // not exist yet.
+    // bit-identical to the no-transport overload. Under active anticipation the
+    // transport stays live: transport-sensitive nodes are excluded from the
+    // ahead-rendered interior (AnticipationExclusion::TransportSensitive) and run
+    // exterior, so every interior node that IS ahead-rendered is
+    // transport-insensitive by construction and ignores the populated transport
+    // (see set_anticipation_enabled / transport_suppressed_for_anticipation).
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples,
                  const format::ProcessContext& transport);
 
-    // Count of blocks for which a supplied transport was SUPPRESSED because
-    // anticipative rendering was active (see the transport process() overload).
-    // Stays 0 unless both transport and anticipation are in use at once; a
-    // non-zero value confirms the anticipation interior rendered without the
-    // live playhead, exactly as the no-transport path would. Relaxed-atomic,
-    // written only by the audio thread.
+    // Count of transport-sensitive nodes that anticipation forced to run
+    // exterior (excluded from the ahead-rendered interior so they observe the
+    // live host transport). Resolved at compile when anticipation is active; the
+    // former "transport suppressed per block" meaning is retired — the per-node
+    // exclusion (AnticipationExclusion::TransportSensitive) replaced the blanket
+    // suppression. Stays 0 unless a transport-sensitive node coexists with active
+    // anticipation. Relaxed-atomic; written by compile_() on the control thread.
     std::uint64_t transport_suppressed_for_anticipation() const noexcept {
         return transport_suppressed_for_anticipation_.load(std::memory_order_relaxed);
     }
@@ -776,6 +828,12 @@ private:
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+        // Transport-aware custom callbacks, populated alongside custom_processors
+        // for any Custom node whose type registered a transport-aware variant.
+        // The presence of an entry mirrors GraphNode::transport_sensitive for
+        // that node (both resolved from the same compile-time condition), so the
+        // routed binding and the anticipation analysis stay consistent.
+        std::unordered_map<NodeId, CustomNodeTransportProcessFn> custom_transport_processors;
         struct NodeShape {
             NodeType type;
             int num_input_ports;
@@ -935,12 +993,38 @@ private:
     // See routed_walk_fallbacks(): incremented when an eligible routed path failed
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
-    // See transport_suppressed_for_anticipation(): incremented when a supplied
-    // transport was dropped for a block because anticipation was active.
-    // Audio-thread writer only.
+    // See transport_suppressed_for_anticipation(): set by compile_() to the count
+    // of transport-sensitive nodes that active anticipation forced exterior
+    // (excluded from the ahead-rendered interior so they observe the live
+    // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
-    std::atomic<std::uint32_t> active_process_readers_{0};
+    // mutable: const snapshot readers (extract_midi / node_latency_samples) must
+    // bump this reader pin via ProcessReadGuard. Pinning does not change logical
+    // const-ness of the graph.
+    mutable std::atomic<std::uint32_t> active_process_readers_{0};
+
+    // RCU-style read pin for the live CompiledGraph snapshot. Any thread that
+    // dereferences live_raw_ must hold one of these for the entire duration of
+    // the dereference so prune_retired_snapshots_() / wait_for_retired_snapshots_()
+    // can see it and defer the free. The audio process path uses it; so do the
+    // control-thread snapshot readers (inject_midi / extract_midi /
+    // node_latency_samples / set_node_gain) — none of which run on the
+    // prepare/release thread, so without the pin a concurrent prepare()/release()
+    // could retire+free the snapshot mid-dereference (use-after-free). The seq_cst
+    // add/sub pairs with prune/wait's seq_cst load (see prune_retired_snapshots_()).
+    struct ProcessReadGuard {
+        explicit ProcessReadGuard(const SignalGraph& owner) noexcept
+            : owner_(owner) {
+            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
+        }
+        ~ProcessReadGuard() noexcept {
+            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
+        }
+        ProcessReadGuard(const ProcessReadGuard&) = delete;
+        ProcessReadGuard& operator=(const ProcessReadGuard&) = delete;
+        const SignalGraph& owner_;
+    };
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};
@@ -966,8 +1050,68 @@ private:
     // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
     mutable std::mutex node_load_mu_;
 
+    // Serializes CONTROL-THREAD access to the source-of-truth topology — the
+    // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
+    // they own (gain, ports, plugin/custom identity, custom state) — AND the
+    // snapshot-publication state (live_ / live_raw_ / retired_snapshots_) that a
+    // re-prepare and a concurrent invalidate_live_() both mutate. The control
+    // surface is multi-threaded: a host thread calls prepare()/compile_() (which
+    // iterates nodes_/connections_ and reads GraphNode::gain) while a UI thread
+    // adds/removes nodes or connections, edits a GraphNode field
+    // (set_node_gain / set_node_parameter / set_custom_node_state), or reads one
+    // (node_gain / get_node_parameter / custom_node_state / node_loads). Without
+    // this lock those vector mutations + plain-field reads/writes race.
+    //
+    // Contract — EVERY public control-thread method that reads or writes
+    // nodes_ / connections_ / a mutable GraphNode field, or that publishes/retires
+    // a snapshot, holds this mutex for the duration of that access:
+    //   mutators  : add_input_node, add_output_node, add_plugin_node(×2),
+    //               add_unresolved_plugin_node, add_gain_node,
+    //               add_midi_input_node, add_midi_output_node,
+    //               add_unresolved_custom_node, register_custom_node_type,
+    //               remove_node, connect, connect_midi, connect_sidechain,
+    //               connect_automation, connect_audio_rate_modulation,
+    //               connect_feedback, disconnect, clear, set_node_gain,
+    //               set_node_parameter, set_custom_node_state, prepare, release.
+    //   readers   : node_gain, get_node_parameter, custom_node_state, node_loads.
+    // The low-level helpers node() / has_path() / would_create_cycle() /
+    // processing_order() / custom_node_type() / audio_rate_modulation_lane() /
+    // validate_generated_graph() / total_declared_ports_() are LOCK-FREE and
+    // assume the caller already holds this mutex; the public methods above are
+    // their only callers on the mutating path. Public methods that delegate to
+    // another public mutator (add_custom_node -> add_unresolved_custom_node) do
+    // NOT take the lock themselves — the leaf takes it once — to avoid
+    // self-deadlock on this non-recursive mutex.
+    //
+    // The nodes() / connections() accessors hand out a reference to the live
+    // vector and the live_*() snapshot getters read live_; both are governed by
+    // the same caller-side keepalive/serialization contract they always were and
+    // are intentionally NOT locked here (locking a reference-returning accessor
+    // can't protect the caller's later iteration anyway).
+    //
+    // Deadlock-free by construction:
+    //  - Taken ONLY on the control thread. The audio render path
+    //    (process_impl / the executor / the reference walk) reads the immutable
+    //    CompiledGraph snapshot — never nodes_ or GraphNode fields — so it must
+    //    never take this lock. Taking a mutex on the audio thread would be an
+    //    RT-safety violation.
+    //  - NEVER held while acquiring a ProcessReadGuard reader-pin. The methods
+    //    that both edit source state AND reflect into the live snapshot
+    //    (set_node_gain) take this mutex for the source write, RELEASE it, then
+    //    separately pin the snapshot — so this mutex can never invert lock order
+    //    with the RCU drain (prune_retired_snapshots_ / wait_for_retired_snapshots_,
+    //    the latter busy-waited under this mutex by release()).
+    mutable std::mutex graph_mutation_mutex_;
+
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;
+    // Lock-free core of audio_rate_modulation_lane() — scans nodes_ via node() and
+    // assumes the caller already holds graph_mutation_mutex_. The public
+    // audio_rate_modulation_lane() locks and forwards here; connect_audio_rate_
+    // modulation() (already holding the mutex) calls this core directly to avoid
+    // re-locking the non-recursive mutex.
+    bool audio_rate_modulation_lane_locked_(const Connection& connection,
+                                            state::ModulationLane& lane) const;
     // Shared body of both process() overloads. `transport` is the host
     // transport context for the block, or nullptr for the no-transport path.
     // RT-safe (no allocation per block).
@@ -975,6 +1119,15 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    // Legacy serial reference walk — the hand-maintained, bit-exact inter-node
+    // DSP oracle and fallback for process_impl(). Lives in its own translation
+    // unit (signal_graph_reference_walk.cpp) but stays a member so it can name
+    // the private nested CompiledGraph / NodeRuntime types without promotion.
+    // process_impl() invokes it when no routed path takes a block.
+    void run_reference_walk_(audio::BufferView<float>& output,
+                             const audio::BufferView<const float>& input,
+                             int num_samples,
+                             CompiledGraph* cg);
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();

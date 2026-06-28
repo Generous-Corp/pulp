@@ -86,7 +86,7 @@ TEST_CASE("JsonRpcPeer request/response over an in-memory channel", "[json_rpc]"
 }
 
 TEST_CASE("JsonRpcError factories expose spec codes and messages",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     const auto parse = JsonRpcError::parse_error();
     const auto invalid = JsonRpcError::invalid_request();
     const auto params = JsonRpcError::invalid_params();
@@ -104,7 +104,7 @@ TEST_CASE("JsonRpcError factories expose spec codes and messages",
 }
 
 TEST_CASE("JsonRpcResult factories separate success payloads from failures",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     const auto ok = JsonRpcResult::ok(R"({"ready":true})");
     REQUIRE(ok.result_json == R"({"ready":true})");
     REQUIRE_FALSE(ok.error.has_value());
@@ -173,7 +173,7 @@ TEST_CASE("JsonRpcPeer fires notification handler and expects no response", "[js
 }
 
 TEST_CASE("JsonRpcPeer delivers empty notification params when omitted",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer server(*pair.second);
 
@@ -245,7 +245,7 @@ TEST_CASE("JsonRpcPeer unregisters methods and notifications", "[json_rpc]") {
 }
 
 TEST_CASE("JsonRpcPeer preserves string request ids and omits missing params",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string reply;
@@ -269,7 +269,7 @@ TEST_CASE("JsonRpcPeer preserves string request ids and omits missing params",
 }
 
 TEST_CASE("JsonRpcPeer destruction clears the channel message callback",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string reply;
@@ -390,7 +390,7 @@ TEST_CASE("JsonRpcPeer reports closed and failed sends", "[json_rpc]") {
 }
 
 TEST_CASE("JsonRpcPeer rejects sends after direct channel close",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
 
@@ -405,7 +405,7 @@ TEST_CASE("JsonRpcPeer rejects sends after direct channel close",
 }
 
 TEST_CASE("JsonRpcPeer destructor detaches its message callback",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     std::string reply;
     pair.second->on_message([&](const Message& message) {
@@ -421,7 +421,7 @@ TEST_CASE("JsonRpcPeer destructor detaches its message callback",
 }
 
 TEST_CASE("JsonRpcPeer omits params for empty request payloads",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -447,7 +447,7 @@ TEST_CASE("JsonRpcPeer omits params for empty request payloads",
 }
 
 TEST_CASE("JsonRpcPeer preserves string request ids in responses",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string reply;
@@ -469,7 +469,7 @@ TEST_CASE("JsonRpcPeer preserves string request ids in responses",
 }
 
 TEST_CASE("JsonRpcPeer dispatches incoming error responses with data",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -499,7 +499,7 @@ TEST_CASE("JsonRpcPeer dispatches incoming error responses with data",
 }
 
 TEST_CASE("JsonRpcPeer defaults missing incoming error fields",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -527,7 +527,7 @@ TEST_CASE("JsonRpcPeer defaults missing incoming error fields",
 }
 
 TEST_CASE("JsonRpcPeer replies to null id requests and notification gaps",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -553,7 +553,7 @@ TEST_CASE("JsonRpcPeer replies to null id requests and notification gaps",
 }
 
 TEST_CASE("JsonRpcPeer rejects requests with non-string method names",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -578,7 +578,7 @@ TEST_CASE("JsonRpcPeer rejects requests with non-string method names",
 }
 
 TEST_CASE("JsonRpcPeer ignores notifications with non-string method names",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -600,7 +600,7 @@ TEST_CASE("JsonRpcPeer ignores notifications with non-string method names",
 }
 
 TEST_CASE("JsonRpcPeer unregisters a replacement handler cleanly",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
     JsonRpcPeer server(*pair.second);
@@ -633,7 +633,7 @@ TEST_CASE("JsonRpcPeer unregisters a replacement handler cleanly",
 }
 
 TEST_CASE("JsonRpcPeer ignores malformed response payloads without firing callbacks",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -658,7 +658,7 @@ TEST_CASE("JsonRpcPeer ignores malformed response payloads without firing callba
 }
 
 TEST_CASE("JsonRpcPeer forwards scalar and object params unchanged",
-          "[json_rpc][coverage][large]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
     JsonRpcPeer server(*pair.second);
@@ -689,7 +689,7 @@ TEST_CASE("JsonRpcPeer forwards scalar and object params unchanged",
 }
 
 TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without replies",
-          "[json_rpc][coverage][large]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -707,7 +707,7 @@ TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without r
 }
 
 TEST_CASE("JsonRpcPeer rejects invalid request envelopes before dispatch",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -736,7 +736,7 @@ TEST_CASE("JsonRpcPeer rejects invalid request envelopes before dispatch",
 }
 
 TEST_CASE("JsonRpcPeer destructor releases the channel callback",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string reply;
@@ -769,7 +769,7 @@ TEST_CASE("JsonRpcPeer destructor releases the channel callback",
 }
 
 TEST_CASE("JsonRpcPeer consumes pending callbacks after the first response",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -798,7 +798,7 @@ TEST_CASE("JsonRpcPeer consumes pending callbacks after the first response",
 }
 
 TEST_CASE("JsonRpcPeer destructor clears the channel message callback",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     {
@@ -815,7 +815,7 @@ TEST_CASE("JsonRpcPeer destructor clears the channel message callback",
 }
 
 TEST_CASE("JsonRpcPeer tolerates sparse error responses",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string outbound_request;
@@ -843,7 +843,7 @@ TEST_CASE("JsonRpcPeer tolerates sparse error responses",
 }
 
 TEST_CASE("JsonRpcPeer notification handlers replace and clear cleanly",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
     JsonRpcPeer server(*pair.second);
@@ -872,7 +872,7 @@ TEST_CASE("JsonRpcPeer notification handlers replace and clear cleanly",
 }
 
 TEST_CASE("JsonRpcPeer destructor clears the channel message handler",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> replies;
@@ -899,7 +899,7 @@ TEST_CASE("JsonRpcPeer destructor clears the channel message handler",
 }
 
 TEST_CASE("JsonRpcPeer accepts binary JSON and default error envelopes",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
     JsonRpcPeer server(*pair.second);
@@ -946,7 +946,7 @@ TEST_CASE("JsonRpcPeer accepts binary JSON and default error envelopes",
 }
 
 TEST_CASE("JsonRpcPeer consumes responses for requests without callbacks",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::vector<std::string> outbound;
@@ -976,7 +976,7 @@ TEST_CASE("JsonRpcPeer consumes responses for requests without callbacks",
 }
 
 TEST_CASE("JsonRpcPeer escapes outbound method and notification names",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
     JsonRpcPeer server(*pair.second);
@@ -1010,7 +1010,7 @@ TEST_CASE("JsonRpcPeer escapes outbound method and notification names",
 }
 
 TEST_CASE("JsonRpcPeer drops invalid notifications without invoking handlers",
-          "[json_rpc][coverage]") {
+          "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
     std::string unexpected_reply;

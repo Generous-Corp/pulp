@@ -60,8 +60,8 @@ oriented:
 `pulp_node_v1` is the language-neutral C ABI for custom `SignalGraph` nodes. It
 ships as a real header —
 `core/native-components/include/pulp/native_components/pulp_node_v1.h` (module
-`pulp::native-components`) — derived from the Phase 5 source-level
-`CustomNodeType` lifecycle/state experience. Its `PULP_NODE_V1_ABI_MAJOR` tracks
+`pulp::native-components`) — derived from the source-level `CustomNodeType`
+lifecycle/state contract. Its `PULP_NODE_V1_ABI_MAJOR` tracks
 `PULP_NODE_ABI_VERSION` (the cross-module equality is asserted in
 `test/test_pulp_node_v1.cpp`).
 
@@ -359,7 +359,7 @@ preserve that identity even when the target graph has not registered a matching
 factory. Multiple versions of the same custom `type_id` can be registered at
 once; deserialization resolves by exact `(type_id, version)`.
 
-### Stateful custom nodes (Phase 5)
+### Stateful custom nodes
 
 `CustomNodeType` is additively extended with an optional **stateful lifecycle**.
 When `create` is set, the graph owns one opaque instance per node (RAII via

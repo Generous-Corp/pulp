@@ -1,4 +1,4 @@
-// Phase 8a — pulp::design module + component catalog + metadata.
+// pulp::design module + component catalog + metadata.
 // Verifies the catalog is well-formed (every entry maps a Figma component to a
 // real native class + header + tokens), the theme helper produces the token-true
 // Ink & Signal theme, and apply_ink_signal restyles a view tree.

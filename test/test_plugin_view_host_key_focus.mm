@@ -370,6 +370,59 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
     }
 }
 
+// A View whose on_key_event records keys and consumes only the letter 'a' — the
+// stand-in for an editor root that wires Musical Typing on on_key_event.
+namespace {
+struct NoteCaptureRoot : public pulp::view::View {
+    std::vector<pulp::view::KeyCode> seen;
+    bool on_key_event(const pulp::view::KeyEvent& e) override {
+        if (e.is_down) seen.push_back(e.key);
+        return e.is_down && e.key == pulp::view::KeyCode::a;  // "note" key consumed
+    }
+};
+}  // namespace
+
+// With NO focused input widget, a keystroke must still reach the editor ROOT's
+// on_key_event — that is what makes a plugin's own Musical Typing fire when
+// hosted (it was dropped before: the handler returned early on no focus, so the
+// key fell through to the DAW). Keys the root does NOT consume still pass on.
+TEST_CASE("PluginViewHost (mac CPU) — unfocused keys reach the editor ROOT "
+          "(hosted Musical Typing)",
+          "[plugin-view-host][key-routing][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted root-key test skipped.");
+            return;
+        }
+        NoteCaptureRoot root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+        REQUIRE(View::focused_input_ == nullptr);  // nothing focused
+
+        // 'a' (kVK_ANSI_A = 0): the root consumes it as a note — it must have been
+        // dispatched to the root despite no focused widget.
+        [pulp_view keyDown:make_key_event(0, 0, @"a")];
+        REQUIRE_FALSE(root.seen.empty());
+        REQUIRE(root.seen.back() == KeyCode::a);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 // ── Focus affordance + release ───────────────────────────────────────────────
 //
 // Two host-keyboard-etiquette contracts the embedded view must honor:

@@ -51,15 +51,15 @@ tools/harness/
 | Harness status | Meaning                                                                              | Catalog `status` mapping |
 | -------------- | ------------------------------------------------------------------------------------ | ------------------------ |
 | PASS           | Implemented, matches reference behavior on all enumerated supported values.          | `supported`              |
+| SUPPORTED-NO-EVIDENCE | Static implementation checks pass, but referenced evidence tests are missing or stale. | `supported`          |
 | DIVERGE        | Implemented but partial — some supported values match, others diverge or are missing.| `partial`                |
 | NO-OP          | Accepted silently (intentional stub — bridge registration exists, body is empty).    | `noop`                   |
 | NOT-IMPL       | Falls through silently / has no implementation surface in pulp.                      | `missing`                |
 | OOS            | Explicitly out of scope.                                                             | `wontfix`                |
 
-The `noop` catalog status was added in pulp #1475 to close the
-vocabulary gap discovered while triaging css/animation* and
-css/touchAction during #1474. Without it, every intentional NO-OP
-registers as drift regardless of what the catalog claims.
+The `noop` catalog status distinguishes intentional bridge stubs from
+missing implementations. Without it, every intentional NO-OP registers
+as drift regardless of what the catalog claims.
 
 ## CLI
 

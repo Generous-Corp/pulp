@@ -59,32 +59,32 @@ TEST_CASE("pulp upgrade URL: version field flows into the release tag verbatim",
 }
 
 TEST_CASE("pulp upgrade URL: unknown non-Windows platforms keep tarball shape",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto r = pulp_upgrade_url_for("2.0.0", "freebsd", "x64");
     REQUIRE(r.asset == "pulp-freebsd-x64.tar.gz");
     REQUIRE(r.url.find("/v2.0.0/pulp-freebsd-x64.tar.gz") != std::string::npos);
 }
 
 TEST_CASE("pulp upgrade URL: platform comparison is intentionally exact",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto r = pulp_upgrade_url_for("2.0.0", "Windows", "x64");
     REQUIRE(r.asset == "pulp-Windows-x64.tar.gz");
 }
 
 TEST_CASE("pulp upgrade URL: asset name is reused verbatim as URL suffix",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto r = pulp_upgrade_url_for("2.1.0", "darwin", "arm64");
     REQUIRE(r.url.ends_with("/" + r.asset));
 }
 
 TEST_CASE("pulp upgrade URL: empty version still produces the v-prefixed tag slot",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto r = pulp_upgrade_url_for("", "linux", "x64");
     REQUIRE(r.url.find("/download/v/pulp-linux-x64.tar.gz") != std::string::npos);
 }
 
 TEST_CASE("pulp upgrade URL: empty platform and arch remain literal in asset",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto empty_platform = pulp_upgrade_url_for("2.2.0", "", "arm64");
     REQUIRE(empty_platform.asset == "pulp--arm64.tar.gz");
     REQUIRE(empty_platform.url.ends_with("/pulp--arm64.tar.gz"));
@@ -95,7 +95,7 @@ TEST_CASE("pulp upgrade URL: empty platform and arch remain literal in asset",
 }
 
 TEST_CASE("pulp upgrade URL: literal input is not normalized or URL escaped",
-          "[cli][upgrade][url][coverage][large]") {
+          "[cli][upgrade][url]") {
     auto r = pulp_upgrade_url_for(" 2.2.0 ", "darwin universal", "arm 64");
     REQUIRE(r.asset == "pulp-darwin universal-arm 64.tar.gz");
     REQUIRE(r.url.find("/download/v 2.2.0 /") != std::string::npos);

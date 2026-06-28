@@ -187,7 +187,7 @@ TEST_CASE("CiDiscovery ignores malformed and unhandled messages",
 }
 
 TEST_CASE("CiDiscovery ignores null message buffers",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery ci;
 
     REQUIRE(ci.process_message(nullptr, 0).empty());
@@ -195,7 +195,7 @@ TEST_CASE("CiDiscovery ignores null message buffers",
 }
 
 TEST_CASE("CiDiscovery rejects wrong universal sysex headers",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery ci;
     auto wrong_universal_id = make_ci_header(CiMessageType::DiscoveryInquiry,
                                              MUID{0x00011111}, MUID::broadcast());
@@ -214,7 +214,7 @@ TEST_CASE("CiDiscovery rejects wrong universal sysex headers",
 }
 
 TEST_CASE("CiDiscovery ignores undersized discovery replies",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery ci;
     int callbacks = 0;
     ci.on_device_discovered = [&](const CiDeviceInfo&) { ++callbacks; };
@@ -243,7 +243,7 @@ TEST_CASE("CiDiscovery ignores inquiries addressed to another MUID",
 }
 
 TEST_CASE("CiDiscovery responds to inquiry addressed directly to local MUID",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery responder;
     CiDeviceInfo info = responder.device_info();
     info.muid = MUID{0x00001234};
@@ -263,7 +263,7 @@ TEST_CASE("CiDiscovery responds to inquiry addressed directly to local MUID",
 }
 
 TEST_CASE("CiDiscovery stores minimal-length discovery replies",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery ci;
     std::vector<CiDeviceInfo> callbacks;
     ci.on_device_discovered = [&](const CiDeviceInfo& info) {
@@ -311,7 +311,7 @@ TEST_CASE("CiDiscovery stores discovery replies and fires callbacks",
 }
 
 TEST_CASE("CiDiscovery discovery reply stores identity metadata",
-          "[midi][ci][coverage][phase3-routing]") {
+          "[midi][ci]") {
     CiDiscovery inquirer;
     CiDeviceInfo local = inquirer.device_info();
     local.muid = MUID{0x00011111};
@@ -353,7 +353,7 @@ TEST_CASE("CiDiscovery discovery reply stores identity metadata",
 }
 
 TEST_CASE("CiDiscovery clamps oversized discovery max SysEx metadata",
-          "[midi][ci][coverage][phase3-routing]") {
+          "[midi][ci]") {
     CiDiscovery inquirer;
     CiDeviceInfo local = inquirer.device_info();
     local.muid = MUID{0x00011111};
@@ -377,7 +377,7 @@ TEST_CASE("CiDiscovery clamps oversized discovery max SysEx metadata",
 }
 
 TEST_CASE("CiDiscovery ignores discovery replies addressed to another MUID",
-          "[midi][ci][coverage][phase3-routing]") {
+          "[midi][ci]") {
     CiDiscovery inquirer;
     CiDeviceInfo local = inquirer.device_info();
     local.muid = MUID{0x00033333};
@@ -442,7 +442,7 @@ TEST_CASE("CiDiscovery profile management ignores unknown profiles",
 }
 
 TEST_CASE("ProfileId equality ignores reserved byte",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     ProfileId lhs{0x01, 0x02, 0x03, 0x04, 0x00};
     ProfileId same_identity{0x01, 0x02, 0x03, 0x04, 0x7F};
     ProfileId different_level{0x01, 0x02, 0x03, 0x05, 0x00};
@@ -464,7 +464,7 @@ TEST_CASE("CiDiscovery profile callback", "[midi][ci]") {
 }
 
 TEST_CASE("CiDiscovery profile callback reports enable and disable",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery ci;
     ProfileId profile{0x02, 0x03, 0x04, 0x05, 0x00};
     ci.add_profile({profile, false, 4});
@@ -487,7 +487,7 @@ TEST_CASE("CiDiscovery profile callback reports enable and disable",
 }
 
 TEST_CASE("CiDiscovery profile enable and disable repeat notifications are explicit",
-          "[midi][ci][coverage]") {
+          "[midi][ci]") {
     CiDiscovery ci;
     ProfileId profile{0x04, 0x05, 0x06, 0x07, 0x00};
     ci.add_profile({profile, false, 2});
@@ -555,7 +555,7 @@ TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
 }
 
 TEST_CASE("CiDiscovery profile inquiry only responds to local or broadcast MUID",
-          "[midi][ci][coverage][phase3-routing]") {
+          "[midi][ci]") {
     CiDiscovery responder;
     CiDeviceInfo local = responder.device_info();
     local.muid = MUID{0x00066666};
@@ -600,7 +600,7 @@ TEST_CASE("CiDiscovery profile inquiry only responds to local or broadcast MUID"
 }
 
 TEST_CASE("CiDiscovery profile inquiry with no profiles reports zero counts",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery responder;
     MUID peer{0x0002468A};
     auto inquiry = make_ci_header(CiMessageType::ProfileInquiry,
@@ -680,7 +680,7 @@ TEST_CASE("CiDiscovery profile reply lists enabled and disabled profiles",
 }
 
 TEST_CASE("CiDiscovery profile reply encodes multi-byte profile counts",
-          "[midi][ci][codecov]") {
+          "[midi][ci]") {
     CiDiscovery responder;
     for (int i = 0; i < 130; ++i) {
         responder.add_profile({

@@ -274,7 +274,7 @@ TEST_CASE("ViewBridge defers on_view_opened until notify_attached", "[view_bridg
 }
 
 TEST_CASE("ViewBridge stores detached resize state and resets on reopen",
-          "[view_bridge][coverage]") {
+          "[view_bridge]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);

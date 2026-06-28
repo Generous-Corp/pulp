@@ -1,4 +1,4 @@
-// render_scenario.cpp — typed offline render scenarios (harness PR 2).
+// render_scenario.cpp — typed offline render scenarios.
 // Event-application semantics are documented in render_scenario.hpp; keep
 // the block loop here in lock-step with those docs.
 

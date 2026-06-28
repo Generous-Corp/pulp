@@ -1,5 +1,5 @@
 # PulpSampler — sample-buffer sampler with MIDI triggering and ADSR
-# CLAP only for now (like PulpSynth/PulpDrums)
+# CLAP is the validated example format; enable others only after validation.
 
 if(PULP_HAS_CLAP)
     # CLAP plugin

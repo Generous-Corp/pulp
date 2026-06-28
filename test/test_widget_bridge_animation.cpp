@@ -672,7 +672,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
 }
 
 TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normalization",
-          "[view][bridge][asset][coverage]")
+          "[view][bridge][asset]")
 {
     ScriptEngine engine;
     View root;
@@ -730,7 +730,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
 }
 
 TEST_CASE("WidgetBridge registerDrop dispatches escaped payloads to JS",
-          "[view][bridge][dnd][coverage]")
+          "[view][bridge][dnd]")
 {
     ScriptEngine engine;
     View root;
@@ -776,7 +776,7 @@ TEST_CASE("WidgetBridge registerDrop dispatches escaped payloads to JS",
 }
 
 TEST_CASE("WidgetBridge registerContextMenu dispatches native menu position",
-          "[view][bridge][context-menu][coverage]")
+          "[view][bridge][context-menu]")
 {
     ScriptEngine engine;
     View root;
@@ -813,7 +813,7 @@ TEST_CASE("WidgetBridge registerContextMenu dispatches native menu position",
 }
 
 TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
-          "[view][bridge][font][coverage]")
+          "[view][bridge][font]")
 {
     ScriptEngine engine;
     View root;

@@ -127,7 +127,7 @@ TEST_CASE("pulp_motion_publish_components emits sorted multi-component events",
 }
 
 TEST_CASE("pulp_motion_publish_components tolerates empty and null inputs",
-          "[motion][swift-bridge][coverage]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     const char* keys[1] = {"x"};
@@ -141,7 +141,7 @@ TEST_CASE("pulp_motion_publish_components tolerates empty and null inputs",
 }
 
 TEST_CASE("pulp_motion bridge normalizes null C strings",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     pulp_motion_publish_value(nullptr, nullptr, 0.0, 0.001, 3);
@@ -154,7 +154,7 @@ TEST_CASE("pulp_motion bridge normalizes null C strings",
 }
 
 TEST_CASE("pulp_motion bridge normalizes null provenance and geometry names",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     pulp_motion_set_ambient_provenance(nullptr, nullptr, nullptr, 0);
@@ -301,7 +301,7 @@ TEST_CASE("pulp_motion_update_geometry with a non-default metric also emits",
 }
 
 TEST_CASE("pulp_motion_update_geometry keeps frame metrics on the sampled trace only",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     const int id = pulp_motion_register_geometry_trace("FrameOnly", 60);
@@ -321,7 +321,7 @@ TEST_CASE("pulp_motion_update_geometry keeps frame metrics on the sampled trace 
 }
 
 TEST_CASE("pulp_motion geometry registry survives coordinator reset",
-          "[motion][swift-bridge][coverage]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     const int first = pulp_motion_register_geometry_trace("ViewA", 30);
@@ -344,7 +344,7 @@ TEST_CASE("pulp_motion geometry registry survives coordinator reset",
 }
 
 TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     pulp_motion_update_geometry(123456, "frame", 1.0, 2.0, 3.0, 4.0);
@@ -356,7 +356,7 @@ TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
 }
 
 TEST_CASE("pulp_motion geometry bridge detaches one trace without silencing others",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     const int first = pulp_motion_register_geometry_trace("First", 60);
@@ -384,7 +384,7 @@ TEST_CASE("pulp_motion geometry bridge detaches one trace without silencing othe
 }
 
 TEST_CASE("PulpBridge state ABI rejects invalid buffers without touching callers",
-          "[motion][swift-bridge][coverage][requested]") {
+          "[motion][swift-bridge]") {
     int untouched_size = 1234;
     REQUIRE(pulp_state_serialize(nullptr) == nullptr);
     REQUIRE(untouched_size == 1234);

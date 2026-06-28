@@ -38,7 +38,11 @@ What you get:
   bundle through `PluginSlot`, no DAW or audio device:
   - `pulp audio render --plugin <bundle> --out out.wav --duration-ms 1000`
   - drive it with `--input-signal`, `--input`, repeatable `--param`, and repeatable `--midi`
-  - `--param <id>=<value>[@frame]` values are the PLAIN native parameter domain, not normalized
+  - `--param <id>=<value>[@frame]` values are the PLAIN native parameter domain,
+    not normalized; `@frame` is **sample-accurate** (block-rate on LV2 by its
+    control-port nature, and on any plugin that reads its params once per block)
+  - also exposed as the `pulp_audio_render` MCP tool (returns the metrics JSON;
+    takes a single `param`/`midi` token — use the CLI for multiple)
 
 To add coverage for a new effect, copy the nearest contract fixture in
 `test/test_audio_contracts.cpp` (or a Doctor case in `test/test_audio_doctor.cpp`)
@@ -47,7 +51,9 @@ an `audio-run/` bundle, reach for the `pulp audio validate` verbs above. For a
 plugin bundle that needs a deterministic offline scenario, use `pulp audio render`.
 
 > Live in-app inspection has landed in `/audio-inspect` and
-> `pulp run --audio-inspector`. The still-planned harness slice is the live
-> rolling-ring capture-to-WAV path; until it lands, use the fixtures, Audio
-> Scope, earliest-window `pulp run --audio-capture-wav`, `pulp audio validate`,
-> and `pulp audio render` according to the window/source you need.
+> `pulp run --audio-inspector`. Live capture-to-WAV has landed in two modes:
+> `pulp run --audio-capture-wav` (earliest window, int16 — presence/level/clip)
+> and `pulp run --audio-capture-rolling` (last/steady-state window, float, or
+> `--audio-capture-rolling-format int24` — the window `doctor`/`compare` want).
+> Pick among the fixtures, Audio Scope, the two live captures, `pulp audio
+> validate`, and `pulp audio render` according to the window/source you need.

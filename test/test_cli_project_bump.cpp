@@ -212,7 +212,7 @@ TEST_CASE("refuse_dynamic_pin rejects branch names and SHAs",
 }
 
 TEST_CASE("pin normalization accepts uppercase v but preserves lowercase style only",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     REQUIRE(pb::pin_has_v_prefix("V1.2.3"));
     REQUIRE(pb::normalize_pin("V1.2.3") == "1.2.3");
     REQUIRE(pb::parse_semver_strict("V2.3.4").ok);
@@ -282,7 +282,7 @@ TEST_CASE("rewrite_pin returns nullopt on Unknown site",
 }
 
 TEST_CASE("rewrite_pin rejects stale and invalid captured spans",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     std::string src = "project(App VERSION 0.23.0)\n";
     auto site = pb::find_pin_site(src);
     REQUIRE(site.kind == pb::PinKind::ProjectVersion);
@@ -322,7 +322,7 @@ TEST_CASE("is_downgrade compares semver strictly",
 }
 
 TEST_CASE("compare_semver returns zero when either input is invalid",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     auto ok = pb::parse_semver_strict("1.2.3");
     auto bad = pb::parse_semver_strict("1.2");
     REQUIRE(pb::compare_semver(ok, bad) == 0);
@@ -403,7 +403,7 @@ TEST_CASE("legacy undo batch synthesizes a CMake edit",
 }
 
 TEST_CASE("parse_undo_batch rejects non-object roots and missing separators",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     REQUIRE_FALSE(pb::parse_undo_batch("").has_value());
     REQUIRE_FALSE(pb::parse_undo_batch("[]").has_value());
     REQUIRE_FALSE(pb::parse_undo_batch(R"({"timestamp" "missing-colon"})").has_value());
@@ -457,7 +457,7 @@ TEST_CASE("list_undo_batches returns newest-first",
 }
 
 TEST_CASE("list_undo_batches ignores non-files and non-undo names",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     TempDir tmp;
     fs::create_directories(tmp.path / "bump-undo-directory.json");
     std::ofstream(tmp.path / "not-an-undo.json") << "{}";
@@ -483,7 +483,7 @@ TEST_CASE("undo_batch_path replaces colons for Windows safety",
 }
 
 TEST_CASE("undo_batch_path returns empty for empty home",
-          "[project-bump][coverage][issue-643]") {
+          "[project-bump][issue-643]") {
     REQUIRE(pb::undo_batch_path({}, "2026-04-21T14:30:00Z").empty());
 }
 

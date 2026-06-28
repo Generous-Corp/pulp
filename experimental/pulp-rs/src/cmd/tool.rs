@@ -26,8 +26,14 @@ use crate::color;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
 use crate::tool_registry::{
-    self, current_platform_key, load, locate_tool, uninstall_tool, ToolDescriptor, ToolRegistry,
+    self, current_platform_key, load, locate_tool, uninstall_tool, ToolRegistry,
 };
+
+mod tool_doctor;
+use tool_doctor::doctor;
+
+mod tool_status;
+use tool_status::{status_label, tool_available_on_platform};
 
 /// Parsed subcommand token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,8 +69,13 @@ pub enum Sub {
         /// Arguments forwarded to the tool.
         args: Vec<String>,
     },
-    /// `doctor`.
-    Doctor,
+    /// `doctor [id] [--run]`.
+    Doctor {
+        /// Optional tool id to inspect.
+        id: Option<String>,
+        /// Execute the tool's smoke check when a target is provided.
+        run: bool,
+    },
 }
 
 /// Parse the tail into a [`Sub`].
@@ -137,7 +148,27 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
             let rest = args.get(2..).map(<[String]>::to_vec).unwrap_or_default();
             Ok(Sub::Run { id, args: rest })
         }
-        "doctor" => Ok(Sub::Doctor),
+        "doctor" => {
+            let mut id = None;
+            let mut run = false;
+            for a in &args[1..] {
+                if a == "--run" {
+                    run = true;
+                } else if id.is_none() {
+                    id = Some(a.clone());
+                } else {
+                    return Err(CliError::BadUsage(
+                        "Usage: pulp tool doctor [tool-id] [--run]".to_owned(),
+                    ));
+                }
+            }
+            if run && id.is_none() {
+                return Err(CliError::BadUsage(
+                    "Usage: pulp tool doctor [tool-id] [--run]".to_owned(),
+                ));
+            }
+            Ok(Sub::Doctor { id, run })
+        }
         _ => Err(CliError::UnknownSubcommand),
     }
 }
@@ -168,7 +199,7 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
         Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
-        Sub::Doctor => doctor(&reg, out),
+        Sub::Doctor { id, run } => doctor(&reg, id.as_deref(), *run, spawner, out),
     }
 }
 
@@ -192,7 +223,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 uninstall <tool>        Remove a pulp-managed tool\n\
         \x20 path <tool>             Print path to a tool's binary\n\
         \x20 run <tool> [args]       Run a tool with arguments\n\
-        \x20 doctor                  Check tool health\n",
+        \x20 doctor [tool] [--run]   Check tool health\n",
     )
     .map_err(io)
 }
@@ -222,37 +253,6 @@ fn list(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
         .map_err(io)?;
     }
     Ok(0)
-}
-
-fn tool_available_on_platform(tool: &ToolDescriptor, platform: &str) -> bool {
-    tool.binary_sources.contains_key(platform)
-        || tool.install_method == "python_pip"
-        || tool.install_method == "npm_package"
-}
-
-fn status_label(
-    tool: &ToolDescriptor,
-    loc: &tool_registry::LocateResult,
-    platform: &str,
-) -> String {
-    if loc.found && loc.source == "pulp-managed" {
-        format!("{}installed{}", color::green(), color::reset())
-    } else if loc.found {
-        format!(
-            "{}system ({}){}",
-            color::yellow(),
-            loc.path.display(),
-            color::reset()
-        )
-    } else if tool_available_on_platform(tool, platform) {
-        format!("{}available{}", color::dim(), color::reset())
-    } else {
-        format!(
-            "{}not available for {platform}{}",
-            color::red(),
-            color::reset()
-        )
-    }
 }
 
 fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Result<i32> {
@@ -479,57 +479,6 @@ fn run_tool<S: Spawner>(
     spawner.run(&inv)
 }
 
-fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
-    let platform = current_platform_key();
-    writeln!(
-        out,
-        "Tool Health {dim}({platform}){reset}:\n",
-        dim = color::dim(),
-        reset = color::reset()
-    )
-    .map_err(io)?;
-    let mut issues = 0;
-    for (id, tool) in &reg.tools {
-        let loc = locate_tool(tool);
-        if loc.found {
-            writeln!(
-                out,
-                "  {green}✓{reset} {} — {} ({})",
-                tool.display_name,
-                loc.source,
-                loc.path.display(),
-                green = color::green(),
-                reset = color::reset()
-            )
-            .map_err(io)?;
-        } else {
-            let available = tool_available_on_platform(tool, platform);
-            if available {
-                writeln!(
-                    out,
-                    "  {yel}-{reset} {} — not installed {dim}(pulp tool install {id}){reset}",
-                    tool.display_name,
-                    yel = color::yellow(),
-                    reset = color::reset(),
-                    dim = color::dim()
-                )
-                .map_err(io)?;
-            } else {
-                writeln!(
-                    out,
-                    "  {red}✗{reset} {} — not available for {platform}",
-                    tool.display_name,
-                    red = color::red(),
-                    reset = color::reset()
-                )
-                .map_err(io)?;
-                issues += 1;
-            }
-        }
-    }
-    Ok(i32::from(issues > 0))
-}
-
 // Helper used only in tests to resolve fixtures.
 #[cfg(test)]
 #[allow(dead_code)]
@@ -540,39 +489,8 @@ pub(crate) fn registry_at(p: &std::path::Path) -> Result<ToolRegistry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
+    use crate::test_support::EnvVarGuard;
     use std::fs;
-    use std::sync::MutexGuard;
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::ENV_LOCK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self {
-                key,
-                previous,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
 
     fn plant_project(body: &str) -> tempfile::TempDir {
         let td = tempfile::tempdir().unwrap();
@@ -706,6 +624,8 @@ mod tests {
     #[test]
     fn info_renders_json_metadata() {
         let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
         let rc = info(&reg, "video-proof", true, &mut buf).unwrap();
@@ -729,6 +649,8 @@ mod tests {
     #[test]
     fn info_renders_text_metadata() {
         let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
         let rc = info(&reg, "video-proof", false, &mut buf).unwrap();
@@ -748,12 +670,91 @@ mod tests {
     fn doctor_reports_zero_issues_when_nothing_marked_unavailable() {
         let td = plant_project(registry_body());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
         let mut buf = Vec::new();
-        let rc = doctor(&reg, &mut buf).unwrap();
+        let rc = doctor(&reg, None, false, &spawner, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         // UV is "available" or "installed" for current platform.
         assert!(s.contains("UV"));
         assert_eq!(rc, 0);
+    }
+
+    #[test]
+    fn doctor_target_reports_install_hint_for_missing_tool() {
+        let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("video-proof"), false, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 1);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Video Proof"));
+        assert!(s.contains("pulp tool install video-proof"));
+        assert!(spawner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn doctor_target_unknown_tool_errors_without_health_header() {
+        let td = plant_project(info_registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("does-not-exist"), false, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 1);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Tool 'does-not-exist' not found"));
+        assert!(!s.contains("Tool Health"));
+        assert!(spawner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn doctor_target_reports_smoke_hint_for_installed_npm_tool() {
+        let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let wrapper = home
+            .join("tools")
+            .join("npm-packages")
+            .join("video-proof")
+            .join(if cfg!(windows) { "run.bat" } else { "run.sh" });
+        fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
+        fs::write(&wrapper, "stub").unwrap();
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("video-proof"), false, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Video Proof"));
+        assert!(s.contains("pulp tool doctor video-proof --run"));
+        assert!(spawner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn doctor_target_run_execs_located_wrapper() {
+        let td = plant_project(info_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let wrapper = home
+            .join("tools")
+            .join("npm-packages")
+            .join("video-proof")
+            .join(if cfg!(windows) { "run.bat" } else { "run.sh" });
+        fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
+        fs::write(&wrapper, "stub").unwrap();
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("video-proof"), true, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Video Proof smoke check passed"));
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, wrapper.to_string_lossy().into_owned());
+        assert!(calls[0].args.is_empty());
     }
 
     #[test]
@@ -824,7 +825,64 @@ mod tests {
     #[test]
     fn parse_sub_doctor() {
         let s = parse_sub(&["doctor".to_owned()]).unwrap();
-        assert!(matches!(s, Sub::Doctor));
+        assert!(matches!(
+            s,
+            Sub::Doctor {
+                id: None,
+                run: false
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sub_doctor_accepts_target_and_run_flag() {
+        let s = parse_sub(&[
+            "doctor".to_owned(),
+            "video-proof".to_owned(),
+            "--run".to_owned(),
+        ])
+        .unwrap();
+        match s {
+            Sub::Doctor { id, run } => {
+                assert_eq!(id.as_deref(), Some("video-proof"));
+                assert!(run);
+            }
+            other => panic!("expected Doctor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_doctor_accepts_run_before_target() {
+        let s = parse_sub(&[
+            "doctor".to_owned(),
+            "--run".to_owned(),
+            "video-proof".to_owned(),
+        ])
+        .unwrap();
+        match s {
+            Sub::Doctor { id, run } => {
+                assert_eq!(id.as_deref(), Some("video-proof"));
+                assert!(run);
+            }
+            other => panic!("expected Doctor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_doctor_rejects_run_without_target() {
+        let err = parse_sub(&["doctor".to_owned(), "--run".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool doctor"));
+    }
+
+    #[test]
+    fn parse_sub_doctor_rejects_extra_positional() {
+        let err = parse_sub(&[
+            "doctor".to_owned(),
+            "video-proof".to_owned(),
+            "extra".to_owned(),
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool doctor"));
     }
 
     #[test]

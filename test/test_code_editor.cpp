@@ -95,7 +95,7 @@ TEST_CASE("CodeEditor insert text", "[gui][code-editor]") {
 }
 
 TEST_CASE("CodeEditor insert appends in read-only fallback mode",
-          "[gui][code-editor][coverage][issue-655]") {
+          "[gui][code-editor][issue-655]") {
     CodeEditor editor;
     editor.set_read_only(true);
     editor.set_text("alpha");
@@ -109,7 +109,7 @@ TEST_CASE("CodeEditor insert appends in read-only fallback mode",
 }
 
 TEST_CASE("CodeEditor marker API is a stable no-op in native fallback mode",
-          "[gui][code-editor][coverage][phase3]") {
+          "[gui][code-editor]") {
     CodeEditor editor;
     editor.set_text("alpha\nbeta");
     editor.set_markers({{1, "warn"}, {2, "error"}});
@@ -137,7 +137,7 @@ TEST_CASE("CodeEditor paint renders without crash", "[gui][code-editor]") {
 }
 
 TEST_CASE("CodeEditor paint covers line numbers highlight clipping and token colors",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     CodeEditor editor;
     CodeEditorConfig config;
     config.theme = "vs-light";
@@ -164,7 +164,7 @@ TEST_CASE("CodeEditor paint covers line numbers highlight clipping and token col
 }
 
 TEST_CASE("CodeEditor paint emits gutter line numbers when enabled",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     CodeEditor editor;
     CodeEditorConfig config;
     config.line_numbers = true;
@@ -184,7 +184,7 @@ TEST_CASE("CodeEditor paint emits gutter line numbers when enabled",
 }
 
 TEST_CASE("SystemTrayIcon lifecycle methods are safe without native handles",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     SystemTrayIcon tray;
     REQUIRE_NOTHROW(tray.set_icon("pulp-status"));
     REQUIRE_NOTHROW(tray.set_tooltip("Pulp"));
@@ -210,7 +210,7 @@ TEST_CASE("FileBasedDocument title from path", "[gui][code-editor]") {
 }
 
 TEST_CASE("FileBasedDocument handles save and load edge paths",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     TestDoc doc;
     int dirty_callback_count = 0;
     bool last_dirty = true;
@@ -245,7 +245,7 @@ TEST_CASE("FileBasedDocument handles save and load edge paths",
 }
 
 TEST_CASE("FileBasedDocument handles successful load and save_as paths",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     TestDoc doc;
     int dirty_callback_count = 0;
     bool last_dirty = true;
@@ -294,7 +294,7 @@ TEST_CASE("RecentlyOpenedFilesList MRU behavior", "[gui][code-editor]") {
 }
 
 TEST_CASE("RecentlyOpenedFilesList removes entries and ignores missing paths",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     RecentlyOpenedFilesList mru;
     mru.add("/path/a.txt");
     mru.add("/path/b.txt");
@@ -316,7 +316,7 @@ TEST_CASE("RecentlyOpenedFilesList removes entries and ignores missing paths",
 }
 
 TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",
-          "[gui][code-editor][coverage]") {
+          "[gui][code-editor]") {
     RecentlyOpenedFilesList mru;
     mru.add("/keep/existing.txt");
 
@@ -357,7 +357,7 @@ TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",
 }
 
 TEST_CASE("RecentlyOpenedFilesList remove and max-entry edge paths",
-          "[gui][code-editor][coverage][issue-655]") {
+          "[gui][code-editor][issue-655]") {
     RecentlyOpenedFilesList mru;
     mru.add("/a.txt");
     mru.add("/b.txt");

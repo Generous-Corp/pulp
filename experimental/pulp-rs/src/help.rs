@@ -126,7 +126,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "loop",
-        summary: "Leveraged-prototype focus mode: single-platform watch + rebuild (#940)",
+        summary: "Leveraged-prototype focus marker + watch loop",
     },
     Entry {
         name: "inspect",
@@ -134,7 +134,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "scan",
-        summary: "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins",
+        summary: "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins",
     },
     Entry {
         name: "host",
@@ -171,6 +171,22 @@ pub const COMMANDS: &[Entry] = &[
     Entry {
         name: "coverage",
         summary: "Local coverage tooling (diff-cover gate mirror)",
+    },
+    Entry {
+        name: "macos",
+        summary: "Per-PR macOS-runner retargeting (local/namespace/github-hosted)",
+    },
+    Entry {
+        name: "ci-host",
+        summary: "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)",
+    },
+    Entry {
+        name: "overflow",
+        summary: "Configure macOS-runner overflow routing (status/enable/disable/threshold)",
+    },
+    Entry {
+        name: "tweaks",
+        summary: "Inspect the pulp-tweaks.json sidecar (diff against a design)",
     },
 ];
 

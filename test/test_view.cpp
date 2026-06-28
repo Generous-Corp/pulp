@@ -121,7 +121,7 @@ TEST_CASE("View child management", "[view]") {
     REQUIRE(removed->parent() == nullptr);
 }
 
-TEST_CASE("View child removal ignores unknown children", "[view][coverage]") {
+TEST_CASE("View child removal ignores unknown children", "[view]") {
     View root;
     auto child = std::make_unique<View>();
     auto* child_ptr = child.get();
@@ -200,7 +200,7 @@ TEST_CASE("View hit testing", "[view]") {
 }
 
 TEST_CASE("View hit testing honors disabled hit-testable and overflow states",
-          "[view][coverage]") {
+          "[view]") {
     View root;
     root.set_bounds({0, 0, 160, 160});
 
@@ -256,7 +256,7 @@ TEST_CASE("View theme resolution", "[view][theme]") {
 }
 
 TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited state",
-          "[view][coverage]") {
+          "[view]") {
     class ResizedView : public View {
     public:
         void on_resized() override { ++resized_count; }
@@ -387,7 +387,7 @@ TEST_CASE("View simulate_drag calls drag sequence", "[view][events]") {
 }
 
 TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
-          "[view][coverage]") {
+          "[view]") {
     View v;
 
     v.set_pointer_capture(7);
@@ -705,7 +705,7 @@ TEST_CASE("Flex layout with padding", "[view][layout]") {
 }
 
 TEST_CASE("Grid layout with no columns leaves children unchanged",
-          "[view][layout][coverage]") {
+          "[view][layout]") {
     View root;
     root.set_bounds({0, 0, 120, 80});
     root.set_layout_mode(LayoutMode::grid);
@@ -1384,7 +1384,7 @@ TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
 }
 
 TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",
-          "[view][live-constant][coverage]") {
+          "[view][live-constant]") {
     auto& registry = LiveConstantRegistry::instance();
     registry.on_change = {};
 
@@ -1429,7 +1429,7 @@ TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",
 }
 
 TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
-          "[view][live-constant][coverage]") {
+          "[view][live-constant]") {
     auto& registry = LiveConstantRegistry::instance();
     registry.register_constant(
         "phase3.live.editor", "test_view.cpp", 303, 5.0f, 0.0f, 10.0f);

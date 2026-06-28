@@ -137,7 +137,7 @@ TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
 // and (b) the filename-fallback path produces a single PluginInfo so
 // users see SOMETHING in the catalog instead of a silent drop.
 TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail path)",
-          "[host][scanner][issue-1862][coverage]") {
+          "[host][scanner][issue-1862]") {
     namespace fs = std::filesystem;
     auto tmp = fs::temp_directory_path() / "pulp_clap_dlopen_fail_test.clap";
     std::error_code ec;
@@ -339,7 +339,7 @@ TEST_CASE("PluginSlot load returns nullptr for stub", "[host][slot]") {
 }
 
 TEST_CASE("PluginSlot load fails cleanly for invalid dispatch inputs",
-          "[host][slot][coverage]") {
+          "[host][slot]") {
     PluginInfo clap;
     clap.name = "MissingClap";
     clap.path = "/definitely/missing/Missing.clap";
@@ -669,7 +669,7 @@ float process_first_sample(PluginSlot& slot, float input_sample) {
 } // namespace
 
 TEST_CASE("PluginScanner CLAP descriptor surfaces PulpGain bundle metadata",
-          "[host][scanner][clap][coverage][issue-493]") {
+          "[host][scanner][clap][issue-493]") {
     namespace fs = std::filesystem;
     const fs::path path = PULP_TEST_CLAP_PATH;
     if (!fs::exists(path)) {
@@ -753,7 +753,7 @@ TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][int
 }
 
 TEST_CASE("ClapSlot process delivers automation and MIDI events to CLAP",
-          "[host][slot][clap][coverage][issue-493]") {
+          "[host][slot][clap][issue-493]") {
     auto slot = load_pulpgain_clap_slot();
     if (!slot) return;
 
@@ -800,7 +800,7 @@ TEST_CASE("ClapSlot process delivers automation and MIDI events to CLAP",
 }
 
 TEST_CASE("ClapSlot handles zero-channel processing and unknown params",
-          "[host][slot][clap][coverage][issue-493]") {
+          "[host][slot][clap][issue-493]") {
     auto slot = load_pulpgain_clap_slot();
     if (!slot) return;
 
@@ -825,7 +825,7 @@ TEST_CASE("ClapSlot handles zero-channel processing and unknown params",
 }
 
 TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
-          "[host][slot][clap][coverage][issue-493]") {
+          "[host][slot][clap][issue-493]") {
     auto slot = load_pulpgain_clap_slot();
     if (!slot) return;
 
@@ -865,7 +865,7 @@ TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
 }
 
 TEST_CASE("ClapSlot bypass and release paths copy input and zero extra outputs",
-          "[host][slot][clap][coverage][issue-493]") {
+          "[host][slot][clap][issue-493]") {
     auto slot = load_pulpgain_clap_slot();
     if (!slot) return;
 
@@ -907,7 +907,7 @@ TEST_CASE("ClapSlot bypass and release paths copy input and zero extra outputs",
 }
 
 TEST_CASE("ClapSlot restore_state supersedes cached host edits",
-          "[host][slot][clap][state][coverage][issue-493]") {
+          "[host][slot][clap][state][issue-493]") {
     auto slot = load_pulpgain_clap_slot();
     if (!slot) return;
 
@@ -1024,7 +1024,7 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][iss
 }
 
 TEST_CASE("ParameterEventQueue sorts sample offsets and preserves duplicates",
-          "[host][params][codecov]") {
+          "[host][params]") {
     ParameterEventQueue queue;
     queue.push({3, 64, 0.75f});
     queue.push(ParameterEvent{1, 0, 0.25f});
@@ -1047,7 +1047,7 @@ TEST_CASE("ParameterEventQueue sorts sample offsets and preserves duplicates",
 }
 
 TEST_CASE("ParameterEventQueue iteration and clear expose queued values",
-          "[host][params][codecov]") {
+          "[host][params]") {
     ParameterEventQueue queue;
     queue.push({10, -4, -1.0f});
     queue.push({11, 128, 1.0f});

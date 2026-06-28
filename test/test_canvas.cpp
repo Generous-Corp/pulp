@@ -314,7 +314,7 @@ TEST_CASE("RecordingCanvas transforms", "[canvas]") {
 }
 
 TEST_CASE("RecordingCanvas restores save stack and transform snapshots",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas]") {
     RecordingCanvas canvas;
 
     canvas.translate(5.0f, 7.0f);
@@ -346,7 +346,7 @@ TEST_CASE("RecordingCanvas restores save stack and transform snapshots",
 }
 
 TEST_CASE("RecordingCanvas captures Canvas2D state and media command payloads",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas]") {
     RecordingCanvas canvas;
     const float dash[] = {2.0f, 4.0f, 6.0f};
     const uint8_t pixels[] = {
@@ -414,7 +414,7 @@ TEST_CASE("RecordingCanvas captures Canvas2D state and media command payloads",
 }
 
 TEST_CASE("RecordingCanvas captures remaining path primitive payloads",
-          "[canvas][coverage][phase3-canvas]") {
+          "[canvas]") {
     RecordingCanvas canvas;
 
     canvas.begin_path();
@@ -788,7 +788,7 @@ TEST_CASE("Canvas SDF fallback covers stroked shape variants",
 }
 
 TEST_CASE("RecordingCanvas captures sticky paint and image state payloads",
-          "[canvas][recording][coverage]") {
+          "[canvas][recording]") {
     RecordingCanvas rc;
     const uint8_t pixels[] = {
         1, 2, 3, 4,
@@ -828,7 +828,7 @@ TEST_CASE("RecordingCanvas captures sticky paint and image state payloads",
 }
 
 TEST_CASE("RecordingCanvas captures stroke gradient commands and stop payloads",
-          "[canvas][recording][coverage]") {
+          "[canvas][recording]") {
     RecordingCanvas rc;
     const Color colors[] = {
         Color::rgba8(10, 20, 30, 40),
@@ -869,7 +869,7 @@ TEST_CASE("RecordingCanvas captures stroke gradient commands and stop payloads",
 }
 
 TEST_CASE("Canvas base fallbacks delegate through recording backend",
-          "[canvas][fallback][coverage]") {
+          "[canvas][fallback]") {
     RecordingCanvas rc;
     const Color colors[] = {Color::rgba8(3, 4, 5, 6)};
     const float positions[] = {0.0f};

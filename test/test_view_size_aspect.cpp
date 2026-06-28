@@ -41,7 +41,7 @@ TEST_CASE("aspect ratio is independent of min/max bounds",
 }
 
 TEST_CASE("ViewSize zero max bounds remain unbounded when aspect is locked",
-          "[format][view-size][coverage]") {
+          "[format][view-size]") {
     ViewSize v;
     v.preferred_width = 1024;
     v.preferred_height = 768;

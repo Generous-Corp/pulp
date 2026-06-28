@@ -110,7 +110,7 @@ TEST_CASE("pulp-scan-worker reports usage when bundle path is missing",
 }
 
 TEST_CASE("pulp-scan-worker rejects extra positional arguments",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("extra-args");
     auto bundle = scratch.path / "Extra.vst3";
     auto ignored = scratch.path / "Ignored.vst3";
@@ -137,7 +137,7 @@ TEST_CASE("pulp-scan-worker rejects unsupported bundle extensions",
 }
 
 TEST_CASE("pulp-scan-worker rejects extension variants before scanning",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("extension-variants");
     auto upper_vst3 = scratch.path / "Upper.VST3";
     auto partial = scratch.path / "Almost.vst3.tmp";
@@ -160,7 +160,7 @@ TEST_CASE("pulp-scan-worker rejects extension variants before scanning",
 }
 
 TEST_CASE("pulp-scan-worker rejects missing extension targets before scanning",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("missing-extension");
     auto bundle_without_suffix = scratch.path / "Plugin";
     auto hidden_partial = scratch.path / ".Plugin.vst3.tmp";
@@ -183,7 +183,7 @@ TEST_CASE("pulp-scan-worker rejects missing extension targets before scanning",
 }
 
 TEST_CASE("pulp-scan-worker reports empty success for absent supported bundle paths",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("absent-supported-bundles");
     auto missing_vst3 = scratch.path / "Missing.vst3";
     auto missing_clap = scratch.path / "Missing.clap";
@@ -214,7 +214,7 @@ TEST_CASE("pulp-scan-worker emits JSON for a manifest-free VST3 bundle",
 }
 
 TEST_CASE("pulp-scan-worker reports VST3 moduleinfo identity and booleans",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("vst3-moduleinfo");
     auto bundle = scratch.path / "ModuleInfoProbe.vst3";
     fs::create_directories(bundle / "Contents" / "Resources");
@@ -244,7 +244,7 @@ TEST_CASE("pulp-scan-worker reports VST3 moduleinfo identity and booleans",
 }
 
 TEST_CASE("pulp-scan-worker filters sibling bundles from the same directory",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("vst3-siblings");
     auto target = scratch.path / "Target.vst3";
     auto sibling = scratch.path / "Sibling.vst3";
@@ -264,7 +264,7 @@ TEST_CASE("pulp-scan-worker filters sibling bundles from the same directory",
 }
 
 TEST_CASE("pulp-scan-worker emits fallback JSON for unreadable CLAP bundles",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("clap-fallback");
     auto bundle = scratch.path / "Fallback.clap";
     write_file(bundle, "not a dynamic library");
@@ -283,7 +283,7 @@ TEST_CASE("pulp-scan-worker emits fallback JSON for unreadable CLAP bundles",
 }
 
 TEST_CASE("pulp-scan-worker preserves fallback JSON fields for spaced CLAP paths",
-          "[host][scan-worker][coverage][phase3]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("spaced-clap");
     auto bundle = scratch.path / "Space Name.clap";
     write_file(bundle, "not a dynamic library");
@@ -301,7 +301,7 @@ TEST_CASE("pulp-scan-worker preserves fallback JSON fields for spaced CLAP paths
 }
 
 TEST_CASE("pulp-scan-worker escapes fallback JSON descriptor strings",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
 #if defined(_WIN32)
     SUCCEED("Windows filenames cannot contain the control characters needed for this fallback-name escape path");
 #else
@@ -324,7 +324,7 @@ TEST_CASE("pulp-scan-worker escapes fallback JSON descriptor strings",
 }
 
 TEST_CASE("pulp-scan-worker test JSON escape helper covers control bytes",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
     const std::string text = std::string("Quote\" Slash\\ Back") + '\b'
                            + " Form" + '\f' + " Line\nReturn\rTab\tUnit"
                            + '\x01' + "End";
@@ -333,7 +333,7 @@ TEST_CASE("pulp-scan-worker test JSON escape helper covers control bytes",
 }
 
 TEST_CASE("pulp-scan-worker escapes JSON control characters in fallback names",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
 #if defined(_WIN32)
     SUCCEED("Windows filenames cannot contain the control characters needed for this fallback-name escape path");
 #else
@@ -359,7 +359,7 @@ TEST_CASE("pulp-scan-worker escapes JSON control characters in fallback names",
 }
 
 TEST_CASE("pulp-scan-worker rejects known but unsupported plugin suffixes",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("unsupported-formats");
     auto component = scratch.path / "Legacy.component";
     auto lv2 = scratch.path / "Graph.lv2";
@@ -380,7 +380,7 @@ TEST_CASE("pulp-scan-worker rejects known but unsupported plugin suffixes",
 }
 
 TEST_CASE("pulp-scan-worker falls back cleanly for malformed VST3 moduleinfo",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("bad-vst3-moduleinfo");
     auto bundle = scratch.path / "Bad Metadata.vst3";
     fs::create_directories(bundle / "Contents" / "Resources");
@@ -399,7 +399,7 @@ TEST_CASE("pulp-scan-worker falls back cleanly for malformed VST3 moduleinfo",
 }
 
 TEST_CASE("pulp-scan-worker keeps CLAP fallback JSON scoped to the requested bundle",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("clap-siblings");
     auto target = scratch.path / "Target Clap.clap";
     auto sibling = scratch.path / "Sibling Clap.clap";
@@ -417,7 +417,7 @@ TEST_CASE("pulp-scan-worker keeps CLAP fallback JSON scoped to the requested bun
 }
 
 TEST_CASE("pulp-scan-worker reports one JSON object per target scan",
-          "[host][scan-worker][coverage]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("single-object");
     auto bundle = scratch.path / "Single.vst3";
     fs::create_directories(bundle / "Contents" / "Resources");
@@ -435,7 +435,7 @@ TEST_CASE("pulp-scan-worker reports one JSON object per target scan",
 }
 
 TEST_CASE("pulp-scan-worker matches relative bundle paths from the current directory",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("relative-vst3");
     CurrentPathGuard cwd(scratch.path);
     fs::create_directories("Relative.vst3/Contents/Resources");
@@ -453,7 +453,7 @@ TEST_CASE("pulp-scan-worker matches relative bundle paths from the current direc
 }
 
 TEST_CASE("pulp-scan-worker matches dot-prefixed bundle paths without leaking siblings",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("dot-relative-clap");
     CurrentPathGuard cwd(scratch.path);
     write_file("Target.clap", "not a dynamic library");
@@ -475,7 +475,7 @@ TEST_CASE("pulp-scan-worker matches dot-prefixed bundle paths without leaking si
 }
 
 TEST_CASE("pulp-scan-worker normalizes parent-directory segments before filtering",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("parent-segment-vst3");
     auto plugins = scratch.path / "plugins";
     auto nested = plugins / "nested";
@@ -499,7 +499,7 @@ TEST_CASE("pulp-scan-worker normalizes parent-directory segments before filterin
 }
 
 TEST_CASE("pulp-scan-worker normalizes CLAP parent segments before filtering",
-          "[host][scan-worker][coverage][requested]") {
+          "[host][scan-worker]") {
     ScratchDir scratch("parent-segment-clap");
     auto plugins = scratch.path / "plugins";
     auto nested = plugins / "nested";

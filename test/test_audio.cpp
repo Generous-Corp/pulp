@@ -115,7 +115,7 @@ TEST_CASE("BufferView clears external storage and supports const access",
 }
 
 TEST_CASE("BufferView supports int16 external storage",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     int16_t ch0[3] = {1, -2, 3};
     int16_t ch1[3] = {4, -5, 6};
     int16_t* ptrs[2] = {ch0, ch1};
@@ -175,7 +175,7 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
 }
 
 TEST_CASE("Buffer supports non-float sample storage",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<int16_t> buffer(2, 3);
     buffer.channel(0)[0] = 12;
     buffer.channel(1)[2] = -34;
@@ -192,7 +192,7 @@ TEST_CASE("Buffer supports non-float sample storage",
 }
 
 TEST_CASE("Buffer resize from empty regrows zero-filled channels",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> buf(2, 3);
     buf.channel(0)[0] = 1.0f;
     buf.channel(1)[2] = -1.0f;
@@ -217,7 +217,7 @@ TEST_CASE("Buffer resize from empty regrows zero-filled channels",
 }
 
 TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
-          "[audio][buffer][codecov]") {
+          "[audio][buffer]") {
     Buffer<float> zero_channels(0, 8);
     REQUIRE(zero_channels.num_channels() == 0);
     REQUIRE(zero_channels.num_samples() == 8);
@@ -241,7 +241,7 @@ TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
 }
 
 TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> buffer(2, 2);
     buffer.channel(0)[0] = 1.0f;
     buffer.channel(1)[1] = -1.0f;
@@ -261,7 +261,7 @@ TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
 }
 
 TEST_CASE("Buffer resize to smaller shape remaps channel spans",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> buffer(3, 5);
     buffer.channel(0)[4] = 0.25f;
     buffer.channel(2)[4] = -0.5f;
@@ -280,7 +280,7 @@ TEST_CASE("Buffer resize to smaller shape remaps channel spans",
 }
 
 TEST_CASE("Buffer copy owns independent channel storage",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> original(2, 3);
     original.channel(0)[0] = 1.0f;
     original.channel(1)[2] = 2.0f;
@@ -304,7 +304,7 @@ TEST_CASE("Buffer copy owns independent channel storage",
 }
 
 TEST_CASE("Buffer move refreshes channel pointers for the new owner",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> original(2, 2);
     original.channel(0)[0] = 0.25f;
     original.channel(1)[1] = -0.5f;
@@ -377,7 +377,7 @@ TEST_CASE("BufferView clear only zeros sliced sample range",
 }
 
 TEST_CASE("BufferView slice clamps starts past the end to empty views",
-          "[audio][buffer][slice][codecov]") {
+          "[audio][buffer][slice]") {
     Buffer<float> buffer(2, 4);
     for (std::size_t i = 0; i < 4; ++i) {
         buffer.channel(0)[i] = static_cast<float>(i + 1);
@@ -408,7 +408,7 @@ TEST_CASE("BufferView slice clamps starts past the end to empty views",
 }
 
 TEST_CASE("BufferView nested slices accumulate offsets into the same storage",
-          "[audio][buffer][slice][coverage]") {
+          "[audio][buffer][slice]") {
     Buffer<float> buffer(2, 8);
     for (std::size_t i = 0; i < 8; ++i) {
         buffer.channel(0)[i] = static_cast<float>(i);
@@ -431,7 +431,7 @@ TEST_CASE("BufferView nested slices accumulate offsets into the same storage",
 }
 
 TEST_CASE("BufferView zero-length slices keep channel offsets and clear as no-op",
-          "[audio][buffer][slice][coverage]") {
+          "[audio][buffer][slice]") {
     Buffer<float> buffer(2, 5);
     for (std::size_t i = 0; i < 5; ++i) {
         buffer.channel(0)[i] = static_cast<float>(i + 1);
@@ -453,7 +453,7 @@ TEST_CASE("BufferView zero-length slices keep channel offsets and clear as no-op
 }
 
 TEST_CASE("BufferView slices produced from const views still alias source storage",
-          "[audio][buffer][slice][coverage]") {
+          "[audio][buffer][slice]") {
     Buffer<float> buffer(1, 4);
     buffer.channel(0)[0] = 1.0f;
     buffer.channel(0)[1] = 2.0f;
@@ -477,7 +477,7 @@ TEST_CASE("BufferView slices produced from const views still alias source storag
 }
 
 TEST_CASE("Buffer self assignment preserves storage and channel pointers",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> buffer(2, 3);
     buffer.channel(0)[1] = 0.125f;
     buffer.channel(1)[2] = -0.25f;
@@ -504,7 +504,7 @@ TEST_CASE("Buffer self assignment preserves storage and channel pointers",
 }
 
 TEST_CASE("Buffer rejects dimensions that overflow sample storage",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     const auto max = std::numeric_limits<std::size_t>::max();
     REQUIRE_THROWS_AS((Buffer<float>(2, max)), std::length_error);
 
@@ -522,7 +522,7 @@ TEST_CASE("Buffer rejects dimensions that overflow sample storage",
 }
 
 TEST_CASE("Buffer move leaves source empty and rebinds destination views",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> source(2, 3);
     source.channel(0)[2] = 0.75f;
     source.channel(1)[0] = -0.5f;
@@ -551,7 +551,7 @@ TEST_CASE("Buffer move leaves source empty and rebinds destination views",
 }
 
 TEST_CASE("AudioFileData reports shape from first channel",
-          "[audio][file][codecov]") {
+          "[audio][file]") {
     AudioFileData empty;
     REQUIRE(empty.sample_rate == 0);
     REQUIRE(empty.num_channels() == 0);
@@ -574,7 +574,7 @@ TEST_CASE("AudioFileData reports shape from first channel",
 }
 
 TEST_CASE("Device metadata defaults and custom configs are stable",
-          "[audio][device][codecov]") {
+          "[audio][device]") {
     DeviceInfo info;
     REQUIRE(info.id.empty());
     REQUIRE(info.name.empty());
@@ -605,7 +605,7 @@ TEST_CASE("Device metadata defaults and custom configs are stable",
 }
 
 TEST_CASE("AudioSystem default device-change callback is snapshot safe",
-          "[audio][device][coverage]") {
+          "[audio][device]") {
     class DummyAudioSystem final : public AudioSystem {
     public:
         std::vector<DeviceInfo> enumerate_devices() override { return {}; }
@@ -654,7 +654,7 @@ TEST_CASE("AudioSystem default device-change callback is snapshot safe",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
-          "[audio][load][coverage]") {
+          "[audio][load]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.begin(0, 48000.0f);
@@ -669,7 +669,7 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
-          "[audio][load][coverage]") {
+          "[audio][load]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.begin(64, std::numeric_limits<float>::infinity());
@@ -684,7 +684,7 @@ TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
 }
 
 TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and resets peak load",
-          "[audio][load][coverage]") {
+          "[audio][load]") {
     AudioProcessLoadMeasurer measurer;
 
     measurer.set_smoothing(-1.0f);
@@ -710,7 +710,7 @@ TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and resets peak load",
 }
 
 TEST_CASE("CallbackContext defaults and sample position remain explicit",
-          "[audio][device][codecov]") {
+          "[audio][device]") {
     CallbackContext empty;
     REQUIRE(empty.sample_rate == 0.0);
     REQUIRE(empty.buffer_size == 0);
@@ -727,7 +727,7 @@ TEST_CASE("CallbackContext defaults and sample position remain explicit",
 }
 
 TEST_CASE("AudioCallback receives stable context and writable output views",
-          "[audio][device][codecov]") {
+          "[audio][device]") {
     CallbackContext defaults;
     REQUIRE(defaults.sample_rate == 0.0);
     REQUIRE(defaults.buffer_size == 0);
@@ -870,7 +870,7 @@ TEST_CASE("ChannelSet immersive layout preserves documented speaker order",
 }
 
 TEST_CASE("Buffer resize handles type changes and preserves new shape",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<double> buf(3, 2);
     buf.channel(0)[0] = 1.0;
     buf.channel(1)[1] = -2.0;
@@ -891,7 +891,7 @@ TEST_CASE("Buffer resize handles type changes and preserves new shape",
 }
 
 TEST_CASE("Buffer resize through empty shapes rebuilds channel pointers",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     Buffer<float> buf(2, 3);
     buf.channel(0)[0] = 1.0f;
     buf.channel(1)[2] = -1.0f;
@@ -921,7 +921,7 @@ TEST_CASE("Buffer resize through empty shapes rebuilds channel pointers",
 }
 
 TEST_CASE("BufferView supports zero-sample clears without touching channel pointers",
-          "[audio][buffer][coverage]") {
+          "[audio][buffer]") {
     float left = 1.0f;
     float right = -1.0f;
     float* ptrs[2] = {&left, &right};
@@ -939,7 +939,7 @@ TEST_CASE("BufferView supports zero-sample clears without touching channel point
 }
 
 TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
-          "[audio][channel-set][coverage]") {
+          "[audio][channel-set]") {
     auto named = ChannelSet::discrete(3);
     auto renamed = named;
     renamed.name = "Three unnamed channels";
@@ -950,7 +950,7 @@ TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
 }
 
 TEST_CASE("ChannelSet speaker names cover top and discrete positions",
-          "[audio][channel-set][coverage]") {
+          "[audio][channel-set]") {
     REQUIRE(speaker_name(Speaker::TopFrontLeft) == "Top Front Left");
     REQUIRE(speaker_name(Speaker::TopFrontRight) == "Top Front Right");
     REQUIRE(speaker_name(Speaker::TopBackLeft) == "Top Back Left");
@@ -960,7 +960,7 @@ TEST_CASE("ChannelSet speaker names cover top and discrete positions",
 }
 
 TEST_CASE("ChannelSet unsupported surround counts fall back to discrete layouts",
-          "[audio][channel-set][coverage]") {
+          "[audio][channel-set]") {
     for (auto channels : {7u, 9u, 10u, 11u}) {
         auto layout = ChannelSet::from_channel_count(channels);
         CAPTURE(channels);

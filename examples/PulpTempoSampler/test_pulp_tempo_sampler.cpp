@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -608,6 +609,372 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
     f.proc->request_reanalyze();
     REQUIRE(wait_for([&] { return f.proc->num_slices() > low; }));
     REQUIRE(f.proc->num_slices() > low);
+}
+
+// LOOP acts on currently-HELD notes: press a note, let its one-shot finish, then
+// engage LOOP (without re-pressing) and it loops; disengage LOOP while still held
+// and it stops. Natural expected behaviour.
+TEST_CASE("LOOP toggle engages/disengages a currently-held note",
+          "[tempo-sampler][issue-loop-held]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);                       // start one-shot
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Press + HOLD note 60 (slice 0); play the one-shot out until it goes silent.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double tail = 0.0;
+    for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        tail = block_energy(l); }
+    CHECK(tail < 1e-6);   // one-shot finished + silent, but the key is STILL held (no note-off)
+
+    // Engage LOOP while held -> it re-engages looping with no re-press.
+    f.store.set_value(kTempoLoop, 1.0f);
+    double looped = 0.0;
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        looped += block_energy(l); }
+    CHECK(looped > 1e-3);
+
+    // Disengage LOOP while still held -> looping stops (finishes the pass, then silent).
+    f.store.set_value(kTempoLoop, 0.0f);
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    double after = 0.0;
+    for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);
+}
+
+// A MIDI panic (CC123 All Notes Off) must clear the HELD-note set, not just stop
+// voices: otherwise a later LOOP-on resurrects a phantom chord the host already
+// silenced. Mirrors the held-but-silent setup of the LOOP test, then panics.
+TEST_CASE("MIDI panic clears the held set so LOOP cannot resurrect a phantom note",
+          "[tempo-sampler][issue-loop-panic]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);                       // start one-shot
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Press + HOLD note 60 (no note-off); let the one-shot play out to silence.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double tail = 0.0;
+    for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        tail = block_energy(l); }
+    REQUIRE(tail < 1e-6);   // one-shot finished + silent, key still "held" (no note-off)
+
+    // Host panic: All Notes Off. The held set must clear here.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 123, 0));
+      process_midi(*f.proc, 120.0, m, l, r); }
+
+    // Engage LOOP. With the held set cleared, there is nothing to resurrect -> silent.
+    f.store.set_value(kTempoLoop, 1.0f);
+    double after = 0.0;
+    for (int b = 0; b < 400; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);   // no phantom loop (without the panic-clear this rings)
+}
+
+// CC120 (All Sound Off) hard-stops every voice immediately (vs CC123's release)
+// AND clears the held set — a ringing looped note is silenced at once and cannot
+// be resurrected by a later LOOP-on.
+TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set",
+          "[tempo-sampler][issue-loop-panic]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 1.0f);                      // loop so the voice keeps ringing
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Hold note 60; let the loop establish a steady ring.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double ringing = 0.0;
+    for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        ringing += block_energy(l); }
+    REQUIRE(ringing > 1e-3);                                  // actively looping
+
+    // All Sound Off: immediate silence (next block), no release tail.
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 120, 0));
+      process_midi(*f.proc, 120.0, m, l, r); }
+    double after = 0.0;
+    for (int b = 0; b < 4; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        after += block_energy(l); }
+    CHECK(after < 1e-6);                                      // hard-stopped at once
+
+    // Held set cleared too: toggling LOOP off then on must not resurrect note 60.
+    f.store.set_value(kTempoLoop, 0.0f);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+    f.store.set_value(kTempoLoop, 1.0f);
+    double resurrected = 0.0;
+    for (int b = 0; b < 200; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+        resurrected += block_energy(l); }
+    CHECK(resurrected < 1e-6);
+}
+
+// Every slice plays at the SAME speed (native rate 1.0): the loop is time-
+// stretched ONCE into a single host-tempo buffer and each slice is a [start,end)
+// region into it, so no slice can play faster/slower than another. Prove it by
+// triggering the shortest + longest slice one-shot and asserting each plays for ~
+// its region length — a per-slice rate bug would make duration not track length.
+TEST_CASE("all slices play back at the same (native) rate — none faster/slower",
+          "[tempo-sampler][issue-slice-rate]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 6);            // 48k loop into 48k host -> R=1 at matched tempo
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    f.store.set_value(kTempoLoop, 0.0f);              // one-shot so a voice stops at region end
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // host==loop -> R=1
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 3; }));
+
+    std::vector<float> mono; float sr = 0.0f; std::vector<long> slices;
+    REQUIRE(f.proc->snapshot_for_view(mono, sr, slices));
+    REQUIRE(slices.size() >= 4);
+    const int root = static_cast<int>(f.store.get_value(kRootNote));
+
+    // Play a slice one-shot and count samples until it falls silent (2 silent blocks).
+    auto play_len = [&](int idx) -> long {
+        std::vector<float> ll(512), rr(512);
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, root + idx, 100));
+          process_midi(*f.proc, 120.0, m, ll, rr); }
+        long active = 512; int silent = 0;
+        for (int b = 0; b < 400 && silent < 2; ++b) {
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, ll, rr);
+            if (block_energy(ll) > 1e-7) { active = static_cast<long>(b + 2) * 512; silent = 0; }
+            else ++silent;
+        }
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, root + idx));
+          process_midi(*f.proc, 120.0, m, ll, rr); }
+        for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, ll, rr); } // drain
+        return active;
+    };
+
+    // Shortest + longest slice region (seed from slice 0 so no <climits> needed).
+    int si = 0, li = 0; long smin = slices[1] - slices[0], smax = smin;
+    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+        const long len = slices[i + 1] - slices[i];
+        if (len < smin) { smin = len; si = static_cast<int>(i); }
+        if (len > smax) { smax = len; li = static_cast<int>(i); }
+    }
+    REQUIRE(smax > smin);
+    const long played_short = play_len(si);
+    const long played_long  = play_len(li);
+    INFO("short slice " << si << " region=" << smin << " played=" << played_short);
+    INFO("long  slice " << li << " region=" << smax << " played=" << played_long);
+
+    // Each slice plays for ~its own region length (rate ≈ 1.0, not 0.5x/2x). A
+    // generous band absorbs the ~5 ms release fade + 512-sample block granularity.
+    auto within_rate1 = [](long played, long region) {
+        return played >= region * 6 / 10 && played <= region * 16 / 10 + 1200;
+    };
+    CHECK(within_rate1(played_short, smin));
+    CHECK(within_rate1(played_long, smax));
+    // And the longer region genuinely plays longer — the SAME rate orders them.
+    CHECK(played_long > played_short);
+}
+
+// bar_exact_bpm derives the EXACT bar-multiple tempo so a loop tiles perfectly at
+// any host tempo, and uses the host as an octave prior to resolve half/double
+// detection errors.
+TEST_CASE("bar-exact tempo: perfect tiling + host-prior octave resolution",
+          "[tempo-sampler][issue-tempo-barsnap]") {
+    using P = PulpTempoSamplerProcessor;
+    const double sr = 48000.0;
+    // A 2-bar (8-beat) loop whose TRUE tempo is fractional (103.4). The analyzer
+    // rounds to 103; bar_exact recovers ~103.4.
+    const double true_bpm = 103.4;
+    const long frames = std::lround(8.0 * 60.0 / true_bpm * sr);   // exactly 8 beats long
+    const double exact = P::bar_exact_bpm(frames, sr, /*host*/120.0, /*analyzer*/103.0);
+    CHECK(std::abs(exact - true_bpm) < 0.05);
+    // Tiling invariant: frames * exact == 8 beats * 60 * sr (host-independent), so
+    // the loop fills an exact 2 bars at ANY host tempo.
+    const double ideal = 8.0 * 60.0 * sr;
+    CHECK(std::abs(static_cast<double>(frames) * exact - ideal) < 0.002 * ideal);
+
+    // OCTAVE FIX: the analyzer detected DOUBLE tempo (206) for the same 2-bar loop,
+    // but the host is 120, so bar_exact picks the 8-beat reading (~103.4), not 206.
+    CHECK(std::abs(P::bar_exact_bpm(frames, sr, 120.0, 206.0) - true_bpm) < 0.1);
+    // With NO host hint it trusts the analyzer's octave (16 beats at ~206.8).
+    CHECK(P::bar_exact_bpm(frames, sr, 0.0, 206.0) > 200.0);
+    // And a genuine 3-bar loop (12 beats) is NOT collapsed to 2 bars by the host
+    // prior — the octave neighbours of the analyzer's count don't include 8.
+    const long f3 = std::lround(12.0 * 60.0 / 155.0 * sr);         // 3 bars at 155
+    const double e3 = P::bar_exact_bpm(f3, sr, 120.0, 155.0);
+    CHECK(std::abs(static_cast<double>(f3) * e3 - 12.0 * 60.0 * sr) < 0.002 * 12.0 * 60.0 * sr);
+    CHECK(e3 > 140.0);  // ~155 (3 bars), not ~103 (2 bars)
+
+    // Degenerate inputs pass straight through.
+    CHECK(P::bar_exact_bpm(frames, sr, 120.0, 0.0) == 0.0);
+    CHECK(P::bar_exact_bpm(0, sr, 120.0, 120.0) == 120.0);
+}
+
+// A manually-set TEMPO must survive close+reopen (serialize/deserialize) — it
+// lives in a non-param atomic that v1 state did not persist.
+TEST_CASE("tempo override persists across serialize/deserialize",
+          "[tempo-sampler][issue-tempo-persist]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_target_bpm(150.0);                 // manual tempo (auto-unlinks)
+    CHECK_FALSE(f.proc->tempo_linked());
+    const auto blob = f.proc->serialize_plugin_state();
+    REQUIRE(!blob.empty());
+
+    Fixture g;                                     // a freshly reopened plugin instance
+    REQUIRE(g.proc->deserialize_plugin_state(
+        std::span<const std::uint8_t>(blob.data(), blob.size())));
+    REQUIRE(wait_for([&] { return g.proc->has_sample(); }));
+    CHECK(std::lround(g.proc->effective_bpm()) == 150);  // tempo restored, not reset
+    CHECK_FALSE(g.proc->tempo_linked());                 // still manual
+}
+
+// TEMPO LINK: default linked (follows host); a manual value unlinks; re-link
+// follows the host again. Mirrors the editor's LINK toggle + drag-to-unlink.
+TEST_CASE("tempo LINK: default-linked follows host, manual unlinks, relink re-follows",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+
+    // Default LINKED → follows the host transport.
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    const long exp90 = std::llround(48000.0 * 120.0 / 90.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+    process_block(*f.proc, 140.0, false, 0, l, r);       // change host tempo
+    const long exp140 = std::llround(48000.0 * 120.0 / 140.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp140; }));  // auto-follows
+
+    // Manual tempo UNLINKS — host changes are now ignored.
+    f.proc->set_target_bpm(100.0);
+    CHECK_FALSE(f.proc->tempo_linked());
+    process_block(*f.proc, 200.0, false, 0, l, r);       // host ignored
+    const long exp100 = std::llround(48000.0 * 120.0 / 100.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp100; }));
+
+    // Re-link → follows the host again.
+    f.proc->set_tempo_linked(true);
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+}
+
+// In the standalone (no DAW transport) LINKED resolves to the loop's OWN detected
+// tempo, so a dropped loop plays at its natural tempo (R≈1) rather than a host
+// default. set_standalone_host(true) is what the editor reports on view-open.
+TEST_CASE("standalone LINKED follows the loop's detected tempo, not the host default",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    f.proc->set_standalone_host(true);
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);            // detected = 120
+    CHECK(f.proc->tempo_linked());
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 90.0, false, 0, l, r);    // host says 90 — ignored in standalone
+    // Linked-standalone renders at the detected tempo → R = 120/120 = 1 → raw length.
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == 48000; }));
+}
+
+// Unlinking engages the SAMPLE's own (fractional, bar-snapped) tempo so the loop
+// plays at its natural speed and the readout shows it — not the host BPM.
+TEST_CASE("unlinking engages the sample's own detected tempo (not the host)",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(103.4);   // the loop's fractional detected tempo
+    REQUIRE(f.proc->tempo_linked());        // default linked
+    f.proc->set_tempo_linked(false);        // unlink → adopt the sample's tempo
+    CHECK_FALSE(f.proc->tempo_linked());
+    CHECK(std::abs(f.proc->effective_bpm() - 103.4) < 0.01);
+}
+
+// A fresh drop WHILE UNLINKED adopts the new sample's detected tempo (the readout
+// follows the dropped sample, not a stale value).
+TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto a = percussive_loop(48000, 8);
+    const float* ca[1] = {a.data()};
+    REQUIRE(f.proc->load_loop(ca, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_tempo_linked(false);        // unlink
+    auto b = percussive_loop(48000, 4);     // a DIFFERENT loop
+    const float* cb[1] = {b.data()};
+    REQUIRE(f.proc->load_loop(cb, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    CHECK_FALSE(f.proc->tempo_linked());
+    const double det = f.proc->detected_bpm();
+    if (det > 0.0)                          // when the analyzer found a tempo for the drop
+        CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
+}
+
+// Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
+// guard) and every cut snapped to a zero-crossing so slice edges don't click.
+TEST_CASE("slice boundaries respect a minimum length and land on zero-crossings",
+          "[tempo-sampler][issue-slicing]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);  // dense onsets to stress short slices
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.store.set_value(kOnsetSens, 1.0f);     // max slices — where slivers appeared
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 3; }));
+
+    std::vector<float> mono; float sr = 0.0f; std::vector<long> slices;
+    REQUIRE(f.proc->snapshot_for_view(mono, sr, slices));
+    REQUIRE(slices.size() >= 4);             // 0, >=2 interior cuts, end
+
+    // (a) every slice — including the first [0,cut) and last [cut,end) — is at least
+    // ~30 ms long (no sliver). The internal floor is 40 ms; assert a safe lower bound.
+    const long min_len = static_cast<long>(0.030 * sr);
+    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+        INFO("slice " << i << " [" << slices[i] << "," << slices[i + 1] << ")");
+        CHECK(slices[i + 1] - slices[i] >= min_len);
+    }
+    // (b)+(c) each INTERIOR boundary is a zero-crossing (sign change), so both the
+    // end of the previous slice and the start of the next begin at zero — no click.
+    for (std::size_t i = 1; i + 1 < slices.size(); ++i) {
+        const long b = slices[i];
+        REQUIRE(b > 0); REQUIRE(b < static_cast<long>(mono.size()));
+        const bool sign_change = (mono[static_cast<size_t>(b - 1)] <= 0.0f) !=
+                                 (mono[static_cast<size_t>(b)] <= 0.0f);
+        INFO("boundary " << b << " prev=" << mono[static_cast<size_t>(b - 1)]
+                         << " cur=" << mono[static_cast<size_t>(b)]);
+        CHECK(sign_change);
+    }
 }
 
 // Item A: the footer TEMPO box drives a target-tempo override. Engaging it pins

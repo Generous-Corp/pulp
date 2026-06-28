@@ -65,7 +65,7 @@ if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
 endif()
 
-# pulp-canvas links pulp-bundled-fonts privately when Skia is on (#932).
+# pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
 if(TARGET pulp-bundled-fonts)
@@ -181,7 +181,7 @@ endforeach()
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
 
-# SDK build-type marker (pulp-internal task #35).
+# SDK build-type marker.
 #
 # Records the CMAKE_BUILD_TYPE the SDK was built with so PulpConfig.cmake
 # can refuse — or at least loudly warn — when a downstream plugin tries
@@ -376,7 +376,7 @@ if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
     # guard `if(DEFINED WGPU_IMPLIB ...)` always evaluated to FALSE and
     # the .lib was silently skipped from the SDK. That's why scaffolded
     # Windows plugins fail with "IMPORTED_IMPLIB not set for imported
-    # target 'webgpu'" (see #94).
+    # target 'webgpu'".
     #
     # Read the path from the imported target directly. Prefer the
     # config-specific property (some WebGPU-distribution versions only

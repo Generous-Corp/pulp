@@ -1,12 +1,17 @@
 # Web Plugin Formats: WAMv2 and WebCLAP
 
-Pulp plugins can run in browsers through two complementary web standards. This guide explains how they work, how to build them, and how to try the live demo.
+Pulp's web-plugin work is split across two complementary web standards. This
+guide explains the intended architecture, the checked-in build paths, and the
+current browser-host limits.
 
 ## Browser Host Availability
 
 The Pulp Browser Host is currently a local tool in `tools/browser-host/`. The
 repo does not yet publish a canonical repo-owned Pages deployment for it, so
-browser-host examples should be treated as local-run instructions for now.
+browser-host examples should be treated as local-run instructions for now. The
+host is also not yet an end-to-end validated WAM/WebCLAP runtime; use it as a
+browser-host scaffold until the AudioWorklet and WebCLAP host-library paths are
+wired and tested.
 
 ## Two Paths to the Browser
 
@@ -29,7 +34,7 @@ Pulp Processor (C++ → WASM via Emscripten)
 **Key files:**
 - `core/format/include/pulp/format/web/wam_adapter.hpp` — C++ bridge
 - `core/format/src/wasm/wam_adapter.cpp` — implementation
-- `core/format/src/wasm/wam-plugin.js` — WAMv2 JS runtime
+- `core/format/src/wasm/wam-plugin.js` — experimental WAMv2 JS runtime scaffold
 
 **Upstream references:**
 - [WAMv2 API](https://github.com/webaudiomodules/api) — interface definitions
@@ -96,10 +101,12 @@ emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The output is a `.js` + `.wasm` pair for the checked-in demo plugins. The root
-`tools/cmake/PulpWasm.cmake` helper is available for projects that include it
-explicitly, but the root Pulp build does not currently create WAM targets from
-`-DPULP_WASM=ON` alone.
+The output is a `.js` + `.wasm` pair for the checked-in demo plugins. Those
+files expose the C entry points used by `WamProcessorBridge`; wrapping them as a
+host-compatible WAM ES module and running them through the browser host is still
+experimental and not runtime-validated. The root `tools/cmake/PulpWasm.cmake`
+helper is available for projects that include it explicitly, but the root Pulp
+build does not currently create WAM targets from `-DPULP_WASM=ON` alone.
 
 ### Option 2: WebCLAP (WASI SDK)
 
@@ -109,10 +116,9 @@ export WASI_SDK_PREFIX=/opt/wasi-sdk
 
 # Configure a project that includes tools/cmake/PulpWclap.cmake and calls
 # pulp_add_wclap(...). The root Pulp tree does not currently define a checked-in
-# PulpGain_WCLAP target.
+# PulpGain_WCLAP target, and there is no root PULP_BUILD_WCLAP toggle.
 cmake -S . -B build-wclap \
   -DCMAKE_TOOLCHAIN_FILE=tools/cmake/wasi-toolchain.cmake \
-  -DPULP_BUILD_WCLAP=ON \
   -DCMAKE_BUILD_TYPE=Release
 
 # Build the project-defined WCLAP target
@@ -146,17 +152,17 @@ The `PULP_WCLAP_PLUGIN()` macro handles all of this automatically.
 
 ## Pulp Browser Host
 
-The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML app that can:
+The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML shell for
+the web-plugin runtime work. Today it can:
 
-- Load WAMv2 modules via ES module import
-- Route audio through the plugin (file playback or microphone)
-- Display auto-generated parameter controls
-- Provide an on-screen MIDI keyboard for instruments
-- Show a real-time oscilloscope
-- Share plugin state via URL (base64-encoded)
+- Accept WAM/WASM/WCLAP URLs or files and classify them by extension
+- Serve as the local static host for checked-in Emscripten outputs
+- Play audio files through the Web Audio analyser path
+- Show the shell UI, MIDI keyboard, and oscilloscope
 
-The host currently recognizes WCLAP URLs and files, but the `.wclap.tar.gz`
-unpack/instantiate path is still a placeholder until `wclap-host-js` is wired.
+The host does not yet instantiate the checked-in WAM demo outputs into plugin
+`AudioWorkletNode`s, build parameter controls from those outputs, or unpack
+WCLAP bundles with `wclap-host-js`.
 
 ### Publishing Status
 
@@ -181,7 +187,7 @@ python3 -m http.server 8080
 |--------|-----------|---------|-------------|----------|-----|
 | CLAP | CMake | Native | ✅ Direct | ❌ | clap.gui (NSView/HWND) |
 | WebCLAP | WASI SDK | WASM | Experimental via wclap-bridge | Experimental via external wclap-host-js; Pulp browser-host loading not wired yet | clap.webview |
-| WAMv2 | Emscripten | WASM | ❌ | ✅ AudioWorklet | HTML/CSS/JS |
+| WAMv2 | Emscripten | WASM | ❌ | Experimental generated-output lane; Pulp browser-host runtime wiring not validated | HTML/CSS/JS |
 
 ## What Runs Where
 

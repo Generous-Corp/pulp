@@ -255,7 +255,7 @@ TEST_CASE("object-position: percentage offsets the centred dst",
 }
 
 TEST_CASE("object-fit unknown keyword falls back to fill",
-          "[widgets][image][object-fit][coverage][phase3]") {
+          "[widgets][image][object-fit]") {
     using Catch::Matchers::WithinAbs;
     ImageView v;
     configure_view(v, 200, 100, "stretchy");
@@ -274,7 +274,7 @@ TEST_CASE("object-fit unknown keyword falls back to fill",
 }
 
 TEST_CASE("object-position: length tokens offset by slack",
-          "[widgets][image][object-position][coverage][phase3]") {
+          "[widgets][image][object-position]") {
     using Catch::Matchers::WithinAbs;
     ImageView v;
     configure_view(v, 200, 150, "contain", "25px 10px");
@@ -291,7 +291,7 @@ TEST_CASE("object-position: length tokens offset by slack",
 }
 
 TEST_CASE("object-position: malformed numeric tokens fall back to center",
-          "[widgets][image][object-position][coverage][phase3]") {
+          "[widgets][image][object-position]") {
     using Catch::Matchers::WithinAbs;
     ImageView v;
     configure_view(v, 200, 150, "contain", "25pxjunk 10em");
@@ -308,7 +308,7 @@ TEST_CASE("object-position: malformed numeric tokens fall back to center",
 }
 
 TEST_CASE("object-position: non-finite numeric tokens fall back to center",
-          "[widgets][image][object-position][coverage][phase3]") {
+          "[widgets][image][object-position]") {
     using Catch::Matchers::WithinAbs;
     ImageView v;
     configure_view(v, 200, 150, "contain", "1e999% 25%");

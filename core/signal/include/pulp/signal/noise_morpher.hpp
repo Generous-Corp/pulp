@@ -74,11 +74,19 @@ public:
     /// between the previous and current envelopes (frac=0 → previous,
     /// frac=1 → current). `out` holds num_bins complex bins (DC..Nyquist)
     /// with magnitude = interpolated envelope and fresh random phase.
+    /// Compensate the random-phase WOLA energy loss. Random-phase synthesis
+    /// frames overlap-add INCOHERENTLY (powers add) while the engine's WOLA
+    /// normalizes for COHERENT summation (amplitudes add), so the rendered
+    /// noise comes out several dB too quiet — and more so at denser overlap
+    /// (time compression). Callers that know the synthesis hop set this so the
+    /// morphed noise hits the target envelope level. Default 1 = uncompensated.
+    void set_synthesis_gain(float g) { synth_gain_ = g > 0.0f ? g : 1.0f; }
+
     void synthesize(float frac, std::complex<float>* out) {
         const float f = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
         for (int k = 0; k < num_bins_; ++k) {
-            const float mag = env_a_[static_cast<size_t>(k)] * (1.0f - f)
-                            + env_b_[static_cast<size_t>(k)] * f;
+            const float mag = (env_a_[static_cast<size_t>(k)] * (1.0f - f)
+                            + env_b_[static_cast<size_t>(k)] * f) * synth_gain_;
             const float phase = next_phase();
             out[k] = std::polar(mag, phase);
         }
@@ -106,6 +114,7 @@ private:
     }
 
     int num_bins_ = 0;
+    float synth_gain_ = 1.0f;
     std::uint64_t seed_ = 0;
     std::uint64_t rng_ = 0;
     bool have_prev_ = false;

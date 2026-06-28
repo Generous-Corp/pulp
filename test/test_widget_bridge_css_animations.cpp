@@ -84,7 +84,7 @@ TEST_CASE("parse_transition_shorthand: steps(N, end|start)",
 }
 
 TEST_CASE("parse_transition_shorthand rejects partial easing numbers",
-          "[view][bridge][css][coverage][phase3]") {
+          "[view][bridge][css]") {
     auto bezier = parse_transition_shorthand(
         "opacity 200ms cubic-bezier(0.42junk, 0, 0.58, 1)");
     REQUIRE(bezier.size() == 1);

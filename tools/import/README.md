@@ -30,7 +30,7 @@ a vendor token leaks into the schema or fixtures.
 
 Run the test: `python3 -m unittest tools.import.test_project_import_ir_schema -v`
 
-## Design notes (grounded by the Phase 0 extractor spike)
+## Design notes
 
 The IR is shaped to be **honest by construction**: a fact the importer can't
 statically resolve becomes a low-confidence value plus a first-class `constructs`
@@ -50,7 +50,7 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
 - **`dsp.reachability_scope`** is explicit so portable-core confidence is never
   read from a shallow scan.
 
-## Roadmap (Phase 1 substrate, narrowed)
+## Roadmap
 
 - [x] `ProjectImportIR` schema + conformance test.
 - [x] SPI **contract** (`detect`/`analyze`/`plan`/`emit`, JSON-over-stdio,

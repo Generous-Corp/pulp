@@ -10,7 +10,7 @@
 using namespace pulp::host;
 
 TEST_CASE("ParameterEventQueue sorts by sample offset without dropping payload",
-          "[host][parameter-event-queue][coverage][phase3]") {
+          "[host][parameter-event-queue]") {
     ParameterEventQueue q;
     q.push(ParameterEvent{.param_id = 7, .sample_offset = 64, .value = 0.7f});
     q.push(ParameterEvent{.param_id = 3, .sample_offset = 0, .value = 0.3f});
@@ -35,7 +35,7 @@ TEST_CASE("ParameterEventQueue sorts by sample offset without dropping payload",
 }
 
 TEST_CASE("ParameterEventQueue supports move push, iteration, and reuse after clear",
-          "[host][parameter-event-queue][coverage][phase3]") {
+          "[host][parameter-event-queue]") {
     ParameterEventQueue q;
     ParameterEvent moved{.param_id = 11, .sample_offset = -4, .value = -1.0f};
     q.push(std::move(moved));
@@ -174,7 +174,7 @@ TEST_CASE("ParameterEventQueue sort() is stable across duplicate offsets at scal
 }
 
 TEST_CASE("ParameterEventQueue exposes overflow telemetry",
-          "[host][parameter-event-queue][telemetry][phase2]") {
+          "[host][parameter-event-queue][telemetry]") {
     ParameterEventQueue q;
     REQUIRE(q.overflow_count() == 0);
 
@@ -210,7 +210,7 @@ TEST_CASE("ParameterEventQueue exposes overflow telemetry",
 }
 
 TEST_CASE("ParameterEventQueue telemetry path allocates zero times",
-          "[host][parameter-event-queue][telemetry][rt-safety][phase2]") {
+          "[host][parameter-event-queue][telemetry][rt-safety]") {
     ParameterEventQueue q;
 
     pulp::test::RtAllocationProbe probe;

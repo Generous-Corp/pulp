@@ -34,7 +34,7 @@ void write_png_artifact(const std::vector<std::uint8_t>& png, std::string name) 
 } // namespace
 
 TEST_CASE("TextEditor caret_rect has a fallback before first paint",
-          "[view][text_editor][coverage]") {
+          "[view][text_editor]") {
     TextEditor editor;
     editor.set_bounds({0, 0, 120, 24});
     editor.set_text("abc");

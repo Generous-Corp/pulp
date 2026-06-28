@@ -407,7 +407,7 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
 }
 
 TEST_CASE("Label baseline_y follows text metrics and inherited font size",
-          "[view][widget][baseline][coverage]") {
+          "[view][widget][baseline]") {
     Label normal("CHAIN");
     normal.set_font_size(14.0f);
     const float normal_baseline = normal.baseline_y();

@@ -192,6 +192,38 @@ predictable output, no MIDI.
   and built into the same per-node event queue. A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
+  - **Where the walk lives.** The legacy serial reference walk is no longer
+    inline in `process_impl`; it lives in
+    `core/host/src/signal_graph_reference_walk.cpp` and is entered via
+    `SignalGraph::run_reference_walk_` when no routed path takes a block. It is
+    kept deliberately INDEPENDENT of `signal_graph_executor_routing.{hpp,cpp}`
+    — do not share or merge its gather / PDC / feedback / MIDI / automation
+    execution with the executor. The MIDI-block helpers shared by both the
+    routed dispatch and the walk (`clear_midi_block`, `midi_block_has_drops`,
+    `copy_midi_block`) live in the shared header
+    `core/host/src/signal_graph_internal.hpp`. The dual-maintenance rule still
+    applies: any audio-output-affecting edit to the walk must be mirrored in the
+    executor (and vice versa), guarded by `test_graph_routing_differential_parity`,
+    `test_signal_graph_executor_parity`, and `test_signal_graph_offline_parity`.
+  - **Connection lane CLASSIFICATION is single-sourced** (distinct from the
+    execution-independence rule above). Which lane a host `Connection` carries —
+    audio / event(MIDI) / automation, plus the orthogonal feedback flag and the
+    dense-vs-sparse audio-rate split — is decided in ONE place: `classify()` in
+    `signal_graph_executor_routing.{hpp,cpp}`, returning a `ConnectionClass`. The
+    runtime structs carry this as a typed `graph::GraphRuntimeConnectionKind`
+    discriminator (`Audio`/`Event`/`Automation`, default `Audio`) instead of the
+    old independent `event`/`is_automation` bools; read it via the
+    `pulp::graph::is_event` / `is_automation_conn` / `carries_audio` accessors.
+    BOTH classification surfaces route through `classify()`: the executor-routing
+    gather (building `GraphRuntimeConnectionSpec`s) AND the compile-time
+    reference-walk edge bucketer in `SignalGraph::compile_` (audio / MIDI /
+    sparse-automation / dense-audio-rate / feedback buckets). The PDC/latency
+    passes share the matching `connection_affects_latency()` predicate. A
+    sidechain edge deliberately classifies as `Audio` (it is plain audio into a
+    higher dest port). This is single-sourced CLASSIFICATION only — the gather
+    math, PDC delay rings, and MIDI/automation evaluation stay independent and
+    dual-maintained per the rule above. New lane mappings are pinned by
+    `test_connection_classify`.
 - **Transport-aware `process()`.** Alongside the no-transport
   `process(out, in, n)` there is an additive
   `process(out, in, n, const format::ProcessContext& transport)` overload. Both
@@ -204,8 +236,28 @@ predictable output, no MIDI.
   render-speed hint is categorical and travels through `*block.transport`, never the
   multiplier. Nodes that ignore `block.transport` are bit-identical to the
   no-transport path, so routed-vs-walk parity is unaffected. Under active
-  anticipation the supplied transport is SUPPRESSED for the block (see the
-  anticipation gotchas and `transport_suppressed_for_anticipation()`).
+  anticipation the transport stays LIVE: transport-sensitive nodes are excluded
+  from the ahead-rendered interior (see the per-node opt-in below and the
+  anticipation gotchas), so every ahead-rendered node is transport-insensitive by
+  construction and the forwarding is inert for it.
+- **Per-node transport opt-in (`PluginSlot::wants_transport()` + transport
+  `process()` overload / a transport-aware custom callback).** A routed plugin or
+  custom node OPTS INTO the host transport: a `PluginSlot` overrides
+  `wants_transport()` to return `true` and overrides the appended
+  `process(ProcessBuffers&, midi_in, midi_out, param_events, n, const
+  format::ProcessContext&)` overload; a custom node's type sets
+  `process_transport` (stateless) or `process_instance_transport` (stateful).
+  `compile_` resolves the capability ONCE into the cached, prepare-stable
+  `GraphNode::transport_sensitive` (Plugin: from `slot->wants_transport()`;
+  Custom: from a non-empty transport callback registration), resolved BEFORE the
+  anticipation eligibility analysis. That ONE cached bit is read by BOTH the
+  routed binding (`PluginBindingContext::wants_transport` /
+  `CustomBindingContext::process_transport`, which forward the live transport when
+  the block carries one) AND the anticipation analyzer (which seeds
+  `AnticipationExclusion::TransportSensitive`), so the partition and the bindings
+  can never disagree. INVARIANT: never call a live `slot->wants_transport()` per
+  block on the audio thread — the bit is cached at compile and a capability change
+  requires a re-prepare. A node that does not opt in is byte-for-byte unchanged.
 - **Parallel-executor routing (opt-in, default OFF, independent of the serial
   opt-in).** `set_parallel_routing_enabled(true)` drives the SAME eligible subset
   through `GraphRuntimeExecutor::process_parallel` — a levelized fork-join over a
@@ -240,17 +292,19 @@ predictable output, no MIDI.
   `analyze_anticipation_eligibility(nodes, connections)` is the static SAFETY
   contract for rendering a latent subgraph ahead of the audio deadline: it
   classifies each node `None` (passed) or a hard-exclusion reason — seeds live
-  AudioInput/MidiInput nodes, both endpoints of every feedback edge, and any node
-  with a sidechain inbound edge, then propagates each exclusion forward along
-  feedforward (non-feedback) edges to a fixpoint so anything downstream of an
+  AudioInput/MidiInput nodes, both endpoints of every feedback edge, any node with
+  a sidechain inbound edge, and any node with `GraphNode::transport_sensitive` set
+  (the per-node host-transport opt-in), then propagates each exclusion forward
+  along feedforward (non-feedback) edges to a fixpoint so anything downstream of an
   excluded node is excluded too. It's deliberately conservative: a false exclusion
   only forfeits a speed-up, but a false inclusion would render an unsafe node
-  ahead. GOTCHA: `passes_static_exclusions(i)` is NOT a blanket "safe to
-  anticipate" — host-clock-sensitive plugins (output depends on the transport
-  playhead) are NOT statically detectable from node metadata and are intentionally
-  not covered; a renderer consuming this must layer a host-time check or a per-node
-  opt-out on top. The `SignalGraph` anticipative splice now gates on this
-  analysis when `set_anticipation_enabled(true)` is prepared.
+  ahead. Host-clock sensitivity is handled by the `TransportSensitive` seed: a
+  host-clock-dependent node opts in via `wants_transport()` / a transport-aware
+  custom callback (resolved into `transport_sensitive` at compile), so it — and
+  its downstream cone — is kept out of the ahead-rendered interior and runs live.
+  `passes_static_exclusions(i)` true therefore IS sufficient for the partition to
+  treat node i as ahead-renderable. The `SignalGraph` anticipative splice gates on
+  this analysis when `set_anticipation_enabled(true)` is prepared.
 - **Anticipation partition (`anticipation_partition.{hpp,cpp}`).**
   `build_anticipation_partition(nodes, connections, eligibility)` carves the
   renderable eligible INTERIOR (eligible nodes minus the live AudioOutput/MidiOutput
@@ -305,13 +359,17 @@ predictable output, no MIDI.
   snapshot (RCU object-lifetime only) and is single-producer-guarded, but the host
   MUST stop/join the pump before any `prepare()`/mutation — prepare reinitializes
   the SAME plugin instances the pump renders (a data race otherwise; same rule as
-  "no `process()` during prepare"). (3) Host-clock-sensitive interiors aren't
-  detected by the static eligibility pass; the transport-aware `process()` overload
-  therefore SUPPRESSES the supplied transport for any block where anticipation is
-  active (counted by `transport_suppressed_for_anticipation()`), so the ahead-render
-  and the live render both see absent transport. A per-node transport-sensitivity
-  opt-out is the precondition for letting a transport-aware interior coexist with
-  anticipation; until that exists, suppression is the conservative guarantee.
+  "no `process()` during prepare"). (3) Host-clock-sensitive nodes opt in via the
+  per-node transport capability (`wants_transport()` / a transport-aware custom
+  callback → cached `GraphNode::transport_sensitive`). The eligibility pass seeds
+  `AnticipationExclusion::TransportSensitive` on that bit, so a transport-sensitive
+  node — and its downstream cone — is EXCLUDED from the ahead-rendered interior and
+  always runs live/exterior, where it receives the live transport. The former
+  blanket transport suppression under anticipation is therefore RETIRED: the
+  transport stays populated on every block (inert for the transport-insensitive
+  interior). `transport_suppressed_for_anticipation()` is repurposed to count the
+  transport-sensitive nodes anticipation forced exterior (resolved at compile),
+  not per-block drops.
   (A masked node must not be an `AudioOutput` or a feedback endpoint; the
   partition guarantees this and `process_routed` debug-asserts it.) (4) The lane
   uses a FIXED block size (the prepared max). A block of a different size — or a

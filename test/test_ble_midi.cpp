@@ -87,14 +87,13 @@ TEST_CASE("BleMidiPacketDecoder rejects undersized packets", "[ble-midi]") {
     REQUIRE_FALSE(dec.decode(bogus, sizeof(bogus)));
 }
 
-// Regression: PR #3017. Running status is scoped to a single
-// BLE-MIDI packet per Apple BLE-MIDI 1.0 §3.4. Carrying it across
-// packets would fabricate events from leading data bytes in the next
-// packet. The first packet establishes 0x90 running status; the second
-// arrives with NO status byte (just timestamp + data) and must NOT emit
-// a Note On using the prior packet's 0x90.
+// Running status is scoped to a single BLE-MIDI packet per Apple BLE-MIDI
+// 1.0 §3.4. Carrying it across packets would fabricate events from leading
+// data bytes in the next packet. The first packet establishes 0x90 running
+// status; the second arrives with NO status byte (just timestamp + data) and
+// must NOT emit a Note On using the prior packet's 0x90.
 TEST_CASE("BleMidiPacketDecoder clears running status at packet boundaries "
-          "(regression: PR #3017 review)",
+          "(regression coverage)",
           "[ble-midi][issue-3017]") {
     BleMidiPacketDecoder dec;
     std::vector<DecodedMsg> received;

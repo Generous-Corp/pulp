@@ -48,10 +48,10 @@ TEST_CASE("WebView backend availability flag matches identifier",
 // When the build option is OFF, the WebView TU is excluded entirely and
 // detect_webview_backend() MUST return "none" so callers can distinguish
 // "this build excluded WebView" from "this OS has no WebView installed"
-// (regression: PR #3016).
+// Regression coverage for that disabled-build contract.
 #if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
 TEST_CASE("WebView backend reports none when PULP_BUILD_WEBVIEW=OFF "
-          "(regression: PR #3016 review)",
+          "(regression coverage)",
           "[webview][backend-detect][issue-3016]") {
     REQUIRE(pulp::view::detect_webview_backend() == "none");
     REQUIRE_FALSE(pulp::view::webview_backend_available());

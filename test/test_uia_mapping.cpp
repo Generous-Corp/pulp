@@ -21,7 +21,7 @@ TEST_CASE("role_to_control_type returns stable UIA IDs", "[a11y][uia]") {
 }
 
 TEST_CASE("UIA mapping falls back for unknown role values",
-          "[a11y][uia][coverage][phase3]") {
+          "[a11y][uia]") {
     auto unknown = static_cast<View::AccessRole>(999);
     REQUIRE(role_to_control_type(unknown) == kControlTypeCustom);
     REQUIRE(patterns_for_role(unknown).count == 0);
@@ -98,7 +98,7 @@ TEST_CASE("mapping tables are constexpr-usable", "[a11y][uia]") {
 // rest of this file pins for the mapping table.
 
 TEST_CASE("range-value patterns gate the IRangeValueProvider fragment",
-          "[a11y][uia][phase3]") {
+          "[a11y][uia]") {
     // Slider + meter advertise RangeValue; everything else does not.
     REQUIRE(role_supports_range_value(View::AccessRole::slider));
     REQUIRE(role_supports_range_value(View::AccessRole::meter));
@@ -110,7 +110,7 @@ TEST_CASE("range-value patterns gate the IRangeValueProvider fragment",
 }
 
 TEST_CASE("value pattern gates the IValueProvider fragment (writable range)",
-          "[a11y][uia][phase3]") {
+          "[a11y][uia]") {
     // Slider is writable (Value + RangeValue); meter is read-only progress
     // (RangeValue only). This is the IsReadOnly discriminator.
     REQUIRE(role_supports_value(View::AccessRole::slider));
@@ -120,7 +120,7 @@ TEST_CASE("value pattern gates the IValueProvider fragment (writable range)",
 }
 
 TEST_CASE("runtime ids are unique, stable, and append-id prefixed",
-          "[a11y][uia][phase3]") {
+          "[a11y][uia]") {
     // First element is the documented UiaAppendRuntimeId (3); the key is
     // 1 + index so it is strictly positive and distinct per fragment.
     constexpr auto a = runtime_id_for_index(0);
@@ -135,7 +135,7 @@ TEST_CASE("runtime ids are unique, stable, and append-id prefixed",
 }
 
 TEST_CASE("normalized value fraction clamps and maps to [0,1]",
-          "[a11y][uia][phase3]") {
+          "[a11y][uia]") {
     REQUIRE(normalized_value_fraction(0.0, 0.0, 1.0) == Catch::Approx(0.0));
     REQUIRE(normalized_value_fraction(0.5, 0.0, 1.0) == Catch::Approx(0.5));
     REQUIRE(normalized_value_fraction(1.0, 0.0, 1.0) == Catch::Approx(1.0));

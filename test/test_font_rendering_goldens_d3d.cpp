@@ -76,7 +76,7 @@
 //      Prefer the WARP adapter for the committed values — real-GPU
 //      digests are runner-dependent.
 //
-// Tag: [golden][gpu][d3d][skia][font][issue-2257-followup][scaffold]
+// Tag: [golden][gpu][d3d][skia][font][scaffold]
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -88,8 +88,8 @@
 // raster↔D3D tolerance TEST_CASE. Tolerance for the cross-backend
 // probe is ±20 % (see header rationale).
 
-TEST_CASE("font v2 Slice 3.4 — D3D12 goldens require implementation before lane enablement",
-          "[golden][gpu][d3d][skia][font][scaffold][issue-2257-followup]") {
+TEST_CASE("font D3D12 goldens require implementation before lane enablement",
+          "[golden][gpu][d3d][skia][font][scaffold]") {
     FAIL("D3D12 goldens are enabled without an implementation; add the "
          "Windows D3D render/readback assertions before turning on this lane.");
 }

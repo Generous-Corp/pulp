@@ -70,7 +70,7 @@ TEST_CASE("Panel: zero border width skips border", "[panel]") {
 }
 
 TEST_CASE("Panel: custom theme tokens drive fill and stroke colors",
-          "[panel][coverage]") {
+          "[panel]") {
     Theme theme;
     theme.colors["panel.fill"] = color_from_hex(0x112233);
     theme.colors["panel.stroke"] = color_from_hex(0x445566);
@@ -97,7 +97,7 @@ TEST_CASE("Panel: custom theme tokens drive fill and stroke colors",
 }
 
 TEST_CASE("Panel: missing theme tokens use documented fallback colors",
-          "[panel][coverage]") {
+          "[panel]") {
     Panel panel;
     panel.set_theme(Theme{});
     panel.set_bounds({0, 0, 80, 40});
@@ -120,7 +120,7 @@ TEST_CASE("Panel: missing theme tokens use documented fallback colors",
 }
 
 TEST_CASE("Panel: border geometry is inset and radius is clamped by border width",
-          "[panel][coverage]") {
+          "[panel]") {
     Panel panel;
     panel.set_bounds({0, 0, 100, 50});
     panel.set_corner_radius(3.0f);

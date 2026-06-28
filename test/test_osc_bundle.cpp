@@ -63,7 +63,7 @@ TEST_CASE("OSC TimeTag keeps fractional unix seconds near one-second boundary",
 }
 
 TEST_CASE("OSC TimeTag converts fractional halves without losing the fraction",
-          "[osc][bundle][timetag][codecov]") {
+          "[osc][bundle][timetag]") {
     auto tt = TimeTag::from_unix(1000.5);
 
     REQUIRE(tt.seconds == 2208989800u);
@@ -72,7 +72,7 @@ TEST_CASE("OSC TimeTag converts fractional halves without losing the fraction",
 }
 
 TEST_CASE("OSC TimeTag converts positive sub-second unix times",
-          "[osc][bundle][timetag][codecov]") {
+          "[osc][bundle][timetag]") {
     auto tt = TimeTag::from_unix(0.25);
 
     REQUIRE(tt.seconds == 2208988800u);
@@ -120,7 +120,7 @@ TEST_CASE("OSC default BundleElement is an empty message element",
 }
 
 TEST_CASE("OSC BundleElement takes ownership of unique_ptr bundles",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     auto nested = std::make_unique<Bundle>();
     nested->timetag = TimeTag::from_unix(42.0);
     Message msg("/owned");
@@ -137,7 +137,7 @@ TEST_CASE("OSC BundleElement takes ownership of unique_ptr bundles",
 }
 
 TEST_CASE("OSC BundleElement message constructor preserves message content",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     Message msg("/direct");
     msg.add(11).add(std::string("payload"));
 
@@ -151,7 +151,7 @@ TEST_CASE("OSC BundleElement message constructor preserves message content",
 }
 
 TEST_CASE("OSC BundleElement value constructor copies nested bundle content",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     Bundle nested;
     Message msg("/value-copy");
     msg.add(std::string("payload"));
@@ -211,7 +211,7 @@ TEST_CASE("OSC Bundle serialize/deserialize round-trip", "[osc][bundle]") {
 }
 
 TEST_CASE("OSC Bundle serialize preserves non-immediate timetag bytes",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     Bundle bundle;
     bundle.timetag = {0x01020304u, 0xA0B0C0D0u};
 
@@ -280,7 +280,7 @@ TEST_CASE("Bundle::deserialize rejects data shorter than 16 bytes",
 }
 
 TEST_CASE("Bundle::deserialize rejects null data with bundle-sized length",
-          "[osc][bundle][deserialize-edge][codecov]") {
+          "[osc][bundle][deserialize-edge]") {
     REQUIRE_FALSE(Bundle::deserialize(nullptr, 16).has_value());
 }
 
@@ -353,7 +353,7 @@ TEST_CASE("Bundle::deserialize rejects malformed message element",
 }
 
 TEST_CASE("Bundle::deserialize rejects zero-sized elements",
-          "[osc][bundle][deserialize-edge][codecov]") {
+          "[osc][bundle][deserialize-edge]") {
     auto buf = make_empty_bundle_bytes();
     append_u32(buf, 0);
 
@@ -429,7 +429,7 @@ TEST_CASE("Bundle deep nesting (3 levels) round-trips",
 }
 
 TEST_CASE("Bundle round-trip preserves blob and float message arguments",
-          "[osc][bundle][roundtrip][codecov]") {
+          "[osc][bundle][roundtrip]") {
     Bundle bundle;
     Message msg("/mixed");
     msg.add(std::vector<uint8_t>{0xAA, 0xBB});
@@ -506,7 +506,7 @@ TEST_CASE("Address pattern star bounded by path separator",
 }
 
 TEST_CASE("Address pattern star backtracks within a path segment",
-          "[osc][bundle][pattern][codecov]") {
+          "[osc][bundle][pattern]") {
     REQUIRE(address_matches("/foo/*bar", "/foo/bar"));
     REQUIRE(address_matches("/foo/*bar", "/foo/bazbar"));
     REQUIRE(address_matches("/foo/a*c", "/foo/abc"));
@@ -515,7 +515,7 @@ TEST_CASE("Address pattern star backtracks within a path segment",
 }
 
 TEST_CASE("Address pattern handles class, star, and alternative boundaries",
-          "[osc][bundle][pattern][codecov]") {
+          "[osc][bundle][pattern]") {
     REQUIRE(address_matches("/[A-C]/x", "/B/x"));
     REQUIRE_FALSE(address_matches("/[C-A]/x", "/B/x"));
     REQUIRE_FALSE(address_matches("/[]/x", "/a/x"));
@@ -542,7 +542,7 @@ TEST_CASE("Malformed address patterns fail closed",
 }
 
 TEST_CASE("Address pattern alternatives reject empty branches",
-          "[osc][bundle][pattern][coverage][phase3-github]") {
+          "[osc][bundle][pattern]") {
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefix"));
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefixSuffix"));
     REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefixOther"));
@@ -558,7 +558,7 @@ TEST_CASE("Address pattern alternatives support first and later branches",
 }
 
 TEST_CASE("Address pattern alternatives backtrack when a prefix branch fails",
-          "[osc][bundle][pattern][codecov]") {
+          "[osc][bundle][pattern]") {
     REQUIRE(address_matches("/{foo,foobar}/gain", "/foobar/gain"));
     REQUIRE(address_matches("/{a,ab,abc}/tail", "/abc/tail"));
     REQUIRE_FALSE(address_matches("/{foo,foobar}/gain", "/foobaz/gain"));

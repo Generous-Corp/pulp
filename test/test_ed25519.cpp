@@ -1,7 +1,7 @@
 // test_ed25519.cpp — RFC 8032 §7.1 test-vector coverage for the Ed25519
-// surface added in macOS plan item 7.1b.
+// runtime crypto surface.
 //
-// Each test vector is verified two ways:
+// Each test vector is verified three ways:
 //   (1) ed25519_keypair_from_seed(seed) reproduces the published public key
 //   (2) ed25519_sign(seed||pk, msg) matches the published signature byte-for-byte
 //   (3) ed25519_verify(pk, sig, msg) returns true; flipping any byte returns false

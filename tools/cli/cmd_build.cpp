@@ -13,9 +13,9 @@ namespace {
 // This helper runs the validate step before promoting bundles into
 // `~/Library/Audio/Plug-Ins/...`. It defers to `cmd_validate` for the
 // actual validator orchestration so the policy stays in exactly one
-// place — including the missing-tool advisory wording (#51 / #356).
+// place, including the missing-tool advisory wording.
 //
-// Returns the exit code from cmd_validate. Item 7.4b acceptance #3
+// Returns the exit code from cmd_validate. The missing-auval acceptance case
 // ("when auval is missing from PATH, install of an AU fails with the
 // install hint") is implemented by passing --strict, which upgrades
 // missing-tool advisories to hard failures so we never silently
@@ -141,7 +141,7 @@ int cmd_build(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // FetchContent cache preflight (issue #744). Cheap (<1s on a
+    // FetchContent cache preflight. Cheap (<1s on a
     // typical cache); fails fast with a clear remediation message
     // instead of letting `cmake configure` blow up 200 lines into the
     // log on a dangling symlink. Skipped only when the user has set

@@ -226,6 +226,13 @@ private:
     void notify_property_changed(std::string_view name,
                                  const PropertyValue& old_val,
                                  const PropertyValue& new_val);
+    void notify_child_added(StateTree& child, int index);
+    void notify_child_removed(StateTree& child, int index);
+
+    // True if this node is `node` or one of its ancestors (walks `node`'s
+    // parent chain upward). Used by add_child / insert_child to reject
+    // parent/child cycles before they can form.
+    bool is_ancestor_of(const StateTree* node) const;
 };
 
 /// Owns the listener wiring created by `StateTree::clone_synced()`.
@@ -294,9 +301,26 @@ public:
         if (value_ != new_value) {
             T old = std::move(value_);
             value_ = std::move(new_value);
-            for (auto& [id, fn] : listeners_) {
-                (void)id;
+            // Snapshot-then-dispatch with a liveness recheck, mirroring
+            // StateTree's listener fan-out: a callback may add or remove
+            // listeners on this same value while it runs, which would
+            // invalidate iterators into the live vector. A listener removed
+            // earlier in the same dispatch is skipped; one added during the
+            // dispatch is not invoked for the in-flight set. The single-
+            // listener fast path copies the callable before invoking so a
+            // self-removing sole listener can't free its own executing body.
+            if (listeners_.size() == 1) {
+                auto fn = listeners_.front().second;
                 if (fn) fn(old, value_);
+                return;
+            }
+            auto snapshot = listeners_;
+            for (auto& [id, fn] : snapshot) {
+                if (!fn) continue;
+                bool still_registered = std::any_of(
+                    listeners_.begin(), listeners_.end(),
+                    [id = id](const auto& e) { return e.first == id; });
+                if (still_registered) fn(old, value_);
             }
         }
     }

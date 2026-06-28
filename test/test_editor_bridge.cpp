@@ -237,8 +237,8 @@ TEST_CASE("EditorBridge::get_uint: clamps negatives to zero, handles type coerci
     CHECK(EditorBridge::get_uint(obj, "absent", 5) == 5u);
 }
 
-// PR #711 regression coverage: floats above SIZE_MAX must clamp, not
-// invoke undefined behavior via direct float→size_t cast.
+// Regression coverage: floats above SIZE_MAX must clamp, not invoke undefined
+// behavior via direct float→size_t cast.
 TEST_CASE("EditorBridge::get_uint: clamps floats above SIZE_MAX to size_t max",
           "[editor_bridge][issue-709]")
 {
@@ -355,7 +355,7 @@ TEST_CASE("EditorBridge::dispatch_webview_message: malformed payload_json errors
     CHECK(response_has_error(r, "malformed JSON"));
 }
 
-// ── PR #711: non-movable / non-copyable EditorBridge contract ─────────────
+// Non-movable / non-copyable EditorBridge contract.
 //
 // attach_webview installs a callback that captures a reference to the
 // bridge. Allowing moves would let an attached bridge be relocated out

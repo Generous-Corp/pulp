@@ -87,6 +87,12 @@ pulp_add_test_suite(pulp-test-signal-graph-parallel-cost
 pulp_add_test_suite(pulp-test-graph-routing-differential-parity
     SOURCES test_graph_routing_differential_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# Pins the single connection-classification surface (classify): every host
+# Connection variant maps to one runtime lane, so the routed gather and the
+# reference-walk bucketer can never drift apart.
+pulp_add_test_suite(pulp-test-connection-classify
+    SOURCES test_connection_classify.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # Anticipative-rendering safety contract: the static eligibility analysis must
 # exclude every live-input / feedback / sidechain-dependent node and propagate
 # those exclusions downstream, so no unsafe subgraph is ever rendered ahead.

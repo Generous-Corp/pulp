@@ -333,7 +333,7 @@ TEST_CASE("PluginScanner VST3 bundle with well-formed moduleinfo.json yields FUI
 }
 
 TEST_CASE("PluginScanner VST3 moduleinfo raw CID bytes normalize to lowercase hex",
-          "[host][scanner][regression][codecov][phase3]") {
+          "[host][scanner][regression]") {
     ScratchDir scratch("vst3-raw-cid");
 
     const std::string body = R"({
@@ -370,7 +370,7 @@ TEST_CASE("PluginScanner VST3 moduleinfo raw CID bytes normalize to lowercase he
 }
 
 TEST_CASE("PluginScanner VST3 moduleinfo skips unusable class records",
-          "[host][scanner][regression][codecov][phase3]") {
+          "[host][scanner][regression]") {
     ScratchDir scratch("vst3-unusable-classes");
 
     const std::string body = R"({
@@ -638,7 +638,7 @@ TEST_CASE("ScanOptions progress callback fires at least once per format lane",
 }
 
 TEST_CASE("PluginScanner progress callback reports hermetic extra-path lanes",
-          "[host][scanner][coverage][phase3]") {
+          "[host][scanner]") {
     ScratchDir scratch("scan-progress-hermetic");
 
     const std::string ttl_body =
@@ -849,7 +849,7 @@ TEST_CASE("ParameterEventQueue has fixed capacity and drops overflow without all
 }
 
 TEST_CASE("ParameterEventQueue accepts rvalue pushes and exposes const iteration",
-          "[host][automation][coverage][phase3]") {
+          "[host][automation]") {
     pulp::host::ParameterEventQueue queue;
     queue.push(pulp::host::ParameterEvent{0x10, 5, 0.5f});
     queue.push(pulp::host::ParameterEvent{0x11, 5, 0.6f});

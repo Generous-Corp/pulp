@@ -20,9 +20,18 @@
 //   T3  process_mode and render_speed_hint reach the Processor via *block.transport
 //       (NOT via block.render_speed, which stays the numeric 1.0 — the hint is a
 //       categorical enum and is never mapped into the multiplier).
-//   T4  When anticipative rendering is active the transport overload SUPPRESSES the
-//       supplied transport: output stays bit-identical to the no-transport render
-//       and transport_suppressed_for_anticipation() counts the suppression.
+//   T4  Per-node transport sensitivity (PluginSlot::wants_transport() and a
+//       transport-aware custom callback): a node opts in, the routed binding
+//       forwards the live transport to it, and a transport-absent block yields
+//       the transport-absent defaults. A node that does NOT opt in is byte-for-
+//       byte unchanged.
+//   T5  Under active anticipation a transport-sensitive node is forced exterior
+//       (AnticipationExclusion::TransportSensitive) and RECEIVES the live
+//       transport, while a transport-insensitive interior stays ahead-rendered
+//       and is unaffected. Output beside an anticipated latent branch stays
+//       bit-identical to the no-transport render; transport_suppressed_for_
+//       anticipation() now counts the transport-sensitive nodes forced exterior
+//       (the former blanket per-block suppression is retired).
 
 #include "harness/graph_routing_harness.hpp"
 
@@ -97,13 +106,18 @@ private:
     PluginInfo info_;
 };
 
-class TransportAwareSlot final : public PluginSlot {
+// A transport-sensitive 2-in/2-out effect: opts in via wants_transport() and
+// records the ProcessContext the routed binding forwards to it. Its audio output
+// is IDENTICAL on both the transport and no-transport paths (scale by 0.5), so a
+// graph using it is bit-identical regardless of whether transport is supplied —
+// only `last`/`got_transport` differ. Used to prove the opt-in forwarding.
+class TransportRecordingSlot final : public PluginSlot {
 public:
-    TransportAwareSlot() {
-        info_.name = "TransportAware";
+    TransportRecordingSlot() {
+        info_.name = "TransportRecorder";
         info_.format = PluginFormat::CLAP;
-        info_.num_inputs = 1;
-        info_.num_outputs = 1;
+        info_.num_inputs = 2;
+        info_.num_outputs = 2;
         info_.category = "Effect";
     }
     const PluginInfo& info() const override { return info_; }
@@ -111,30 +125,29 @@ public:
     bool prepare(double, int) override { return true; }
     void release() override {}
     bool wants_transport() const override { return true; }
-
+    // No-transport path (the routed multi-bus default projects here): scale only.
     void process(pulp::audio::BufferView<float>& out,
                  const pulp::audio::BufferView<const float>& in,
                  const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::host::ParameterEventQueue&, int n) override {
-        ++transportless_calls;
-        copy_input(out, in, n);
+        ++calls;
+        scale(out, in, n);
     }
-
+    // Transport path: record the supplied context, then the SAME scale.
     void process(pulp::format::ProcessBuffers& audio,
-                 const pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&,
-                 int n,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n,
                  const pulp::format::ProcessContext& transport) override {
+        ++calls;
         ++transport_calls;
-        last_transport = transport;
-        auto* out = audio.main_output();
-        const auto* in = audio.main_input();
+        last = transport;
+        got_transport = true;
+        auto* output = audio.main_output();
+        const auto* input = audio.main_input();
         pulp::audio::BufferView<float> empty_out;
         pulp::audio::BufferView<const float> empty_in;
-        copy_input(out ? *out : empty_out, in ? *in : empty_in, n);
+        scale(output ? *output : empty_out, input ? *input : empty_in, n);
     }
-
     std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
     float get_parameter(uint32_t) const override { return 0.0f; }
     void set_parameter(uint32_t, float) override {}
@@ -148,24 +161,88 @@ public:
     void* create_editor_view() override { return nullptr; }
     void destroy_editor_view() override {}
 
+    pulp::format::ProcessContext last;
+    bool got_transport = false;
+    int calls = 0;
     int transport_calls = 0;
-    int transportless_calls = 0;
-    pulp::format::ProcessContext last_transport;
 
 private:
-    static void copy_input(pulp::audio::BufferView<float>& out,
-                           const pulp::audio::BufferView<const float>& in,
-                           int n) {
+    static void scale(pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in, int n) {
         const std::size_t chs = std::min(out.num_channels(), in.num_channels());
         for (std::size_t c = 0; c < chs; ++c) {
-            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+            const float* i = in.channel_ptr(c);
+            float* o = out.channel_ptr(c);
+            for (int k = 0; k < n; ++k)
+                o[static_cast<std::size_t>(k)] = 0.5f * i[static_cast<std::size_t>(k)];
         }
-        for (std::size_t c = chs; c < out.num_channels(); ++c) {
+        for (std::size_t c = chs; c < out.num_channels(); ++c)
             std::fill_n(out.channel_ptr(c), n, 0.0f);
-        }
     }
-
     PluginInfo info_;
+};
+
+// A transport-sensitive 0-in/2-out GENERATOR for the anticipation coexistence
+// test: deterministic per-block output ((c+1)*100 + block) advanced once per
+// process() call on BOTH overloads (so its audio is identical with or without
+// transport), recording the ProcessContext on the transport path.
+class TransportGen final : public PluginSlot {
+public:
+    TransportGen() {
+        info_.name = "TransportGen";
+        info_.format = PluginFormat::CLAP;
+        info_.num_inputs = 0;
+        info_.num_outputs = 2;
+        info_.category = "Generator";
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    bool wants_transport() const override { return true; }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n) override {
+        emit(out, n);
+    }
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n,
+                 const pulp::format::ProcessContext& transport) override {
+        last = transport;
+        got_transport = true;
+        auto* output = audio.main_output();
+        pulp::audio::BufferView<float> empty_out;
+        emit(output ? *output : empty_out, n);
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    pulp::format::ProcessContext last;
+    bool got_transport = false;
+
+private:
+    void emit(pulp::audio::BufferView<float>& out, int n) {
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            float* o = out.channel_ptr(c);
+            const float v = static_cast<float>((c + 1) * 100) + static_cast<float>(block_);
+            for (int k = 0; k < n; ++k) o[static_cast<std::size_t>(k)] = v;
+        }
+        ++block_;
+    }
+    PluginInfo info_;
+    int block_ = 0;
 };
 
 // Stateful counting generator (mirrors the anticipation suite's CountingGen):
@@ -311,33 +388,6 @@ TEST_CASE("SignalGraph transport overload is bit-identical for transport-inert n
     }
     // No anticipation in play, so nothing was suppressed.
     REQUIRE(withT.transport_suppressed_for_anticipation() == 0);
-}
-
-TEST_CASE("SignalGraph routed plugin binding delivers transport to opted-in slots",
-          "[host][signal-graph][transport]") {
-    SignalGraph graph;
-    graph.set_canonical_executor_routing_enabled(true);
-    const auto in = graph.add_input_node(1, "In");
-    auto slot = std::make_unique<TransportAwareSlot>();
-    auto* slot_ptr = slot.get();
-    const auto plug = graph.add_plugin_node(std::move(slot), 1, 1, "TransportAware");
-    const auto out = graph.add_output_node(1, "Out");
-    REQUIRE(graph.connect(in, 0, plug, 0));
-    REQUIRE(graph.connect(plug, 0, out, 0));
-    REQUIRE(graph.prepare(kSr, kFrames));
-
-    auto transport = non_default_transport();
-    transport.process_mode = pulp::format::ProcessMode::Offline;
-    const auto rendered = render_block(graph, &transport);
-
-    REQUIRE(slot_ptr->transport_calls == 1);
-    REQUIRE(slot_ptr->transportless_calls == 0);
-    REQUIRE(slot_ptr->last_transport.is_playing);
-    REQUIRE(slot_ptr->last_transport.tempo_bpm == 140.0);
-    REQUIRE(slot_ptr->last_transport.position_samples == 4096);
-    REQUIRE(slot_ptr->last_transport.process_mode == pulp::format::ProcessMode::Offline);
-    REQUIRE(rendered[0][0] == 0.0f);
-    REQUIRE(rendered[0][1] == 0.01f);
 }
 
 // ── T2 / T3: plumbing proof at the consumer ──────────────────────────────────
@@ -495,21 +545,251 @@ TEST_CASE("SignalGraph transport delivers process_mode and render-speed hint via
     REQUIRE(r.render_speed == 1.0);
 }
 
-// ── T4: anticipation safety ──────────────────────────────────────────────────
+// ── T4: per-node opt-in (plugin + custom) ────────────────────────────────────
 
 namespace {
 
-// gen(0/2) -> gain -> out(2). Interior = {gen, gain}; out is the live sink — an
-// anticipation-eligible latent interior (no live input / feedback / sidechain).
-void wire_anticipation_graph(SignalGraph& g) {
-    const auto gen = g.add_plugin_node(std::make_unique<CountingGen>(), 0, 2, "Gen");
-    const auto gain = g.add_gain_node("G");
+// in(2) -> ts-plugin -> out(2). The plugin opts into transport. Returns a raw
+// pointer to the slot (the graph keeps it alive) so the test can read what it
+// received.
+TransportRecordingSlot* wire_transport_plugin(SignalGraph& g) {
+    auto slot = std::make_unique<TransportRecordingSlot>();
+    auto* raw = slot.get();
+    const auto in = g.add_input_node(2, "In");
+    const auto plug = g.add_plugin_node(std::move(slot), 2, 2, "TS");
     const auto out = g.add_output_node(2, "Out");
     for (int c = 0; c < 2; ++c) {
-        REQUIRE(g.connect(gen, c, gain, c));
-        REQUIRE(g.connect(gain, c, out, c));
+        REQUIRE(g.connect(in, c, plug, c));
+        REQUIRE(g.connect(plug, c, out, c));
     }
-    REQUIRE(g.set_node_gain(gain, 0.5f));
+    return raw;
+}
+
+} // namespace
+
+TEST_CASE("SignalGraph forwards transport to an opted-in plugin node",
+          "[host][signal-graph][transport]") {
+    // A plugin overriding wants_transport()->true and the transport process()
+    // overload receives the live host transport on the routed path; a
+    // transport-absent block falls back to the no-transport overload and the
+    // documented transport-absent defaults.
+    SECTION("transport supplied -> the plugin sees the live playhead") {
+        SignalGraph g;
+        g.set_canonical_executor_routing_enabled(true);
+        auto* slot = wire_transport_plugin(g);
+        REQUIRE(g.prepare(kSr, kFrames));
+        const auto t = non_default_transport();
+        (void)render_block(g, &t);
+        REQUIRE(slot->got_transport == true);
+        REQUIRE(slot->transport_calls == 1);
+        REQUIRE(slot->last.is_playing == true);
+        REQUIRE(slot->last.tempo_bpm == 140.0);
+        REQUIRE(slot->last.position_samples == 4096);
+    }
+    SECTION("no transport -> the plugin runs the transport-less overload") {
+        SignalGraph g;
+        g.set_canonical_executor_routing_enabled(true);
+        auto* slot = wire_transport_plugin(g);
+        REQUIRE(g.prepare(kSr, kFrames));
+        (void)render_block(g, nullptr);
+        REQUIRE(slot->got_transport == false);   // transport overload never invoked
+        REQUIRE(slot->transport_calls == 0);
+        REQUIRE(slot->calls == 1);               // the no-transport overload ran
+    }
+}
+
+TEST_CASE("SignalGraph forwards transport to opted-in plugins on the parallel path",
+          "[host][signal-graph][transport][parallel]") {
+    // The opt-in capability bit is resolved into the binding context at
+    // snapshot-build time for BOTH the serial and the levelized-parallel routed
+    // snapshots, so opted-in plugins must receive the live transport when the
+    // parallel path dispatches the block, exactly as on the serial path. Two
+    // sibling plugins fed from the same input form one parallel level so the
+    // worker pool actually dispatches it (a single-node chain would run serially
+    // and never exercise the parallel binding wiring).
+    SignalGraph g;
+    g.set_canonical_executor_routing_enabled(true);
+    g.set_parallel_routing_enabled(true);
+    g.set_parallel_min_work_units(0);  // force the parallel path past the break-even gate
+    auto slotA = std::make_unique<TransportRecordingSlot>();
+    auto slotB = std::make_unique<TransportRecordingSlot>();
+    auto* a = slotA.get();
+    auto* b = slotB.get();
+    const auto in = g.add_input_node(2, "In");
+    const auto pA = g.add_plugin_node(std::move(slotA), 2, 2, "TSA");
+    const auto pB = g.add_plugin_node(std::move(slotB), 2, 2, "TSB");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, pA, c));
+        REQUIRE(g.connect(in, c, pB, c));
+        REQUIRE(g.connect(pA, c, out, c));  // fan-in sum at the output
+        REQUIRE(g.connect(pB, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    const auto t = non_default_transport();
+    (void)render_block(g, &t);
+    // The parallel path must have actually dispatched a level (pA and pB are
+    // siblings at one level), else this would silently degrade to the serial
+    // path and stop testing the parallel binding wiring.
+    REQUIRE(g.routing_executor_stats().parallel_levels_dispatched > 0);
+    for (auto* slot : {a, b}) {
+        REQUIRE(slot->got_transport == true);
+        REQUIRE(slot->transport_calls == 1);
+        REQUIRE(slot->last.is_playing == true);
+        REQUIRE(slot->last.tempo_bpm == 140.0);
+        REQUIRE(slot->last.position_samples == 4096);
+    }
+}
+
+TEST_CASE("SignalGraph leaves a plugin that does not opt in byte-for-byte unchanged",
+          "[host][signal-graph][transport]") {
+    // A plugin that does NOT override wants_transport() (ScaleSlot) is bit-
+    // identical between the transport and no-transport overloads — the no-bit
+    // oracle: opting in is the ONLY thing that changes a slot's behaviour.
+    SignalGraph plain;
+    SignalGraph withT;
+    plain.set_canonical_executor_routing_enabled(true);
+    withT.set_canonical_executor_routing_enabled(true);
+    for (SignalGraph* g : {&plain, &withT}) {
+        const auto in = g->add_input_node(2, "In");
+        const auto plug = g->add_plugin_node(std::make_unique<ScaleSlot>(), 2, 2, "Scale");
+        const auto out = g->add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g->connect(in, c, plug, c));
+            REQUIRE(g->connect(plug, c, out, c));
+        }
+    }
+    REQUIRE(plain.prepare(kSr, kFrames));
+    REQUIRE(withT.prepare(kSr, kFrames));
+    const auto transport = non_default_transport();
+    for (int block = 0; block < 4; ++block) {
+        const auto a = render_block(plain, nullptr);
+        const auto b = render_block(withT, &transport);
+        for (int c = 0; c < 2; ++c)
+            for (int k = 0; k < kFrames; ++k)
+                REQUIRE(a[static_cast<std::size_t>(c)][static_cast<std::size_t>(k)] ==
+                        b[static_cast<std::size_t>(c)][static_cast<std::size_t>(k)]);
+    }
+}
+
+namespace {
+
+// A transport-aware custom type that records the ProcessContext it receives into
+// a caller-owned sink, and passes audio through. The plain `process` (no
+// transport) marks the sink seen=false; `process_transport` records the context.
+struct CustomTransportSink {
+    pulp::format::ProcessContext last;
+    bool got_transport = false;
+    int plain_calls = 0;
+};
+
+void register_transport_custom(SignalGraph& g, CustomTransportSink* sink,
+                               bool with_transport_cb) {
+    CustomNodeType ty;
+    ty.type_id = "transport.recorder";
+    ty.num_input_ports = 2;
+    ty.num_output_ports = 2;
+    auto passthrough = [](pulp::audio::BufferView<float>& out,
+                          const pulp::audio::BufferView<const float>& in, int n) {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c)
+            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+        for (std::size_t c = chs; c < out.num_channels(); ++c)
+            std::fill_n(out.channel_ptr(c), n, 0.0f);
+    };
+    ty.process = [sink, passthrough](pulp::audio::BufferView<float>& out,
+                                     const pulp::audio::BufferView<const float>& in,
+                                     int n) {
+        ++sink->plain_calls;
+        passthrough(out, in, n);
+    };
+    if (with_transport_cb) {
+        ty.process_transport = [sink, passthrough](
+                                   pulp::audio::BufferView<float>& out,
+                                   const pulp::audio::BufferView<const float>& in,
+                                   int n,
+                                   const pulp::format::ProcessContext& transport) {
+            sink->last = transport;
+            sink->got_transport = true;
+            passthrough(out, in, n);
+        };
+    }
+    REQUIRE(g.register_custom_node_type(ty));
+}
+
+} // namespace
+
+TEST_CASE("SignalGraph forwards transport to an opted-in custom node",
+          "[host][signal-graph][transport]") {
+    // A custom type that registers process_transport receives the live transport;
+    // a custom type with only the plain `process` is transport-unaware and never
+    // sees it (the no-bit oracle for custom nodes).
+    SECTION("process_transport set -> the custom node sees the transport") {
+        CustomTransportSink sink;
+        SignalGraph g;
+        g.set_canonical_executor_routing_enabled(true);
+        register_transport_custom(g, &sink, /*with_transport_cb=*/true);
+        const auto in = g.add_input_node(2, "In");
+        const auto cust = g.add_custom_node("transport.recorder", "Rec");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, cust, c));
+            REQUIRE(g.connect(cust, c, out, c));
+        }
+        REQUIRE(g.prepare(kSr, kFrames));
+        const auto t = non_default_transport();
+        (void)render_block(g, &t);
+        REQUIRE(sink.got_transport == true);
+        REQUIRE(sink.last.tempo_bpm == 140.0);
+        REQUIRE(sink.plain_calls == 0);  // the transport callback took over
+    }
+    SECTION("plain process only -> the custom node is transport-unaware") {
+        CustomTransportSink sink;
+        SignalGraph g;
+        g.set_canonical_executor_routing_enabled(true);
+        register_transport_custom(g, &sink, /*with_transport_cb=*/false);
+        const auto in = g.add_input_node(2, "In");
+        const auto cust = g.add_custom_node("transport.recorder", "Rec");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, cust, c));
+            REQUIRE(g.connect(cust, c, out, c));
+        }
+        REQUIRE(g.prepare(kSr, kFrames));
+        const auto t = non_default_transport();
+        (void)render_block(g, &t);
+        REQUIRE(sink.got_transport == false);
+        REQUIRE(sink.plain_calls == 1);  // the plain process ran with transport present
+    }
+}
+
+// ── T5: transport-sensitive node coexists with active anticipation ───────────
+
+namespace {
+
+// Two branches into one live sink:
+//   gen1(CountingGen, 0/2) -> gain1 -> out   (transport-insensitive interior)
+//   gen2(TransportGen,  0/2) -> gain2 -> out   (transport-sensitive, exterior)
+// gen1's branch is an anticipation-eligible latent interior; gen2 opts into
+// transport so it (and its gain) is forced exterior and runs live. Returns the
+// transport-sensitive generator so the test can read what it received.
+TransportGen* wire_two_branch_graph(SignalGraph& g) {
+    auto gen2 = std::make_unique<TransportGen>();
+    auto* raw2 = gen2.get();
+    const auto g1 = g.add_plugin_node(std::make_unique<CountingGen>(), 0, 2, "Gen1");
+    const auto gain1 = g.add_gain_node("G1");
+    const auto g2 = g.add_plugin_node(std::move(gen2), 0, 2, "Gen2");
+    const auto gain2 = g.add_gain_node("G2");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(g1, c, gain1, c));
+        REQUIRE(g.connect(gain1, c, out, c));
+        REQUIRE(g.connect(g2, c, gain2, c));
+        REQUIRE(g.connect(gain2, c, out, c));
+    }
+    REQUIRE(g.set_node_gain(gain1, 0.5f));
+    REQUIRE(g.set_node_gain(gain2, 0.25f));
+    return raw2;
 }
 
 std::array<std::vector<float>, 2> render_generator_block(
@@ -529,21 +809,24 @@ std::array<std::vector<float>, 2> render_generator_block(
 
 } // namespace
 
-TEST_CASE("SignalGraph anticipation suppresses a supplied transport and counts it",
+TEST_CASE("SignalGraph anticipation forces a transport-sensitive node exterior and feeds it transport",
           "[host][signal-graph][transport][anticipation]") {
-    // Oracle: anticipation active, no-transport overload.
+    // Oracle: anticipation active, no transport. Subject: identical graph,
+    // anticipation active, with a non-default transport. The transport-insensitive
+    // interior (gen1/gain1) is ahead-rendered identically in both; the
+    // transport-sensitive branch (gen2/gain2) runs live in both and produces
+    // identical audio (TransportGen is transport-independent), so output is
+    // bit-identical. Only the subject's gen2 RECEIVES the transport.
     SignalGraph oracle;
     oracle.set_canonical_executor_routing_enabled(true);
     oracle.set_anticipation_enabled(true);
-    wire_anticipation_graph(oracle);
+    auto* oracle_gen2 = wire_two_branch_graph(oracle);
     REQUIRE(oracle.prepare(kSr, kFrames));
 
-    // Subject: identical graph, anticipation active, transport overload with a
-    // non-default transport that MUST be suppressed.
     SignalGraph subject;
     subject.set_canonical_executor_routing_enabled(true);
     subject.set_anticipation_enabled(true);
-    wire_anticipation_graph(subject);
+    auto* subject_gen2 = wire_two_branch_graph(subject);
     REQUIRE(subject.prepare(kSr, kFrames));
 
     const auto transport = non_default_transport();
@@ -558,9 +841,17 @@ TEST_CASE("SignalGraph anticipation suppresses a supplied transport and counts i
                         b[static_cast<std::size_t>(c)][static_cast<std::size_t>(k)]);
     }
 
-    // The subject suppressed the transport on every one of the six interior
-    // blocks (anticipation is valid from prepare, so suppression fires once per
-    // process() call); the oracle never had a transport to suppress.
-    REQUIRE(subject.transport_suppressed_for_anticipation() == 6);
-    REQUIRE(oracle.transport_suppressed_for_anticipation() == 0);
+    // The subject's transport-sensitive generator ran live/exterior and saw the
+    // live playhead; the oracle's never had a transport supplied.
+    REQUIRE(subject_gen2->got_transport == true);
+    REQUIRE(subject_gen2->last.tempo_bpm == 140.0);
+    REQUIRE(subject_gen2->last.position_samples == 4096);
+    REQUIRE(oracle_gen2->got_transport == false);
+
+    // The counter now reports transport-sensitive nodes FORCED EXTERIOR by
+    // anticipation (a compile-time capability count), not per-block suppression.
+    // Both graphs have exactly one transport-sensitive node (gen2); gain2 is a
+    // plain Gain (not transport-sensitive) even though it inherits the exclusion.
+    REQUIRE(subject.transport_suppressed_for_anticipation() == 1);
+    REQUIRE(oracle.transport_suppressed_for_anticipation() == 1);
 }

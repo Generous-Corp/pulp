@@ -1,0 +1,71 @@
+"""Layer B — perceptual quality models (opt-in, license-fenced).
+
+A full-reference perceptual MOS predictor (ViSQOL) is a *coarse global guard*
+complementary to the Layer-A artifact detectors: it won't say "smear at 42 ms", but
+it flags "this got perceptually worse overall." It is **advisory, never a gate**.
+
+License fence (the plan's §4, enforced here in code, not just docs): the tool is
+reached ONLY across a process boundary, ONLY via an explicit env-path the developer
+sets (`PULP_VISQOL_BIN`). No bundling, no auto-download, no import. When the env-path
+is unset or the binary is missing, the result is `skipped` with a reason — never an
+error, never a failure. Public CI never sets the env-path, so it always skips.
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+from typing import Any
+
+VISQOL_ENV = "PULP_VISQOL_BIN"
+
+
+def _resolve(env_var: str) -> tuple[str | None, str]:
+    path = os.environ.get(env_var, "").strip()
+    if not path:
+        return None, f"{env_var} not set (opt-in perceptual model; skipping)"
+    resolved = shutil.which(path) or (path if os.path.exists(path) else None)
+    if not resolved:
+        return None, f"{env_var}={path} not found on disk/PATH; skipping"
+    return resolved, ""
+
+
+def parse_mos(text: str) -> float | None:
+    """Pull a MOS-LQO float (1..5) from a ViSQOL stdout line. Robust to format drift."""
+    m = re.search(r"MOS[-_ ]?LQO\s*[:=]?\s*([0-9]+\.[0-9]+)", text, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"\b([1-4]\.[0-9]+|5\.0+)\b", text)  # fallback: a plausible MOS value
+    return float(m.group(1)) if m else None
+
+
+def run_visqol(reference_wav: str, candidate_wav: str, timeout_s: float = 180.0) -> dict[str, Any]:
+    """Run ViSQOL (audio/music mode) on two WAVs via its env-path binary. Returns an
+    advisory result dict; status is `skipped` when the tool isn't installed."""
+    binary, reason = _resolve(VISQOL_ENV)
+    if binary is None:
+        return {"tool": "visqol", "status": "skipped", "reason": reason, "mos_lqo": None}
+    try:
+        proc = subprocess.run(
+            [binary, "--reference_file", reference_wav, "--degraded_file", candidate_wav,
+             "--use_speech_mode=false"],
+            capture_output=True, text=True, timeout=timeout_s,
+        )
+        mos = parse_mos(proc.stdout + "\n" + proc.stderr)
+        if mos is None:
+            return {"tool": "visqol", "status": "error", "mos_lqo": None,
+                    "reason": "could not parse MOS-LQO from output", "exit": proc.returncode}
+        return {"tool": "visqol", "status": "ok", "mos_lqo": round(mos, 3),
+                "mode": "audio", "advisory": True}
+    except subprocess.TimeoutExpired:
+        return {"tool": "visqol", "status": "error", "mos_lqo": None, "reason": "timeout"}
+    except Exception as exc:  # never let an opt-in tool break the run
+        return {"tool": "visqol", "status": "error", "mos_lqo": None, "reason": str(exc)}
+
+
+def evaluate(reference_wav: str, candidate_wav: str) -> list[dict[str, Any]]:
+    """All available perceptual models for a (reference, candidate) WAV pair. Advisory;
+    each entry degrades to `skipped` when its tool isn't installed. PEAQ/AQUATK (GPL,
+    Tier-3, developer-supplied) plug in here the same way behind their own env-paths."""
+    return [run_visqol(reference_wav, candidate_wav)]

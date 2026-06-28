@@ -2,7 +2,7 @@
 //
 // Operator surface for retargeting JUST the macOS leg of a PR's CI to a
 // different runner pool, without disturbing the matrix-bound Linux/Windows
-// legs. Backed by .github/workflows/build-macos.yml (see pulp task #20).
+// legs. Backed by .github/workflows/build-macos.yml.
 //
 // Subcommands:
 //   pulp macos retarget --pr N --to <local|namespace|github-hosted>

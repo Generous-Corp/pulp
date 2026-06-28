@@ -1,13 +1,12 @@
 // View mask and overflow tests for two coherent paint/hit-test surfaces:
 //
-//   1. pulp #1148 slice (a) — symmetric overflow:visible hit-test
-//      extension. PR #1297 added a 500px-radius extension so that
-//      absolutely-positioned popovers / dropdowns / menus protrude
-//      past their parent and still receive pointer hits.
+//   1. Symmetric overflow:visible hit-test extension. A 500px-radius
+//      extension allows absolutely-positioned popovers / dropdowns / menus
+//      to protrude past their parent and still receive pointer hits.
 //      View::hit_test extends overflow:visible 500px to LEFT / RIGHT
 //      / UP / DOWN; does NOT extend past 500px LEFT.
 //
-//   2. pulp #1737 / #1515 — CSS mask-image + mask-size paint slice.
+//   2. CSS mask-image + mask-size paint coverage.
 //      View::paint_all routes through save_layer_with_mask when
 //      mask-image is set; does NOT route through when mask-image is
 //      empty or set to 'none'.
@@ -25,14 +24,11 @@
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+// ── Symmetric overflow:visible hit-test extension ───────────────────────
 //
-// PR #1297 added overflow:visible hit-test extension so that absolutely-
-// positioned popovers / dropdowns whose content escapes their bounds box
-// still receive clicks. The original implementation only extended the box
-// 500px DOWNWARD, which broke left-extending popovers (e.g. Spectr's bands
-// picker that opens to the left of its trigger). This suite locks the
-// extension to ±500px on all four sides.
+// Overflow:visible hit-test extension lets absolutely-positioned popovers /
+// dropdowns whose content escapes their bounds box still receive clicks. This
+// suite locks the extension to ±500px on all four sides.
 //
 // Each direction places a "popover" grandchild positioned outside its
 // overflow:visible parent in the tested direction — overflow:visible
@@ -65,7 +61,7 @@ struct PopoverFixture {
 } // namespace
 
 TEST_CASE("View::hit_test extends overflow:visible 500px to the LEFT",
-          "[view][hit_test][issue-1148][overflow-symmetric]") {
+          "[view][hit_test][overflow-symmetric]") {
     // Popover at container-local (-200, 25) → root-space (400..450, 625..675).
     // 100px to the LEFT of container.x=600 covers root.x = 425.
     PopoverFixture f(-200, 25);
@@ -73,7 +69,7 @@ TEST_CASE("View::hit_test extends overflow:visible 500px to the LEFT",
 }
 
 TEST_CASE("View::hit_test extends overflow:visible 500px to the RIGHT",
-          "[view][hit_test][issue-1148][overflow-symmetric]") {
+          "[view][hit_test][overflow-symmetric]") {
     // Popover at container-local (200, 25) → root-space (800..850, 625..675).
     // 100px to the RIGHT of container.right=700 covers root.x = 825.
     PopoverFixture f(200, 25);
@@ -81,7 +77,7 @@ TEST_CASE("View::hit_test extends overflow:visible 500px to the RIGHT",
 }
 
 TEST_CASE("View::hit_test extends overflow:visible 500px UPWARD",
-          "[view][hit_test][issue-1148][overflow-symmetric]") {
+          "[view][hit_test][overflow-symmetric]") {
     // Popover at container-local (25, -200) → root-space (625..675, 400..450).
     // 100px ABOVE container.y=600 covers root.y = 425.
     PopoverFixture f(25, -200);
@@ -89,16 +85,16 @@ TEST_CASE("View::hit_test extends overflow:visible 500px UPWARD",
 }
 
 TEST_CASE("View::hit_test extends overflow:visible 500px DOWNWARD",
-          "[view][hit_test][issue-1148][overflow-symmetric]") {
+          "[view][hit_test][overflow-symmetric]") {
     // Popover at container-local (25, 200) → root-space (625..675, 800..850).
     // 100px BELOW container.bottom=700 covers root.y = 825.
-    // This direction was already supported pre-#1148 — guards regression.
+    // This direction was already supported before the symmetric extension.
     PopoverFixture f(25, 200);
     REQUIRE(f.root.hit_test({650, 825}) == f.popover);
 }
 
 TEST_CASE("View::hit_test does NOT extend overflow:visible past 500px LEFT",
-          "[view][hit_test][issue-1148][overflow-symmetric]") {
+          "[view][hit_test][overflow-symmetric]") {
     // Popover anchored 600px LEFT of container — outside the symmetric
     // ±500px slack, so the click must miss the popover entirely. With
     // container x=600, popover at container-local x=-650 lands at
@@ -108,13 +104,13 @@ TEST_CASE("View::hit_test does NOT extend overflow:visible past 500px LEFT",
     REQUIRE(f.root.hit_test({0, 650}) != f.popover);
 }
 
-// ── pulp #1737 / #1515 — CSS mask-image + mask-size paint slice ─────────
+// ── CSS mask-image + mask-size paint coverage ───────────────────────────
 //
-// Phase 1 ships linear-gradient mask shapes through the new
-// Canvas::save_layer_with_mask virtual + SkiaCanvas's 2-saveLayer +
-// kDstIn composite at restore() time. RecordingCanvas spy captures
-// the API dispatch so we can pin the wiring without depending on Skia
-// (which is the only backend that actually composites the mask alpha).
+// Linear-gradient mask shapes route through the Canvas::save_layer_with_mask
+// virtual + SkiaCanvas's 2-saveLayer + kDstIn composite at restore() time.
+// RecordingCanvas spy captures the API dispatch so we can pin the wiring
+// without depending on Skia (which is the only backend that actually composites
+// the mask alpha).
 // Visual output is verified separately against the SkiaCanvas raster
 // path in the [skia] tests below.
 
@@ -139,7 +135,7 @@ struct MaskSpyCanvas : pulp::canvas::RecordingCanvas {
 }
 
 TEST_CASE("View::paint_all routes through save_layer_with_mask when mask-image is set",
-          "[view][issue-1515][issue-1737]") {
+          "[view][mask-image]") {
     pulp::view::View v;
     v.set_bounds({0, 0, 100, 50});
     v.set_mask_image("linear-gradient(to bottom, black, transparent)");
@@ -159,7 +155,7 @@ TEST_CASE("View::paint_all routes through save_layer_with_mask when mask-image i
 }
 
 TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is empty",
-          "[view][issue-1515][issue-1737]") {
+          "[view][mask-image]") {
     pulp::view::View v;
     v.set_bounds({0, 0, 100, 50});
     // No mask_image set — paint_all should use the legacy path
@@ -172,7 +168,7 @@ TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask
 }
 
 TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is 'none'",
-          "[view][issue-1515][issue-1737]") {
+          "[view][mask-image]") {
     pulp::view::View v;
     v.set_bounds({0, 0, 100, 50});
     v.set_mask_image("none");

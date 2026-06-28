@@ -67,7 +67,7 @@ TEST_CASE("SplitView lays out horizontal and vertical panes around divider",
 }
 
 TEST_CASE("SplitView clamps split fraction and supports pane replacement",
-          "[view][split_view][coverage][phase3]") {
+          "[view][split_view]") {
     SplitView split;
     auto first = std::make_unique<View>();
     auto second = std::make_unique<View>();

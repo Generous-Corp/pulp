@@ -110,7 +110,7 @@ TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
 }
 
 TEST_CASE("NSD can browse again after stop",
-          "[events][service-discovery][coverage]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -126,7 +126,7 @@ TEST_CASE("NSD can browse again after stop",
 }
 
 TEST_CASE("NSD unregister after backend removal is a no-op",
-          "[events][service-discovery][coverage]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
@@ -527,7 +527,7 @@ TEST_CASE("NSD keys discoveries and loss by service name plus type",
 }
 
 TEST_CASE("NSD routes register and unregister to the current backend after swaps",
-          "[events][service-discovery][coverage]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     auto first = std::make_unique<FakeBackend>();
     auto first_log = first->log;
@@ -554,7 +554,7 @@ TEST_CASE("NSD routes register and unregister to the current backend after swaps
 }
 
 TEST_CASE("NSD loss matching ignores services with the same type but different name",
-          "[events][service-discovery][coverage]") {
+          "[events][service-discovery]") {
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::make_unique<FakeBackend>());
 
@@ -641,7 +641,7 @@ TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
 }
 
 TEST_CASE("MountedVolumeListChangeDetector stop wakes a long poll promptly",
-          "[events][volume][lifecycle][coverage]") {
+          "[events][volume][lifecycle]") {
 #ifdef _WIN32
     SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
     return;

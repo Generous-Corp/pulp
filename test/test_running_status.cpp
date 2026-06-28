@@ -135,7 +135,7 @@ TEST_CASE("running status repeats the previous status",
 }
 
 TEST_CASE("running status completes messages split across feed calls",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<Captured> out;
     p.on_short_message([&](const MidiEvent& e) {
@@ -176,7 +176,7 @@ TEST_CASE("program change has a single data byte",
 }
 
 TEST_CASE("running status repeats control-change and pitch-bend messages",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     auto v = parse({
         0xB4, 0x40, 0x7F,  // sustain pedal on channel 4
         0x41, 0x00,        // running CC
@@ -222,7 +222,7 @@ TEST_CASE("running status handles one and two byte channel messages",
 }
 
 TEST_CASE("running status completes channel messages across feed boundaries",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<Captured> shorts;
     p.on_short_message([&](const MidiEvent& e) {
@@ -249,7 +249,7 @@ TEST_CASE("running status completes channel messages across feed boundaries",
 }
 
 TEST_CASE("new channel status cancels partial running-status data",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     auto v = parse({
         0x90, 0x3C, 0x7F,  // establish note-on running status
         0x3D,              // partial running-status note, missing velocity
@@ -284,7 +284,7 @@ TEST_CASE("system common messages use their status-specific data lengths",
 }
 
 TEST_CASE("system common messages complete across feed boundaries without running",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<Captured> shorts;
     p.on_short_message([&](const MidiEvent& e) {
@@ -319,7 +319,7 @@ TEST_CASE("real-time clock interleaves without breaking running status",
 }
 
 TEST_CASE("all realtime status bytes emit immediately",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     auto v = parse({0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF});
 
     REQUIRE(v.size() == 8);
@@ -334,7 +334,7 @@ TEST_CASE("all realtime status bytes emit immediately",
 }
 
 TEST_CASE("reserved real-time bytes preserve running status",
-          "[midi][running-status][codecov]") {
+          "[midi][running-status]") {
     auto v = parse({
         0x90, 0x3C, 0x7F,
         0xF9,
@@ -400,7 +400,7 @@ TEST_CASE("real-time bytes inside sysex are emitted without ending sysex",
 }
 
 TEST_CASE("unterminated sysex is dropped on reset",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<uint8_t> sx;
     std::vector<uint8_t> shorts;
@@ -509,7 +509,7 @@ TEST_CASE("undefined system statuses cancel pending system common data",
 }
 
 TEST_CASE("empty feed and reset drop partial running-status messages",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser parser;
     std::vector<Captured> shorts;
     parser.on_short_message([&](const MidiEvent& e) {
@@ -540,7 +540,7 @@ TEST_CASE("empty feed and reset drop partial running-status messages",
 }
 
 TEST_CASE("reset drops partial sysex before the next complete sysex",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser parser;
     std::vector<std::vector<uint8_t>> sysex;
     parser.on_sysex([&](const uint8_t* data, std::size_t size) {
@@ -661,7 +661,7 @@ TEST_CASE("reset() clears pending system-common state",
 }
 
 TEST_CASE("reset clears pending sysex payload",
-          "[midi][running-status][coverage][phase3]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     int sysex_count = 0;
     std::vector<Captured> shorts;
@@ -690,7 +690,7 @@ TEST_CASE("reset clears pending sysex payload",
 }
 
 TEST_CASE("feed preserves partial channel message across calls",
-          "[midi][running-status][coverage]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<Captured> shorts;
     p.on_short_message([&](const MidiEvent& e) {
@@ -721,7 +721,7 @@ TEST_CASE("feed preserves partial channel message across calls",
 }
 
 TEST_CASE("feed preserves sysex payload across calls",
-          "[midi][running-status][coverage]") {
+          "[midi][running-status]") {
     RunningStatusParser p;
     std::vector<uint8_t> sysex;
     std::vector<uint8_t> shorts;

@@ -10,7 +10,7 @@
 using namespace pulp::view;
 
 TEST_CASE("view core target links baked design import without script runtime",
-          "[view][import][core-link][phase-9]") {
+          "[view][import][core-link][baked-ui]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root.type = "frame";
@@ -39,7 +39,7 @@ TEST_CASE("view core target links baked design import without script runtime",
 }
 
 TEST_CASE("view core classname extraction reads bundled template styles",
-          "[view][import][core-link][phase-9]") {
+          "[view][import][core-link][template-styles]") {
     const std::string html =
         R"HTML(<html><head><script type="__bundler/template">)HTML"
         R"JSON("<html><head><style>.panel { color: #abcdef; background-color: #123456; }</style></head><body></body></html>")JSON"

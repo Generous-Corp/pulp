@@ -19,6 +19,33 @@ class SignalGraph;
 struct GraphNode;
 struct Connection;
 
+// The single, authoritative classification of a host Connection into a runtime
+// lane. EVERY surface that needs to know whether a Connection is audio / MIDI /
+// automation — the executor-routing gather, the legacy reference-walk edge
+// bucketer, and the latency/PDC passes — routes through classify() so the three
+// can never drift apart. `kind` is the lane discriminator carried onto the
+// runtime connection structs; `feedback` is the orthogonal back-edge flag;
+// `audio_rate` distinguishes a dense audio-rate modulation edge from a sparse
+// two-point automation edge (both have kind == Automation). A sidechain edge is
+// deliberately NOT special-cased: it arrives as a plain-audio Connection with
+// the destination's sidechain input port already resolved, so it classifies as
+// Audio.
+struct ConnectionClass {
+    graph::GraphRuntimeConnectionKind kind = graph::GraphRuntimeConnectionKind::Audio;
+    bool feedback = false;
+    bool audio_rate = false;
+};
+
+ConnectionClass classify(const Connection& c);
+
+// True iff this connection carries latency-aligned audio that participates in
+// plug-in delay compensation: a plain feedforward audio edge or a dense
+// audio-rate modulation edge (its source is sampled per block-position and
+// time-aligned like audio). Feedback back-edges, MIDI edges, and sparse two-
+// point automation edges carry no latency-aligned audio. Single-sourced from
+// classify() so the latency/PDC passes can't drift from the lane bucketing.
+bool connection_affects_latency(const Connection& c);
+
 // Fallback scratch a routed Plugin-node binding hands to PluginSlot::process
 // when the routed call does not need per-node MIDI or automation buffers.
 // MIDI/automation graphs use the executor-owned per-node scratch exposed through
@@ -42,6 +69,12 @@ struct PluginBindingContext {
     bool wants_transport = false;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
+    // Cached, prepare-stable copy of the node's transport-sensitivity capability
+    // (GraphNode::transport_sensitive, resolved once at compile from
+    // PluginSlot::wants_transport()). The binding reads THIS, never a live
+    // slot->wants_transport() per block, so the routed forwarding and the
+    // anticipation partition resolve from the same value and can never disagree.
+    bool wants_transport = false;
 };
 
 // The custom-node process callback. Declared here (identical to the alias in
@@ -51,6 +84,15 @@ struct PluginBindingContext {
 using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
+
+// Transport-aware custom callback (identical to the alias in signal_graph.hpp;
+// see the note above on the redeclaration being well-formed). Carries the host
+// transport for a transport-sensitive custom node.
+using CustomNodeTransportProcessFn =
+    std::function<void(audio::BufferView<float>& output,
+                       const audio::BufferView<const float>& input,
+                       int num_samples,
+                       const format::ProcessContext& transport)>;
 
 // Per-Custom-node binding context (the binding's user_data). Stored in a
 // caller-owned vector reserved to the custom-node count so its elements keep
@@ -63,6 +105,13 @@ using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
 // mismatch); the binding then reproduces SignalGraph's pass-through-or-zero.
 struct CustomBindingContext {
     CustomNodeProcessFn process;
+    // Transport-aware callback for a transport-sensitive custom node. When set
+    // (and a transport is available for the block) the binding invokes this
+    // instead of `process`; empty == transport-unaware node. A COPY of the
+    // resolved callback (its own keepalive on any captured instance), mirroring
+    // `process`. Its non-empty state mirrors the node's resolved
+    // GraphNode::transport_sensitive, so binding and partition stay consistent.
+    CustomNodeTransportProcessFn process_transport;
 };
 
 // A SignalGraph translated into the canonical GraphRuntimeExecutor's routing
@@ -155,7 +204,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                  load_for = {},
                              std::vector<CustomBindingContext>* custom_ctx = nullptr,
                              const std::function<const CustomNodeProcessFn*(NodeId)>&
-                                 custom_for = {});
+                                 custom_for = {},
+                             // Resolves a Custom node's transport-aware callback
+                             // (null = none). Populated into the binding context
+                             // alongside `custom_for`; a node with a non-null
+                             // result is transport-sensitive (consistent with
+                             // GraphNode::transport_sensitive resolved at compile).
+                             const std::function<const CustomNodeTransportProcessFn*(NodeId)>&
+                                 custom_transport_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

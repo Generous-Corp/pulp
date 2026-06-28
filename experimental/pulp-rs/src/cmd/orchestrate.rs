@@ -1349,38 +1349,7 @@ fn io_err(e: std::io::Error) -> CliError {
 mod tests {
     use super::*;
     use crate::proc::testing::RecordingSpawner;
-    use std::ffi::OsString;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, previous }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::remove_var(key);
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
+    use crate::test_support::EnvVarGuard;
 
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
@@ -1758,7 +1727,6 @@ mod tests {
 
     #[test]
     fn status_source_tree_reports_manual_pr_workflow_from_config() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
         let td = tempfile::tempdir().unwrap();
         source_tree_fixture(td.path());
         let home = tempfile::tempdir().unwrap();
@@ -1767,8 +1735,10 @@ mod tests {
             "[pr]\nworkflow = \"manual\"\n",
         )
         .unwrap();
-        let _home = EnvVarGuard::set("PULP_HOME", home.path().to_str().unwrap());
-        let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "");
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_HOME", Some(home.path().to_str().unwrap())),
+            ("PULP_PR_WORKFLOW", Some("")),
+        ]);
         let probe = StubGitProbe {
             branch: None,
             commit: None,
@@ -1784,7 +1754,6 @@ mod tests {
 
     #[test]
     fn status_reports_invalid_pr_workflow_from_env() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
         let td = tempfile::tempdir().unwrap();
         source_tree_fixture(td.path());
         let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "subversion");
@@ -1802,7 +1771,6 @@ mod tests {
 
     #[test]
     fn status_source_tree_reports_github_pr_workflow_from_env() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
         let td = tempfile::tempdir().unwrap();
         source_tree_fixture(td.path());
         let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "github");
@@ -1821,7 +1789,6 @@ mod tests {
 
     #[test]
     fn status_standalone_reports_project_owned_pr_workflow() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
         let td = tempfile::tempdir().unwrap();
         std::fs::write(td.path().join("pulp.toml"), "sdk_version = \"9.9.9\"\n").unwrap();
         let _workflow = EnvVarGuard::set("PULP_PR_WORKFLOW", "manual");
@@ -1874,6 +1841,7 @@ mod tests {
 
     #[test]
     fn cache_fetch_is_stubbed() {
+        let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let mut out = Vec::new();
         let err = cache_with_home(
@@ -1927,7 +1895,7 @@ mod tests {
     fn parse_run_args_first_positional_wins() {
         let r = parse_run_args(&["first".to_owned(), "second".to_owned(), "third".to_owned()]);
         // First positional wins as target; subsequent positionals
-        // (#914 contract, matches C++) land in user_pass_through.
+        // land in user_pass_through to match the C++ parser.
         assert_eq!(r.target_name, "first");
         assert_eq!(
             r.user_pass_through,
@@ -1956,7 +1924,6 @@ mod tests {
 
     #[test]
     fn run_cmd_prints_live_audio_notice() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvVarGuard::unset("PULP_RUN_AUDIO_NOTICE");
         let td = tempfile::tempdir().unwrap();
         let proj = standalone_project(td.path());
@@ -1982,7 +1949,6 @@ mod tests {
 
     #[test]
     fn run_cmd_honors_live_audio_notice_opt_out() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvVarGuard::set("PULP_RUN_AUDIO_NOTICE", "0");
         let td = tempfile::tempdir().unwrap();
         let proj = standalone_project(td.path());

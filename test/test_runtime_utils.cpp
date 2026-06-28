@@ -795,7 +795,7 @@ TEST_CASE("DynamicLibrary missing symbol records an error while staying open",
     REQUIRE(lib.open(system_library_path()));
     REQUIRE(lib.is_open());
 
-    REQUIRE(lib.find_symbol("pulp_missing_symbol_for_phase3_coverage") == nullptr);
+    REQUIRE(lib.find_symbol("pulp_missing_symbol_for_dynlib_error") == nullptr);
     REQUIRE_FALSE(lib.error().empty());
     REQUIRE(lib.is_open());
 
@@ -1178,7 +1178,7 @@ TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
 }
 
 TEST_CASE("base64 rejects URL-safe alphabet and misplaced padding across whitespace",
-          "[runtime][base64][large]") {
+          "[runtime][base64]") {
     REQUIRE_FALSE(base64_decode("SGVsbG8-").has_value());
     REQUIRE_FALSE(base64_decode("SGVsbG8_").has_value());
     REQUIRE_FALSE(base64_decode("YQ=\n=Z").has_value());
@@ -1246,7 +1246,7 @@ TEST_CASE("base64 decodes mixed full quartets and unpadded tails",
 }
 
 TEST_CASE("base64 covers full alphabet and padded binary tails",
-          "[runtime][base64][large]") {
+          "[runtime][base64]") {
     const uint8_t alphabet_bytes[] = {
         0x00, 0x10, 0x83, 0x10, 0x51, 0x87, 0x20, 0x92,
         0x8b, 0x30, 0xd3, 0x8f, 0x41, 0x14, 0x93, 0x51,
@@ -1270,7 +1270,7 @@ TEST_CASE("base64 covers full alphabet and padded binary tails",
 }
 
 TEST_CASE("base64 decode tolerates whitespace inside unpadded input",
-          "[runtime][base64][large]") {
+          "[runtime][base64]") {
     auto decoded = base64_decode("\n Y W J \t j Z A \r");
     REQUIRE(decoded.has_value());
     REQUIRE(std::string(decoded->begin(), decoded->end()) == "abcd");
@@ -1497,7 +1497,7 @@ TEST_CASE("Expression evaluator handles nested function calls",
 }
 
 TEST_CASE("Expression evaluator covers multi-argument builtins",
-          "[runtime][expression][large]") {
+          "[runtime][expression]") {
     REQUIRE(evaluate("min(5, 3)") == Catch::Approx(3.0));
     REQUIRE(evaluate("max(5, 3)") == Catch::Approx(5.0));
     REQUIRE(evaluate("pow(2, 5)") == Catch::Approx(32.0));
@@ -1506,7 +1506,7 @@ TEST_CASE("Expression evaluator covers multi-argument builtins",
 }
 
 TEST_CASE("Expression evaluator rejects incomplete multi-argument calls",
-          "[runtime][expression][large]") {
+          "[runtime][expression]") {
     REQUIRE_FALSE(evaluate("min(1)").has_value());
     REQUIRE_FALSE(evaluate("max(1)").has_value());
     REQUIRE_FALSE(evaluate("pow(2)").has_value());
@@ -1516,7 +1516,7 @@ TEST_CASE("Expression evaluator rejects incomplete multi-argument calls",
 // ── ScopeGuard ─────────────────────────────────────────────────────────
 
 TEST_CASE("ScopeGuard dismiss and move transfer ownership",
-          "[runtime][scope_guard][large]") {
+          "[runtime][scope_guard]") {
     int calls = 0;
     {
         auto guard = make_scope_guard([&] { ++calls; });
@@ -1533,7 +1533,7 @@ TEST_CASE("ScopeGuard dismiss and move transfer ownership",
 }
 
 TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
-          "[runtime][scope_guard][large]") {
+          "[runtime][scope_guard]") {
     int value = 0;
     {
         PULP_ON_SCOPE_EXIT(value = 42);
@@ -2025,7 +2025,7 @@ TEST_CASE("format_diff handles manually constructed operation order",
 }
 
 TEST_CASE("text_diff tie-breaks replacements as delete before insert",
-          "[runtime][text-diff][large]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("left\nmiddle\nright",
                           "left\ncenter\nright");
 
@@ -2041,7 +2041,7 @@ TEST_CASE("text_diff tie-breaks replacements as delete before insert",
 }
 
 TEST_CASE("text_diff preserves blank lines as diff entries",
-          "[runtime][text-diff][large]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("alpha\n\nomega",
                           "alpha\ninserted\n\nomega");
 
@@ -2057,7 +2057,7 @@ TEST_CASE("text_diff preserves blank lines as diff entries",
 }
 
 TEST_CASE("format_diff keeps empty inserted and deleted lines visible",
-          "[runtime][text-diff][large]") {
+          "[runtime][text-diff]") {
     const std::vector<DiffEntry> diff{
         {DiffOp::Equal, "context"},
         {DiffOp::Delete, ""},
@@ -2071,7 +2071,7 @@ TEST_CASE("format_diff keeps empty inserted and deleted lines visible",
 }
 
 TEST_CASE("text_diff treats trailing newline as no synthetic blank line",
-          "[runtime][text-diff][large]") {
+          "[runtime][text-diff]") {
     auto diff = text_diff("alpha\nbeta\n", "alpha\nbeta");
 
     REQUIRE(diff.size() == 2);

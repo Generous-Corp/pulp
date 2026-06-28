@@ -53,7 +53,7 @@ TEST_CASE("pulp projects list (no --json) emits human text",
 }
 
 TEST_CASE("pulp projects validates parser errors before registry mutation",
-          "[cli][shellout][projects][coverage][phase3]") {
+          "[cli][shellout][projects]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     auto pulp_home = unique_temp_dir("pulp-projects-parser-home");
@@ -201,7 +201,7 @@ TEST_CASE("pulp scan --help exits 0 with usage on stdout",
 }
 
 TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
-          "[cli][shellout][scan][coverage][phase3]") {
+          "[cli][shellout][scan]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     const struct {
@@ -226,7 +226,7 @@ TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
 }
 
 TEST_CASE("pulp host validates parser errors before plugin loading",
-          "[cli][shellout][host][coverage][phase3]") {
+          "[cli][shellout][host]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     const struct {
@@ -267,7 +267,7 @@ TEST_CASE("pulp host help lists every supported format and descriptor id flag",
 }
 
 TEST_CASE("pulp host derives AU id from bundle Info.plist",
-          "[cli][shellout][host][au][coverage]") {
+          "[cli][shellout][host][au]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 #if !defined(__APPLE__)
     SKIP("AU host loading is macOS-only");
@@ -344,8 +344,8 @@ TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
 #else
     auto clap_dir = home / ".clap";
 #endif
-    auto alpha_path = clap_dir / "Phase8Alpha.clap";
-    auto beta_path = clap_dir / "Phase8Beta.clap";
+    auto alpha_path = clap_dir / "ScanAlpha.clap";
+    auto beta_path = clap_dir / "ScanBeta.clap";
     fs::create_directories(beta_path);
     fs::create_directories(alpha_path);
 
@@ -358,8 +358,8 @@ TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
     REQUIRE(r.stdout_output.find(alpha_path.string()) != std::string::npos);
     REQUIRE(r.stdout_output.find(beta_path.string()) != std::string::npos);
 
-    auto alpha = r.stdout_output.find("Phase8Alpha");
-    auto beta = r.stdout_output.find("Phase8Beta");
+    auto alpha = r.stdout_output.find("ScanAlpha");
+    auto beta = r.stdout_output.find("ScanBeta");
     REQUIRE(alpha != std::string::npos);
     REQUIRE(beta != std::string::npos);
     REQUIRE(alpha < beta);
@@ -378,11 +378,11 @@ TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
     scoped_home.set(home.string());
 
 #if defined(__linux__)
-    auto lv2_dir = home / ".lv2" / "Phase8Probe.lv2";
+    auto lv2_dir = home / ".lv2" / "ScanProbe.lv2";
     fs::create_directories(lv2_dir);
     write_text(lv2_dir / "manifest.ttl",
                "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
-               "<http://example.org/phase8-probe> a lv2:Plugin .\n");
+               "<http://example.org/scan-probe> a lv2:Plugin .\n");
 #endif
 
     auto r = run_pulp({"scan", "--format", "lv2"}, /*timeout_ms=*/30000);
@@ -390,7 +390,7 @@ TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
 #if defined(__linux__)
-    REQUIRE(r.stdout_output.find("Phase8Probe") != std::string::npos);
+    REQUIRE(r.stdout_output.find("ScanProbe") != std::string::npos);
 #else
     REQUIRE((r.stdout_output.find("[LV2]") != std::string::npos ||
              r.stdout_output.find("No plugins found") != std::string::npos));

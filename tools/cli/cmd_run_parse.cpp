@@ -54,6 +54,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     bool audio_scope_acquisition_option_seen = false;
     bool audio_capture_frames_option_seen = false;
     bool audio_capture_rolling_frames_option_seen = false;
+    bool audio_capture_rolling_format_option_seen = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& a = args[i];
@@ -321,6 +322,33 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             }
             continue;
         }
+        {
+            std::string fmt;
+            bool have_fmt = false;
+            if (a == "--audio-capture-rolling-format") {
+                if (i + 1 >= args.size() || args[i + 1].empty()) {
+                    r.error = "--audio-capture-rolling-format requires float|int24";
+                    return r;
+                }
+                fmt = args[++i];
+                have_fmt = true;
+            } else if (a.rfind("--audio-capture-rolling-format=", 0) == 0) {
+                fmt = a.substr(std::string("--audio-capture-rolling-format=").size());
+                have_fmt = true;
+            }
+            if (have_fmt) {
+                audio_capture_rolling_format_option_seen = true;
+                if (fmt == "float") {
+                    r.audio_capture_rolling_int24 = false;
+                } else if (fmt == "int24") {
+                    r.audio_capture_rolling_int24 = true;
+                } else {
+                    r.error = "--audio-capture-rolling-format must be 'float' or 'int24'";
+                    return r;
+                }
+                continue;
+            }
+        }
 
         if (r.target_name.empty() && !a.empty() && a[0] != '-') {
             r.target_name = a;
@@ -360,6 +388,9 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     }
     if (audio_capture_rolling_frames_option_seen && r.audio_capture_rolling_path.empty()) {
         r.error = "--audio-capture-rolling-frames requires --audio-capture-rolling";
+    }
+    if (audio_capture_rolling_format_option_seen && r.audio_capture_rolling_path.empty()) {
+        r.error = "--audio-capture-rolling-format requires --audio-capture-rolling";
     }
 
     return r;
@@ -409,6 +440,10 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
         if (opts.audio_capture_rolling_frames > 0) {
             out.push_back("--audio-capture-rolling-frames");
             out.push_back(std::to_string(opts.audio_capture_rolling_frames));
+        }
+        if (opts.audio_capture_rolling_int24) {
+            out.push_back("--audio-capture-rolling-format");
+            out.push_back("int24");
         }
     }
     for (const auto& a : opts.user_pass_through) {

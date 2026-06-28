@@ -93,7 +93,7 @@ NamedPipePair open_named_pipe_pair(const std::filesystem::path& path) {
 }  // namespace
 
 TEST_CASE("StreamResult helper predicates classify errors",
-          "[stream][coverage][phase3]") {
+          "[stream]") {
     auto ok = StreamResult::make(3);
     REQUIRE(ok.ok());
     REQUIRE_FALSE(ok.would_block());
@@ -112,7 +112,7 @@ TEST_CASE("StreamResult helper predicates classify errors",
 }
 
 TEST_CASE("StreamResult factory preserves explicit zero-byte success",
-          "[stream][coverage][phase3]") {
+          "[stream]") {
     auto result = StreamResult::make(0);
     REQUIRE(result.ok());
     REQUIRE_FALSE(result.would_block());
@@ -121,7 +121,7 @@ TEST_CASE("StreamResult factory preserves explicit zero-byte success",
 }
 
 TEST_CASE("StreamResult closed failure has no transferred bytes",
-          "[stream][coverage][phase3]") {
+          "[stream]") {
     auto result = StreamResult::fail(StreamError::Closed);
     REQUIRE_FALSE(result.ok());
     REQUIRE_FALSE(result.would_block());
@@ -130,7 +130,7 @@ TEST_CASE("StreamResult closed failure has no transferred bytes",
 }
 
 TEST_CASE("StreamResult closed predicate only matches closed errors",
-          "[stream][coverage][phase3]") {
+          "[stream]") {
     auto closed = StreamResult::fail(StreamError::Closed);
     REQUIRE_FALSE(closed.ok());
     REQUIRE_FALSE(closed.would_block());
@@ -164,7 +164,7 @@ TEST_CASE("MemoryStream round-trip", "[stream]") {
 }
 
 TEST_CASE("MemoryStream default starts open and empty",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream;
     REQUIRE(stream.is_open());
     REQUIRE(stream.size() == 0);
@@ -194,7 +194,7 @@ TEST_CASE("MemoryStream partial read", "[stream]") {
 }
 
 TEST_CASE("MemoryStream read cursor remains at end after EOF",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{11, 22});
     std::uint8_t out[4]{};
 
@@ -208,7 +208,7 @@ TEST_CASE("MemoryStream read cursor remains at end after EOF",
 }
 
 TEST_CASE("MemoryStream rewind after EOF allows replay",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{4, 5, 6});
     std::uint8_t out[3]{};
 
@@ -223,7 +223,7 @@ TEST_CASE("MemoryStream rewind after EOF allows replay",
 }
 
 TEST_CASE("MemoryStream close is idempotent",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{1});
     stream.close();
     stream.close();
@@ -235,7 +235,7 @@ TEST_CASE("MemoryStream close is idempotent",
 }
 
 TEST_CASE("MemoryStream write copies caller storage",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream;
     std::uint8_t payload[] = {1, 2, 3};
     REQUIRE(stream.write(payload, sizeof(payload)).bytes == sizeof(payload));
@@ -248,7 +248,7 @@ TEST_CASE("MemoryStream write copies caller storage",
 }
 
 TEST_CASE("MemoryStream write preserves existing unread prefix",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{10, 20, 30});
     std::uint8_t out[2]{};
     REQUIRE(stream.read(out, 1).bytes == 1);
@@ -263,7 +263,7 @@ TEST_CASE("MemoryStream write preserves existing unread prefix",
 }
 
 TEST_CASE("MemoryStream clear is idempotent on open streams",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
     stream.clear();
     stream.clear();
@@ -274,7 +274,7 @@ TEST_CASE("MemoryStream clear is idempotent on open streams",
 }
 
 TEST_CASE("MemoryStream zero-byte write on closed stream reports closed",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream;
     stream.close();
 
@@ -338,7 +338,7 @@ TEST_CASE("MemoryStream zero-size, rewind, and clear edge paths", "[stream]") {
 }
 
 TEST_CASE("MemoryStream clear does not reopen a closed stream",
-          "[stream][coverage][phase3-large]") {
+          "[stream]") {
     MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
     stream.close();
     stream.clear();
@@ -352,7 +352,7 @@ TEST_CASE("MemoryStream clear does not reopen a closed stream",
     REQUIRE(stream.write(&byte, 1).closed());
 }
 
-TEST_CASE("StreamResult helpers classify non-ok states", "[stream][coverage][issue-656]") {
+TEST_CASE("StreamResult helpers classify non-ok states", "[stream][issue-656]") {
     auto ok = StreamResult::make(3);
     REQUIRE(ok.ok());
     REQUIRE(ok.bytes == 3);
@@ -437,7 +437,7 @@ TEST_CASE("FileStream append and move keep handle ownership correct", "[stream]"
 }
 
 TEST_CASE("FileStream read-write mode tracks position and zero-byte I/O",
-          "[stream][coverage][phase3]") {
+          "[stream]") {
     auto path = make_temp_path("pulp_stream_readwrite");
     const std::uint8_t payload[] = {'r', 'w', '0'};
 
@@ -485,7 +485,7 @@ TEST_CASE("FileStream open failure leaves stream closed", "[stream]") {
     REQUIRE(r.closed());
 }
 
-TEST_CASE("FileStream zero-size operations and positions are stable", "[stream][coverage][issue-656]") {
+TEST_CASE("FileStream zero-size operations and positions are stable", "[stream][issue-656]") {
     auto path = make_temp_path("pulp_stream_position");
     const std::uint8_t payload[] = {'x', 'y', 'z'};
 
@@ -541,7 +541,7 @@ TEST_CASE("Stream polymorphic usage", "[stream]") {
 }
 
 TEST_CASE("FileStream ReadWrite mode tracks position and truncates on open",
-          "[stream][file][coverage][issue-641]") {
+          "[stream][file][issue-641]") {
     auto path = make_temp_path("pulp_stream_readwrite");
     const std::uint8_t first[] = {'o', 'l', 'd'};
     const std::uint8_t second[] = {'n', 'e', 'w', '!'};
@@ -575,7 +575,7 @@ TEST_CASE("FileStream ReadWrite mode tracks position and truncates on open",
 }
 
 TEST_CASE("MemoryStream clear keeps closed streams closed",
-          "[stream][memory][coverage][issue-641]") {
+          "[stream][memory][issue-641]") {
     MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
     stream.close();
     stream.clear();
@@ -590,7 +590,7 @@ TEST_CASE("MemoryStream clear keeps closed streams closed",
 }
 
 TEST_CASE("MemoryStream appends without rewinding the read cursor",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
     std::uint8_t out[4]{};
 
@@ -615,7 +615,7 @@ TEST_CASE("MemoryStream appends without rewinding the read cursor",
 }
 
 TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{9, 8, 7});
     std::uint8_t discarded[2]{};
     REQUIRE(stream.read(discarded, sizeof(discarded)).bytes == sizeof(discarded));
@@ -637,7 +637,7 @@ TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
 }
 
 TEST_CASE("MemoryStream rejects null buffers for non-empty I/O",
-          "[stream][memory][coverage][phase3]") {
+          "[stream][memory]") {
     MemoryStream stream(std::vector<std::uint8_t>{1, 2});
     std::uint8_t byte = 9;
 
@@ -660,7 +660,7 @@ TEST_CASE("MemoryStream rejects null buffers for non-empty I/O",
 }
 
 TEST_CASE("MemoryStream default construction reports open empty stream",
-          "[stream][memory][coverage][phase3-large]") {
+          "[stream][memory]") {
     MemoryStream empty;
     REQUIRE(empty.is_open());
     REQUIRE(empty.size() == 0);
@@ -671,7 +671,7 @@ TEST_CASE("MemoryStream default construction reports open empty stream",
 }
 
 TEST_CASE("FileStream reopen closes the previous handle",
-          "[stream][file][coverage][phase3]") {
+          "[stream][file]") {
     auto first = make_temp_path("pulp_stream_reopen_first");
     auto second = make_temp_path("pulp_stream_reopen_second");
     const std::uint8_t a[] = {'a'};
@@ -704,7 +704,7 @@ TEST_CASE("FileStream reopen closes the previous handle",
 }
 
 TEST_CASE("FileStream move construction transfers open handle and closes source",
-          "[stream][file][coverage][phase3-large]") {
+          "[stream][file]") {
     auto path = make_temp_path("pulp_stream_move_construct");
     const std::uint8_t payload[] = {'m', 'o', 'v', 'e'};
 
@@ -727,7 +727,7 @@ TEST_CASE("FileStream move construction transfers open handle and closes source"
 }
 
 TEST_CASE("FileStream move assignment handles self and closed sources",
-          "[stream][file][coverage][phase3]") {
+          "[stream][file]") {
     auto path = make_temp_path("pulp_stream_self_move");
     const std::uint8_t payload[] = {'s', 'e', 'l', 'f'};
 
@@ -755,7 +755,7 @@ TEST_CASE("FileStream move assignment handles self and closed sources",
 }
 
 TEST_CASE("FileStream rejects null buffers for non-empty I/O",
-          "[stream][file][coverage][phase3]") {
+          "[stream][file]") {
     auto path = make_temp_path("pulp_stream_null_buffers");
     const std::uint8_t payload[] = {'o', 'k'};
 
@@ -788,7 +788,7 @@ TEST_CASE("FileStream rejects null buffers for non-empty I/O",
 }
 
 TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
-          "[stream][tcp][coverage][issue-641]") {
+          "[stream][tcp][issue-641]") {
     TcpStream first;
     TcpStream second;
     std::uint8_t byte = 0;
@@ -804,7 +804,7 @@ TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
 }
 
 TEST_CASE("HttpStream invalid URLs fail without external transport",
-          "[stream][http][coverage][issue-641]") {
+          "[stream][http][issue-641]") {
     HttpStream stream;
     HttpStream::Request request;
     request.url = "not-a-url";
@@ -825,7 +825,7 @@ TEST_CASE("HttpStream invalid URLs fail without external transport",
 }
 
 TEST_CASE("HttpStream fetch resets a closed stream before reporting new failure",
-          "[stream][http][coverage][phase3]") {
+          "[stream][http]") {
     HttpStream stream;
     stream.close();
 
@@ -845,7 +845,7 @@ TEST_CASE("HttpStream fetch resets a closed stream before reporting new failure"
 }
 
 TEST_CASE("PipeStream closed and null pipe states fail closed",
-          "[stream][pipe][coverage][phase3]") {
+          "[stream][pipe]") {
     PipeStream stream;
     std::uint8_t byte = 0;
 
@@ -885,7 +885,7 @@ TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_
 }
 
 TEST_CASE("PipeStream default and moved-empty streams fail closed",
-          "[stream][pipe][coverage][phase3]") {
+          "[stream][pipe]") {
     PipeStream stream;
     REQUIRE_FALSE(stream.is_open());
 
@@ -908,7 +908,7 @@ TEST_CASE("PipeStream default and moved-empty streams fail closed",
 }
 
 TEST_CASE("PipeStream closed streams still report closed before null-buffer checks",
-          "[stream][pipe][coverage][phase3]") {
+          "[stream][pipe]") {
     PipeStream stream;
 
     REQUIRE(stream.read(nullptr, 1).closed());
@@ -917,7 +917,7 @@ TEST_CASE("PipeStream closed streams still report closed before null-buffer chec
 
 #ifndef _WIN32
 TEST_CASE("PipeStream POSIX FIFO round-trips bytes",
-          "[stream][pipe][coverage][phase3]") {
+          "[stream][pipe]") {
     auto path = make_temp_path("pulp_pipe_stream_roundtrip");
     std::filesystem::remove(path);
 
@@ -1058,7 +1058,7 @@ TEST_CASE("NamedPipe POSIX client read waits through initial reply EOF",
 }
 
 TEST_CASE("PipeStream forwards reads and writes over a connected POSIX FIFO",
-          "[stream][pipe][coverage][phase3]") {
+          "[stream][pipe]") {
     auto path = make_temp_path("pulp_pipe_stream_roundtrip");
     std::filesystem::remove(path);
 

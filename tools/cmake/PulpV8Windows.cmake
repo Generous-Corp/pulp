@@ -1,5 +1,5 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
-# v8-builder drop-in (task #27-pulp).
+# v8-builder drop-in.
 #
 # The sealed Windows v8.dll (v8-builder, v8-15.1.27) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:

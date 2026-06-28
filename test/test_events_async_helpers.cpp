@@ -161,7 +161,7 @@ TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
 }
 
 TEST_CASE("ActionBroadcaster skips empty listener callbacks",
-          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -179,7 +179,7 @@ TEST_CASE("ActionBroadcaster skips empty listener callbacks",
 }
 
 TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
-          "[events][async_updater][action_broadcaster][coverage][phase3-large]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int second = -1;
@@ -209,7 +209,7 @@ TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
-          "[events][async_updater][action_broadcaster][coverage]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int first_id = -1;
@@ -235,7 +235,7 @@ TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
-          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int late_id = -1;
@@ -264,7 +264,7 @@ TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster tolerates null listeners",
-          "[events][async_updater][action_broadcaster][coverage]") {
+          "[events][async_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -325,7 +325,7 @@ TEST_CASE("MultiTimer restart keeps one running entry per id",
 }
 
 TEST_CASE("MultiTimer supports zero and negative timer ids",
-          "[events][async_updater][multi_timer][coverage]") {
+          "[events][async_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(0, 1);
@@ -340,7 +340,7 @@ TEST_CASE("MultiTimer supports zero and negative timer ids",
 }
 
 TEST_CASE("MultiTimer restart after stop_all works for existing entries",
-          "[events][async_updater][multi_timer][coverage]") {
+          "[events][async_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(3, 10);

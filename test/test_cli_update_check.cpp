@@ -101,7 +101,7 @@ TEST_CASE("parse_cache_json tolerates missing/unknown fields",
 }
 
 TEST_CASE("parse_cache_json keeps defaults for non-positive schema and malformed ints",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     auto negative_schema = uc::parse_cache_json(R"({
         "schema": -7,
         "last_check_epoch_sec": -42,
@@ -122,7 +122,7 @@ TEST_CASE("parse_cache_json keeps defaults for non-positive schema and malformed
 }
 
 TEST_CASE("serialize_cache_json escapes cache string fields",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     uc::CacheEntry entry;
     entry.latest_version = "1.2.3\nnext";
     entry.release_notes_url = "https://example.invalid/tag/\"quoted\"";
@@ -156,7 +156,7 @@ TEST_CASE("write_cache_file + read_cache_file atomically round-trip",
 }
 
 TEST_CASE("write_cache_file creates parents and reports blocked parent paths",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     auto dir = make_tmpdir("write-cache-parents");
 
     uc::CacheEntry entry;
@@ -257,7 +257,7 @@ TEST_CASE("parse_semver tolerates release tag boundaries",
 }
 
 TEST_CASE("parse_semver accepts short release triples with zero-filled tail",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     auto major_only = uc::parse_semver("7");
     REQUIRE(major_only.ok);
     REQUIRE(major_only.major == 7);
@@ -285,7 +285,7 @@ TEST_CASE("is_newer compares correctly", "[cli][update-check][issue-547]") {
 }
 
 TEST_CASE("compare_semver orders each component and ignores invalid triples",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     REQUIRE(uc::compare_semver(uc::parse_semver("1.0.0"),
                                uc::parse_semver("2.0.0")) == -1);
     REQUIRE(uc::compare_semver(uc::parse_semver("2.1.0"),
@@ -320,7 +320,7 @@ TEST_CASE("write_toml_key_in_section creates missing section",
 }
 
 TEST_CASE("write_toml_key_in_section appends after existing content without trailing newline",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     std::string src =
         "[create]\n"
         "projects_dir = \"~/dev\"";
@@ -397,7 +397,7 @@ TEST_CASE("read_toml_key_in_section ignores commented examples",
 }
 
 TEST_CASE("read_toml_key_in_section trims quoted values before inline comments",
-          "[cli][update-check][coverage][phase3]") {
+          "[cli][update-check][toml][comments]") {
     std::string src =
         "[update]\n"
         "mode =   \"manual\"   # selected by user\n"
@@ -408,7 +408,7 @@ TEST_CASE("read_toml_key_in_section trims quoted values before inline comments",
 }
 
 TEST_CASE("write_toml_key_in_section appends into empty section before the next section",
-          "[cli][update-check][coverage][phase3]") {
+          "[cli][update-check][toml][section-insert]") {
     std::string src =
         "[update]\n"
         "\n"
@@ -430,7 +430,7 @@ TEST_CASE("write_toml_key_in_section appends into empty section before the next 
 }
 
 TEST_CASE("read_toml_key_in_section handles bare values and section boundaries",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     std::string src =
         "[update]\n"
         "mode = manual\n"
@@ -445,7 +445,7 @@ TEST_CASE("read_toml_key_in_section handles bare values and section boundaries",
 }
 
 TEST_CASE("read_toml_key_in_section does not match substring keys",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     std::string src =
         "[update]\n"
         "mode_name = \"auto\"\n"
@@ -495,7 +495,7 @@ TEST_CASE("refresh_cache carries forward previous on fetch failure",
     REQUIRE(next.last_check_epoch_sec == 2'000);
 }
 
-// ── resolve_latest_with_persist (#1599) ─────────────────────────────────────
+// ── resolve_latest_with_persist ────────────────────────────────────────
 //
 // Regression for the "cache permanently stuck at v0.73.0 despite v0.78.2
 // being live" trap: pulp_cli.cpp's detached background refresh gets reaped
@@ -635,7 +635,7 @@ TEST_CASE("resolve_latest_with_persist refreshes when cached version is empty",
 }
 
 TEST_CASE("resolve_latest_with_persist supports empty cache path without writing",
-          "[cli][update-check][codecov]") {
+          "[cli][update-check]") {
     FakeFetcher fetcher;
     fetcher.canned.ok = true;
     fetcher.canned.latest_version = "0.81.0";

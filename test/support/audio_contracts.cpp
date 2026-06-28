@@ -1,4 +1,4 @@
-// audio_contracts.cpp — named audio contracts (harness PR 3).
+// audio_contracts.cpp — named audio contracts.
 // See audio_contracts.hpp for the vocabulary and message policy.
 
 #include "audio_contracts.hpp"

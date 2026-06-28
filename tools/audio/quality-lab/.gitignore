@@ -1,0 +1,8 @@
+# opt-in venv + generated artifacts (never committed)
+.venv/
+__pycache__/
+*.pyc
+report.json
+*.report.json
+corpus_runs/
+.pytest_cache/

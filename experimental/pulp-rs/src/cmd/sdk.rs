@@ -331,6 +331,7 @@ fn io_err(e: std::io::Error) -> CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::EnvVarGuard;
     use serde_json::Value;
 
     #[test]
@@ -431,6 +432,7 @@ mod tests {
 
     #[test]
     fn install_returns_bad_usage() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
         let err = run_with_home(Sub::Install, td.path(), false, &mut buf).unwrap_err();
@@ -468,8 +470,7 @@ mod tests {
     #[test]
     fn parse_sub_unknown_token_errors() {
         let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand)
-                || err.to_string().contains("unknown"));
+        assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
     }
 
     #[test]
@@ -497,7 +498,8 @@ mod tests {
     #[test]
     fn list_entries_picks_up_local_with_pulp_config_cmake() {
         let td = tempfile::tempdir().unwrap();
-        let local_root = td.path()
+        let local_root = td
+            .path()
             .join("sdk-local")
             .join("darwin-arm64")
             .join("0.41.0");
@@ -516,8 +518,12 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         // Plant a local-shape dir but WITHOUT PulpConfig.cmake.
         std::fs::create_dir_all(
-            td.path().join("sdk-local").join("darwin-arm64").join("0.40.0")
-        ).unwrap();
+            td.path()
+                .join("sdk-local")
+                .join("darwin-arm64")
+                .join("0.40.0"),
+        )
+        .unwrap();
         assert!(list_entries(td.path()).is_empty());
     }
 
@@ -528,8 +534,10 @@ mod tests {
         run_with_home(Sub::Help, td.path(), false, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("pulp-rs sdk"), "missing usage banner: {s:?}");
-        assert!(s.contains("status") && s.contains("clean") && s.contains("install"),
-                "missing subcommand list: {s:?}");
+        assert!(
+            s.contains("status") && s.contains("clean") && s.contains("install"),
+            "missing subcommand list: {s:?}"
+        );
     }
 
     #[test]

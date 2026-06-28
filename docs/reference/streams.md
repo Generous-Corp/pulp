@@ -78,7 +78,7 @@ if (stream->status_code() == 200) {
 }
 ```
 
-HTTPS is inherited from `cpp-httplib`, which ships with mbedTLS. `HttpStream` is currently read-only: calling `write()` returns `StreamError::Invalid`. Request-body streaming is Phase 4 of the streams feature plan.
+HTTPS is inherited from `cpp-httplib`, which ships with mbedTLS. `HttpStream` is currently read-only: calling `write()` returns `StreamError::Invalid`. Request-body streaming is not part of the shipped stream contract yet.
 
 ## `AsyncStream` — non-blocking with backpressure
 
@@ -124,7 +124,7 @@ The `stream-demo` example in `examples/stream-demo/` exercises all three layers:
 ./build/examples/stream-demo/pulp-stream-demo --http https://example.com
 ```
 
-## Message channels (Phase 4)
+## Message channels
 
 Bytewise transports stay in `Stream`. Structured messages — where one `send` matches one delivered message — live behind `pulp::runtime::MessageChannel`:
 
@@ -140,7 +140,7 @@ class MessageChannel {
 };
 ```
 
-Four implementations ship with this phase:
+Four message-channel implementations ship today:
 
 | Channel | Header | Transport |
 |---------|--------|-----------|

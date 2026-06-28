@@ -4,7 +4,7 @@
 `paws-and-paths` example from Google's DESIGN.md format spec repository.
 
 - **Upstream**: https://github.com/google-labs-code/design.md
-- **Pinned tag**: `0.1.1` (commit `6589f05166473ddc54ca01a615254a673add492c`, published 2026-04-21)
+- **Pinned tag**: `0.3.0` (commit `2a19f5dd97ab887971b417ebdf1e7e8fda0c7f79`, published 2026-06-15). The `paws-and-paths/DESIGN.md` example is byte-identical to the `0.1.1` copy, so the fixture content is unchanged across this bump.
 - **Upstream path**: `examples/paws-and-paths/DESIGN.md`
 - **License**: Apache-2.0 (see `/NOTICE.md` for the upstream attribution)
 

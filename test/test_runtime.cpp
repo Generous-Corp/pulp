@@ -1216,15 +1216,12 @@ TEST_CASE("runtime logging wrappers accept formatted payloads",
     REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
 }
 
-// ─── pulp_build_info.hpp (Tier A Slice 7) ───────────────────────────────────
+// ─── Build info ─────────────────────────────────────────────────────────────
 
 #include <pulp/runtime/build_info.hpp>
 
 TEST_CASE("pulp_build_info constants are populated at configure time",
           "[runtime][build-info]") {
-    // CMake's CMAKE_BUILD_TYPE is empty for multi-config generators
-    // (Xcode, Visual Studio) but populated for Ninja/Make. We assert
-    // the field is *available*, not that it's specifically non-empty.
     static_assert(!pulp::runtime::kSdkVersion.empty(),
                   "SDK version must be set from PROJECT_VERSION");
 

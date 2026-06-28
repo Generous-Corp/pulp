@@ -322,7 +322,7 @@ TEST_CASE("set_pass_gpu_time rejects a negative duration",
 }
 
 TEST_CASE("RenderPassManager begin_frame clears stale frame state",
-          "[render][gpu-timestamps][coverage][phase3]") {
+          "[render][gpu-timestamps]") {
     RenderPassManager rpm;
     rpm.set_budget(1.0f);
     rpm.begin_frame();

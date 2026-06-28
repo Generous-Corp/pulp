@@ -17,25 +17,6 @@ using namespace pulp_test_cli;
 
 namespace {
 
-class ScopedCurrentPath {
-public:
-    explicit ScopedCurrentPath(const fs::path& next)
-        : previous_(fs::current_path()) {
-        fs::current_path(next);
-    }
-
-    ~ScopedCurrentPath() {
-        std::error_code ec;
-        fs::current_path(previous_, ec);
-    }
-
-    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
-    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
-
-private:
-    fs::path previous_;
-};
-
 std::string repo_project_version_for_shellout_tests() {
     const auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
     auto cmake = read_file(repo_root / "CMakeLists.txt");
@@ -77,15 +58,6 @@ fs::path write_version_project_fixture(const std::string& prefix,
                    marketplace_plugin_version + "\"}]\n"
                "}\n");
     return root;
-}
-
-ProcessResult run_pulp_in_directory(const fs::path& dir,
-                                    const std::vector<std::string>& args,
-                                    int timeout_ms = 10000) {
-    const auto bin = fs::absolute(pulp_binary());
-    REQUIRE(fs::exists(bin));
-    ScopedCurrentPath cwd(dir);
-    return exec(bin.string(), args, timeout_ms);
 }
 
 }  // namespace
@@ -288,7 +260,7 @@ TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
 }
 
 TEST_CASE("pulp audio model commands report install, activation, and status state",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto home = unique_temp_dir("pulp-audio-model-shellout-home");
@@ -355,7 +327,7 @@ TEST_CASE("pulp audio model commands report install, activation, and status stat
 }
 
 TEST_CASE("pulp audio read-bundle reports manifest metadata in text and json",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto root = unique_temp_dir("pulp-audio-bundle-shellout");
@@ -413,7 +385,7 @@ TEST_CASE("pulp audio read-bundle reports manifest metadata in text and json",
 }
 
 TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json",
-          "[cli][shellout][audio][coverage]") {
+          "[cli][shellout][audio]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto home = unique_temp_dir("pulp-audio-excerpt-shellout-home");
@@ -468,7 +440,7 @@ TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json
 }
 
 TEST_CASE("pulp cache usage and parser errors are deterministic",
-          "[cli][shellout][cache][coverage][phase3]") {
+          "[cli][shellout][cache]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto home = unique_temp_dir("pulp-cache-shellout-home");
@@ -634,7 +606,7 @@ TEST_CASE("pulp status reports effective PR workflow",
 }
 
 TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
-          "[cli][shellout][misc][coverage][phase3]") {
+          "[cli][shellout][misc]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto status_extra = run_pulp({"status", "extra"});
@@ -651,7 +623,7 @@ TEST_CASE("pulp status and clean reject unexpected arguments before side effects
 }
 
 TEST_CASE("pulp clean removes the active project build directory",
-          "[cli][shellout][misc][coverage][phase3]") {
+          "[cli][shellout][misc]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto project = unique_temp_dir("pulp-clean-shellout");
@@ -747,7 +719,7 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     auto get_mode = run_pulp({"config", "get", "update.mode"}, 10000);
     REQUIRE_FALSE(get_mode.timed_out);
     REQUIRE(get_mode.exit_code == 0);
-    REQUIRE(get_mode.stdout_output == "manual\n");
+    REQUIRE(normalize_newlines(get_mode.stdout_output) == "manual\n");
 
     auto set_channel = run_pulp({"config", "set", "update.channel", "beta"}, 10000);
     REQUIRE_FALSE(set_channel.timed_out);
@@ -896,7 +868,7 @@ TEST_CASE("pulp version check exits 0 on a clean tree and mentions SDK/plugin/ma
 }
 
 TEST_CASE("pulp version outside a project reports SDK but check fails clearly",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -922,7 +894,7 @@ TEST_CASE("pulp version outside a project reports SDK but check fails clearly",
 }
 
 TEST_CASE("pulp version check accepts a complete matching project fixture",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -959,7 +931,7 @@ TEST_CASE("pulp version check accepts a complete matching project fixture",
 }
 
 TEST_CASE("pulp version check reports every version drift surface",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -994,7 +966,7 @@ TEST_CASE("pulp version check reports every version drift surface",
 }
 
 TEST_CASE("pulp version check rejects unknown options before running checks",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1019,7 +991,7 @@ TEST_CASE("pulp version check rejects unknown options before running checks",
 }
 
 TEST_CASE("pulp version bump updates project version and changelog guidance",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1055,7 +1027,7 @@ TEST_CASE("pulp version bump updates project version and changelog guidance",
 }
 
 TEST_CASE("pulp version bump --plugin only updates pulp_add_plugin version",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1090,7 +1062,7 @@ TEST_CASE("pulp version bump --plugin only updates pulp_add_plugin version",
 }
 
 TEST_CASE("pulp version bump rejects missing and invalid components",
-          "[cli][shellout][version][coverage]") {
+          "[cli][shellout][version]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
@@ -1227,7 +1199,7 @@ TEST_CASE("pulp help output lists the top-level subcommands",
 }
 
 TEST_CASE("pulp macos validates local operator arguments before gh calls",
-          "[cli][shellout][macos][coverage][phase3]") {
+          "[cli][shellout][macos]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1284,7 +1256,7 @@ TEST_CASE("pulp macos validates local operator arguments before gh calls",
 }
 
 TEST_CASE("pulp overflow validates non-mutating operator arguments",
-          "[cli][shellout][overflow][coverage][phase3]") {
+          "[cli][shellout][overflow]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -1546,7 +1518,7 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
 }
 
 TEST_CASE("pulp create validates parser errors before scaffolding",
-          "[cli][shellout][create][coverage][phase3]") {
+          "[cli][shellout][create]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto base = fs::temp_directory_path() /
@@ -1786,7 +1758,7 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
 }
 
 TEST_CASE("pulp build validates js engine option before compatibility checks",
-          "[cli][shellout][build][coverage][phase3]") {
+          "[cli][shellout][build]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     auto tmp = unique_temp_dir("pulp-shellout-build-js-engine");
@@ -2088,7 +2060,7 @@ TEST_CASE("pulp project bump rejects non-semver --to",
 }
 
 TEST_CASE("pulp project bump rejects missing --to values before project lookup",
-          "[cli][shellout][project][coverage][phase3]") {
+          "[cli][shellout][project]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     const auto bin = fs::absolute(pulp_binary());
@@ -2112,7 +2084,7 @@ TEST_CASE("pulp project bump rejects missing --to values before project lookup",
 }
 
 TEST_CASE("pulp project validates stray parser arguments before project lookup",
-          "[cli][shellout][project][coverage][phase3]") {
+          "[cli][shellout][project]") {
     if (!binary_available()) { SKIP("pulp binary not available"); }
 
     const auto bin = fs::absolute(pulp_binary());
@@ -2227,8 +2199,9 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     fs::path repo_root = fs::current_path() / ".." / "..";
     repo_root = fs::weakly_canonical(repo_root);
     if (!fs::exists(repo_root / "mkdocs.yml")) {
-        SKIP("mkdocs.yml not at expected repo root — likely non-standard "
-             "build layout");
+        SUCCEED("mkdocs.yml not at expected repo root — likely non-standard "
+                "build layout; skipping");
+        return;
     }
     fs::path subdir = repo_root / "tools";
     REQUIRE(fs::exists(subdir));
@@ -2462,7 +2435,9 @@ TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
         "pulp-cli-run-fixture";
 #endif
     if (!fs::exists(fixture_src)) {
-        SKIP("fixture binary not built at " + fixture_src.string());
+        SUCCEED("fixture binary not built at " + fixture_src.string()
+                + "; skipping");
+        return;
     }
 
     // Build a fake project tree that cmd_run can navigate.

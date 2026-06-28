@@ -26,8 +26,8 @@ constexpr int kMaxCaptureWindowSamples = 16384;
 // drop-on-full, so this holds the EARLIEST ~window samples after the stream
 // starts, not a rolling "last N", and `write_wav_file` quantizes to int16. That
 // is robust for `summarize`/`assert` (presence / level / clip / NaN), but it is
-// the wrong window for steady-state `doctor` (THD/response) and is
-// quantization-limited for `compare` — those wait on the rolling-ring follow-up.
+// the wrong source for steady-state `doctor` (THD/response) and is
+// quantization-limited for `compare`.
 inline bool write_audio_capture_wav_file(const std::string& path,
                                          audio::AudioProbe& probe,
                                          const StandaloneConfig& config) {

@@ -168,7 +168,7 @@ TEST_CASE("ValueAnimation advance returns false when not animating", "[view][ani
 // ── KeyframeAnimation tests ──────────────────────────────────────────────────
 
 TEST_CASE("KeyframeAnimation sorts keyframes and interpolates local spans",
-          "[view][animation][keyframe][coverage]") {
+          "[view][animation][keyframe]") {
     KeyframeAnimation anim;
     anim.set_keyframes({{1.0f, 100.0f}, {0.0f, 0.0f}, {0.25f, 40.0f}});
     anim.set_duration(1.0f);
@@ -180,7 +180,7 @@ TEST_CASE("KeyframeAnimation sorts keyframes and interpolates local spans",
 }
 
 TEST_CASE("KeyframeAnimation honors reverse direction and forwards fill",
-          "[view][animation][keyframe][coverage]") {
+          "[view][animation][keyframe]") {
     KeyframeAnimation anim;
     anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 10.0f}});
     anim.set_duration(1.0f);
@@ -195,7 +195,7 @@ TEST_CASE("KeyframeAnimation honors reverse direction and forwards fill",
 }
 
 TEST_CASE("KeyframeAnimation alternate direction flips odd iterations",
-          "[view][animation][keyframe][coverage]") {
+          "[view][animation][keyframe]") {
     KeyframeAnimation anim;
     anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 10.0f}});
     anim.set_duration(1.0f);
@@ -210,7 +210,7 @@ TEST_CASE("KeyframeAnimation alternate direction flips odd iterations",
 }
 
 TEST_CASE("KeyframeAnimation start resets a previously finished animation",
-          "[view][animation][keyframe][coverage]") {
+          "[view][animation][keyframe]") {
     KeyframeAnimation anim;
     anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 1.0f}});
     anim.set_duration(0.1f);
@@ -225,7 +225,7 @@ TEST_CASE("KeyframeAnimation start resets a previously finished animation",
 }
 
 TEST_CASE("KeyframeAnimation pause resume stop and invalid inputs keep value",
-          "[view][animation][keyframe][coverage]") {
+          "[view][animation][keyframe]") {
     KeyframeAnimation anim;
     anim.set_duration(1.0f);
     anim.start();

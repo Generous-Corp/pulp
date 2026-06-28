@@ -2611,7 +2611,7 @@ TEST_CASE("baked native materializer honors explicit hit-test metadata",
     REQUIRE(hit == root.get());
 }
 
-TEST_CASE("baked native materializer only treats display text as editor value for textarea (PR #3128 review)",
+TEST_CASE("baked native materializer only treats display text as editor value for textarea",
           "[view][import][native-materializer]") {
     // Regression: the text_value fallback used incidental node text for any
     // editor, so a label/heading captured as text_content was injected as the

@@ -159,7 +159,7 @@ TEST_CASE("RenderLoop timer backend can restart with a new callback",
 // ── VBlank-locked safe-repaint additions ───────────────────────────────
 
 TEST_CASE("RenderLoop factory selects the timer backend under force-timer",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     // This test target is compiled with PULP_RENDER_LOOP_FORCE_TIMER=1, so
     // the factory must select the conscious timer fallback on every host.
     auto loop = RenderLoop::create();
@@ -168,7 +168,7 @@ TEST_CASE("RenderLoop factory selects the timer backend under force-timer",
 }
 
 TEST_CASE("RenderLoop explicit timer factory is deterministic",
-          "[render][loop][coverage][large]") {
+          "[render][loop]") {
     auto loop = RenderLoop::create_timer_loop();
     REQUIRE(loop != nullptr);
     REQUIRE_FALSE(loop->is_running());
@@ -182,7 +182,7 @@ TEST_CASE("RenderLoop explicit timer factory is deterministic",
 }
 
 TEST_CASE("render_loop_backend_is_vsync distinguishes real vblank sources",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     // The four native backends are real vblank sources; only the timer
     // fallback is not. constexpr so the classification is compile-checked.
     static_assert(render_loop_backend_is_vsync(RenderLoopBackend::cv_display_link));
@@ -196,7 +196,7 @@ TEST_CASE("render_loop_backend_is_vsync distinguishes real vblank sources",
 }
 
 TEST_CASE("render_loop_backend_name covers every backend",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     CHECK(std::string(render_loop_backend_name(RenderLoopBackend::cv_display_link))
           == "CVDisplayLink");
     CHECK(std::string(render_loop_backend_name(RenderLoopBackend::ca_display_link))
@@ -210,7 +210,7 @@ TEST_CASE("render_loop_backend_name covers every backend",
 }
 
 TEST_CASE("DwmBackendTracker latches to the timer fallback once a vblank wait fails",
-          "[render][loop][vblank][slice-16][issue-2580]") {
+          "[render][loop][vblank][issue-2580]") {
     // The Windows loop sleeps on a ~60 Hz timer when
     // DwmFlush() fails, but backend() must then stop claiming dwm_flush so
     // render_loop_backend_is_vsync() callers can detect the fallback.
@@ -236,7 +236,7 @@ TEST_CASE("DwmBackendTracker latches to the timer fallback once a vblank wait fa
 }
 
 TEST_CASE("RenderLoop coalesces a burst of frame requests into one callback",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     // The canonical safe-repaint contract: any number of request_frame()
     // calls between two vblanks fire the callback exactly once. This is the
     // platform-agnostic coalescing the native vsync subclasses inherit via
@@ -264,7 +264,7 @@ TEST_CASE("RenderLoop coalesces a burst of frame requests into one callback",
 }
 
 TEST_CASE("RenderLoop stays idle with no frame request",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     // Demand-driven: after the initial start() frame, an untouched loop
     // must not free-run. This is what makes vblank-locked repaint cheap
     // for an idle UI versus the legacy periodic-poll pattern.
@@ -282,7 +282,7 @@ TEST_CASE("RenderLoop stays idle with no frame request",
 }
 
 TEST_CASE("RenderLoop request_frame from inside the callback arms the next frame",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     // A callback that re-arms (e.g. an animating widget) drives a steady
     // one-callback-per-vblank cadence — the next-frame scheduling path —
     // without ever recursing within the same frame.
@@ -305,7 +305,7 @@ TEST_CASE("RenderLoop request_frame from inside the callback arms the next frame
 }
 
 TEST_CASE("RenderLoop stop suppresses callbacks for a pending request",
-          "[render][loop][vblank][slice-16]") {
+          "[render][loop][vblank]") {
     auto loop = RenderLoop::create();
     REQUIRE(loop != nullptr);
 

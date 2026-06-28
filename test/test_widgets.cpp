@@ -846,7 +846,7 @@ TEST_CASE("Fader horizontal orientation", "[view][widget]") {
 }
 
 TEST_CASE("Knob and Fader render loaded sprite strips",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     auto knob_strip = make_sprite_strip(2, 9, 3, SpriteStrip::Orientation::vertical);
     Knob knob;
     knob.set_bounds({0, 0, 20, 30});
@@ -1075,7 +1075,7 @@ TEST_CASE("RangeSlider renders track + fill + handle",
 }
 
 TEST_CASE("RangeSlider vertical paint draws lower fill and inverted handle",
-          "[view][widget][issue-966][coverage]") {
+          "[view][widget][issue-966]") {
     RangeSlider rs;
     rs.set_bounds({0, 0, 24, 200});
     rs.set_orientation(RangeSlider::Orientation::vertical);
@@ -1222,7 +1222,7 @@ TEST_CASE("Audio widgets render declarative schemas and invalid schema fallback"
 }
 
 TEST_CASE("Audio widget schemas reject malformed dimension tokens without error fallback",
-          "[view][widget][schema][coverage][phase3]") {
+          "[view][widget][schema]") {
     Knob knob;
     knob.set_bounds({0, 0, 80, 80});
     knob.set_value(0.5f);
@@ -1716,7 +1716,7 @@ TEST_CASE("SpectrumView empty renders background", "[view][widget]") {
 }
 
 TEST_CASE("SpectrumView invalid dB range only draws background",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     SpectrumView spectrum;
     spectrum.set_bounds({0, 0, 300, 100});
     spectrum.set_style(SpectrumView::Style::bars);
@@ -1732,7 +1732,7 @@ TEST_CASE("SpectrumView invalid dB range only draws background",
 }
 
 TEST_CASE("SpectrogramView auto-configures and paints pushed spectrum",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     SpectrogramView spectrogram;
     spectrogram.set_bounds({0, 0, 128, 32});
 
@@ -1756,7 +1756,7 @@ TEST_CASE("SpectrogramView auto-configures and paints pushed spectrum",
 }
 
 TEST_CASE("SpectrogramView explicit configuration controls painted grid size",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     SpectrogramView spectrogram;
     spectrogram.set_bounds({0, 0, 40, 20});
     spectrogram.configure(4, 2, pulp::signal::ColorRamp::heat, -60.0f, -20.0f);
@@ -1776,7 +1776,7 @@ TEST_CASE("SpectrogramView explicit configuration controls painted grid size",
 }
 
 TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     pulp::signal::MultiChannelMeterData data;
     data.num_channels = 3;
     data.channels[0].rms = 0.95f;
@@ -1833,7 +1833,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
 }
 
 TEST_CASE("MultiMeter with no channels paints nothing",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     MultiMeter meter;
     meter.set_bounds({0, 0, 80, 40});
 
@@ -1844,7 +1844,7 @@ TEST_CASE("MultiMeter with no channels paints nothing",
 }
 
 TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
-          "[view][widget][coverage]") {
+          "[view][widget]") {
     CorrelationMeter meter;
     meter.set_bounds({0, 0, 100, 20});
 

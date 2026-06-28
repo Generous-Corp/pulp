@@ -1,8 +1,8 @@
-// test_render_scenario.cpp — harness PR 2 coverage.
+// test_render_scenario.cpp — render-scenario harness coverage.
 //
-// Covers, per the Slice 2 acceptance of
+// Covers the render-scenario harness acceptance for
 // planning/2026-06-09-audio-observability-and-validation-harness-plan.md:
-//   - Buffer<float>::view() const (the core API fix shipped in this PR)
+//   - Buffer<float>::view() const
 //   - deterministic signal generators (seeded noise, impulse, step, DC,
 //     multi-sine, swept sine, automation + MIDI scripts)
 //   - RenderScenario typed scenarios for one effect (PulpGain) and one
@@ -44,7 +44,7 @@ double window_rms_dbfs(const pulp::audio::Buffer<float>& buffer,
 } // namespace
 
 TEST_CASE("Buffer const view exposes identical read-only data",
-          "[audio][buffer][harness-2]") {
+          "[audio][buffer]") {
     auto buf = make_sine(2, 256, 440.0f, 48000.0, 0.5f);
     const auto& const_buf = buf;
 
@@ -64,7 +64,7 @@ TEST_CASE("Buffer const view exposes identical read-only data",
 }
 
 TEST_CASE("Signal generators are deterministic and shaped as documented",
-          "[audio][generators][harness-2]") {
+          "[audio][generators]") {
     SECTION("silence, DC, impulse, impulse train, step") {
         const auto silence = make_silence(2, 128);
         CHECK(analyze(silence, 48000.0).max_peak() == 0.0);
@@ -163,7 +163,7 @@ TEST_CASE("Signal generators are deterministic and shaped as documented",
 }
 
 TEST_CASE("RenderScenario: PulpGain effect scenario",
-          "[audio][scenario][pulpgain][harness-2]") {
+          "[audio][scenario][pulpgain]") {
     // -12 dBFS sine peak → RMS -15.05 dBFS; -6 dB output gain → -21.05.
     auto scenario = RenderScenario(pulp::examples::create_pulp_gain)
         .name("pulpgain.minus6")
@@ -189,7 +189,7 @@ TEST_CASE("RenderScenario: PulpGain effect scenario",
 }
 
 TEST_CASE("RenderScenario: PulpGain bypass nulls against unity gain",
-          "[audio][scenario][pulpgain][harness-2]") {
+          "[audio][scenario][pulpgain]") {
     // Bypass copies input; unity gain multiplies by exactly 1.0f. Both must
     // be bit-identical to the stimulus, hence to each other (tolerance
     // class: exact).
@@ -210,7 +210,7 @@ TEST_CASE("RenderScenario: PulpGain bypass nulls against unity gain",
 }
 
 TEST_CASE("RenderScenario: PulpGain block-quantized automation",
-          "[audio][scenario][pulpgain][automation][harness-2]") {
+          "[audio][scenario][pulpgain][automation]") {
     // Output gain drops 0 → -20 dB exactly at the half-way block boundary;
     // the two halves must differ by 20 dB (numeric ±0.2 dB).
     constexpr std::int64_t half = 12000;
@@ -230,7 +230,7 @@ TEST_CASE("RenderScenario: PulpGain block-quantized automation",
 }
 
 TEST_CASE("RenderScenario: PulpTone instrument scenario with MIDI script",
-          "[audio][scenario][pulptone][harness-2]") {
+          "[audio][scenario][pulptone]") {
     // A4 note-on at frame 0, note-off at 200 ms, render 400 ms: pitch must
     // be 440 Hz (numeric ±5 cents over the held half) and the release tail
     // must decay (default release is 200 ms).
@@ -259,7 +259,7 @@ TEST_CASE("RenderScenario: PulpTone instrument scenario with MIDI script",
 }
 
 TEST_CASE("RenderScenario: 64/128/256 block partition invariance",
-          "[audio][scenario][partition][harness-2]") {
+          "[audio][scenario][partition]") {
     constexpr int kBlocks[] = {64, 128, 256};
 
     SECTION("PulpGain (effect) is exactly partition-invariant") {
@@ -296,7 +296,7 @@ TEST_CASE("RenderScenario: 64/128/256 block partition invariance",
 }
 
 TEST_CASE("RenderScenario matrix runner sweeps sample rate × block size",
-          "[audio][scenario][matrix][harness-2]") {
+          "[audio][scenario][matrix]") {
     // Generator input so the 100 ms stimulus tracks each cell's rate.
     auto scenario = RenderScenario(pulp::examples::create_pulp_gain)
         .name("pulpgain.matrix")

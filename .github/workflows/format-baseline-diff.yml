@@ -1,7 +1,5 @@
 name: Format validator baseline diff
 
-# Companion-track U-3 (planning/2026-05-17-refactor-roadmap-final.md).
-#
 # Runs the format validator baseline diff whenever a PR touches the
 # format adapters or plugin slots. Catches silent format/protocol
 # regressions that compile clean but break real-DAW compatibility.

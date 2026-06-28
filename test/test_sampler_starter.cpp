@@ -12,9 +12,9 @@
 using namespace pulp::design;
 using namespace pulp::view;
 
-// Phase 8d — the sampler starter. Structure assertions run everywhere; the
-// render assertion only where a screenshot provider exists. This is the
-// end-to-end proof that the ingested design system composes into a real UI.
+// Sampler starter structure assertions run everywhere; the render assertion
+// only where a screenshot provider exists. This is the end-to-end proof that
+// the ingested design system composes into a real UI.
 
 namespace {
 // Count direct children of `root` whose dynamic type is T.

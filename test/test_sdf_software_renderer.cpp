@@ -69,7 +69,7 @@ TEST_CASE("software SDF render handles empty quad list",
 }
 
 TEST_CASE("software SDF render leaves output untouched for invalid output bounds",
-          "[canvas][sdf][render][coverage][issue-650]") {
+          "[canvas][sdf][render][issue-650]") {
     TinyAtlas atlas{1, 1, {255}};
     SdfTextQuad q;
     q.dst_w = 1.0f;
@@ -179,7 +179,7 @@ TEST_CASE("software SDF render keeps maximum alpha for overlapping quads",
 }
 
 TEST_CASE("software SDF render honors custom edge thresholds",
-          "[canvas][sdf][render][coverage][issue-650]") {
+          "[canvas][sdf][render][issue-650]") {
     TinyAtlas atlas{2, 1, {64, 255}};
     SdfTextQuad q;
     q.dst_w = 2.0f;

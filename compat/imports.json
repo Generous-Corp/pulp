@@ -1,6 +1,38 @@
 {
   "imports": {
     "_note": "The 'imports' prefix tracks design-import format detection (see core/dsl/import-design / tools/cli/src/import_design.cpp / docs/reference/imports/*). Each top-level key is a recognized import source (claude, figma, pencil, stitch, v0); each entry carries 'parser-version' (the Pulp-side detector version) and 'detected-formats' (a list of {format-version, introduced, deprecated, fingerprint, notes} objects). The `fingerprint` field is the heuristic the parser uses to recognize the source format from a directory or file payload. When a new import source lands or an existing source's export format changes, add a detected-formats entry rather than mutating an existing one (so historical exports keep parsing). Tracked via PR #1047 (pulp #1031) for versioned import-design detection.",
+    "object-coverage": {
+      "_note": "IR-level, source-agnostic coverage of normalized DesignIR object types across the import pipeline. For each type, the support level at three stages: 'detected' (an adapter recognizes the source object), 'parsed' (it is lowered into the normalized IR), 'codegen' (generate_pulp_js emits a real renderable primitive for it). Source-agnostic by construction: the importer and codegen operate on the normalized IR, so a 'handled' type renders identically for figma/figma-plugin/pencil/stitch/v0/claude. Levels: handled | partial | missing. The 'types' rows are DRIFT-CHECKED by test/test_import_object_coverage.cpp (binary pulp-test-import-object-coverage, Catch2 tag [object-coverage]): it builds a synthetic IRNode per type, runs generate_pulp_js, and FAILS if a 'codegen: handled' type drops to an empty frame, or a 'codegen: missing' vector-kind does not trip the dropped-vector invariant (#3275) — keeping this matrix honest against the code. The 'features' rows track cross-cutting paint/layout capabilities owned by separate hardening slices; they are documented here but not type-drift-checked. Seeded from planning/2026-05-31-import-coverage-hardening-plan.md section 3.",
+      "levels": ["handled", "partial", "missing"],
+      "types": {
+        "frame":     {"detected": "handled", "parsed": "handled", "codegen": "handled", "note": "group/section/slice normalize to frame; emits createRow/createCol"},
+        "text":      {"detected": "handled", "parsed": "handled", "codegen": "handled", "note": "first-char dominant style; emits createLabel. Per-range runs tracked in features.text-per-range-styles"},
+        "label":     {"detected": "handled", "parsed": "handled", "codegen": "handled", "note": "alias of text; emits createLabel"},
+        "image":     {"detected": "handled", "parsed": "handled", "codegen": "handled", "note": "solid/linear-gradient/image fills; emits createImage; no-skew + gross-size invariants guard sizing"},
+        "vector":    {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "a node carrying path_data (d/pathData) lowers to a native SvgPathWidget via createSvgPath+setSvgPath; a bare vector with no path_data and no rasterized asset still drops and is flagged by the dropped-vector invariant. Rasterize-at-export remains the faithful path for the figma lane"},
+        "path":      {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "see vector"},
+        "svg_path":  {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "see vector"},
+        "rect":      {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "synthesize_primitive_paths derives an SVG rect `d` (rounded via border-radius) from geometry when the node carries no path_data/fill/children, so codegen lowers it to a native SvgPath (svg_fill forced to none; border -> svg_stroke). A filled rect still renders via the generic-frame branch unchanged"},
+        "svg_rect":  {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "see rect"},
+        "rectangle": {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "see rect"},
+        "line":      {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "synthesized as the bounding-box diagonal (M0 0 L w h); border -> svg_stroke. Hairlines (area < 256px^2) remain below the dropped-vector area gate but still lower to a real SvgPath"},
+        "svg_line":  {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "see line"},
+        "ellipse":   {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "synthesized as two half-arcs inside the (w,h) box; ellipse children consumed into a parent widget's native paint are still not flagged"},
+        "circle":    {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "see ellipse"},
+        "polygon":   {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "synthesized as a regular polygon inscribed in (w,h); corner count from the pointCount attribute (default 3) when the source provides it. Rasterize-to-PNG at export remains an alternative faithful path"},
+        "polyline":  {"detected": "handled", "parsed": "partial", "codegen": "missing", "note": "an open run of explicit points; not synthesizable from geometry alone, so the bare form still drops (carry path_data or rasterize at export)"},
+        "star":      {"detected": "handled", "parsed": "partial", "codegen": "handled", "note": "synthesized with alternating outer/inner radii; pointCount (default 5) and innerRadius ratio (default 0.5) read from attributes when present"}
+      },
+      "features": {
+        "text-per-range-styles":            {"detected": "handled", "parsed": "handled", "codegen": "partial", "note": "mixed-style text parses into IRNode.text_runs (from a `runs`/`textRuns` array; the Figma exporter builds them from characterStyleOverrides + styleOverrideTable) and the web-compat codegen emits nested per-run <span style=...> children (font-weight/size/style/color/letter-spacing/decoration) with the gaps inheriting the dominant style. Native (bridge) codegen now emits setTextRuns -> the bridge builds a canvas::AttributedString and Label::paint_attributed_ draws each span (single-line); multi-line mixed text still degrades to the dominant style, hence codegen partial. Char offsets are UTF-8 byte offsets (Figma exporter converts; codegen snaps to codepoint starts)"},
+        "interactive-promotion":            {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "button/input promotion from onclick/aria/cursor signals; native-arm disposition is promotion-dependent"},
+        "grid-container":                   {"detected": "partial", "parsed": "handled", "codegen": "partial", "note": "display:grid / gridTemplateColumns|Rows / gridAutoFlow / per-item gridColumn|Row parse into IRLayout grid fields and lower to the native grid engine (createGrid + setGrid template_columns/rows/gap/auto_flow + per-item column/row start/end) — NOT Yoga grid (Pulp's own LayoutMode::grid). Explicit line placement (\"1 / 3\") handled; span / named-lines / minmax deferred to auto-flow, hence codegen partial"},
+        "radial-angular-diamond-gradient":  {"detected": "handled", "parsed": "handled", "codegen": "partial", "note": "radial-gradient()/conic-gradient() parse in the setBackgroundGradient bridge and paint via the canvas radial/sweep (SkGradientShader MakeRadial/MakeSweep; CoreGraphics native radial + software conic) through View::paint dispatch (bg_gradient_type 2/3). Figma GRADIENT_RADIAL/ANGULAR/DIAMOND export to the CSS forms (diamond approximated by radial). Center defaults to 50% 50%; radial extent keywords (closest-side/closest-corner/farthest-side/farthest-corner) map to an approximate radius fraction of max(w,h) — exact per-keyword geometry needs w/h+center which the bridge layer lacks, and explicit px radii are not converted, hence codegen partial"},
+        "mix-blend-mode":                   {"detected": "handled", "parsed": "handled", "codegen": "partial", "note": "IRStyle.mix_blend_mode is parsed (style.mixBlendMode + figma.blend_mode, normalized to the CSS keyword; normal/pass-through dropped) and emitted on container/image/text/svg_path nodes (web style.mixBlendMode; native setMixBlendMode → View::set_mix_blend_mode + save_layer_with_blend). Not yet emitted on audio-widget nodes (knob/fader/meter), hence partial"},
+        "masks-clip-paths":                 {"detected": "partial", "parsed": "partial", "codegen": "partial", "note": "IRStyle.clip_path/mask/mask_image/mask_size parsed (clipPath/mask/maskImage/maskSize) and emitted web (style.*) + native (setClipPath/setMask/setMaskImage/setMaskSize → View::set_clip_path/set_mask/... pulp #1515) on container/image/text/svg_path nodes. CSS sources carry these directly; Figma mask-layer → clip-path extraction is a separate adapter concern, hence detected/parsed partial"},
+        "constraints":                      {"detected": "partial", "parsed": "handled", "codegen": "partial", "note": "Figma resize constraints (constraints.horizontal/vertical, also under a figma{} or layout{} block; MIN/MAX/CENTER/STRETCH/SCALE normalized to left/right/center/stretch/scale) parse into IRLayout.h/v_constraint and lower to flex at codegen: center -> auto margins both sides, right/bottom -> leading auto margin, scale -> flex-grow:1, stretch -> align-self:stretch, left/top -> flex default. Best-effort within Flexbox (no new layout primitive); axis-exact scale/stretch depends on parent direction, hence codegen partial"}
+      }
+    },
     "claude": {
       "parser-version": "2.1",
       "detected-formats": [
@@ -42,10 +74,16 @@
             },
             {
               "kind": "frontmatter-key",
-              "any-of": ["colors", "typography", "rounded", "spacing", "components"]
+              "any-of": [
+                "colors",
+                "typography",
+                "rounded",
+                "spacing",
+                "components"
+              ]
             }
           ],
-          "notes": "Google's DESIGN.md (Apache-2.0, https://github.com/google-labs-code/design.md). Upstream pin: tag 0.1.1. YAML frontmatter + Markdown body. Strict detection: filename + frontmatter fence + name: key + at least one canonical token-group key. The all-of match plus 95% confidence floor avoids false positives on generic Jekyll/Hugo Markdown frontmatter."
+          "notes": "Google's DESIGN.md (Apache-2.0, https://github.com/google-labs-code/design.md). Upstream pin: tag 0.3.0. YAML frontmatter + Markdown body. Strict detection: filename + frontmatter fence + name: key + at least one canonical token-group key. The all-of match plus 95% confidence floor avoids false positives on generic Jekyll/Hugo Markdown frontmatter."
         }
       ]
     },
@@ -92,6 +130,31 @@
     "v0": {
       "parser-version": "0.1",
       "detected-formats": []
+    },
+    "figma-plugin": {
+      "parser-version": "0.1.0",
+      "detected-formats": [
+        {
+          "format-version": "2026.05-figma-plugin-v1",
+          "introduced": "2026-05-28",
+          "deprecated": null,
+          "match": "all-of",
+          "fingerprint": [
+            {
+              "kind": "json-key-equals",
+              "path": "provenance.adapter",
+              "value": "figma-plugin"
+            },
+            {
+              "kind": "json-key-equals",
+              "path": "format_version",
+              "value": "2026.05-figma-plugin-v1"
+            }
+          ],
+          "min-confidence-pct": 95,
+          "notes": "Pulp Figma plugin v1 export. Generated by the 'Design for Pulp' plugin."
+        }
+      ]
     }
   }
 }

@@ -65,7 +65,7 @@ TEST_CASE("KeyEvent modifier queries", "[view][input]") {
 }
 
 TEST_CASE("KeyEvent combined modifier helpers stay independent",
-          "[view][input][coverage]") {
+          "[view][input]") {
     KeyEvent e;
     e.modifiers = kModShift | kModCtrl | kModAlt | kModCmd;
 
@@ -133,7 +133,7 @@ TEST_CASE("MouseEvent pen pointer type with stylus data", "[view][input][pointer
 }
 
 TEST_CASE("MouseEvent unknown pointer type falls back to mouse string",
-          "[view][input][pointer][coverage]") {
+          "[view][input][pointer]") {
     MouseEvent e;
     e.pointer_type = static_cast<PointerType>(99);
     e.pointer_id = 3;

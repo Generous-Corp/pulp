@@ -62,7 +62,7 @@ const DrawCommand* find_text(const RecordingCanvas& canvas, const std::string& t
 
 } // namespace
 
-TEST_CASE("TableListBox paint returns early without model or columns", "[gui][table][coverage]") {
+TEST_CASE("TableListBox paint returns early without model or columns", "[gui][table]") {
     TableListBox table;
     table.set_bounds({0, 0, 200, 100});
 
@@ -77,7 +77,7 @@ TEST_CASE("TableListBox paint returns early without model or columns", "[gui][ta
 }
 
 TEST_CASE("TableListBox paints scaled aligned headers rows and sort indicator",
-          "[gui][table][coverage]") {
+          "[gui][table]") {
     RecordingTableModel model({
         {"Alpha", "Synth", "10"},
         {"Beta", "Effect", "2"},
@@ -126,7 +126,7 @@ TEST_CASE("TableListBox paints scaled aligned headers rows and sort indicator",
 }
 
 TEST_CASE("TableListBox ignores unsortable header clicks and selects visible rows",
-          "[gui][table][coverage]") {
+          "[gui][table]") {
     RecordingTableModel model({
         {"Row 0", "A"},
         {"Row 1", "B"},
@@ -160,7 +160,7 @@ TEST_CASE("TableListBox ignores unsortable header clicks and selects visible row
 }
 
 TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
-          "[gui][table][coverage]") {
+          "[gui][table]") {
     SimpleTableModel model;
     model.add_row({"B"});
     model.add_row({"A", "two"});
@@ -175,7 +175,7 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
 }
 
 TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table]") {
     SimpleTableModel model;
     model.set_data({
         {"Alpha", "3"},
@@ -195,7 +195,7 @@ TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
 }
 
 TEST_CASE("SimpleTableModel set_data replaces rows and sorts sparse descending",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table]") {
     SimpleTableModel model;
     model.add_row({"old", "row"});
     model.set_data({
@@ -218,7 +218,7 @@ TEST_CASE("SimpleTableModel set_data replaces rows and sorts sparse descending",
 }
 
 TEST_CASE("TableListBox clear columns and model-less clicks are stable",
-          "[gui][table][coverage][issue-653]") {
+          "[gui][table][issue-653]") {
     TableListBox table;
     table.set_bounds({0, 0, 160, 80});
     table.set_header_height(20.0f);
@@ -239,7 +239,7 @@ TEST_CASE("TableListBox clear columns and model-less clicks are stable",
 }
 
 TEST_CASE("TableListBox paints selected row and ignores negative body clicks",
-          "[gui][table][coverage][issue-653]") {
+          "[gui][table][issue-653]") {
     RecordingTableModel model({
         {"First", "A"},
         {"Second", "B"},
@@ -266,7 +266,7 @@ TEST_CASE("TableListBox paints selected row and ignores negative body clicks",
 }
 
 TEST_CASE("TableListBox ignores clicks outside right and bottom bounds",
-          "[gui][table][coverage][issue-653]") {
+          "[gui][table][issue-653]") {
     RecordingTableModel model({
         {"First", "A"},
         {"Second", "B"},
@@ -289,7 +289,7 @@ TEST_CASE("TableListBox ignores clicks outside right and bottom bounds",
 }
 
 TEST_CASE("TableListBox ignores header clicks past scaled columns",
-          "[gui][table][coverage][phase3]") {
+          "[gui][table]") {
     RecordingTableModel model({
         {"First", "A"},
         {"Second", "B"},

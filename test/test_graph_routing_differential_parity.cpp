@@ -209,7 +209,7 @@ RuntimeSpecs build_runtime_specs(const RandomGraph& rg, std::vector<GainState>& 
     for (const auto& e : rg.edges) s.conns.push_back({e.src, 0, e.dst, 0});
     if (feedback_on_gain) {
         const std::uint32_t id = rg.gain_id(feedback_idx);
-        s.conns.push_back({id, 0, id, 0, /*feedback=*/true, /*event=*/false});
+        s.conns.push_back({id, 0, id, 0, /*feedback=*/true});
     }
 
     states.assign(rg.gain_count, GainState{});

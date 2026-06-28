@@ -10,7 +10,9 @@ import { call, _resolveVar } from './prop-applier-internal.js';
 // Translate CSS / React-Native fontWeight keyword values to numeric weights
 // before reaching the bridge. Mirrors the same logic in the JS CSS shim
 // (`web-compat-style-decl.js`). Numeric values (`400`, `'500'`) flow through
-// unchanged. The fallback keeps CSS keyword semantics explicit:
+// unchanged. Do not collapse this to `Number(value)`: `Number('bold')` is NaN
+// and would silently fall back to 400, rendering bold text as normal.
+// The fallback keeps CSS keyword semantics explicit:
 //   normal  -> 400
 //   bold    -> 700
 //   lighter -> 300 (no font cascade in pulp; safe lower default)
@@ -141,11 +143,9 @@ export function applyTypographyProp(
         // / 'underline' / 'line-through' / 'overline'`.
         case 'textDecorationLine': call('setTextDecoration', id, value as string); return true;
         // RN textShadow cluster. The CSS shim (`web-compat-style-decl.js`)
-        // calls `setTextShadow` defensively; the bridge may not register the
-        // full shadow function on every build, so missing functions are no-op
-        // calls through `call`. Each per-attribute setter writes one slot in
-        // isolation so a diff that touches one prop doesn't clobber the
-        // others.
+        // handles aggregate CSS shorthand. Each per-attribute setter here
+        // writes one slot in isolation so a diff that touches one prop
+        // doesn't clobber the others.
         case 'textShadowColor':  call('setTextShadowColor',  id, _resolveVar(value) as string); return true;
         case 'textShadowOffset': {
             // RN spec: `{ width, height }` (number / number).

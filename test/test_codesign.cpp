@@ -72,12 +72,12 @@ TEST_CASE("check_notarization on nonexistent path is false", "[ship][codesign]")
 }
 
 TEST_CASE("codesign rejects nonexistent path and identity",
-          "[ship][codesign][coverage][issue-644]") {
+          "[ship][codesign][issue-644]") {
     REQUIRE_FALSE(codesign("/nonexistent/binary", "Developer ID Application: Missing"));
 }
 
 TEST_CASE("codesign includes entitlements path on failure path",
-          "[ship][codesign][coverage][issue-644]") {
+          "[ship][codesign][issue-644]") {
     REQUIRE_FALSE(codesign("/nonexistent/binary",
                            "Developer ID Application: Missing",
                            "/nonexistent/entitlements.plist"));
@@ -97,12 +97,12 @@ TEST_CASE("codesign (Windows) rejects empty identity and empty path before signi
 #endif
 
 TEST_CASE("notarization staple on nonexistent path is false",
-          "[ship][codesign][coverage][issue-644]") {
+          "[ship][codesign][issue-644]") {
     REQUIRE_FALSE(notarize_staple("/nonexistent/binary"));
 }
 
 TEST_CASE("ASC notarization submit fails closed for missing inputs",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
     auto request = notarize_submit_asc("/nonexistent/archive.zip",
                                        "/nonexistent/AuthKey_TEST.p8",
                                        "TESTKEY123",
@@ -111,7 +111,7 @@ TEST_CASE("ASC notarization submit fails closed for missing inputs",
 }
 
 TEST_CASE("create_pkg on nonexistent component is false",
-          "[ship][codesign][coverage][issue-644]") {
+          "[ship][codesign][issue-644]") {
     auto output = (fs::temp_directory_path() / "pulp-missing-component.pkg").string();
     REQUIRE_FALSE(create_pkg("/nonexistent/component.vst3",
                              output,
@@ -162,7 +162,7 @@ TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign]") {
 }
 
 TEST_CASE("codesign reports unsigned regular files without identity metadata",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
     ScopedTempDir temp("pulp-codesign-unsigned");
     const auto file = temp.path / "plain-tool";
     std::ofstream(file) << "not a Mach-O";
@@ -186,7 +186,7 @@ TEST_CASE("codesign reports unsigned regular files without identity metadata",
 }
 
 TEST_CASE("codesign failure paths leave requested outputs absent",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
     ScopedTempDir temp("pulp-codesign-failures");
     const auto pkg = temp.path / "missing.pkg";
     const auto signed_pkg = temp.path / "missing-signed.pkg";
@@ -212,7 +212,7 @@ TEST_CASE("codesign failure paths leave requested outputs absent",
 }
 
 TEST_CASE("combined pkg rejects empty and missing component inputs",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
     ScopedTempDir temp("pulp-combined-pkg-failures");
     const auto empty_output = temp.path / "empty.pkg";
     const auto missing_output = temp.path / "missing.pkg";
@@ -307,7 +307,7 @@ TEST_CASE("combined pkg is component-selectable with a choice per format",
 
 #ifdef __APPLE__
 TEST_CASE("codesign parsers tolerate noisy command output",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
     auto info = detail::parse_codesign_details(
         "Executable=/tmp/Pulp.app\n"
         "Authority=Developer ID Application: Pulp Labs (TEAM123456)\n"
@@ -344,7 +344,7 @@ TEST_CASE("codesign parsers tolerate noisy command output",
 #endif
 
 TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
     const auto plist = default_audio_entitlements();
 #ifdef __APPLE__
     REQUIRE(plist.find(R"(<?xml version="1.0" encoding="UTF-8"?>)") != std::string::npos);
@@ -363,7 +363,7 @@ TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
 }
 
 TEST_CASE("codesign detail parser extracts identity and team fields",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto info = pulp::ship::detail::parse_codesign_details(R"(
 Executable=/Applications/Pulp.app/Contents/MacOS/Pulp
@@ -402,7 +402,7 @@ TeamIdentifier=FIRST12345
 }
 
 TEST_CASE("notarytool submit parser accepts UUID ids only",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto accepted = pulp::ship::detail::parse_notarytool_submit_id(R"(
 Submission ID received
@@ -433,7 +433,7 @@ Submission ID received
 }
 
 TEST_CASE("notarytool submit parser keeps UUID boundaries strict",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto tab_boundary = pulp::ship::detail::parse_notarytool_submit_id(
         "id: 12345678-abcd-4abc-9def-123456789abc\tstatus: Accepted");
@@ -457,7 +457,7 @@ TEST_CASE("notarytool submit parser keeps UUID boundaries strict",
 }
 
 TEST_CASE("notarytool status parser classifies terminal states",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto accepted = pulp::ship::detail::parse_notarytool_status("status: Accepted\nmessage: Ready");
     REQUIRE(accepted.complete);
@@ -482,7 +482,7 @@ TEST_CASE("notarytool status parser classifies terminal states",
 }
 
 TEST_CASE("notarytool status parser preserves raw diagnostic output",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     const std::string invalid_log = R"(status: Invalid
 issues:
@@ -504,7 +504,7 @@ issues:
 }
 
 TEST_CASE("security identity parser preserves quoted display names",
-          "[ship][codesign][coverage][phase3]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto identities = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
   1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Developer ID Application: Pulp Audio LLC (ABCDE12345)"
@@ -538,7 +538,7 @@ TEST_CASE("security identity parser preserves quoted display names",
 }
 
 TEST_CASE("security identity parser ignores unquoted validity summaries",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto identities = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
 Policy: Code Signing
@@ -559,7 +559,7 @@ Policy: Code Signing
 }
 
 TEST_CASE("mac codesign parsers ignore unrelated command noise",
-          "[ship][codesign][coverage][requested]") {
+          "[ship][codesign]") {
 #ifdef __APPLE__
     auto details = pulp::ship::detail::parse_codesign_details(R"DETAILS(
 warning: unable to build chain to self-signed root

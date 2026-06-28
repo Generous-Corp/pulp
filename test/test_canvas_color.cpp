@@ -26,7 +26,7 @@ void require_color_near(const Color& color,
 }  // namespace
 
 TEST_CASE("Color HSV covers primary and secondary hue sectors",
-          "[canvas][color][coverage][phase3]") {
+          "[canvas][color]") {
     struct Case {
         const char* name;
         float hue;
@@ -59,7 +59,7 @@ TEST_CASE("Color HSV covers primary and secondary hue sectors",
 }
 
 TEST_CASE("Color OKLCH covers sRGB transfer thresholds and wrapped hue",
-          "[canvas][color][coverage][phase3]") {
+          "[canvas][color]") {
     auto near_black = Color::rgba(0.003f, 0.003f, 0.003f).to_oklch();
     require_near(near_black.L, 0.06146f, 0.0002f);
     require_near(near_black.C, 0.0f, 0.0001f);
@@ -76,7 +76,7 @@ TEST_CASE("Color OKLCH covers sRGB transfer thresholds and wrapped hue",
 }
 
 TEST_CASE("Color binary encoding preserves unclamped float channels",
-          "[canvas][color][coverage][phase3]") {
+          "[canvas][color]") {
     auto original = Color::rgba(1.25f, -0.125f, 0.5f, 0.75f);
 
     uint8_t bytes[16]{};

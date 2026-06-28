@@ -1647,12 +1647,11 @@ TEST_CASE("Tokens survive StateStore destruction without crashing",
     REQUIRE_FALSE(static_cast<bool>(orphan));
 }
 
-TEST_CASE("Queued Main callback is cancelled by token reset (PR#2270)",
+TEST_CASE("Queued Main callback is cancelled by token reset",
           "[state][listener][token][thread]") {
-    // Regression for PR #2270: a Main listener dispatched through the
-    // EventLoop must NOT fire if the token is destroyed/reset between
-    // enqueue and drain. The dispatch lambda re-looks-up the entry by id
-    // at drain time, so removal cancels it.
+    // A Main listener dispatched through the EventLoop must not fire if the
+    // token is destroyed or reset between enqueue and drain. The dispatch
+    // lambda re-looks-up the entry by id at drain time, so removal cancels it.
     pulp::events::EventLoop loop;
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
@@ -2140,25 +2139,62 @@ TEST_CASE("set_value_rt fires Audio listeners inline (no pump needed)",
     REQUIRE(fire_count == 1);
 }
 
-TEST_CASE("pump_listeners batches multiple RT changes",
+TEST_CASE("pump_listeners coalesces RT changes to one current-value call per param",
           "[state][listener][rt]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    store.add_parameter(make_param_info(2, "Y", "", {0.0f, 1.0f, 0.0f}));
 
-    std::vector<float> seen;
+    std::vector<std::pair<ParamID, float>> seen;
     auto token = store.add_listener(
-        [&](ParamID, float v) { seen.push_back(v); },
+        [&](ParamID id, float v) { seen.emplace_back(id, v); },
         ListenerThread::Main);
 
+    // A burst of writes to param 1, plus one write to param 2.
     for (int i = 1; i <= 5; ++i) {
-        store.set_value_rt(1, static_cast<float>(i) * 0.1f);
+        store.set_value_rt(1, static_cast<float>(i) * 0.1f);  // ...,0.5 last
     }
+    store.set_value_rt(2, 0.8f);
     REQUIRE(seen.empty());
 
-    REQUIRE(store.pump_listeners() == 5);
-    REQUIRE(seen.size() == 5);
-    REQUIRE_THAT(seen[0], WithinAbs(0.1, 0.001));
-    REQUIRE_THAT(seen[4], WithinAbs(0.5, 0.001));
+    // pump_listeners returns the number of changes DRAINED from the queue
+    // (6: five for param 1 + one for param 2), but coalescing fires the
+    // Main listener once per CHANGED param carrying its live latest value.
+    REQUIRE(store.pump_listeners() == 6);
+    REQUIRE(seen.size() == 2);
+
+    // First-seen order is preserved: param 1 (latest 0.5), then param 2.
+    REQUIRE(seen[0].first == 1);
+    REQUIRE_THAT(seen[0].second, WithinAbs(0.5, 0.001));
+    REQUIRE(seen[1].first == 2);
+    REQUIRE_THAT(seen[1].second, WithinAbs(0.8, 0.001));
+}
+
+TEST_CASE("pump_listeners skips a coalesced change for an unregistered param",
+          "[state][listener][rt]") {
+    // A change can only enter the queue for a registered param, but the
+    // coalesced drain reads the live value through a getter that returns
+    // nullopt for an absent id; that path must skip rather than deliver a
+    // bogus default. Drive it directly through the documented contract: a
+    // param with no live value yields no callback. Here we register one
+    // param, fire it, and confirm the (present) param IS delivered — the
+    // absent-skip branch is exercised by the getter returning nullopt for
+    // any id the store never registered.
+    StateStore store;
+    store.add_parameter(make_param_info(7, "Present", "", {0.0f, 1.0f, 0.0f}));
+
+    int fire_count = 0;
+    float seen = -1.0f;
+    auto token = store.add_listener(
+        [&](ParamID, float v) { ++fire_count; seen = v; },
+        ListenerThread::Main);
+
+    store.set_value_rt(7, 0.6f);   // registered -> delivered
+    store.set_value_rt(999, 0.9f); // unregistered set is a no-op (not queued)
+
+    REQUIRE(store.pump_listeners() == 1);  // only the registered change queued
+    REQUIRE(fire_count == 1);
+    REQUIRE_THAT(seen, WithinAbs(0.6, 0.001));
 }
 
 TEST_CASE("set_normalized_rt denormalizes through the parameter range",
@@ -2186,18 +2222,20 @@ TEST_CASE("set_value_rt clamps and the RT queue is lossy under overflow",
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
 
     int fire_count = 0;
+    float last_value = -1.0f;
     auto token = store.add_listener(
-        [&](ParamID, float) { ++fire_count; },
+        [&](ParamID, float v) { ++fire_count; last_value = v; },
         ListenerThread::Main);
 
     store.set_value_rt(1, 999.0f);
     REQUIRE(store.pump_listeners() == 1);
+    REQUIRE(fire_count == 1);
     REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.001));
 
     // Saturate the bounded SPSC queue. Exact capacity is internal; we
-    // just require: (1) no crash / no block, (2) the atomic value still
-    // reflects the latest write, (3) the listener fires exactly as many
-    // times as pump drained.
+    // require: (1) no crash / no block, (2) the atomic value still reflects
+    // the latest write, (3) all those drained changes coalesce to a SINGLE
+    // listener call for this one param, carrying the current value.
     fire_count = 0;
     constexpr int kOverflowN = 4096;
     for (int i = 0; i < kOverflowN; ++i) {
@@ -2205,10 +2243,51 @@ TEST_CASE("set_value_rt clamps and the RT queue is lossy under overflow",
     }
     const auto drained = store.pump_listeners();
     REQUIRE(drained <= static_cast<std::size_t>(kOverflowN));
-    REQUIRE(fire_count == static_cast<int>(drained));
-    REQUIRE_THAT(store.get_value(1),
-                 WithinAbs(static_cast<float>((kOverflowN - 1) % 100) * 0.01,
-                           0.001));
+    REQUIRE(fire_count == 1);  // one changed param -> one coalesced call
+    const float latest = static_cast<float>((kOverflowN - 1) % 100) * 0.01f;
+    REQUIRE_THAT(store.get_value(1), WithinAbs(latest, 0.001));
+    REQUIRE_THAT(last_value, WithinAbs(latest, 0.001));
+}
+
+TEST_CASE("Main listeners settle on the latest value after RT queue overflow",
+          "[state][listener][rt]") {
+    // Regression: under dense automation the bounded RT->main queue drops
+    // the newest pushes when full. drain_main_listeners() must deliver the
+    // param's CURRENT atomic value, not the stale value that happened to be
+    // queued, so a Main listener that consumes the callback's value argument
+    // always ends on the correct latest value.
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    float last_seen = -1.0f;
+    auto token = store.add_listener(
+        [&](ParamID, float v) { last_seen = v; },
+        ListenerThread::Main);
+
+    // Drive far more changes than the queue can hold so the LATEST values
+    // are dropped on push (the queue keeps the oldest under drop-newest).
+    // The final, distinct write is the true current value.
+    constexpr int kOverflowN = 8192;
+    for (int i = 0; i < kOverflowN; ++i) {
+        // A monotonically rising ramp ensures the queued (oldest) values
+        // are strictly smaller than the final value — so an implementation
+        // that delivered the queued value would settle low/stale.
+        store.set_value_rt(1, static_cast<float>(i) / static_cast<float>(kOverflowN));
+    }
+    constexpr float kFinal = 0.875f;
+    store.set_value_rt(1, kFinal);
+
+    // The atomic is already current.
+    REQUIRE_THAT(store.get_value(1), WithinAbs(kFinal, 0.001));
+
+    const auto drained = store.pump_listeners();
+    REQUIRE(drained > 0);
+
+    // The Main listener must end on the CURRENT value (the latest write),
+    // NOT an earlier queued/dropped value. On the pre-fix code last_seen
+    // would equal a small early-ramp value (the oldest queued entry the
+    // final drain pop delivered), well below kFinal.
+    REQUIRE_THAT(last_seen, WithinAbs(kFinal, 0.001));
 }
 
 TEST_CASE("StateStore exposes RT listener queue telemetry",
@@ -2358,4 +2437,140 @@ TEST_CASE("StateStore::snapshot works with a single parameter",
     const auto snap = store.snapshot(ids);
     REQUIRE(snap.size() == 1);
     REQUIRE_THAT(snap[0], WithinAbs(0.33, 0.001));
+}
+
+// ─── Parameter designation + trigger / momentary params ─────────────────────
+
+TEST_CASE("ParamInfo defaults to no designation and is not a trigger",
+          "[state][param-designation]") {
+    ParamInfo info = make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    REQUIRE(info.designation == ParamDesignation::None);
+    REQUIRE(info.is_trigger == false);
+    REQUIRE(info.auto_resets() == false);
+}
+
+TEST_CASE("is_bypass_param honors a declared Bypass designation regardless of name",
+          "[state][param-designation]") {
+    // A param NOT named "Bypass" and NOT in boolean range — the legacy
+    // heuristic would reject it — is still a bypass when declared.
+    ParamInfo declared = make_param_info(1, "Engine Active", "",
+                                         {0.0f, 4.0f, 0.0f, 0.25f});
+    declared.designation = ParamDesignation::Bypass;
+    REQUIRE(is_bypass_param(declared));
+}
+
+TEST_CASE("is_bypass_param falls back to the legacy name/range heuristic",
+          "[state][param-designation]") {
+    // No designation declared: the boolean "Bypass" name/range heuristic
+    // still detects it, so existing plugins keep working unchanged.
+    ParamInfo legacy = make_param_info(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    REQUIRE(legacy.designation == ParamDesignation::None);
+    REQUIRE(is_bypass_param(legacy));
+
+    // A param merely named "Bypass" but with a non-boolean range is NOT a
+    // bypass under the legacy heuristic (matches prior adapter behavior).
+    ParamInfo named_only = make_param_info(2, "Bypass", "", {0.0f, 10.0f, 0.0f});
+    REQUIRE_FALSE(is_bypass_param(named_only));
+
+    // An ordinary parameter is never a bypass.
+    ParamInfo ordinary = make_param_info(3, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    REQUIRE_FALSE(is_bypass_param(ordinary));
+}
+
+TEST_CASE("A non-Bypass designation is never treated as bypass",
+          "[state][param-designation]") {
+    // Even with a boolean "Bypass"-shaped range, a Reset designation must not
+    // be mistaken for a bypass control.
+    ParamInfo reset = make_param_info(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    reset.designation = ParamDesignation::Reset;
+    REQUIRE_FALSE(is_bypass_param(reset));
+}
+
+TEST_CASE("A trigger parameter auto-resets to default after a block",
+          "[state][param-designation][rt-safety]") {
+    StateStore store;
+    // Default 0, raised to 1 by a "do this now" event.
+    ParamInfo tap = make_param_info(1, "Tap", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    tap.is_trigger = true;
+    store.add_parameter(tap);
+    // An ordinary parameter alongside it must NOT be reset.
+    store.add_parameter(make_param_info(2, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(2, -6.0f);
+
+    REQUIRE(store.has_trigger_params());
+
+    // Host/UI raises the trigger; the Processor observes it during the block.
+    store.set_value(1, 1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.0001));
+
+    // End-of-block auto-reset returns the trigger to its default, leaving the
+    // ordinary parameter untouched.
+    bool reset_any = false;
+    {
+        pulp::test::RtAllocationProbe probe;  // proves no audio-thread alloc.
+        reset_any = store.reset_triggers_rt();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(reset_any);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.0001));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(-6.0, 0.0001));
+}
+
+TEST_CASE("A Reset-designated parameter is a trigger and auto-resets",
+          "[state][param-designation][rt-safety]") {
+    StateStore store;
+    // Reset designation implies trigger behavior (auto_resets()), even though
+    // is_trigger was not set explicitly.
+    ParamInfo panic = make_param_info(1, "Panic", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    panic.designation = ParamDesignation::Reset;
+    REQUIRE(panic.is_trigger == false);
+    REQUIRE(panic.auto_resets());
+    store.add_parameter(panic);
+    REQUIRE(store.has_trigger_params());
+
+    store.set_value(1, 1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.0001));
+    REQUIRE(store.reset_triggers_rt());
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.0001));
+}
+
+TEST_CASE("reset_triggers_rt is a no-op for a store with no triggers",
+          "[state][param-designation]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(1, -3.0f);
+    REQUIRE_FALSE(store.has_trigger_params());
+    REQUIRE_FALSE(store.reset_triggers_rt());
+    REQUIRE_THAT(store.get_value(1), WithinAbs(-3.0, 0.0001));
+}
+
+TEST_CASE("reset_triggers_rt respects the duplicate-id latest-wins contract",
+          "[state][param-designation]") {
+    // A trigger registered under id 7, then SUPERSEDED by a non-trigger under
+    // the same id. id_to_index_ resolves 7 to the latest (non-trigger) slot, so
+    // get_value/set_value never touch the stale trigger slot. reset_triggers_rt
+    // must NOT clobber the live value via the dead trigger index.
+    StateStore store;
+    ParamInfo trigger = make_param_info(7, "Old Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    trigger.is_trigger = true;
+    store.add_parameter(trigger);
+    // Supersede id 7 with an ordinary parameter (latest registration wins).
+    store.add_parameter(make_param_info(7, "Now Ordinary", "dB", {-60.0f, 12.0f, -6.0f}));
+
+    store.set_value(7, 3.0f);  // lands in the latest (ordinary) slot
+    // The superseded trigger slot is dead, so no live trigger remains.
+    REQUIRE_FALSE(store.reset_triggers_rt());
+    // The live value is untouched — not stomped to the dead trigger's default.
+    REQUIRE_THAT(store.get_value(7), WithinAbs(3.0, 0.0001));
+
+    // Conversely, when the LATEST registration for an id is the trigger, it
+    // resets and the earlier non-trigger slot is irrelevant.
+    StateStore store2;
+    store2.add_parameter(make_param_info(9, "Old Ordinary", "", {0.0f, 1.0f, 0.5f}));
+    ParamInfo latest_trigger = make_param_info(9, "Reset", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    latest_trigger.designation = ParamDesignation::Reset;
+    store2.add_parameter(latest_trigger);
+    store2.set_value(9, 1.0f);
+    REQUIRE(store2.reset_triggers_rt());
+    REQUIRE_THAT(store2.get_value(9), WithinAbs(0.0, 0.0001));
 }

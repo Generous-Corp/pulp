@@ -291,7 +291,7 @@ TEST_CASE("analyze_screenshot_content accepts non-empty UI captures",
 }
 
 TEST_CASE("compare_screenshots reports rendered decode failure",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto png = render_label_png("Reference", Theme::dark());
     REQUIRE_FALSE(png.empty());
 
@@ -302,7 +302,7 @@ TEST_CASE("compare_screenshots reports rendered decode failure",
 }
 
 TEST_CASE("compare_screenshots penalizes size mismatch",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto small = render_label_png("Same", Theme::dark(), 40, 20);
     auto large = render_label_png("Same", Theme::dark(), 80, 40);
     REQUIRE_FALSE(small.empty());
@@ -316,7 +316,7 @@ TEST_CASE("compare_screenshots penalizes size mismatch",
 }
 
 TEST_CASE("compare_screenshot_files covers file IO success and failures",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto ref_png = render_label_png("File A", Theme::dark());
     auto ren_png = render_label_png("File A", Theme::dark());
     REQUIRE_FALSE(ref_png.empty());
@@ -383,7 +383,7 @@ TEST_CASE("generate_diff_image rejects oversized combined canvas",
 }
 
 TEST_CASE("generate_diff_image handles invalid changed and size mismatch inputs",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto dark = render_label_png("Diff", Theme::dark(), 80, 40);
     auto light = render_label_png("Diff", Theme::light(), 80, 40);
     auto small = render_label_png("Diff", Theme::dark(), 40, 20);
@@ -439,7 +439,7 @@ TEST_CASE("crop_png clamps regions to image bounds", "[view][compare]") {
 }
 
 TEST_CASE("crop_png rejects invalid and non-intersecting regions",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto png = render_label_png("Crop guards", Theme::dark(), 80, 40);
     REQUIRE_FALSE(png.empty());
 
@@ -478,7 +478,7 @@ TEST_CASE("diff_bounds locates changed pixels", "[view][compare]") {
 }
 
 TEST_CASE("diff_bounds is invalid for identical or undecodable images",
-          "[view][compare][coverage][phase3]") {
+          "[view][compare]") {
     auto png = render_label_png("Same", Theme::dark(), 80, 40);
     REQUIRE_FALSE(png.empty());
 

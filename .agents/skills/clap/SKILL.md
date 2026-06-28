@@ -156,9 +156,25 @@ current mod offset. Plugins that only read `store.get_value(id)` do
 bus** (flag `CLAP_AUDIO_PORT_IS_MAIN`); **bus 1 (when present) is the
 sidechain** and is routed via `Processor::set_sidechain(&view)` before
 `process()`. Additional input buses beyond index 1 are ignored — the
-Processor API exposes a single sidechain slot. Secondary **output**
-buses are zero-filled so multi-out instruments don't surface
-uninitialised memory to hosts.
+Processor API exposes a single sidechain slot.
+
+**Secondary (aux) output buses ARE routed** to the richer
+`Processor::process(ProcessBuffers&)` surface (role `Aux`, index ≥1) for
+multi-out instruments (drum machines, multitimbral, stem renderers).
+`clap_process` builds one `ProcessBusBufferView<float>` per host output
+bus from pre-allocated `aux_output_ptrs[kMaxOutputBuses-1][kMaxChannels]`
+storage (row `b-1` backs host bus `b`; the main bus uses `output_ptrs`),
+so the routing path never allocates on the audio thread. Each aux bus is
+**pre-zeroed before `process()`**, so a single-output processor (whose
+default `process(ProcessBuffers&)` writes only the main bus) leaves aux
+buses silent — no uninitialised memory, no behavioural change. A
+multi-out processor overrides `process(ProcessBuffers&)` and writes each
+aux bus. The aux view's `declared_channels` is the descriptor's declared
+count (cached in `clap_activate` — never call `descriptor()` on the audio
+thread; it allocates), while `buffer.num_channels()` carries the actual
+routed count, so `matches_declared_layout()` can detect a host-vs-declared
+mismatch. Host output buses beyond `kMaxOutputBuses` are zero-filled but
+not routed.
 
 ### MIDI: short messages, sysex, note-expression, UMP
 
@@ -300,6 +316,23 @@ without invoking `Processor::process`. MIDI output stays empty so
 bypassed MIDI FX don't leak notes — same contract the VST3 and AU v3
 adapters honour.
 
+**Param designation (declared bypass) + trigger params.** The bypass
+parameter is found through the shared `pulp::state::is_bypass_param`
+contract, not a re-implemented name/range check. A Processor author can
+declare `ParamInfo::designation = ParamDesignation::Bypass` to mark a
+param as the bypass control *independently of its name* — the legacy
+boolean-`"Bypass"` name/range heuristic remains the fallback when no
+designation is declared, so existing plugins are unchanged. The adapter
+also calls `StateStore::reset_triggers_rt()` to auto-reset trigger /
+momentary params (`is_trigger`, or a `ParamDesignation::Reset`
+"reset/panic" control) back to their default. The call sits AFTER the
+bypass if/else (not inside the non-bypass branch), so it is a
+**single-exit invariant**: a trigger raised while bypassed still settles
+this block instead of firing late. It runs before the `out_events` scan,
+so the host records the settle. Input param events are applied to the
+store before the bypass check, so a host-raised trigger is observed-then-
+settled within the same block whether or not the plugin is bypassed.
+
 ### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via
@@ -355,6 +388,16 @@ if (sc_bus.data32) {
 
 The VST3 adapter carries the same guard for null bus channel pointers.
 Mirror both whenever reshaping the sidechain path.
+
+### Aux output bus `data32` can be null too — guard the pre-zero loop
+
+A deactivated **secondary output** bus can report `channel_count > 0`
+while `data32 == nullptr`, exactly like the sidechain case. The aux
+pre-zero loop in `clap_process` runs *before* the routing loop's own
+`data32` guard, so it must `if (!bus.data32) continue;` before indexing
+`bus.data32[ch]` — otherwise a host that presents an inactive aux output
+null-derefs on the audio thread. Both the pre-zero loop and the routing
+loop guard the bus pointer; keep both.
 
 ### Reset modulation offsets **every** buffer
 

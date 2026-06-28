@@ -202,7 +202,7 @@ TEST_CASE("WidgetBridge canvasGlobalCompositeOperation maps CSS strings to Blend
 }
 
 TEST_CASE("WidgetBridge direct Canvas2D gap APIs replay expected canvas commands",
-          "[view][bridge][canvas][coverage]") {
+          "[view][bridge][canvas]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -865,7 +865,7 @@ TEST_CASE("WidgetBridge canvasDrawImage 9-arg form plumbs source rect end-to-end
 // invokes canvasDrawImage directly via JS and asserts the CanvasDrawCmd state
 // right at the JS-→-bridge boundary (read back via CanvasWidget::commands()).
 TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the recorded cmd",
-          "[view][bridge][canvas][issue-1739][canvas2d][coverage]") {
+          "[view][bridge][canvas][issue-1739][canvas2d]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -922,7 +922,7 @@ TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the 
 // branch must NOT fire, so has_source_rect stays false. Pins the
 // else-branch of the bridge plumbing.
 TEST_CASE("WidgetBridge canvasDrawImage 6-arg call leaves has_source_rect=false",
-          "[view][bridge][canvas][issue-1739][canvas2d][coverage]") {
+          "[view][bridge][canvas][issue-1739][canvas2d]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -970,7 +970,7 @@ TEST_CASE("WidgetBridge canvasDrawImage 6-arg call leaves has_source_rect=false"
 // propagate that state into the fill_text cmd rather than reset to defaults.
 
 TEST_CASE("WidgetBridge 4-arg canvasFillText preserves prior fillStyle color",
-          "[view][bridge][canvas][issue-1901][canvas2d][coverage]") {
+          "[view][bridge][canvas][issue-1901][canvas2d]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -1013,7 +1013,7 @@ TEST_CASE("WidgetBridge 4-arg canvasFillText preserves prior fillStyle color",
 }
 
 TEST_CASE("WidgetBridge 4-arg canvasFillText preserves prior set_font state",
-          "[view][bridge][canvas][issue-1901][canvas2d][coverage]") {
+          "[view][bridge][canvas][issue-1901][canvas2d]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});

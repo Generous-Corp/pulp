@@ -302,7 +302,7 @@ int cmd_create(const std::vector<std::string>& args) {
     bool ci_mode = false;
     bool in_tree_mode = false;
     bool mpe_mode = false;
-    // Pulp #2087: default new projects to floating-SDK mode (track latest)
+    // Default new projects to floating-SDK mode (track latest)
     // instead of exact-pin. `--pin` opts into exact-version pinning at
     // create-time for users who want reproducibility from day one.
     bool pin_at_create = false;
@@ -471,7 +471,7 @@ int cmd_create(const std::vector<std::string>& args) {
     for (auto& c : checks) {
         if (c.passed) continue;
         // Optional checks are advisory — they surface fix advice but
-        // must not gate `pulp create`. The pulp-mcp row (#2067) is
+        // must not gate `pulp create`. The pulp-mcp row is
         // optional because the binary is only needed for the Claude
         // Code plugin's MCP server, not for creating a Pulp project.
         if (c.optional) {
@@ -743,7 +743,7 @@ int cmd_create(const std::vector<std::string>& args) {
     if (standalone_mode) {
         std::ofstream f(out_dir / "pulp.toml");
         f << "[pulp]\n";
-        // Pulp #2087: floating-SDK default. Unpinned projects track the
+        // Floating-SDK default. Unpinned projects track the
         // latest installed SDK on every rebuild, so users automatically
         // pick up framework fixes without remembering to run an
         // explicit upgrade. `--pin` writes the exact resolved version
@@ -770,7 +770,7 @@ int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
-    // Android target scaffold (experimental — see issue #83)
+    // Android target scaffold (experimental).
     if (want_android) {
         auto android_tmpl_dir = templates_base / "android";
         if (!fs::exists(android_tmpl_dir) && !root.empty()) {
@@ -830,13 +830,13 @@ int cmd_create(const std::vector<std::string>& args) {
 
     // Register the new project in ~/.pulp/projects.json so
     // `pulp doctor --versions` can report per-project skew without an
-    // opt-in disk scan (#552). The registry is a best-effort
+    // opt-in disk scan. The registry is a best-effort
     // diagnostic surface — a failure here is non-fatal and logged only
     // in non-CI mode so we don't clutter CI-driven scaffold output.
     {
         auto reg = pulp::cli::projects_registry::registry_path();
-        // #563: check the write result
-        // rather than blindly printing "Registered" — otherwise a
+        // Check the write result rather than blindly printing
+        // "Registered" — otherwise a
         // failed `write_registry()` in an unwritable $PULP_HOME
         // surfaces as "registered" to the user but the project is
         // missing from the file. Scaffold itself still succeeds

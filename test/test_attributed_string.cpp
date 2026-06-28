@@ -309,7 +309,7 @@ TEST_CASE("GlyphArrangement hit testing and cursor positions", "[canvas][layout]
 }
 
 TEST_CASE("AttributedString append preserves empty spans between text",
-          "[canvas][text][coverage]") {
+          "[canvas][text]") {
     AttributedString str;
     str.append("left");
     str.append("");
@@ -323,7 +323,7 @@ TEST_CASE("AttributedString append preserves empty spans between text",
 }
 
 TEST_CASE("AttributedString set_font overwrites styled span fonts only",
-          "[canvas][text][coverage]") {
+          "[canvas][text]") {
     AttributedString str;
     TextSpan span;
     span.text = "styled";
@@ -340,7 +340,7 @@ TEST_CASE("AttributedString set_font overwrites styled span fonts only",
 }
 
 TEST_CASE("AttributedString set_color preserves font attributes",
-          "[canvas][text][coverage]") {
+          "[canvas][text]") {
     AttributedString str;
     TextSpan span;
     span.text = "styled";
@@ -358,7 +358,7 @@ TEST_CASE("AttributedString set_color preserves font attributes",
 }
 
 TEST_CASE("TextLayout preserves style on wrapped span fragments",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     AttributedString str;
     TextSpan span;
     span.text = "alpha beta";
@@ -384,7 +384,7 @@ TEST_CASE("TextLayout preserves style on wrapped span fragments",
 }
 
 TEST_CASE("TextLayout consecutive newlines create blank layout lines",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     AttributedString str("top\n\nbottom");
 
     auto layout = layout_attributed_string(str, 1000.0f, 13.0f);
@@ -397,7 +397,7 @@ TEST_CASE("TextLayout consecutive newlines create blank layout lines",
 }
 
 TEST_CASE("TextLayout forced break keeps full unspaced text",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     AttributedString str;
     str.append("abcdef", 10.0f, Color::rgba8(1, 1, 1));
 
@@ -410,7 +410,7 @@ TEST_CASE("TextLayout forced break keeps full unspaced text",
 }
 
 TEST_CASE("TextLayout span-specific font size affects width and height",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     AttributedString str;
     str.append("wide", 20.0f, Color::rgba8(1, 1, 1));
     str.append("narrow", 10.0f, Color::rgba8(2, 2, 2));
@@ -426,7 +426,7 @@ TEST_CASE("TextLayout span-specific font size affects width and height",
 }
 
 TEST_CASE("GlyphArrangement totals use widest line and last descent",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     GlyphArrangement layout;
 
     TextLine short_line;
@@ -447,7 +447,7 @@ TEST_CASE("GlyphArrangement totals use widest line and last descent",
 }
 
 TEST_CASE("GlyphArrangement hit_test uses half-advance thresholds",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     GlyphArrangement layout;
     TextLine line;
     line.ascent = 8.0f;
@@ -464,7 +464,7 @@ TEST_CASE("GlyphArrangement hit_test uses half-advance thresholds",
 }
 
 TEST_CASE("GlyphArrangement position_for_index scans later lines",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     GlyphArrangement layout;
 
     TextLine first;
@@ -482,7 +482,7 @@ TEST_CASE("GlyphArrangement position_for_index scans later lines",
 }
 
 TEST_CASE("Parallelogram from_rect_shear contains skewed interior points",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     auto p = Parallelogram::from_rect_shear(0.0f, 0.0f, 10.0f, 10.0f, 3.0f);
 
     REQUIRE(p.contains(5.0f, 5.0f));
@@ -492,7 +492,7 @@ TEST_CASE("Parallelogram from_rect_shear contains skewed interior points",
 }
 
 TEST_CASE("Parallelogram negative shear contains expected interior",
-          "[canvas][layout][coverage]") {
+          "[canvas][layout]") {
     auto p = Parallelogram::from_rect_shear(10.0f, 20.0f, 12.0f, 8.0f, -4.0f);
 
     REQUIRE(p.contains(12.0f, 24.0f));

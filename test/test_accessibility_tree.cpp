@@ -180,7 +180,7 @@ TEST_CASE("find_by_role_and_label returns nullptr when absent",
 }
 
 TEST_CASE("snapshot preserves depth-first order and first matching view pointer",
-          "[a11y][harness][coverage]") {
+          "[a11y][harness]") {
     Probe root;
 
     auto group = std::make_unique<Probe>();
@@ -296,7 +296,7 @@ TEST_CASE("Accessibility snapshot surfaces ARIA state attributes",
 }
 
 TEST_CASE("Accessibility value interface default strings clamp and fall back",
-          "[a11y][coverage][issue-654]") {
+          "[a11y][issue-654]") {
     Probe root;
 
     auto high = std::make_unique<RangeProbe>(30.0);
@@ -323,7 +323,7 @@ TEST_CASE("Accessibility value interface default strings clamp and fall back",
 }
 
 TEST_CASE("Accessibility helper interfaces expose default selection behavior",
-          "[a11y][coverage][issue-654]") {
+          "[a11y][issue-654]") {
     TextProbe text("abcdef");
     REQUIRE(text.get_character_count() == 6);
     REQUIRE(text.get_selection() == std::pair<int, int>{0, 0});

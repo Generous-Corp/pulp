@@ -254,7 +254,7 @@ TEST_CASE("pulp pr native help stays available without shipyard",
 }
 
 TEST_CASE("pulp pr native validates option values before checkout lookup",
-          "[cli][shellout][pr][coverage][phase3]") {
+          "[cli][shellout][pr]") {
     if (!binary_available()) { SKIP("pulp binary not built"); }
 
     const auto bin = fs::absolute(pulp_binary());

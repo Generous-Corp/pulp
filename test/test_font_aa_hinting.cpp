@@ -24,9 +24,9 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 
-// Regression note from PR #2186: `Default` / `PlatformDefault` resolve
-// to `std::nullopt`, signalling "caller preserves the existing
-// per-context heuristic". Explicit modes still resolve to the fixed enum.
+// `Default` / `PlatformDefault` resolve to `std::nullopt`, signalling
+// "caller preserves the existing per-context heuristic". Explicit modes still
+// resolve to the fixed enum.
 
 TEST_CASE("AA mode: Default returns nullopt (caller decides)", "[font][aa][issue-2163]") {
     REQUIRE(sk_edging_for(AntiAliasMode::Default) == std::nullopt);

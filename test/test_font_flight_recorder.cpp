@@ -57,7 +57,7 @@ TEST_CASE("FlightRecorder: capacity overflow drops oldest", "[font][diagnostics]
 }
 
 TEST_CASE("FlightRecorder: snapshot is non-destructive and ordered",
-          "[font][diagnostics][coverage]") {
+          "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
     r.set_capacity(4);
@@ -106,7 +106,7 @@ TEST_CASE("FlightRecorder: shrinking capacity trims oldest records",
 }
 
 TEST_CASE("FlightRecorder: capacity=0 trims existing records immediately",
-          "[font][diagnostics][coverage]") {
+          "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
     r.set_capacity(3);
@@ -135,7 +135,7 @@ TEST_CASE("FlightRecorder: capacity=0 disables recording", "[font][diagnostics]"
 }
 
 TEST_CASE("FlightRecorder: disabled recording still advances sequence",
-          "[font][diagnostics][coverage]") {
+          "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
     r.set_capacity(1);
@@ -185,7 +185,7 @@ TEST_CASE("FlightRecorder: JSON drain is well-formed", "[font][diagnostics]") {
 }
 
 TEST_CASE("FlightRecorder: JSON drain preserves order and sequence fields",
-          "[font][diagnostics][coverage]") {
+          "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
     r.set_capacity(4);

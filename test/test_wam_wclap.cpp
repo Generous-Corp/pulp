@@ -107,7 +107,7 @@ TEST_CASE("WamDescriptorData to_json", "[format][wam]") {
 }
 
 TEST_CASE("WamDescriptorData defaults serialize every advertised capability",
-          "[format][wam][coverage][phase3]") {
+          "[format][wam]") {
     WamDescriptorData desc;
     desc.name = "Default";
     auto json = desc.to_json();
@@ -136,7 +136,7 @@ TEST_CASE("WamProcessorBridge initialization", "[format][wam]") {
 }
 
 TEST_CASE("WamProcessorBridge handles uninitialized and null-factory states",
-          "[format][wam][coverage][phase3]") {
+          "[format][wam]") {
     WamProcessorBridge uninitialized(create_test_wam);
     auto empty_desc = uninitialized.descriptor();
     REQUIRE(empty_desc.name.empty());
@@ -199,7 +199,7 @@ TEST_CASE("WamProcessorBridge audio processing", "[format][wam]") {
 }
 
 TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
-          "[format][wam][coverage][phase3]") {
+          "[format][wam]") {
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 
@@ -234,7 +234,7 @@ TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
 }
 
 TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
-          "[format][wam][coverage][phase3]") {
+          "[format][wam]") {
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 

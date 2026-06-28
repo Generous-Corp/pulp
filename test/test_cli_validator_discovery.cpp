@@ -338,7 +338,7 @@ TEST_CASE("first-existing priority path wins even when a healthy copy is further
 }
 
 TEST_CASE("discovery uses PATH-resolved validator when known paths are absent",
-          "[doctor][validators][coverage]") {
+          "[doctor][validators]") {
     StubEnv env;
     env.path_resolve["pluginval"] = "/opt/local/bin/pluginval";
     env.existing.insert("/opt/local/bin/pluginval");
@@ -354,7 +354,7 @@ TEST_CASE("discovery uses PATH-resolved validator when known paths are absent",
 }
 
 TEST_CASE("broken validator with unknown ownership requires manual sudo path",
-          "[doctor][validators][coverage]") {
+          "[doctor][validators]") {
     StubEnv env;
     env.existing.insert("/usr/local/bin/pluginval");
     // Deliberately omit owners entry: classify_ownership returns Unknown.
@@ -496,7 +496,7 @@ TEST_CASE("apply_fixes is a no-op on a fully healthy environment",
 }
 
 TEST_CASE("apply_fixes counts mixed healthy missing and root-owned reports",
-          "[doctor][validators][coverage]") {
+          "[doctor][validators]") {
     std::vector<vd::ValidatorReport> reports;
 
     vd::ValidatorReport healthy;
@@ -524,7 +524,7 @@ TEST_CASE("apply_fixes counts mixed healthy missing and root-owned reports",
 }
 
 TEST_CASE("render_report can emit ANSI color wrappers",
-          "[doctor][validators][coverage]") {
+          "[doctor][validators]") {
     vd::ValidatorReport healthy;
     healthy.name = "auval";
     healthy.status = vd::ValidatorStatus::Healthy;

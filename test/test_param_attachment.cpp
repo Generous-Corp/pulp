@@ -113,7 +113,7 @@ TEST_CASE("attach_knob on_change writes to store", "[view][attachment]") {
 }
 
 TEST_CASE("attach_knob formatter denormalizes values with units",
-          "[view][attachment][coverage][phase3]") {
+          "[view][attachment]") {
     StateStore store;
     setup_store(store);
 

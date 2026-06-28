@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""format_baseline_diff.py — companion-track U-3.
+"""format_baseline_diff.py — validator baseline diff gate.
 
 Diff the current validator output (auval/pluginval/clap-validator) on a
 representative Pulp plugin against the committed baseline in

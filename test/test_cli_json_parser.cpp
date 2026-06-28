@@ -25,7 +25,7 @@ json::JsonValue parse_json(const std::string& text) {
 }  // namespace
 
 TEST_CASE("json parser: object lookup returns matching keys and null for missing keys",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"name":"pulp","enabled":true})");
     REQUIRE(value.type == json::JsonValue::Object);
     REQUIRE(value.get("name") != nullptr);
@@ -34,14 +34,14 @@ TEST_CASE("json parser: object lookup returns matching keys and null for missing
 }
 
 TEST_CASE("json parser: get on non-objects is null-safe",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"(["name","pulp"])");
     REQUIRE(value.type == json::JsonValue::Array);
     CHECK(value.get("name") == nullptr);
 }
 
 TEST_CASE("json parser: string escapes decode the supported JSON escape set",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"s":"quote:\" slash:\/ backslash:\\ line:\n tab:\t cr:\r"})");
     auto* s = value.get("s");
     REQUIRE(s != nullptr);
@@ -54,7 +54,7 @@ TEST_CASE("json parser: string escapes decode the supported JSON escape set",
 }
 
 TEST_CASE("json parser: unicode escapes advance and use placeholder text",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"symbol":"A\u2665B","after":"ok"})");
     auto* symbol = value.get("symbol");
     REQUIRE(symbol != nullptr);
@@ -64,7 +64,7 @@ TEST_CASE("json parser: unicode escapes advance and use placeholder text",
 }
 
 TEST_CASE("json parser: short unicode escapes still advance safely",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"symbol":"A\u12"})");
     auto* symbol = value.get("symbol");
     REQUIRE(symbol != nullptr);
@@ -72,7 +72,7 @@ TEST_CASE("json parser: short unicode escapes still advance safely",
 }
 
 TEST_CASE("json parser: unknown escapes preserve the escaped character",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"s":"prefix\q\/suffix"})");
     auto* s = value.get("s");
     REQUIRE(s != nullptr);
@@ -80,14 +80,14 @@ TEST_CASE("json parser: unknown escapes preserve the escaped character",
 }
 
 TEST_CASE("json parser: unterminated strings return accumulated text",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     json::JsonParser parser{"\"partial\\ntext", 0};
     CHECK(parser.parse_string() == "partial\ntext");
     CHECK(parser.pos == std::string{"\"partial\\ntext"}.size());
 }
 
 TEST_CASE("json parser: arrays preserve order across mixed values",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"(["first",2,false,null,{"k":"v"}])");
     REQUIRE(value.type == json::JsonValue::Array);
     REQUIRE(value.arr().size() == 5);
@@ -100,7 +100,7 @@ TEST_CASE("json parser: arrays preserve order across mixed values",
 }
 
 TEST_CASE("json parser: empty object and array keep empty accessors stable",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto object = parse_json("{}");
     auto array = parse_json("[]");
     REQUIRE(object.type == json::JsonValue::Object);
@@ -110,7 +110,7 @@ TEST_CASE("json parser: empty object and array keep empty accessors stable",
 }
 
 TEST_CASE("json parser: const accessors return stable empty containers",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     const auto scalar = parse_json("true");
     CHECK(scalar.arr().empty());
     CHECK(scalar.obj().empty());
@@ -121,7 +121,7 @@ TEST_CASE("json parser: const accessors return stable empty containers",
 }
 
 TEST_CASE("json parser: numeric forms feed integer and floating accessors",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"neg":-42,"frac":3.5,"exp":1.25e2})");
     REQUIRE(value.get("neg") != nullptr);
     REQUIRE(value.get("frac") != nullptr);
@@ -132,7 +132,7 @@ TEST_CASE("json parser: numeric forms feed integer and floating accessors",
 }
 
 TEST_CASE("json parser: signed exponents and leading plus are parsed as numbers",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"small":-1.5e-2,"plus":+7})");
     REQUIRE(value.get("small") != nullptr);
     REQUIRE(value.get("plus") != nullptr);
@@ -141,19 +141,19 @@ TEST_CASE("json parser: signed exponents and leading plus are parsed as numbers"
 }
 
 TEST_CASE("json parser: string array accessor filters non-string entries",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"(["alpha",1,"beta",true,{"ignored":"yes"},"gamma"])");
     CHECK(value.as_string_array() == std::vector<std::string>{"alpha", "beta", "gamma"});
 }
 
 TEST_CASE("json parser: string array accessor defaults for non-arrays",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"items":["ignored"]})");
     CHECK(value.as_string_array().empty());
 }
 
 TEST_CASE("json parser: scalar accessors return defaults for mismatched types",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"s":"42","n":7,"b":true,"f":false,"nil":null})");
     CHECK(value.get("n")->as_string().empty());
     CHECK(value.get("s")->as_int() == 0);
@@ -163,7 +163,7 @@ TEST_CASE("json parser: scalar accessors return defaults for mismatched types",
 }
 
 TEST_CASE("json parser: duplicate object keys return the first inserted value",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"dup":"first","dup":"second"})");
     REQUIRE(value.get("dup") != nullptr);
     CHECK(value.get("dup")->as_string() == "first");
@@ -171,7 +171,7 @@ TEST_CASE("json parser: duplicate object keys return the first inserted value",
 }
 
 TEST_CASE("json parser: nested object paths remain readable through get",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"outer":{"inner":{"leaf":"value"}}})");
     auto* outer = value.get("outer");
     REQUIRE(outer != nullptr);
@@ -183,7 +183,7 @@ TEST_CASE("json parser: nested object paths remain readable through get",
 }
 
 TEST_CASE("json parser: duplicate object keys keep first-match lookup semantics",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"name":"first","name":"second"})");
     REQUIRE(value.type == json::JsonValue::Object);
     REQUIRE(value.obj().size() == 2);
@@ -192,7 +192,7 @@ TEST_CASE("json parser: duplicate object keys keep first-match lookup semantics"
 }
 
 TEST_CASE("json parser: unknown escapes preserve escaped byte",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(R"({"path":"a\qb","slash":"c\/d"})");
     REQUIRE(value.get("path") != nullptr);
     REQUIRE(value.get("slash") != nullptr);
@@ -201,7 +201,7 @@ TEST_CASE("json parser: unknown escapes preserve escaped byte",
 }
 
 TEST_CASE("json parser: scalar empty accessors share immutable defaults",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     const auto value = parse_json(R"("not an array or object")");
     REQUIRE(value.type == json::JsonValue::String);
     CHECK(value.arr().empty());
@@ -210,7 +210,7 @@ TEST_CASE("json parser: scalar empty accessors share immutable defaults",
 }
 
 TEST_CASE("json parser: whitespace is accepted around tokens",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json(" \n\t { \r\n \"k\" \t : \n [ true , false ] \n } ");
     auto* k = value.get("k");
     REQUIRE(k != nullptr);
@@ -220,21 +220,21 @@ TEST_CASE("json parser: whitespace is accepted around tokens",
 }
 
 TEST_CASE("json parser: invalid number tokens become zero-valued numbers",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json("-");
     CHECK(value.type == json::JsonValue::Number);
     CHECK(value.as_int() == 0);
 }
 
 TEST_CASE("json parser: empty input becomes a zero-valued number",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto value = parse_json("");
     CHECK(value.type == json::JsonValue::Number);
     CHECK(value.as_int() == 0);
 }
 
 TEST_CASE("json parser: lenient object and array delimiter recovery is stable",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto object = parse_json(R"({"a":1 "b":2})");
     REQUIRE(object.type == json::JsonValue::Object);
     REQUIRE(object.get("a") != nullptr);
@@ -251,7 +251,7 @@ TEST_CASE("json parser: lenient object and array delimiter recovery is stable",
 }
 
 TEST_CASE("json parser: delimiter recovery accepts adjacent object keys",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto object = parse_json(R"({"a":1 "b":2 "c":3})");
     REQUIRE(object.type == json::JsonValue::Object);
     REQUIRE(object.obj().size() == 3);
@@ -261,7 +261,7 @@ TEST_CASE("json parser: delimiter recovery accepts adjacent object keys",
 }
 
 TEST_CASE("json parser: delimiter recovery accepts adjacent array values",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto array = parse_json(R"([1 "two" {"three":3} true false null -4 +5 .6])");
     REQUIRE(array.type == json::JsonValue::Array);
     REQUIRE(array.arr().size() == 9);
@@ -278,7 +278,7 @@ TEST_CASE("json parser: delimiter recovery accepts adjacent array values",
 }
 
 TEST_CASE("json parser: EOF terminates lenient object and array recovery",
-          "[cli][json-parser][coverage][large]") {
+          "[cli][json-parser]") {
     auto object = parse_json(R"({"a":1 "b":2)");
     REQUIRE(object.type == json::JsonValue::Object);
     REQUIRE(object.obj().size() == 2);

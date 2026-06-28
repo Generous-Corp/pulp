@@ -247,13 +247,17 @@ at `--sample-rate` — no resampling), `--param <id>=<value>[@frame]`, and
 
 **`--param` values are PLAIN domain** (the parameter's native `min..max`), **not
 normalized `[0,1]`** — matching `PluginSlot::set_parameter` /
-`ParameterEvent::value`. Parameters are delivered block-quantized via
-`set_parameter` (forwarding the per-block queue too would double-apply each
-change on loaders that honor sample-accurate events); MIDI stays sample-accurate.
-The block stepper is a deliberate, callback-driven parallel to
-`OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse
-the core renderer directly); a block-partition-invariance test guards the two
-against drift.
+`ParameterEvent::value`. Parameters are delivered **sample-accurately**: the
+stepper windows each block's events with per-block sample offsets and the queue
+is forwarded straight to `PluginSlot::process`, which every loader applies at the
+event offset (CLAP/VST3/AU sample-accurate; LV2 block-rate by its control-port
+contract). We do NOT also call `set_parameter` — that would double-apply each
+change (once at offset 0, once at its real offset). MIDI is likewise
+sample-accurate. (A plugin that reads its own params once per block still steps
+at block boundaries — that is the plugin's rate, not the CLI's.) The block
+stepper is a deliberate, callback-driven parallel to `OfflineRenderHost::render`
+(PluginSlot has no `ProcessContext`, so it can't reuse the core renderer
+directly); a block-partition-invariance test guards the two against drift.
 
 ## Live capture-to-WAV — two modes, both LANDED
 
@@ -265,22 +269,42 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
   `assert` (presence / level / clip / NaN); the wrong window for steady-state
   `doctor` and quantization-limited for `compare`. `--audio-capture-frames <n>`
   sets the window.
-- **`--audio-capture-rolling <file>` (last-N, float).** Keeps the LAST
+- **`--audio-capture-rolling <file>` (last-N, float or int24).** Keeps the LAST
   (steady-state) window in a `RollingAudioCaptureBuffer` and writes a **float**
   WAV (no int16 floor) — the window `doctor` (THD/response) and `compare`
   (sub-−96 dBFS residuals) actually want. `--audio-capture-rolling-frames <n>`
-  sets the window. Uses the hold protocol so the off-RT materialize is safe while
-  the audio thread is still appending. One capture mode per invocation (mutually
-  exclusive with `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
+  sets the window; `--audio-capture-rolling-format int24` swaps the float WAV for
+  int24 (≈ −144 dBFS floor, smaller, universal DAW compatibility). Uses the hold
+  protocol so the off-RT materialize is safe while the audio thread is still
+  appending. One capture mode per invocation (mutually exclusive with
+  `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
 
-Float WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth::Float32)`.
+WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
+`Int16` (default overload), `Int24`, or `Float32`.
 
 ## Roadmap
 
 The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
-render` (offline plugin render), `pulp run --audio-capture-wav` (earliest-window
-int16), and `pulp run --audio-capture-rolling` (last-N float). The live realtime
-output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
-inspection* above). Remaining ideas are additive — e.g. a 24-bit-int capture
-alongside the float WAV, and sample-accurate (not block-quantized) `--param`
-automation in `render`.
+render` (offline plugin render, sample-accurate `--param @frame`), `pulp run
+--audio-capture-wav` (earliest-window int16), and `pulp run
+--audio-capture-rolling` (last-N, float or int24). The live realtime output tap
+they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live inspection*
+above). The harness's offline/live capture surface is feature-complete; further
+work is open-ended (e.g. additional analysis verbs), not a tracked backlog.
+
+## Sibling: the Audio Quality Lab (reference-vs-candidate perceptual artifacts)
+
+This skill covers presence / level / THD / response. For **reference-vs-candidate
+perceptual artifact** detection — "did this DSP change make it sound *worse*?"
+(transient smear, seam clicks) — there is a separate **opt-in** developer/CI tool,
+`tools/audio/quality-lab/` (Python, numpy + soundfile). It is additive: it does NOT
+change anything here and is never required to run the basic harness or `ctest`.
+
+- Run: `cd tools/audio/quality-lab && python -m quality_lab.cli run-p0a --mode bad`.
+- The P0a slice aligns a candidate to a reference (onset-map + local cross-correlation),
+  runs a transient-sharpness detector, and writes a `report.json` with per-onset
+  localization, coverage/confidence, and provenance.
+- Credibility: the detector is validated against an *independent* textbook phase
+  vocoder (`reference_pv.py`), not just its own synthetic degradation.
+- Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
+  `tools/audio/quality-lab/README.md`.

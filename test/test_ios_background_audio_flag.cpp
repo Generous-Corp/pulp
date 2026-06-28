@@ -28,7 +28,7 @@ TEST_CASE("ios_requires_background_audio is settable per plugin",
 }
 
 TEST_CASE("ios_requires_background_audio survives descriptor copies",
-          "[ios][descriptor][coverage][phase3]") {
+          "[ios][descriptor]") {
     PluginDescriptor live_looper;
     live_looper.name = "LiveLooper";
     live_looper.category = PluginCategory::Effect;

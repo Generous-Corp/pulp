@@ -83,7 +83,8 @@ Default formats are platform-gated:
 
 On macOS and Windows, AAX is optional. `pulp create` only scaffolds `aax_entry.cpp`
 and includes the AAX target when an AAX SDK is already configured via
-`PULP_AAX_SDK_DIR`. Linux and Ubuntu do not support AAX.
+`PULP_AAX_SDK_DIR` or auto-discovered in a standard user-local SDK path. Linux
+and Ubuntu do not support AAX.
 
 ### build
 
@@ -307,9 +308,12 @@ dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
   after the frame delay, then exit. Unlike `--audio-capture-wav`, this keeps the
   **last** (steady-state) window — the window `validate doctor`/`compare` want —
   with no int16 quantization floor. `--audio-capture-rolling-frames <n>` sets the
-  window (0 = as much as the ring holds). Implies `--headless` but still launches
-  the live audio device. The standalone runs one capture mode per invocation, so
-  this is mutually exclusive with `--audio-inspector`, `--audio-scope-json`, and
+  window (0 = as much as the ring holds). `--audio-capture-rolling-format
+  float|int24` picks the sample format — **float** (default, full precision) or
+  **int24** (integer, ≈ −144 dBFS floor, ~75% the size, universal DAW/tool
+  compatibility). Implies `--headless` but still launches the live audio device.
+  The standalone runs one capture mode per invocation, so this is mutually
+  exclusive with `--audio-inspector`, `--audio-scope-json`, and
   `--audio-capture-wav`.
 
 Display-only waveform controls:
@@ -880,6 +884,8 @@ pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artif
 pulp ship notarize --dry-run                       # print resolved argv, no submit
 pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
+pulp ship appcast --url https://example.com/MyApp-1.0.pkg --version 1.0.0
+pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key <base64-key>
 pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
@@ -889,9 +895,10 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
-| `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
+| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
+| `appcast`  | Generate a Sparkle-compatible appcast feed from a package URL or local artifact |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
 | `check`    | Check signing status of built desktop plugins or Android APK/AAB artifacts |
 | `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
@@ -899,12 +906,16 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
-`--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
-`.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
+`--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
+macOS `.app`/`.dmg`/plugin bundles, or Windows `.exe`/plugin bundles. `.pkg`
+installers are signed at creation time with a Developer ID **Installer**
+identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary.
+`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
+
+`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
@@ -914,6 +925,7 @@ without running the full release pipeline. Point it at a `.app`, `.dmg`, or
 
 ```bash
 pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+pulp ship share MyApp.app --identity "..." --output dist --entitlements entitlements.plist
 pulp ship share MyApp.app --dry-run        # print the plan, do nothing
 ```
 
@@ -926,13 +938,19 @@ chain as `pulp ship notarize` (App Store Connect API key preferred). `.dmg`
 inputs skip the wrap step; `.pkg` inputs are assumed already installer-signed
 and are only notarized + verified.
 
+For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
+instead of `artifacts/`, and `--entitlements <plist>` to override the default
+app-signing entitlements.
+
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
 
-`auv3-xcodeproj` generates a separate CMake Xcode build directory for an AUv3
-target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or `macosx`; default
-output is `build/xcode/<target>-<sdk>`. Use `--dry-run` to print the CMake
-invocation without requiring Xcode.
+`auv3-xcodeproj` generates a separate CMake Xcode build directory for a project
+that contains an AUv3 target. `--sdk` accepts `iphonesimulator`, `iphoneos`, or
+`macosx`; default output is `build/xcode/<target>-<sdk>`. The generated build
+hint targets `<target>_AUv3`. Use `--dry-run` to print the CMake invocation and
+build hint without requiring Xcode. For the macOS lane, the generated project
+also contains the runnable containing-app target `<target>_AUv3Host`.
 
 #### `pulp ship notarize`
 
@@ -1255,7 +1273,7 @@ file error.
 
 ### import-design
 
-**Status**: experimental
+**Status**: partial
 
 Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
 React JSX, or Google DESIGN.md source files into generated Pulp UI code.
@@ -1388,7 +1406,7 @@ Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--t
 
 The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
-`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix block-quantizes the change to the block containing that frame. Parameters are delivered block-quantized via `set_parameter` (sample-accurate parameter automation is a follow-up; MIDI is already sample-accurate). The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
+`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix delivers the change **sample-accurately** at that frame. The per-block parameter queue is forwarded straight to `PluginSlot::process`, which every loader applies at the event's sample offset — CLAP (`clap_event_param_value` at `header.time`), VST3 (`IParameterChanges` add-point), AU (`AudioUnitScheduleParameters` buffer offset); LV2 applies it block-rate, which is LV2's control-port contract. (A plugin that itself reads its parameters once per block will still step at block boundaries — that is the plugin's own rate, not the CLI's.) The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use
@@ -1421,6 +1439,15 @@ Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
 Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
 
+The live watch/relaunch loop is implemented by the C++ delegate (`pulp-cpp`).
+Normal installed/source builds ship the Rust `pulp` front end with that sibling
+delegate, so `pulp dev` forwards to the full watch loop when `pulp-cpp` is
+available. If the delegate is unavailable or fallthrough is disabled, the Rust
+fallback runs one configure/build pass, optionally runs tests, optionally
+launches once, and prints a watch-loop stub notice instead of watching for
+changes. The `--validate` and `--allow-unsupported-sdk` dev-loop behavior is
+therefore part of the delegated C++ path.
+
 ```bash
 pulp dev                                      # Watch and rebuild
 pulp dev --test                               # Watch, rebuild, run tests
@@ -1437,13 +1464,13 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--test`, `-t` | Run tests after each successful build |
+| `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
-| `--validate` | Run quick plugin dlopen validation after build |
-| `--run TARGET` | Launch TARGET from the build dir; relaunch on rebuild |
-| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT |
+| `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
-| `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
 | `-- args...` | Arguments passed to the launched app |
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
@@ -1452,7 +1479,7 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" marker. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling can read the advisory focus marker when it needs platform-specific behavior; `pulp loop` itself does not rewrite the build graph.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
@@ -1488,25 +1515,25 @@ See [docs/guides/focus-mode.md](../guides/focus-mode.md) for the full playbook (
 
 **Status**: usable
 
-Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in that was found. Mirrors what `pulp::host::PluginScanner` does at runtime. Useful for sanity-checking your local plug-in installation or for narrowing down which plug-in to feed to `pulp host`.
+Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle that was found. The installed Rust `pulp scan` path is a filesystem inventory: it does not dlopen plug-ins or query factories, so names are filename-derived and vendor / version / unique-id metadata is not surfaced. The C++ delegate (`pulp-cpp scan`) still owns the rich `pulp::host::PluginScanner` metadata path.
 
 ```bash
-pulp scan                           # Scan every supported format the build includes
+pulp scan                           # Filesystem inventory for every supported format
 pulp scan --format clap             # Scan only CLAP
 pulp scan --format vst3             # Only VST3
 pulp scan --format au               # Only AU v2
 pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
-pulp scan --no-load                 # Filesystem-only walk escape hatch
+pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
 Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary. Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
+On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
-`pulp scan --help` is short-circuited — it does NOT dlopen any plug-in, so it remains safe even when one of the installed plug-ins would crash the rich path.
+`pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
 
 ### host
 
@@ -1611,11 +1638,12 @@ pulp tool uninstall <id>            # Remove a pulp-managed tool, or an importer
 pulp tool path <id>                 # Print the absolute path to the installed tool's binary
 pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
 pulp tool doctor                    # Health check: which tools are installed, which are missing, which are unavailable on this platform
+pulp tool doctor <id> [--run]       # Check one tool; --run executes the resolved tool path with no args
 
 pulp add <importer>                 # Alias for `pulp tool install <importer>`
 ```
 
-Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local npm wrapper installed under `~/.pulp/tools/npm-packages/<id>/`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`. The aggregate form reports installable-but-missing tools without failing; the targeted form returns non-zero when the named tool is unknown, unavailable, or not installed. With `--run`, the targeted form executes the resolved tool path with no arguments and returns its exit code; `npm_package` entries use that path as their wrapper smoke check.
 
 **Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 

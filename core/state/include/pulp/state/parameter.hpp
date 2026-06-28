@@ -23,6 +23,34 @@ enum class ParamRate {
     AudioRate,
 };
 
+/// Declared semantic role of a parameter.
+///
+/// A designation lets the Processor author state *what a parameter means*
+/// rather than leaving format adapters to guess from its name and range.
+/// Adapters consult the declared designation first and fall back to a
+/// name/range heuristic only for parameters that declare `None`, so existing
+/// plugins keep working unchanged.
+///
+/// - `None`   — an ordinary parameter (the default). Adapters apply their
+///              legacy name/range heuristic to decide whether it is a bypass.
+/// - `Bypass` — a host-visible bypass control. Interpreted as a toggle with
+///              the threshold convention **off < 0.5, on >= 0.5**, regardless
+///              of the declared range: adapters short-circuit to pass-through
+///              audio when the current value is >= 0.5. Because of this
+///              threshold, format adapters present a declared `Bypass`
+///              parameter to the host as a two-state/boolean control even if
+///              its `ParamRange` is continuous. Declare this independently of
+///              the parameter's name.
+/// - `Reset`  — a host-visible momentary "reset / panic" control. It behaves
+///              as a trigger parameter (see `ParamInfo::is_trigger`): the host
+///              sets it, the Processor observes it for one block, and the
+///              value auto-resets to its default after the block.
+enum class ParamDesignation {
+    None,
+    Bypass,
+    Reset,
+};
+
 /// Defines the numeric range of a parameter, including normalization.
 ///
 /// Normalization maps the [min, max] range to [0, 1] for host automation.
@@ -244,7 +272,53 @@ struct ParamInfo {
 
     ParamRate rate = ParamRate::ControlRate;
     float smoothing_ramp_seconds = 0.0f; ///< 0 = off / immediate control-rate updates.
+
+    /// Declared semantic role. `None` (the default) preserves legacy behavior:
+    /// adapters fall back to their name/range bypass heuristic. Declaring
+    /// `Bypass` or `Reset` makes the role explicit and name-independent.
+    ParamDesignation designation = ParamDesignation::None;
+
+    /// Momentary "trigger" parameter. A trigger is a one-shot "do this now"
+    /// control (panic, reset, tap): the host or UI raises it, the Processor
+    /// observes it for exactly one process block, and the state plumbing
+    /// auto-resets it to its range default after the block
+    /// (see `StateStore::reset_triggers_rt`). A `Reset` designation implies a
+    /// trigger; an author may also set this directly for a custom one-shot.
+    ///
+    /// One-shot latch contract: a trigger value is **block-local**. Whatever
+    /// value is present during a process block — raised by the host/UI, or even
+    /// written by the Processor itself mid-block — is reset to the range default
+    /// at the END of that block. A trigger therefore never persists across
+    /// blocks; observe it within the block it fires. Format adapters reset
+    /// triggers on EVERY audio-callback exit, including bypass / pass-through
+    /// early-returns, so a panic/reset raised while bypassed still clears that
+    /// block rather than firing late on the next non-bypassed block.
+    bool is_trigger = false;
+
+    /// True when this parameter should auto-reset to its default after each
+    /// process block — i.e. it is an explicit trigger or carries the `Reset`
+    /// designation (which is defined to behave as a trigger).
+    bool auto_resets() const {
+        return is_trigger || designation == ParamDesignation::Reset;
+    }
 };
+
+/// Decide whether @p info is a bypass control.
+///
+/// Designation-first, heuristic-fallback: a declared `Bypass` designation
+/// wins regardless of name or range. A parameter that declares `None` falls
+/// back to the legacy name/range heuristic (a boolean parameter named
+/// "Bypass": step >= 1, range exactly [0, 1]) so existing plugins are
+/// unchanged. A non-`None`, non-`Bypass` designation is never a bypass.
+///
+/// This is the single source of truth shared by every format adapter, so the
+/// bypass contract cannot drift between VST3 / AU / CLAP.
+inline bool is_bypass_param(const ParamInfo& info) {
+    if (info.designation == ParamDesignation::Bypass) return true;
+    if (info.designation != ParamDesignation::None) return false;
+    return info.name == "Bypass" && info.range.step >= 1.0f &&
+           info.range.min == 0.0f && info.range.max == 1.0f;
+}
 
 /// Thread-safe atomic parameter value for lock-free audio/UI communication.
 ///
@@ -315,6 +389,15 @@ public:
 private:
     std::atomic<float> value_{0.0f};
     std::atomic<float> mod_offset_{0.0f};
+
+    // value_ / mod_offset_ are read and written on the audio thread through
+    // relaxed std::atomic<float> (see get()/set()/get_modulated()). If
+    // std::atomic<float> were not lock-free on a target, those accessors would
+    // fall back to a hidden mutex and violate the audio-thread no-lock contract.
+    // Fail the build instead. See docs/guides/dsp-threading.md "The three rules".
+    static_assert(std::atomic<float>::is_always_lock_free,
+                  "Pulp requires a lock-free std::atomic<float> for real-time-safe "
+                  "parameter access on the audio thread");
 };
 
 /// Callback signature for parameter change notifications.

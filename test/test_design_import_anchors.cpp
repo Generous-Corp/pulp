@@ -1,4 +1,4 @@
-// Phase 0a: tests for stable_anchor_id assignment on IRNode trees.
+// Tests for stable_anchor_id assignment on IRNode trees.
 // Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
 // Mirrors the TS-side tests in packages/pulp-import-ir/tests/anchors.test.ts.
 
@@ -176,10 +176,9 @@ TEST_CASE("adapter anchors use source_node_id when present",
 
 TEST_CASE("adapter strategy falls back to content-hash for nodes without IDs",
           "[view][import][anchors]") {
-    // Phase 0a soft-fail: missing source_node_id shouldn't crash the
-    // pipeline. The fallback uses the content-hash branch so the node
-    // still gets SOME anchor — better for downstream inspector use than
-    // an empty anchor.
+    // Missing source_node_id shouldn't crash the pipeline. The fallback uses
+    // the content-hash branch so the node still gets SOME anchor — better for
+    // downstream inspector use than an empty anchor.
     IRNode root = make_node("frame", {}, {}, "0:1");
     root.children.push_back(make_node("button", "OK"));  // no source_node_id
 
@@ -196,8 +195,8 @@ TEST_CASE("adapter strategy falls back to content-hash for nodes without IDs",
 TEST_CASE("assign_anchors preserves pre-existing stable_anchor_id values",
           "[view][import][anchors]") {
     // If an authored override has already set stable_anchor_id, the
-    // walker must leave it alone. This is how Phase 1 will honor
-    // user-pinned anchors for elements they want to track precisely.
+    // walker must leave it alone. This preserves user-pinned anchors for
+    // elements they want to track precisely.
     IRNode root = make_node("frame");
     root.stable_anchor_id = "pinned-by-user";
     root.children.push_back(make_node("text", "Hello"));
@@ -211,9 +210,8 @@ TEST_CASE("assign_anchors preserves pre-existing stable_anchor_id values",
 
 // ── parser entry-point integration ──────────────────────────────────────
 //
-// These verify the parsers we wired in Phase 0a actually call
-// assign_anchors with the right strategy and produce stable output
-// across re-imports of the same source.
+// These verify the parsers call assign_anchors with the right strategy and
+// produce stable output across re-imports of the same source.
 
 TEST_CASE("parse_figma_json populates anchors via the adapter strategy",
           "[view][import][anchors]") {
@@ -292,8 +290,8 @@ TEST_CASE("parse_claude_html re-tags provenance after delegating to stitch",
 TEST_CASE("parse_stitch_html regex-fallback path also assigns anchors",
           "[view][import][anchors]") {
     // Non-JSON input forces the regex fallback at the end of
-    // parse_stitch_html. The Phase 0a additions stamp provenance +
-    // confidence=DIVERGE and call assign_anchors on the regex-built tree.
+    // parse_stitch_html. The regex fallback stamps provenance +
+    // confidence=DIVERGE and calls assign_anchors on the regex-built tree.
     const std::string html = "<div><span>hello</span><span>world</span></div>";
     auto ir = parse_stitch_html(html);
 
@@ -326,8 +324,8 @@ TEST_CASE("parse_v0_tsx JSON path populates content-hash anchors",
 TEST_CASE("parse_v0_tsx structural TSX path assigns anchors",
           "[view][import][anchors]") {
     // Non-JSON TSX input takes the host-JSX structural extraction path.
-    // Phase 0a stamps DIVERGE confidence + anchors because dynamic React
-    // expressions still require runtime import.
+    // Structural extraction stamps DIVERGE confidence + anchors because
+    // dynamic React expressions still require runtime import.
     const std::string tsx =
         "<div className=\"flex-row gap-2\">"
         "<div className=\"flex-col p-2\">child</div>"
@@ -400,7 +398,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode emits @pulp-anchor comments",
     REQUIRE(js.find("// @pulp-anchor figma:0:1") != std::string::npos);
 }
 
-// ── Phase 0b: setAnchor() codegen — binds anchor to the live widget ─────
+// ── setAnchor() codegen — binds anchor to the live widget ───────────────
 
 TEST_CASE("web-compat codegen emits setAnchor calls per node",
           "[view][import][anchors][setAnchor]") {

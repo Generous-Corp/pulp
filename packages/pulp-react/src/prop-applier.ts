@@ -126,11 +126,12 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     }
     // Also arm the pointer dispatch path for mouse events. Do not do
     // this for onClick: that is the W3C click-on-release semantic and
-    // routes through on_click.
+    // routes through on_click; onClick alone intentionally does not arm
+    // pointer dispatch.
     // Imported JSX bundles install onMouseDown / onMouseMove / onMouseUp
-    // handlers that need to fire on press, not release. Without this,
-    // hit_test returns the widget with has_pointer=no and the bridge's
-    // pointer event lambda never fires for mouse* event types.
+    // handlers that need to fire on press, not release. Without pointer
+    // registration, hit_test returns the widget with has_pointer=no and
+    // the bridge's pointer event lambda never fires for mouse* event types.
     if (eventName === 'mousedown' || eventName === 'mouseup' ||
         eventName === 'mousemove') {
         call('registerPointer', id);

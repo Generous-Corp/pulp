@@ -106,13 +106,19 @@ TEST_CASE("audio render stepper: event windowing, incl. exactly on a block bound
     events.midi = midi;
 
     // Reconstruct absolute frames inside the callback from a running block start.
+    // The driver forwards this exact queue to PluginSlot::process, so the event
+    // VALUE must survive windowing alongside the offset — that is what makes
+    // `--param @frame` sample-accurate rather than block-quantized.
     std::vector<std::uint64_t> param_frames, midi_frames;
+    std::vector<float> param_values;
     std::uint64_t running = 0;
     auto capture = [&](audio::BufferView<float>&, const audio::BufferView<const float>&,
                        const midi::MidiBuffer& mi, midi::MidiBuffer&,
                        const state::ParameterEventQueue& pq, int n) {
-        for (const auto& e : pq.events())
+        for (const auto& e : pq.events()) {
             param_frames.push_back(running + static_cast<std::uint64_t>(e.sample_offset));
+            param_values.push_back(e.value);
+        }
         for (const auto& e : mi)
             midi_frames.push_back(running + static_cast<std::uint64_t>(e.sample_offset));
         running += static_cast<std::uint64_t>(n);
@@ -124,8 +130,10 @@ TEST_CASE("audio render stepper: event windowing, incl. exactly on a block bound
     REQUIRE(ar::render_blocks(spec_for(block, frames), no_input, events, out, st, capture));
 
     // Every event lands at its requested absolute frame — the frame-256 event in
-    // the block that STARTS at 256 (offset 0), not the prior block.
+    // the block that STARTS at 256 (offset 0), not the prior block — carrying its
+    // value (here value == frame), so the forwarded queue is sample-accurate.
     REQUIRE(param_frames == std::vector<std::uint64_t>{0, 256, 300});
+    REQUIRE(param_values == std::vector<float>{0.0f, 256.0f, 300.0f});
     REQUIRE(midi_frames == std::vector<std::uint64_t>{256});
     REQUIRE(st.params_dispatched == 3);
     REQUIRE(st.midi_dispatched == 1);

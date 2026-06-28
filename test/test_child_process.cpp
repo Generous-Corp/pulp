@@ -326,7 +326,7 @@ TEST_CASE("output capture respects max byte limits",
 }
 
 TEST_CASE("zero max output bytes drains without capturing lines",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     std::vector<std::string> stdout_lines;
     std::vector<std::string> stderr_lines;
 
@@ -413,7 +413,7 @@ TEST_CASE("line callback buffers partial stdout without trailing newline",
 }
 
 TEST_CASE("line callback buffers partial stderr without trailing newline",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     std::vector<std::string> stderr_lines;
     ProcessOptions opts;
     opts.timeout_ms = 5000;
@@ -435,7 +435,7 @@ TEST_CASE("line callback buffers partial stderr without trailing newline",
 }
 
 TEST_CASE("move assignment transfers a running child process",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
 #ifdef _WIN32
@@ -459,7 +459,7 @@ TEST_CASE("move assignment transfers a running child process",
 }
 
 TEST_CASE("move constructor transfers a running child process",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
 #ifdef _WIN32
@@ -553,7 +553,7 @@ TEST_CASE("cancel after natural exit reports completed process result",
 
 #ifndef _WIN32
 TEST_CASE("process reuse clears timeout state from prior run",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
     ProcessOptions timeout_opts;
@@ -575,7 +575,7 @@ TEST_CASE("process reuse clears timeout state from prior run",
 }
 
 TEST_CASE("process reuse clears cancellation state from prior run",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
     REQUIRE(cp.start("sleep", {"30"}));
@@ -595,7 +595,7 @@ TEST_CASE("process reuse clears cancellation state from prior run",
 }
 
 TEST_CASE("start cancels a running child before launching replacement",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
     REQUIRE(cp.start("sleep", {"30"}));
@@ -613,7 +613,7 @@ TEST_CASE("start cancels a running child before launching replacement",
 }
 
 TEST_CASE("failed restart after completion does not retain stale child state",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
     REQUIRE(cp.start("/bin/sh", {"-c", "printf before-failure"}));
@@ -636,7 +636,7 @@ TEST_CASE("failed restart after completion does not retain stale child state",
 }
 
 TEST_CASE("argv arguments preserve empty strings spaces and punctuation",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ProcessOptions opts;
     opts.timeout_ms = 5000;
 
@@ -653,7 +653,7 @@ TEST_CASE("argv arguments preserve empty strings spaces and punctuation",
 }
 
 TEST_CASE("line callback emits empty lines and preserves order",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     std::vector<std::string> lines;
     ProcessOptions opts;
     opts.timeout_ms = 5000;
@@ -671,7 +671,7 @@ TEST_CASE("line callback emits empty lines and preserves order",
 }
 
 TEST_CASE("line callback joins a line split across drain passes",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     std::vector<std::string> lines;
     ProcessOptions opts;
     opts.timeout_ms = 5000;
@@ -691,7 +691,7 @@ TEST_CASE("line callback joins a line split across drain passes",
 }
 
 TEST_CASE("line callback honors output cap before later complete lines",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     std::vector<std::string> lines;
     ProcessOptions opts;
     opts.timeout_ms = 5000;
@@ -710,7 +710,7 @@ TEST_CASE("line callback honors output cap before later complete lines",
 }
 
 TEST_CASE("read_available_output drains stdout without losing stderr result",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
 
     ProcessOptions opts;
@@ -791,7 +791,7 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
 
 #ifndef _WIN32
 TEST_CASE("ChildProcess destructor cancels a still-running POSIX child",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     int pid = -1;
     const auto before_scope = std::chrono::steady_clock::now();
 
@@ -811,7 +811,7 @@ TEST_CASE("ChildProcess destructor cancels a still-running POSIX child",
 }
 
 TEST_CASE("ChildProcess move construction transfers a running POSIX child",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess source;
     REQUIRE(source.start("/bin/sh", {"-c", "printf moved"}));
 
@@ -823,7 +823,7 @@ TEST_CASE("ChildProcess move construction transfers a running POSIX child",
 }
 
 TEST_CASE("ChildProcess move assignment transfers a running POSIX child",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess source;
     REQUIRE(source.start("/bin/sh", {"-c", "printf assigned; exit 6"}));
 
@@ -836,7 +836,7 @@ TEST_CASE("ChildProcess move assignment transfers a running POSIX child",
 }
 
 TEST_CASE("cancel escalates when a POSIX child ignores SIGTERM",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
     REQUIRE(cp.start(
         "/bin/sh",
@@ -863,7 +863,7 @@ TEST_CASE("cancel escalates when a POSIX child ignores SIGTERM",
 }
 
 TEST_CASE("timeout escalates when a POSIX child ignores SIGTERM",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ProcessOptions opts;
     opts.timeout_ms = 100;
 
@@ -878,7 +878,7 @@ TEST_CASE("timeout escalates when a POSIX child ignores SIGTERM",
 }
 
 TEST_CASE("starting a POSIX replacement cancels a still-running child",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
     REQUIRE(cp.start(
         "/bin/sh",
@@ -908,7 +908,7 @@ TEST_CASE("starting a POSIX replacement cancels a still-running child",
 }
 
 TEST_CASE("starting a POSIX replacement drains a previously observed exit",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
     REQUIRE(cp.start("/bin/sh", {"-c", "printf first; exit 3"}));
 
@@ -929,7 +929,7 @@ TEST_CASE("starting a POSIX replacement drains a previously observed exit",
 }
 
 TEST_CASE("POSIX wait consumes cached fast-exit status after polling",
-          "[child_process][edge][coverage]") {
+          "[child_process][edge]") {
     ChildProcess cp;
     REQUIRE(cp.start("/bin/sh", {"-c", "printf cached-status; exit 9"}));
 

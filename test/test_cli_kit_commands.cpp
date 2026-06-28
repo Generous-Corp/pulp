@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Focused tests for Phase 1 `pulp kit` metadata-only validation.
+// Focused tests for `pulp kit` metadata-only validation.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -276,8 +276,8 @@ int run_success_command(const std::string& cmd) {
 
 }  // namespace
 
-TEST_CASE("pulp kit validates the Phase 1 kit-lane fixture manifests",
-          "[cli][kit][phase1]") {
+TEST_CASE("pulp kit validates metadata-only kit fixture manifests",
+          "[cli][kit]") {
     const auto root = repo_root();
     for (const auto& rel : {
              "fixtures/packages/gain-dsp-kit",
@@ -297,7 +297,7 @@ TEST_CASE("pulp kit validates the Phase 1 kit-lane fixture manifests",
 }
 
 TEST_CASE("pulp kit rejects incompatible requires.pulp constraints",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -348,7 +348,7 @@ TEST_CASE("pulp kit rejects incompatible requires.pulp constraints",
 }
 
 TEST_CASE("pulp kit rejects incompatible requires.cpp constraints",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -393,7 +393,7 @@ TEST_CASE("pulp kit rejects incompatible requires.cpp constraints",
 }
 
 TEST_CASE("pulp kit rejects malformed requires.cpp constraints",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -438,7 +438,7 @@ TEST_CASE("pulp kit rejects malformed requires.cpp constraints",
 }
 
 TEST_CASE("pulp kit rejects fractional requires.cpp constraints",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -483,7 +483,7 @@ TEST_CASE("pulp kit rejects fractional requires.cpp constraints",
 }
 
 TEST_CASE("pulp kit rejects unknown Pulp module dependencies",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -528,7 +528,7 @@ TEST_CASE("pulp kit rejects unknown Pulp module dependencies",
 }
 
 TEST_CASE("pulp kit rejects manifest array entries that violate the schema",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -581,7 +581,7 @@ TEST_CASE("pulp kit rejects manifest array entries that violate the schema",
 }
 
 TEST_CASE("pulp kit rejects malformed Pulp module dependencies",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -626,7 +626,7 @@ TEST_CASE("pulp kit rejects malformed Pulp module dependencies",
 }
 
 TEST_CASE("pulp kit search separates local kit and content lanes",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
 
     int exit_code = 0;
@@ -648,7 +648,7 @@ TEST_CASE("pulp kit search separates local kit and content lanes",
 }
 
 TEST_CASE("pulp kit search discovers verified local kit and content archives",
-          "[cli][kit][phase5][archive]") {
+          "[cli][kit][archive]") {
     const auto root = repo_root() / "fixtures/packages";
     TempDir search_root;
     const auto kit_archive = search_root.path / "basic-ui-kit.pulpkit";
@@ -719,7 +719,7 @@ TEST_CASE("pulp kit metadata can inspect content archives but cannot plan, apply
 }
 
 TEST_CASE("pulp kit search filters local manifests by package kind",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
 
     int exit_code = 0;
@@ -732,13 +732,13 @@ TEST_CASE("pulp kit search filters local manifests by package kind",
 }
 
 TEST_CASE("pulp kit search rejects invalid lane filters before scanning",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
     REQUIRE(cmd_kit({"search", "basic", "--root", root.string(), "--lane", "dependency", "--json"}) == 2);
 }
 
 TEST_CASE("pulp kit validation accepts template generated-project golden diffs",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     const auto root = repo_root();
     const auto fixture = root / "fixtures/packages/simple-plugin-template";
 
@@ -751,7 +751,7 @@ TEST_CASE("pulp kit validation accepts template generated-project golden diffs",
 }
 
 TEST_CASE("pulp kit validation rejects template kits without generated-project diffs",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "templates" / "basic-plugin" / "CMakeLists.txt",
                "cmake_minimum_required(VERSION 3.24)\nproject(MissingTemplateDiff)\n");
@@ -795,7 +795,7 @@ TEST_CASE("pulp kit validation rejects template kits without generated-project d
 }
 
 TEST_CASE("pulp package JSON Schema carries kind-specific review evidence rules",
-          "[cli][kit][phase3][schema]") {
+          "[cli][kit][schema]") {
     const auto schema = read_file(repo_root() / "tools/kits/pulp-package.schema.json");
 
     REQUIRE(schema.find(R"("allOf")") != std::string::npos);
@@ -811,7 +811,7 @@ TEST_CASE("pulp package JSON Schema carries kind-specific review evidence rules"
 }
 
 TEST_CASE("pulp kit validation accepts UI screenshot evidence paths",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     const auto root = repo_root();
     const auto fixture = root / "fixtures/packages/basic-ui-kit";
 
@@ -829,7 +829,7 @@ TEST_CASE("pulp kit validation accepts UI screenshot evidence paths",
 }
 
 TEST_CASE("pulp kit init scaffolds structured authoring provenance",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
 
     REQUIRE(cmd_kit({"init", "--kind", "source",
@@ -848,7 +848,7 @@ TEST_CASE("pulp kit init scaffolds structured authoring provenance",
 }
 
 TEST_CASE("pulp kit validation verifies hashed evidence objects",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -914,7 +914,7 @@ TEST_CASE("pulp kit validation verifies hashed evidence objects",
 }
 
 TEST_CASE("pulp kit validation requires a per-asset license inventory",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -959,7 +959,7 @@ TEST_CASE("pulp kit validation requires a per-asset license inventory",
 }
 
 TEST_CASE("pulp kit validation rejects mismatched evidence digests",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -1015,7 +1015,7 @@ TEST_CASE("pulp kit validation rejects mismatched evidence digests",
 }
 
 TEST_CASE("pulp kit validation rejects missing UI screenshot evidence paths",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "ui" / "index.js", "export const fixtureName = 'Missing Evidence';\n");
     write_file(kit.path / "ui" / "tokens.json", "{}\n");
@@ -1068,7 +1068,7 @@ TEST_CASE("pulp kit validation rejects missing UI screenshot evidence paths",
 }
 
 TEST_CASE("pulp kit validation rejects UI kits with no screenshot evidence",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "ui" / "index.js", "export const fixtureName = 'No Evidence';\n");
     write_file(kit.path / "ui" / "tokens.json", "{}\n");
@@ -1117,7 +1117,7 @@ TEST_CASE("pulp kit validation rejects UI kits with no screenshot evidence",
 }
 
 TEST_CASE("pulp kit verify evaluates Pulp screenshot profile reports after plan review",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerify)\n");
 
@@ -1138,7 +1138,7 @@ TEST_CASE("pulp kit verify evaluates Pulp screenshot profile reports after plan 
 }
 
 TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after review",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyRender)\n");
     write_fake_screenshot_tool(project.path, "fake png bytes");
@@ -1163,7 +1163,7 @@ TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after revi
 }
 
 TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot baselines",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualDiff)\n");
     write_fake_screenshot_tool(project.path, "fake png bytes");
@@ -1262,7 +1262,7 @@ TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot ba
 }
 
 TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatch",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualMismatch)\n");
     write_fake_screenshot_tool(project.path, "actual bytes");
@@ -1360,7 +1360,7 @@ TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatc
 }
 
 TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualTolerance)\n");
     write_fake_screenshot_tool(project.path, "actual bytes");
@@ -1462,7 +1462,7 @@ TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
 }
 
 TEST_CASE("pulp kit verify rejects negative visual diff tolerance without screenshot execution",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBadVisualTolerance)\n");
 
@@ -1552,7 +1552,7 @@ TEST_CASE("pulp kit verify rejects negative visual diff tolerance without screen
 }
 
 TEST_CASE("pulp kit verify rejects mismatched screenshot profile reports",
-          "[cli][kit][phase3]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBad)\n");
 
@@ -1630,8 +1630,8 @@ TEST_CASE("pulp kit verify rejects mismatched screenshot profile reports",
     REQUIRE(cmd_kit({"verify", kit.path.string(), "--project", project.path.string(), "--json"}) == 1);
 }
 
-TEST_CASE("pulp kit validates Phase 4 graph, node-pack, and native-component fixtures",
-          "[cli][kit][phase4]") {
+TEST_CASE("pulp kit validates graph, node-pack, and native-component fixtures",
+          "[cli][kit]") {
     const auto root = repo_root();
     for (const auto& rel : {
              "fixtures/packages/level-graph-node-kit",
@@ -1648,8 +1648,8 @@ TEST_CASE("pulp kit validates Phase 4 graph, node-pack, and native-component fix
     }
 }
 
-TEST_CASE("pulp kit verify checks Phase 4 graph, node-pack, and native profiles",
-          "[cli][kit][phase4]") {
+TEST_CASE("pulp kit verify checks graph, node-pack, and native profiles",
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4Verify)\n");
     const auto root = repo_root();
@@ -1666,7 +1666,7 @@ TEST_CASE("pulp kit verify checks Phase 4 graph, node-pack, and native profiles"
 }
 
 TEST_CASE("pulp kit verify rejects executable node-pack inspect profiles",
-          "[cli][kit][phase4]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitBadNodeVerify)\n");
 
@@ -1745,7 +1745,7 @@ TEST_CASE("pulp kit verify rejects executable node-pack inspect profiles",
 }
 
 TEST_CASE("pulp kit validation rejects dynamic-native kits on iOS and AUv3",
-          "[cli][kit][phase4]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Unsupported native kit\n");
     write_file(kit.path / "validation" / "node-pack-smoke.json", "{}\n");
@@ -1796,8 +1796,8 @@ TEST_CASE("pulp kit validation rejects dynamic-native kits on iOS and AUv3",
     REQUIRE(has_issue(result, "dynamic-native-unsupported"));
 }
 
-TEST_CASE("pulp kit validation requires realtime contracts for Phase 4 kits",
-          "[cli][kit][phase4]") {
+TEST_CASE("pulp kit validation requires realtime contracts for graph and native kits",
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Missing realtime contract\n");
     write_file(kit.path / "include" / "gain_core.h", "#pragma once\n");
@@ -1853,7 +1853,7 @@ TEST_CASE("pulp kit validation requires realtime contracts for Phase 4 kits",
 }
 
 TEST_CASE("pulp kit validation rejects incomplete realtime contracts for graph kits",
-          "[cli][kit][phase4]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Incomplete graph realtime contract\n");
     write_file(kit.path / "src" / "node.cpp", "int graph_node() { return 0; }\n");
@@ -1908,7 +1908,7 @@ TEST_CASE("pulp kit validation rejects incomplete realtime contracts for graph k
 }
 
 TEST_CASE("pulp kit validation reports actionable manifest errors",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir tmp;
     write_file(tmp.path / "pulp.package.json", R"JSON({
   "schema": "pulp-package-v1",
@@ -1952,7 +1952,7 @@ TEST_CASE("pulp kit validation reports actionable manifest errors",
 }
 
 TEST_CASE("pulp kit validation rejects ids unsafe as project path components",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     TempDir tmp;
     write_file(tmp.path / "ui" / "main.js", "export function setup() {}\n");
     write_file(tmp.path / "licenses" / "LICENSE.txt", "MIT\n");
@@ -1996,7 +1996,7 @@ TEST_CASE("pulp kit validation rejects ids unsafe as project path components",
 }
 
 TEST_CASE("pulp kit inspect JSON summarizes without executing package files",
-          "[cli][kit][phase1]") {
+          "[cli][kit]") {
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     auto result = validate_manifest_path(fixture);
     auto json = validation_result_json(result);
@@ -2007,7 +2007,7 @@ TEST_CASE("pulp kit inspect JSON summarizes without executing package files",
 }
 
 TEST_CASE("pulp kit plan previews project mutations without writing files",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPlan)\n");
 
@@ -2068,7 +2068,7 @@ TEST_CASE("pulp kit rejects preview alias to preserve plan/apply trust wording",
 }
 
 TEST_CASE("pulp kit plan resolves dependency packages only through curated registry",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPlanDeps)\n");
     write_file(project.path / "tools" / "packages" / "registry.json", R"JSON({
@@ -2183,7 +2183,7 @@ TEST_CASE("pulp kit rejects unsafe CMake target metadata before generated files"
 }
 
 TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI files",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitApply)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
@@ -2232,7 +2232,7 @@ TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI file
 }
 
 TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned files",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     TempDir first_pack;
     TempDir second_pack;
@@ -2268,7 +2268,7 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
 }
 
 TEST_CASE("pulp kit apply rolls back copied files when ownership lock cannot be written",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRollback)\n");
     write_file(project.path / ".pulp", "not a directory\n");
@@ -2284,7 +2284,7 @@ TEST_CASE("pulp kit apply rolls back copied files when ownership lock cannot be 
 }
 
 TEST_CASE("pulp kit apply rejects symlinks inside exported directories before copying",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     TempDir kit_copy;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitSymlinkReject)\n");
@@ -2312,7 +2312,7 @@ TEST_CASE("pulp kit apply rejects symlinks inside exported directories before co
 }
 
 TEST_CASE("pulp kit remove deletes only lock-recorded owned files",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRemove)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
@@ -2336,7 +2336,7 @@ TEST_CASE("pulp kit remove deletes only lock-recorded owned files",
 }
 
 TEST_CASE("pulp kit apply builds, tests, and removes cleanly from a CMake project",
-          "[cli][kit][phase2][acceptance]") {
+          "[cli][kit][acceptance]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt",
                "cmake_minimum_required(VERSION 3.24)\n"
@@ -2368,7 +2368,7 @@ TEST_CASE("pulp kit apply builds, tests, and removes cleanly from a CMake projec
 }
 
 TEST_CASE("pulp kit remove rejects tampered lock paths outside the kit-owned tree",
-          "[cli][kit][phase2][security]") {
+          "[cli][kit][security]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRemoveTamper)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
@@ -2389,8 +2389,8 @@ TEST_CASE("pulp kit remove rejects tampered lock paths outside the kit-owned tre
     REQUIRE(fs::exists(lock_path));
 }
 
-TEST_CASE("pulp kit apply copies Phase 4 graph, node-pack, and native exports",
-          "[cli][kit][phase4]") {
+TEST_CASE("pulp kit apply copies graph, node-pack, and native exports",
+          "[cli][kit]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4)\n");
     const auto root = repo_root();
@@ -2456,7 +2456,7 @@ TEST_CASE("pulp kit apply copies Phase 4 graph, node-pack, and native exports",
 }
 
 TEST_CASE("pulp kit pack writes archive with SHA-256 manifest",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir tmp;
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     const auto out = tmp.path / "basic-ui-kit.pulpkit";
@@ -2473,7 +2473,7 @@ TEST_CASE("pulp kit pack writes archive with SHA-256 manifest",
 }
 
 TEST_CASE("pulp kit pack rejects symlinks before writing archive payloads",
-          "[cli][kit][phase2][security]") {
+          "[cli][kit][security]") {
     TempDir tmp;
     TempDir kit_copy;
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
@@ -2498,7 +2498,7 @@ TEST_CASE("pulp kit pack rejects symlinks before writing archive payloads",
 }
 
 TEST_CASE("pulp kit accepts packed pulpkit archives for validate, plan, and apply",
-          "[cli][kit][phase2][archive]") {
+          "[cli][kit][archive]") {
     TempDir tmp;
     TempDir project;
     write_file(project.path / "CMakeLists.txt",
@@ -2537,7 +2537,7 @@ TEST_CASE("pulp kit accepts packed pulpkit archives for validate, plan, and appl
 }
 
 TEST_CASE("pulp kit rejects pulpkit archives without hash manifests",
-          "[cli][kit][phase2][archive][security]") {
+          "[cli][kit][archive][security]") {
     TempDir tmp;
     TempDir project;
     write_file(project.path / "CMakeLists.txt",
@@ -2560,7 +2560,7 @@ TEST_CASE("pulp kit rejects pulpkit archives without hash manifests",
 }
 
 TEST_CASE("pulp kit rejects pulpkit archives with unlisted payload files",
-          "[cli][kit][phase2][archive][security]") {
+          "[cli][kit][archive][security]") {
     TempDir tmp;
     TempDir project;
     write_file(project.path / "CMakeLists.txt",
@@ -2583,7 +2583,7 @@ TEST_CASE("pulp kit rejects pulpkit archives with unlisted payload files",
 }
 
 TEST_CASE("pulp kit publish dry-run enforces publish policy without remote mutation",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     TempDir tmp;
     const auto fixture = tmp.path / "basic-ui-kit";
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
@@ -2603,7 +2603,7 @@ TEST_CASE("pulp kit publish dry-run enforces publish policy without remote mutat
 }
 
 TEST_CASE("pulp kit publish dry-run rejects mismatched signed registry manifests",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     TempDir tmp;
     const auto fixture = tmp.path / "basic-ui-kit";
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
@@ -2616,7 +2616,7 @@ TEST_CASE("pulp kit publish dry-run rejects mismatched signed registry manifests
 }
 
 TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     TempDir tmp;
     const auto fixture = tmp.path / "basic-ui-kit";
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
@@ -2641,7 +2641,7 @@ TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files",
 }
 
 TEST_CASE("pulp kit publish dry-run rejects agent-authored packages without human review",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Agent kit\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -2686,7 +2686,7 @@ TEST_CASE("pulp kit publish dry-run rejects agent-authored packages without huma
 }
 
 TEST_CASE("pulp kit publish dry-run rejects structured agent provenance without human review",
-          "[cli][kit][phase5]") {
+          "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Structured agent kit\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -2738,7 +2738,7 @@ TEST_CASE("pulp kit publish dry-run rejects structured agent provenance without 
 }
 
 TEST_CASE("pulp kit apply rejects non-project roots before writing files",
-          "[cli][kit][phase2]") {
+          "[cli][kit]") {
     TempDir not_project;
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 

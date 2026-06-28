@@ -20,9 +20,9 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 # CHOC: header-only C++ utilities (ISC license)
 # Used for: JS engine abstraction, MIDI utilities, WebView (drag-and-drop)
 #
-# ⚠ INTERIM FORK PIN — see pulp #3619. Temporarily pinned to a fork tag that
-# adds WebView file drag-and-drop (window.chocStartFileDrag([...]) +
-# `chocfilesdropped` event) — the PoC from upstream Tracktion/choc#64. The fork
+# ⚠ INTERIM FORK PIN — temporarily pinned to a fork tag that adds WebView
+# file drag-and-drop (window.chocStartFileDrag([...]) + `chocfilesdropped`
+# event) — the PoC from upstream Tracktion/choc#64. The fork
 # is upstream f0f5cdf5a938 + 5 commits, 0 behind, so reverting is a one-line
 # repoint. WHEN choc#64 MERGES UPSTREAM, restore:
 #     GIT_REPOSITORY https://github.com/Tracktion/choc.git
@@ -32,7 +32,7 @@ pulp_register_fetchcontent_source(choc REF df148a41a6bc9cbd67727532c4d5c9d8aa6d5
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/danielraffel/choc.git
-    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC; see pulp #3619
+    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC
 )
 FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
@@ -41,8 +41,8 @@ pulp_patch_choc_v8("${choc_SOURCE_DIR}")
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
 # On Android + iOS, Dawn is bundled in Skia's pre-built libs — skip
-# FetchContent. wgpu-native doesn't publish iOS prebuilds (tracked in
-# #359); pulp's render path is Dawn-only whenever Skia is the backend
+# FetchContent. wgpu-native doesn't publish iOS prebuilds; pulp's
+# render path is Dawn-only whenever Skia is the backend
 # anyway (pulp::render::GpuSurface uses Dawn's C++ API under PULP_HAS_SKIA).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
@@ -165,8 +165,8 @@ if(PULP_ENABLE_GPU)
         # On Android + iOS, Dawn is bundled in Skia's pre-built libs.
         # Set PULP_HAS_WEBGPU so the render subsystem builds without
         # needing the desktop wgpu-native FetchContent path. iOS in
-        # particular has no wgpu-native prebuild and won't until #359
-        # is resolved — Dawn is the only viable backend, which matches
+        # particular has no wgpu-native prebuild yet — Dawn is the only
+        # viable backend, which matches
         # how pulp::render uses Dawn when PULP_HAS_SKIA is set.
         if(ANDROID OR IOS)
             set(PULP_HAS_WEBGPU TRUE)
@@ -185,7 +185,7 @@ if(PULP_ENABLE_GPU)
     endif()
 endif()
 
-# pulp-internal #62 — LOUD perf-regression guard. PULP_ENABLE_GPU=ON
+# LOUD perf-regression guard. PULP_ENABLE_GPU=ON
 # but no Skia found silently falls back to CoreGraphics CPU rendering.
 # That fallback is ~5-10× slower than Skia/Dawn for live JS-driven UIs
 # (Spectr's editor.js drag went from 7% CPU on Skia to 100% CPU on CG
@@ -222,10 +222,10 @@ if(PULP_ENABLE_GPU AND NOT PULP_HAS_SKIA)
         "  ╚══════════════════════════════════════════════════════════════════════╝")
 endif()
 
-# SDK-release safety net for pulp #1817. The release workflow turns this
-# option ON via -DPULP_REQUIRE_GPU_FOR_SDK=ON so a missing Skia tarball
-# is a hard configure error instead of a silent CG-only build that ships
-# downstream to every SDK consumer.
+# SDK-release safety net. The release workflow turns this option ON via
+# -DPULP_REQUIRE_GPU_FOR_SDK=ON so a missing Skia tarball is a hard
+# configure error instead of a silent CG-only build that ships downstream
+# to every SDK consumer.
 if(PULP_ENABLE_GPU AND PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_HAS_SKIA)
     message(FATAL_ERROR
         "PULP_REQUIRE_GPU_FOR_SDK=ON but Skia binaries were not found at "
@@ -454,7 +454,7 @@ endif()
 # `git ls-remote https://github.com/google/highway.git refs/tags/1.2.0`).
 # Pinning the SHA instead of the tag avoids intermittent
 # `fatal: invalid reference: 1.2.0` failures when GIT_SHALLOW combines
-# with tag-name resolution under load (Pulp #1930). SHA pins are also
+# with tag-name resolution under load. SHA pins are also
 # more cache-friendly: FetchContent's UPDATE_DISCONNECTED check sees a
 # stable ref and skips the re-fetch on every reconfigure.
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)

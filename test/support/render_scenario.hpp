@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file render_scenario.hpp
-/// Typed offline render scenarios over HeadlessHost (harness PR 2).
+/// Typed offline render scenarios over HeadlessHost.
 ///
 /// A RenderScenario describes one deterministic render — processor
 /// factory, sample rate, block size, channel layout, duration, input

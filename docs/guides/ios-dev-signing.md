@@ -123,14 +123,19 @@ cmake --build build-ios-device --target MyKnob_HostApp --config Release -- -sdk 
 . tools/scripts/source_dev_creds.sh
 pulp build
 pulp ship sign --identity "${PULP_SIGN_IDENTITY}"
-pulp ship notarize                # picks ASC key fields up from sourced env
 pulp ship package --version 0.1.0
+pulp ship notarize --path artifacts/<produced-pkg-or-dmg>
 ```
 
-`pulp ship notarize` reads `PULP_NOTARY_KEY_PATH`, `PULP_NOTARY_KEY_ID`,
-and `PULP_NOTARY_ISSUER_ID` from the environment, so sourcing the
-helper first is all the wiring needed. See the [`ship` skill](../../.agents/skills/ship/SKILL.md)
-for the full notarization precedence and the legacy Apple-ID lane.
+`pulp ship notarize --path` reads `PULP_NOTARY_KEY_PATH`,
+`PULP_NOTARY_KEY_ID`, and `PULP_NOTARY_ISSUER_ID` from the environment,
+so sourcing the helper first is all the credential wiring needed. Submit
+the packaged artifact that `pulp ship package` produced; use
+`pulp ship release --pkg` or `pulp ship release --dmg` when you want the
+sign/package/notarize stages composed by the CLI. See the
+[`ship` skill](../../.agents/skills/ship/SKILL.md) for the full
+notarization precedence, installer-identity notes, and the legacy
+Apple-ID lane.
 
 ## What MUST change for App Store release
 

@@ -271,7 +271,7 @@ TEST_CASE("BufferingReader signals finished when source ends", "[audio][bufferin
 }
 
 TEST_CASE("BufferingReader preserves buffered tail after worker reaches EOF",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
 
     std::atomic<int> emitted{0};
@@ -385,7 +385,7 @@ TEST_CASE("BufferingReader stop is safe to call multiple times", "[audio][buffer
 }
 
 TEST_CASE("BufferingReader rejects invalid start configuration",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
     std::atomic<int> callback_count{0};
     reader.set_read_callback([&](float*, int, int) {
@@ -413,7 +413,7 @@ TEST_CASE("BufferingReader rejects invalid start configuration",
 }
 
 TEST_CASE("BufferingReader invalid restart clears prior running state",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
     reader.set_read_callback([](float* dest, int frames, int channels) {
         for (int i = 0; i < frames * channels; ++i) dest[i] = 1.0f;
@@ -451,7 +451,7 @@ TEST_CASE("BufferingReader channel mismatch returns 0", "[audio][buffering]") {
 }
 
 TEST_CASE("BufferingReader invalid read destinations are no-ops",
-          "[audio][buffering][codecov]") {
+          "[audio][buffering]") {
     BufferingReader reader;
 
     REQUIRE(reader.read(nullptr, 16, 1) == 0);
@@ -471,7 +471,7 @@ TEST_CASE("BufferingReader invalid read destinations are no-ops",
 }
 
 TEST_CASE("BufferingReader invalid start parameters do not launch a worker",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
 
     reader.start(0, 1024);
@@ -493,7 +493,7 @@ TEST_CASE("BufferingReader invalid start parameters do not launch a worker",
 }
 
 TEST_CASE("BufferingReader read rejects overflowing frame-channel requests",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
     reader.set_read_callback([](float* dest, int frames, int channels) {
         for (int i = 0; i < frames * channels; ++i) dest[i] = 1.0f;
@@ -510,7 +510,7 @@ TEST_CASE("BufferingReader read rejects overflowing frame-channel requests",
 }
 
 TEST_CASE("BufferingReader clamps over-reported callback frame counts",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
     std::atomic<int> next{0};
     reader.set_read_callback([&](float* dest, int frames, int channels) {
@@ -538,7 +538,7 @@ TEST_CASE("BufferingReader clamps over-reported callback frame counts",
 }
 
 TEST_CASE("BufferingReader fills ring buffers smaller than the worker chunk",
-          "[audio][buffering][coverage]") {
+          "[audio][buffering]") {
     BufferingReader reader;
     std::atomic<int> emitted{0};
     reader.set_read_callback([&](float* dest, int frames, int channels) {

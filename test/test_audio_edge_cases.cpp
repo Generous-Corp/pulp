@@ -68,7 +68,7 @@ void process_once(pulp::format::HeadlessHost& host,
 }  // namespace
 
 TEST_CASE("Audio frame fill clamps partial reads and preserves valid samples",
-          "[audio][edges][frame-fill][codecov]") {
+          "[audio][edges][frame-fill]") {
     float buffer[] = {
         1.0f, 2.0f,
         3.0f, 4.0f,

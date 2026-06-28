@@ -91,7 +91,7 @@ TEST_CASE("RectangleList subtract handles no-op and full-cover cases",
 }
 
 TEST_CASE("RectangleList subtract emits all side bands around a center cut",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -213,7 +213,7 @@ TEST_CASE("Rect enclosing union preserves non-empty side",
 }
 
 TEST_CASE("Rect right bottom and empty semantics cover zero and negative extents",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect normal{2, 3, 4, 5};
     REQUIRE(normal.right() == Catch::Approx(6.0f));
     REQUIRE(normal.bottom() == Catch::Approx(8.0f));
@@ -226,7 +226,7 @@ TEST_CASE("Rect right bottom and empty semantics cover zero and negative extents
 }
 
 TEST_CASE("Rect contains keeps right and bottom edges exclusive",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect r{-2, -3, 5, 7};
 
     REQUIRE(r.contains(-2.0f, -3.0f));
@@ -238,7 +238,7 @@ TEST_CASE("Rect contains keeps right and bottom edges exclusive",
 }
 
 TEST_CASE("Rect intersection is commutative for overlapping rectangles",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect a{-5, 2, 12, 6};
     Rect b{0, -1, 4, 10};
 
@@ -250,7 +250,7 @@ TEST_CASE("Rect intersection is commutative for overlapping rectangles",
 }
 
 TEST_CASE("Rect intersection of contained rectangle returns contained bounds",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect outer{-10, -10, 30, 30};
     Rect inner{-2, 3, 5, 6};
 
@@ -259,7 +259,7 @@ TEST_CASE("Rect intersection of contained rectangle returns contained bounds",
 }
 
 TEST_CASE("Rect intersection treats edge and corner contact as empty",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect base{0, 0, 10, 10};
 
     REQUIRE_FALSE(base.intersects({10, 2, 3, 3}));
@@ -270,7 +270,7 @@ TEST_CASE("Rect intersection treats edge and corner contact as empty",
 }
 
 TEST_CASE("Rect enclosing union handles negative coordinates",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect a{-10, 5, 4, 5};
     Rect b{3, -2, 8, 3};
 
@@ -279,7 +279,7 @@ TEST_CASE("Rect enclosing union handles negative coordinates",
 }
 
 TEST_CASE("Rect enclosing union of two empty rectangles is empty",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     Rect a{5, 6, 0, 7};
     Rect b{-1, -2, 8, 0};
 
@@ -288,7 +288,7 @@ TEST_CASE("Rect enclosing union of two empty rectangles is empty",
 }
 
 TEST_CASE("RectangleList preserves insertion order for indexing and iteration",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({3, 0, 1, 1});
     rl.add({1, 0, 1, 1});
@@ -306,7 +306,7 @@ TEST_CASE("RectangleList preserves insertion order for indexing and iteration",
 }
 
 TEST_CASE("RectangleList contains checks negative-coordinate rectangles",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({-10, -5, 4, 8});
     rl.add({5, -2, 3, 3});
@@ -318,7 +318,7 @@ TEST_CASE("RectangleList contains checks negative-coordinate rectangles",
 }
 
 TEST_CASE("RectangleList intersects ignores empty query rectangles",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -328,7 +328,7 @@ TEST_CASE("RectangleList intersects ignores empty query rectangles",
 }
 
 TEST_CASE("RectangleList bounding box for a single rectangle is that rectangle",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({-4, 8, 6, 2});
 
@@ -336,7 +336,7 @@ TEST_CASE("RectangleList bounding box for a single rectangle is that rectangle",
 }
 
 TEST_CASE("RectangleList total_area intentionally double-counts overlaps",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
     rl.add({5, 5, 10, 10});
@@ -345,7 +345,7 @@ TEST_CASE("RectangleList total_area intentionally double-counts overlaps",
 }
 
 TEST_CASE("RectangleList clipped preserves source order and leaves source intact",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
     rl.add({20, 20, 10, 10});
@@ -360,7 +360,7 @@ TEST_CASE("RectangleList clipped preserves source order and leaves source intact
 }
 
 TEST_CASE("RectangleList clipped against disjoint bounds returns empty list",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
     rl.add({20, 20, 5, 5});
@@ -369,7 +369,7 @@ TEST_CASE("RectangleList clipped against disjoint bounds returns empty list",
 }
 
 TEST_CASE("RectangleList clipped handles negative clip coordinates",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({-10, -10, 8, 8});
     rl.add({-3, -3, 8, 8});
@@ -382,7 +382,7 @@ TEST_CASE("RectangleList clipped handles negative clip coordinates",
 }
 
 TEST_CASE("RectangleList subtract top strip keeps the lower remainder",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -393,7 +393,7 @@ TEST_CASE("RectangleList subtract top strip keeps the lower remainder",
 }
 
 TEST_CASE("RectangleList subtract bottom strip keeps the upper remainder",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -404,7 +404,7 @@ TEST_CASE("RectangleList subtract bottom strip keeps the upper remainder",
 }
 
 TEST_CASE("RectangleList subtract left strip keeps the right remainder",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -415,7 +415,7 @@ TEST_CASE("RectangleList subtract left strip keeps the right remainder",
 }
 
 TEST_CASE("RectangleList subtract right strip keeps the left remainder",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -426,7 +426,7 @@ TEST_CASE("RectangleList subtract right strip keeps the left remainder",
 }
 
 TEST_CASE("RectangleList subtract vertical middle split creates left and right pieces",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -438,7 +438,7 @@ TEST_CASE("RectangleList subtract vertical middle split creates left and right p
 }
 
 TEST_CASE("RectangleList subtract horizontal middle split creates top and bottom pieces",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -450,7 +450,7 @@ TEST_CASE("RectangleList subtract horizontal middle split creates top and bottom
 }
 
 TEST_CASE("RectangleList subtract corner overlap creates two non-overlapping pieces",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -465,7 +465,7 @@ TEST_CASE("RectangleList subtract corner overlap creates two non-overlapping pie
 }
 
 TEST_CASE("RectangleList subtract overlap extending past left edge",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
 
@@ -478,7 +478,7 @@ TEST_CASE("RectangleList subtract overlap extending past left edge",
 }
 
 TEST_CASE("RectangleList subtract applies independently to multiple rectangles",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
     rl.add({20, 0, 10, 10});
@@ -491,7 +491,7 @@ TEST_CASE("RectangleList subtract applies independently to multiple rectangles",
 }
 
 TEST_CASE("RectangleList repeated subtracts work on previously split pieces",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 12, 12});
 
@@ -507,7 +507,7 @@ TEST_CASE("RectangleList repeated subtracts work on previously split pieces",
 }
 
 TEST_CASE("RectangleList clear allows reuse without stale bounds",
-          "[canvas][rect][coverage][phase3-large]") {
+          "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 100, 100});
     rl.clear();
