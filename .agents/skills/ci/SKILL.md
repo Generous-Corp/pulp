@@ -609,10 +609,12 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   workflow only needs the PulpEffect AU/VST3/CLAP bundles, not GPU examples
   such as `pulp-design-tool`.
 - **Build-and-Test workflow_dispatch is Shipyard PR validation.** Preserve
-  `-DPULP_ENABLE_GPU=OFF` on the workflow_dispatch configure path in
-  `.github/workflows/build.yml`: the local self-hosted macOS runner may not
-  have the pinned Skia archive, while pull_request validation already disables
-  example bundles and release workflows own GPU/SDK coverage.
+  `-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF` on the
+  workflow_dispatch configure path in `.github/workflows/build.yml`: the local
+  self-hosted macOS runner may not have the pinned Skia archive, and no-GPU
+  dispatches must not link example bundles that require the GPU plugin view
+  host. Pull-request validation also disables example bundles, while nightly /
+  release workflows own full example/product and GPU coverage.
   When adding optional shell arguments in `build.yml` (for example macOS-only
   `-G Ninja`), use bash arrays and expand them as `"${args[@]}"`; scalar
   `$args` trips actionlint/shellcheck word-splitting checks.
