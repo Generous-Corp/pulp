@@ -343,6 +343,52 @@ TEST_CASE("MpeVoiceAllocator tolerates zero polyphony",
     REQUIRE_FALSE(alloc.last_was_glide());
 }
 
+TEST_CASE("MpeVoiceAllocator glide survives stealing a releasing same-channel voice",
+          "[midi][mpe]") {
+    // Polyphony 1, all on channel 1. A note that received NoteOff is
+    // releasing() but still active(); its channel glide refcount was
+    // already removed in the NoteOff path. Stealing that releasing voice
+    // must NOT decrement the refcount a second time — otherwise the
+    // refcount the just-placed note bumped is wrongly zeroed and the next
+    // legato note-on reports a re-attack instead of a glide.
+    MpeVoiceAllocator<TestVoice> alloc{1};
+
+    alloc.dispatch(note_on_event(1, 60, 100, 1));   // first note, channel 1
+    REQUIRE_FALSE(alloc.last_was_glide());
+
+    alloc.dispatch(note_off_event(1, 1));           // note id=1 starts releasing
+    REQUIRE(alloc.voice(0).active());               // releasing voices stay active
+    REQUIRE(alloc.voice(0).releasing());
+
+    // No free voice → steals the releasing id=1. The new note bumps the
+    // channel-1 refcount; the steal path must leave that refcount intact.
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    REQUIRE(alloc.active_count() == 1);
+
+    // Genuine legato: a third note on channel 1 while id=2 is still held.
+    alloc.dispatch(note_on_event(1, 64, 100, 3));
+    REQUIRE(alloc.last_was_glide());                // false on the old code
+}
+
+TEST_CASE("MpeVoiceAllocator balances glide refcount when no voice is placed",
+          "[midi][mpe]") {
+    // Zero polyphony: observe_note_on() increments the channel refcount
+    // unconditionally, but no voice is ever placed. The increment must be
+    // balanced so the channel doesn't read glide-held forever — a later
+    // note-on on the same channel must not be misclassified as legato.
+    MpeVoiceAllocator<TestVoice> alloc{0};
+    REQUIRE(alloc.polyphony() == 0);
+
+    alloc.dispatch(note_on_event(1, 60, 100, 1));   // leaks ch1 refcount on old code
+    REQUIRE_FALSE(alloc.last_was_glide());
+
+    // Second note-on on the same channel. With the leak, the stale
+    // refcount makes this report glide; balanced, it reports no glide.
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    REQUIRE_FALSE(alloc.last_was_glide());           // true on the old code
+    REQUIRE(alloc.active_count() == 0);
+}
+
 TEST_CASE("MpeGlideDetector flags overlap on same channel", "[midi][mpe]") {
     MpeGlideDetector glide;
     MpeNoteState a; a.channel = 1; a.note = 60; a.note_id = 1;
