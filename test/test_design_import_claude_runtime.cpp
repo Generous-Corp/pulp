@@ -245,12 +245,12 @@ TEST_CASE("parse_claude_html_with_runtime against the real Spectr fixture "
           "[view][import][issue-468][.fixture]") {
     const char* fixture = std::getenv("PULP_CLAUDE_BUNDLE_FIXTURE");
     if (!fixture || !*fixture) {
-        SUCCEED("PULP_CLAUDE_BUNDLE_FIXTURE not set — skipping real-bundle harness test");
+        SKIP("PULP_CLAUDE_BUNDLE_FIXTURE not set; real-bundle harness test cannot run");
         return;
     }
     std::ifstream f(fixture);
     if (!f.is_open()) {
-        SUCCEED("fixture not readable, skipping: " << fixture);
+        SKIP("fixture not readable; real-bundle harness test cannot run: " << fixture);
         return;
     }
     std::ostringstream ss;
