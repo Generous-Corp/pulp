@@ -515,3 +515,52 @@ TEST_CASE("AAX model truncates long labels and falls back for empty parameter na
     REQUIRE(result.definition.components[0].short_name.size() == 31);
     REQUIRE(result.definition.components[0].short_name == "ThisPluginNameIsDefinitelyLonge");
 }
+
+// AAX audit topic: parameter taper mapping. A binding must preserve whether a
+// parameter is linear, log/skewed, or discrete/enum so the host plays back the
+// correct automation curve and step count. Previously only linear + a single
+// discrete step_count were asserted; a dropped skew or wrong step_count would
+// pass silently.
+TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][model]") {
+    auto codes = valid_codes();
+    auto descriptor = descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}});
+    descriptor.name = "TaperEffect";
+
+    ConfigurableProcessor::configure(
+        std::move(descriptor),
+        {
+            // Linear gain 0..1.
+            {.id = 1, .name = "Gain", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}},
+            // Log/skewed frequency 20..20k, 1 kHz at the normalized midpoint.
+            {.id = 2, .name = "Freq", .unit = "Hz",
+             .range = pulp::state::ParamRange::with_centre(20.0f, 20000.0f, 1000.0f, 1000.0f)},
+            // Enum/discrete: 3 positions (0,1,2) via step = 1.
+            {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f}},
+        });
+
+    auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(result.ok);
+    REQUIRE(result.definition.parameters.size() == 3);
+
+    const auto& gain = result.definition.parameters[0];
+    const auto& freq = result.definition.parameters[1];
+    const auto& mode = result.definition.parameters[2];
+
+    // Linear taper: skew == 1, continuous.
+    REQUIRE(gain.range.is_linear());
+    REQUIRE(gain.range.skew == 1.0f);
+    REQUIRE_FALSE(gain.discrete);
+
+    // Log taper survives into the binding: non-linear skew, and the normalized
+    // midpoint still maps back near the chosen 1 kHz centre.
+    REQUIRE_FALSE(freq.range.is_linear());
+    REQUIRE(freq.range.skew != 1.0f);
+    REQUIRE_FALSE(freq.discrete);
+    const float mid = freq.range.denormalize(0.5f);
+    REQUIRE(mid > 999.0f);
+    REQUIRE(mid < 1001.0f);
+
+    // Enum/discrete taper: 3 steps (0,1,2).
+    REQUIRE(mode.discrete);
+    REQUIRE(mode.step_count == 3u);
+}
