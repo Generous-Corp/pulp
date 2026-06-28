@@ -91,8 +91,12 @@ Projects that want AAX must include `AAX` in `FORMATS` and provide:
 - `AAX_NATIVE_CODE`
 - `aax_entry.cpp`
 
-If the SDK is missing, `pulp status`, `pulp doctor`, and `pulp create` now point
-you back to the Avid download page instead of guessing.
+If the SDK is missing, `pulp status` and `pulp doctor` point you back to the
+Avid download page instead of guessing. `pulp create` follows the same optional
+boundary: default macOS/Windows plugin scaffolds include `AAX` and
+`aax_entry.cpp` only when an AAX SDK is configured via `PULP_AAX_SDK_DIR` or
+auto-discovered in a standard user-local SDK path; otherwise the generated
+project omits AAX and can opt in later.
 
 ## Validation Workflow
 
@@ -136,7 +140,9 @@ Pulp now handles AAX as a first-class optional format:
 
 - `pulp status` reports detected AAX SDKs on macOS/Windows and explicit unsupported status on Linux/Ubuntu
 - `pulp doctor` reports optional AAX SDK and validator discovery on macOS/Windows
-- `pulp create` scaffolds `aax_entry.cpp` on macOS/Windows but keeps AAX disabled until you opt in
+- `pulp create` scaffolds `aax_entry.cpp` on macOS/Windows only when the
+  optional AAX SDK is configured or auto-discovered; otherwise the default
+  project omits AAX and builds the other supported formats
 - `pulp validate` uses the validator when present and explains what to install when it is not
 
 That keeps the day-to-day developer UX clear without bundling any Avid code.

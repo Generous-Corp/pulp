@@ -38,8 +38,17 @@ public:
     const T& get() const { return value_; }
     operator const T&() const { return value_; }
 
-    /// Set the value (updates both cache and tree)
+    /// Set the value (updates both cache and tree).
+    ///
+    /// Short-circuits a redundant write-through: if the new value equals the
+    /// current cached value AND the property is already materialized in the
+    /// tree, the write (and its listener notification) is skipped. The
+    /// present-check is essential — when the property is absent and the cache
+    /// is still sitting on `default_`, a `set(default_)` MUST materialize the
+    /// property, so it must not be swallowed by the value-equality test.
     void set(const T& new_value) {
+        if (tree_ && value_ == new_value && tree_->has(property_name_))
+            return;
         value_ = new_value;
         if (tree_)
             tree_->set(property_name_, PropertyValue(new_value));
@@ -85,19 +94,37 @@ private:
     void update_from_variant(const PropertyValue& val);
 };
 
-// Specializations for common types
+// Whether the incoming variant means "the property is absent" — i.e. it was
+// removed from the tree (StateTree::remove notifies with an empty
+// PropertyValue{}) or never existed (StateTree::get of an unknown key returns
+// std::monostate). This is the ONLY signal for absence: a property that is
+// still present but holds an unexpected/uncoercible type (e.g. a string where
+// this cache wants a bool) is NOT absent, and the cache must keep its prior
+// value rather than reverting to the default.
+inline bool property_is_absent(const PropertyValue& val) {
+    return std::holds_alternative<std::monostate>(val);
+}
+
+// Specializations for common types. Each reverts to `default_` when the
+// property is absent (removed), applies the value on a type match (with the
+// documented numeric coercion for double), and otherwise leaves the cache
+// unchanged so a present-but-mismatched value does not clobber it.
 template<> inline void CachedProperty<bool>::update_from_variant(const PropertyValue& val) {
-    if (auto* b = std::get_if<bool>(&val)) value_ = *b;
+    if (property_is_absent(val)) value_ = default_;
+    else if (auto* b = std::get_if<bool>(&val)) value_ = *b;
 }
 template<> inline void CachedProperty<int64_t>::update_from_variant(const PropertyValue& val) {
-    if (auto* i = std::get_if<int64_t>(&val)) value_ = *i;
+    if (property_is_absent(val)) value_ = default_;
+    else if (auto* i = std::get_if<int64_t>(&val)) value_ = *i;
 }
 template<> inline void CachedProperty<double>::update_from_variant(const PropertyValue& val) {
-    if (auto* d = std::get_if<double>(&val)) value_ = *d;
+    if (property_is_absent(val)) value_ = default_;
+    else if (auto* d = std::get_if<double>(&val)) value_ = *d;
     else if (auto* i = std::get_if<int64_t>(&val)) value_ = static_cast<double>(*i);
 }
 template<> inline void CachedProperty<std::string>::update_from_variant(const PropertyValue& val) {
-    if (auto* s = std::get_if<std::string>(&val)) value_ = *s;
+    if (property_is_absent(val)) value_ = default_;
+    else if (auto* s = std::get_if<std::string>(&val)) value_ = *s;
 }
 
 }  // namespace pulp::state

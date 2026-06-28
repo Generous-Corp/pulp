@@ -600,3 +600,151 @@ TEST_CASE("frontmatter-less DESIGN.md handles emphasis, slashes, rgb(), refs, an
     // A non-dimension spacing value is skipped, not stored.
     REQUIRE(result.ir.tokens.dimensions.find("spacing-weird") == result.ir.tokens.dimensions.end());
 }
+
+// ── DESIGN.md 0.3.0 format coverage ─────────────────────────────────────
+// The format spec was bumped 0.1.1 → 0.3.0. The changes relevant to Pulp's
+// consumer (importer) side are: any-valid-CSS-color values, arbitrary-depth
+// nested token declarations, bare-number spacing, and an unknown-top-level-key
+// warning. Each is covered below in the structured-frontmatter path.
+
+// (0.3.0) ── frontmatter colors accept any valid CSS color, no spurious warn ─
+TEST_CASE("frontmatter colors accept named/functional CSS colors without a color-shape warning",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\n"
+        "name: CSS Colors\n"
+        "colors:\n"
+        "  a-hex6: \"#1A2B3C\"\n"
+        "  a-hex8: \"#1A2B3C80\"\n"
+        "  a-hex4: \"#abcd\"\n"
+        "  a-named: cornflowerblue\n"
+        "  a-transparent: transparent\n"
+        "  a-rgb: \"rgb(10, 20, 30)\"\n"
+        "  a-rgba: \"rgba(10, 20, 30, 0.5)\"\n"
+        "  a-hsl: \"hsl(200 50% 40%)\"\n"
+        "  a-oklch: \"oklch(0.7 0.1 200)\"\n"
+        "  a-colormix: \"color-mix(in srgb, red 40%, blue)\"\n"
+        "---\n";
+    auto result = parse_designmd(yaml);
+    // Every value above is a valid CSS color → no color-shape diagnostic at all.
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "color-shape"));
+    // Values are preserved verbatim (the spec keeps the original format).
+    REQUIRE(result.ir.tokens.colors.at("a-named") == "cornflowerblue");
+    REQUIRE(result.ir.tokens.colors.at("a-oklch") == "oklch(0.7 0.1 200)");
+    REQUIRE(result.ir.tokens.colors.at("a-hex8") == "#1A2B3C80");
+    REQUIRE(result.ir.tokens.colors.at("a-hex4") == "#abcd");
+}
+
+// (0.3.0) ── a genuinely invalid color value still warns ────────────────
+TEST_CASE("frontmatter color that is not a CSS color or reference still warns",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\nname: Bad\ncolors:\n  primary: \"#000000\"\n  oops: not-a-color\n---\n";
+    auto result = parse_designmd(yaml);
+    REQUIRE(has_diag_code(result.diagnostics, "color-shape"));
+    // It is still stored (we never silently drop a token).
+    REQUIRE(result.ir.tokens.colors.at("oops") == "not-a-color");
+}
+
+// (0.3.0) ── arbitrary-depth nested color tokens resolve via dot paths ───
+TEST_CASE("nested color declarations emit dot-path tokens and resolve as references",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\n"
+        "name: Nested\n"
+        "colors:\n"
+        "  background:\n"
+        "    light: \"#ffffff\"\n"
+        "    dark: \"#000000\"\n"
+        "  brand:\n"
+        "    accent:\n"
+        "      strong: \"#ff0066\"\n"
+        "components:\n"
+        "  panel:\n"
+        "    backgroundColor: \"{colors.background.light}\"\n"
+        "    accent: \"{colors.brand.accent.strong}\"\n"
+        "---\n";
+    auto result = parse_designmd(yaml);
+    // Nested tokens are keyed by their dot-joined path.
+    REQUIRE(result.ir.tokens.colors.at("background.light") == "#ffffff");
+    REQUIRE(result.ir.tokens.colors.at("background.dark") == "#000000");
+    REQUIRE(result.ir.tokens.colors.at("brand.accent.strong") == "#ff0066");
+    // And a {colors.a.b.c} reference resolves to the nested primitive.
+    REQUIRE(result.ir.tokens.strings.at("components.panel.backgroundColor") == "#ffffff");
+    REQUIRE(result.ir.tokens.strings.at("components.panel.accent") == "#ff0066");
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "broken-ref"));
+}
+
+// (0.3.0) ── nested + bare-number spacing/rounded resolve as dimensions ──
+TEST_CASE("nested and unitless dimension tokens resolve in rounded/spacing",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\n"
+        "name: Dims\n"
+        "spacing:\n"
+        "  base: 8\n"            // bare number per spec → 8px
+        "  scale:\n"
+        "    lg: 40px\n"
+        "rounded:\n"
+        "  pill: 9999px\n"
+        "components:\n"
+        "  card:\n"
+        "    padding: \"{spacing.scale.lg}\"\n"
+        "    gap: \"{spacing.base}\"\n"
+        "---\n";
+    auto result = parse_designmd(yaml);
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-base") == 8.0f);
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-scale.lg") == 40.0f);
+    REQUIRE(result.ir.tokens.dimensions.at("rounded-pill") == 9999.0f);
+    // Nested + bare-number references both resolve to "<n>px" strings.
+    REQUIRE(result.ir.tokens.strings.at("components.card.padding") == "40px");
+    REQUIRE(result.ir.tokens.strings.at("components.card.gap") == "8px");
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "broken-ref"));
+}
+
+// (0.3.0) ── unknown top-level frontmatter keys warn but don't error ─────
+TEST_CASE("unknown top-level frontmatter key emits an unknown-key warning",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\n"
+        "name: Typo\n"
+        "colors:\n"
+        "  primary: \"#000000\"\n"
+        "elevation:\n"            // not a schema key
+        "  card: 0 2px 4px\n"
+        "---\n";
+    auto result = parse_designmd(yaml);
+    bool found_elevation = false;
+    for (const auto& d : result.diagnostics) {
+        if (d.code == "unknown-key") {
+            REQUIRE(d.severity == DesignMdSeverity::warning);  // never an error
+            if (d.path == "elevation") found_elevation = true;
+        }
+    }
+    REQUIRE(found_elevation);
+    // The known keys parse normally alongside the warning.
+    REQUIRE(result.ir.tokens.colors.at("primary") == "#000000");
+}
+
+// (0.3.0) ── the canonical schema keys never trip the unknown-key warning ─
+TEST_CASE("all canonical frontmatter keys parse without an unknown-key warning",
+          "[view][import][designmd][parse][designmd030]") {
+    auto result = parse_designmd(upstream_fixture());
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "unknown-key"));
+}
+
+// (0.3.0) ── numeric/boolean YAML scalars in component props don't crash ─
+TEST_CASE("numeric and boolean component property scalars flow through as strings",
+          "[view][import][designmd][parse][designmd030]") {
+    const std::string yaml =
+        "---\n"
+        "name: Scalars\n"
+        "components:\n"
+        "  toggle:\n"
+        "    fontWeight: 600\n"   // bare number
+        "    enabled: true\n"     // boolean scalar
+        "---\n";
+    auto result = parse_designmd(yaml);  // must not throw
+    REQUIRE(result.ir.tokens.strings.at("components.toggle.fontWeight") == "600");
+    REQUIRE(result.ir.tokens.strings.at("components.toggle.enabled") == "true");
+}

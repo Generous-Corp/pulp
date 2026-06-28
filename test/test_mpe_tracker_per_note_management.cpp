@@ -151,6 +151,44 @@ TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state",
     REQUIRE(tracker.find(1, 60)->pitch_bend_semitones > 0.0f);
 }
 
+TEST_CASE("MpeVoiceTracker note-on retrigger re-seeds expression from channel cache",
+          "[midi][mpe][per-note-management][regression]") {
+    // Sequence: note-on → detach → channel pitch bend changes (withheld
+    // from the detached note but recorded in the per-channel cache) →
+    // note-on retrigger (no intervening note-off). The re-attached note
+    // must resume at the CURRENT channel value, not the stale value frozen
+    // at detach time. The fresh-slot allocation path already seeds from the
+    // per-channel cache; the retrigger path must do the same.
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
+    REQUIRE(tracker.process(note_on(/*ch=*/1, /*note=*/60)));
+    REQUIRE(tracker.find(1, 60)->pitch_bend_semitones == 0.0f);
+
+    // Detach the live note from channel-level controllers.
+    REQUIRE(tracker.process(UmpPacket::per_note_management(
+        /*group=*/0, /*channel=*/1, /*note=*/60,
+        /*flags=*/UmpPacket::kPerNoteDetachControllers)));
+    REQUIRE(tracker.find(1, 60)->detached);
+
+    // Channel-level pitch bend changes WHILE the note is detached. The
+    // detached note keeps 0, but the per-channel cache now holds the new
+    // bend value.
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(
+        /*group=*/0, /*channel=*/1, /*value=*/0xFFFFFFFFu)));
+    REQUIRE(tracker.find(1, 60)->pitch_bend_semitones == 0.0f); // withheld
+
+    // Retrigger the same (channel, note) without a note-off. The slot is
+    // re-attached (detach cleared) and must adopt the current channel bend.
+    REQUIRE(tracker.process(note_on(/*ch=*/1, /*note=*/60, /*velocity=*/0x4000)));
+    const auto* n = tracker.find(1, 60);
+    REQUIRE(n != nullptr);
+    REQUIRE_FALSE(n->detached);
+    // Old code: stale 0.0 (frozen at detach). New code: current channel
+    // bend — a near-full-scale bend over the default 48-semitone member
+    // range lands close to +48.
+    REQUIRE(n->pitch_bend_semitones > 0.0f);
+    REQUIRE(n->pitch_bend_semitones > 47.0f);
+}
+
 TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state",
           "[midi][mpe][per-note-management][regression][issue-2860]") {
     // Per the MIDI 2.0 UMP spec § Per-Note Management, when both detach

@@ -7,8 +7,8 @@
 // These Pulp-native wrappers cover the three window patterns a standalone app
 // — or a plugin's secondary window — needs in practice:
 //
-//   - `DocumentWindow` — a top-level document/editor window with a menu bar,
-//     a content area that hosts a View tree, and a close-confirmation hook
+//   - `DocumentWindow` — a top-level document/editor window with a stored menu
+//     descriptor, a content area that hosts a View tree, and a close-confirmation hook
 //     ("Save changes?") that fires before the close actually happens.
 //
 //   - `DialogWindow` — a modal/quasi-modal dialog with explicit OK / Cancel
@@ -70,10 +70,10 @@ public:
     DocumentWindow(DocumentWindow&&) = delete;
     DocumentWindow& operator=(DocumentWindow&&) = delete;
 
-    /// Set or replace the menu bar. Pulp standalone macOS apps surface this
-    /// as the real NSMenu; on platforms without a global menu bar (Windows /
-    /// Linux), the WindowHost implementation may surface it inline or ignore
-    /// it. Stored on the class either way so the test surface is the same.
+    /// Set or replace the logical menu model. The current DocumentWindow stores
+    /// this descriptor for host/test consumption; `show()` does not install a
+    /// platform menu. Hosts that need one should consume
+    /// `menus()` and install their own backend.
     void set_menus(std::vector<Menu> menus);
     const std::vector<Menu>& menus() const { return menus_; }
 

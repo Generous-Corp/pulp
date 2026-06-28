@@ -923,9 +923,11 @@ TEST_CASE("CachedProperty refresh and numeric coercion", "[state][cached]") {
     tree->set("mix", 2.5);
     REQUIRE_THAT(mix.get(), WithinAbs(2.5, 1e-5));
 
+    // Removing the bound property reverts the cache to its default — an
+    // absent property is not "the last value forever".
     tree->remove("mix");
     mix.refresh();
-    REQUIRE_THAT(mix.get(), WithinAbs(2.5, 1e-5));
+    REQUIRE_THAT(mix.get(), WithinAbs(0.5, 1e-5));
 }
 
 TEST_CASE("CachedProperty move transfers listener ownership", "[state][cached]") {
@@ -1053,6 +1055,75 @@ TEST_CASE("CachedProperty int refresh preserves cache on incompatible values",
 
     tree->set("count", int64_t(7));
     REQUIRE(count.get() == 7);
+}
+
+TEST_CASE("CachedProperty reverts to default when the property is removed",
+          "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    gain.set(0.9);
+    REQUIRE_THAT(gain.get(), WithinAbs(0.9, 1e-5));
+    REQUIRE(tree->has("gain"));
+
+    // remove() notifies through the listener — no explicit refresh needed.
+    tree->remove("gain");
+    REQUIRE_FALSE(tree->has("gain"));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+}
+
+TEST_CASE("CachedProperty set short-circuits a redundant write",
+          "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    // Materialize the property with a meaningful change.
+    gain.set(0.8);
+
+    int notifications = 0;
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        if (prop == "gain") ++notifications;
+    });
+
+    gain.set(0.8);  // unchanged — must be swallowed
+    REQUIRE(notifications == 0);
+
+    gain.set(0.9);  // meaningful change — must fire once
+    REQUIRE(notifications == 1);
+
+    gain.set(0.9);  // unchanged again — swallowed
+    REQUIRE(notifications == 1);
+
+    REQUIRE_THAT(gain.get(), WithinAbs(0.9, 1e-5));
+}
+
+TEST_CASE("CachedProperty set of the default value still materializes "
+          "an absent property", "[state][cached]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<double> gain(tree, "gain", 0.5);
+
+    // Cache equals default and the property does not yet exist in the tree.
+    REQUIRE_FALSE(tree->has("gain"));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+
+    int notifications = 0;
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        if (prop == "gain") ++notifications;
+    });
+
+    // Writing the default value must NOT be swallowed — the property has to
+    // become present, and the listener has to fire.
+    gain.set(0.5);
+    REQUIRE(notifications == 1);
+    REQUIRE(tree->has("gain"));
+    REQUIRE_THAT(tree->get_double("gain"), WithinAbs(0.5, 1e-5));
+    REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+
+    // A second write of the same value is now redundant and swallowed.
+    gain.set(0.5);
+    REQUIRE(notifications == 1);
 }
 
 // ── StateTreeSynchroniser ───────────────────────────────────────────────

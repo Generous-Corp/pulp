@@ -8238,7 +8238,7 @@
               ]
             }
           ],
-          "notes": "Google's DESIGN.md (Apache-2.0, https://github.com/google-labs-code/design.md). Upstream pin: tag 0.1.1. YAML frontmatter + Markdown body. Strict detection: filename + frontmatter fence + name: key + at least one canonical token-group key. The all-of match plus 95% confidence floor avoids false positives on generic Jekyll/Hugo Markdown frontmatter."
+          "notes": "Google's DESIGN.md (Apache-2.0, https://github.com/google-labs-code/design.md). Upstream pin: tag 0.3.0. YAML frontmatter + Markdown body. Strict detection: filename + frontmatter fence + name: key + at least one canonical token-group key. The all-of match plus 95% confidence floor avoids false positives on generic Jekyll/Hugo Markdown frontmatter."
         }
       ]
     },

@@ -12,6 +12,7 @@
 #include <clap/ext/preset-load.h>
 #include <algorithm>
 #include <array>
+#include <span>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -152,6 +153,35 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
     self->processor->prepare(ctx);
+
+    // Cache the descriptor-declared channel count of each secondary (aux)
+    // output bus so clap_process() can report a bus's declared layout without
+    // calling descriptor() — which allocates — on the audio thread. Index i
+    // corresponds to host output bus i+1 (the main bus at index 0 is handled
+    // separately). Buses beyond the preallocated row count are not routed.
+    for (int i = 0; i < kMaxOutputBuses - 1; ++i) {
+        const std::size_t bus_index = static_cast<std::size_t>(i) + 1;
+        self->declared_aux_channels[i] =
+            bus_index < desc.output_buses.size()
+                ? desc.output_buses[bus_index].default_channels
+                : 0;
+    }
+
+    // Size the per-channel dry delay used by the bypass pass-through. The host
+    // compensates the plugin path by its reported latency, so the bypassed dry
+    // copy must be delayed by exactly that many samples to stay aligned with
+    // the host's plugin-delay-compensation. Allocate here, never in
+    // clap_process(); a 0 latency leaves the delay lines unused so the bypass
+    // pass-through stays a zero-copy memcpy.
+    self->bypass_delay_samples = reported_latency_samples(
+        self->processor->latency_samples(), self->host_quirks);
+    if (self->bypass_delay_samples < 0) self->bypass_delay_samples = 0;
+    if (self->bypass_delay_samples > 0) {
+        for (auto& line : self->bypass_dry_delay) {
+            line.prepare(self->bypass_delay_samples);
+        }
+    }
+
     // Reset the playhead snapshot — the next process() call is the
     // first block of a fresh activation cycle and must NOT diff against
     // stale transport data from the previous activation. Without this,
@@ -219,6 +249,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // thread, then restore its prior FP mode on scope exit. See
     // docs/guides/dsp-threading.md "Numeric mode".
     pulp::signal::ScopedFlushDenormals flush_denormals;
+
+    // Max-frames contract guard (defensive; well-behaved hosts never exceed the
+    // advertised max). The Processor and all its scratch buffers were sized in
+    // clap_activate() to self->max_buffer_size. A render larger than that would
+    // overrun them and corrupt DSP state. CLAP has no clean per-block reject, so
+    // clamp the processed region to the prepared max and zero the un-processable
+    // tail [max, original) on every main output channel below so it reads back
+    // as clean silence rather than garbage.
+    const auto original_num_samples = num_samples;
+    if (self->max_buffer_size > 0 &&
+        num_samples > static_cast<uint32_t>(self->max_buffer_size)) {
+        num_samples = static_cast<uint32_t>(self->max_buffer_size);
+    }
 
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
@@ -308,15 +351,41 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         out_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < out_channels; ++ch)
             self->output_ptrs[ch] = bus.data32[ch];
+        // When the render was clamped above, the processor only writes the
+        // first num_samples frames; zero the un-processable tail on every main
+        // output channel so the host reads silence past the prepared max.
+        if (original_num_samples > num_samples) {
+            for (int ch = 0; ch < out_channels; ++ch) {
+                if (self->output_ptrs[ch]) {
+                    std::memset(self->output_ptrs[ch] + num_samples, 0,
+                                sizeof(float) * (original_num_samples - num_samples));
+                }
+            }
+        }
     }
-    // Secondary output buses are zero-filled so hosts do not read
-    // uninitialised memory on multi-out instruments. Full multi-out routing
-    // to Processor is tracked separately (audit 5.2).
+    // Secondary (aux) output buses route to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments (drum
+    // machines, multitimbral, stem renderers). Each routed aux bus is
+    // pre-zeroed here first so that:
+    //   * a single-output Processor (the default process(ProcessBuffers&),
+    //     which only writes the main output) leaves aux buses silent rather
+    //     than handing the host uninitialised memory, and
+    //   * a multi-out Processor that writes only some aux channels still emits
+    //     silence on the channels it skipped.
+    // Host output buses beyond kMaxOutputBuses are zero-filled but not routed,
+    // preserving the prior safe behaviour for unusually wide bus layouts.
+    const uint32_t routed_output_buses =
+        (std::min)(process->audio_outputs_count,
+                   static_cast<uint32_t>(kMaxOutputBuses));
     for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
         auto& bus = process->audio_outputs[b];
+        // An inactive/deactivated bus can report channel_count > 0 while
+        // data32 == nullptr. Guard the bus pointer before indexing it so the
+        // pre-zero loop never dereferences null on the audio thread.
+        if (!bus.data32) continue;
         for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
             if (bus.data32[ch]) {
-                std::memset(bus.data32[ch], 0, sizeof(float) * num_samples);
+                std::memset(bus.data32[ch], 0, sizeof(float) * original_num_samples);
             }
         }
     }
@@ -339,16 +408,50 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             .buffer = sidechain_view,
         },
     }};
-    std::array<ProcessBusBufferView<float>, 1> output_buses{{
-        {
-            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                     out_channels, false, process->audio_outputs_count > 0},
-            .buffer = output_view,
-        },
-    }};
+    // Build one ProcessBusBufferView per routed output bus. Index 0 is the
+    // main output (already wired into output_view above); each subsequent entry
+    // wires the host's aux output channel pointers into per-bus storage.
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    output_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 out_channels, false, process->audio_outputs_count > 0},
+        .buffer = output_view,
+    };
+    for (uint32_t b = 1; b < routed_output_buses; ++b) {
+        auto& bus = process->audio_outputs[b];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
+        // Row b-1 backs host output bus b (the main bus at index 0 uses
+        // output_ptrs, not this storage).
+        float** ptrs = self->aux_output_ptrs[b - 1];
+        bool active = bus.data32 != nullptr;
+        if (active) {
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[ch] = bus.data32[ch];
+                if (!ptrs[ch]) {
+                    // A null per-channel pointer demotes the whole bus to
+                    // inactive so the Processor sees an empty bus rather than a
+                    // half-valid BufferView.
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (!active) aux_channels = 0;
+        // declared_channels reports the descriptor's declared layout (cached in
+        // clap_activate); buffer.num_channels() carries the actual routed count.
+        // Keeping these distinct lets matches_declared_layout() detect a
+        // host-vs-declared channel-count mismatch instead of being tautological.
+        output_buses[b] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     self->declared_aux_channels[b - 1], true, active},
+            .buffer = audio::BufferView<float>(ptrs, aux_channels, num_samples),
+        };
+    }
     ProcessBuffers process_buffers{
         .inputs = ProcessBusBufferSet<const float>(input_buses),
-        .outputs = ProcessBusBufferSet<float>(output_buses),
+        .outputs = ProcessBusBufferSet<float>(
+            std::span(output_buses.data(), routed_output_buses)),
     };
 
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
@@ -679,13 +782,41 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
     if (bypassed) {
+        // Bypass is pure host-buffer passthrough (no processor scratch), so it
+        // safely handles the full original block rather than the clamped count.
+        // The dry-delay line is sized independently of the block size (to the
+        // reported latency in clap_activate()), so it too processes the full
+        // original_num_samples — bypass stays a true 1:1 host passthrough with
+        // no clamp tail to zero.
+        const bool delayed = self->bypass_delay_samples > 0 &&
+            out_channels <= static_cast<int>(self->bypass_dry_delay.size());
         for (int ch = 0; ch < out_channels; ++ch) {
             if (self->output_ptrs[ch] == nullptr) continue;
             if (ch < in_channels && self->input_ptrs[ch] != nullptr) {
-                std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
-                            sizeof(float) * num_samples);
+                if (delayed) {
+                    // The plugin path is host-compensated by its reported
+                    // latency, so the bypassed dry signal must be delayed by
+                    // the same amount to stay sample-aligned with the host's
+                    // plugin-delay-compensation. The delay line is fed only
+                    // while bypassed: a one-time transient in the first
+                    // bypass_delay_samples after engaging bypass is accepted
+                    // (bypass toggling is a user action, not sample-critical)
+                    // in exchange for a zero-cost non-bypassed path. Steady
+                    // state emits input[n - latency].
+                    auto& line = self->bypass_dry_delay[ch];
+                    const float* in = self->input_ptrs[ch];
+                    float* out = self->output_ptrs[ch];
+                    for (uint32_t n = 0; n < original_num_samples; ++n) {
+                        out[n] = line.process(
+                            in[n],
+                            static_cast<float>(self->bypass_delay_samples));
+                    }
+                } else {
+                    std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
+                                sizeof(float) * original_num_samples);
+                }
             } else {
-                std::memset(self->output_ptrs[ch], 0, sizeof(float) * num_samples);
+                std::memset(self->output_ptrs[ch], 0, sizeof(float) * original_num_samples);
             }
         }
         self->processor->set_sidechain(nullptr);

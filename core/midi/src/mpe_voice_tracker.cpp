@@ -226,6 +226,14 @@ void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool 
             s.note_id = next_note_id_++;
             s.is_upper_zone = upper;
             s.detached = false;
+            // Re-seed expression from the per-channel caches, mirroring the
+            // fresh-slot branch below. A note that detached (and then saw
+            // channel-level controller changes that were withheld while
+            // detached) must resume at the *current* channel value on
+            // retrigger, not the stale value frozen at detach time.
+            s.pitch_bend_semitones = channel_pitch_bend_[ch];
+            s.pressure = channel_pressure_[ch];
+            s.timbre = channel_timbre_[ch];
             if (on_note_on) on_note_on(s);
             return;
         }

@@ -259,6 +259,54 @@ def run_real_engine(
     return report
 
 
+def run_real_audio(
+    input_wav: str, ratio: float = 2.0, character: str = "clean",
+) -> dict[str, Any]:
+    """Run the real engine on a REAL audio file and check it reference-free (dry-input
+    policy): a faithful time-stretch preserves the SOURCE spectrum (timing changes,
+    timbre shouldn't), so the global spectral detectors compare the engine output's LTAS
+    to the source's. Works on any WAV the developer supplies — the path to real-audio
+    evidence (the committed corpus stays synthetic; real audio is developer-supplied)."""
+    import os
+
+    from . import engine
+    from .detectors import hf_fizz, spectral_centroid, spectral_flux
+
+    if not engine.available():
+        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
+                "reason": "stretchcli not built"}
+    if not os.path.exists(input_wav):
+        return {"verdict": "ERROR", "reason": f"input not found: {input_wav}"}
+
+    source, sr = audio_io.load_wav(input_wav)
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        out_wav = os.path.join(d, "engine.wav")
+        eng_res = engine.stretch(input_wav, out_wav, ratio, character=character)
+        if eng_res["status"] != "ok":
+            return {"verdict": "ERROR", "engine": eng_res}
+        candidate, _ = audio_io.load_wav(out_wav)
+    candidate = audio_io.level_match(candidate, source)
+
+    # Global spectral detectors (no alignment): dry-input reference is the source itself.
+    results = [
+        spectral_centroid.detect(source, candidate, sr),
+        hf_fizz.detect(source, candidate, sr),
+        spectral_flux.detect(source, candidate, sr),
+    ]
+    determinism = {"level_match": "rms", "alignment": "identity", "sample_rate": sr,
+                   "reference_policy": "dry-input"}
+    recipe = {"source": "real-audio", "input": os.path.basename(input_wav),
+              "engine": "stretchcli", "character": character, "ratio": ratio}
+    case = QualityCase(case_id=f"realaudio:{os.path.basename(input_wav)}", family="real-audio",
+                       reference_policy="dry-input", alignment_policy="identity",
+                       detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux"], params=recipe)
+    verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
+    report = build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
+    report["engine"] = eng_res
+    return report
+
+
 def run_p0a(smear: bool, latency_ms: float = 5.0, smear_ms: float = 8.0,
             case: QualityCase = P0A_CASE) -> dict[str, Any]:
     """The P0a gate: the drum-break with just the transient-sharpness detector."""

@@ -207,8 +207,10 @@ TEST_CASE("StateStore RT parameter writes do not allocate",
     REQUIRE(audio_listener_calls == 2);
     REQUIRE(main_listener_calls == 0);
     REQUIRE_THAT(store.get_value(1), WithinAbs(0.25f, 1e-6f));
+    // Two queued changes to the same param drain (count == 2) but coalesce
+    // to a single current-value Main-listener call.
     REQUIRE(store.pump_listeners() == 2);
-    REQUIRE(main_listener_calls == 2);
+    REQUIRE(main_listener_calls == 1);
 }
 
 TEST_CASE("NativeCoreProcessor process runs without heap allocation",

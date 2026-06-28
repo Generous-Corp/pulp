@@ -7,8 +7,7 @@
 //! network-heavy install paths (`sdk install`, `cache fetch skia`,
 //! `upgrade install`), filesystem-watch loops (`build --watch`, `dev
 //! --watch`, `design --watch`), interactive wizards (`create` default
-//! mode), host-library work (deep `scan` metadata via
-//! `PluginScanner::scan()`, `doctor android` / `doctor ios`),
+//! mode), host-library work (`host`, `doctor android` / `doctor ios`),
 //! `tool install` archive extraction, and the Shipyard-adjacent
 //! `pr --native` path.
 //!
