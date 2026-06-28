@@ -84,7 +84,10 @@ TEST_CASE("mapping tables are constexpr-usable", "[a11y][uia]") {
                   "slider must map to UIA slider at compile time");
     constexpr auto pats = patterns_for_role(View::AccessRole::toggle);
     static_assert(pats.count == 2, "toggle must carry 2 patterns");
-    SUCCEED("constexpr evaluation passed");
+    REQUIRE(slider_type == kControlTypeSlider);
+    REQUIRE(pats.count == 2);
+    REQUIRE(pats.ids[0] == kPatternToggle);
+    REQUIRE(pats.ids[1] == kPatternInvoke);
 }
 
 // ── Per-widget fragment helpers ──────────────────────────────────────────

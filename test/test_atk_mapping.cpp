@@ -81,5 +81,8 @@ TEST_CASE("mapping tables are constexpr-usable", "[a11y][atk]") {
         interfaces_for_role(View::AccessRole::slider);
     static_assert((slider_flags & kInterfaceValue) != 0,
                   "slider must carry AtkValue at compile time");
-    SUCCEED("constexpr evaluation passed");
+    REQUIRE(slider_role == kRoleSlider);
+    REQUIRE((slider_flags & kInterfaceComponent) != 0);
+    REQUIRE((slider_flags & kInterfaceValue) != 0);
+    REQUIRE((slider_flags & kInterfaceAction) == 0);
 }
