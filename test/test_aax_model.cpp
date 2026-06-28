@@ -564,3 +564,61 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
     REQUIRE(mode.discrete);
     REQUIRE(mode.step_count == 3u);
 }
+
+// AAX audit topic: master bypass. AAX reserves packet slot 0 for the host
+// master-bypass control, so the parameter packet is always plugin-params + 1 —
+// even for a plugin with no automatable parameters. A regression that stopped
+// reserving the slot would misalign every parameter index in the packet.
+TEST_CASE("AAX model reserves a master-bypass packet slot regardless of parameter count", "[aax][model]") {
+    auto codes = valid_codes();
+
+    // Zero parameters: the packet still has the reserved bypass slot.
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}}));
+    auto none = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(none.ok);
+    REQUIRE(none.definition.parameters.empty());
+    REQUIRE(none.definition.packet_float_count == 1u);
+
+    // Three parameters: bypass slot + three params.
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}}),
+        {
+            {.id = 1, .name = "A", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+            {.id = 2, .name = "B", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+            {.id = 3, .name = "C", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+        });
+    auto three = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(three.ok);
+    REQUIRE(three.definition.parameters.size() == 3);
+    REQUIRE(three.definition.packet_float_count == 4u);
+}
+
+// AAX audit topic: parameter IDs. Bindings must keep declaration order and give
+// each parameter a stable, unique AAX id derived from its ParamID — hosts key
+// automation off these strings, so a reordering or collision corrupts sessions.
+TEST_CASE("AAX model assigns stable unique ids in declaration order", "[aax][model]") {
+    auto codes = valid_codes();
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}}),
+        {
+            {.id = 0x10, .name = "First",  .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+            {.id = 0x02, .name = "Second", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+            {.id = 0xAB, .name = "Third",  .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+        });
+    auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(result.ok);
+    const auto& p = result.definition.parameters;
+    REQUIRE(p.size() == 3);
+    // Declaration order preserved (not sorted by id).
+    REQUIRE(p[0].name == "First");
+    REQUIRE(p[1].name == "Second");
+    REQUIRE(p[2].name == "Third");
+    // aax_id == parameter_id_string(id), and ids are unique.
+    REQUIRE(p[0].aax_id == pulp::format::aax::parameter_id_string(0x10));
+    REQUIRE(p[1].aax_id == pulp::format::aax::parameter_id_string(0x02));
+    REQUIRE(p[2].aax_id == pulp::format::aax::parameter_id_string(0xAB));
+    REQUIRE(p[0].aax_id != p[1].aax_id);
+    REQUIRE(p[1].aax_id != p[2].aax_id);
+    REQUIRE(p[0].aax_id != p[2].aax_id);
+}
