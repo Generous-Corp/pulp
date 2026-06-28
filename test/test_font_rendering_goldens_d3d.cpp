@@ -88,17 +88,10 @@
 // raster↔D3D tolerance TEST_CASE. Tolerance for the cross-backend
 // probe is ±20 % (see header rationale).
 
-TEST_CASE("font v2 Slice 3.4 — D3D12 goldens scaffold placeholder",
+TEST_CASE("font v2 Slice 3.4 — D3D12 goldens require implementation before lane enablement",
           "[golden][gpu][d3d][skia][font][scaffold][issue-2257-followup]") {
-    // Placeholder. The real implementation imports Skia's D3D
-    // context (`GrD3DBackendContext` / `GrDirectContexts::MakeDirect3D`
-    // or Graphite-D3D via Dawn), allocates a 128×32 RGBA8 surface,
-    // and runs the same three goldens as the Metal lane.
-    //
-    // This SUCCEED() exists only so the test target is non-empty when
-    // PULP_D3D_AVAILABLE is ON but no D3D runner is wired yet.
-    SUCCEED("D3D12 goldens scaffold — implementation lands when a "
-            "Windows D3D CI runner exists.");
+    FAIL("D3D12 goldens are enabled without an implementation; add the "
+         "Windows D3D render/readback assertions before turning on this lane.");
 }
 
 #else  // !(PULP_HAS_SKIA && _WIN32 && PULP_D3D_AVAILABLE)

@@ -746,28 +746,119 @@ TEST_CASE("Wave5 css/wordWrap stores break-word/anywhere on word_break slot",
     REQUIRE(p->word_break() == "break-word");
 }
 
-// Every yoga entry claiming `supported` in compat.json must reference a real
-// test path. This comprehensive case exercises each property's bridge dispatch
-// plus FlexStyle storage round-trip so catalog claims have evidence backing.
-//
-// One TEST_CASE rather than 47 individual ones: every yoga property
-// uses the same setFlex(id, key, value) shape, and the harness
-// verifier only requires the test path exists — not a per-entry
-// case. The covered keys ARE the entries listed in compat.json.
-TEST_CASE("yoga NO-EV backfill — all 47 supported entries dispatch + round-trip",
+// Compat catalog entries reference this tag as aggregate evidence. Keep it
+// behavior-backed: representative Yoga bridge properties must dispatch and
+// round-trip through FlexStyle rather than merely satisfying the path verifier.
+TEST_CASE("yoga NO-EV backfill — representative entries dispatch + round-trip",
           "[view][bridge][yoga][issue-1711][evidence-backfill]") {
-    // Catalog evidence path uses this test's tag; the actual bridge dispatch
-    // coverage for every yoga property is provided by the surface-specific
-    // TEST_CASEs throughout this file (setFlex/setBorderWidth/etc. round-trips).
-    SUCCEED("yoga evidence-backfill placeholder — see [issue-1711] tag in compat.json");
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('parent', '');
+        createPanel('child', '');
+        setFlex('parent', 'display', 'flex');
+        setFlex('parent', 'direction', 'row');
+        setFlex('parent', 'flex_wrap', 'wrap');
+        setFlex('parent', 'justify_content', 'space-between');
+        setFlex('parent', 'align_items', 'center');
+        setFlex('parent', 'align_content', 'space-around');
+        setFlex('parent', 'width', 320);
+        setFlex('parent', 'height', 180);
+        setFlex('parent', 'padding_left', 12);
+        setFlex('parent', 'padding_right', 12);
+        setFlex('parent', 'padding_top', 8);
+        setFlex('parent', 'padding_bottom', 8);
+        setFlex('parent', 'gap', 6);
+        setFlex('child', 'align_self', 'flex-end');
+        setFlex('child', 'flex_grow', 2);
+        setFlex('child', 'flex_shrink', 0.5);
+        setFlex('child', 'flex_basis', '25%');
+        setFlex('child', 'order', 3);
+    )");
+
+    auto* parent = bridge.widget("parent");
+    auto* child = bridge.widget("child");
+    REQUIRE(parent != nullptr);
+    REQUIRE(child != nullptr);
+
+    const auto& fp = parent->flex();
+    REQUIRE(fp.direction == FlexDirection::row);
+    REQUIRE(fp.flex_wrap == FlexWrap::wrap);
+    REQUIRE(fp.justify_content == FlexJustify::space_between);
+    REQUIRE(fp.align_items == FlexAlign::center);
+    REQUIRE(fp.align_content_space == FlexStyle::AlignContentSpace::space_around);
+    REQUIRE_THAT(fp.preferred_width, WithinAbs(320.0f, 0.001f));
+    REQUIRE_THAT(fp.preferred_height, WithinAbs(180.0f, 0.001f));
+    REQUIRE_THAT(fp.padding_left, WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(fp.padding_right, WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(fp.padding_top, WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(fp.padding_bottom, WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(fp.gap, WithinAbs(6.0f, 0.001f));
+
+    const auto& fc = child->flex();
+    REQUIRE(fc.align_self == FlexAlign::end);
+    REQUIRE_THAT(fc.flex_grow, WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(fc.flex_shrink, WithinAbs(0.5f, 0.001f));
+    REQUIRE(fc.dim_flex_basis.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_flex_basis.value, WithinAbs(25.0f, 0.001f));
+    REQUIRE(fc.order == 3);
 }
 
-// Evidence backfill for the RN surface.
-TEST_CASE("rn NO-EV backfill — exercise dispatch for 92 supported entries",
+// Evidence backfill for the RN surface. This is intentionally representative:
+// specific RN bridge families have dedicated tests elsewhere, while this case
+// proves the aggregate evidence tag still exercises live bridge behavior.
+TEST_CASE("rn NO-EV backfill — representative entries dispatch + round-trip",
           "[view][bridge][rn][issue-1711][evidence-backfill]") {
-    // Catalog evidence path is satisfied; surface-specific bridge coverage is
-    // provided by other TEST_CASEs in this file.
-    SUCCEED("rn evidence-backfill placeholder — see [issue-1711] tag in compat.json");
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('card', '');
+        setFlex('card', 'width', 240);
+        setFlex('card', 'height', 120);
+        setFlex('card', 'margin_left', 10);
+        setFlex('card', 'margin_right', 10);
+        setFlex('card', 'padding_top', 6);
+        setFlex('card', 'padding_bottom', 6);
+        setOpacity('card', 0.65);
+        setPointerEvents('card', 'box-none');
+        setBackfaceVisibility('card', 'hidden');
+        setShadow('card', '#000000ff', 4, 8, 0.5, 12);
+        setScale('card', 1.25);
+        setRotation('card', 15);
+        setTranslate('card', 18, 24);
+    )");
+
+    auto* card = bridge.widget("card");
+    REQUIRE(card != nullptr);
+    const auto& flex = card->flex();
+    REQUIRE_THAT(flex.preferred_width, WithinAbs(240.0f, 0.001f));
+    REQUIRE_THAT(flex.preferred_height, WithinAbs(120.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_left, WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_right, WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_top, WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_bottom, WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(card->opacity(), WithinAbs(0.65f, 0.001f));
+    REQUIRE(card->pointer_events() == View::PointerEvents::box_none);
+    REQUIRE_FALSE(card->backface_visible());
+    REQUIRE(card->has_box_shadow());
+    REQUIRE_THAT(card->box_shadow().offset_x, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(card->box_shadow().offset_y, WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(card->box_shadow().blur, WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(card->box_shadow().color.a, WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(card->scale(), WithinAbs(1.25f, 0.001f));
+    REQUIRE_THAT(card->rotation(), WithinAbs(15.0f, 0.001f));
+    REQUIRE_THAT(card->translate_x(), WithinAbs(18.0f, 0.001f));
+    REQUIRE_THAT(card->translate_y(), WithinAbs(24.0f, 0.001f));
 }
 
 // Evidence backfill for the CSS surface. Same approach as yoga / rn: a

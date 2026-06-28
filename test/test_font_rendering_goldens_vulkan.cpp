@@ -89,17 +89,10 @@
 // raster↔Vulkan tolerance TEST_CASE. Tolerance for the cross-backend
 // probe is ±20 % (see header rationale).
 
-TEST_CASE("font v2 Slice 3.4 — Vulkan goldens scaffold placeholder",
+TEST_CASE("font v2 Slice 3.4 — Vulkan goldens require implementation before lane enablement",
           "[golden][gpu][vulkan][skia][font][scaffold][issue-2257-followup]") {
-    // Placeholder. The real implementation imports Skia's Vulkan
-    // context (`GrVkBackendContext` / `GrDirectContexts::MakeVulkan`
-    // or Graphite-Vulkan via Dawn), allocates a 128×32 RGBA8 surface,
-    // and runs the same three goldens as the Metal lane.
-    //
-    // This SUCCEED() exists only so the test target is non-empty when
-    // PULP_VULKAN_AVAILABLE is ON but no Vulkan runner is wired yet.
-    SUCCEED("Vulkan goldens scaffold — implementation lands when a "
-            "Vulkan CI runner exists.");
+    FAIL("Vulkan goldens are enabled without an implementation; add the "
+         "Vulkan render/readback assertions before turning on this lane.");
 }
 
 #else  // !(PULP_HAS_SKIA && (linux||win) && PULP_VULKAN_AVAILABLE)
