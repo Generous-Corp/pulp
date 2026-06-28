@@ -259,8 +259,10 @@ specifics are out of scope.
       the relative-unit resolver lands.
     - `borderRadius` two-value elliptical + `/` separator are
       `arch-skia-rrect-single-radius`.
-    - `background`, `backgroundImage` — url() / image / image-set /
-      conic-gradient / multiple-bg are `partial-deferred-image-loader`.
+    - `background`, `backgroundImage` — url() / image / image-set are
+      `partial-deferred-image-loader`; linear, radial, and conic
+      gradients render through the canvas gradient path; multiple-bg is
+      `arch-single-bg`.
     - `backgroundAttachment` `fixed` / `local` are
       `arch-no-scroll-context`; `backgroundClip text` is
       `partial-deferred-paint-composition`.
