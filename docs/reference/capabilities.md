@@ -266,7 +266,8 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | ConcertinaPanel, SplitView, Breadcrumb, Toolbar | usable | [view](modules.md#view) | |
 | ColorPicker, Lasso, PropertyList, CodeEditor | usable | [view](modules.md#view) | |
 | CanvasWidget (25 draw commands) | usable | [view](modules.md#view) | [custom-rendering](../guides/custom-rendering.md) |
-| ModulationMatrix, A/B compare, sortable TableView | planned | [view](modules.md#view) | Production-readiness workstream 07 |
+| ModulationMatrixWidget (source-to-destination routes) | usable | [view](modules.md#view) | [widgets](widgets.md#audio-specific) |
+| A/B compare, sortable TableView | planned | [view](modules.md#view) | Production-readiness workstream 07 |
 
 ### Web-Compat Layer
 

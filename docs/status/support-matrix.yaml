@@ -995,7 +995,8 @@ widgets:
   canvas_widget:    { status: usable, header: canvas_widget.hpp }
   table:            { status: partial, header: table.hpp,
                       notes: "Basic rows; sortable columns + virtualization planned." }
-  modulation_matrix:   { status: planned, notes: "Planned modulation-matrix widget." }
+  modulation_matrix:   { status: usable, header: modulation_matrix_widget.hpp,
+                          notes: "Source-to-destination route widget backed by ModulationMatrix; focused data-model and widget interaction tests exist." }
   ab_compare:          { status: planned, notes: "Planned A/B comparison widget." }
   resizable_shell:     { status: planned, notes: "Planned documented resizable-shell pattern." }
 
