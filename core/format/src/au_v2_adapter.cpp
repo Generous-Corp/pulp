@@ -341,6 +341,23 @@ OSStatus PulpAUEffect::Initialize()
         // Globals here would clobber a restored preset with construction defaults.
     }
 
+    // Pre-size the per-block MIDI buffers so the render drain loop appends
+    // without heap allocation. Capacity-limited: add()/add_sysex_copy() drop
+    // past the reserved bound instead of growing the underlying vectors
+    // (matches the VST3/CLAP adapters).
+    midi_in_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_out_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_in_.set_realtime_capacity_limit(true);
+    midi_out_.set_realtime_capacity_limit(true);
+
+    // Pre-size the per-channel pointer vectors so the render-time resize() never
+    // grows capacity (and thus never allocates) in steady state. The render
+    // block resizes to the host-supplied buffer count, which is at most the
+    // configured channel count in AU's non-interleaved float model; reserving to
+    // it up front turns the first render / reconfig resize into a no-op realloc.
+    input_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+    output_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
     return noErr;
@@ -459,16 +476,26 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     audio::BufferView<float> output_view(
         output_ptrs_.data(), out_channels, inFramesToProcess);
 
-    midi::MidiBuffer midi_in, midi_out;
+    // Reuse the member MIDI buffers (pre-reserved + capacity-limited in
+    // Initialize); reset them rather than constructing new ones each block.
+    // clear() empties the event list; clear_sysex() recycles the pooled sysex
+    // payloads so last block's sysex does not leak into this one.
+    midi::MidiBuffer& midi_in = midi_in_;
+    midi::MidiBuffer& midi_out = midi_out_;
+    midi_in.clear();
+    midi_in.clear_sysex();
+    midi_out.clear();
+    midi_out.clear_sysex();
     // Drain the lock-free MIDI queues filled by HandleMIDIEvent / HandleSysEx.
     // Wait-free on the audio thread — no mutex. aumf-typed effects receive MIDI
-    // here; aufx-typed effects simply find the queues empty.
+    // here; aufx-typed effects simply find the queues empty. add_sysex_copy
+    // (not add_sysex(vector)) copies into the buffer's pre-reserved realtime
+    // payload pool instead of allocating a fresh heap vector per message.
     while (auto ev = midi_in_queue_.try_pop())
         midi_in.add(*ev);
     while (auto sx = sysex_in_queue_.try_pop())
-        midi_in.add_sysex(
-            std::vector<uint8_t>(sx->bytes.begin(), sx->bytes.begin() + sx->length),
-            /*sample_offset=*/0);
+        midi_in.add_sysex_copy(sx->bytes.data(), sx->length,
+                               /*sample_offset=*/0);
     midi_in.sort();
 
     ProcessContext ctx = make_render_process_context(
@@ -478,8 +505,14 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     // AU v2 has no scheduled-parameter event source, so this queue is empty
     // and host params flow via store_ as before. Set it anyway so a Processor
-    // always sees a non-null queue. Wrap only the process call in
-    // ScopedNoAlloc; the preamble above legitimately allocates.
+    // always sees a non-null queue. Only the process call is wrapped in
+    // ScopedNoAlloc. The MIDI drain above no longer allocates (the buffers are
+    // member buffers reset with clear()/clear_sysex(), and SysEx is copied into
+    // the pre-reserved payload pool). The input_ptrs_/output_ptrs_ resize() in
+    // the preamble is a no-op realloc in steady state — Initialize() reserves
+    // both vectors to the channel count — so the only path that could still
+    // allocate is a host that grows the buffer count beyond the configured
+    // channels, which the AU non-interleaved float model does not do.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
     std::array<ProcessBusBufferView<const float>, 1> input_buses{{

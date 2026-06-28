@@ -129,7 +129,15 @@ fn create_help_lists_all_options() {
 
 #[test]
 fn create_rejects_without_ci_flag() {
-    let output = run_anywhere(&["create", "demo"]);
+    let td = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .current_dir(td.path())
+        .args(["create", "demo"])
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run");
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).expect("utf8");
     assert!(stderr.contains("--ci"), "expected --ci hint, got: {stderr}");

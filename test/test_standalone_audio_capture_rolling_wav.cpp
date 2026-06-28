@@ -18,11 +18,39 @@
 #include <filesystem>
 #include <cstdlib>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace {
 
 namespace fs = std::filesystem;
+
+void set_rolling_format_env(const char* value) {
+#if defined(_WIN32)
+    _putenv_s("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value ? value : "");
+#else
+    if (value) ::setenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value, 1);
+    else ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
+#endif
+}
+
+class ScopedRollingFormatEnv {
+public:
+    ScopedRollingFormatEnv() {
+        if (const char* value = std::getenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT")) {
+            had_value_ = true;
+            old_value_ = value;
+        }
+    }
+
+    ~ScopedRollingFormatEnv() {
+        set_rolling_format_env(had_value_ ? old_value_.c_str() : nullptr);
+    }
+
+private:
+    bool had_value_ = false;
+    std::string old_value_;
+};
 
 // Append one block of a per-channel, absolute-frame ramp to the rolling buffer.
 void append_block(pulp::audio::RollingAudioCaptureBuffer& rolling, int channels,
@@ -178,9 +206,9 @@ TEST_CASE("rolling capture WAV with an empty path or unprepared buffer is a no-o
 
 TEST_CASE("PULP_AUDIO_CAPTURE_ROLLING_FORMAT env parses int24/float and ignores junk",
           "[standalone][audio-capture-rolling]") {
+    ScopedRollingFormatEnv env_guard;
     auto parse = [](const char* value) {
-        if (value) ::setenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value, 1);
-        else ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
+        set_rolling_format_env(value);
         pulp::format::StandaloneConfig cfg;
         cfg = pulp::format::detail::standalone_config_from_environment(cfg);
         return cfg.audio_capture_rolling_int24;
@@ -191,7 +219,6 @@ TEST_CASE("PULP_AUDIO_CAPTURE_ROLLING_FORMAT env parses int24/float and ignores 
     CHECK(parse("int32") == false);
     CHECK(parse("INT24") == false);
     CHECK(parse(nullptr) == false);  // unset → default float
-    ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
 }
 
 #if PULP_ENABLE_AUDIO_PROBES

@@ -1032,20 +1032,24 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
-| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD) |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
+| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD) |
+| `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
 | `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
 | `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
 | `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
 | `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
 | `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
+| `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
 | `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
 | `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
+| `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |
+| `motion` | Trace and validate animations, transitions, scroll geometry, reduced motion, and motion fixtures |
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): single-platform watch + rebuild, AOT analyzer, ar-swap, PR-state monitor |
@@ -1063,7 +1067,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-30 skills as of 2026-06-17. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 
