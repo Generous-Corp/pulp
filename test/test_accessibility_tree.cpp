@@ -360,8 +360,7 @@ TEST_CASE("Accessibility helper interfaces expose default selection behavior",
 // nodes re-parented onto their nearest accessible ancestor. Then call
 // Component.GetExtents on a widget and assert it matches the View's root-
 // relative bounds. Runs only under a real session bus (`dbus-run-session --
-// ctest`); SUCCEED-skips otherwise so it is green on every Linux CI host and a
-// no-op stub off Linux.
+// ctest`); reports an honest skip otherwise, and is a no-op stub off Linux.
 
 #if defined(__linux__) && !defined(__ANDROID__)
 namespace {
@@ -447,14 +446,12 @@ bool read_node(const std::string& server_name, const std::string& path,
 TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
           "[view][accessibility][atspi][linux][issue-L7b]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
     {
         DBus probe;
         if (!probe.connect_session()) {
-            SUCCEED("skipped: no session bus (run under dbus-run-session)");
-            return;
+            SKIP("no session bus (run under dbus-run-session)");
         }
     }
 
@@ -514,8 +511,7 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
     void* handle =
         init_accessibility_on_session_bus_for_test(root, &server_name);
     if (!handle) {
-        SUCCEED("skipped: could not export on session bus");
-        return;
+        SKIP("could not export on session bus");
     }
     REQUIRE_FALSE(server_name.empty());
 
@@ -694,14 +690,12 @@ bool contains(const std::vector<std::string>& v, const std::string& s) {
 TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
           "[view][accessibility][atspi][linux][issue-L7c]") {
     if (!DBus::library_available()) {
-        SUCCEED("skipped: libdbus not available");
-        return;
+        SKIP("libdbus not available");
     }
     {
         DBus probe;
         if (!probe.connect_session()) {
-            SUCCEED("skipped: no session bus (run under dbus-run-session)");
-            return;
+            SKIP("no session bus (run under dbus-run-session)");
         }
     }
 
@@ -729,8 +723,7 @@ TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
     void* handle =
         init_accessibility_on_session_bus_for_test(root, &server_name);
     if (!handle) {
-        SUCCEED("skipped: could not export on session bus");
-        return;
+        SKIP("could not export on session bus");
     }
     REQUIRE_FALSE(server_name.empty());
 
@@ -818,10 +811,10 @@ TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
 #else
 TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
           "[view][accessibility][atspi][issue-L7b]") {
-    SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");
+    SKIP("Linux AT-SPI provider is a Linux-only runtime backend");
 }
 TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
           "[view][accessibility][atspi][issue-L7c]") {
-    SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");
+    SKIP("Linux AT-SPI provider is a Linux-only runtime backend");
 }
 #endif
