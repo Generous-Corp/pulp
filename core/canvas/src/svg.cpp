@@ -59,6 +59,7 @@ float SvgImage::height() const {
 
 std::vector<uint8_t> SvgImage::rasterize(int w, int h) const {
     if (!image_ || w <= 0 || h <= 0) return {};
+    if (width() <= 0 || height() <= 0) return {};
 
     auto* rast = nsvgCreateRasterizer();
     if (!rast) return {};

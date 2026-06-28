@@ -117,9 +117,14 @@ TEST_CASE("SvgImage invalid render emits no commands", "[canvas][svg]") {
 
 TEST_CASE("SvgImage invalid string", "[canvas][svg]") {
     auto img = SvgImage::from_string("not svg");
-    // nanosvg may return an empty image rather than nullptr
-    // Just check it doesn't crash
-    REQUIRE(true);
+
+    REQUIRE(img.width() == 0);
+    REQUIRE(img.height() == 0);
+    REQUIRE(img.rasterize(16, 16).empty());
+
+    RecordingCanvas canvas;
+    img.render(canvas, 0, 0, 16, 16);
+    REQUIRE(canvas.command_count() == 0);
 }
 
 TEST_CASE("SvgImage move semantics", "[canvas][svg]") {
