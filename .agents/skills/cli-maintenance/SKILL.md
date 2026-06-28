@@ -424,8 +424,20 @@ sibling build tree first, honor `PULP_BUILD_DIR` when present, and keep
 `test/test_cli_shellout.cpp` subprocess-output `INFO(...)` diagnostics so
 future failures show the delegated binary's stderr.
 
+On multi-config generators (MSVC / Visual Studio), the helper executable lives
+under the configuration directory, e.g.
+`build-windows/tools/import-design/Release/pulp-import-design.exe`, while the
+delegated relative path remains `tools/import-design/pulp-import-design`.
+Candidate lookup must therefore check both the direct single-config path and
+`Release` / `RelWithDebInfo` / `Debug` / `MinSizeRel` subdirectories, preferring
+the config inferred from the running `pulp-cpp` path when it is itself under
+`tools/cli/<config>/`. Add or keep a focused `delegate_to_build_binary` test
+that asserts the missing-helper diagnostic includes a `Release` candidate; a
+macOS/Linux single-config build will otherwise miss this Windows-only failure
+mode.
+
 **Cwd independence (2026-05-14):** `delegate_to_build_binary` in
-`tools/cli/cli_common.cpp` MUST NOT require `cwd` to be inside a Pulp
+`tools/cli/cli_delegate.cpp` MUST NOT require `cwd` to be inside a Pulp
 project to find a delegate. Sibling helpers live next to the CLI binary
 itself, so the argv[0]-relative resolution path is authoritative and
 project-root is a fallback. The original `require_project_root()` gate

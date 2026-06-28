@@ -2388,6 +2388,10 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 `tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
 When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`
 and lower that ceiling to the new exact LOC in the same PR that moves code out.
+`tools/cli/cli_common.cpp` follows the same ratchet rule: when shared helper
+logic moves into a focused translation unit such as `cli_delegate.cpp`, lower
+the `cli_common.cpp` ceiling in `hotspot_size_guard.json` in that same PR so the
+extraction cannot quietly regrow.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 
