@@ -100,9 +100,11 @@ Audio port count and info come from `descriptor().input_buses` and `descriptor()
 - `in_place_pair` set to `CLAP_INVALID_ID`
 
 The process callback routes bus 0 as the main input/output and routes input bus
-1 to `Processor::sidechain_input()` when present. Additional input buses and
-secondary output buses require a richer process surface than the current simple
-`Processor::process()` signature.
+1 to `Processor::sidechain_input()` when present. Descriptor-declared secondary
+output buses are routed through the richer `ProcessBuffers` surface for
+processors that override it; processors that only implement the simple
+`Processor::process()` signature write the main output and leave aux outputs
+silent. Additional input buses beyond bus 1 are not exposed today.
 
 `format::ProcessBuffers` and `format::ProcessBusBufferSet` are the additive
 shared vocabulary for that richer surface. They are non-owning views over
@@ -133,9 +135,10 @@ half-valid buffer.
 
 ### Known Limitations
 
-- Bus 0 and one sidechain input are routed. Additional input buses and
-  secondary output buses are not exposed through the simple `Processor`
-  callback.
+- Bus 0 and one sidechain input are routed. Descriptor-declared secondary
+  output buses are writable through `ProcessBuffers`; additional input buses
+  beyond the sidechain are not exposed through the simple `Processor` process
+  surface.
 - Desktop CLAP plugin targets expose `CLAP_EXT_GUI` when built with
   `PULP_CLAP_GUI=1`; headless/CI/test environments and WCLAP builds do not
   expose a live desktop editor.
@@ -200,6 +203,13 @@ The adapter adds event buses based on `descriptor()`:
 
 VST3 note events (`Event::kNoteOnEvent`, `Event::kNoteOffEvent`) are converted to/from `MidiEvent`. Velocity is scaled between float 0-1 (VST3) and integer 0-127 (MIDI). Sample offsets are preserved.
 
+MIDI controllers are host-mediated in VST3. For MIDI-accepting plug-ins, the
+adapter implements `IMidiMapping` so hosts can map CC, pitch bend, and channel
+aftertouch to hidden ParamIDs; `process()` decodes those parameter changes back
+into sample-accurate MIDI messages. MPE-enabled plug-ins also expose
+`INoteExpressionController`, routing VST3 tuning, volume, and brightness
+note-expression events into Pulp's MPE sidecar.
+
 ### State Save/Load
 
 - **Save (`getState`):** Writes a combined host-facing blob containing the
@@ -237,7 +247,10 @@ non-interactive runs do not launch editor windows.
 
 ### Known Limitations
 
-- Bus 0 and one sidechain input are routed through `ProcessBuffers`. Secondary output buses are zero-filled today rather than exposed as writable processor outputs.
+- Bus 0, one sidechain input, and descriptor-declared secondary output buses
+  are routed through `ProcessBuffers`. A multi-out processor that overrides
+  `process(ProcessBuffers&)` writes each aux output bus; processors that only
+  implement the simple callback leave aux buses silent.
 - Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation.
 
 ---
