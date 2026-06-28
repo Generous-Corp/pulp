@@ -35,8 +35,8 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
 | `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
 | `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
-| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
-| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
+| `platform_maturity.accessibility.windows` | Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source. | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
+| `platform_maturity.accessibility.linux` | Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus. | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
 
 ---
@@ -298,8 +298,8 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | VoiceOver accessibility | usable | macOS | NSAccessibilityElement + AccessRole |
 | VoiceOver accessibility | usable | iOS | UIAccessibilityElement with slider increment/decrement |
 | TalkBack accessibility | usable | Android | JNI bridge: role, label, value, table metadata, actions |
-| UIA accessibility | partial | Windows | Role map only; provider pending (production-readiness 04) |
-| AT-SPI accessibility | partial | Linux | Role map only; D-Bus registration pending (production-readiness 04) |
+| UIA accessibility | partial | Windows | Provider tree, WM_GETOBJECT, and value/focus/name event helpers exist; direct UIA client regression still pending |
+| AT-SPI accessibility | partial | Linux | Direct D-Bus provider exposes per-widget tree/value paths with loopback tests; real registry/Orca signal receipt still pending |
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
 | Right-click context menu | partial | all | on_context_menu/registerContextMenu fire; view-tree ContextMenu is actionable; native showContextMenu currently renders only on macOS and does not report selection |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |

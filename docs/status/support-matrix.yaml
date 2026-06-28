@@ -565,10 +565,18 @@ platform_maturity:
       notes: TalkBack via JNI bridge exposing role, label, value, table metadata, and click/increment/decrement actions. See core/view/platform/android/accessibility_android.cpp.
     windows:
       status: partial
-      notes: UIA stub — role mapping defined, IRawElementProviderSimple/WM_GETOBJECT/event firing pending. See production-readiness workstream 04.
+      notes: >
+        UIA provider tree, WM_GETOBJECT hook, per-widget fragments, and
+        value/focus/name event helpers are implemented in
+        core/view/platform/win/accessibility_win.cpp. Direct UIA client and
+        screen-reader regression tests are still pending.
     linux:
       status: partial
-      notes: AT-SPI2 over direct D-Bus (no libatk) — a11y-bus connect, root Accessible/Application export, and Socket.Embed registration done; per-widget tree + value/events pending. See core/view/platform/linux/accessibility_linux.cpp and production-readiness workstream 04.
+      notes: >
+        AT-SPI2 over direct D-Bus (no libatk) exports root/application objects,
+        per-widget Accessible/Component/Value objects, and event-hook
+        marshalling; session-bus loopback tests cover tree/value behavior.
+        Real registry/Orca signal receipt remains pending.
   ime_composition:
     status: usable
     platform: macos
@@ -935,15 +943,14 @@ limitations:
     - text: "Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.5"
   platform_maturity.accessibility.windows:
-    # UIA bootstrap is in place (UIAutomationCore linked, session init
-    # wired). Remaining: IRawElementProviderSimple provider tree +
-    # WM_GETOBJECT integration + value/focus/selection event emission.
-    - text: "UIA provider tree and event emission pending (UIAutomationCore linked, session init wired)."
+    # UIA provider tree + event helpers are implemented in source. Remaining:
+    # direct client/screen-reader regression coverage and hardening.
+    - text: "Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.1"
   platform_maturity.accessibility.linux:
-    # AT-SPI D-Bus bridge bootstrap is in place. Remaining: per-view
-    # AtkObject model + value/text/focus event emission.
-    - text: "AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place)."
+    # AT-SPI object tree and event-hook marshalling are loopback-tested on the
+    # session bus. Remaining: real a11y registry / Orca signal receipt.
+    - text: "Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
 
 # ── Schema-v2 additions ──────────────────────────────────────────────────────
@@ -1035,11 +1042,25 @@ accessibility_features:
     status: planned
     notes: Per-widget std::vector<Action> exposure planned.
   live_region_announce:
-    status: planned
-    notes: announce(text, politeness) cross-platform API planned.
+    status: partial
+    notes: >
+      announce_accessibility(text, priority) and set_announcement_sink() are
+      implemented and covered by pulp-test-announce. Built-in platform bridges
+      do not install live-region sinks yet, so calls log/no-op unless a host or
+      platform backend supplies one.
   tree_invalidation_events:
-    status: planned
-    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) planned.
+    status: partial
+    notes: >
+      Cross-platform provider event helpers exist, Windows raises UIA
+      structure/value/focus/name events, and Linux rebuilds AT-SPI trees plus
+      marshals value/focus/name events. test/test_accessibility_provider.cpp
+      and test/test_accessibility_tree.cpp cover the no-op/live helper paths.
+      macOS/iOS/Android notification parity and real client signal receipt are
+      still pending.
   a11y_test_harness:
-    status: planned
-    notes: Headless AX introspection tests per platform planned.
+    status: partial
+    notes: >
+      Headless cross-platform snapshots are covered by
+      test/test_accessibility_tree.cpp, and Linux has a session-bus AT-SPI
+      loopback harness. Direct per-platform assistive-client harnesses remain
+      planned.
