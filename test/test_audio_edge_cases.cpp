@@ -119,8 +119,7 @@ TEST_CASE("Audio edges: zero-length process() is a safe no-op",
     // The contract: process() returns cleanly. If PulpGain's loop or
     // the framework wrapper ever dereferences without a size guard
     // this will segfault here.
-    host.process(ov, iv);
-    SUCCEED("zero-length process() returned cleanly");
+    REQUIRE_NOTHROW(host.process(ov, iv));
 }
 
 // ── 2. Denormal-prone input stays finite ─────────────────────────────
