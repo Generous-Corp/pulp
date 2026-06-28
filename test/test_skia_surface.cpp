@@ -35,7 +35,7 @@ using namespace pulp::render;
 TEST_CASE("SkiaSurface requires initialized GpuSurface", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
 
     // Don't initialize GpuSurface — SkiaSurface should fail gracefully
     SkiaSurface::Config config{};
@@ -46,20 +46,20 @@ TEST_CASE("SkiaSurface requires initialized GpuSurface", "[render][skia]") {
     // Should be null because GpuSurface has no Dawn handles
     REQUIRE(skia == nullptr);
 #else
-    REQUIRE(true);  // Skia not compiled in
+    SKIP("Skia not compiled in");
 #endif
 }
 
 TEST_CASE("SkiaSurface uses shared GpuSurface device", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 400;
     gpu_config.height = 300;
 
-    if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+    if (!gpu->initialize(gpu_config)) SKIP("GPU adapter unavailable");
 
     SkiaSurface::Config config{};
     config.width = 400;
@@ -67,31 +67,31 @@ TEST_CASE("SkiaSurface uses shared GpuSurface device", "[render][skia]") {
     config.scale_factor = 1.0f;
 
     auto skia = SkiaSurface::create(*gpu, config);
-    if (!skia) return;  // Graphite context creation failed
+    if (!skia) SKIP("Skia Graphite context unavailable");
 
     REQUIRE(skia->is_available());
 #else
-    REQUIRE(true);
+    SKIP("Skia not compiled in");
 #endif
 }
 
 TEST_CASE("SkiaSurface offscreen frame cycle", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 200;
     gpu_config.height = 150;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP("GPU adapter unavailable");
 
     SkiaSurface::Config config{};
     config.width = 200;
     config.height = 150;
 
     auto skia = SkiaSurface::create(*gpu, config);
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP("Skia surface unavailable");
 
     // Frame cycle: GpuSurface brackets the frame, SkiaSurface draws
     REQUIRE(gpu->begin_frame());
@@ -106,23 +106,23 @@ TEST_CASE("SkiaSurface offscreen frame cycle", "[render][skia]") {
     skia->end_frame();  // submit Graphite recording
     gpu->end_frame();   // present (no-op in offscreen mode)
 #else
-    REQUIRE(true);
+    SKIP("Skia not compiled in");
 #endif
 }
 
 TEST_CASE("SkiaSurface multiple frame cycles", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 100;
     gpu_config.height = 100;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP("GPU adapter unavailable");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 100, .height = 100});
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP("Skia surface unavailable");
 
     // Multiple frames — verify no state leaks
     for (int i = 0; i < 5; ++i) {
@@ -134,23 +134,23 @@ TEST_CASE("SkiaSurface multiple frame cycles", "[render][skia]") {
         gpu->end_frame();
     }
 #else
-    REQUIRE(true);
+    SKIP("Skia not compiled in");
 #endif
 }
 
 TEST_CASE("SkiaSurface resize", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 200;
     gpu_config.height = 200;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP("GPU adapter unavailable");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 200, .height = 200});
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP("Skia surface unavailable");
 
     // Resize both GpuSurface and SkiaSurface
     gpu->resize(400, 300);
@@ -164,7 +164,7 @@ TEST_CASE("SkiaSurface resize", "[render][skia]") {
     skia->end_frame();
     gpu->end_frame();
 #else
-    REQUIRE(true);
+    SKIP("Skia not compiled in");
 #endif
 }
 
@@ -176,7 +176,7 @@ TEST_CASE("SkiaSurface null without Skia", "[render][skia]") {
         REQUIRE(skia == nullptr);
     }
 #else
-    REQUIRE(true);  // Skia is available, tested elsewhere
+    SKIP("Skia is available; null-without-Skia contract is inactive");
 #endif
 }
 
