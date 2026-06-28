@@ -1438,6 +1438,15 @@ Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
 Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
 
+The live watch/relaunch loop is implemented by the C++ delegate (`pulp-cpp`).
+Normal installed/source builds ship the Rust `pulp` front end with that sibling
+delegate, so `pulp dev` forwards to the full watch loop when `pulp-cpp` is
+available. If the delegate is unavailable or fallthrough is disabled, the Rust
+fallback runs one configure/build pass, optionally runs tests, optionally
+launches once, and prints a watch-loop stub notice instead of watching for
+changes. The `--validate` and `--allow-unsupported-sdk` dev-loop behavior is
+therefore part of the delegated C++ path.
+
 ```bash
 pulp dev                                      # Watch and rebuild
 pulp dev --test                               # Watch, rebuild, run tests
@@ -1454,13 +1463,13 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--test`, `-t` | Run tests after each successful build |
+| `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
-| `--validate` | Run quick plugin dlopen validation after build |
-| `--run TARGET` | Launch TARGET from the build dir; relaunch on rebuild |
-| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT |
+| `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
-| `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
 | `-- args...` | Arguments passed to the launched app |
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.

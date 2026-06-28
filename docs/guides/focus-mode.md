@@ -3,6 +3,11 @@
 > Status: **experimental**. The CLI persists focus state and runs the normal
 > watch loop; surrounding tooling can read the focus marker for
 > single-platform iteration workflows.
+>
+> Current scope: the focus marker and normal watch loop are implemented today.
+> Automatic PR-state monitoring and archive-splice helpers are still deferred;
+> their flags are compatibility surfaces that print diagnostics and leave the
+> manual playbook below as the current workflow.
 
 ## Background
 
@@ -16,7 +21,9 @@ ran a tight dev loop that closed 5 framework gaps in about 2 hours:
 5. Upstream agents picked up all 6 sub-issues; PRs merged within 2 hours, auto-released as v0.54.0–v0.56.0.
 6. Bumped the consumer's SDK pin from `0.52.0 → 0.56.0` in one shot. Massive visible parity gain confirmed via screenshot.
 
-`pulp loop` codifies this loop as an explicit, opt-in mode.
+`pulp loop` codifies the available CLI part of this loop as an explicit,
+opt-in mode. The broader analyzer, local-prototype, and upstream-monitoring
+steps remain a documented manual playbook until their dedicated helpers land.
 
 ## When to use focus mode
 
@@ -56,7 +63,9 @@ Full flag reference: [`docs/reference/cli.md#loop`](../reference/cli.md#loop).
 
 ## Recommended playbook
 
-The leveraged-prototype loop has five steps.
+The leveraged-prototype loop has five steps. Today, `pulp loop` automates the
+focus marker plus watch loop; the surrounding analyzer, local-prototype,
+PR-monitor, and SDK-bump steps are still manual.
 
 ### 1. Analyze the consumer's bundle
 
@@ -84,9 +93,12 @@ small and validate the patched SDK before treating the result as proof.
 
 ### 4. Monitor upstream PR state flips
 
-Use GitHub issue and PR searches to watch the upstream batch. The important
-signal is when each PR linked to a filed gap merges and the SDK release that
-contains it is available to the consumer.
+Automatic `pulp loop --watch-issues` monitoring is deferred today. The current
+CLI recognizes the flag, prints a diagnostic, and continues the normal loop.
+
+Use GitHub issue and PR searches to watch the upstream batch manually. The
+important signal is when each PR linked to a filed gap merges and the SDK
+release that contains it is available to the consumer.
 
 ### 5. Bump the SDK pin and validate cross-platform
 

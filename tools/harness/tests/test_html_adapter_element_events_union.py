@@ -76,6 +76,10 @@ class HtmlAdapterElementEventsUnionTests(unittest.TestCase):
             f"HtmlAdapter dropped web-compat-dom-ops.js — missing: {sorted(missing)}",
         )
 
+    def test_animation_methods_still_resolve(self) -> None:
+        """Methods from web-compat-animation.js must stay in the union."""
+        self.assertIn("animate", self.methods, "HtmlAdapter dropped web-compat-animation.js")
+
 
 if __name__ == "__main__":
     unittest.main()

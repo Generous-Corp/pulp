@@ -122,9 +122,9 @@ ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup
 | `background-color` | ✅ | Full CSS Color L4 |
 | `background-image` (gradient) | ✅ | linear-gradient with multi-stop |
 | `background-image` (URL) | ❌ | Only gradients, not images |
-| `background-size` | ⚠️ | CSS parsed, bridge stub |
-| `background-position` | ⚠️ | CSS parsed, bridge stub |
-| `background-repeat` | ⚠️ | CSS parsed, bridge stub |
+| `background-size` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
+| `background-position` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
+| `background-repeat` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
 | `border` (shorthand) | ✅ | width + style + color |
 | `border-top` / `right` / `bottom` / `left` | ✅ | Per-side borders |
 | `border-width` / `color` per-side | ✅ | |
