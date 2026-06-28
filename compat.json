@@ -734,7 +734,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundPosition wires JS \u2192 bridge \u2192 View slot"
       ],
       "notes": "Wave 5 css.5 \u2014 registered the previously-missing setBackgroundPosition bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_position_ slot for a future raster-image paint pass to honor without a JS-side change. Solid-bg paint (which is what Pulp paints today) doesn't position because there's no raster image to position. Catalog stays `supported` since the value coverage (keyword / length / percentage) all parse and survive bridge round-trip; the architectural caveat is: with no raster background pipeline (arch-deferred-image-loader), the offsets have no visual effect.",
       "issue": ""
@@ -752,10 +752,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge_css_misc.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_css_misc.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View"
       ],
-      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat \u2014 the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup \u2014 partial \u2192 supported (no unsupported values listed; wired through web-compat-style-decl.js).",
+      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat \u2014 the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op; the entry is supported because the declared value parses and round-trips, with this storage-only paint caveat recorded here. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup \u2014 partial \u2192 supported (no unsupported values listed; wired through web-compat-style-decl.js).",
       "issue": "1552"
     },
     "css/backgroundSize": {
@@ -770,7 +769,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundSize wires JS \u2192 bridge \u2192 View slot"
       ],
       "notes": "Wave 5 css.5 \u2014 registered the previously-missing setBackgroundSize bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_size_ slot for a future raster-image paint pass. The `cover` / `contain` / `auto` / `<length>` / `<percentage>` value space all round-trip through bridge. Architectural caveat: arch-deferred-image-loader \u2014 without a raster bg pipeline these have no visual effect, but the catalog claim is honest because the value is captured and queryable.",
       "issue": ""
