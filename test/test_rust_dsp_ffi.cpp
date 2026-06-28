@@ -19,6 +19,7 @@
 #include <new>
 #include <string_view>
 
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -62,13 +63,16 @@ TEST_CASE("rust core lifecycle drives create->process->destroy", "[rust-dsp][lif
     REQUIRE(inst != nullptr);
 
     REQUIRE(core->prepare(inst, nullptr) == PULP_NATIVE_OK);
+    REQUIRE(core->set_bus_layout(inst, nullptr) == PULP_NATIVE_OK);
     REQUIRE(core->resume(inst) == PULP_NATIVE_OK);
     // No-op process must report success without touching host buffers.
     REQUIRE(core->process(inst, nullptr) == PULP_NATIVE_OK);
+    core->reset(inst);
+    REQUIRE(core->report_latency(inst) == 0);
+    REQUIRE(core->report_tail(inst) == 0);
     REQUIRE(core->suspend(inst) == PULP_NATIVE_OK);
     core->release(inst);
     core->destroy(inst);
-    SUCCEED("lifecycle completed");
 }
 
 TEST_CASE("rust allocation OUTSIDE a no-alloc scope is allowed",
@@ -76,7 +80,8 @@ TEST_CASE("rust allocation OUTSIDE a no-alloc scope is allowed",
     // Positive control: the checking allocator must NOT trap when no scope is
     // active. If this aborted, the hook would be over-eager.
     pulp_noop_selftest_alloc();
-    SUCCEED("allocation outside scope did not trap");
+    INFO("Rust allocation returned while no RtNoAllocScope was active");
+    REQUIRE(::kill(::getpid(), 0) == 0);
 }
 
 TEST_CASE("rust allocation INSIDE a no-alloc scope traps (death test)",
