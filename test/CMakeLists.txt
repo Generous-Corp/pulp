@@ -370,6 +370,20 @@ add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
 
+# WAMv2 Processor->WASM bridge hardening (native coverage of the -fno-exceptions
+# WASM bridge: non-throwing param parse, frame-count clamp, JSON escaping,
+# param/state round-trip). Compiles the bridge TU directly and links the real
+# pulp libraries (create_view() comes from format.cpp; the headless stub is
+# WASM-only). When PulpWam.cmake gives the bridge a proper library target, this
+# can link that instead of compiling the source directly.
+add_executable(pulp-test-wam-adapter test_wam_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp
+)
+target_link_libraries(pulp-test-wam-adapter PRIVATE
+    Catch2::Catch2WithMain
+    pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
+catch_discover_tests(pulp-test-wam-adapter)
+
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
