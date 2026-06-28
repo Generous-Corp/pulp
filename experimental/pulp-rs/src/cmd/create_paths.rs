@@ -77,6 +77,7 @@ mod tests {
         let home = td.path().join("home");
         let _env = crate::test_support::EnvVarGuard::set_many(&[
             ("HOME", Some(home.to_str().unwrap())),
+            ("USERPROFILE", Some(home.to_str().unwrap())),
             ("PULP_HOME", None),
             ("PULP_PROJECTS_DIR", Some("~/Pulp Projects")),
         ]);
@@ -98,11 +99,34 @@ mod tests {
         .unwrap();
         let _env = crate::test_support::EnvVarGuard::set_many(&[
             ("HOME", Some(home.to_str().unwrap())),
+            ("USERPROFILE", Some(home.to_str().unwrap())),
             ("PULP_HOME", Some(pulp_home.to_str().unwrap())),
             ("PULP_PROJECTS_DIR", None),
         ]);
 
         let resolved = configured_projects_base_dir(td.path()).unwrap();
         assert_eq!(resolved, home.join("Configured Projects"));
+    }
+
+    #[test]
+    fn configured_projects_base_prefers_env_over_config() {
+        let td = tempfile::tempdir().unwrap();
+        let home = td.path().join("home");
+        let pulp_home = td.path().join("pulp-home");
+        fs::create_dir_all(&pulp_home).unwrap();
+        fs::write(
+            pulp_home.join("config.toml"),
+            "[create]\nprojects_dir = \"~/Configured Projects\"\n",
+        )
+        .unwrap();
+        let _env = crate::test_support::EnvVarGuard::set_many(&[
+            ("HOME", Some(home.to_str().unwrap())),
+            ("USERPROFILE", Some(home.to_str().unwrap())),
+            ("PULP_HOME", Some(pulp_home.to_str().unwrap())),
+            ("PULP_PROJECTS_DIR", Some("~/Env Projects")),
+        ]);
+
+        let resolved = configured_projects_base_dir(td.path()).unwrap();
+        assert_eq!(resolved, home.join("Env Projects"));
     }
 }
