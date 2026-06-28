@@ -50,8 +50,15 @@ set(WASM_LINK_FLAGS
     "-sENVIRONMENT=web"
     "-sMODULARIZE=1"
     "-sEXPORT_ES6=1"
-    "-sEXPORTED_FUNCTIONS=['_malloc','_free']"
-    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
+    # The wam_* C exports MUST be on this allowlist. With MODULARIZE+EXPORT_ES6
+    # the generated module only emits Module['_name'] accessors for names listed
+    # here; __attribute__((used)) keeps them in the binary but does NOT add the
+    # JS accessor. Keep this in sync with the wam_* entry points
+    # (pulp_*_wasm.cpp). Leading underscore is the C symbol prefix.
+    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_descriptor','_wam_state_size','_wam_read_state','_wam_write_state']"
+    # HEAPF32/HEAPU8 are needed to marshal audio buffers and state blobs across
+    # the JS/WASM boundary by copying into heap views.
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','HEAPF32','HEAPU8']"
     "--no-entry"
     "-O2"
 )
