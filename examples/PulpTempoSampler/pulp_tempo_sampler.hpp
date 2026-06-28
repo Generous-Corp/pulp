@@ -122,6 +122,9 @@ enum TempoSamplerParams : state::ParamID {
     kTempoLoop    = 10,
     kRootNote     = 11, // MIDI note of slice 0 (slice idx = note - root)
     kOnsetSens    = 12, // 0..1 onset-detection sensitivity (higher = more slices)
+    kPlayToEnd    = 13, // Logic Quick Sampler "Play to End": a triggered slice
+                        // plays through to the loop end (root => whole loop) so
+                        // chopping (SENS>0) never steals whole-loop looping.
 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
@@ -542,6 +545,12 @@ public:
                                        static_cast<float>(kDefaultRootNote), 1}});
         store.add_parameter({.id = kOnsetSens, .name = "Onset Sensitivity", .unit = "",
                              .range = {0, 1, kDefaultOnsetSensitivity, 0.01f}});
+        // Default ON: a triggered slice plays through to the loop end, so the root
+        // always yields the whole loop and raising SLICES (SENS) never removes
+        // whole-loop looping. OFF = strict per-slice chop (Logic Quick Sampler
+        // "Play to End"). Persisted via StateStore; pre-kPlayToEnd states load
+        // the default ON. No custom-state version bump needed.
+        store.add_parameter({.id = kPlayToEnd, .name = "Play To End", .unit = "", .range = {0, 1, 1, 1}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -1059,6 +1068,18 @@ public:
         return note - static_cast<int>(state().get_value(kRootNote));
     }
 
+    /// Test-only: the [start,end) frame range region_for_note maps `note` to,
+    /// over the currently published (tempo-matched) sample. Returns {0,0} when
+    /// the note maps to no slice. Lets tests assert that Play-to-End makes the
+    /// root span the whole loop while OFF stops at the next slice boundary.
+    std::pair<std::uint64_t, std::uint64_t>
+    region_range_for_note_test(int note, bool loop, bool play_to_end) const {
+        const auto sample = store_.read_published_view();
+        const auto r = region_for_note(note, sample, loop, play_to_end);
+        if (!r) return {0, 0};
+        return {r->start_frame, r->end_frame};
+    }
+
     /// Render synchronously (tests/headless). Real hosts use the worker.
     void render_now(double host_bpm) { render_to_tempo(host_bpm); }
 
@@ -1399,9 +1420,29 @@ public:
             loopBtn->set_off_background_color(raised);
             loopBtn->set_off_text_color(muted);
             loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 614, 316, 84, 26);
+            place(*loopBtn, 614, 316, 56, 26);
             root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
             root->add_child(std::move(loopBtn));
+        }
+
+        // TO END toggle (Logic Quick Sampler "Play to End"): when on, a triggered
+        // slice plays through to the loop end, so the root key yields the whole
+        // loop and raising SLICES never steals whole-loop looping. Off = strict
+        // per-slice chop. Bound to kPlayToEnd (default ON); region_for_note reads
+        // it per note. Held voices pick up a TO END change on the next trigger.
+        {
+            auto endBtn = std::make_unique<ToggleButton>();
+            endBtn->set_label("TO END");
+            endBtn->set_font_size(10.0f);
+            endBtn->set_corner_radius(6.0f);
+            endBtn->set_on_background_color(teal);
+            endBtn->set_on_text_color(bg900);
+            endBtn->set_off_background_color(raised);
+            endBtn->set_off_text_color(muted);
+            endBtn->set_off_border_color(faint);
+            place(*endBtn, 676, 316, 64, 26);
+            root->bindings.push_back(bind_parameter(*endBtn, state(), kPlayToEnd));
+            root->add_child(std::move(endBtn));
         }
 
         // The musical-typing keyboard is NOT inline anymore: the SDK primitive
@@ -1595,6 +1636,7 @@ private:
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         bool loop = false;
+        bool play_to_end = true;  // triggered slice plays to the loop end (root => whole loop)
     };
 
     // Publish the most-recently-triggered active voice's slice + progress for
@@ -1942,6 +1984,7 @@ private:
         p.adsr.sustain = state().get_value(kTempoSustain) / 100.0f;
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
+        p.play_to_end = state().get_value(kPlayToEnd) >= 0.5f;
         return p;
     }
 
@@ -1952,7 +1995,7 @@ private:
 
     // Region for a note: a slice of the published (already tempo-matched) buffer.
     std::optional<audio::LoopRegion> region_for_note(int note, const audio::PublishedSampleView& sample,
-                                                     bool loop) const noexcept {
+                                                     bool loop, bool play_to_end) const noexcept {
         std::uint64_t start = 0, end = 0;
         const int root = static_cast<int>(state().get_value(kRootNote));
         {
@@ -1961,10 +2004,21 @@ private:
                 const int idx = note - root;
                 if (idx >= 0 && idx + 1 < static_cast<int>(slices_stretched_.size())) {
                     start = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx)]);
-                    end = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
+                    // Play to End (Logic Quick Sampler): the triggered slice plays
+                    // through to the loop end — the last stretched marker, which
+                    // analyze_locked()/render_to_tempo() guarantee equals the
+                    // published loop end — instead of stopping at the next slice.
+                    // So idx 0 (root) => the whole loop; idx k => slice k to end.
+                    // OFF => stop at the next boundary (strict per-slice chop).
+                    end = play_to_end
+                              ? static_cast<std::uint64_t>(slices_stretched_.back())
+                              : static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
                 }
             }
         }
+        // Defensive: the published loop end can equal num_frames; clamp so the
+        // whole-loop region is never rejected by the > num_frames guard below.
+        if (play_to_end && end > sample.num_frames) end = sample.num_frames;
         // Each slice is mapped to its own chromatic note (idx = note - root). A
         // note outside [root, root + num_slices) — or one with invalid stretched
         // boundaries — maps to NO slice: play nothing. Never fall back to the
@@ -2041,7 +2095,7 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.loop);
+        const auto region = region_for_note(note, sample, params.loop, params.play_to_end);
         if (!region) return;  // note maps to no slice -> silent (don't play the whole sample)
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }

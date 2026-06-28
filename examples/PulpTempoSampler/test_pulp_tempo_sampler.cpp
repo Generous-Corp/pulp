@@ -170,7 +170,10 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 12);
+    REQUIRE(s.param_count() == 13);
+    // Play to End defaults ON: a dropped loop's root yields the whole loop even
+    // after chopping (raising SENS), matching Logic Quick Sampler's slice ergonomics.
+    REQUIRE(s.get_value(kPlayToEnd) == 1.0f);
 }
 
 TEST_CASE("PulpTempoSampler package metadata uses the descriptor version", "[tempo-sampler]") {
@@ -751,6 +754,9 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
     f.proc->set_loop_bpm_for_test(120.0);
     f.store.set_value(kTempoLoop, 0.0f);              // one-shot so a voice stops at region end
+    f.store.set_value(kPlayToEnd, 0.0f);              // per-slice chop: this test measures
+                                                      // each slice's OWN region length, not
+                                                      // the whole-loop Play-to-End default.
     std::vector<float> l(512), r(512);
     { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // host==loop -> R=1
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
@@ -1064,6 +1070,100 @@ TEST_CASE("whole-loop LOOP tiles under stretch (slowed host)",
     }
     INFO("slowed worst beat-grid deviation = " << worst << " samples (" << (worst * 1000.0 / sr) << " ms)");
     CHECK(worst <= 256);   // within ~5 ms of the host grid even when stretched 1.33x
+}
+
+// PLAY TO END (Logic Quick Sampler parity), precise region semantics: with the
+// loop CHOPPED into >1 slice, the root with Play-to-End ON spans the whole loop
+// (so chopping never steals whole-loop looping), while OFF stops at the next
+// slice boundary. Every slice key still maps; under Play-to-End it plays from its
+// own start to the loop end.
+TEST_CASE("Play to End: root spans the whole loop even when chopped (>1 slice)",
+          "[tempo-sampler][issue-loop-tile][play-to-end]") {
+    Fixture f;
+    const double sr = 48000.0, bpm = 120.0;
+    const long beat = std::lround(60.0 / bpm * sr);        // 24000
+    const int beats = 4; const long frames = beat * beats; // 96000 (1 bar)
+    std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+    const float amp[4] = {1.0f, 0.5f, 0.8f, 0.4f};         // distinct beats
+    for (int b = 0; b < beats; ++b) { const long p = b * beat;
+        buf[static_cast<size_t>(p)] = amp[b];
+        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.store.set_value(kOnsetSens, 1.0f);                   // CHOP: max slices
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+    f.proc->set_loop_bpm_for_test(bpm);                    // identity stretch (R=1)
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }   // publish
+    REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
+    const auto pub = static_cast<std::uint64_t>(f.proc->published_frames());
+
+    const auto whole0 = f.proc->region_range_for_note_test(kRoot, true, /*play_to_end=*/true);
+    const auto chop0  = f.proc->region_range_for_note_test(kRoot, true, /*play_to_end=*/false);
+    const auto whole1 = f.proc->region_range_for_note_test(kRoot + 1, true, true);
+    const auto chop1  = f.proc->region_range_for_note_test(kRoot + 1, true, false);
+
+    CHECK(whole0.first == 0u);
+    CHECK(whole0.second == pub);            // root + Play-to-End ON = the WHOLE loop
+    CHECK(chop0.first == 0u);
+    CHECK(chop0.second < pub);              // OFF = just slice 0 (a fraction)
+    CHECK(chop0.second == chop1.first);     // slice-1 boundary is shared start
+    CHECK(whole1.first == chop1.first);     // root+1 starts at slice 1 ...
+    CHECK(whole1.second == pub);            // ... and (Play-to-End ON) plays to the end
+    CHECK(chop1.second > chop1.first);
+    CHECK(chop1.second <= pub);
+}
+
+// PLAY TO END, audio-level: chopped (SENS 1) + LOOP + Play-to-End ON, holding the
+// root must reproduce the FULL multi-beat loop (distinct beat amplitudes) every
+// pass — proving the whole loop loops, not slice 0. This is the exact "raising
+// SLICES no longer steals whole-loop looping" guarantee at the audio path.
+TEST_CASE("Play to End: chopped + LOOP still loops the whole loop (audio)",
+          "[tempo-sampler][issue-loop-tile][play-to-end]") {
+    Fixture f;
+    const double sr = 48000.0, bpm = 120.0;
+    const long beat = std::lround(60.0 / bpm * sr);
+    const int beats = 4; const long frames = beat * beats;
+    std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+    const float amp[4] = {1.0f, 0.45f, 0.8f, 0.35f};
+    for (int b = 0; b < beats; ++b) { const long p = b * beat;
+        buf[static_cast<size_t>(p)] = amp[b];
+        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.store.set_value(kOnsetSens, 1.0f);                   // CHOP
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+    f.proc->set_loop_bpm_for_test(bpm);
+    f.store.set_value(kTempoLoop, 1.0f);                   // LOOP on
+    CHECK(f.store.get_value(kPlayToEnd) == 1.0f);          // default ON
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
+    REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
+
+    std::vector<float> out; out.reserve(300000);
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+      process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
+    for (int blk = 0; blk < 520; ++blk) {                  // ~2.7 bars
+        midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    std::vector<float> peaks;
+    for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
+        const float a = std::abs(out[static_cast<size_t>(i)]);
+        if (a > 0.2f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
+            a > std::abs(out[static_cast<size_t>(i + 1)])) peaks.push_back(a);
+    }
+    REQUIRE(peaks.size() >= 8);                            // >= 8 beats over ~2.7 bars
+    float pmin = peaks[0], pmax = peaks[0];
+    for (float a : peaks) { pmin = std::min(pmin, a); pmax = std::max(pmax, a); }
+    // Distinct beat amplitudes present => more than slice 0 is looping. If only
+    // slice 0 (Play-to-End OFF behavior) looped, every peak would be ~1.0.
+    INFO("peak amp range = [" << pmin << ", " << pmax << "]");
+    CHECK(pmax - pmin > 0.2f);
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
