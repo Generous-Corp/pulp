@@ -113,10 +113,16 @@ function(pulp_add_wam_plugin NAME)
         "-O2"
     )
     if(ARG_SINGLE_FILE)
+        # AudioWorklet DSP module: BASE64-embed the wasm (SINGLE_FILE) and emit
+        # an ES-module factory (MODULARIZE+EXPORT_ES6). The processor module
+        # imports this factory and awaits it at top level, so Module is fully
+        # ready when the AudioWorkletProcessor constructs — a plain global
+        # Module is module-scoped under addModule() and never becomes visible.
         list(APPEND _link
             "-sSINGLE_FILE=1"
-            "-sBINARYEN_ASYNC_COMPILATION=0"
-            "-sENVIRONMENT=web,worker,shell")
+            "-sMODULARIZE=1"
+            "-sEXPORT_ES6=1"
+            "-sENVIRONMENT=web,worker")
     else()
         list(APPEND _link
             "-sMODULARIZE=1"

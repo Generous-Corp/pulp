@@ -34,3 +34,11 @@ pulp_add_wam_plugin(PulpPluck
 pulp_add_wam_plugin(PulpChorus
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_chorus_wasm.cpp
     INCLUDES ${PULP_ROOT}/examples/web-demos)
+
+# SINGLE_FILE worklet-delivery build of PulpGain: the wasm is BASE64-embedded
+# and compiled synchronously, which is what an AudioWorkletProcessor needs (no
+# fetch / no async compile in worklet scope). The separate-wasm PulpGain target
+# above stays for the Node runner and export inspection.
+pulp_add_wam_plugin(PulpGainWorklet SINGLE_FILE
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_gain_wasm.cpp
+    INCLUDES ${PULP_ROOT}/examples/pulp-gain)

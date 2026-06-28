@@ -8,7 +8,33 @@
 // times.
 //
 // Pure JS — no Node- or browser-specific APIs — so it loads in Node, a worklet,
-// and the main thread alike.
+// and the main thread alike. In particular it must NOT use TextEncoder/
+// TextDecoder, which are undefined in AudioWorkletGlobalScope.
+
+// Minimal UTF-8 codec (AudioWorkletGlobalScope has no TextEncoder/TextDecoder).
+function utf8Encode(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = str.codePointAt(i);
+    if (c > 0xffff) i++; // surrogate pair consumed
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+  }
+  return Uint8Array.from(out);
+}
+function utf8Decode(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length;) {
+    let c = bytes[i++];
+    if (c < 0x80) s += String.fromCodePoint(c);
+    else if (c < 0xe0) s += String.fromCodePoint(((c & 0x1f) << 6) | (bytes[i++] & 0x3f));
+    else if (c < 0xf0) s += String.fromCodePoint(((c & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+    else s += String.fromCodePoint(((c & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+  }
+  return s;
+}
 
 // Build the import object for `new WebAssembly.Instance(module, imports)`.
 // `getMemory()` returns the live exported WebAssembly.Memory; it is a callback
@@ -51,11 +77,8 @@ export function makeBridge(exports) {
   const mem = () => exports.memory;
   const u8 = () => new Uint8Array(mem().buffer);
   const f32 = () => new Float32Array(mem().buffer);
-  const enc = new TextEncoder();
-  const dec = new TextDecoder();
-
   const writeCStr = (s) => {
-    const bytes = enc.encode(s + "\0");
+    const bytes = utf8Encode(s + "\0");
     const p = exports.malloc(bytes.length);
     u8().set(bytes, p);
     return p;
@@ -64,7 +87,7 @@ export function makeBridge(exports) {
     const h = u8();
     let e = p;
     while (h[e] !== 0) e++;
-    return dec.decode(h.subarray(p, e));
+    return utf8Decode(h.subarray(p, e));
   };
 
   return {
