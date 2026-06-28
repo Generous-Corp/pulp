@@ -1,6 +1,7 @@
 #include <pulp/format/aax_entry.hpp>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/format/aax_midi_packets.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/store.hpp>
@@ -25,6 +26,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -222,70 +224,29 @@ void decode_midi_node(AAX_IMIDINode* node, midi::MidiBuffer* midi_in) {
         return;
     }
 
-    if (auto* stream = node->GetNodeBuffer(); stream && stream->mBuffer) {
-        // Sysex accumulator — AAX splits multi-byte sysex into
-        // sequential AAX_CMidiPacket entries (mData[4] max) with the
-        // F0 status in the first packet and F7 terminator in the last.
-        // AAX docs allow continuation packets without a status byte;
-        // the accumulator treats every byte while `sysex_in_progress`
-        // as payload until F7 is seen.
-        std::vector<uint8_t> sysex_buffer;
-        bool sysex_in_progress = false;
-        int32_t sysex_start_offset = 0;
-
-        for (uint32_t index = 0; index < stream->mBufferSize; ++index) {
-            const auto& packet = stream->mBuffer[index];
-            if (packet.mLength == 0) {
-                continue;
-            }
-
-            // Detect sysex start OR continue an already-running sysex.
-            const bool starts_sysex =
-                (!sysex_in_progress && packet.mData[0] == 0xF0);
-            if (starts_sysex || sysex_in_progress) {
-                if (starts_sysex) {
-                    sysex_buffer.clear();
-                    sysex_start_offset =
-                        static_cast<int32_t>(packet.mTimestamp);
-                    sysex_in_progress = true;
-                }
-                for (uint32_t b = 0; b < packet.mLength && b < 4; ++b) {
-                    const uint8_t byte = packet.mData[b];
-                    sysex_buffer.push_back(byte);
-                    if (byte == 0xF7) {
-                        midi_in->add_sysex(std::move(sysex_buffer),
-                                           sysex_start_offset, 0.0);
-                        sysex_buffer.clear();
-                        sysex_in_progress = false;
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            // Short channel-voice or system-common (1..3 bytes).
-            if (packet.mLength > 3) {
-                // Unexpected — AAX short-message packets are 1..3
-                // bytes; anything larger outside a sysex is malformed.
-                continue;
-            }
-
-            unsigned char data1 = packet.mLength > 1 ? packet.mData[1] : 0;
-            unsigned char data2 = packet.mLength > 2 ? packet.mData[2] : 0;
-            midi::MidiEvent event{
-                .message = choc::midi::ShortMessage(packet.mData[0], data1, data2),
-                .sample_offset = static_cast<int32_t>(packet.mTimestamp),
-                .timestamp = 0.0,
-            };
-            midi_in->add(std::move(event));
-        }
-
-        // Dangling sysex (no F7 before the block ended) — drop rather
-        // than deliver a corrupt message. A real device should have
-        // emitted F7 within the block; if it didn't, the DAW's own
-        // host layer will have flagged the malformed stream.
-        midi_in->sort();
+    auto* stream = node->GetNodeBuffer();
+    if (!stream || !stream->mBuffer) {
+        return;
     }
+
+    // Translate the SDK packet stream into the SDK-free MidiPacketBytes the
+    // unit-tested reassembler in aax_midi_packets.hpp understands, then let it
+    // handle the F0/continuation/F7 state machine, malformed-packet skipping,
+    // dangling-sysex drop, and sort. Keeping the algorithm SDK-free is what
+    // makes it testable without the AAX SDK (see test/test_aax_midi.cpp).
+    std::vector<MidiPacketBytes> packets;
+    packets.reserve(stream->mBufferSize);
+    for (uint32_t index = 0; index < stream->mBufferSize; ++index) {
+        const auto& packet = stream->mBuffer[index];
+        MidiPacketBytes mp{};
+        mp.length = static_cast<uint8_t>(std::min<uint32_t>(packet.mLength, 4));
+        for (uint8_t b = 0; b < mp.length; ++b) {
+            mp.data[b] = static_cast<uint8_t>(packet.mData[b]);
+        }
+        mp.timestamp = packet.mTimestamp;
+        packets.push_back(mp);
+    }
+    decode_midi_packets(packets, *midi_in);
 }
 
 void encode_midi_node(AAX_IMIDINode* node, const midi::MidiBuffer& midi_out) {
@@ -307,27 +268,27 @@ void encode_midi_node(AAX_IMIDINode* node, const midi::MidiBuffer& midi_out) {
         node->PostMIDIPacket(&packet);
     }
 
-    // Sysex outbound — chunk each SysexEvent into 4-byte AAX packets.
-    // AAX_CMidiPacket::mData is exactly 4 bytes; the full F0..F7 byte
-    // stream is delivered as ceil(N / 4) consecutive packets sharing
-    // the same timestamp.
+    // Sysex outbound — chunk each SysexEvent into 4-byte AAX packets via the
+    // SDK-free fragmenter (the inverse of decode's reassembly; unit-tested in
+    // test/test_aax_midi.cpp). The full F0..F7 byte stream is delivered as
+    // ceil(N / 4) consecutive packets sharing the same timestamp.
     for (const auto& sx : midi_out.sysex()) {
         if (sx.data.empty()) continue;
         const uint32_t ts = static_cast<uint32_t>(
             std::max(0, sx.sample_offset));
-        size_t offset = 0;
-        while (offset < sx.data.size()) {
-            const size_t chunk = std::min<size_t>(4, sx.data.size() - offset);
+        auto fragments = fragment_sysex(
+            std::span<const uint8_t>(sx.data.data(), sx.data.size()), ts);
+        for (std::size_t k = 0; k < fragments.size(); ++k) {
+            const auto& mp = fragments[k];
             AAX_CMidiPacket packet{};
-            packet.mTimestamp = ts;
-            packet.mLength = static_cast<uint8_t>(chunk);
-            std::memcpy(packet.mData, sx.data.data() + offset, chunk);
+            packet.mTimestamp = mp.timestamp;
+            packet.mLength = mp.length;
+            std::memcpy(packet.mData, mp.data.data(), mp.length);
             // mIsImmediate flags the first chunk only; continuation
             // packets ride the same timestamp and shouldn't re-fire
             // the immediate-dispatch path.
-            packet.mIsImmediate = (offset == 0 && ts == 0);
+            packet.mIsImmediate = (k == 0 && ts == 0);
             node->PostMIDIPacket(&packet);
-            offset += chunk;
         }
     }
 }

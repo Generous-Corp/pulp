@@ -135,9 +135,19 @@ int32_t sysex_start_offset = 0;
 //   if byte == 0xF7 → flush accumulator as one MidiEvent, reset
 ```
 
-This matches the shape used for CLAP/VST3/AU/CoreMIDI/ALSA sysex. See
-`core/format/src/aax_runtime.cpp::decode_midi_node` for the canonical
-implementation.
+This matches the shape used for CLAP/VST3/AU/CoreMIDI/ALSA sysex. The state
+machine itself is **SDK-free and unit-tested** in
+`core/format/include/pulp/format/aax_midi_packets.hpp`
+(`decode_midi_packets()` for input, `fragment_sysex()` for output) — because
+`aax_runtime.cpp` is gated behind the developer-supplied SDK and is **not
+compiled in stock CI**, the only way to test the reassembly/fragmentation is to
+keep it out of the `AAX_*`-typed translation unit. `decode_midi_node` /
+`encode_midi_node` in `aax_runtime.cpp` just translate `AAX_CMidiPacket` <->
+`MidiPacketBytes` and delegate, so the tested code is the shipping code. When you
+change either path, change `aax_midi_packets.hpp` (and its tests in
+`test/test_aax_midi.cpp`, which run in default CI), not a copy inside the runtime
+— and re-verify the runtime delegation on an AAX SDK machine, since CI cannot
+compile it.
 The AAX bypass MIDI-thru helper must copy sidecar payloads with
 `MidiBuffer::add_sysex_copy()`; `MidiBuffer::SysexPayload` is deliberately
 not a movable raw `std::vector`.

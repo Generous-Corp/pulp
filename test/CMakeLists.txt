@@ -1181,6 +1181,9 @@ pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::f
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 
+# AAX MIDI/SysEx packet reassembly + fragmentation (SDK-free pure logic)
+pulp_add_test_suite(pulp-test-aax-midi LIBRARIES pulp::format)
+
 # Appcast/auto-update tests
 pulp_add_test_suite(pulp-test-appcast LIBRARIES pulp::ship)
 
