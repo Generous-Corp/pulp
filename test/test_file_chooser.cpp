@@ -94,7 +94,7 @@ TEST_CASE("FileChooser null callback discards results without crashing",
                       const std::vector<FileFilter>& filters,
                       const std::string& default_path) {
         ++open_calls;
-        REQUIRE(title.empty());
+        REQUIRE(title == "Open");
         REQUIRE(filters.empty());
         REQUIRE(default_path.empty());
         return std::optional<std::string>("ignored.wav");
@@ -104,7 +104,7 @@ TEST_CASE("FileChooser null callback discards results without crashing",
                       const std::string& default_path,
                       const std::string& default_name) {
         ++save_calls;
-        REQUIRE(title.empty());
+        REQUIRE(title == "Save");
         REQUIRE(filters.empty());
         REQUIRE(default_path.empty());
         REQUIRE(default_name.empty());
@@ -113,7 +113,7 @@ TEST_CASE("FileChooser null callback discards results without crashing",
     b.choose_folder = [&](const std::string& title,
                           const std::string& default_path) {
         ++folder_calls;
-        REQUIRE(title.empty());
+        REQUIRE(title == "Choose Folder");
         REQUIRE(default_path.empty());
         return std::optional<std::string>("/ignored");
     };
