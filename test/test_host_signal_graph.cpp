@@ -907,6 +907,86 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     REQUIRE(retire_iterations.load(std::memory_order_relaxed) > 0);
 }
 
+TEST_CASE("SignalGraph control-thread node-field edits serialize against prepare",
+          "[host][graph][race][rt-safety][tsan]") {
+    // Companion to the snapshot-lifetime test above, which deliberately left the
+    // control-thread GraphNode-field race out of scope (see its note). The race
+    // closed here is between two CONTROL threads — never the audio thread:
+    //   * a UI thread mutating control-owned source-of-truth state —
+    //     set_node_gain() writes the plain GraphNode::gain scalar and scans nodes_
+    //     via node(); add_gain_node()/remove_node() push/erase nodes_;
+    //   * a host thread calling prepare() -> compile_(), which iterates nodes_ and
+    //     reads GraphNode::gain (signal_graph.cpp, `rt.gain = ... n.gain`).
+    // These touch the plain nodes_ vector + GraphNode plain fields, which the
+    // ProcessReadGuard snapshot pin does NOT protect (that pins the compiled
+    // snapshot, not the source GraphNode). Without graph_mutation_mutex_ this is a
+    // data race; with it the accesses are serialized. The audio render path is
+    // intentionally absent: it reads only the immutable CompiledGraph snapshot,
+    // never nodes_/GraphNode fields, so it takes no lock here.
+    //
+    // Proof is under ThreadSanitizer: reverting the locks reports a write/read
+    // data race on GraphNode::gain (and on the nodes_ vector storage); with the
+    // locks the run is clean.
+    SignalGraph graph;
+    auto in   = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out  = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> all_gain_ok{true};
+    std::atomic<long> mutate_iterations{0};
+    std::atomic<long> prepare_iterations{0};
+
+    // Thread A — control-thread topology + node-field mutator. Loops the verified
+    // gain-field write plus a nodes_ push/erase (add + remove of a scratch node),
+    // so both the GraphNode::gain race and the nodes_-iteration race are exercised
+    // against Thread B's compile_().
+    std::thread mutate_thread([&] {
+        long i = 0;
+        while (!stop.load(std::memory_order_acquire)) {
+            const float g = static_cast<float>(i % 17) / 16.0f;
+            if (!graph.set_node_gain(gain, g)) {
+                all_gain_ok.store(false, std::memory_order_relaxed);
+            }
+            // nodes_ structural churn: add then immediately remove a scratch node
+            // so the graph size stays bounded while nodes_ is mutated under
+            // compile_()'s iteration.
+            const NodeId scratch = graph.add_gain_node("scratch");
+            graph.remove_node(scratch);
+            mutate_iterations.fetch_add(1, std::memory_order_relaxed);
+            ++i;
+            if ((i % 64) == 0) std::this_thread::yield();
+        }
+    });
+
+    // Thread B — host prepare()/compile_() loop. compile_() reads GraphNode::gain
+    // and iterates nodes_; this is the read side of the race.
+    std::thread prepare_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.prepare(48000.0, 32);
+            prepare_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    mutate_thread.join();
+    prepare_thread.join();
+
+    REQUIRE(all_gain_ok.load(std::memory_order_relaxed));
+    REQUIRE(mutate_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(prepare_iterations.load(std::memory_order_relaxed) > 0);
+    graph.release();
+}
+
 TEST_CASE("SignalGraph retired snapshots do not own removed plugins",
           "[host][graph][lifetime]") {
     std::atomic<int> destroyed{0};

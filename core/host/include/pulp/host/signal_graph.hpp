@@ -1050,6 +1050,34 @@ private:
     // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
     mutable std::mutex node_load_mu_;
 
+    // Serializes CONTROL-THREAD access to the source-of-truth topology — the
+    // nodes_ vector and the plain (non-atomic) GraphNode fields it owns (gain,
+    // ports, plugin/custom identity). The control surface is multi-threaded:
+    // a host thread calls prepare()/compile_() (which iterates nodes_ and reads
+    // GraphNode::gain) while a UI thread calls set_node_gain()/node_gain() (which
+    // scans nodes_ via node() and read/writes GraphNode::gain) or a topology
+    // mutator (add_*/remove_node, which push/erase nodes_). Without this lock
+    // those plain-field reads/writes and the nodes_ iteration race.
+    //
+    // Scope rules (deadlock-free by construction):
+    //  - Taken ONLY on the control thread. The audio render path
+    //    (process_impl / the executor / the reference walk) reads the immutable
+    //    CompiledGraph snapshot — never nodes_ or GraphNode fields — so it must
+    //    never take this lock. Taking a mutex on the audio thread would be an
+    //    RT-safety violation.
+    //  - DISJOINT from the ProcessReadGuard reader-pin / retired-snapshot drain
+    //    (active_process_readers_). This mutex is never held across
+    //    prune_retired_snapshots_() / wait_for_retired_snapshots_() and never
+    //    nested inside a ProcessReadGuard, so it cannot invert lock order with
+    //    the RCU drain that busy-waits on the reader count (e.g. release()).
+    //    set_node_gain() takes this mutex for the GraphNode::gain write, RELEASES
+    //    it, then separately pins the snapshot to reflect the value into the
+    //    per-runtime atomic.
+    //  - node() / has_path() / processing_order() / would_create_cycle() are
+    //    lock-free private helpers that assume the caller already holds this
+    //    mutex (or is the serialized control path); they must not re-acquire it.
+    mutable std::mutex graph_mutation_mutex_;
+
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;
     // Shared body of both process() overloads. `transport` is the host

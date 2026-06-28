@@ -250,6 +250,11 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot,
 }
 
 NodeId SignalGraph::add_gain_node(const std::string& name) {
+    // Serialize the nodes_ push against a concurrent compile_()/node() scan on a
+    // host thread. invalidate_live_() here drives only the non-blocking prune
+    // (never the blocking reader-drain), so holding the mutation mutex across it
+    // cannot invert lock order with the reader-pin mechanism.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Gain;
@@ -362,6 +367,9 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id,
 }
 
 bool SignalGraph::remove_node(NodeId id) {
+    // Serialize the nodes_ erase against a concurrent compile_()/node() scan on a
+    // host thread (see add_gain_node for the lock-ordering rationale).
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     auto it = std::find_if(nodes_.begin(), nodes_.end(),
         [id](const GraphNode& n) { return n.id == id; });
     if (it == nodes_.end()) return false;
@@ -1436,6 +1444,24 @@ int SignalGraph::pump_anticipation(int max_blocks) {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    // Serialize the ENTIRE prepare against concurrent control-thread mutators
+    // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
+    // lock covers two distinct shared surfaces:
+    //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
+    //      including GraphNode::gain in compile_() — vs the mutators' writes.
+    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
+    //      mutated by the prologue's retire_snapshot_ + the epilogue's
+    //      publish/prune, which a concurrent mutator's invalidate_live_() also
+    //      touches. Those were previously single-control-thread-owned; with a
+    //      second control thread editing the graph they must be serialized too.
+    //
+    // Deadlock-free: prepare() only ever drives the NON-blocking
+    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
+    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
+    // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
+    // never invert order with the reader-drain handshake.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+
     live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
@@ -1651,6 +1677,16 @@ SignalGraph::validate_generated_graph(int max_block_size) const {
 }
 
 void SignalGraph::release() {
+    // Serialize against concurrent control-thread mutators / prepare() for the
+    // same two surfaces prepare() guards: the nodes_ iteration below and the
+    // snapshot-publication state (live_ / live_raw_ / retired_snapshots_).
+    // wait_for_retired_snapshots_() blocks on the reader count while holding this
+    // mutex; that is deadlock-free because the only thread that holds a reader pin
+    // AND wants this mutex (set_node_gain) releases the mutex before pinning, and
+    // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
+    // never take this mutex at all.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+
     live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     wait_for_retired_snapshots_();
@@ -1980,9 +2016,19 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // Write the UI-thread-owned scalar on GraphNode so it survives future
     // compile_() calls. Also reflect into the live snapshot's runtime through
     // a per-runtime atomic so the change takes effect without a re-prepare.
-    auto* n = const_cast<GraphNode*>(node(id));
-    if (!n) return false;
-    n->gain = linear_gain;
+    //
+    // The GraphNode::gain write + the node() scan of nodes_ are serialized under
+    // graph_mutation_mutex_ against compile_()'s read of GraphNode::gain and its
+    // nodes_ iteration (this API runs on the UI thread, prepare()/compile_() on a
+    // host thread). The lock is RELEASED before the ProcessReadGuard-pinned
+    // snapshot reflection below, so it never nests inside the reader-pin / RCU
+    // drain mechanism and cannot invert lock order with release()'s reader wait.
+    {
+        std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+        auto* n = const_cast<GraphNode*>(node(id));
+        if (!n) return false;
+        n->gain = linear_gain;
+    }
     // Pin the live snapshot around the load + the per-runtime gain store: this
     // UI-thread-owned API is not the prepare/release thread, so without the
     // guard a concurrent prepare()/release() could retire+free `cg` between the
@@ -1999,6 +2045,10 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
 }
 
 float SignalGraph::node_gain(NodeId id) const {
+    // Read counterpart of set_node_gain(): the node() scan of nodes_ and the
+    // GraphNode::gain read are serialized under graph_mutation_mutex_ against
+    // compile_()'s nodes_ iteration / gain read and concurrent set_node_gain().
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     auto* n = node(id);
     if (!n) return 1.0f;
     return n->gain;
