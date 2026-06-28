@@ -138,8 +138,10 @@ lanes, and verify a runner is actually busy before blaming capacity.
   `add_test` / `pulp_add_test_suite` lands. Adding a test fails the
   `hotspot_size_guard` gate until you raise `max_loc` for `test/CMakeLists.txt`
   in the same change (compress the registration first, then bump by the small
-  remaining delta). This is expected, not a smell — unlike source hotspots, the
-  fix is to raise the ceiling, not to split the file.
+  remaining delta). Set `max_loc` to the exact current `wc -l test/CMakeLists.txt`
+  so the ceiling stays honest rather than accumulating headroom. This is
+  expected, not a smell — unlike source hotspots, the fix is to raise the
+  ceiling, not to split the file.
 - **Source hotspots (e.g. `core/view/src/design_cpp_codegen.cpp`) are frozen
   too — bump the ceiling for a *coherent* feature, split when it's accretion.**
   `hotspot_size_guard.json` also freezes large source files. When a single,
