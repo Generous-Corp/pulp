@@ -47,7 +47,8 @@ inline constexpr std::uint32_t kSpectralChannels = 2;
 struct SpectralControlBlock {
     std::atomic<float> morph{0.5f};   // 0..1 — scrubs the loud layer across the chord
     std::atomic<float> smear{0.2f};   // 0..1 — magnitude blur across frequency
-    std::atomic<float> jitter{0.1f};  // 0..1 — per-layer phase wander
+    std::atomic<float> jitter{0.45f}; // 0..1 — per-hop phase wander; high enough to
+                                      // break the FFT-period buzz (smooth freeze)
     std::atomic<int> freeze{0};       // capture-trigger level (rising edge captures)
 };
 

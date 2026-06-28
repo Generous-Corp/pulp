@@ -265,11 +265,16 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let k = idx % p.n;
     var ph = phase[idx] + TWO_PI_A * f32(k) * p.hop_ratio;
     if (p.jitter > 0.0) {
+        // Per-hop phase wander scaled to a full turn at jitter=1, so it
+        // accumulates into a random walk that decorrelates the FFT-period
+        // repetition (the buzzy "loop" a coherent freeze would otherwise have).
+        // Conjugate-antisymmetric (bin k vs n-k) so the synthesized frame stays
+        // real. The seed advances each render, so successive hops differ.
         let half = p.n / 2u;
         if (k > 0u && k < half) {
-            ph = ph + p.jitter * hash01(k);
+            ph = ph + p.jitter * TWO_PI_A * hash01(k);
         } else if (k > half && k < p.n) {
-            ph = ph - p.jitter * hash01(p.n - k);
+            ph = ph - p.jitter * TWO_PI_A * hash01(p.n - k);
         }
     }
     // Wrap to [-pi, pi] (std::remainder semantics) to keep cos/sin precise.

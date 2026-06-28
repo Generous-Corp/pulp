@@ -119,6 +119,37 @@ TEST_CASE("GpuSpectralStack wins at high layer counts", "[spectral][gpu]") {
     REQUIRE(gpu_us < cpu_us);   // GPU is faster at 128 layers
 }
 
+TEST_CASE("Freeze with jitter does not buzz at the FFT period", "[spectral]") {
+    // A coherent phase-advance freeze repeats exactly every fft_size samples —
+    // an audible buzzy "loop". With jitter the per-hop phase wander decorrelates
+    // that repetition, so the sustained output must NOT be strongly periodic at
+    // the fft_size lag.
+    constexpr uint32_t N = 2048, HOP = 512, B = 256, BLOCKS = 360;
+    constexpr double SR = 48000.0, FREQ = 220.0;
+    gpu_audio::CpuSpectralStack stack; REQUIRE(stack.prepare(N, HOP, 1));
+    gpu_audio::SpectralFreezeFramer framer; REQUIRE(framer.prepare(&stack, N, HOP));
+
+    std::vector<float> in(B), out(B), tail;
+    double ph = 0; const double dp = 2.0 * kPi * FREQ / SR;
+    for (uint32_t b = 0; b < BLOCKS; ++b) {
+        const bool feeding = b < 40;
+        for (uint32_t i = 0; i < B; ++i) { in[i] = feeding ? 0.5f*std::sin(ph) : 0.0f; ph += dp; }
+        gpu_audio::SpectralFreezeControls c;
+        c.freeze = (b >= 20); c.smear = 0.0f; c.jitter = 0.45f;  // the shipped default
+        c.weights = nullptr; c.active = true;
+        framer.process(in.data(), out.data(), B, c);
+        if (b >= 200) tail.insert(tail.end(), out.begin(), out.end());
+    }
+    // Autocorrelation exactly at the fft_size lag — the buzz would push this ~1.0.
+    double num = 0, e0 = 0, e1 = 0;
+    for (size_t i = 0; i + N < tail.size(); ++i) {
+        num += tail[i] * tail[i+N]; e0 += tail[i]*tail[i]; e1 += tail[i+N]*tail[i+N];
+    }
+    const double r = num / std::sqrt(e0 * e1 + 1e-30);
+    INFO("autocorr at fft-period lag = " << r);
+    REQUIRE(r < 0.8);   // not a tight FFT-period loop
+}
+
 TEST_CASE("SpectralFreezeFramer sustains a captured tone", "[spectral]") {
     constexpr uint32_t N = 1024, HOP = 256;
     constexpr double SR = 48000.0, FREQ = 1000.0;

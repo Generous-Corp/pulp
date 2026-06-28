@@ -103,8 +103,12 @@ bool CpuSpectralStack::render(float* frame_out, const float* weights, float smea
         for (uint32_t k = 0; k < n_; ++k) {
             float p = ph[k] + adv * static_cast<float>(k);
             if (jit > 0.0f) {
-                if (k > 0u && k < half) p += jit * hash01(k, seed);
-                else if (k > half && k < n_) p -= jit * hash01(n_ - k, seed);
+                // Full-turn-at-1 per-hop wander → a random walk that breaks the
+                // FFT-period repetition; conjugate-antisymmetric to stay real.
+                if (k > 0u && k < half)
+                    p += jit * static_cast<float>(kTwoPi) * hash01(k, seed);
+                else if (k > half && k < n_)
+                    p -= jit * static_cast<float>(kTwoPi) * hash01(n_ - k, seed);
             }
             p -= static_cast<float>(kTwoPi) * std::round(p / static_cast<float>(kTwoPi));
             ph[k] = p;

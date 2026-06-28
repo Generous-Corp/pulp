@@ -107,8 +107,11 @@ public:
                              .range = {0.0f, 1.0f, 0.5f, 0.0f}});
         store.add_parameter({.id = kSmear, .name = "Smear", .unit = "",
                              .range = {0.0f, 1.0f, 0.2f, 0.0f}});
+        // Jitter defaults high enough to decorrelate the FFT-period repetition,
+        // so a freeze sustains as a smooth evolving cloud rather than a buzzy
+        // loop. Lower it toward 0 for a more static, tonal freeze.
         store.add_parameter({.id = kJitter, .name = "Jitter", .unit = "",
-                             .range = {0.0f, 1.0f, 0.1f, 0.0f}});
+                             .range = {0.0f, 1.0f, 0.45f, 0.0f}});
         // Engine: 0 = CPU spectral stack (default), 1 = GPU runtime. CPU is the
         // default — the live GPU path is opt-in by governance.
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
