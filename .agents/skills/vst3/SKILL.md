@@ -203,10 +203,62 @@ Event::kNoteOffEvent → MidiEvent::note_off
 Event::kDataEvent (type=kMidiSysEx) → midi_in_.add_sysex_copy(bytes, size, sampleOffset, 0.0)
 ```
 
-Non-note short MIDI (CC, pitch bend, aftertouch) is **not** delivered
-by Steinberg's event list — VST3 hosts translate those into parameter
-automation using `kIsMidiCC`-tagged parameters. If you need them, model
-them as Pulp parameters, not MIDI. See `docs/guides/formats.md`.
+Non-note short MIDI (CC, mod wheel, sustain, pitch bend, channel
+aftertouch) is **not** delivered by Steinberg's event list — VST3 routes
+controllers through `IMidiMapping` instead. The adapter implements it so
+these reach MIDI-accepting plug-ins on the same `midi_in_` buffer as notes:
+
+```
+IMidiMapping::getMidiControllerAssignment(bus, channel, cc) → reserved hidden ParamID
+host then sends that controller as a normal parameter change
+process(): a param change whose ID is a REGISTERED controller
+  → decode (channel, controller) → CC / pitch-bend / channel-pressure MidiEvent → midi_in_
+```
+
+See `core/format/include/pulp/format/detail/vst3_midi_mapping.hpp` for the
+ParamID scheme (base `0xC0000000`, 16 channels × 130 controllers; controller
+0..127 = CCs, 128 = aftertouch, 129 = pitch bend) and the decode helpers.
+Load-bearing constraints:
+- **The reserved ParamIDs MUST be registered parameters** (flagged
+  `kIsHidden`, NOT `kCanAutomate`) — VST3 rejects a mapping to an
+  unregistered ID, and the SDK's MIDI-mapping validation suite asserts every
+  returned tag is in the parameter set. That is why `initialize()` registers
+  2080 hidden controller params (only when `desc.accepts_midi`).
+- **ONE predicate for register / map / divert — `is_registered_controller()`,
+  NOT a bare range test.** `initialize()` builds a `std::vector<bool>` bitmap
+  (`registered_controller_ids_`, indexed by `id - base`) recording exactly the
+  controller IDs it registered. A reserved ID that collides with a real
+  plug-in parameter is **skipped** at registration AND its bitmap bit stays
+  clear, so `getMidiControllerAssignment()` declines that controller and
+  `process()` does NOT divert that ID to MIDI — the host's param-change for it
+  still reaches `store_`. Using a bare `is_vst3_midi_cc_param()` range test in
+  `process()` would silently hijack a colliding real param into MIDI (state
+  corruption). The bitmap lookup is O(1) and allocation-free on the audio
+  thread (built once at init). Regression: `[vst3][midimapping][collision]`.
+- **Gate on `desc.accepts_midi`.** An effect that ignores MIDI registers
+  none of these, so its host-visible parameter count is exactly what it
+  declared — existing param-count / state-format contracts are unaffected.
+  (Controllers never enter `store_`, so saved state never contains a
+  controller ID — verified by `[vst3][midimapping][state]`.)
+- **The event input bus must declare 16 channels** (`addEventInput(name, 16)`),
+  not 1 — the host queries `getMidiControllerAssignment` per channel up to the
+  bus's `channelCount`, so a 1-channel bus only ever maps channel 0.
+- Controllers are decoded in the parameter-change loop (before the note/SysEx
+  loop), so `midi_in_` is cleared at the **top** of `process()`, not just
+  before the event loop, and `midi_in_.sort()` runs after both sources append
+  so controllers and notes interleave in sample order. Real plug-in param
+  changes still flow to `store_` / `param_events_` unchanged.
+- **Decode is defensively hardened:** value `std::clamp`ed to 0..1 before
+  encoding, CC/AT clamped to 0..127, bend to 0..16383, and a param-change
+  `sampleOffset` outside `[0, numSamples)` is dropped. The controller `add()`
+  is the same capacity-limited, drop-on-overflow, alloc-free path as notes.
+- **`MidiBuffer::sort()` is insertion-stable** (index sort over a pre-reserved
+  scratch keyed by `(sample_offset, original_index)`, NOT `std::stable_sort` —
+  which can allocate, and NOT a byte tie-break — which would silently reorder
+  same-offset events by status byte and change musical semantics). A controller
+  add()'ed before a note-on at the same offset stays before it, deterministic
+  run-to-run. The scratch is reserved by `reserve()`/`reserve_events()`, so the
+  sort stays allocation-free on the audio thread.
 
 MIDI output mirrors the inverse: note_on / note_off in
 `midi_out_` are written back into `data.outputEvents`.

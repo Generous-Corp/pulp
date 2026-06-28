@@ -3,7 +3,10 @@
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/quirk_apply.hpp>
+#include <pulp/format/detail/vst3_midi_mapping.hpp>
+#include <pulp/midi/message.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <pluginterfaces/vst/ivstmidicontrollers.h>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
@@ -15,6 +18,7 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -88,6 +92,11 @@ struct TestVst3Config {
     bool veto_bus_layout = false;  // is_bus_layout_supported() always returns false
     bool capture_param_event_vector = true;
     int latency_samples = 0;
+    // When set, declare a real plug-in parameter whose ID lands inside the
+    // reserved MIDI-controller range, to exercise the collision-aware
+    // diversion predicate.
+    bool add_colliding_param = false;
+    pulp::state::ParamID colliding_param_id = 0;
 };
 
 class TestVst3Processor : public pulp::format::Processor {
@@ -117,6 +126,13 @@ public:
                 .id = kBypassParamId,
                 .name = "Bypass",
                 .range = {0.0f, 1.0f, 0.0f, 1.0f},
+            });
+        }
+        if (config_.add_colliding_param) {
+            store.add_parameter({
+                .id = config_.colliding_param_id,
+                .name = "Collider",
+                .range = {0.0f, 1.0f, 0.0f, 0.01f},
             });
         }
     }
@@ -167,6 +183,7 @@ public:
     bool last_process_buffer_layouts_match = false;
     bool last_process_buffer_storage_valid = false;
     std::size_t last_midi_in_size = 0;
+    std::vector<pulp::midi::MidiEvent> last_midi_in_events;
     std::size_t last_sysex_size = 0;
     std::vector<uint8_t> last_sysex_payload;
     std::vector<pulp::state::ParameterEvent> last_param_events;
@@ -207,6 +224,7 @@ void TestVst3Processor::process(
     last_output_channels = audio_output.num_channels();
     last_sidechain_channels = sidechain_input() ? sidechain_input()->num_channels() : 0;
     last_midi_in_size = midi_in.size();
+    last_midi_in_events.assign(midi_in.begin(), midi_in.end());
     last_sysex_size = midi_in.sysex_size();
     if (last_sysex_size > 0) {
         last_sysex_payload = midi_in.sysex()[0].data.to_vector();
@@ -1883,6 +1901,778 @@ TEST_CASE("VST3 clamps an oversized render block and zeros the tail",
         REQUIRE(out_l[i] == 0.0f);
         REQUIRE(out_r[i] == 0.0f);
     }
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// IMidiMapping — MIDI controller input for VST3 instruments.
+//
+// VST3 has no raw MIDI CC / pitch-bend / aftertouch events. The host
+// queries getMidiControllerAssignment for the ParamID each controller maps
+// to, then delivers those controllers as ordinary parameter changes. The
+// adapter reserves a private ParamID range, registers the controllers as
+// hidden parameters, and decodes inbound parameter changes in that range
+// back into MIDI messages on midi_in.
+// ─────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Feed a single controller parameter-change point through process() and
+// return the MIDI events the processor saw on midi_in. The plug-in must
+// accept MIDI for the controller mapping to be active.
+struct MidiControllerSetup {
+    pulp::format::vst3::PulpVst3Processor processor{create_test_processor};
+    TestVst3Processor* test_processor = nullptr;
+    HostApp host_app;
+
+    explicit MidiControllerSetup() {
+        TestVst3Config config;
+        config.descriptor.accepts_midi = true;
+        reset_test_processor(config);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        test_processor = TestVst3Processor::g_last_processor;
+        REQUIRE(test_processor != nullptr);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 16;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    }
+
+    // Drive one parameter change for `param_id` at `offset` with `normalized`
+    // value, and run process() over a small stereo block.
+    void run_one(Steinberg::Vst::ParamID param_id, Steinberg::int32 offset,
+                 double normalized) {
+        Steinberg::Vst::ParameterChanges input_params(1);
+        Steinberg::int32 param_index = 0;
+        auto* queue = input_params.addParameterData(param_id, param_index);
+        REQUIRE(queue != nullptr);
+        Steinberg::int32 point_index = 0;
+        REQUIRE(queue->addPoint(offset, normalized, point_index) ==
+                Steinberg::kResultTrue);
+
+        constexpr int kFrames = 16;
+        std::array<float, kFrames> in_l{};
+        std::array<float, kFrames> in_r{};
+        std::array<float, kFrames> out_l{};
+        std::array<float, kFrames> out_r{};
+        float* main_inputs[2] = {in_l.data(), in_r.data()};
+        float* main_outputs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+        audio_inputs[0].numChannels = 2;
+        audio_inputs[0].channelBuffers32 = main_inputs;
+        Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+        audio_outputs[0].numChannels = 2;
+        audio_outputs[0].channelBuffers32 = main_outputs;
+
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = audio_inputs;
+        data.outputs = audio_outputs;
+        data.inputParameterChanges = &input_params;
+
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("VST3 IMidiMapping assigns stable, non-colliding controller ParamIDs",
+          "[vst3][midi][midimapping]") {
+    namespace VstCtrl = Steinberg::Vst;
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // The plug-in declares one Gain param (id 1). The controller IDs must all
+    // differ from it, and from each other.
+    auto assignment = [&](Steinberg::int16 channel,
+                          VstCtrl::CtrlNumber cc) -> std::optional<VstCtrl::ParamID> {
+        VstCtrl::ParamID id = 0;
+        if (processor.getMidiControllerAssignment(0, channel, cc, id) ==
+            Steinberg::kResultTrue) {
+            return id;
+        }
+        return std::nullopt;
+    };
+
+    // Mod wheel (CC1), sustain (CC64), pitch bend, channel aftertouch on
+    // channel 0 — each present, distinct, and not equal to a plug-in param.
+    const auto cc1   = assignment(0, VstCtrl::kCtrlModWheel);
+    const auto cc64  = assignment(0, VstCtrl::kCtrlSustainOnOff);
+    const auto pitch = assignment(0, VstCtrl::kPitchBend);
+    const auto after = assignment(0, VstCtrl::kAfterTouch);
+    REQUIRE(cc1.has_value());
+    REQUIRE(cc64.has_value());
+    REQUIRE(pitch.has_value());
+    REQUIRE(after.has_value());
+
+    std::array<VstCtrl::ParamID, 4> ids{*cc1, *cc64, *pitch, *after};
+    for (auto id : ids) {
+        REQUIRE(id != kGainParamId);
+        REQUIRE(pulp::format::detail::is_vst3_midi_cc_param(id));
+    }
+    std::sort(ids.begin(), ids.end());
+    REQUIRE(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
+
+    // Per-channel uniqueness: the same controller on a different channel maps
+    // to a different ParamID, and channel 0 differs from channels 1 and 7.
+    REQUIRE(assignment(1, VstCtrl::kCtrlModWheel) != cc1);
+    REQUIRE(assignment(7, VstCtrl::kPitchBend) != pitch);
+
+    // Stable: a second query returns the same ID.
+    REQUIRE(assignment(0, VstCtrl::kCtrlModWheel) == cc1);
+
+    // Out-of-range controller numbers and buses are declined.
+    VstCtrl::ParamID dummy = 0;
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCountCtrlNumber, dummy) == Steinberg::kResultFalse);
+    REQUIRE(processor.getMidiControllerAssignment(
+                1, 0, VstCtrl::kCtrlModWheel, dummy) == Steinberg::kResultFalse);
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 16, VstCtrl::kCtrlModWheel, dummy) == Steinberg::kResultFalse);
+
+    // Every reserved ParamID the mapping can return is a registered hidden
+    // parameter (VST3 requires this for the host to honor the mapping).
+    ParameterInfo info{};
+    REQUIRE(processor.getParameterInfo(static_cast<Steinberg::int32>(0), info) ==
+            Steinberg::kResultOk);
+    bool found_hidden_controller = false;
+    const Steinberg::int32 param_count = processor.getParameterCount();
+    for (Steinberg::int32 i = 0; i < param_count; ++i) {
+        ParameterInfo pi{};
+        REQUIRE(processor.getParameterInfo(i, pi) == Steinberg::kResultOk);
+        if (pi.id == *cc1) {
+            found_hidden_controller = true;
+            REQUIRE((pi.flags & ParameterInfo::kIsHidden) != 0);
+            REQUIRE((pi.flags & ParameterInfo::kCanAutomate) == 0);
+        }
+    }
+    REQUIRE(found_hidden_controller);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 IMidiMapping is inert for plug-ins that do not accept MIDI",
+          "[vst3][midi][midimapping]") {
+    // An effect with accepts_midi == false registers no controller params and
+    // declines every assignment query, so its parameter set is exactly what it
+    // declared (no host-visible inflation, no state-format change). Disable the
+    // bypass-synthesis quirk so the only parameter is the plug-in's own Gain.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+    reset_test_processor();  // default config: accepts_midi == false
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    REQUIRE(processor.getParameterCount() == 1);  // Gain only — no controllers
+
+    Steinberg::Vst::ParamID id = 0xdead;
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 0, Steinberg::Vst::kCtrlModWheel, id) == Steinberg::kResultFalse);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("VST3 IMidiMapping decodes a CC parameter change into a MIDI CC",
+          "[vst3][midi][midimapping][process]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID cc1_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, cc1_id) == Steinberg::kResultTrue);
+
+    // Mod wheel to ~half-scale at sample offset 5 on channel 0.
+    s.run_one(cc1_id, 5, 0.5);
+
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    const auto& me = s.test_processor->last_midi_in_events.at(0);
+    REQUIRE(me.is_cc());
+    REQUIRE(me.channel() == 0);
+    REQUIRE(me.cc_number() == 1);
+    REQUIRE(me.cc_value() == static_cast<uint8_t>(0.5 * 127.0 + 0.5));  // 64
+    REQUIRE(me.sample_offset == 5);
+
+    // The controller did NOT leak into the parameter stream or the store.
+    REQUIRE(s.processor.last_input_param_events().size() == 0);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 IMidiMapping decodes pitch bend to a 14-bit message",
+          "[vst3][midi][midimapping][process]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID pb_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 3, VstCtrl::kPitchBend, pb_id) == Steinberg::kResultTrue);
+
+    // Centre (0.5) → 8192 (half of 16383, rounded).
+    s.run_one(pb_id, 9, 0.5);
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    {
+        const auto& me = s.test_processor->last_midi_in_events.at(0);
+        REQUIRE(me.is_pitch_bend());
+        REQUIRE(me.channel() == 3);
+        REQUIRE(me.message.getPitchWheelValue() ==
+                static_cast<uint32_t>(0.5 * 16383.0 + 0.5));  // 8192
+        REQUIRE(me.sample_offset == 9);
+    }
+
+    // Full scale (1.0) → 16383.
+    s.run_one(pb_id, 0, 1.0);
+    {
+        const auto& me = s.test_processor->last_midi_in_events.at(0);
+        REQUIRE(me.is_pitch_bend());
+        REQUIRE(me.message.getPitchWheelValue() == 16383u);
+    }
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 IMidiMapping decodes channel aftertouch to channel pressure",
+          "[vst3][midi][midimapping][process]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID at_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 2, VstCtrl::kAfterTouch, at_id) == Steinberg::kResultTrue);
+
+    s.run_one(at_id, 4, 1.0);
+
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    const auto& me = s.test_processor->last_midi_in_events.at(0);
+    REQUIRE(me.message.isChannelPressure());
+    REQUIRE(me.channel() == 2);
+    REQUIRE(me.message.getChannelPressureValue() == 127);
+    REQUIRE(me.sample_offset == 4);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 real plug-in parameter changes still reach the store, not MIDI",
+          "[vst3][midi][midimapping][process]") {
+    // With MIDI mapping active, a change to a REAL parameter (Gain) must still
+    // flow to the store and the param-event queue — only the reserved
+    // controller range is diverted to MIDI.
+    MidiControllerSetup s;
+
+    s.run_one(kGainParamId, 0, 1.0);  // full-scale gain
+
+    REQUIRE(s.test_processor->last_midi_in_size == 0);
+    REQUIRE(s.processor.last_input_param_events().size() == 1);
+    REQUIRE(s.processor.last_input_param_events().events()[0].param_id ==
+            kGainParamId);
+    // Gain range is [-60, 24]; normalized 1.0 denormalizes to 24 dB.
+    REQUIRE_THAT(s.test_processor->gain_seen_in_process, WithinAbs(24.0f, 1e-5f));
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 IMidiMapping controller decode does not allocate on the audio thread",
+          "[vst3][midi][midimapping][realtime][perf]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID cc1_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, cc1_id) == Steinberg::kResultTrue);
+
+    // Build the param-change structure once (its ctor allocates), then measure
+    // only process().
+    VstCtrl::ParameterChanges input_params(1);
+    Steinberg::int32 param_index = 0;
+    auto* queue = input_params.addParameterData(cc1_id, param_index);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 point_index = 0;
+    REQUIRE(queue->addPoint(2, 0.75, point_index) == Steinberg::kResultTrue);
+
+    constexpr int kFrames = 16;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    VstCtrl::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    VstCtrl::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    VstCtrl::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+
+    REQUIRE(s.processor.process(data) == Steinberg::kResultOk);  // warm
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(s.processor.process(data) == Steinberg::kResultOk);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── P0: collision-aware diversion ────────────────────────────────────
+// A real plug-in parameter whose ID lands inside the reserved controller
+// range must NOT be hijacked as a MIDI controller: it is registered as a
+// real parameter, getMidiControllerAssignment declines the colliding
+// controller, and a host parameter-change for that ID reaches store_
+// rather than being decoded to MIDI. A non-colliding controller in the
+// same plug-in still decodes normally.
+TEST_CASE("VST3 IMidiMapping never diverts a real param that collides with the reserved range",
+          "[vst3][midi][midimapping][collision]") {
+    namespace VstCtrl = Steinberg::Vst;
+
+    // Channel 0 / controller 1 (mod wheel) → base + 1.
+    const auto collide_id =
+        pulp::format::detail::vst3_midi_cc_param_id(0, 1);
+    REQUIRE(collide_id == pulp::format::detail::kVst3MidiCcParamBase + 1);
+
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    config.add_colliding_param = true;
+    config.colliding_param_id = collide_id;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    // The colliding controller (channel 0, CC1) is declined — the host owns
+    // that ID as a real parameter, not a controller.
+    VstCtrl::ParamID assigned = 0;
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, assigned) == Steinberg::kResultFalse);
+
+    // A different controller (channel 0, sustain CC64) is unaffected.
+    VstCtrl::ParamID cc64_id = 0;
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlSustainOnOff, cc64_id) == Steinberg::kResultTrue);
+    REQUIRE(cc64_id != collide_id);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 16;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 16;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    // Drive BOTH the colliding real-param ID and the non-colliding controller
+    // in the same block.
+    Steinberg::Vst::ParameterChanges input_params(2);
+    Steinberg::int32 idx = 0;
+    auto* collide_queue = input_params.addParameterData(collide_id, idx);
+    REQUIRE(collide_queue != nullptr);
+    Steinberg::int32 pidx = 0;
+    REQUIRE(collide_queue->addPoint(0, 1.0, pidx) == Steinberg::kResultTrue);
+    auto* cc64_queue = input_params.addParameterData(cc64_id, idx);
+    REQUIRE(cc64_queue != nullptr);
+    REQUIRE(cc64_queue->addPoint(4, 1.0, pidx) == Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    // The colliding ID flowed to store_ as a real parameter (value 1.0), NOT
+    // to MIDI — only the non-colliding CC64 appears on midi_in.
+    REQUIRE_THAT(test_processor->state().get_value(collide_id),
+                 WithinAbs(1.0f, 1e-6f));
+    REQUIRE(test_processor->last_midi_in_size == 1);
+    const auto& me = test_processor->last_midi_in_events.at(0);
+    REQUIRE(me.is_cc());
+    REQUIRE(me.cc_number() == 64);
+    REQUIRE(me.sample_offset == 4);
+
+    // The colliding ID surfaced as a real parameter event (reached store_ path).
+    bool saw_collider_event = false;
+    for (const auto& ev : test_processor->last_param_events) {
+        if (ev.param_id == collide_id) saw_collider_event = true;
+    }
+    REQUIRE(saw_collider_event);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── should-fix: defensive value / sample-offset hardening ────────────
+TEST_CASE("VST3 IMidiMapping clamps out-of-range controller values and offsets",
+          "[vst3][midi][midimapping][robust]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID cc1_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, cc1_id) == Steinberg::kResultTrue);
+
+    // Above 1.0 clamps to full scale (127), not a wrapped/garbage byte.
+    s.run_one(cc1_id, 0, 1.7);
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    REQUIRE(s.test_processor->last_midi_in_events.at(0).cc_value() == 127);
+
+    // Below 0.0 clamps to 0.
+    s.run_one(cc1_id, 0, -0.5);
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    REQUIRE(s.test_processor->last_midi_in_events.at(0).cc_value() == 0);
+
+    // A sample offset outside [0, numSamples) is dropped, not emitted.
+    s.run_one(cc1_id, 9999, 0.5);
+    REQUIRE(s.test_processor->last_midi_in_size == 0);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── should-fix: bounded, allocation-free, drop-on-overflow ───────────
+TEST_CASE("VST3 IMidiMapping controller overflow drops without allocating",
+          "[vst3][midi][midimapping][realtime][perf]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID cc1_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, cc1_id) == Steinberg::kResultTrue);
+
+    // Far more controller points than the reserved per-block MIDI capacity.
+    constexpr Steinberg::int32 kFrames = 4096;
+    constexpr int kPoints = 4096;
+    VstCtrl::ParameterChanges input_params(1);
+    Steinberg::int32 idx = 0;
+    auto* queue = input_params.addParameterData(cc1_id, idx);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 pidx = 0;
+    for (int i = 0; i < kPoints; ++i) {
+        REQUIRE(queue->addPoint(i % kFrames,
+                                static_cast<double>(i % 128) / 127.0,
+                                pidx) == Steinberg::kResultTrue);
+    }
+
+    std::vector<float> in_l(kFrames, 0.0f), in_r(kFrames, 0.0f);
+    std::vector<float> out_l(kFrames, 0.0f), out_r(kFrames, 0.0f);
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    VstCtrl::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    VstCtrl::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    VstCtrl::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+
+    // Reconfigure prepared block size to the big frame count so the run is
+    // legal, then warm + measure: the overflowing controller decode must not
+    // allocate, must not crash, and the buffer caps at its reserved size.
+    VstCtrl::ProcessSetup big{};
+    big.processMode = VstCtrl::kRealtime;
+    big.symbolicSampleSize = VstCtrl::kSample32;
+    big.maxSamplesPerBlock = kFrames;
+    big.sampleRate = 48000.0;
+    REQUIRE(s.processor.setupProcessing(big) == Steinberg::kResultOk);
+
+    REQUIRE(s.processor.process(data) == Steinberg::kResultOk);  // warm
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(s.processor.process(data) == Steinberg::kResultOk);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    // Capacity-bounded: dropped past the reserved worst-case, never grew.
+    REQUIRE(s.test_processor->last_midi_in_size <= 2048u);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── should-fix: deterministic same-offset ordering ───────────────────
+TEST_CASE("VST3 IMidiMapping controller and note at same offset sort deterministically",
+          "[vst3][midi][midimapping][order]") {
+    namespace VstCtrl = Steinberg::Vst;
+    MidiControllerSetup s;
+
+    VstCtrl::ParamID pb_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kPitchBend, pb_id) == Steinberg::kResultTrue);
+
+    constexpr int kFrames = 16;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    VstCtrl::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    VstCtrl::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    // A note-on AND a pitch-bend, both at sample offset 8.
+    VstCtrl::EventList events(2);
+    VstCtrl::Event note_on{};
+    note_on.type = VstCtrl::Event::kNoteOnEvent;
+    note_on.sampleOffset = 8;
+    note_on.noteOn.channel = 0;
+    note_on.noteOn.pitch = 60;
+    note_on.noteOn.velocity = 0.5f;
+    REQUIRE(events.addEvent(note_on) == Steinberg::kResultOk);
+
+    auto run_capture = [&]() {
+        VstCtrl::ParameterChanges input_params(1);
+        Steinberg::int32 idx = 0;
+        auto* q = input_params.addParameterData(pb_id, idx);
+        REQUIRE(q != nullptr);
+        Steinberg::int32 pidx = 0;
+        REQUIRE(q->addPoint(8, 1.0, pidx) == Steinberg::kResultTrue);
+
+        VstCtrl::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = audio_inputs;
+        data.outputs = audio_outputs;
+        data.inputParameterChanges = &input_params;
+        data.inputEvents = &events;
+        REQUIRE(s.processor.process(data) == Steinberg::kResultOk);
+
+        std::vector<std::pair<int, bool>> seq;  // (offset, is_pitch_bend)
+        for (const auto& m : s.test_processor->last_midi_in_events) {
+            seq.emplace_back(m.sample_offset, m.is_pitch_bend());
+        }
+        return seq;
+    };
+
+    const auto first = run_capture();
+    const auto second = run_capture();
+    REQUIRE(first.size() == 2);
+    // Both events at offset 8, identical relative order run-to-run.
+    REQUIRE(first[0].first == 8);
+    REQUIRE(first[1].first == 8);
+    REQUIRE(first == second);
+    // Insertion-order semantics: the adapter decodes controllers in the
+    // parameter-change loop, which runs BEFORE the note/SysEx event loop, so
+    // the pitch-bend was add()'ed before the note-on and must stay first after
+    // the insertion-stable sort. (A byte tie-break would have put the note-on —
+    // status 0x90 — before the pitch-bend — status 0xE0.)
+    REQUIRE(first[0].second == true);   // pitch-bend first
+    REQUIRE(first[1].second == false);  // note-on second
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+// Direct MidiBuffer contract: sort() is insertion-stable at equal offsets.
+// This is where the same-offset musical semantics live (every adapter + the
+// synth consume it), so assert the order primitives directly rather than only
+// through one adapter.
+TEST_CASE("MidiBuffer sort is insertion-stable for equal sample offsets",
+          "[midi][buffer][order]") {
+    pulp::midi::MidiBuffer buf;
+    buf.reserve(8);
+    buf.set_realtime_capacity_limit(true);
+
+    // All at offset 4, inserted in a deliberate order:
+    //   CC (0xB0) → note-off (0x80) → note-on (0x90) → pitch-bend (0xE0)
+    // A byte/status tie-break would reorder these (0x80 < 0x90 < 0xB0 < 0xE0);
+    // insertion order must preserve the sequence as inserted.
+    auto cc      = pulp::midi::MidiEvent::cc(0, 64, 100);  cc.sample_offset = 4;
+    auto noteoff = pulp::midi::MidiEvent::note_off(0, 60, 0); noteoff.sample_offset = 4;
+    auto noteon  = pulp::midi::MidiEvent::note_on(0, 60, 100); noteon.sample_offset = 4;
+    auto bend    = pulp::midi::MidiEvent::pitch_bend(0, 12000); bend.sample_offset = 4;
+    REQUIRE(buf.add(cc));
+    REQUIRE(buf.add(noteoff));
+    REQUIRE(buf.add(noteon));
+    REQUIRE(buf.add(bend));
+
+    // An earlier-offset event added LAST must sort to the front; a later one
+    // to the back — the primary key is still sample_offset.
+    auto early = pulp::midi::MidiEvent::cc(0, 1, 5); early.sample_offset = 0;
+    auto late  = pulp::midi::MidiEvent::cc(0, 1, 9); late.sample_offset = 9;
+    REQUIRE(buf.add(early));
+    REQUIRE(buf.add(late));
+
+    buf.sort();
+
+    std::vector<std::pair<int, uint8_t>> got;  // (offset, status byte)
+    for (const auto& m : buf) {
+        got.emplace_back(m.sample_offset, m.data()[0] & 0xF0);
+    }
+    // offset 0 first, offset 9 last; the four offset-4 events keep insertion
+    // order: CC(0xB0), note-off(0x80), note-on(0x90), pitch-bend(0xE0).
+    REQUIRE(got.size() == 6);
+    REQUIRE(got[0] == std::make_pair(0, static_cast<uint8_t>(0xB0)));
+    REQUIRE(got[1] == std::make_pair(4, static_cast<uint8_t>(0xB0)));  // CC
+    REQUIRE(got[2] == std::make_pair(4, static_cast<uint8_t>(0x80)));  // note-off
+    REQUIRE(got[3] == std::make_pair(4, static_cast<uint8_t>(0x90)));  // note-on
+    REQUIRE(got[4] == std::make_pair(4, static_cast<uint8_t>(0xE0)));  // pitch-bend
+    REQUIRE(got[5] == std::make_pair(9, static_cast<uint8_t>(0xB0)));
+
+    // Re-sorting an already-sorted buffer is idempotent (stable).
+    buf.sort();
+    std::vector<std::pair<int, uint8_t>> again;
+    for (const auto& m : buf) {
+        again.emplace_back(m.sample_offset, m.data()[0] & 0xF0);
+    }
+    REQUIRE(again == got);
+}
+
+// ── should-fix: parameter count delta, state exclusion, flags ────────
+TEST_CASE("VST3 IMidiMapping adds exactly 2080 hidden controller params and keeps state clean",
+          "[vst3][midi][midimapping][params][state]") {
+    namespace VstCtrl = Steinberg::Vst;
+    constexpr int kControllers =
+        pulp::format::detail::kVst3MidiChannels *
+        pulp::format::detail::kVst3ControllersPerChannel;  // 2080
+
+    // Disable the bypass-synthesis quirk so the count delta is exactly the
+    // controller set, with no synthesized extras to subtract.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+
+    Steinberg::int32 audio_only_count = 0;
+    {
+        reset_test_processor();  // accepts_midi == false
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        audio_only_count = processor.getParameterCount();
+        REQUIRE(audio_only_count == 1);  // Gain only
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    // Exactly +2080 over the audio-only set.
+    REQUIRE(processor.getParameterCount() == audio_only_count + kControllers);
+
+    // Every controller param is kIsHidden AND NOT kCanAutomate.
+    VstCtrl::ParamID cc1_id = 0;
+    REQUIRE(processor.getMidiControllerAssignment(
+                0, 0, VstCtrl::kCtrlModWheel, cc1_id) == Steinberg::kResultTrue);
+    bool checked = false;
+    const Steinberg::int32 count = processor.getParameterCount();
+    for (Steinberg::int32 i = 0; i < count; ++i) {
+        ParameterInfo pi{};
+        REQUIRE(processor.getParameterInfo(i, pi) == Steinberg::kResultOk);
+        if (pi.id == cc1_id) {
+            checked = true;
+            REQUIRE((pi.flags & ParameterInfo::kIsHidden) != 0);
+            REQUIRE((pi.flags & ParameterInfo::kCanAutomate) == 0);
+        }
+    }
+    REQUIRE(checked);
+
+    // Saved state contains ONLY real/store params: the serialized blob must
+    // not contain the controller ID's little-endian bytes.
+    test_processor->state().set_value(kGainParamId, -12.0f);
+    VectorStream out_stream;
+    REQUIRE(processor.getState(&out_stream) == Steinberg::kResultOk);
+    const auto blob = out_stream.take();
+    const std::array<uint8_t, 4> needle{
+        static_cast<uint8_t>(cc1_id & 0xFF),
+        static_cast<uint8_t>((cc1_id >> 8) & 0xFF),
+        static_cast<uint8_t>((cc1_id >> 16) & 0xFF),
+        static_cast<uint8_t>((cc1_id >> 24) & 0xFF)};
+    const bool present = std::search(blob.begin(), blob.end(),
+                                     needle.begin(), needle.end()) != blob.end();
+    REQUIRE_FALSE(present);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// ── should-fix: queryInterface regression guard ──────────────────────
+TEST_CASE("VST3 queryInterface exposes base interfaces and IMidiMapping with one AddRef",
+          "[vst3][midi][midimapping][queryinterface]") {
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    auto query = [&](const Steinberg::TUID iid) -> void* {
+        void* obj = nullptr;
+        if (processor.queryInterface(iid, &obj) == Steinberg::kResultOk) {
+            return obj;
+        }
+        return nullptr;
+    };
+
+    // Base interfaces still resolve through the override.
+    void* comp = query(Steinberg::Vst::IComponent::iid);
+    REQUIRE(comp != nullptr);
+    static_cast<Steinberg::FUnknown*>(comp)->release();
+
+    void* proc = query(Steinberg::Vst::IAudioProcessor::iid);
+    REQUIRE(proc != nullptr);
+    static_cast<Steinberg::FUnknown*>(proc)->release();
+
+    void* edit = query(Steinberg::Vst::IEditController::iid);
+    REQUIRE(edit != nullptr);
+    static_cast<Steinberg::FUnknown*>(edit)->release();
+
+    // The newly added interface resolves and is a valid IMidiMapping.
+    void* mm = nullptr;
+    REQUIRE(processor.queryInterface(Steinberg::Vst::IMidiMapping::iid, &mm) ==
+            Steinberg::kResultOk);
+    REQUIRE(mm != nullptr);
+    auto* midi_mapping = static_cast<Steinberg::Vst::IMidiMapping*>(mm);
+    Steinberg::Vst::ParamID dummy = 0;
+    // The plug-in does not accept MIDI, so the query is declined — but the
+    // interface pointer itself is callable (no crash), proving the cast is
+    // sound and queryInterface returned the right vtable.
+    REQUIRE(midi_mapping->getMidiControllerAssignment(
+                0, 0, Steinberg::Vst::kCtrlModWheel, dummy) ==
+            Steinberg::kResultFalse);
+    static_cast<Steinberg::FUnknown*>(mm)->release();
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

@@ -24,6 +24,13 @@ formats:
     macos: usable
     windows: partial
     linux: partial
+    notes: >
+      MIDI controllers (CC, mod wheel, sustain, channel aftertouch, pitch
+      bend) reach MIDI-accepting plug-ins via IMidiMapping: the host queries
+      getMidiControllerAssignment for a reserved hidden ParamID per
+      (channel, controller) and the adapter decodes those parameter changes
+      back into sample-accurate MIDI messages. Registered only when
+      descriptor.accepts_midi=true.
   au_v2:
     macos: usable
     windows: unsupported

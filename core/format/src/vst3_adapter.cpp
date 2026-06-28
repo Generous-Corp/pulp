@@ -7,6 +7,8 @@
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_frame_rate.hpp>
+#include <pulp/format/detail/vst3_midi_mapping.hpp>
+#include <pulp/midi/message.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
@@ -18,6 +20,7 @@
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
 #include <pluginterfaces/base/ustring.h>
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -29,6 +32,46 @@ using namespace Steinberg::Vst;
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
+}
+
+tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
+    // Expose IMidiMapping (the only interface this subclass adds) and then
+    // delegate everything else to SingleComponentEffect so its IComponent /
+    // IAudioProcessor / IEditController surface stays intact.
+    QUERY_INTERFACE(iid, obj, IMidiMapping::iid, IMidiMapping)
+    return SingleComponentEffect::queryInterface(iid, obj);
+}
+
+bool PulpVst3Processor::is_registered_controller(state::ParamID id) const {
+    if (!detail::is_vst3_midi_cc_param(id)) return false;
+    const auto index = static_cast<std::size_t>(id - detail::kVst3MidiCcParamBase);
+    return index < registered_controller_ids_.size() &&
+           registered_controller_ids_[index];
+}
+
+tresult PLUGIN_API PulpVst3Processor::getMidiControllerAssignment(
+    int32 busIndex, int16 channel, CtrlNumber midiControllerNumber, ParamID& id) {
+    // VST3 controllers reach the plug-in only as parameter changes: the host
+    // calls this to learn which ParamID a given controller maps to. Decline
+    // when this plug-in does not accept MIDI input, when the controller is
+    // outside the standard range, or for any bus/channel beyond the single
+    // 16-channel MIDI input bus the adapter registers.
+    if (!midi_controller_mapping_active_) return kResultFalse;
+    if (busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (midiControllerNumber < 0 ||
+        midiControllerNumber >= detail::kVst3ControllersPerChannel) {
+        return kResultFalse;
+    }
+    const auto candidate = detail::vst3_midi_cc_param_id(
+        static_cast<int>(channel), static_cast<int>(midiControllerNumber));
+    // Never hand the host a ParamID that collided with a real plug-in
+    // parameter and was therefore NOT registered as a controller. The host
+    // owns that ID as an automatable parameter; reporting it as a controller
+    // would make the same ID both a parameter and a controller assignment.
+    if (!is_registered_controller(candidate)) return kResultFalse;
+    id = candidate;
+    return kResultTrue;
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
@@ -105,9 +148,11 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             bus.optional ? 0 : Steinberg::Vst::BusInfo::kDefaultActive);
     }
 
-    // Add event buses for MIDI
+    // Add event buses for MIDI. The event input bus carries all 16 MIDI
+    // channels (the second argument is the channel count, default 16), so
+    // per-channel controller mapping below has a channel to bind to.
     if (desc.accepts_midi) {
-        addEventInput(STR16("MIDI In"), 1);
+        addEventInput(STR16("MIDI In"), 16);
     }
     if (desc.produces_midi) {
         addEventOutput(STR16("MIDI Out"), 1);
@@ -142,6 +187,63 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         pinfo.unitId = static_cast<Steinberg::Vst::UnitID>(param.group_id);
 
         parameters.addParameter(pinfo);
+    }
+
+    // Register hidden MIDI-controller parameters so the host accepts the
+    // IMidiMapping assignments. VST3 requires every ParamID returned from
+    // getMidiControllerAssignment to be a registered parameter; these are
+    // flagged kIsHidden (NOT kCanAutomate) so they carry controller traffic
+    // without cluttering the host's automation lanes. Only registered when
+    // the plug-in accepts MIDI input, mirroring the event-bus gating — an
+    // effect that ignores MIDI keeps its exact author-declared parameter
+    // set, so existing parameter-count contracts are unaffected.
+    //
+    // Count: 16 channels × 130 controllers (128 CCs + channel aftertouch +
+    // pitch bend) = 2080 hidden parameters, in the reserved ParamID range
+    // [kVst3MidiCcParamBase, kVst3MidiCcParamEnd). The range is far above
+    // any author-assigned ID; the per-ID collision guard below makes the
+    // no-overlap guarantee hold even for a pathological high-ID plug-in.
+    if (desc.accepts_midi) {
+        midi_controller_mapping_active_ = true;
+        // Membership bitmap: one bit per reserved controller slot. A slot is
+        // set only when its ID was actually registered as a hidden controller
+        // — i.e. it did not collide with a real plug-in parameter. This is the
+        // single predicate used by getMidiControllerAssignment() and the
+        // process()-side diversion below.
+        registered_controller_ids_.assign(
+            static_cast<std::size_t>(detail::kVst3MidiChannels *
+                                     detail::kVst3ControllersPerChannel),
+            false);
+        for (int channel = 0; channel < detail::kVst3MidiChannels; ++channel) {
+            for (int controller = 0;
+                 controller < detail::kVst3ControllersPerChannel; ++controller) {
+                const auto cc_id =
+                    detail::vst3_midi_cc_param_id(channel, controller);
+                // Never shadow a real plug-in parameter. The reserved range
+                // cannot collide in practice, but if a plug-in ever picked an
+                // ID inside it, the real parameter wins: we leave the bitmap
+                // slot clear so this controller is neither registered, nor
+                // reported by getMidiControllerAssignment, nor diverted from
+                // store_ in process(). One consistent predicate, no corruption.
+                if (store_.info(static_cast<state::ParamID>(cc_id)) != nullptr) {
+                    runtime::log_info(
+                        "VST3: MIDI controller ParamID {} collides with a "
+                        "plugin parameter; skipping controller mapping for "
+                        "channel {} controller {}",
+                        cc_id, channel, controller);
+                    continue;
+                }
+                Steinberg::Vst::ParameterInfo cinfo{};
+                cinfo.id = cc_id;
+                cinfo.stepCount = 0;
+                cinfo.defaultNormalizedValue = 0.0;
+                cinfo.flags = ParameterInfo::kIsHidden;
+                cinfo.unitId = Steinberg::Vst::kRootUnitId;
+                parameters.addParameter(cinfo);
+                registered_controller_ids_[static_cast<std::size_t>(
+                    cc_id - detail::kVst3MidiCcParamBase)] = true;
+            }
+        }
     }
 
     runtime::log_info("VST3: initialized '{}' with {} parameters",
@@ -388,6 +490,17 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     param_events_.clear();
 
+    // Reset the reused per-block MIDI buffers up front. They are cleared here
+    // (not just before the event loop below) because MIDI controllers arrive
+    // as parameter changes in the loop that follows and are decoded straight
+    // into midi_in_; both the reserved short-event store and the SysEx sidecar
+    // must be empty before either source appends. clear()/clear_sysex() recycle
+    // reserved capacity, so this stays allocation-free.
+    midi_in_.clear();
+    midi_in_.clear_sysex();
+    midi_out_.clear();
+    midi_out_.clear_sysex();
+
     // Read parameter changes from host and sync to Pulp StateStore
     if (data.inputParameterChanges) {
         int32 count = data.inputParameterChanges->getParameterCount();
@@ -397,6 +510,77 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 ParamID id = queue->getParameterId();
                 int32 point_count = queue->getPointCount();
                 if (point_count > 0) {
+                    // Parameter changes whose ID is a REGISTERED hidden
+                    // controller are MIDI controllers the host routed through
+                    // IMidiMapping, not real plug-in parameters. The predicate
+                    // is is_registered_controller() (the same bitmap the
+                    // registration and assignment paths use), NOT a bare range
+                    // test: a real plug-in parameter that happens to fall in
+                    // the reserved range was never registered as a controller,
+                    // so it is NOT diverted here and still reaches store_.
+                    // Decode each point into a sample-accurate MIDI message on
+                    // the same midi_in_ buffer the note/SysEx path uses; these
+                    // never touch store_ or param_events_.
+                    if (is_registered_controller(static_cast<state::ParamID>(id))) {
+                        const auto decoded = detail::vst3_decode_midi_cc_param(
+                            static_cast<state::ParamID>(id));
+                        const auto channel =
+                            static_cast<uint8_t>(decoded.channel);
+                        for (int32 point = 0; point < point_count; ++point) {
+                            ParamValue value;
+                            int32 offset;
+                            if (queue->getPoint(point, offset, value) !=
+                                kResultTrue) {
+                                continue;
+                            }
+                            // Defensive value/offset hardening. Hosts normally
+                            // send normalized 0..1 at a valid in-block offset,
+                            // but the bridge must not emit a malformed MIDI byte
+                            // or an out-of-block sample offset.
+                            const double norm = std::clamp(
+                                static_cast<double>(value), 0.0, 1.0);
+                            if (offset < 0 || offset >= data.numSamples) {
+                                continue;  // outside [0, numSamples): drop
+                            }
+                            midi::MidiEvent me;
+                            if (decoded.controller == detail::kVst3CtrlPitchBend) {
+                                // Normalized 0..1 → 14-bit pitch bend
+                                // (0..16383, centre 8192).
+                                const auto bend14 = static_cast<uint16_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 16383.0 + 0.5),
+                                        0, 16383));
+                                me = midi::MidiEvent::pitch_bend(channel, bend14);
+                            } else if (decoded.controller ==
+                                       detail::kVst3CtrlAfterTouch) {
+                                // Channel pressure (status 0xD0): 7-bit value,
+                                // no factory helper, so build the message
+                                // directly.
+                                const auto v7 = static_cast<uint8_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 127.0 + 0.5),
+                                        0, 127));
+                                me = midi::MidiEvent{
+                                    choc::midi::ShortMessage(
+                                        static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
+                                        v7, 0),
+                                    0, 0.0};
+                            } else {
+                                // Standard CC 0..127.
+                                const auto v7 = static_cast<uint8_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 127.0 + 0.5),
+                                        0, 127));
+                                me = midi::MidiEvent::cc(
+                                    channel,
+                                    static_cast<uint8_t>(decoded.controller),
+                                    v7);
+                            }
+                            me.sample_offset = offset;
+                            midi_in_.add(me);
+                        }
+                        continue;
+                    }
                     for (int32 point = 0; point < point_count; ++point) {
                         ParamValue value;
                         int32 offset;
@@ -611,17 +795,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         return kResultOk;
     }
 
-    // Reuse the reserved, realtime-capacity-limited per-block MIDI buffers so
-    // translating VST3 events never allocates on the audio thread (see
-    // setupProcessing()). Both the short-event store AND the SysEx sidecar must
-    // be reset every block: clear() empties only events_, so clear_sysex() is
-    // required as well — otherwise a SysEx payload from one block would leak
-    // into later blocks. clear_sysex() recycles pooled payloads, so it stays
-    // allocation-free.
-    midi_in_.clear();
-    midi_in_.clear_sysex();
-    midi_out_.clear();
-    midi_out_.clear_sysex();
+    // midi_in_ / midi_out_ were reset at the top of process() (the controller
+    // decode that runs in the parameter-change loop appends to midi_in_, so
+    // the buffers cannot be cleared here). Note and SysEx events append on top
+    // of any controllers already decoded for this block.
     if (data.inputEvents) {
         int32 event_count = data.inputEvents->getEventCount();
         for (int32 i = 0; i < event_count; ++i) {
@@ -662,6 +839,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
+
+    // Controllers (decoded from parameter changes) and note/SysEx events are
+    // appended from two independent sources, so the combined stream may not be
+    // in sample order. Sort once so the Processor sees sample-accurate,
+    // monotonically increasing offsets. std::sort over the reserved, bounded
+    // events vector does not allocate.
+    midi_in_.sort();
 
     // Build process context
     pulp::format::ProcessContext ctx;
