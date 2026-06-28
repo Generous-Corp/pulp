@@ -70,9 +70,7 @@ TEST_CASE("zero_fill_short_read: over-reported frames_read clamped to total",
 
 TEST_CASE("zero_fill_short_read: null buffer is a no-op",
           "[audio][frame-fill][issue-244]") {
-    // Would crash if not guarded.
-    zero_fill_short_read(nullptr, 1, 8, 2);
-    SUCCEED("no crash");
+    REQUIRE_NOTHROW(zero_fill_short_read(nullptr, 1, 8, 2));
 }
 
 TEST_CASE("zero_fill_short_read: zero channels is a no-op",
