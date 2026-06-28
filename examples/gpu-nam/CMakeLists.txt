@@ -10,6 +10,17 @@ if(TARGET pulp::render)
         target_link_libraries(gpu-nam-test PRIVATE pulp::render Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-test COMMAND gpu-nam-test)
+
+        # Fused GPU NAM forward validated against the exact CPU oracle on the real
+        # .nam capture. Needs both pulp::render (GPU primitive) and pulp::runtime
+        # (choc::json, used by the .nam loader / oracle).
+        if(TARGET pulp::runtime)
+            add_executable(gpu-nam-gpu-test test_gpu_nam_real.cpp)
+            target_link_libraries(gpu-nam-gpu-test
+                PRIVATE pulp::render pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-gpu-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-gpu-test COMMAND gpu-nam-gpu-test)
+        endif()
     endif()
 endif()
 

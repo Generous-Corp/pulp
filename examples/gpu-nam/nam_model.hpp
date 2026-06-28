@@ -408,6 +408,10 @@ public:
     int out_channels() const { return out_channels_; }
     double sample_rate() const { return sample_rate_; }
     std::size_t weights_size() const { return weights_.size(); }
+    // Read-only view of the flat weight blob (in NAM serialization order,
+    // including the trailing head_scale scalar). Lets a GPU adapter upload the
+    // exact same weights the CPU oracle runs, so both forwards stay identical.
+    const float* weights_data() const { return weights_.data(); }
     std::size_t weights_consumed() const { return weights_consumed_; }
     std::size_t expected_weight_count() const { return expected_weight_count_; }
     const std::string& error() const { return error_; }

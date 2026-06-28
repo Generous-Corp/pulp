@@ -9,6 +9,7 @@
 
 #include "gpu_compute_pool.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -445,6 +446,135 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+// ── NAM WaveNet fused passes ────────────────────────────────────────────────
+// The exact open-source NAM forward, block-parallel (one thread per block
+// sample) and fused (all passes in one submit over resident buffers). Per-array
+// rechannel (1x1) → dilated conv layers (+ condition mixin, Tanh/gated, residual,
+// head accumulate) → head rechannel, chained array→array, then head_scale.
+// Channels are capped at 64 so the per-thread scratch arrays are fixed-size.
+
+static constexpr const char* kNamRechannelShader = R"wgsl(
+// 1x1 rechannel (no bias): dst[t] = W * src[t]. Source vectors live at
+// (src_pad+t)*in_ch (so a deeper array reads the previous array's block region
+// past its history columns); the mono input is in_ch=1, src_pad=0.
+struct P { in_ch:u32, out_ch:u32, B:u32, w_off:u32, src_pad:u32, dst_pad:u32, p0:u32, p1:u32 };
+@group(0) @binding(0) var<storage, read>       wts : array<f32>;
+@group(0) @binding(1) var<storage, read>       src : array<f32>;
+@group(0) @binding(2) var<storage, read_write> dst : array<f32>;
+@group(0) @binding(3) var<uniform>             p   : P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    let scol = (p.src_pad + t) * p.in_ch;
+    let dcol = (p.dst_pad + t) * p.out_ch;
+    for (var oc = 0u; oc < p.out_ch; oc = oc + 1u) {
+        var acc = 0.0;
+        let wrow = p.w_off + oc * p.in_ch;
+        for (var ic = 0u; ic < p.in_ch; ic = ic + 1u) {
+            acc = acc + wts[wrow + ic] * src[scol + ic];
+        }
+        dst[dcol + oc] = acc;
+    }
+}
+)wgsl";
+
+static constexpr const char* kNamLayerShader = R"wgsl(
+// One NAM layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
+// a = (gated ? tanh(z[:C])*sigmoid(z[C:]) : tanh(z[:C])) (C); head += a;
+// out = in + (layer1x1_bias + layer1x1_W * a). condition_size is 1 (mono input).
+struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32,
+           conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32,
+           p0:u32, p1:u32, p2:u32, p3:u32 };
+@group(0) @binding(0) var<storage, read>       wts     : array<f32>;
+@group(0) @binding(1) var<storage, read>       ina     : array<f32>;  // C*(pad+B)
+@group(0) @binding(2) var<storage, read_write> outa    : array<f32>;  // C*(pad+B)
+@group(0) @binding(3) var<storage, read>       cond    : array<f32>;  // B mono input
+@group(0) @binding(4) var<storage, read_write> headacc : array<f32>;  // C*B
+@group(0) @binding(5) var<uniform>             p       : P;
+
+var<private> zbuf : array<f32, 128>;  // Zmax = 2*Cmax
+var<private> abuf : array<f32, 64>;   // Cmax
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    let C = p.C; let K = p.K; let Z = p.Z;
+    let acol = p.pad + t;
+    let x = cond[t];
+    for (var oc = 0u; oc < Z; oc = oc + 1u) {
+        var acc = wts[p.conv_b + oc];
+        for (var k = 0u; k < K; k = k + 1u) {
+            let back = p.dil * (K - 1u - k);   // valid: pad >= max back
+            let base = (acol - back) * C;
+            let wbase = p.conv_w + oc * C * K + k;
+            for (var ic = 0u; ic < C; ic = ic + 1u) {
+                acc = acc + wts[wbase + ic * K] * ina[base + ic];
+            }
+        }
+        acc = acc + wts[p.mix_w + oc] * x;   // input_mixin (condition_size == 1)
+        zbuf[oc] = acc;
+    }
+    if (p.gated == 0u) {
+        for (var c = 0u; c < C; c = c + 1u) { abuf[c] = tanh(zbuf[c]); }
+    } else {
+        for (var c = 0u; c < C; c = c + 1u) {
+            let g = 1.0 / (1.0 + exp(-zbuf[C + c]));
+            abuf[c] = tanh(zbuf[c]) * g;
+        }
+    }
+    let hc = t * C;
+    for (var c = 0u; c < C; c = c + 1u) { headacc[hc + c] = headacc[hc + c] + abuf[c]; }
+    let tc = acol * C;
+    for (var oc = 0u; oc < C; oc = oc + 1u) {
+        var r = wts[p.l1_b + oc];
+        let rrow = p.l1_w + oc * C;
+        for (var ic = 0u; ic < C; ic = ic + 1u) { r = r + wts[rrow + ic] * abuf[ic]; }
+        outa[tc + oc] = ina[tc + oc] + r;
+    }
+}
+)wgsl";
+
+static constexpr const char* kNamHeadShader = R"wgsl(
+// head rechannel (1x1, optional bias): headout[t] = (bias?) + W * headacc[t].
+struct P { C:u32, H:u32, B:u32, hr_w:u32, hr_b:u32, head_bias:u32, p0:u32, p1:u32 };
+@group(0) @binding(0) var<storage, read>       wts     : array<f32>;
+@group(0) @binding(1) var<storage, read>       headacc : array<f32>;  // C*B
+@group(0) @binding(2) var<storage, read_write> headout : array<f32>;  // H*B
+@group(0) @binding(3) var<uniform>             p       : P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    let ic0 = t * p.C;
+    let oc0 = t * p.H;
+    for (var oc = 0u; oc < p.H; oc = oc + 1u) {
+        var acc = 0.0;
+        if (p.head_bias == 1u) { acc = wts[p.hr_b + oc]; }
+        let wrow = p.hr_w + oc * p.C;
+        for (var ic = 0u; ic < p.C; ic = ic + 1u) {
+            acc = acc + wts[wrow + ic] * headacc[ic0 + ic];
+        }
+        headout[oc0 + oc] = acc;
+    }
+}
+)wgsl";
+
+static constexpr const char* kNamScaleShader = R"wgsl(
+// Final output: out[t] = head_scale * last_headout[t*H + 0].
+struct P { B:u32, H:u32, scale:f32, p0:u32 };
+@group(0) @binding(0) var<storage, read>       headout : array<f32>;  // H*B
+@group(0) @binding(1) var<storage, read_write> outp    : array<f32>;  // B
+@group(0) @binding(2) var<uniform>             p       : P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    outp[t] = headout[t * p.H] * p.scale;
+}
+)wgsl";
+
 static constexpr const char* kMatmulShader = R"wgsl(
 // Dense matmul C[M*N] = A[M*K] * B[K*N], all row-major. One thread per output
 // element. Foundational primitive for GPU neural inference (dense / LSTM gates).
@@ -645,6 +775,7 @@ public:
         multi_conv_plans_.clear();
         spectral_stack_plans_.clear();
         conv_stack_plans_.clear();
+        nam_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
@@ -656,6 +787,10 @@ public:
         conv_in_pipeline_ = nullptr;
         conv_layer_pipeline_ = nullptr;
         conv_head_pipeline_ = nullptr;
+        nam_rechannel_pipeline_ = nullptr;
+        nam_layer_pipeline_ = nullptr;
+        nam_head_pipeline_ = nullptr;
+        nam_scale_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
@@ -1599,6 +1734,237 @@ public:
         return read_back(plan.readback, out_block, blk_bytes);
     }
 
+    // ── NAM WaveNet ─────────────────────────────────────────────────────────
+
+    bool prepare_nam(const NamLayerArraySpec* arrays, uint32_t num_arrays,
+                     const float* weights, uint32_t weights_len,
+                     uint32_t block_size, float head_scale) override {
+        if (!initialized_ || !arrays || !weights) return false;
+        const uint32_t B = block_size;
+        if (num_arrays == 0 || B == 0) return false;
+
+        // Validate shapes + compute the exact weight count by walking the blob in
+        // NAM's serialization order. This must match the .nam layout byte-for-byte.
+        uint64_t need = 0;
+        for (uint32_t a = 0; a < num_arrays; ++a) {
+            const NamLayerArraySpec& s = arrays[a];
+            if (s.channels == 0 || s.channels > 64 || s.kernel == 0 ||
+                s.num_layers == 0 || !s.dilations || s.head_size == 0)
+                return false;
+            if (s.condition_size != 1) return false;  // mono condition only
+            const uint32_t expect_in = (a == 0) ? 1u : arrays[a - 1].channels;
+            if (s.input_size != expect_in) return false;
+            if (a > 0 && arrays[a - 1].head_size != s.channels) return false;  // head chain
+            const uint64_t Z = s.gated ? 2ull * s.channels : s.channels;
+            need += static_cast<uint64_t>(s.channels) * s.input_size;  // rechannel
+            for (uint32_t l = 0; l < s.num_layers; ++l)
+                need += Z * s.channels * s.kernel + Z          // conv W+bias
+                        + Z * s.condition_size                  // input_mixin
+                        + static_cast<uint64_t>(s.channels) * s.channels + s.channels;  // layer1x1
+            need += static_cast<uint64_t>(s.head_size) * s.channels
+                    + (s.head_bias ? s.head_size : 0u);        // head rechannel
+        }
+        need += 1;  // trailing head_scale
+        if (weights_len != need) return false;
+
+        NamPlan plan;
+        plan.B = B;
+        plan.head_scale = head_scale;
+
+        const uint32_t wbytes = static_cast<uint32_t>(need) * 4u;
+        const uint32_t blk_bytes = B * 4u;
+        const auto act_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc
+                             | wgpu::BufferUsage::CopyDst;
+        plan.weights = create_storage_buffer(wbytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.input = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.output = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        plan.readback = create_readback_buffer(blk_bytes);
+        if (!plan.weights || !plan.input || !plan.output || !plan.readback) return false;
+        queue_.WriteBuffer(plan.weights, 0, weights, wbytes);
+
+        auto make_uniform = [&](uint32_t size) {
+            wgpu::BufferDescriptor ud{};
+            ud.size = size;
+            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            return device_.CreateBuffer(&ud);
+        };
+
+        uint32_t max_hist_floats = 0;      // for the shared history-slide scratch
+        uint32_t max_headacc_floats = 0;   // for the zeroing scratch
+        uint64_t woff = 0;
+
+        for (uint32_t a = 0; a < num_arrays; ++a) {
+            const NamLayerArraySpec& s = arrays[a];
+            const uint32_t C = s.channels, K = s.kernel, H = s.head_size;
+            const uint32_t Z = s.gated ? 2u * C : C;
+            uint32_t max_dil = 1;
+            for (uint32_t l = 0; l < s.num_layers; ++l)
+                max_dil = s.dilations[l] > max_dil ? s.dilations[l] : max_dil;
+            const uint32_t PAD = max_dil * (K - 1u);
+
+            NamArray na;
+            na.channels = C; na.head_size = H; na.num_layers = s.num_layers;
+            na.pad = PAD; na.head_bias = s.head_bias;
+
+            const uint32_t act_bytes = C * (PAD + B) * 4u;
+            std::vector<float> act_zero(static_cast<std::size_t>(C) * (PAD + B), 0.0f);
+            for (uint32_t l = 0; l <= s.num_layers; ++l) {
+                wgpu::Buffer buf = create_storage_buffer(act_bytes, act_usage);
+                if (!buf) return false;
+                queue_.WriteBuffer(buf, 0, act_zero.data(), act_bytes);  // zero history
+                na.act.push_back(std::move(buf));
+            }
+            na.headacc = create_storage_buffer(C * B * 4u,
+                wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+            na.headout = create_storage_buffer(H * B * 4u,
+                wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+            if (!na.headacc || !na.headout) return false;
+
+            max_hist_floats = std::max(max_hist_floats, C * PAD);
+            max_headacc_floats = std::max(max_headacc_floats, C * B);
+
+            // rechannel offset (consumed first in the array).
+            const uint32_t rc_w = static_cast<uint32_t>(woff);
+            woff += static_cast<uint64_t>(C) * s.input_size;
+
+            // rechannel uniform + bind group. Array 0 reads the mono input
+            // (in_ch=1, src_pad=0); array a>0 reads the previous array's last
+            // activation (in_ch=prevC, src_pad=prevPAD), wired in nam_forward
+            // ordering (the bind group references the previous array's buffer).
+            na.rechannel_u = make_uniform(32);
+            const uint32_t src_pad = (a == 0) ? 0u : plan.arrays[a - 1].pad;
+            struct RcU { uint32_t in_ch, out_ch, B, w_off, src_pad, dst_pad, p0, p1; }
+                rcu{s.input_size, C, B, rc_w, src_pad, PAD, 0, 0};
+            queue_.WriteBuffer(na.rechannel_u, 0, &rcu, sizeof(rcu));
+            const wgpu::Buffer& rc_src = (a == 0) ? plan.input
+                                                  : plan.arrays[a - 1].act.back();
+            na.rechannel_bg = create_bind_group(nam_rechannel_pipeline_,
+                {plan.weights, rc_src, na.act[0], na.rechannel_u});
+            if (!na.rechannel_bg) return false;
+
+            for (uint32_t l = 0; l < s.num_layers; ++l) {
+                const uint32_t conv_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(Z) * C * K;
+                const uint32_t conv_b = static_cast<uint32_t>(woff);
+                woff += Z;
+                const uint32_t mix_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(Z) * s.condition_size;
+                const uint32_t l1_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(C) * C;
+                const uint32_t l1_b = static_cast<uint32_t>(woff);
+                woff += C;
+
+                wgpu::Buffer u = make_uniform(64);
+                struct LyU { uint32_t C, K, B, dil, Z, gated, pad,
+                             conv_w, conv_b, mix_w, l1_w, l1_b, p0, p1, p2, p3; }
+                    lyu{C, K, B, s.dilations[l], Z, s.gated, PAD,
+                        conv_w, conv_b, mix_w, l1_w, l1_b, 0, 0, 0, 0};
+                queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
+                wgpu::BindGroup bg = create_bind_group(nam_layer_pipeline_,
+                    {plan.weights, na.act[l], na.act[l + 1], plan.input, na.headacc, u});
+                if (!bg) return false;
+                na.layer_u.push_back(std::move(u));
+                na.layer_bg.push_back(std::move(bg));
+            }
+
+            const uint32_t hr_w = static_cast<uint32_t>(woff);
+            woff += static_cast<uint64_t>(H) * C;
+            const uint32_t hr_b = static_cast<uint32_t>(woff);
+            if (s.head_bias) woff += H;
+
+            na.head_u = make_uniform(32);
+            struct HdU { uint32_t C, H, B, hr_w, hr_b, head_bias, p0, p1; }
+                hdu{C, H, B, hr_w, hr_b, s.head_bias, 0, 0};
+            queue_.WriteBuffer(na.head_u, 0, &hdu, sizeof(hdu));
+            na.head_bg = create_bind_group(nam_head_pipeline_,
+                {plan.weights, na.headacc, na.headout, na.head_u});
+            if (!na.head_bg) return false;
+
+            plan.arrays.push_back(std::move(na));
+        }
+
+        // Final scale pass over the last array's head output (head_size==1 in the
+        // standard model; the shader reads index 0 of each sample's head vector).
+        const NamArray& last = plan.arrays.back();
+        plan.scale_u = make_uniform(16);
+        struct ScU { uint32_t B, H; float scale; uint32_t p0; }
+            scu{B, last.head_size, head_scale, 0};
+        queue_.WriteBuffer(plan.scale_u, 0, &scu, sizeof(scu));
+        plan.scale_bg = create_bind_group(nam_scale_pipeline_,
+            {last.headout, plan.output, plan.scale_u});
+        if (!plan.scale_bg) return false;
+
+        const uint32_t hist_bytes = std::max(max_hist_floats, 1u) * 4u;
+        plan.hist_temp = create_storage_buffer(hist_bytes, act_usage);
+        if (!plan.hist_temp) return false;
+
+        nam_zero_.assign(std::max(max_headacc_floats, 1u), 0.0f);
+        nam_plans_.insert_or_assign(B, std::move(plan));
+        return true;
+    }
+
+    bool nam_forward(const float* in_block, float* out_block,
+                     uint32_t block_size) override {
+        if (!initialized_ || !in_block || !out_block) return false;
+        auto it = nam_plans_.find(block_size);
+        if (it == nam_plans_.end()) return false;
+        NamPlan& plan = it->second;
+        const uint32_t B = plan.B;
+        const uint32_t blk_bytes = B * 4u;
+
+        queue_.WriteBuffer(plan.input, 0, in_block, blk_bytes);
+        for (auto& na : plan.arrays)   // head accumulators start at zero each block
+            queue_.WriteBuffer(na.headacc, 0, nam_zero_.data(), na.channels * B * 4u);
+
+        const uint32_t wg = (B + 255u) / 256u;
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        auto run = [&](const wgpu::ComputePipeline& pl, const wgpu::BindGroup& bg) {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(pl);
+            pass.SetBindGroup(0, bg);
+            pass.DispatchWorkgroups(wg);
+            pass.End();
+        };
+
+        for (uint32_t a = 0; a < plan.arrays.size(); ++a) {
+            NamArray& na = plan.arrays[a];
+            run(nam_rechannel_pipeline_, na.rechannel_bg);
+            if (a > 0) {  // seed this array's head accumulator with the previous head output
+                const NamArray& prev = plan.arrays[a - 1];
+                encoder.CopyBufferToBuffer(prev.headout, 0, na.headacc, 0,
+                                           static_cast<uint64_t>(na.channels) * B * 4u);
+            }
+            for (uint32_t l = 0; l < na.num_layers; ++l)
+                run(nam_layer_pipeline_, na.layer_bg[l]);
+            run(nam_head_pipeline_, na.head_bg);
+        }
+        run(nam_scale_pipeline_, plan.scale_bg);
+        encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
+
+        // Slide each array's activation windows: the most-recent PAD columns
+        // become the next block's history so dilated taps reach across the block
+        // boundary (streaming continuity). Via a shared temp so source/dest never
+        // overlap; copies in one encoder are ordered, so reusing temp is safe.
+        for (auto& na : plan.arrays) {
+            if (na.pad == 0) continue;
+            const uint64_t hist_bytes = static_cast<uint64_t>(na.channels) * na.pad * 4u;
+            const uint64_t tail_off = static_cast<uint64_t>(na.channels) * B * 4u;
+            for (auto& buf : na.act) {
+                encoder.CopyBufferToBuffer(buf, tail_off, plan.hist_temp, 0, hist_bytes);
+                encoder.CopyBufferToBuffer(plan.hist_temp, 0, buf, 0, hist_bytes);
+            }
+        }
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        return read_back(plan.readback, out_block, blk_bytes);
+    }
+
     // ── Linear algebra ─────────────────────────────────────────────────────
 
     bool matmul(const float* a, const float* b, float* c,
@@ -2119,6 +2485,10 @@ private:
     wgpu::ComputePipeline conv_in_pipeline_;     // conv-stack input projection
     wgpu::ComputePipeline conv_layer_pipeline_;  // conv-stack gated dilated layer
     wgpu::ComputePipeline conv_head_pipeline_;   // conv-stack linear head
+    wgpu::ComputePipeline nam_rechannel_pipeline_;  // NAM 1x1 rechannel
+    wgpu::ComputePipeline nam_layer_pipeline_;      // NAM dilated conv layer
+    wgpu::ComputePipeline nam_head_pipeline_;       // NAM head rechannel
+    wgpu::ComputePipeline nam_scale_pipeline_;      // NAM final head_scale
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
@@ -2249,6 +2619,32 @@ private:
     std::unordered_map<uint32_t, ConvStackPlan> conv_stack_plans_;
     std::vector<float> cs_zero_;  // skip-buffer zeroing scratch
 
+    // NAM WaveNet plan: the full multi-array model, device-resident. `weights`
+    // holds the whole flat blob. Each array owns its activation buffers (one per
+    // layer-input, C*(pad+B), padded for dilation history), a head accumulator
+    // (C*B) and a head output (H*B). Pass uniforms + bind groups are pre-built so
+    // each forward is just WriteBuffer(input) + encode + one readback. Keyed by
+    // block size; rebuilt if it changes.
+    struct NamArray {
+        uint32_t channels = 0, head_size = 0, num_layers = 0, pad = 0, head_bias = 0;
+        std::vector<wgpu::Buffer> act;   // num_layers+1 activation buffers
+        wgpu::Buffer headacc, headout;
+        wgpu::Buffer rechannel_u, head_u;
+        std::vector<wgpu::Buffer> layer_u;
+        wgpu::BindGroup rechannel_bg, head_bg;
+        std::vector<wgpu::BindGroup> layer_bg;
+    };
+    struct NamPlan {
+        uint32_t B = 0;
+        float head_scale = 1.0f;
+        wgpu::Buffer weights, input, output, readback, hist_temp;
+        wgpu::Buffer scale_u;
+        wgpu::BindGroup scale_bg;
+        std::vector<NamArray> arrays;
+    };
+    std::unordered_map<uint32_t, NamPlan> nam_plans_;
+    std::vector<float> nam_zero_;  // head-accumulator zeroing scratch (max C*B)
+
     // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
     // the render path is non-RT so a resize here is fine).
     std::vector<float> sp_scratch_;
@@ -2302,6 +2698,15 @@ private:
         if (!conv_layer_pipeline_) return false;
         conv_head_pipeline_ = create_pipeline("conv_head", kConvStackHeadShader);
         if (!conv_head_pipeline_) return false;
+
+        nam_rechannel_pipeline_ = create_pipeline("nam_rechannel", kNamRechannelShader);
+        if (!nam_rechannel_pipeline_) return false;
+        nam_layer_pipeline_ = create_pipeline("nam_layer", kNamLayerShader);
+        if (!nam_layer_pipeline_) return false;
+        nam_head_pipeline_ = create_pipeline("nam_head", kNamHeadShader);
+        if (!nam_head_pipeline_) return false;
+        nam_scale_pipeline_ = create_pipeline("nam_scale", kNamScaleShader);
+        if (!nam_scale_pipeline_) return false;
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;
