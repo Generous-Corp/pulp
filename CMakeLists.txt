@@ -97,7 +97,16 @@ option(PULP_LOTTIE "Enable Lottie animation playback via the bundled skottie mod
 # exportDesignTokens) stays compiled regardless (see core/view/src/w3c_tokens.cpp).
 # When OFF, WidgetBridge::install_runtime_import_handlers() becomes a no-op.
 option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; release/ship OFF." ON)
-option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
+option(PULP_ENABLE_SWIFT
+       "Reserved compatibility toggle; currently no effect. SwiftPM and target helpers enable Swift where needed."
+       OFF)
+if(PULP_ENABLE_SWIFT)
+    message(WARNING
+        "PULP_ENABLE_SWIFT is reserved and currently has no effect. "
+        "Swift support is built through apple/Package.swift and target "
+        "helpers such as pulp_add_ios_host_app(), which enable Swift when "
+        "Swift sources are present.")
+endif()
 # Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
 # dev/examples builds. Release / standalone-ship builds should configure
 # with -DPULP_ENABLE_INSPECTOR=OFF so a shipped standalone app does not

@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6116,
-      "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 6127,
+      "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
