@@ -202,6 +202,19 @@ public:
     ///                  callback through the installed @c EventLoop;
     ///                  @c ListenerThread::Audio runs it inline on the
     ///                  firing thread and asserts caller RT-safety.
+    ///
+    /// @note Main-thread listeners fed by the real-time path
+    ///       (@c set_value_rt / @c set_normalized_rt, drained by
+    ///       @c pump_listeners) are CURRENT-VALUE notifications: the
+    ///       @c float passed to the callback is a live snapshot read at
+    ///       drain time (not the value queued when the change fired), and
+    ///       deliveries are COALESCED to one call per changed parameter
+    ///       per pump. This keeps the value coherent under dense
+    ///       automation — a burst of N writes to one parameter yields a
+    ///       single callback carrying the latest value, never a sequence
+    ///       of stale intermediate values. @c ListenerThread::Audio
+    ///       listeners are unaffected: they fire inline per change with
+    ///       that change's value.
     [[nodiscard]]
     ListenerToken add_listener(ParamChangeCallback callback,
                                ListenerThread thread);
@@ -277,6 +290,13 @@ public:
     void copy_state_migrations_from(const StateStore& source);
 
 private:
+    // Member ORDER is load-bearing for the RT->main listener path. The
+    // parameter storage (id_to_index_ + values_) MUST be declared before
+    // registry_ so that, on destruction (reverse declaration order),
+    // registry_ is torn down FIRST. registry_'s value_getter captures
+    // `this` and reads id_to_index_/values_ during drain_main_listeners;
+    // destroying registry_ before that storage guarantees the getter can
+    // never run after the storage it reads is gone. Do not reorder.
     std::vector<ParamInfo> params_;
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;

@@ -8,6 +8,54 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05280"></a>
+## [0.528.0] - 2026-06-28
+
+- feat(format): route secondary output buses to the Processor in CLAP and VST3 ([#5191](https://github.com/danielraffel/pulp/pull/5191))
+
+<a id="v05270"></a>
+## [0.527.0] - 2026-06-28
+
+- fix(format): marshal VST3 restartComponent off the audio thread ([#5190](https://github.com/danielraffel/pulp/pull/5190))
+
+<a id="v05260"></a>
+## [0.526.0] - 2026-06-28
+
+- fix(format): make CLAP and .pulpset param text conversion locale-independent ([#5181](https://github.com/danielraffel/pulp/pull/5181))
+- fix(view): guard GPU hosted-view drag category behind PULP_HAS_SKIA ([#5185](https://github.com/danielraffel/pulp/pull/5185))
+- docs(view): align modulation matrix status ([#5187](https://github.com/danielraffel/pulp/pull/5187))
+- docs(format): align AU v2 parameter sync guide ([#5069](https://github.com/danielraffel/pulp/pull/5069))
+
+<a id="v05240"></a>
+## [0.524.0] - 2026-06-28
+
+- feat(format): VST3 per-note expression (MPE) via INoteExpressionController ([#5170](https://github.com/danielraffel/pulp/pull/5170))
+
+<a id="v05230"></a>
+## [0.523.0] - 2026-06-27
+
+- fix(host): serialize control-thread SignalGraph node-field access against prepare ([#5167](https://github.com/danielraffel/pulp/pull/5167))
+
+<a id="v05220"></a>
+## [0.522.0] - 2026-06-28
+
+- feat(designmd): track DESIGN.md format spec 0.3.0 in the importer ([#5136](https://github.com/danielraffel/pulp/pull/5136))
+
+<a id="v05211"></a>
+## [0.521.1] - 2026-06-27
+
+- fix(rt): coalesce live main-listener notifications and clamp native-core event offsets ([#5161](https://github.com/danielraffel/pulp/pull/5161))
+
+<a id="v05210"></a>
+## [0.521.0] - 2026-06-27
+
+- feat(format): deliver MIDI controllers to VST3 instruments via IMidiMapping ([#5155](https://github.com/danielraffel/pulp/pull/5155))
+
+<a id="v05200"></a>
+## [0.520.0] - 2026-06-28
+
+- feature/au render rt safety ([#5152](https://github.com/danielraffel/pulp/pull/5152))
+
 <a id="v05190"></a>
 ## [0.519.0] - 2026-06-27
 
@@ -5443,6 +5491,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.528.0]: https://github.com/danielraffel/pulp/releases/tag/v0.528.0
+[0.527.0]: https://github.com/danielraffel/pulp/releases/tag/v0.527.0
+[0.526.0]: https://github.com/danielraffel/pulp/releases/tag/v0.526.0
+[0.524.0]: https://github.com/danielraffel/pulp/releases/tag/v0.524.0
+[0.523.0]: https://github.com/danielraffel/pulp/releases/tag/v0.523.0
+[0.522.0]: https://github.com/danielraffel/pulp/releases/tag/v0.522.0
+[0.521.1]: https://github.com/danielraffel/pulp/releases/tag/v0.521.1
+[0.521.0]: https://github.com/danielraffel/pulp/releases/tag/v0.521.0
+[0.520.0]: https://github.com/danielraffel/pulp/releases/tag/v0.520.0
 [0.519.0]: https://github.com/danielraffel/pulp/releases/tag/v0.519.0
 [0.518.0]: https://github.com/danielraffel/pulp/releases/tag/v0.518.0
 [0.517.3]: https://github.com/danielraffel/pulp/releases/tag/v0.517.3

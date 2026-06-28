@@ -127,8 +127,8 @@
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1236,
-      "note": "CLI common cleanup candidate"
+      "max_loc": 1138,
+      "note": "CLI common cleanup candidate; lowered after delegate extraction"
     },
     {
       "path": "tools/cli/kit_commands.cpp",

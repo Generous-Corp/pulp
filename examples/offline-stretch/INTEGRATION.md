@@ -12,7 +12,7 @@ out, **exactly `round(N·time_ratio)` frames** (loop grid-lock). Modes:
 - **Tempo-only** — `time_ratio≠1`, pitch 0: `RealtimePitchTimeProcessor` time_stretch, pitch preserved.
 - **Pitch-only** — `time_ratio=1`, pitch≠0: realtime_pitch + formant (follow/preserve/independent).
 - **Independent R+S** — follow-formant = single pass (stretch R·P + resample P); preserve/independent = pitch→tempo cascade.
-- **STN noise routing** (`route_noise_stn`, default on) and **draft `quality=0`** (fast Hann-OLA) for instant preview.
+- **STN noise routing** (`route_noise_stn`, off by default; opt in with `--stn`) and **draft `quality=0`** (fast Hann-OLA) for instant preview.
 
 ```cpp
 pulp::signal::OfflineStretch s;
