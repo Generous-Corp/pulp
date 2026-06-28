@@ -172,6 +172,22 @@ pub const COMMANDS: &[Entry] = &[
         name: "coverage",
         summary: "Local coverage tooling (diff-cover gate mirror)",
     },
+    Entry {
+        name: "macos",
+        summary: "Per-PR macOS-runner retargeting (local/namespace/github-hosted)",
+    },
+    Entry {
+        name: "ci-host",
+        summary: "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)",
+    },
+    Entry {
+        name: "overflow",
+        summary: "Configure macOS-runner overflow routing (status/enable/disable/threshold)",
+    },
+    Entry {
+        name: "tweaks",
+        summary: "Inspect the pulp-tweaks.json sidecar (diff against a design)",
+    },
 ];
 
 /// Script-delegate table — mirrors `script_commands[]`.
