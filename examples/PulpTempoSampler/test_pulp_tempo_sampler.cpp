@@ -1686,6 +1686,52 @@ TEST_CASE("Direction + Loop dropdowns drive their params", "[tempo-sampler][mode
     CHECK(loop->selected() == 2);   // Reverse
 }
 
+// TEMPO field: tap-to-type an exact BPM. The footer readout IS a numeric TextEditor;
+// on_return parses the leading number (ignoring the live " BPM" suffix), clamps to
+// the engine's [20, 400] range, and engages it as the manual target (auto-unlinking).
+TEST_CASE("TEMPO field types an exact BPM on Return (parse + clamp + unlink)",
+          "[tempo-sampler][tempo-ui]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 24000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    auto* fld = root->tempo_edit_;
+    REQUIRE(fld != nullptr);
+
+    // The affordance: a numeric field that highlights its value when tapped.
+    CHECK(fld->numeric_only);
+    CHECK(fld->select_on_focus);
+
+    // Starts LINKED (no manual override); typing a value engages it as the target.
+    REQUIRE_FALSE(f.proc->tempo_override_active());
+    fld->on_return("128");
+    CHECK(f.proc->tempo_override_active());
+    CHECK(std::lround(f.proc->effective_bpm()) == 128);
+
+    // One decimal is honored, and the readout's trailing " BPM" is ignored.
+    fld->on_return("142.5");
+    CHECK(std::abs(f.proc->effective_bpm() - 142.5) < 0.01);
+    fld->on_return("96.0 BPM");
+    CHECK(std::abs(f.proc->effective_bpm() - 96.0) < 0.01);
+
+    // Out-of-range values clamp to the engine range, not rejected.
+    fld->on_return("9999");
+    CHECK(std::lround(f.proc->effective_bpm()) == 400);
+    fld->on_return("1");
+    CHECK(std::lround(f.proc->effective_bpm()) == 20);
+
+    // Escape and empty/garbage input leave the engaged tempo untouched.
+    f.proc->set_target_bpm(150.0);
+    fld->on_escape();
+    CHECK(std::lround(f.proc->effective_bpm()) == 150);
+    fld->on_return("");
+    CHECK(std::lround(f.proc->effective_bpm()) == 150);
+}
+
 // REVERSE direction: a whole-loop region played in Reverse reads end->start, so a
 // STRONG impulse near the loop start and a WEAK impulse near the end come out in
 // the OPPOSITE order vs Forward. A/B the first audible peak to prove direction.

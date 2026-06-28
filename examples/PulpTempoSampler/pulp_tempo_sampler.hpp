@@ -32,6 +32,7 @@
 #include <pulp/view/musical_typing.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -57,7 +58,7 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.5.1";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.6.0";
 
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
@@ -421,6 +422,13 @@ public:
     // The FrameTick poller defaults the fader/readout to the detected loop BPM
     // whenever a new loop is analyzed (generation bump), so R≈1 on load.
     view::Fader* tempo_fader = nullptr;
+    // Tap-to-type BPM field. Idle it shows the live "120.0 BPM" readout (the
+    // FrameTick rewrites it from effective_bpm while it is NOT focused); click it
+    // to edit — the value highlights (select_on_focus), type a number, Return
+    // commits via set_target_bpm and the fader thumb re-syncs on the next frame.
+    // It is the readout AND the editor, so a click focuses it natively (the host
+    // focuses whatever was clicked) — no separate hit target to plumb focus for.
+    view::TextEditor* tempo_edit_ = nullptr;
     view::ToggleButton* link_btn = nullptr;  // tempo LINK toggle (follow host vs manual)
     view::View* detail_overlay_ = nullptr;   // Logic-style "Detail" page (Gate, Flex Speed, …)
     bool hosted_in_standalone_ = false;      // resolved on view-open
@@ -1367,11 +1375,11 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(322, 324, 46, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        label(316, 324, 44, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 366, 322, 64, 16);
+            place(*fader, 360, 322, 44, 16);
             fader->set_value(bpm_to_norm(effective_bpm()));
             // Dragging engages a manual target tempo — which auto-UNLINKS from the
             // host (set_target_bpm sets the override). The FrameTick re-syncs the
@@ -1382,21 +1390,49 @@ public:
             root->tempo_fader = fader.get();
             root->add_child(std::move(fader));
         }
-        // Live BPM readout (shows the tempo the loop is currently stretched to —
-        // the host tempo while linked, the manual target while unlinked).
+        // Tap-to-type BPM field. Idle it reads like the old teal readout
+        // ("120.0 BPM"); click it to dial an exact tempo — the value highlights,
+        // type, Return commits. Wide enough for the longest value ("400.0 BPM").
         {
-            auto live = std::make_unique<LiveText>();
-            live->font_family = mono;
-            live->color = teal;
-            live->text = [this] {
-                // One decimal so the loop's bar-snapped fractional tempo is visible
-                // (e.g. 103.4 when unlinked) — an integer readout hid it.
+            auto edit = std::make_unique<view::TextEditor>();
+            edit->numeric_only = true;          // digits + '.'; one decimal is enough
+            edit->select_on_focus = true;       // tap highlights the whole value
+            edit->max_length = 7;               // "400.0" plus a little slack
+            edit->set_font_size(11.0f);
+            // Teal text + a background that blends with the footer so it reads as a
+            // plain readout until focused; the select-all highlight + caret are the
+            // edit affordance. A small theme override recolors the editor's text and
+            // keeps selected glyphs legible (selected text is drawn in bg.primary).
+            view::Theme th;
+            th.colors["text.primary"]   = teal;     // idle + caret colour
+            th.colors["bg.primary"]     = bg900;    // selected-glyph colour (on the highlight)
+            th.colors["accent.primary"] = tealSoft; // selection highlight (soft teal)
+            edit->set_theme(th);
+            edit->set_background_color(bg900);
+            edit->set_border(Color::rgba8(0, 0, 0, 0), 0.0f);  // no chrome box
+            auto sync_text = [this](view::TextEditor* e) {
                 char buf[24];
                 std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
-                return std::string(buf);
+                e->set_text(buf);
             };
-            place(*live, 434, 320, 56, 18);
-            root->add_child(std::move(live));
+            sync_text(edit.get());
+            auto* ePtr = edit.get();
+            edit->on_return = [this, ePtr](const std::string& s) {
+                // Parse the leading number (ignores a trailing " BPM" if present),
+                // clamp to range, engage it as the manual target (auto-unlinks),
+                // then blur so the live readout + fader thumb resume next frame.
+                const double v = std::strtod(s.c_str(), nullptr);
+                if (v > 0.0) set_target_bpm(v);   // set_target_bpm clamps to [20,400]
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            edit->on_escape = [ePtr] {
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            place(*edit, 408, 320, 70, 20);
+            root->tempo_edit_ = ePtr;
+            root->add_child(std::move(edit));
         }
         // TEMPO LINK toggle: ON = follow the reference tempo (host transport in a
         // DAW; the loop's detected BPM in standalone) and re-stretch automatically
@@ -1415,7 +1451,7 @@ public:
             linkBtn->set_off_border_color(faint);
             linkBtn->set_on(tempo_linked());
             linkBtn->on_toggle = [this](bool on) { set_tempo_linked(on); };
-            place(*linkBtn, 492, 316, 46, 26);
+            place(*linkBtn, 482, 316, 42, 26);
             root->link_btn = linkBtn.get();
             root->add_child(std::move(linkBtn));
         }
@@ -1447,6 +1483,14 @@ public:
                     rp->tempo_fader->set_value(bpm_to_norm(effective_bpm()));
                 if (rp->link_btn && rp->link_btn->is_on() != tempo_linked())
                     rp->link_btn->set_on(tempo_linked());
+                // Live-track the BPM field UNLESS the user is editing it (focused) —
+                // overwriting mid-type would fight their input. On blur (Return/Esc/
+                // outside-click) has_focus() drops and the readout resumes.
+                if (rp->tempo_edit_ && !rp->tempo_edit_->has_focus()) {
+                    char buf[24];
+                    std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
+                    if (rp->tempo_edit_->text() != buf) rp->tempo_edit_->set_text(buf);
+                }
             };
             place(*tick, 0, 0, 0, 0);
             root->add_child(std::move(tick));
@@ -1464,8 +1508,8 @@ public:
                 state().end_gesture(kDirection);
             };
             auto* dirPtr = dir.get();
-            label(544, 324, 24, 18, "DIR", faint, 10, 600, LabelAlign::left, true);
-            place(*dir, 572, 316, 62, 26);
+            label(528, 324, 22, 18, "DIR", faint, 10, 600, LabelAlign::left, true);
+            place(*dir, 552, 316, 68, 26);
             root->listeners.push_back(state().add_listener(
                 [this, dirPtr](state::ParamID id, float v) {
                     if (id == kDirection) dirPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
@@ -1500,8 +1544,8 @@ public:
                 }
             };
             auto* loopPtr = combo.get();
-            label(640, 324, 28, 18, "LOOP", faint, 10, 600, LabelAlign::left, true);
-            place(*combo, 672, 316, 68, 26);
+            label(624, 324, 28, 18, "LOOP", faint, 10, 600, LabelAlign::left, true);
+            place(*combo, 654, 316, 80, 26);
             root->listeners.push_back(state().add_listener(
                 [this, loopPtr, sel_for_state](state::ParamID id, float) {
                     if (id == kTempoLoop || id == kLoopMode) loopPtr->set_selected_silent(sel_for_state());
