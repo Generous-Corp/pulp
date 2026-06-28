@@ -140,9 +140,9 @@ TEST_CASE("[jsx-experiment] Chainer JSX bundle materializes through Claude runti
           "[view][import][jsx]") {
     const char* bundle_path = std::getenv("PULP_JSX_BUNDLE");
     if (!bundle_path || !*bundle_path) {
-        SUCCEED("PULP_JSX_BUNDLE not set — skipping. Run the Node transform first: "
-                "node tools/import-design/jsx-runtime/jsx-transform.mjs --in "
-                "planning/fixtures/jsx/chainer-instrument.jsx --out /tmp/chainer-bundle.js");
+        SKIP("PULP_JSX_BUNDLE not set; run the Node transform first: "
+             "node tools/import-design/jsx-runtime/jsx-transform.mjs --in "
+             "planning/fixtures/jsx/chainer-instrument.jsx --out /tmp/chainer-bundle.js");
         return;
     }
 
@@ -298,9 +298,9 @@ TEST_CASE("[jsx-experiment] TypeScript .tsx bundle materializes through Claude r
     // fixture" to the mainstream React export surface.
     const char* bundle_path = std::getenv("PULP_TSX_BUNDLE");
     if (!bundle_path || !*bundle_path) {
-        SUCCEED("PULP_TSX_BUNDLE not set — skipping. Run the Node transform first: "
-                "node tools/import-design/jsx-runtime/jsx-transform.mjs --in "
-                "planning/fixtures/jsx/typed-control.tsx --out /tmp/tsx-bundle.js");
+        SKIP("PULP_TSX_BUNDLE not set; run the Node transform first: "
+             "node tools/import-design/jsx-runtime/jsx-transform.mjs --in "
+             "planning/fixtures/jsx/typed-control.tsx --out /tmp/tsx-bundle.js");
         return;
     }
 
