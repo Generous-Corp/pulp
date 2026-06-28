@@ -4,14 +4,14 @@
   "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-headless-surface-skip-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 285,
+    "succeed": 284,
     "require_true": 16,
-    "skip": 522
+    "skip": 523
   },
   "classifications": {
-    "needs-review": 791,
+    "needs-review": 792,
     "placeholder": 4,
-    "skip-as-pass": 12,
+    "skip-as-pass": 11,
     "unconditional-true": 16
   },
   "notes": [

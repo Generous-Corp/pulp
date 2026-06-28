@@ -951,7 +951,7 @@ TEST_CASE("Windows Bonjour factory returns nullptr or working backend",
 TEST_CASE("Bonjour backend round-trips publish → browse on macOS",
           "[events][service-discovery][bonjour][smoke][.][!mayfail]") {
     if (const char* skip = std::getenv("PULP_SKIP_BONJOUR_SMOKE"); skip && *skip) {
-        SUCCEED("PULP_SKIP_BONJOUR_SMOKE set; skipping Bonjour smoke.");
+        SKIP("PULP_SKIP_BONJOUR_SMOKE set; Bonjour smoke cannot run");
         return;
     }
 
