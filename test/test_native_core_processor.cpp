@@ -81,6 +81,19 @@ pulp_native_param_v1 g_param = [] {
 uint32_t g_last_param_view_count = 0;
 uint32_t g_last_param_view_capacity = 0;
 uint32_t g_last_param_view_overflowed = 0;
+uint32_t g_prepare_calls = 0;
+uint32_t g_release_calls = 0;
+uint32_t g_resume_calls = 0;
+uint32_t g_suspend_calls = 0;
+bool g_last_active_state = false;
+
+void reset_lifecycle_observations() {
+    g_prepare_calls = 0;
+    g_release_calls = 0;
+    g_resume_calls = 0;
+    g_suspend_calls = 0;
+    g_last_active_state = false;
+}
 
 const pulp_native_descriptor_v1* gain_descriptor() { return &g_desc; }
 const pulp_native_param_v1* gain_parameters(uint32_t* count) {
@@ -96,19 +109,26 @@ void gain_destroy(pulp_native_instance* i) {
     delete reinterpret_cast<GainInstance*>(i);
 }
 pulp_native_status gain_prepare(pulp_native_instance*, const pulp_native_prepare_v1*) {
+    ++g_prepare_calls;
     return PULP_NATIVE_OK;
 }
-void gain_release(pulp_native_instance*) {}
+void gain_release(pulp_native_instance*) {
+    ++g_release_calls;
+}
 pulp_native_status gain_set_bus_layout(pulp_native_instance*,
                                        const pulp_native_bus_layout_v1*) {
     return PULP_NATIVE_OK;
 }
 pulp_native_status gain_resume(pulp_native_instance* i) {
+    ++g_resume_calls;
     reinterpret_cast<GainInstance*>(i)->active = true;
+    g_last_active_state = true;
     return PULP_NATIVE_OK;
 }
 pulp_native_status gain_suspend(pulp_native_instance* i) {
+    ++g_suspend_calls;
     reinterpret_cast<GainInstance*>(i)->active = false;
+    g_last_active_state = false;
     return PULP_NATIVE_OK;
 }
 void gain_reset(pulp_native_instance*) {}
@@ -404,6 +424,7 @@ TEST_CASE("NativeCoreProcessor RT harness traps blocking locks",
 
 TEST_CASE("NativeCoreProcessor drives suspend/resume/release/latency",
           "[native-core-processor]") {
+    reset_lifecycle_observations();
     format::NativeCoreProcessor proc(&g_core);
     state::StateStore store;
     proc.define_parameters(store);
@@ -413,11 +434,25 @@ TEST_CASE("NativeCoreProcessor drives suspend/resume/release/latency",
     ctx.input_channels = 2;
     ctx.output_channels = 2;
     proc.prepare(ctx);
+    REQUIRE(g_prepare_calls == 1);
+    REQUIRE(g_resume_calls == 1);
+    REQUIRE(g_suspend_calls == 0);
+    REQUIRE(g_release_calls == 0);
+    REQUIRE(g_last_active_state);
+
     proc.suspend();
+    REQUIRE(g_suspend_calls == 1);
+    REQUIRE_FALSE(g_last_active_state);
+
     proc.resume();
+    REQUIRE(g_resume_calls == 2);
+    REQUIRE(g_last_active_state);
+
     REQUIRE(proc.latency_samples() == 0);
     proc.release();
-    SUCCEED("lifecycle transitions completed");
+    REQUIRE(g_suspend_calls == 2);
+    REQUIRE(g_release_calls == 1);
+    REQUIRE_FALSE(g_last_active_state);
 }
 
 TEST_CASE("NativeCoreProcessor round-trips opaque state",
