@@ -173,7 +173,14 @@ bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
     return copied_all && !incomplete;
 }
 
+// All add_*/connect/remove mutators below take graph_mutation_mutex_ for the
+// duration of the nodes_/connections_ mutation + invalidate_live_(). The lock is
+// safe to hold across invalidate_live_() because that drives only the
+// non-blocking prune_retired_snapshots_() (never the blocking reader-drain), so
+// it cannot invert lock order with the ProcessReadGuard reader-pin. See the
+// graph_mutation_mutex_ contract in signal_graph.hpp.
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::AudioInput;
@@ -185,6 +192,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
 }
 
 NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::AudioOutput;
@@ -196,6 +204,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
 }
 
 NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -213,6 +222,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info,
                                                int num_inputs,
                                                int num_outputs,
                                                const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -230,6 +240,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info,
 NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot,
                                     int num_inputs, int num_outputs,
                                     const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -250,10 +261,6 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot,
 }
 
 NodeId SignalGraph::add_gain_node(const std::string& name) {
-    // Serialize the nodes_ push against a concurrent compile_()/node() scan on a
-    // host thread. invalidate_live_() here drives only the non-blocking prune
-    // (never the blocking reader-drain), so holding the mutation mutex across it
-    // cannot invert lock order with the reader-pin mechanism.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
@@ -267,6 +274,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
 }
 
 NodeId SignalGraph::add_midi_input_node(const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::MidiInput;
@@ -278,6 +286,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
 }
 
 NodeId SignalGraph::add_midi_output_node(const std::string& name) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::MidiOutput;
@@ -290,6 +299,10 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     if (!is_valid_custom_node_type(type)) return false;
+    // Scans nodes_ and mutates custom_node_types_; serialize against a concurrent
+    // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
+    // assumes the caller holds this mutex (true for every internal caller below).
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const bool affects_existing_nodes = std::any_of(
         nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
             return node.type == NodeType::Custom
@@ -320,6 +333,13 @@ const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id,
     return &it->second;
 }
 
+// add_custom_node overloads only RESOLVE a registered type (read
+// custom_node_types_) and delegate to the public add_unresolved_custom_node leaf,
+// which takes graph_mutation_mutex_ once for the nodes_ mutation. They do NOT
+// take the lock themselves — delegating through another locked public method
+// would self-deadlock this non-recursive mutex. Type registration is expected to
+// precede topology building (register_custom_node_type holds the same mutex), so
+// the custom_node_types_ read here is consistent with that ordering.
 NodeId SignalGraph::add_custom_node(std::string_view type_id,
                                     const std::string& name) {
     const auto* type = custom_node_type(type_id);
@@ -353,6 +373,9 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id,
     type.default_name = name;
     if (!is_valid_custom_node_type(type)) return 0;
 
+    // The single locked leaf for the add_custom_node family — serializes the
+    // nodes_ push against a concurrent prepare()/mutator.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Custom;
@@ -386,6 +409,7 @@ bool SignalGraph::remove_node(NodeId id) {
 
 bool SignalGraph::connect(NodeId source, PortIndex source_port,
                           NodeId dest, PortIndex dest_port) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -400,6 +424,7 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port,
 }
 
 bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     if (!node(source) || !node(dest)) return false;
     if (would_create_cycle(source, dest)) return false;
     Connection conn{source, 0, dest, 0, false, true};
@@ -415,6 +440,7 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port,
     // else (Gain, Custom, AudioOutput, ...) has no notion of a sidechain
     // bus. We reject other destinations early so callers fail loudly
     // instead of silently routing into a regular audio port.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -440,6 +466,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
                                      float range_lo, float range_hi,
                                      float smoothing_ms,
                                      AutomationMix mix) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -494,6 +521,9 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
                                                 float range_lo, float range_hi,
                                                 float smoothing_ms,
                                                 AutomationMix mix) {
+    // Holds graph_mutation_mutex_ across audio_rate_modulation_lane() below, which
+    // is a lock-free helper that assumes the caller holds it (it scans nodes_).
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -535,7 +565,9 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     conn.automation_smoothing_ms  = std::max(0.0f, smoothing_ms);
     conn.automation_mix           = mix;
     state::ModulationLane lane;
-    if (!audio_rate_modulation_lane(conn, lane)) return false;
+    // Mutex already held: call the lock-free core directly (the public
+    // audio_rate_modulation_lane would re-lock and self-deadlock).
+    if (!audio_rate_modulation_lane_locked_(conn, lane)) return false;
     connections_.push_back(conn);
     invalidate_live_();
     return true;
@@ -543,6 +575,13 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
 
 bool SignalGraph::audio_rate_modulation_lane(const Connection& connection,
                                              state::ModulationLane& lane) const {
+    // Public entry: scans nodes_ via node(), so serialize against mutators.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    return audio_rate_modulation_lane_locked_(connection, lane);
+}
+
+bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connection,
+                                                     state::ModulationLane& lane) const {
     if (!connection.audio_rate_modulation || connection.automation) {
         return false;
     }
@@ -629,6 +668,7 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
 
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
                                    NodeId dest, PortIndex dest_port) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -643,6 +683,7 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
 
 bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
                              NodeId dest, PortIndex dest_port) {
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     Connection target{source, source_port, dest, dest_port};
     auto it = std::find(connections_.begin(), connections_.end(), target);
     if (it == connections_.end()) return false;
@@ -651,6 +692,10 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
     return true;
 }
 
+// Lock-free helper: scans nodes_; the caller MUST hold graph_mutation_mutex_
+// (every internal mutator/reader below does). Public direct callers
+// (e.g. nodes()/node() external users) own their serialization per the accessor
+// contract documented on graph_mutation_mutex_.
 const GraphNode* SignalGraph::node(NodeId id) const {
     for (auto& n : nodes_) if (n.id == id) return &n;
     return nullptr;
@@ -706,6 +751,10 @@ std::vector<NodeId> SignalGraph::processing_order() const {
 }
 
 bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) {
+    // Scans nodes_ via node(); serialize against a concurrent mutator/prepare.
+    // Forwards to the plugin slot's own (independently synchronized) parameter
+    // store — no GraphNode plain field is written here.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     auto* n = const_cast<GraphNode*>(node(id));
     if (!n || n->type != NodeType::Plugin || !n->plugin) return false;
     n->plugin->set_parameter(param_id, value);
@@ -713,6 +762,8 @@ bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) 
 }
 
 float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
+    // Scans nodes_ via node(); serialize against a concurrent mutator/prepare.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     auto* n = node(id);
     if (!n || n->type != NodeType::Plugin || !n->plugin) return 0.f;
     return n->plugin->get_parameter(param_id);
@@ -797,9 +848,18 @@ std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
     // NodeRuntime::load pointers into them, so erasing here would risk a
     // use-after-free on the draining audio thread. Residual map growth is
     // bounded by the number of distinct NodeIds the graph has ever held.
+    // The nodes_ scan is serialized under graph_mutation_mutex_ (against a
+    // concurrent mutator/prepare); take it FIRST and release it before
+    // node_load_mu_ so the lock order is graph_mutation_mutex_ -> node_load_mu_,
+    // matching compile_() (which holds graph_mutation_mutex_ via prepare() and
+    // takes node_load_mu_ inside). live_ids is a private copy, so it is safe to
+    // use after releasing graph_mutation_mutex_.
     std::unordered_set<NodeId> live_ids;
-    live_ids.reserve(nodes_.size());
-    for (const auto& n : nodes_) live_ids.insert(n.id);
+    {
+        std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+        live_ids.reserve(nodes_.size());
+        for (const auto& n : nodes_) live_ids.insert(n.id);
+    }
 
     std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
     std::vector<NodeLoadReport> reports;
@@ -1583,6 +1643,9 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
 }
 
 void SignalGraph::set_limits(GraphLimits limits) {
+    // Mutates limits_ (read by validate_generated_graph under the lock) and drives
+    // invalidate_live_(); serialize against a concurrent prepare()/mutator.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     limits_ = limits;
     invalidate_live_();
 }
@@ -1708,6 +1771,9 @@ void SignalGraph::release() {
 }
 
 std::vector<uint8_t> SignalGraph::custom_node_state(NodeId id) const {
+    // Reads nodes_ + GraphNode custom fields; serialize against a concurrent
+    // mutator/prepare. custom_node_type() is a lock-free helper used under it.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     for (const auto& n : nodes_) {
         if (n.id != id) continue;
         if (n.type != NodeType::Custom) return {};
@@ -1727,6 +1793,9 @@ std::vector<uint8_t> SignalGraph::custom_node_state(NodeId id) const {
 
 bool SignalGraph::set_custom_node_state(NodeId id,
                                         const std::vector<uint8_t>& bytes) {
+    // Writes GraphNode custom fields + invalidate_live_(); serialize against a
+    // concurrent mutator/prepare.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     for (auto& n : nodes_) {
         if (n.id != id) continue;
         if (n.type != NodeType::Custom) return false;
@@ -2006,6 +2075,10 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
 }
 
 void SignalGraph::clear() {
+    // Wipes nodes_/connections_ + invalidate_live_(); serialize against a
+    // concurrent mutator/prepare. invalidate_live_() drives only the non-blocking
+    // prune, so holding the mutex across it is deadlock-free.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
     connections_.clear();
     nodes_.clear();
     next_id_ = 1;
