@@ -170,12 +170,14 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 15);
+    REQUIRE(s.param_count() == 17);
     // Play to End defaults ON: a dropped loop's root yields the whole loop even
     // after chopping (raising SENS), matching Logic Quick Sampler's slice ergonomics.
     REQUIRE(s.get_value(kPlayToEnd) == 1.0f);
     REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop direction = Forward
     REQUIRE(s.get_value(kSliceMode) == 0.0f);  // default Onset/Transient slicing
+    REQUIRE(s.get_value(kGate) == 1.0f);       // default Gate on (key-up releases)
+    REQUIRE(s.get_value(kFlexSpeed) == 2.0f);  // default 1x (index 2 of {1/4,1/2,1,2,4})
 }
 
 TEST_CASE("PulpTempoSampler package metadata uses the descriptor version", "[tempo-sampler]") {
@@ -2377,4 +2379,71 @@ TEST_CASE("Slice modes: Equal and Beat cut evenly-spaced grids", "[tempo-sampler
             CHECK(spacing_ratio(sl) < 1.7);   // beat grid -> evenly spaced
         }
     }
+}
+
+// FLEX SPEED (Logic): playing 2x faster halves the stretched (published) length;
+// 1/2x doubles it. The loop still tempo-matches — speed just scales the ratio.
+TEST_CASE("Flex Speed scales the stretched length", "[tempo-sampler][flex-speed]") {
+    // Fresh fixture per speed (the offline render runs on a live worker; reusing
+    // one fixture across speeds races the worker against the param change).
+    auto pub_at_flex = [](int flex_idx) -> long {
+        Fixture f;
+        f.store.set_value(kOnsetSens, 0.0f);             // whole loop (1 region)
+        auto loop = percussive_loop(48000, 8);           // 48000-frame source
+        const float* ch[1] = {loop.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        f.store.set_value(kFlexSpeed, static_cast<float>(flex_idx));
+        f.proc->render_now(120.0);   // force a re-stretch at the new Flex Speed (the UI
+                                     // listener does this in the app; no listener here)
+        long prev = -1; int stable = 0; std::vector<float> l(512), r(512);
+        for (int i = 0; i < 400 && stable < 25; ++i) {   // process() acks the new publish
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            const long p = f.proc->published_frames();
+            if (p > 0 && p == prev) ++stable; else { stable = 0; prev = p; }
+        }
+        return f.proc->published_frames();
+    };
+    const long base = pub_at_flex(2);   // 1x
+    const long fast = pub_at_flex(3);   // 2x   -> half the length
+    const long slow = pub_at_flex(1);   // 1/2x -> double the length
+    INFO("flex base(1x)=" << base << " fast(2x)=" << fast << " slow(0.5x)=" << slow);
+    CHECK(std::llabs(static_cast<long long>(fast) - base / 2) <= base / 20);   // ~half
+    CHECK(std::llabs(static_cast<long long>(slow) - base * 2) <= base / 10);   // ~double
+}
+
+// GATE: off = One-Shot (key-up ignored, the slice plays through); on = key-up
+// releases the envelope, so the same note-off goes quiet far sooner.
+TEST_CASE("Gate off plays through note-off; Gate on releases", "[tempo-sampler][gate]") {
+    auto energy_after_off = [](float gate) -> double {
+        Fixture f;
+        f.store.set_value(kOnsetSens, 0.0f);             // whole loop (1 region, ~1 s one-shot)
+        f.store.set_value(kTempoLoop, 0.0f);             // one-shot (not looping)
+        f.store.set_value(kGate, gate);
+        auto loop = percussive_loop(48000, 6);
+        const float* ch[1] = {loop.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        // note-on, one block, then note-off ~10 ms in.
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, kRoot));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        double e = 0.0;
+        for (int b = 0; b < 28; ++b) {                   // ~300 ms after note-off
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            e += block_energy(l);
+        }
+        return e;
+    };
+    const double e_off = energy_after_off(0.0f);         // plays through
+    const double e_on  = energy_after_off(1.0f);         // releases
+    INFO("gate-off energy=" << e_off << "  gate-on energy=" << e_on);
+    CHECK(e_off > e_on * 1.5);
 }

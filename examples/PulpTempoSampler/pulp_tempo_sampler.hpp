@@ -131,6 +131,10 @@ enum TempoSamplerParams : state::ParamID {
     kSliceMode    = 15, // how cut points are chosen (Logic Slice "Mode" pop-up):
                         // 0 Onset/Transient (SENS=count), 1 Beat divisions
                         // (SENS=division 1/2/4/8/16), 2 Equal divisions (SENS=count).
+    kGate         = 16, // 1 = key-up releases the envelope (default); 0 = One-Shot:
+                        // a triggered slice plays through, ignoring note-off.
+    kFlexSpeed    = 17, // Logic Flex Speed: index into {1/4, 1/2, 1, 2, 4}x of the
+                        // tempo-synced playback speed. Default index 2 (1x).
 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
@@ -422,6 +426,7 @@ public:
     // whenever a new loop is analyzed (generation bump), so R≈1 on load.
     view::Fader* tempo_fader = nullptr;
     view::ToggleButton* link_btn = nullptr;  // tempo LINK toggle (follow host vs manual)
+    view::View* detail_overlay_ = nullptr;   // Logic-style "Detail" page (Gate, Flex Speed, …)
     bool hosted_in_standalone_ = false;      // resolved on view-open
     std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
 
@@ -562,6 +567,18 @@ public:
         store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
         // Slicing mode (Logic Slice "Mode" pop-up): 0 Onset, 1 Beat, 2 Equal.
         store.add_parameter({.id = kSliceMode, .name = "Slice Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Gate: 1 = key-up releases the envelope (default), 0 = One-Shot.
+        store.add_parameter({.id = kGate, .name = "Gate", .unit = "", .range = {0, 1, 1, 1}});
+        // Flex Speed: index into {1/4,1/2,1,2,4}x; default 1x (index 2).
+        store.add_parameter({.id = kFlexSpeed, .name = "Flex Speed", .unit = "", .range = {0, 4, 2, 1}});
+    }
+
+    // Logic Flex Speed factor: the loop plays this many times faster than the
+    // tempo-synced base (so a higher factor SHORTENS the stretched duration).
+    double flex_speed_factor() const noexcept {
+        static constexpr double kSpeeds[] = {0.25, 0.5, 1.0, 2.0, 4.0};
+        const int i = std::clamp(static_cast<int>(state().get_value(kFlexSpeed) + 0.5f), 0, 4);
+        return kSpeeds[i];
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -1499,6 +1516,81 @@ public:
         // window (⌘K / the "Keyboard" button → toggle_keyboard_window()), so it
         // never overlaps the waveform editor.
 
+        // ── Main / Detail page toggle (header) ──
+        // A single button that flips between the main slice page and the Detail
+        // page; its label tracks the page you'd switch TO (Logic-style two-page UI).
+        {
+            auto btn = std::make_unique<TextButton>("Detail");
+            SamplerEditorRoot* rp = root.get();
+            auto* btnPtr = btn.get();
+            btn->on_click = [rp, btnPtr, shown = std::make_shared<bool>(false)] {
+                *shown = !*shown;
+                if (rp->detail_overlay_) rp->detail_overlay_->set_visible(*shown);
+                btnPtr->set_label(*shown ? "Main" : "Detail");
+                rp->request_repaint();
+            };
+            place(*btn, 384, 14, 82, 28);
+            root->add_child(std::move(btn));
+        }
+
+        // ── Detail page (Logic "Q-Sampler Detail"-style) ──
+        // An opaque overlay over the body (y>=50, header stays visible) holding the
+        // envelope-adjacent controls. Hidden until the Detail page toggle selects it.
+        // Gate + Flex Speed live here now; trim / fades / envelopes land here next.
+        {
+            auto detail = std::make_unique<View>();
+            place(*detail, 0, 50, 760, 322);
+            detail->set_background_color(bg900);   // opaque: hides the body behind it
+            detail->set_visible(false);
+            auto dlabel = [&](float x, float y, float w, const char* t, Color col, float sz, int wt) {
+                auto l = std::make_unique<Label>(std::string(t));
+                place(*l, x, y, w, 18);
+                l->set_text_color(col); l->set_font_size(sz); l->set_font_weight(wt);
+                l->set_text_align(LabelAlign::left); detail->add_child(std::move(l));
+            };
+            dlabel(20, 16, 200, "DETAIL", textStr, 13, 600);
+
+            // GATE: key-up releases the envelope (on) vs One-Shot play-through (off).
+            dlabel(40, 70, 70, "GATE", faint, 10, 600);
+            {
+                auto g = std::make_unique<ToggleButton>();
+                g->set_label("GATE"); g->set_font_size(10.0f); g->set_corner_radius(6.0f);
+                g->set_on_background_color(teal); g->set_on_text_color(bg900);
+                g->set_off_background_color(raised); g->set_off_text_color(muted);
+                g->set_off_border_color(faint);
+                place(*g, 130, 64, 70, 26);
+                root->bindings.push_back(bind_parameter(*g, state(), kGate));
+                detail->add_child(std::move(g));
+            }
+
+            // FLEX SPEED: 1/4..4x of the tempo-synced playback speed (Logic Flex Speed).
+            dlabel(40, 112, 90, "FLEX SPEED", faint, 10, 600);
+            {
+                auto fs = std::make_unique<ComboBox>();
+                fs->set_items({"1/4x", "1/2x", "1x", "2x", "4x"});
+                fs->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kFlexSpeed)), 0, 4));
+                fs->on_change = [this](int idx) {
+                    state().begin_gesture(kFlexSpeed);
+                    state().set_value(kFlexSpeed, static_cast<float>(std::clamp(idx, 0, 4)));
+                    state().end_gesture(kFlexSpeed);
+                    request_render(effective_bpm());   // re-stretch at the new speed
+                };
+                auto* fsPtr = fs.get();
+                place(*fs, 130, 106, 72, 26);
+                root->listeners.push_back(state().add_listener(
+                    [this, fsPtr](state::ParamID id, float v) {
+                        if (id == kFlexSpeed) fsPtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 4));
+                    },
+                    state::ListenerThread::Main));
+                detail->add_child(std::move(fs));
+            }
+
+            dlabel(40, 168, 520, "Trim, fades & envelopes — coming next", muted, 10, 400);
+
+            root->detail_overlay_ = detail.get();
+            root->add_child(std::move(detail));   // LAST = topmost over the body
+        }
+
         root->layout_children();
         return root;
     }
@@ -1912,6 +2004,8 @@ private:
 
         // Duration scales as loop_bpm / host_bpm (faster host => shorter loop).
         double R = (loop_bpm > 0.0 && host_bpm > 0.0) ? (loop_bpm / host_bpm) : 1.0;
+        // Flex Speed: playing N x faster shortens the stretched duration by N.
+        R /= flex_speed_factor();
         R = std::clamp(R, 1.0 / engine_.max_time_ratio(), engine_.max_time_ratio());
 
         const bool link = state().get_value(kTempoLink) >= 0.5f;
@@ -2195,6 +2289,9 @@ private:
 
     void release_note(int note) {
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
+        // Gate off (One-Shot): key-up does NOT release — the slice plays through
+        // (and a looping voice keeps looping until LOOP is turned off).
+        if (state().get_value(kGate) < 0.5f) return;
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
             if (voice.active && voice.note == note && !voice.released) {
