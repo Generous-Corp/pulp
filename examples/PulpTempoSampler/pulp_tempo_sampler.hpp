@@ -122,19 +122,13 @@ enum TempoSamplerParams : state::ParamID {
     kTempoLoop    = 10,
     kRootNote     = 11, // MIDI note of slice 0 (slice idx = note - root)
     kOnsetSens    = 12, // 0..1 onset-detection sensitivity (higher = more slices)
-    kPlaybackMode = 13, // what a key plays (Logic/PlunderTube): 0 Classic (whole
-                        // sample, repitched across the keyboard, loopable),
-                        // 1 Slice (each key plays ONLY its slice), 2 One-Shot
-                        // (whole sample, ignores note-off).
-    kDirection    = 14, // playback DIRECTION: 0 Forward, 1 Reverse, 2 Ping-Pong.
-                        // Combined with kTempoLoop (Loop None/On) to resolve the
-                        // engine mode: e.g. Reverse+Loop-off => play once backward,
-                        // Forward+Loop-on => forward loop, Ping-Pong+Loop-on => bounce.
-    kSliceMode    = 15, // how cut points are chosen (Logic Slice "Mode" pop-up):
-                        // 0 Onset/Transient (SENS=count), 1 Beat divisions
-                        // (SENS=division 1/2/4/8/16), 2 Equal divisions (SENS=count).
-    kGate         = 16, // 1 = key-up releases the envelope (default); 0 = One-Shot:
-                        // a triggered slice plays through, ignoring note-off.
+    kDirection    = 13, // read DIRECTION (Direction dropdown): 0 Forward, 1 Reverse.
+                        // Sets the play direction for a one-shot (LOOP = None).
+    kLoopMode     = 14, // loop SHAPE when looping (LOOP dropdown != None): 0 Forward,
+                        // 1 Reverse, 2 Ping-Pong. The LOOP dropdown (None / Forward /
+                        // Reverse / Ping-Pong) drives this + kTempoLoop (on/off).
+    kGate         = 16, // 1 = key-up releases the envelope (default); 0 = play
+                        // through (the slice plays to its end, ignoring note-off).
     kFlexSpeed    = 17, // Logic Flex Speed: index into {1/4, 1/2, 1, 2, 4}x of the
                         // tempo-synced playback speed. Default index 2 (1x).
 };
@@ -564,18 +558,12 @@ public:
                                        static_cast<float>(kDefaultRootNote), 1}});
         store.add_parameter({.id = kOnsetSens, .name = "Onset Sensitivity", .unit = "",
                              .range = {0, 1, kDefaultOnsetSensitivity, 0.01f}});
-        // Playback Mode: 0 Classic (whole sample, repitched, loopable), 1 Slice
-        // (each key plays only its slice), 2 One-Shot (whole sample, ignores
-        // note-off). Default Slice — this is a drum/loop chopper; SENS 0 leaves it
-        // a single whole-loop slice, raise SENS to chop. For the whole sample on
-        // every key, switch to One-Shot or Classic.
-        store.add_parameter({.id = kPlaybackMode, .name = "Playback Mode", .unit = "", .range = {0, 2, 1, 1}});
-        // Loop direction (used only when kTempoLoop is on): 0 Forward, 1 Reverse,
-        // 2 Ping-Pong. The MODE dropdown writes this alongside kTempoLoop.
-        store.add_parameter({.id = kDirection, .name = "Direction", .unit = "", .range = {0, 2, 0, 1}});
-        // Slicing mode (Logic Slice "Mode" pop-up): 0 Onset, 1 Beat, 2 Equal.
-        store.add_parameter({.id = kSliceMode, .name = "Slice Mode", .unit = "", .range = {0, 2, 0, 1}});
-        // Gate: 1 = key-up releases the envelope (default), 0 = One-Shot.
+        // Read direction (Direction dropdown): 0 Forward, 1 Reverse. Default Forward.
+        store.add_parameter({.id = kDirection, .name = "Direction", .unit = "", .range = {0, 1, 0, 1}});
+        // Loop shape when looping: 0 Forward, 1 Reverse, 2 Ping-Pong. The LOOP
+        // dropdown (None / Forward / Reverse / Ping-Pong) writes this + kTempoLoop.
+        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Gate: 1 = key-up releases the envelope (default), 0 = play through.
         store.add_parameter({.id = kGate, .name = "Gate", .unit = "", .range = {0, 1, 1, 1}});
         // Flex Speed: index into {1/4,1/2,1,2,4}x; default 1x (index 2).
         store.add_parameter({.id = kFlexSpeed, .name = "Flex Speed", .unit = "", .range = {0, 4, 2, 1}});
@@ -1131,9 +1119,9 @@ public:
     /// mode (0 Classic, 1 Slice, 2 One-Shot). Returns {0,0} when the note maps to
     /// nothing (a Slice-mode key outside the slice range).
     std::pair<std::uint64_t, std::uint64_t>
-    region_range_for_note_test(int note, int playback_mode) const {
+    region_range_for_note_test(int note) const {
         const auto sample = store_.read_published_view();
-        const auto r = region_for_note(note, sample, playback_mode);
+        const auto r = region_for_note(note, sample);
         if (!r) return {0, 0};
         return {r->start_frame, r->end_frame};
     }
@@ -1349,33 +1337,13 @@ public:
             root->add_child(std::move(combo));
         }
 
-        // Slice-Mode dropdown (Logic Slice "Mode") + the amount fader beside it.
-        // Onset keeps the strongest transients, Beat cuts on the tempo grid, Equal
-        // cuts N uniform segments; the fader (kOnsetSens) is the amount control for
-        // all three. Either re-slices on the worker (coalesced) via request_reanalyze().
-        {
-            auto smode = std::make_unique<ComboBox>();
-            smode->set_items({"Onset", "Beat", "Equal"});
-            smode->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kSliceMode)), 0, 2));
-            smode->on_change = [this](int idx) {
-                state().begin_gesture(kSliceMode);
-                state().set_value(kSliceMode, static_cast<float>(std::clamp(idx, 0, 2)));
-                state().end_gesture(kSliceMode);
-                request_reanalyze();
-            };
-            auto* smodePtr = smode.get();
-            place(*smode, 124, 316, 64, 26);
-            root->listeners.push_back(state().add_listener(
-                [this, smodePtr](state::ParamID id, float v) {
-                    if (id == kSliceMode) smodePtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 2));
-                },
-                state::ListenerThread::Main));
-            root->add_child(std::move(smode));
-        }
+        // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
+        // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
+        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 192, 322, 56, 16);
+            place(*fader, 162, 322, 86, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -1484,45 +1452,57 @@ public:
             root->add_child(std::move(tick));
         }
 
-        // PLAYBACK MODE dropdown — what a key plays: Classic (whole sample,
-        // repitched across the keyboard), Slice (each key plays ONLY its slice),
-        // One-Shot (whole sample, ignores note-off). Drives kPlaybackMode.
+        // DIRECTION dropdown — Forward / Reverse (the read direction; sets which way
+        // a one-shot plays). Default Forward. Drives kDirection.
         {
-            auto pm = std::make_unique<ComboBox>();
-            pm->set_items({"Classic", "Slice", "1-Shot"});
-            pm->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kPlaybackMode)), 0, 2));
-            pm->on_change = [this](int idx) {
-                state().begin_gesture(kPlaybackMode);
-                state().set_value(kPlaybackMode, static_cast<float>(std::clamp(idx, 0, 2)));
-                state().end_gesture(kPlaybackMode);
+            auto dir = std::make_unique<ComboBox>();
+            dir->set_items({"Forward", "Reverse"});
+            dir->set_selected_silent(state().get_value(kDirection) >= 0.5f ? 1 : 0);
+            dir->on_change = [this](int idx) {
+                state().begin_gesture(kDirection);
+                state().set_value(kDirection, idx >= 1 ? 1.0f : 0.0f);
+                state().end_gesture(kDirection);
             };
-            auto* pmPtr = pm.get();
-            place(*pm, 614, 316, 60, 26);
+            auto* dirPtr = dir.get();
+            place(*dir, 614, 316, 62, 26);
             root->listeners.push_back(state().add_listener(
-                [this, pmPtr](state::ParamID id, float v) {
-                    if (id == kPlaybackMode) pmPtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 2));
+                [this, dirPtr](state::ParamID id, float v) {
+                    if (id == kDirection) dirPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
                 },
                 state::ListenerThread::Main));
-            root->add_child(std::move(pm));
+            root->add_child(std::move(dir));
         }
 
-        // LOOP dropdown — None / On. Whether the played region repeats; the
-        // DIRECTION dropdown (Detail page) sets which way (Forward/Reverse/Ping-Pong).
-        // Default None (play once). Drives kTempoLoop.
+        // LOOP dropdown — None / Forward / Reverse / Ping-Pong (replaces the loop
+        // button). None = play once; the others loop in that shape. Default None.
+        // Drives kTempoLoop (on/off) + kLoopMode (shape).
         {
             auto combo = std::make_unique<ComboBox>();
-            combo->set_items({"None", "On"});
-            combo->set_selected_silent(state().get_value(kTempoLoop) >= 0.5f ? 1 : 0);
+            combo->set_items({"None", "Forward", "Reverse", "Ping-Pong"});
+            auto sel_for_state = [this]() -> int {
+                if (state().get_value(kTempoLoop) < 0.5f) return 0;  // None
+                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 3);
+            };
+            combo->set_selected_silent(sel_for_state());
             combo->on_change = [this](int idx) {
-                state().begin_gesture(kTempoLoop);
-                state().set_value(kTempoLoop, idx >= 1 ? 1.0f : 0.0f);
-                state().end_gesture(kTempoLoop);
+                if (idx <= 0) {
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 0.0f);
+                    state().end_gesture(kTempoLoop);
+                } else {
+                    state().begin_gesture(kLoopMode);
+                    state().set_value(kLoopMode, static_cast<float>(idx - 1));
+                    state().end_gesture(kLoopMode);
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 1.0f);
+                    state().end_gesture(kTempoLoop);
+                }
             };
             auto* loopPtr = combo.get();
-            place(*combo, 676, 316, 64, 26);
+            place(*combo, 678, 316, 62, 26);
             root->listeners.push_back(state().add_listener(
-                [this, loopPtr](state::ParamID id, float v) {
-                    if (id == kTempoLoop) loopPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
+                [this, loopPtr, sel_for_state](state::ParamID id, float) {
+                    if (id == kTempoLoop || id == kLoopMode) loopPtr->set_selected_silent(sel_for_state());
                 },
                 state::ListenerThread::Main));
             root->add_child(std::move(combo));
@@ -1567,29 +1547,7 @@ public:
             };
             dlabel(20, 16, 200, "DETAIL", textStr, 13, 600);
 
-            // DIRECTION: Forward / Reverse / Ping-Pong — which way the played region
-            // reads. Combined with the footer LOOP (None/On) to resolve playback.
-            dlabel(300, 70, 90, "DIRECTION", faint, 10, 600);
-            {
-                auto dir = std::make_unique<ComboBox>();
-                dir->set_items({"Forward", "Reverse", "Ping-Pong"});
-                dir->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kDirection)), 0, 2));
-                dir->on_change = [this](int idx) {
-                    state().begin_gesture(kDirection);
-                    state().set_value(kDirection, static_cast<float>(std::clamp(idx, 0, 2)));
-                    state().end_gesture(kDirection);
-                };
-                auto* dirPtr = dir.get();
-                place(*dir, 392, 64, 92, 26);
-                root->listeners.push_back(state().add_listener(
-                    [this, dirPtr](state::ParamID id, float v) {
-                        if (id == kDirection) dirPtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 2));
-                    },
-                    state::ListenerThread::Main));
-                detail->add_child(std::move(dir));
-            }
-
-            // GATE: key-up releases the envelope (on) vs One-Shot play-through (off).
+            // GATE: key-up releases the envelope (on) vs play-through (off).
             dlabel(40, 70, 70, "GATE", faint, 10, 600);
             {
                 auto g = std::make_unique<ToggleButton>();
@@ -1819,8 +1777,7 @@ private:
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         bool loop = false;
-        int playback_mode = 1;    // 0 Classic, 1 Slice, 2 One-Shot
-        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::Forward;  // direction when looping
+        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::OneShot;  // resolved loop/play mode
     };
 
     // Publish the most-recently-triggered active voice's slice + progress for
@@ -1969,41 +1926,12 @@ private:
             return best;
         };
 
-        // Slicing mode (Logic Slice "Mode" pop-up). Onset (default) keeps the
-        // strongest transients; Equal cuts N uniform segments; Beat cuts on the
-        // detected tempo's (sub)beat grid. SENS is the amount control for all.
-        const int slice_mode = static_cast<int>(state().get_value(kSliceMode) + 0.5f);
+        // Onset slicing: greedily accept the highest-confidence cuts (preserving
+        // the sensitivity->count mapping) that keep EVERY slice — incl. first and
+        // last — at least kMinSlice long, each snapped to a zero-crossing so both
+        // shared edges declick.
         std::vector<long> cuts;
-        if (slice_mode == 2) {
-            // Equal divisions: s -> N equal segments (1..kMaxSlices).
-            const int n = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));
-            for (int k = 1; k < n; ++k) {
-                const long f = snap_zc(static_cast<long>(
-                    std::llround(static_cast<double>(raw_frames_) * k / n)));
-                if (f >= kMinSlice && raw_frames_ - f >= kMinSlice &&
-                    (cuts.empty() || f - cuts.back() >= kMinSlice)) cuts.push_back(f);
-            }
-        } else if (slice_mode == 1) {
-            // Beat divisions: cut every (sub)beat of the detected loop tempo.
-            // s -> {1,2,4,8,16} subdivisions per beat.
-            const double bpm = loop_bpm_.load(std::memory_order_relaxed);
-            static constexpr int kDivs[] = {1, 2, 4, 8, 16};
-            const int di = std::clamp(static_cast<int>(std::lround(s * 4.0)), 0, 4);
-            const double step = bpm > 0.0
-                ? (60.0 / bpm * raw_sr_) / static_cast<double>(kDivs[di]) : 0.0;
-            if (step >= static_cast<double>(kMinSlice))
-                for (double f = step;
-                     f < static_cast<double>(raw_frames_ - 1) &&
-                     static_cast<int>(cuts.size()) < kMaxSlices - 1; f += step) {
-                    const long c = snap_zc(static_cast<long>(std::llround(f)));
-                    if (c >= kMinSlice && raw_frames_ - c >= kMinSlice &&
-                        (cuts.empty() || c - cuts.back() >= kMinSlice)) cuts.push_back(c);
-                }
-        } else {
-            // Onset/Transient (default): greedily accept the highest-confidence
-            // cuts (preserving the sensitivity->count mapping) that keep EVERY
-            // slice — incl. first and last — at least kMinSlice long, each snapped
-            // to a zero-crossing so both shared edges declick.
+        {
             std::vector<audio::OnsetMarker> cand;
             for (const auto& m : onsets.markers)
                 if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
@@ -2201,17 +2129,18 @@ private:
         p.adsr.sustain = state().get_value(kTempoSustain) / 100.0f;
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
-        p.playback_mode = std::clamp(static_cast<int>(state().get_value(kPlaybackMode) + 0.5f), 0, 2);
-        // Resolve direction + loop on/off into a single engine playback mode.
-        const int dir = std::clamp(static_cast<int>(state().get_value(kDirection) + 0.5f), 0, 2);
+        // Direction + Loop -> engine mode (PlunderTube model). LOOP = None plays
+        // once in the Direction (Forward => OneShot, Reverse => ReverseOnce); else
+        // the loop shape (kLoopMode: 0 Forward, 1 Reverse, 2 Ping-Pong) governs it.
         if (!p.loop) {
-            // Play once: Forward/Ping-Pong -> OneShot; Reverse -> reverse one-shot.
-            p.loop_mode = (dir == 1) ? audio::LoopPlaybackMode::ReverseOnce
-                                     : audio::LoopPlaybackMode::OneShot;
+            const bool rev = state().get_value(kDirection) >= 0.5f;
+            p.loop_mode = rev ? audio::LoopPlaybackMode::ReverseOnce
+                              : audio::LoopPlaybackMode::OneShot;
         } else {
-            p.loop_mode = (dir == 1) ? audio::LoopPlaybackMode::Reverse
-                        : (dir == 2) ? audio::LoopPlaybackMode::PingPong
-                                     : audio::LoopPlaybackMode::Forward;
+            const int lm = std::clamp(static_cast<int>(state().get_value(kLoopMode) + 0.5f), 0, 2);
+            p.loop_mode = (lm == 1) ? audio::LoopPlaybackMode::Reverse
+                        : (lm == 2) ? audio::LoopPlaybackMode::PingPong
+                                    : audio::LoopPlaybackMode::Forward;
         }
         return p;
     }
@@ -2222,17 +2151,16 @@ private:
     }
 
     // Region for a note within the published (already tempo-matched) buffer.
-    // Playback mode decides what a key plays:
-    //   Slice (1):   each key plays ONLY its slice ([slice k, slice k+1)); a note
-    //                outside [root, root + num_slices) plays nothing.
-    //   Classic (0)/One-Shot (2): every key plays the WHOLE sample [0, end).
-    // The resolved engine_mode (OneShot / Forward / Reverse / Ping-Pong /
-    // ReverseOnce, from direction + loop) then governs how that region plays.
+    // This is a SLICE sampler: each key plays ONLY its slice
+    // ([slice k, slice k+1) of the published, tempo-matched buffer; idx = note -
+    // root). A note outside [root, root + num_slices) maps to nothing (silent) — it
+    // never falls back to the whole sample. The resolved engine_mode (OneShot /
+    // Forward / Reverse / Ping-Pong, from the LOOP dropdown) governs how it plays.
     std::optional<audio::LoopRegion> region_for_note(
-        int note, const audio::PublishedSampleView& sample, int playback_mode,
+        int note, const audio::PublishedSampleView& sample,
         audio::LoopPlaybackMode engine_mode = audio::LoopPlaybackMode::OneShot) const noexcept {
         std::uint64_t start = 0, end = 0;
-        if (playback_mode == 1) {  // Slice: just this key's slice
+        {
             const int root = static_cast<int>(state().get_value(kRootNote));
             std::lock_guard<std::mutex> lock(slice_mutex_);
             if (slices_stretched_.size() >= 2) {
@@ -2242,10 +2170,6 @@ private:
                     end = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
                 }
             }
-            // Out of range -> start == end == 0 -> silent (handled by the guard).
-        } else {  // Classic / One-Shot: the whole sample on every key
-            start = 0;
-            end = sample.num_frames;
         }
         if (end <= start || end > sample.num_frames) return std::nullopt;
         audio::LoopRegion region;
@@ -2318,30 +2242,23 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.playback_mode, params.loop_mode);
-        if (!region) return;  // note maps to nothing (Slice key out of range) -> silent
+        const auto region = region_for_note(note, sample, params.loop_mode);
+        if (!region) return;  // note maps to no slice -> silent
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];
-        // Buffer is already at host tempo -> native rate (1.0), EXCEPT Classic mode,
-        // which repitches across the keyboard (note vs root, equal temperament).
-        // Slice / One-Shot are not repitched.
-        double rate = 1.0;
-        if (params.playback_mode == 0) {
-            const int root = static_cast<int>(state().get_value(kRootNote));
-            rate = std::pow(2.0, static_cast<double>(note - root) / 12.0);
-        }
-        target->start(note, velocity, rate, host_sample_rate_, sample, *region, sample.num_frames);
+        // The buffer is already at host tempo, and slices aren't repitched, so a
+        // slice plays at its native rate (1.0); pitch-bend/mod apply per chunk.
+        target->start(note, velocity, 1.0, host_sample_rate_, sample, *region, sample.num_frames);
         last_note_ = note;  // most-recently-triggered note drives the playhead
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = velocity;
     }
 
     void release_note(int note) {
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
-        // One-Shot mode (or Gate off) ignores key-up: the sample plays through to
-        // its end (a looping voice keeps looping until LOOP is set to Off).
-        const bool one_shot = static_cast<int>(state().get_value(kPlaybackMode) + 0.5f) == 2;
-        if (one_shot || state().get_value(kGate) < 0.5f) return;
+        // Gate off: key-up does NOT release — the slice plays through to its end
+        // (a looping voice keeps looping until LOOP is set to None).
+        if (state().get_value(kGate) < 0.5f) return;
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
             if (voice.active && voice.note == note && !voice.released) {

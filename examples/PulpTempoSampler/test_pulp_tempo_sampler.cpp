@@ -170,12 +170,10 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 17);
-    // Default Playback Mode = Slice (1): a drum/loop chopper. SENS 0 leaves it a
-    // single whole-loop slice; raise SENS to chop, each key plays just its slice.
-    REQUIRE(s.get_value(kPlaybackMode) == 1.0f);
-    REQUIRE(s.get_value(kDirection) == 0.0f);  // default playback direction = Forward
-    REQUIRE(s.get_value(kSliceMode) == 0.0f);  // default Onset/Transient slicing
+    REQUIRE(s.param_count() == 16);
+    REQUIRE(s.get_value(kDirection) == 0.0f);  // default direction = Forward
+    REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop shape = Forward
+    REQUIRE(s.get_value(kTempoLoop) == 0.0f);  // default LOOP = None (play once)
     REQUIRE(s.get_value(kGate) == 1.0f);       // default Gate on (key-up releases)
     REQUIRE(s.get_value(kFlexSpeed) == 2.0f);  // default 1x (index 2 of {1/4,1/2,1,2,4})
 }
@@ -758,8 +756,6 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
     f.proc->set_loop_bpm_for_test(120.0);
     f.store.set_value(kTempoLoop, 0.0f);              // loop off so a voice stops at region end
-    f.store.set_value(kPlaybackMode, 1.0f);           // Slice mode: each key plays just its
-                                                      // own slice (this test measures slice length).
     std::vector<float> l(512), r(512);
     { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // host==loop -> R=1
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
@@ -1075,20 +1071,19 @@ TEST_CASE("whole-loop LOOP tiles under stretch (slowed host)",
     CHECK(worst <= 256);   // within ~5 ms of the host grid even when stretched 1.33x
 }
 
-// PLAYBACK MODE region semantics: with the loop CHOPPED into >1 slice, a SLICE-mode
-// key plays ONLY its slice (a fraction), while Classic/One-Shot play the WHOLE
-// sample on every key. A Slice-mode key outside the slice range plays nothing.
-TEST_CASE("Playback mode: Slice plays just the slice; Classic/One-Shot play the whole sample",
-          "[tempo-sampler][issue-loop-tile][playback-mode]") {
+// SLICE region semantics: a key plays ONLY its slice ([slice k, slice k+1) of the
+// published buffer); a key outside the slice range plays nothing (never the whole
+// sample). With SENS 0 the loop is a single whole-loop slice on the root.
+TEST_CASE("Slice: each key plays just its slice; out-of-range key is silent",
+          "[tempo-sampler][issue-loop-tile][slice]") {
     Fixture f;
     const double sr = 48000.0, bpm = 120.0;
     const long beat = std::lround(60.0 / bpm * sr);        // 24000
     const int beats = 4; const long frames = beat * beats; // 96000 (1 bar)
     std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
-    const float amp[4] = {1.0f, 0.5f, 0.8f, 0.4f};
     for (int b = 0; b < beats; ++b) { const long p = b * beat;
-        buf[static_cast<size_t>(p)] = amp[b];
-        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
+        buf[static_cast<size_t>(p)] = 1.0f;
+        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -0.9f; }
     const float* ch[1] = {buf.data()};
     REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
@@ -1101,78 +1096,15 @@ TEST_CASE("Playback mode: Slice plays just the slice; Classic/One-Shot play the 
     REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
     const auto pub = static_cast<std::uint64_t>(f.proc->published_frames());
 
-    // Slice mode (1): each key = just its slice; out-of-range key = silent.
-    const auto s0 = f.proc->region_range_for_note_test(kRoot, 1);
-    const auto s1 = f.proc->region_range_for_note_test(kRoot + 1, 1);
-    const auto soob = f.proc->region_range_for_note_test(kRoot + 99, 1);
+    const auto s0 = f.proc->region_range_for_note_test(kRoot);
+    const auto s1 = f.proc->region_range_for_note_test(kRoot + 1);
+    const auto soob = f.proc->region_range_for_note_test(kRoot + 99);
     CHECK(s0.first == 0u);
     CHECK(s0.second < pub);                 // slice 0 is a FRACTION, not the whole loop
     CHECK(s0.second == s1.first);           // contiguous: slice-1 start = slice-0 end
     CHECK(s1.second > s1.first);
     CHECK(s1.second <= pub);
     CHECK((soob.first == 0u && soob.second == 0u));   // out of range -> nothing
-
-    // Classic (0) and One-Shot (2): the WHOLE sample on every key.
-    for (int pm : {0, 2}) {
-        const auto whole = f.proc->region_range_for_note_test(kRoot, pm);
-        const auto wany  = f.proc->region_range_for_note_test(kRoot + 99, pm);
-        CHECK(whole.first == 0u);
-        CHECK(whole.second == pub);
-        CHECK(wany.first == 0u);
-        CHECK(wany.second == pub);          // any note plays the whole sample
-    }
-}
-
-// PLAYBACK MODE, audio-level: chopped + LOOP + hold the root. In SLICE mode only
-// slice 0 loops (uniform peak amplitude); in ONE-SHOT mode the WHOLE sample loops
-// (its distinct beat amplitudes repeat). Proves a Slice loops just the slice.
-TEST_CASE("Playback mode: Slice+loop loops the slice, One-Shot+loop loops the whole sample (audio)",
-          "[tempo-sampler][issue-loop-tile][playback-mode]") {
-    auto peak_range = [](int playback_mode) -> float {
-        Fixture f;
-        const double sr = 48000.0, bpm = 120.0;
-        const long beat = std::lround(60.0 / bpm * sr);
-        const int beats = 4; const long frames = beat * beats;
-        std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
-        const float amp[4] = {1.0f, 0.45f, 0.8f, 0.35f};
-        for (int b = 0; b < beats; ++b) { const long p = b * beat;
-            buf[static_cast<size_t>(p)] = amp[b];
-            if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
-        const float* ch[1] = {buf.data()};
-        REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
-        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-        f.store.set_value(kOnsetSens, 1.0f);               // CHOP (cuts on beats 1,2,3)
-        f.proc->request_reanalyze();
-        REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
-        f.proc->set_loop_bpm_for_test(bpm);
-        f.store.set_value(kPlaybackMode, static_cast<float>(playback_mode));
-        f.store.set_value(kTempoLoop, 1.0f);               // LOOP on (Forward)
-        std::vector<float> l(512), r(512);
-        { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
-        REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
-        std::vector<float> out; out.reserve(300000);
-        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
-          process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
-        for (int blk = 0; blk < 520; ++blk) {              // ~2.7 bars
-            midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
-            out.insert(out.end(), l.begin(), l.end());
-        }
-        std::vector<float> peaks;
-        for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
-            const float a = std::abs(out[static_cast<size_t>(i)]);
-            if (a > 0.2f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
-                a > std::abs(out[static_cast<size_t>(i + 1)])) peaks.push_back(a);
-        }
-        REQUIRE(peaks.size() >= 6);
-        float pmin = peaks[0], pmax = peaks[0];
-        for (float a : peaks) { pmin = std::min(pmin, a); pmax = std::max(pmax, a); }
-        return pmax - pmin;
-    };
-    const float slice_range = peak_range(1);     // Slice: only slice 0 (amp 1.0) loops
-    const float oneshot_range = peak_range(2);   // One-Shot: whole sample (4 distinct amps)
-    INFO("slice peak-range=" << slice_range << "  one-shot peak-range=" << oneshot_range);
-    CHECK(slice_range < 0.2f);                    // uniform => just the slice loops
-    CHECK(oneshot_range > 0.3f);                  // varied  => the whole sample loops
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
@@ -1725,35 +1657,33 @@ TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-
 // PLAYBACK / LOOP / DIRECTION are three SEPARATE dropdowns (Logic/PlunderTube
 // 3-axis model): Playback = Classic/Slice/One-Shot, Loop = None/On, Direction =
 // Forward/Reverse/Ping-Pong (Detail page). Each drives its own param.
-TEST_CASE("Playback/Loop/Direction dropdowns drive their params", "[tempo-sampler][modes-ui]") {
+TEST_CASE("Direction + Loop dropdowns drive their params", "[tempo-sampler][modes-ui]") {
     Fixture f;
     auto buf = sine(440.0, 48000.0, 24000);
     const float* ch[1] = {buf.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
     auto editor = f.proc->create_view();
     REQUIRE(editor);
-    auto* playback = find_combo(editor.get(), "Classic");   // Playback dropdown
-    auto* loop = find_combo(editor.get(), "None");          // Loop dropdown
-    auto* dir = find_combo(editor.get(), "Forward");        // Direction dropdown (Detail)
-    REQUIRE(playback != nullptr);
-    REQUIRE(loop != nullptr);
+    auto* dir = find_combo(editor.get(), "Forward");   // Direction: Forward/Reverse
+    auto* loop = find_combo(editor.get(), "None");     // Loop: None/Forward/Reverse/Ping-Pong
     REQUIRE(dir != nullptr);
+    REQUIRE(loop != nullptr);
 
-    // Defaults: Slice playback, Loop None, Direction Forward.
-    CHECK(playback->selected() == 1);
-    CHECK(loop->selected() == 0);
+    // Defaults: Direction Forward, Loop None.
     CHECK(dir->selected() == 0);
+    CHECK(loop->selected() == 0);
 
-    playback->set_selected(2); CHECK(f.store.get_value(kPlaybackMode) == 2.0f);  // One-Shot
-    playback->set_selected(0); CHECK(f.store.get_value(kPlaybackMode) == 0.0f);  // Classic
-    loop->set_selected(1);     CHECK(f.store.get_value(kTempoLoop) >= 0.5f);     // On
-    loop->set_selected(0);     CHECK(f.store.get_value(kTempoLoop) < 0.5f);      // None
-    dir->set_selected(1);      CHECK(f.store.get_value(kDirection) == 1.0f);     // Reverse
-    dir->set_selected(2);      CHECK(f.store.get_value(kDirection) == 2.0f);     // Ping-Pong
+    dir->set_selected(1); CHECK(f.store.get_value(kDirection) == 1.0f);          // Reverse
+    dir->set_selected(0); CHECK(f.store.get_value(kDirection) == 0.0f);          // Forward
+    loop->set_selected(1); CHECK(f.store.get_value(kTempoLoop) >= 0.5f);         // Forward loop
+    CHECK(f.store.get_value(kLoopMode) == 0.0f);
+    loop->set_selected(2); CHECK(f.store.get_value(kLoopMode) == 1.0f);          // Reverse loop
+    loop->set_selected(3); CHECK(f.store.get_value(kLoopMode) == 2.0f);          // Ping-Pong loop
+    loop->set_selected(0); CHECK(f.store.get_value(kTempoLoop) < 0.5f);          // None
 
-    // Dropdowns reflect external param changes (preset load).
-    f.store.set_value(kPlaybackMode, 1.0f);
-    CHECK(playback->selected() == 1);
+    // Loop dropdown reflects external param changes (preset load).
+    f.store.set_value(kTempoLoop, 1.0f); f.store.set_value(kLoopMode, 1.0f);
+    CHECK(loop->selected() == 2);   // Reverse
 }
 
 // REVERSE direction: a whole-loop region played in Reverse reads end->start, so a
@@ -1775,7 +1705,7 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
         REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
         f.proc->set_loop_bpm_for_test(bpm);
         f.store.set_value(kTempoLoop, 1.0f);                     // loop on
-        f.store.set_value(kDirection, static_cast<float>(dir));  // 0 Forward, 1 Reverse
+        f.store.set_value(kLoopMode, static_cast<float>(dir));   // loop shape: 0 Forward, 1 Reverse
         std::vector<float> l(512), r(512);
         { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
         REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
@@ -2339,66 +2269,6 @@ TEST_CASE("Fix 3: piano toggle swaps frame + fires the resize callback",
     REQUIRE(oh == 266);   // full typing frame, no clipping at its panel dims
 }
 #endif  // __APPLE__
-
-// Slice MODE (Logic Slice "Mode" pop-up): Equal cuts N uniform segments and Beat
-// cuts on the detected-tempo grid — both evenly spaced (vs Onset's transients).
-TEST_CASE("Slice modes: Equal and Beat cut evenly-spaced grids", "[tempo-sampler][slice-mode]") {
-    auto spacing_ratio = [](const std::vector<long>& sl) -> double {
-        if (sl.size() < 3) return 999.0;                  // need >= 2 interior spans
-        long mn = sl[1] - sl[0], mx = mn;                 // seed from first span (no <climits>)
-        for (std::size_t i = 0; i + 1 < sl.size(); ++i) {
-            const long d = sl[i + 1] - sl[i];
-            mn = std::min(mn, d); mx = std::max(mx, d);
-        }
-        return mn > 0 ? static_cast<double>(mx) / static_cast<double>(mn) : 999.0;
-    };
-
-    // Equal divisions: deterministic — no tempo needed. SENS 0.3 -> ~10 segments
-    // on a 1 s loop (each ~100 ms, comfortably above the ~40 ms min-slice).
-    {
-        Fixture f;
-        f.store.set_value(kSliceMode, 2.0f);
-        f.store.set_value(kOnsetSens, 0.3f);
-        auto loop = percussive_loop(48000, 8);
-        const float* ch[1] = {loop.data()};
-        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
-        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-        f.proc->request_reanalyze();
-        REQUIRE(wait_for([&] { return f.proc->num_slices() >= 4; }));
-        std::vector<float> mono; float sr = 0; std::vector<long> sl;
-        REQUIRE(f.proc->snapshot_for_view(mono, sr, sl));
-        INFO("equal-mode slices=" << sl.size() << " spacingRatio=" << spacing_ratio(sl));
-        CHECK(sl.size() >= 4);
-        CHECK(spacing_ratio(sl) < 1.5);       // near-uniform (only ZC-snap jitter)
-    }
-
-    // Beat divisions: cuts on the tempo grid -> also evenly spaced, and more
-    // subdivisions (higher SENS) -> more cuts. Guarded on the analyzer finding a
-    // tempo for the synthetic loop (no real-DAW transport in a unit test).
-    {
-        Fixture f;
-        f.store.set_value(kSliceMode, 1.0f);
-        f.store.set_value(kOnsetSens, 0.25f);
-        auto loop = percussive_loop(48000, 8);
-        const float* ch[1] = {loop.data()};
-        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
-        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-        f.proc->request_reanalyze();
-        wait_for([&] { return f.proc->num_slices() >= 2; });
-        if (f.proc->detected_bpm() <= 0.0 || f.proc->num_slices() < 2) {
-            WARN("beat-mode: analyzer found no tempo for the synthetic loop; "
-                 "mechanism is covered by the Equal-mode case + the render harness");
-        } else {
-            // Beat cuts land on the tempo grid, so the slices are evenly spaced.
-            // (Count is not monotonic in SENS: past a point the sub-beat falls
-            // below the ~40 ms min-slice and cuts are filtered — by design.)
-            std::vector<float> mono; float sr = 0; std::vector<long> sl;
-            REQUIRE(f.proc->snapshot_for_view(mono, sr, sl));
-            INFO("beat-mode slices=" << sl.size() << " spacingRatio=" << spacing_ratio(sl));
-            CHECK(spacing_ratio(sl) < 1.7);   // beat grid -> evenly spaced
-        }
-    }
-}
 
 // FLEX SPEED (Logic): playing 2x faster halves the stretched (published) length;
 // 1/2x doubles it. The loop still tempo-matches — speed just scales the ratio.
