@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use super::aax_sdk;
 use crate::config::pulp_home;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
@@ -1104,14 +1105,12 @@ fn write_plugin_format_availability(proj: &ActiveProject, out: &mut impl Write) 
     )
     .map_err(io_err)?;
     writeln!(out, "  CLAP: available (fetched via CMake)").map_err(io_err)?;
-    if aax_supported_on_host() {
-        match std::env::var_os("PULP_AAX_SDK_DIR")
-            .filter(|v| !v.is_empty() && std::path::Path::new(v).exists())
-        {
-            Some(v) => writeln!(
+    if aax_sdk::supported_on_host() {
+        match aax_sdk::find_root() {
+            Some(root) => writeln!(
                 out,
                 "  AAX:  optional SDK found at {}",
-                std::path::Path::new(&v).display()
+                root.display()
             )
             .map_err(io_err)?,
             None => writeln!(
@@ -1124,16 +1123,6 @@ fn write_plugin_format_availability(proj: &ActiveProject, out: &mut impl Write) 
         writeln!(out, "  AAX:  unsupported on Linux/Ubuntu").map_err(io_err)?;
     }
     Ok(())
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn aax_supported_on_host() -> bool {
-    true
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn aax_supported_on_host() -> bool {
-    false
 }
 
 // ── cache ────────────────────────────────────────────────────────────
@@ -1367,6 +1356,17 @@ mod tests {
         std::fs::write(root.join("test/test_bar.cpp"), "").unwrap();
         std::fs::create_dir_all(root.join("examples/a")).unwrap();
         std::fs::create_dir_all(root.join("examples/b")).unwrap();
+    }
+
+    fn write_fake_aax_sdk(root: &Path) {
+        let interfaces = root.join("Interfaces");
+        std::fs::create_dir_all(&interfaces).unwrap();
+        std::fs::write(interfaces.join("AAX.h"), "// fake AAX SDK marker\n").unwrap();
+        std::fs::write(
+            interfaces.join("AAX_Exports.cpp"),
+            "// fake AAX SDK marker\n",
+        )
+        .unwrap();
     }
 
     fn configure_build(proj: &ActiveProject) {
@@ -1723,6 +1723,63 @@ mod tests {
         assert!(s.contains("Plugin Formats:"));
         assert!(s.contains("VST3: SDK not found"));
         assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_aax_ignores_existing_non_sdk_env_path() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        let non_sdk = tempfile::tempdir().unwrap();
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_AAX_SDK_DIR", Some(non_sdk.path().to_str().unwrap())),
+            ("HOME", Some(home.path().to_str().unwrap())),
+            ("USERPROFILE", Some(home.path().to_str().unwrap())),
+        ]);
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        if aax_sdk::supported_on_host() {
+            assert!(s.contains("AAX:  optional (set PULP_AAX_SDK_DIR"), "{s}");
+            assert!(!s.contains("AAX:  optional SDK found"), "{s}");
+        } else {
+            assert!(s.contains("AAX:  unsupported on Linux/Ubuntu"), "{s}");
+        }
+    }
+
+    #[test]
+    fn status_aax_auto_discovers_standard_user_sdk() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        let sdk = home.path().join("SDKs/avid/aax-sdk/current");
+        write_fake_aax_sdk(&sdk);
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_AAX_SDK_DIR", None),
+            ("HOME", Some(home.path().to_str().unwrap())),
+            ("USERPROFILE", Some(home.path().to_str().unwrap())),
+        ]);
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        if aax_sdk::supported_on_host() {
+            assert!(
+                s.contains(&format!("AAX:  optional SDK found at {}", sdk.display())),
+                "{s}"
+            );
+        } else {
+            assert!(s.contains("AAX:  unsupported on Linux/Ubuntu"), "{s}");
+        }
     }
 
     #[test]

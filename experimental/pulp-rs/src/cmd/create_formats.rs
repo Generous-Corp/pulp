@@ -4,61 +4,7 @@
 //! build/test. This module keeps the Rust-native scaffold path network-free
 //! while still honoring the observable host/AAX availability contract.
 
-use std::path::{Path, PathBuf};
-
-fn aax_supported_on_host() -> bool {
-    cfg!(any(target_os = "macos", target_os = "windows"))
-}
-
-fn user_home_dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(PathBuf::from)
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-    }
-}
-
-fn env_path(key: &str) -> Option<PathBuf> {
-    let raw = std::env::var_os(key)?;
-    let value = raw.to_string_lossy();
-    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
-    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
-}
-
-fn looks_like_aax_sdk_root(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && path.join("Interfaces").join("AAX.h").exists()
-        && path.join("Interfaces").join("AAX_Exports.cpp").exists()
-}
-
-fn aax_sdk_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(path) = env_path("PULP_AAX_SDK_DIR") {
-        candidates.push(path);
-    }
-
-    if let Some(home) = user_home_dir() {
-        candidates.push(home.join("SDKs/avid/aax-sdk/current"));
-        candidates.push(home.join("SDKs/avid/aax-sdk"));
-        candidates.push(home.join("SDKs/Avid/AAXSDK/current"));
-        candidates.push(home.join("SDKs/Avid/AAXSDK"));
-    }
-
-    candidates
-}
-
-fn find_aax_sdk_root() -> Option<PathBuf> {
-    aax_sdk_candidates()
-        .into_iter()
-        .find(|candidate| looks_like_aax_sdk_root(candidate))
-}
+use super::aax_sdk;
 
 /// Pick the default formats string for a given project kind.
 ///
@@ -79,7 +25,7 @@ pub(super) fn default_formats(kind: &str) -> String {
     formats.push("CLAP");
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     formats.push("LV2");
-    if aax_supported_on_host() && find_aax_sdk_root().is_some() {
+    if aax_sdk::supported_on_host() && aax_sdk::find_root().is_some() {
         formats.push("AAX");
     }
     formats.push("Standalone");
@@ -91,6 +37,7 @@ mod tests {
     use super::*;
 
     use std::fs;
+    use std::path::Path;
 
     fn write_fake_aax_sdk(root: &Path) {
         let interfaces = root.join("Interfaces");
@@ -163,20 +110,5 @@ mod tests {
         ]);
 
         assert_eq!(default_formats("effect"), expected_with_detected_aax());
-    }
-
-    #[test]
-    fn aax_sdk_root_auto_discovers_standard_user_paths() {
-        let td = tempfile::tempdir().unwrap();
-        let home = td.path().join("home");
-        let sdk = home.join("SDKs/avid/aax-sdk/current");
-        write_fake_aax_sdk(&sdk);
-        let _env = crate::test_support::EnvVarGuard::set_many(&[
-            ("PULP_AAX_SDK_DIR", None),
-            ("HOME", Some(home.to_str().unwrap())),
-            ("USERPROFILE", Some(home.to_str().unwrap())),
-        ]);
-
-        assert_eq!(find_aax_sdk_root().as_deref(), Some(sdk.as_path()));
     }
 }
