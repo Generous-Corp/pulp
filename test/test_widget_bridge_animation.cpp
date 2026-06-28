@@ -565,12 +565,14 @@ TEST_CASE("WidgetBridge execAsync completion is safe after bridge destruction", 
             "sh -c 'sleep 0.025; printf done'";
 #endif
         bridge.load_script(
-            "on('__async-destroy__', 'result', function(value) { });\n"
+            "var async_destroy_callback_count = 0;\n"
+            "on('__async-destroy__', 'result', function(value) { async_destroy_callback_count += 1; });\n"
             "execAsync('" + js_single_quoted(async_cmd) + "', '__async-destroy__');\n");
+        REQUIRE(engine.evaluate("async_destroy_callback_count").getWithDefault<int>(-1) == 0);
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    SUCCEED();
+    REQUIRE(engine.evaluate("async_destroy_callback_count").getWithDefault<int>(-1) == 0);
 }
 
 TEST_CASE("WidgetBridge timers and storage helpers run through native bridge",
