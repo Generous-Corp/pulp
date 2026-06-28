@@ -827,9 +827,11 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(test_processor->process_count == 1);
     REQUIRE(test_processor->process_buffer_count == 1);
     REQUIRE(test_processor->last_process_buffer_input_buses == 2);
-    REQUIRE(test_processor->last_process_buffer_output_buses == 1);
+    // The adapter now routes both declared output buses (main + aux) to the
+    // Processor's richer surface instead of zero-filling the secondary bus.
+    REQUIRE(test_processor->last_process_buffer_output_buses == 2);
     REQUIRE(test_processor->last_process_buffer_active_inputs == 2);
-    REQUIRE(test_processor->last_process_buffer_active_outputs == 1);
+    REQUIRE(test_processor->last_process_buffer_active_outputs == 2);
     REQUIRE(test_processor->last_process_buffer_had_sidechain);
     REQUIRE(test_processor->last_process_buffer_layouts_match);
     REQUIRE(test_processor->last_process_buffer_storage_valid);
@@ -897,6 +899,146 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(out_event.noteOn.channel == 1);
     REQUIRE(out_event.noteOn.pitch == 64);
     REQUIRE_THAT(out_event.noteOn.velocity, WithinAbs(100.0f / 127.0f, 1e-6f));
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+namespace {
+// Declares two output buses and writes a distinct constant to each via the
+// richer process(ProcessBuffers&) surface. Proves the VST3 adapter routes a
+// declared secondary output bus to the Processor instead of zero-filling it.
+class Vst3MultiOutProcessor final : public pulp::format::Processor {
+public:
+    static constexpr float kMainValue = 0.5f;
+    static constexpr float kAuxValue = -0.25f;
+    static Vst3MultiOutProcessor* g_last;
+
+    Vst3MultiOutProcessor() { g_last = this; }
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vst3MultiOut";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.vst3.multiout";
+        d.version = "1.0.0";
+        d.category = pulp::format::PluginCategory::Instrument;
+        d.input_buses = {{"Main In", 2}};
+        d.output_buses = {{"Main Out", 2}, {"Aux Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    using Processor::process;
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        fill(out, kMainValue);
+    }
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_buffer_calls;
+        output_bus_count = static_cast<int>(audio.outputs.size());
+        if (auto* main = audio.outputs.main(); main && main->active()) {
+            fill(main->buffer, kMainValue);
+            wrote_main = true;
+        }
+        if (auto* aux = audio.outputs.find(pulp::format::BusRole::Aux);
+            aux && aux->active()) {
+            fill(aux->buffer, kAuxValue);
+            wrote_aux = true;
+            aux_channels = static_cast<int>(aux->num_channels());
+        }
+    }
+
+    int process_buffer_calls = 0;
+    int output_bus_count = 0;
+    int aux_channels = 0;
+    bool wrote_main = false;
+    bool wrote_aux = false;
+
+private:
+    static void fill(pulp::audio::BufferView<float>& view, float value) {
+        for (std::size_t ch = 0; ch < view.num_channels(); ++ch) {
+            auto data = view.channel(ch);
+            for (std::size_t n = 0; n < view.num_samples(); ++n) data[n] = value;
+        }
+    }
+};
+Vst3MultiOutProcessor* Vst3MultiOutProcessor::g_last = nullptr;
+
+std::unique_ptr<pulp::format::Processor> create_vst3_multi_out() {
+    return std::make_unique<Vst3MultiOutProcessor>();
+}
+}  // namespace
+
+TEST_CASE("VST3 adapter routes a declared secondary output bus to the Processor",
+          "[vst3][process][multi-out]") {
+    Vst3MultiOutProcessor::g_last = nullptr;
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_vst3_multi_out);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* proc = Vst3MultiOutProcessor::g_last;
+    REQUIRE(proc != nullptr);
+
+    Steinberg::Vst::SpeakerArrangement inputs[1] = {SpeakerArr::kStereo};
+    Steinberg::Vst::SpeakerArrangement outputs[2] = {SpeakerArr::kStereo,
+                                                     SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(inputs, 1, outputs, 2) ==
+            Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{}, in_r{};
+    std::array<float, kFrames> main_l{}, main_r{}, aux_l{}, aux_r{};
+    // Pre-seed outputs with a sentinel that must be overwritten.
+    main_l.fill(99.0f); main_r.fill(99.0f);
+    aux_l.fill(99.0f);  aux_r.fill(99.0f);
+
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {main_l.data(), main_r.data()};
+    float* aux_outputs[2] = {aux_l.data(), aux_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+
+    Steinberg::Vst::AudioBusBuffers audio_outputs[2]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+    audio_outputs[1].numChannels = 2;
+    audio_outputs[1].channelBuffers32 = aux_outputs;
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 2;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    REQUIRE(proc->process_buffer_calls == 1);
+    REQUIRE(proc->output_bus_count == 2);
+    REQUIRE(proc->wrote_main);
+    REQUIRE(proc->wrote_aux);
+    REQUIRE(proc->aux_channels == 2);
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(main_l[i], WithinAbs(Vst3MultiOutProcessor::kMainValue, 1e-6f));
+        REQUIRE_THAT(main_r[i], WithinAbs(Vst3MultiOutProcessor::kMainValue, 1e-6f));
+        REQUIRE_THAT(aux_l[i], WithinAbs(Vst3MultiOutProcessor::kAuxValue, 1e-6f));
+        REQUIRE_THAT(aux_r[i], WithinAbs(Vst3MultiOutProcessor::kAuxValue, 1e-6f));
+    }
+    REQUIRE(Vst3MultiOutProcessor::kMainValue != Vst3MultiOutProcessor::kAuxValue);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

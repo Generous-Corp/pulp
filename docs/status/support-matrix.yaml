@@ -105,12 +105,12 @@ plugin_extensions:
 # confuse "the adapter compiles" with "the adapter is feature-complete."
 format_limitations:
   vst3:
-    - "Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs (workstream 01)."
+    - "Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent (workstream 01)."
     - "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation (workstream 01)."
   au_v2:
     - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
   clap:
-    - "Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface."
+    - "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."
     - "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
   lv2:
     - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring remains part of format-adapter production-readiness work."
@@ -871,12 +871,12 @@ subsystems:
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
   formats.clap:
-    - text: "Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface."
+    - text: "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
     - text: "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
   formats.vst3:
-    - text: "Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs."
+    - text: "Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"

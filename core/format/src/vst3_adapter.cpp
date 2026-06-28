@@ -22,6 +22,7 @@
 #include <pluginterfaces/base/ustring.h>
 #include <algorithm>
 #include <array>
+#include <span>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -650,6 +651,21 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     input_ptrs_.resize(ctx.input_channels);
     output_ptrs_.resize(ctx.output_channels);
 
+    // Pre-size per-bus channel-pointer storage for the secondary (aux) output
+    // buses the descriptor declares (everything past the main bus at index 0).
+    // Each sub-vector is sized to that bus's declared channel count so the
+    // multi-out routing path in process() reuses this storage and never
+    // allocates on the audio thread.
+    const std::size_t declared_output_buses = desc.output_buses.size();
+    aux_output_ptrs_.assign(declared_output_buses > 0 ? declared_output_buses - 1
+                                                       : 0,
+                            {});
+    for (std::size_t b = 1; b < declared_output_buses; ++b) {
+        int ch = desc.output_buses[b].default_channels;
+        aux_output_ptrs_[b - 1].assign(ch > 0 ? static_cast<std::size_t>(ch) : 0,
+                                       nullptr);
+    }
+
     // Pre-allocate the per-block MIDI buffers and switch them to
     // realtime-capacity mode so add()/add_sysex_copy() in process() never grow
     // (and therefore never heap-allocate) on the audio thread. The worst-case
@@ -918,10 +934,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
-    // Secondary output buses are zero-filled so hosts do not read
-    // uninitialised memory on multi-out instruments. The Processor API
-    // currently exposes only the main output bus. Zero the full original block
-    // here — these channels are never processed, so the clamp does not apply.
+    // Secondary (aux) output buses route to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments (drum
+    // machines, multitimbral, stem renderers). Each routed aux bus is
+    // pre-zeroed here first so a single-output Processor (the default
+    // process(ProcessBuffers&) only writes the main output) leaves aux buses
+    // silent rather than handing the host uninitialised memory, and a multi-out
+    // Processor that writes only some aux channels still emits silence on the
+    // channels it skipped. The aux views are assembled below from
+    // aux_output_ptrs_ (pre-sized in setupProcessing()).
     for (int32 b = 1; b < data.numOutputs; ++b) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
@@ -970,16 +991,53 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             .buffer = sidechain_view,
         },
     }};
-    std::array<ProcessBusBufferView<float>, 1> output_buses{{
-        {
-            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                     proc_out, false, data.numOutputs > 0},
-            .buffer = output_view,
-        },
-    }};
+    // Build one ProcessBusBufferView per routed output bus. Index 0 is the
+    // main output; each subsequent entry wires the host's aux output channel
+    // pointers into aux_output_ptrs_ (pre-sized in setupProcessing()). Host
+    // output buses beyond the declared/pre-sized set are zero-filled (above)
+    // but not routed — the same safe fallback as before.
+    static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    output_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 proc_out, false, data.numOutputs > 0},
+        .buffer = output_view,
+    };
+    std::size_t routed_output_buses = 1;
+    const std::size_t max_routed =
+        (std::min)(static_cast<std::size_t>(data.numOutputs),
+                   (std::min)(aux_output_ptrs_.size() + 1, kMaxOutputBuses));
+    for (std::size_t b = 1; b < max_routed; ++b) {
+        auto& bus = data.outputs[b];
+        auto& ptrs = aux_output_ptrs_[b - 1];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.numChannels),
+                       static_cast<int>(ptrs.size()));
+        bool active = bus.channelBuffers32 != nullptr;
+        if (active) {
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[static_cast<std::size_t>(ch)] = bus.channelBuffers32[ch];
+                if (!ptrs[static_cast<std::size_t>(ch)]) {
+                    // A null per-channel pointer demotes the whole bus to
+                    // inactive so the Processor sees an empty bus rather than a
+                    // half-valid BufferView.
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (!active) aux_channels = 0;
+        output_buses[routed_output_buses++] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     aux_channels, true, active},
+            .buffer = audio::BufferView<float>(ptrs.data(), aux_channels,
+                                               num_samples),
+        };
+    }
     ProcessBuffers process_buffers{
         .inputs = ProcessBusBufferSet<const float>(input_buses),
-        .outputs = ProcessBusBufferSet<float>(output_buses),
+        .outputs = ProcessBusBufferSet<float>(
+            std::span(output_buses.data(), routed_output_buses)),
     };
 
     // VST3 `processBlockBypassed` behaviour. When the current bypass

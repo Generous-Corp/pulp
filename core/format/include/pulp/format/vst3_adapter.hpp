@@ -171,6 +171,13 @@ private:
     // bus 1 is consumed; additional buses are ignored because the
     // Processor API exposes a single sidechain slot.
     std::vector<float*> sidechain_ptrs_;
+    // Per-bus channel-pointer storage for secondary (aux) output buses,
+    // indexed [aux_bus][channel]. aux_output_ptrs_[i] backs the BufferView for
+    // the host output bus at index i+1, routed to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments. Sized once in
+    // setupProcessing() from the descriptor's declared output buses so the
+    // multi-out routing path allocates nothing on the audio thread.
+    std::vector<std::vector<float*>> aux_output_ptrs_;
 
     // Per-block MIDI buffers, reused across process() calls. Reserved +
     // realtime-capacity-limited in setupProcessing() so add()/add_sysex_copy()

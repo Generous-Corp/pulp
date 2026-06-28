@@ -12,6 +12,7 @@
 #include <clap/ext/preset-load.h>
 #include <algorithm>
 #include <array>
+#include <span>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -349,11 +350,20 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             }
         }
     }
-    // Secondary output buses are zero-filled so hosts do not read
-    // uninitialised memory on multi-out instruments. Full multi-out routing
-    // to Processor is tracked separately (audit 5.2). Zero the full original
-    // block here — these channels are never processed, so the clamp does not
-    // apply.
+    // Secondary (aux) output buses route to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments (drum
+    // machines, multitimbral, stem renderers). Each routed aux bus is
+    // pre-zeroed here first so that:
+    //   * a single-output Processor (the default process(ProcessBuffers&),
+    //     which only writes the main output) leaves aux buses silent rather
+    //     than handing the host uninitialised memory, and
+    //   * a multi-out Processor that writes only some aux channels still emits
+    //     silence on the channels it skipped.
+    // Host output buses beyond kMaxOutputBuses are zero-filled but not routed,
+    // preserving the prior safe behaviour for unusually wide bus layouts.
+    const uint32_t routed_output_buses =
+        (std::min)(process->audio_outputs_count,
+                   static_cast<uint32_t>(kMaxOutputBuses));
     for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
         auto& bus = process->audio_outputs[b];
         for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
@@ -381,16 +391,44 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             .buffer = sidechain_view,
         },
     }};
-    std::array<ProcessBusBufferView<float>, 1> output_buses{{
-        {
-            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                     out_channels, false, process->audio_outputs_count > 0},
-            .buffer = output_view,
-        },
-    }};
+    // Build one ProcessBusBufferView per routed output bus. Index 0 is the
+    // main output (already wired into output_view above); each subsequent entry
+    // wires the host's aux output channel pointers into per-bus storage.
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    output_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 out_channels, false, process->audio_outputs_count > 0},
+        .buffer = output_view,
+    };
+    for (uint32_t b = 1; b < routed_output_buses; ++b) {
+        auto& bus = process->audio_outputs[b];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
+        float** ptrs = self->aux_output_ptrs[b];
+        bool active = bus.data32 != nullptr;
+        if (active) {
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[ch] = bus.data32[ch];
+                if (!ptrs[ch]) {
+                    // A null per-channel pointer demotes the whole bus to
+                    // inactive so the Processor sees an empty bus rather than a
+                    // half-valid BufferView.
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (!active) aux_channels = 0;
+        output_buses[b] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     aux_channels, true, active},
+            .buffer = audio::BufferView<float>(ptrs, aux_channels, num_samples),
+        };
+    }
     ProcessBuffers process_buffers{
         .inputs = ProcessBusBufferSet<const float>(input_buses),
-        .outputs = ProcessBusBufferSet<float>(output_buses),
+        .outputs = ProcessBusBufferSet<float>(
+            std::span(output_buses.data(), routed_output_buses)),
     };
 
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
