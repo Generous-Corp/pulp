@@ -187,10 +187,11 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
                   "overload deliberately; do not silently change the "
                   "element type.");
 
-    // Runtime smoke: invoke process() with a float buffer to prove
-    // the adapter-facing path is callable (not a compile-only check).
-    StereoEffect p;
+    // Runtime proof: invoke the virtual through the adapter-facing float
+    // signature and assert the processor observes/mutates the float buffers.
+    ProjectingProcessor p;
     float buf_in[2][8] = {};
+    buf_in[0][0] = 0.25f;
     float buf_out[2][8] = {};
     const float* in_ptrs[2]  = {buf_in[0],  buf_in[1]};
     float*       out_ptrs[2] = {buf_out[0], buf_out[1]};
@@ -199,7 +200,13 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     pulp::midi::MidiBuffer mi, mo;
     ProcessContext ctx; ctx.sample_rate = 48000.0; ctx.num_samples = 8;
     p.process(out_view, in_view, mi, mo, ctx);
-    SUCCEED("process() ran with float buffers");
+
+    REQUIRE(p.simple_process_calls == 1);
+    REQUIRE(p.observed_input_channels == 2);
+    REQUIRE(p.observed_output_channels == 2);
+    REQUIRE_FALSE(p.saw_sidechain);
+    REQUIRE(buf_out[0][0] == 1.25f);
+    REQUIRE(buf_out[1][0] == 0.0f);
 }
 
 // ── Additive multi-bus process surface ───────────────────────────────────
