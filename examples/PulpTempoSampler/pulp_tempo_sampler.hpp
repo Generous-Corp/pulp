@@ -489,7 +489,12 @@ public:
     // Onset sensitivity s in [0,1] maps to a slice COUNT (the strongest cuts by
     // confidence are kept): s=0 -> 1 slice (whole sample), s=1 -> kMaxSlices.
     static constexpr int kMaxSlices = 32;
-    static constexpr float kDefaultOnsetSensitivity = 0.5f;  // ~16 slices by default
+    // Default to the WHOLE loop (1 slice): a dropped loop plays + LOOPs as a
+    // single 2-bar region that tiles the bar grid. Raising SENS chops it into
+    // slices for per-key triggering. (A multi-slice default made holding the root
+    // loop only slice 0 — a quarter of the loop — which read as "the loop ends
+    // early.")
+    static constexpr float kDefaultOnsetSensitivity = 0.0f;  // whole loop by default
 
     // MIDI note name in the user-requested C-2..C8 convention (C3 = 60). NOTE:
     // this deliberately differs from Pulp's MidiKeyboard, which labels 60 as C4

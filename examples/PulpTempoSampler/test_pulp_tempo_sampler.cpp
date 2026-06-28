@@ -116,6 +116,10 @@ struct Fixture {
         ctx.input_channels = 0;
         ctx.output_channels = 2;
         proc->prepare(ctx);
+        // Most tests exercise SLICING, so the fixture engages a slicing sensitivity.
+        // The PRODUCT default is whole-loop (SENS 0, 1 slice) — verified explicitly
+        // in "default loads the whole loop as a single region".
+        store.set_value(kOnsetSens, 1.0f);
     }
 };
 
@@ -541,6 +545,7 @@ TEST_CASE("queued load before the state store is bound does not crash",
     // start() order: bind the store, define params, THEN prepare() (start_worker).
     proc->set_state_store(&store);
     proc->define_parameters(store);
+    store.set_value(kOnsetSens, 1.0f);  // exercise slicing (product default is whole-loop)
     format::PrepareContext ctx;
     ctx.sample_rate = 48000;
     ctx.max_buffer_size = 512;
@@ -942,6 +947,123 @@ TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
     const double det = f.proc->detected_bpm();
     if (det > 0.0)                          // when the analyzer found a tempo for the drop
         CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
+}
+
+// Product default: a freshly dropped loop is ONE slice (the whole loop), so
+// holding the root + LOOP tiles the entire loop — not a chop.
+TEST_CASE("default loads the whole loop as a single region (SENS 0)",
+          "[tempo-sampler][issue-loop-tile]") {
+    state::StateStore store;
+    auto proc = std::make_unique<PulpTempoSamplerProcessor>();
+    proc->set_state_store(&store);
+    proc->define_parameters(store);   // installs the DEFAULT SENS
+    format::PrepareContext ctx; ctx.sample_rate = 48000; ctx.max_buffer_size = 512;
+    ctx.input_channels = 0; ctx.output_channels = 2; proc->prepare(ctx);
+    CHECK(store.get_value(kOnsetSens) == 0.0f);   // whole-loop default
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return proc->has_sample(); }));
+    CHECK(proc->num_slices() == 1);               // one region = the whole loop
+}
+
+// AUDIO-LEVEL tiling proof (the "loops perfectly" claim): a click-per-beat loop,
+// played whole (1 slice) with LOOP on at the matched tempo, must reproduce clicks
+// exactly on the beat grid across multiple loop passes — proving the loop length,
+// the downbeat alignment, AND no per-pass drift (not just num_frames).
+TEST_CASE("whole-loop LOOP repeats clicks on the beat grid (no drift)",
+          "[tempo-sampler][issue-loop-tile]") {
+    Fixture f;
+    f.store.set_value(kOnsetSens, 0.0f);              // whole loop (1 slice)
+    const double sr = 48000.0, bpm = 120.0;
+    const long beat = std::lround(60.0 / bpm * sr);   // 24000
+    const int beats = 4;                              // 1 bar
+    const long frames = beat * beats;                 // 96000
+    std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+    for (int b = 0; b < beats; ++b) {                 // a click at each beat
+        const long p = b * beat; buf[static_cast<size_t>(p)] = 1.0f;
+        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -0.9f;
+    }
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+    f.proc->set_loop_bpm_for_test(bpm);               // exact -> R=1 at host 120 (identity stretch)
+    f.store.set_value(kTempoLoop, 1.0f);              // LOOP on
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }   // settle the render
+    REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
+
+    std::vector<float> out; out.reserve(300000);
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+      process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
+    for (int blk = 0; blk < 520; ++blk) {             // ~2.7 bars
+        midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    // Local-maxima peak pick; each must land on the beat grid (period = frames).
+    std::vector<long> peaks;
+    for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
+        const float a = std::abs(out[static_cast<size_t>(i)]);
+        if (a > 0.3f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
+            a > std::abs(out[static_cast<size_t>(i + 1)]))
+            peaks.push_back(i);
+    }
+    REQUIRE(peaks.size() >= 8);                        // >= 8 beats over ~2.7 bars
+    long long worst = 0;
+    for (long p : peaks) {
+        const long grid = std::llround(static_cast<double>(p) / beat) * beat;
+        worst = std::max<long long>(worst, std::llabs(static_cast<long long>(p - grid)));
+    }
+    INFO("worst beat-grid deviation = " << worst << " samples (" << (worst * 1000.0 / sr) << " ms)");
+    CHECK(worst <= 128);                              // within ~2.7 ms of the grid, every pass
+}
+
+// Same proof while STRETCHING (host slower than the loop): the clicks must land
+// on the HOST beat grid — "worse when slowing" was the user's report, so this
+// guards the stretched (R>1) path specifically.
+TEST_CASE("whole-loop LOOP tiles under stretch (slowed host)",
+          "[tempo-sampler][issue-loop-tile]") {
+    Fixture f;
+    f.store.set_value(kOnsetSens, 0.0f);
+    const double sr = 48000.0, loop_bpm = 120.0, host = 90.0;   // slowing: R = 120/90 = 1.333
+    const long beat_src = std::lround(60.0 / loop_bpm * sr);     // 24000 (loop's own beat)
+    const int beats = 4; const long frames = beat_src * beats;   // 96000 (1 bar @120)
+    std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+    for (int b = 0; b < beats; ++b) { const long p = b * beat_src;
+        buf[static_cast<size_t>(p)] = 1.0f; if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -0.9f; }
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+    f.proc->set_loop_bpm_for_test(loop_bpm);
+    f.store.set_value(kTempoLoop, 1.0f);
+    std::vector<float> l(512), r(512);
+    { midi::MidiBuffer m; process_midi(*f.proc, host, m, l, r); }     // render at the slowed host
+    const long beat_host = std::lround(60.0 / host * sr);            // 32000 (beat at 90)
+    REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - beat_host * beats) <= 8; }));
+
+    std::vector<float> out; out.reserve(400000);
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+      process_midi(*f.proc, host, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
+    for (int blk = 0; blk < 640; ++blk) {                            // ~2.5 bars @90
+        midi::MidiBuffer m; process_midi(*f.proc, host, m, l, r);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    std::vector<long> peaks;
+    for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
+        const float a = std::abs(out[static_cast<size_t>(i)]);
+        if (a > 0.3f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
+            a > std::abs(out[static_cast<size_t>(i + 1)])) peaks.push_back(i);
+    }
+    REQUIRE(peaks.size() >= 8);
+    long long worst = 0;
+    for (long p : peaks) {
+        const long grid = std::llround(static_cast<double>(p) / beat_host) * beat_host;
+        worst = std::max<long long>(worst, std::llabs(static_cast<long long>(p - grid)));
+    }
+    INFO("slowed worst beat-grid deviation = " << worst << " samples (" << (worst * 1000.0 / sr) << " ms)");
+    CHECK(worst <= 256);   // within ~5 ms of the host grid even when stretched 1.33x
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
