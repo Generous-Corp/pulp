@@ -37,7 +37,10 @@ TEST_CASE("Negative: PulpGain handles NaN input without crashing", "[negative][g
     }
 
     process_buf(host, in, out);
-    SUCCEED("NaN input processed without crash");
+    for (std::size_t i = 0; i < 256; ++i) {
+        REQUIRE(std::isnan(out.channel(0)[i]));
+        REQUIRE(std::isnan(out.channel(1)[i]));
+    }
 }
 
 TEST_CASE("Negative: PulpGain handles Inf input without crashing", "[negative][gain]") {
@@ -52,7 +55,12 @@ TEST_CASE("Negative: PulpGain handles Inf input without crashing", "[negative][g
     }
 
     process_buf(host, in, out);
-    SUCCEED("Inf input processed without crash");
+    for (std::size_t i = 0; i < 256; ++i) {
+        REQUIRE(std::isinf(out.channel(0)[i]));
+        REQUIRE(out.channel(0)[i] > 0.0f);
+        REQUIRE(std::isinf(out.channel(1)[i]));
+        REQUIRE(out.channel(1)[i] < 0.0f);
+    }
 }
 
 // ── Extreme sample rates ────────────────────────────────────────────────
@@ -160,7 +168,10 @@ TEST_CASE("Negative: PulpGain survives rapid prepare/release cycling", "[negativ
         }
 
         process_buf(host, in, out);
+        for (std::size_t i = 0; i < 64; ++i) {
+            REQUIRE(out.channel(0)[i] == 0.1f);
+            REQUIRE(out.channel(1)[i] == 0.1f);
+        }
         host.release();
     }
-    SUCCEED("100 prepare/release cycles completed");
 }
