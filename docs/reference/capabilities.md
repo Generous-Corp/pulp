@@ -97,7 +97,8 @@ adapter compiles and loads — not that every host-facing feature is wired.
 - **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
   the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
 - **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
-  manifest yet. Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
+  manifest yet, and the Pulp browser-host runtime wiring is still scaffolded.
+  Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
 
 If you hit a limitation not listed, check
 `planning/production-readiness/01-format-adapters.md` and file an issue.
@@ -112,7 +113,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2, WebCLAP, Emscripten pipeline |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2/WebCLAP scaffolding, Emscripten pipeline; browser-host runtime not validated |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
@@ -304,7 +305,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
 | Right-click context menu | partial | all | on_context_menu/registerContextMenu fire; view-tree ContextMenu is actionable; native showContextMenu currently renders only on macOS and does not report selection |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
-| File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
+| File dialogs (open, save, folder) | partial | macOS, Windows, Linux | macOS NSOpenPanel/NSSavePanel; opt-in Windows IFileDialog and Linux xdg-desktop-portal backends via `FileDialog::install_native_backend()` |
 | Drag and drop | usable | macOS | File + text drop targets |
 | Plugin view hosting | usable | macOS/iOS, Windows, Linux | Native NSView/UIView/HWND/X11 plugin-editor hosts. Windows requires Skia; Linux requires Skia + X11 and degrades to headless capture when no display is available. Android/custom targets still require a host-registered `PluginViewHost::Factory`. Native child attach/bounds/detach inside plugin editors is built in on macOS/iOS only; non-Apple child embedding remains factory-backed. |
 | Native child view embedding (WindowHost) | partial | macOS + factory-backed non-Apple | Built-in standalone support is macOS-only. Built-in iOS `WindowHost` does not expose the embedding handles. Windows/Linux/Android require a host-registered `WindowHost::Factory` that implements attach/bounds/detach. |

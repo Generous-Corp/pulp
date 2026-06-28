@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.529.0
+    VERSION 0.530.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -73,8 +73,8 @@ option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
        "Build the opt-in Rust staticlib reference core + FFI/RT-safety tests \
         (requires a Rust toolchain). OFF by default; no Rust for default builds."
        OFF)
-# SDK-release safety net for pulp #1817. When ON, configure FAILS if
-# PULP_ENABLE_GPU is set but Skia binaries weren't located. The release
+# SDK-release safety net. When ON, configure FAILS if PULP_ENABLE_GPU
+# is set but Skia binaries weren't located. The release
 # workflow flips this ON so an SDK tarball can never ship with the GPU
 # code path silently #ifdef'd out. Local developer builds leave it OFF
 # (the default) so a no-Skia incremental rebuild still configures and
@@ -82,7 +82,7 @@ option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
 option(PULP_REQUIRE_GPU_FOR_SDK
        "Fail configure if PULP_ENABLE_GPU=ON but Skia was not found. \
         Set ON in .github/workflows/release-cli.yml to prevent silently \
-        shipping CG-only SDKs (pulp #1817)."
+        shipping CG-only SDKs."
        OFF)
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
@@ -97,7 +97,16 @@ option(PULP_LOTTIE "Enable Lottie animation playback via the bundled skottie mod
 # exportDesignTokens) stays compiled regardless (see core/view/src/w3c_tokens.cpp).
 # When OFF, WidgetBridge::install_runtime_import_handlers() becomes a no-op.
 option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; release/ship OFF." ON)
-option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
+option(PULP_ENABLE_SWIFT
+       "Reserved compatibility toggle; currently no effect. SwiftPM and target helpers enable Swift where needed."
+       OFF)
+if(PULP_ENABLE_SWIFT)
+    message(WARNING
+        "PULP_ENABLE_SWIFT is reserved and currently has no effect. "
+        "Swift support is built through apple/Package.swift and target "
+        "helpers such as pulp_add_ios_host_app(), which enable Swift when "
+        "Swift sources are present.")
+endif()
 # Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
 # dev/examples builds. Release / standalone-ship builds should configure
 # with -DPULP_ENABLE_INSPECTOR=OFF so a shipped standalone app does not
