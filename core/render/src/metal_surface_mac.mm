@@ -1,3 +1,5 @@
+// Per-binary-unique ObjC class names (see header).
+#include "pulp_render_objc_names.h"
 // macOS Metal surface — provides a CAMetalLayer-backed NSView for GPU presentation.
 //
 // Ownership:

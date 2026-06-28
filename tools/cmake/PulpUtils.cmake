@@ -83,6 +83,20 @@ else()
     set(_PULP_VIEW_PLATFORM_MAC_DIR "")
 endif()
 
+# Directory holding the shared macOS render Objective-C cluster
+# (metal_surface_mac.mm + render_loop_apple.mm and their private headers). These
+# define ObjC classes compiled once into pulp-render, so they get the same
+# per-binary suffix treatment as the view cluster. Probed in-tree and from an
+# installed SDK; empty when the sources aren't shipped (helper then skips the
+# render part and warns).
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../core/render/src/metal_surface_mac.mm")
+    set(_PULP_RENDER_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../core/render/src")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/render/metal_surface_mac.mm")
+    set(_PULP_RENDER_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/render")
+else()
+    set(_PULP_RENDER_SRC_DIR "")
+endif()
+
 # Compile a per-binary copy of the macOS view/window/accessibility Objective-C
 # cluster into `target`, with every ObjC class name suffixed by the (sanitized)
 # target name. ObjC class names are process-global; the shared pulp-view-core
@@ -129,14 +143,38 @@ function(_pulp_apply_view_mac_objc_suffix target)
         endif()
     endforeach()
 
+    # metal_surface_mac.mm's PulpMetalView (the CAMetalLayer GPU-surface NSView) is
+    # the one shared-pulp-render macOS ObjC class that cross-plug-in-collides, so
+    # it gets the same per-binary suffix (renamed to a distinct base,
+    # PulpMetalSurfaceView). Only added when the render layer is actually present:
+    # the TU relies on pulp::render's include/link, wired below ONLY under
+    # PULP_HAS_SKIA — adding it in a no-Skia macOS build (a supported fallback)
+    # would fail to compile, so gate on the same condition. (render_loop_apple.mm's
+    # display-link class is iOS-only — inside TARGET_OS_IPHONE — so there is no
+    # macOS copy to namespace. The .mm's quote-include of the render names header
+    # resolves from its own source dir, so no extra include dir is needed.)
+    set(_pulp_render_objc_srcs "")
+    if(PULP_HAS_SKIA AND (TARGET pulp::render OR TARGET Pulp::render))
+        if(_PULP_RENDER_SRC_DIR AND EXISTS "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
+            set(_pulp_render_objc_srcs "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
+        else()
+            message(WARNING
+                "pulp: ${target}: core/render/metal_surface_mac.mm not found — its "
+                "GPU-surface ObjC class keeps its shared fixed name and may collide "
+                "when co-loaded with another Pulp plug-in. The SDK should ship it "
+                "under src/pulp/render.")
+        endif()
+    endif()
+
     # Sanitize the target name into a valid C identifier fragment. The format
     # target name (e.g. SuperConvolver_AU) is unique per shipped binary.
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_view_objc_suffix "${target}")
 
-    target_sources(${target} PRIVATE ${_pulp_view_objc_srcs})
-    # PULP_VIEW_OBJC_SUFFIX is consumed ONLY by pulp_mac_objc_names.h, which only
-    # the view cluster .mm files include — so a target-wide define affects just
-    # those TUs, never the rest of `target`. (A per-source COMPILE_DEFINITIONS
+    target_sources(${target} PRIVATE ${_pulp_view_objc_srcs} ${_pulp_render_objc_srcs})
+    # PULP_VIEW_OBJC_SUFFIX is consumed ONLY by pulp_mac_objc_names.h and
+    # pulp_render_objc_names.h, which only the view + render cluster .mm files
+    # include — so a target-wide define affects just those TUs, never the rest of
+    # `target`. (A per-source COMPILE_DEFINITIONS
     # would be wrong here: when every plug-in format target lives in one CMake
     # directory, set_source_files_properties shares the same shared-source scope
     # across them and the last-added target's value would win for all.)
