@@ -7,8 +7,7 @@ TEST_CASE("Renderer3D hardcoded textured cube renders offscreen", "[render][scen
 
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
     }
 
     INFO(result.error);
@@ -69,9 +68,8 @@ TEST_CASE("Renderer3D can request the Dawn fallback adapter for golden probes",
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     REQUIRE(result.fallback_adapter_requested);
     if (!result.gpu_available) {
-        SUCCEED("Dawn fallback adapter unavailable in this environment: "
+        SKIP("Dawn fallback adapter unavailable in this environment: "
                 << result.error);
-        return;
     }
 
     INFO(result.error);
@@ -93,8 +91,7 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
           "[render][scene3d][gpu][adapter]") {
     auto gpu = GpuSurface::create_dawn();
     if (!gpu) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment");
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment");
     }
 
     GpuSurface::Config config;
@@ -105,8 +102,7 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
         GpuSurface::AdapterBackendPreference::null_backend;
 
     if (!gpu->initialize(config)) {
-        SUCCEED("Dawn null backend unavailable in this environment");
-        return;
+        SKIP("Dawn null backend unavailable in this environment");
     }
 
     const auto info = gpu->adapter_info();
@@ -129,9 +125,8 @@ TEST_CASE("Renderer3D can request Dawn null backend for API-only probes",
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     REQUIRE(result.null_backend_requested);
     if (!result.gpu_available) {
-        SUCCEED("Dawn null backend unavailable in this environment: "
+        SKIP("Dawn null backend unavailable in this environment: "
                 << result.error);
-        return;
     }
 
     INFO(result.error);
@@ -157,8 +152,7 @@ TEST_CASE("Renderer3D renders parsed SceneData offscreen", "[render][scene3d][gp
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
     }
 
     INFO(result.error);
@@ -228,8 +222,7 @@ TEST_CASE("Renderer3D renders generated textured cube GLB",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
     }
 
     INFO(result.error);
@@ -281,8 +274,7 @@ TEST_CASE("Renderer3D renders multiple parsed GLB mesh nodes",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
     }
 
     INFO(result.error);
@@ -336,8 +328,7 @@ TEST_CASE("Renderer3D renders official BoxTextured fixture",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
-        return;
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
     }
 
     INFO(result.error);
