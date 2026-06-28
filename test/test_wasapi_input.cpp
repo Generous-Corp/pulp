@@ -31,8 +31,7 @@ TEST_CASE("WASAPI capture: default input device discovers when present",
     WasapiSystem sys;
     auto info = sys.default_input_device();
     if (info.id.empty()) {
-        SUCCEED("no default capture endpoint on this host; skipping");
-        return;
+        SKIP("no default capture endpoint on this host");
     }
     REQUIRE(info.is_default_input);
     REQUIRE(info.max_input_channels > 0);
@@ -45,8 +44,7 @@ TEST_CASE("WASAPI capture: create_device on input id returns eCapture device",
     WasapiSystem sys;
     auto info = sys.default_input_device();
     if (info.id.empty()) {
-        SUCCEED("no default capture endpoint; skipping");
-        return;
+        SKIP("no default capture endpoint");
     }
     auto device = sys.create_device(info.id);
     REQUIRE(device != nullptr);
@@ -60,8 +58,7 @@ TEST_CASE("WASAPI capture: open + start + stop is leak-free and terminates",
     WasapiSystem sys;
     auto info = sys.default_input_device();
     if (info.id.empty()) {
-        SUCCEED("no default capture endpoint; skipping");
-        return;
+        SKIP("no default capture endpoint");
     }
     auto device = sys.create_device(info.id);
     REQUIRE(device != nullptr);
@@ -111,8 +108,7 @@ TEST_CASE("WASAPI capture: render device still constructs as eRender",
     WasapiSystem sys;
     auto device = sys.create_device("");
     if (!device) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host");
     }
     auto* wasapi = dynamic_cast<WasapiDevice*>(device.get());
     REQUIRE(wasapi != nullptr);
