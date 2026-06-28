@@ -47,6 +47,7 @@ def make_repo(root: pathlib.Path) -> pathlib.Path:
     (root / "core").mkdir()
     (root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.24)\n")
     (root / "tools" / "cli").mkdir(parents=True)
+    (root / "experimental" / "pulp-rs" / "src").mkdir(parents=True)
     (root / "docs" / "status").mkdir(parents=True)
     (root / ".claude" / "commands").mkdir(parents=True)
     (root / ".agents" / "skills" / "ci").mkdir(parents=True)
@@ -109,6 +110,51 @@ other:
             self.assertEqual(csc.extract_yaml_commands(root), {"build", "ship"})
             self.assertEqual(csc.extract_slash_commands(root), {"build", "ship"})
             self.assertEqual(csc.extract_skill_cli_refs(root), {"build": ["ci"], "ship": ["ci"]})
+
+    def test_rust_command_extractor_handles_clap_name_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            (root / "experimental" / "pulp-rs" / "src" / "main.rs").write_text(
+                """
+                #[derive(Subcommand, Debug)]
+                enum Command {
+                    Help,
+                    CiLocal(PkgTailArgs),
+                    #[command(name = "motion")]
+                    Motion(PkgTailArgs),
+                    Identity(PkgTailArgs),
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                csc.extract_rust_command_names(root),
+                {"help", "ci-local", "motion", "identity"},
+            )
+
+    def test_full_cli_inventory_unions_cpp_and_rust_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            (root / "tools" / "cli" / "pulp_cli.cpp").write_text(
+                """
+                static const Command commands[] = {
+                    {"build", "Build project", handle_build},
+                \n};
+                """,
+                encoding="utf-8",
+            )
+            (root / "experimental" / "pulp-rs" / "src" / "main.rs").write_text(
+                """
+                enum Command {
+                    Help,
+                    Identity(PkgTailArgs),
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(csc.extract_cli_command_names(root), {"build", "help", "identity"})
 
     def test_extractors_return_empty_results_for_missing_optional_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

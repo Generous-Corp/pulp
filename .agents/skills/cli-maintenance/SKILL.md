@@ -24,6 +24,12 @@ requires:
 - [ ] Add entry to the command table in `tools/cli/pulp_cli.cpp` (Command, ScriptCommand, or BinaryCommand)
 - [ ] Update `tools/cli/CMakeLists.txt` to compile the new file
 
+For Rust-native commands, the source of truth is
+`experimental/pulp-rs/src/main.rs`'s `enum Command` plus the matching
+`experimental/pulp-rs/src/cmd/<name>.rs` implementation. Add the command to
+`experimental/pulp-rs/src/help.rs` too; the installed Rust binary's help banner
+is user-facing even when there is no C++ table entry.
+
 ### 2. Update the CLI commands manifest
 - [ ] Add entry to `docs/status/cli-commands.yaml` with:
   - `name`, `status` (use status vocabulary: stable/usable/experimental), `summary`
@@ -43,13 +49,14 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, macos, overflow, projects, project, tool, tweaks
+audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, identity, macos, overflow, projects, project, tool, tweaks
 
 `project`, `tool`, and `tweaks` intentionally stay slashless: `project`
 is a per-project SDK pin helper, `tool` is registry/install plumbing
 for optional developer tools and importer add-ons, and `tweaks` is a
 local `pulp-tweaks.json` drift diagnostic that mirrors the inspector
-drawer. Agents call these CLIs directly. Keep this classification in
+drawer. `identity` is an audit/review helper whose lockfile diff should stay
+explicit in the terminal and commit. Agents call these CLIs directly. Keep this classification in
 sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
@@ -84,6 +91,12 @@ the CLI-source / manifest / `docs/reference/cli.md` steps and just keep the
 python3 tools/scripts/cli_sync_check.py
 python3 tools/scripts/check_cli_mcp_parity.py --mode=report
 ```
+
+`cli_sync_check.py` unions the C++ command tables with Rust-native commands
+from `experimental/pulp-rs/src/main.rs`. `check_cli_mcp_parity.py` uses the
+same installed-command model by default, so a Rust-only command still needs
+either a matching `pulp_<command>` MCP tool or an explicit
+`tools/scripts/cli_mcp_parity_baseline.json` reason.
 
 ### 8. Decide: does this need an MCP tool?
 

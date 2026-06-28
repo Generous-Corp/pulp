@@ -7,11 +7,13 @@ import re
 import sys
 from pathlib import Path
 
+from cli_command_inventory import extract_rust_command_names
+
 # Commands that intentionally don't have slash commands
 SKIP_SLASH_COMMANDS = {
     "audio", "cache", "clean", "upgrade", "config", "export-tokens",
     "ci-local", "design-debug", "harness", "help", "add", "audit",
-    "inspect", "import-design", "install", "version",
+    "identity", "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "search", "suggest",
     "target", "update",
     # `pulp macos` and `pulp overflow` are CI runner-pool operator
@@ -52,7 +54,7 @@ def find_repo_root():
 
 
 def extract_command_table_names(root):
-    """Parse user-visible command names from pulp_cli.cpp."""
+    """Parse user-visible command names from the C++ pulp_cli.cpp tables."""
     cli_path = root / "tools" / "cli" / "pulp_cli.cpp"
     if not cli_path.exists():
         return set()
@@ -85,6 +87,11 @@ def extract_command_table_names(root):
             names.add(command)
 
     return names
+
+
+def extract_cli_command_names(root):
+    """Parse the full installed CLI command surface across C++ and Rust."""
+    return extract_command_table_names(root) | extract_rust_command_names(root)
 
 
 def extract_yaml_commands(root):
@@ -144,7 +151,7 @@ def main():
     issues = []
     checks = []
 
-    cli_commands = extract_command_table_names(root)
+    cli_commands = extract_cli_command_names(root)
     yaml_commands = extract_yaml_commands(root)
     slash_commands = extract_slash_commands(root)
     skill_refs = extract_skill_cli_refs(root)

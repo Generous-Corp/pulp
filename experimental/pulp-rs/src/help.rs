@@ -27,15 +27,17 @@
 //! - Package-manager pseudo-commands (`add`, `audit`) — parked in a
 //!   second block to match the C++ banner's shape.
 //!
-//! Entries are ordered to match the C++ banner byte-for-byte. The
-//! `help_parity_test` integration test pins that.
+//! Entries are ordered to match the C++ banner, with Rust-native
+//! extensions inserted beside the closest related command. The
+//! `help_parity_test` integration test pins that installed surface.
 //!
 //! # Parity posture
 //!
-//! The Rust port's banner intentionally mirrors the C++ banner even
-//! when a subcommand is delegated. The user still invokes `pulp`
-//! expecting the same surface; Rust-native vs delegated distinctions
-//! should not leak into user-visible output.
+//! The Rust port's banner intentionally mirrors the C++ banner for
+//! delegated commands and adds Rust-native commands that have no C++
+//! table entry. The user still invokes `pulp` expecting one installed
+//! surface; Rust-native vs delegated distinctions should not leak into
+//! user-visible output.
 
 use std::io::Write;
 
@@ -46,7 +48,7 @@ use crate::error::{CliError, Result};
 pub struct Entry {
     /// Subcommand name as typed by the user.
     pub name: &'static str,
-    /// One-line description, matches the C++ summary exactly.
+    /// One-line description shown in the installed CLI usage banner.
     pub summary: &'static str,
 }
 
@@ -133,6 +135,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Connect to a running plugin inspector",
     },
     Entry {
+        name: "motion",
+        summary: "Agent-facing wrappers around inspector Motion protocol",
+    },
+    Entry {
         name: "scan",
         summary: "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins",
     },
@@ -143,6 +149,10 @@ pub const COMMANDS: &[Entry] = &[
     Entry {
         name: "import",
         summary: "Detect a framework project and emit a Pulp migration scaffold",
+    },
+    Entry {
+        name: "identity",
+        summary: "Manage the .pulp/identity.lock contract",
     },
     Entry {
         name: "kit",

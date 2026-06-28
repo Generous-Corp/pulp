@@ -16,7 +16,7 @@ if [ -z "$FILE" ]; then
 fi
 
 case "$FILE" in
-    */tools/cli/pulp_cli.cpp|*/tools/cli/cmd_*.cpp|*/tools/cli/cli_common.hpp)
+    */tools/cli/pulp_cli.cpp|*/tools/cli/cmd_*.cpp|*/tools/cli/cli_common.hpp|*/experimental/pulp-rs/src/main.rs)
         echo "CLI SYNC: CLI source modified. Run: python3 tools/scripts/cli_sync_check.py"
         echo "  Update: cli-commands.yaml, slash commands, reference docs, skills"
         ;;

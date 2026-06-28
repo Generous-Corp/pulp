@@ -830,6 +830,80 @@ commands:
         description: File path for the one-shot command response
     docs: reference/cli.md#inspect
 
+  - name: motion
+    status: experimental
+    summary: Agent-facing wrappers around the inspector `Motion.*` protocol. Requires a running inspector with the motion server enabled, then records traces, snapshots state, replays `.motion.jsonl` fixtures, and toggles motion-cost sampling from a terminal.
+    args:
+      - name: --host
+        kind: option
+        required: false
+        description: Inspector host, defaulting to 127.0.0.1
+      - name: --port
+        kind: option
+        required: false
+        description: Inspector port; defaults to the same temp-file auto-discovery as `pulp inspect`
+      - name: --json
+        kind: flag
+        required: false
+        description: Emit JSON for subcommands that support it
+    subcommands:
+      - name: record
+        summary: Start a `Motion.startTrace` session and print the trace id; `--out` names the intended fixture path and prints sink guidance but does not write JSONL itself.
+        args:
+          - name: --view
+            kind: option
+            required: false
+            description: Human-readable trace/view name
+          - name: --out
+            kind: option
+            required: false
+            description: Intended fixture path for sink guidance
+          - name: --fps
+            kind: option
+            required: false
+            description: Target sample rate in frames per second
+          - name: --metrics
+            kind: option
+            required: false
+            description: Metric probe spec; may be repeated
+      - name: stop
+        summary: Stop a previously started trace via `Motion.stopTrace`
+        args:
+          - name: --trace-id
+            kind: option
+            required: false
+            description: Trace id returned by record
+      - name: snapshot
+        summary: Print tracing, active-trace, emitted-event, and cost-attribution state via `Motion.snapshot`
+      - name: list-traces
+        summary: List inspector-owned trace ids via `Motion.listTraces`
+      - name: load-fixture
+        summary: Load a `.motion.jsonl` fixture into the scrubber via `Motion.loadFixture`
+        args:
+          - name: path
+            kind: positional
+            required: true
+            description: Fixture path
+      - name: scrub
+        summary: Move the scrubber playhead to a frame via `Motion.scrubTo`
+        args:
+          - name: frame
+            kind: positional
+            required: true
+            description: Target frame
+      - name: play
+        summary: Resume scrubber playback from the current playhead via `Motion.play`
+      - name: pause
+        summary: Pause scrubber playback via `Motion.pause`
+      - name: cost
+        summary: Toggle the cost-attribution channel via `Motion.enableCost` or `Motion.disableCost`
+        args:
+          - name: mode
+            kind: positional
+            required: true
+            description: enable or disable
+    docs: reference/cli.md#motion
+
   - name: tweaks
     status: experimental
     summary: Inspect the `pulp-tweaks.json` sidecar written by the inspector overlay. `tweaks diff` classifies stored tweaks against a design snapshot as clean, drifted (anchor survives, property gone), or orphaned (anchor gone) — the CLI mirror of the inspector drift drawer.
@@ -1857,6 +1931,30 @@ commands:
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
     docs: reference/cli.md#import
+
+  - name: identity
+    status: experimental
+    summary: Manage `.pulp/identity.lock`, the committed pin of each plugin's AU 4CC, manufacturer code, AAX product code, optional VST3 FUID, optional CLAP plugin id, and version.
+    subcommands:
+      - name: record
+        summary: Write or refresh `.pulp/identity.lock`; refuses to overwrite drifted fields unless explicitly allowed.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+            description: Accept host-visible identity drift and overwrite the lock
+          - name: --dry-run
+            kind: flag
+            required: false
+            description: Print what would be written without modifying the lockfile
+      - name: check
+        summary: Compare `.pulp/identity.lock` against the current project and exit 1 on drift.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+            description: Treat drift as success
+    docs: reference/cli.md#identity
 
   - name: tool
     status: usable

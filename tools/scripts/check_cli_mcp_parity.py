@@ -2,14 +2,15 @@
 """CLI ↔ MCP parity check.
 
 Closes part 2 of issue #1997: when a new top-level CLI command lands in
-``tools/cli/pulp_cli.cpp``, the developer should consciously decide
-whether to expose it via MCP (``tools/mcp/pulp_mcp.cpp``). Today we have
-no forcing function and the surface has drifted.
+the C++ command tables or the Rust front-end enum, the developer should
+consciously decide whether to expose it via MCP (``tools/mcp/pulp_mcp.cpp``).
+Today we have no forcing function and the surface has drifted.
 
 This script is a structural invariant gate, mirroring
 ``cli_sync_check.py``, ``skill_sync_check.py``, and the versioning gate:
 
-- Parse the CLI command set from ``tools/cli/pulp_cli.cpp``
+- Parse the CLI command set from ``tools/cli/pulp_cli.cpp`` plus Rust-native
+  commands in ``experimental/pulp-rs/src/main.rs``
 - Parse the MCP tool set from ``tools/mcp/pulp_mcp.cpp``
 - Diff the two sets against ``tools/scripts/cli_mcp_parity_baseline.json``
 - Fail in ``--mode=report`` when a NEW gap appears (CLI command added
@@ -33,6 +34,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cli_command_inventory import extract_rust_commands_from_main as extract_rust_commands
+
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -54,6 +57,9 @@ PACKAGE_MANAGER_COMMANDS = {
     "suggest",
     "target",
 }
+
+# Usage pseudo-commands do not represent an MCP exposure decision.
+PARITY_EXCLUDED_COMMANDS = PACKAGE_MANAGER_COMMANDS | {"help"}
 
 
 # ── Repo helpers ─────────────────────────────────────────────────────────
@@ -113,6 +119,13 @@ def extract_cli_commands(cli_cpp: Path) -> set[str]:
         names.add(entry.group(1))
 
     return names - HIDDEN_CLI_ALIASES
+
+
+def extract_repo_cli_commands(repo: Path, cli_cpp: Path | None = None) -> set[str]:
+    """Return the installed CLI command surface for the repo."""
+    cpp_source = cli_cpp or (repo / "tools" / "cli" / "pulp_cli.cpp")
+    rust_source = repo / "experimental" / "pulp-rs" / "src" / "main.rs"
+    return extract_cli_commands(cpp_source) | extract_rust_commands(rust_source)
 
 
 # ── MCP parsing ──────────────────────────────────────────────────────────
@@ -192,7 +205,7 @@ def compute_diff(
 ) -> Diff:
     # Forward direction: CLI → MCP. Package-manager commands are excluded
     # from the parity surface (they live in their own dispatch lane).
-    eligible_cli = cli_commands - PACKAGE_MANAGER_COMMANDS
+    eligible_cli = cli_commands - PARITY_EXCLUDED_COMMANDS
     cli_without_mcp = {c for c in eligible_cli if cli_to_mcp_name(c) not in mcp_tools}
     accepted_cli_only = cli_without_mcp & set(baseline.cli_only)
     new_cli_only = cli_without_mcp - set(baseline.cli_only)
@@ -366,7 +379,10 @@ def main(argv: list[str] | None = None) -> int:
         repo / "tools" / "scripts" / "cli_mcp_parity_baseline.json"
     )
 
-    cli_commands = extract_cli_commands(cli_source)
+    if args.cli_source:
+        cli_commands = extract_cli_commands(cli_source)
+    else:
+        cli_commands = extract_repo_cli_commands(repo, cli_source)
     mcp_tools = extract_mcp_tools(mcp_source)
     baseline = load_baseline(baseline_path)
     diff = compute_diff(cli_commands, mcp_tools, baseline)
