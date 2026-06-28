@@ -57,7 +57,7 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.0.2";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.1.0";
 
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
