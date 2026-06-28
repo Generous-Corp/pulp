@@ -59,6 +59,24 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
 
+    def test_build_workflow_shipyard_dispatch_skips_examples_with_gpu_off(self) -> None:
+        text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)",
+            text,
+        )
+        self.assertIn(
+            """if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+          fi""",
+            text,
+        )
+        self.assertIn(
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
+            text,
+        )
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 
@@ -100,7 +118,7 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
         self.assertIn("gen=()", self.text)
         self.assertIn("gen=(-G Ninja)", self.text)
         self.assertIn(
-            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release',
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
             self.text,
         )
 
@@ -110,7 +128,7 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
         self.assertIn('if [ "${RUNNER_OS}" = "Windows" ]; then', self.text)
         self.assertIn('cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")', self.text)
         self.assertIn(
-            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release',
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
             self.text,
         )
 
