@@ -7,6 +7,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/clap_entry.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -135,6 +136,50 @@ public:
 private:
     std::string name_;
     std::optional<std::string> prev_;
+};
+
+// RAII guard: force a comma-decimal global C locale for the test body, then
+// restore. Tries a few common comma-decimal locale names; reports whether the
+// installed locale actually produced a comma decimal so the test can decide
+// whether the C-locale assertions are meaningful on this box.
+class ScopedCommaLocale {
+public:
+    ScopedCommaLocale() {
+        const char* prev = std::setlocale(LC_NUMERIC, nullptr);
+        if (prev) prev_ = prev;
+        for (const char* name : {"de_DE.UTF-8", "de_DE", "fr_FR.UTF-8",
+                                 "fr_FR", "nl_NL.UTF-8", "nl_NL"}) {
+            if (std::setlocale(LC_NUMERIC, name)) {
+                // Only accept a locale that genuinely uses a comma decimal
+                // point; otherwise keep trying so the test's strict assertions
+                // are meaningful (or comma_decimal() ends up false → skipped).
+                if (std::localeconv()->decimal_point[0] == ',') {
+                    comma_decimal_ = true;
+                    break;
+                }
+            }
+        }
+    }
+    ~ScopedCommaLocale() {
+        if (!prev_.empty()) std::setlocale(LC_NUMERIC, prev_.c_str());
+    }
+    bool comma_decimal() const { return comma_decimal_; }
+
+private:
+    std::string prev_;
+    bool comma_decimal_ = false;
+};
+
+// RAII guard for the global host-quirk policy so an assertion-throw mid-test
+// can't leak the override into later test cases.
+class ScopedHostQuirkPolicy {
+public:
+    explicit ScopedHostQuirkPolicy(pulp::format::QuirkFilter policy) {
+        pulp::format::set_host_quirk_policy(policy);
+    }
+    ~ScopedHostQuirkPolicy() {
+        pulp::format::set_host_quirk_policy(std::nullopt);
+    }
 };
 
 struct MemoryStream {
@@ -381,6 +426,95 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     plugin->destroy(plugin);
     clap_entry.deinit();
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("CLAP param text conversion is locale-independent (comma-decimal host)",
+          "[clap][entry][params][locale]") {
+    // Under a comma-decimal global C locale, the previous snprintf("%.2f")
+    // emitted "-3,25" and strtod() parsed "0.5" as 0.0 (stopping at the dot),
+    // corrupting display and typed-in values. std::to_chars / std::from_chars
+    // always use the C decimal point, so the round-trip is locale-immune.
+    ScopedCommaLocale guard;
+    if (!guard.comma_decimal()) {
+        SKIP("no comma-decimal locale (de_DE/fr_FR/nl_NL) installed on this box "
+             "— the C-locale regression cannot be proven here");
+    }
+
+    // RAII so an assertion-throw can't leak the quirk override into later tests.
+    ScopedHostQuirkPolicy quirk_guard(pulp::format::kQuirkFilterOff);
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    // value_to_text on the "Mix" param (unit "%") must produce a dot, not a
+    // comma, regardless of the global locale.
+    char text[64]{};
+    REQUIRE(params->value_to_text(plugin, 3, 0.5, text, sizeof(text)));
+    REQUIRE(std::string(text) == "0.50 %");
+    REQUIRE(std::string(text).find(',') == std::string::npos);
+
+    // value_to_text on the "Mode" param (no unit).
+    REQUIRE(params->value_to_text(plugin, 2, 0.5, text, sizeof(text)));
+    REQUIRE(std::string(text) == "0.50");
+
+    // text_to_value must parse a dotted "0.5" fully (not stop at the dot).
+    double value = 99.0;
+    REQUIRE(params->text_to_value(plugin, 3, "0.5", &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Round-trip: format then parse back.
+    REQUIRE(params->value_to_text(plugin, 3, 0.5, text, sizeof(text)));
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 3, text, &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Leading-space tolerance (strtod parity).
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 3, "   0.5 %", &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Leading '+' accepted (strtod parity; from_chars alone rejects it).
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 3, "+0.5", &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Leading tab/other whitespace skipped (strtod parity; not just ' ').
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 3, "\t0.5", &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Trailing text after the number is still accepted (matches strtod).
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 3, "0.5 dB", &value));
+    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+
+    // Non-numeric text still fails, as before.
+    REQUIRE_FALSE(params->text_to_value(plugin, 3, "%", &value));
+
+    // Empty / whitespace-only input is rejected.
+    REQUIRE_FALSE(params->text_to_value(plugin, 3, "", &value));
+    REQUIRE_FALSE(params->text_to_value(plugin, 3, "   ", &value));
+
+    // Out-of-range input (advances ptr but sets ec=out_of_range) must be
+    // rejected WITHOUT writing a bogus 0.0 — the value sentinel survives.
+    value = 7.0;
+    REQUIRE_FALSE(params->text_to_value(plugin, 3, "1e999999", &value));
+    REQUIRE_THAT(value, WithinAbs(7.0, 1e-9));
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
 }
 
 TEST_CASE("CLAP params extension formats fallbacks and flushes gestures",
