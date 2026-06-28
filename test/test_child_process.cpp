@@ -3,8 +3,10 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
+#include <signal.h>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -790,13 +792,22 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
 #ifndef _WIN32
 TEST_CASE("ChildProcess destructor cancels a still-running POSIX child",
           "[child_process][edge][coverage]") {
+    int pid = -1;
+    const auto before_scope = std::chrono::steady_clock::now();
+
     {
         ChildProcess cp;
         REQUIRE(cp.start("sleep", {"10"}));
+        pid = cp.process_id();
+        REQUIRE(pid > 0);
         REQUIRE(cp.is_running());
     }
 
-    SUCCEED("scope exit returned after cancelling the child");
+    const auto elapsed = std::chrono::steady_clock::now() - before_scope;
+    REQUIRE(elapsed < std::chrono::seconds(5));
+    errno = 0;
+    REQUIRE(::kill(pid, 0) == -1);
+    REQUIRE(errno == ESRCH);
 }
 
 TEST_CASE("ChildProcess move construction transfers a running POSIX child",
