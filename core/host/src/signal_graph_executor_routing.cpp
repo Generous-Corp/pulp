@@ -49,7 +49,7 @@ bool gain_binding(fmt::ProcessBlock&,
 // are stack-built each call (string_view names, no allocation), matching
 // SignalGraph; both paths reach the slot through PluginSlot::process's default
 // main-in/main-out projection, so the audio output is bit-identical.
-bool plugin_binding(fmt::ProcessBlock&,
+bool plugin_binding(fmt::ProcessBlock& block,
                     const fmt::GraphRuntimeNodeProcessContext& ctx,
                     void* user_data) noexcept {
     auto* pctx = static_cast<PluginBindingContext*>(user_data);
@@ -112,7 +112,12 @@ bool plugin_binding(fmt::ProcessBlock&,
     state::ParameterEventQueue& param_events =
         ctx.node_param_events != nullptr ? *ctx.node_param_events
                                          : pctx->scratch->param_events;
-    pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
+    if (pctx->wants_transport && block.transport != nullptr) {
+        pctx->slot->process(
+            buffers, midi_in, midi_out, param_events, num_samples, *block.transport);
+    } else {
+        pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
+    }
     return true;
 }
 
@@ -396,6 +401,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             } else {
                 PluginBindingContext ctx;
                 ctx.slot = slot;
+                ctx.wants_transport = slot->wants_transport();
                 if (parallel_safe) {
                     try {
                         ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();

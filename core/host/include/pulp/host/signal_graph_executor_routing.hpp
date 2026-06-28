@@ -39,6 +39,7 @@ struct PluginRoutingScratch {
 // context into `plugin_ctx`.
 struct PluginBindingContext {
     PluginSlot* slot = nullptr;
+    bool wants_transport = false;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
 };

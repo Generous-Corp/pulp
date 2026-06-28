@@ -561,6 +561,8 @@ TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mo
     // Only one capture mode per invocation.
     REQUIRE_FALSE(parse_run_options({"--audio-inspector",
                                      "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-probe-json", "/tmp/probe.json",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--audio-scope-json", "/tmp/s.json",
                                      "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--audio-capture-wav", "/tmp/c.wav",

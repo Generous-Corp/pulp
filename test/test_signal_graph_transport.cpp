@@ -97,6 +97,77 @@ private:
     PluginInfo info_;
 };
 
+class TransportAwareSlot final : public PluginSlot {
+public:
+    TransportAwareSlot() {
+        info_.name = "TransportAware";
+        info_.format = PluginFormat::CLAP;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+        info_.category = "Effect";
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    bool wants_transport() const override { return true; }
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n) override {
+        ++transportless_calls;
+        copy_input(out, in, n);
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&,
+                 int n,
+                 const pulp::format::ProcessContext& transport) override {
+        ++transport_calls;
+        last_transport = transport;
+        auto* out = audio.main_output();
+        const auto* in = audio.main_input();
+        pulp::audio::BufferView<float> empty_out;
+        pulp::audio::BufferView<const float> empty_in;
+        copy_input(out ? *out : empty_out, in ? *in : empty_in, n);
+    }
+
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    int transport_calls = 0;
+    int transportless_calls = 0;
+    pulp::format::ProcessContext last_transport;
+
+private:
+    static void copy_input(pulp::audio::BufferView<float>& out,
+                           const pulp::audio::BufferView<const float>& in,
+                           int n) {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c) {
+            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+        }
+        for (std::size_t c = chs; c < out.num_channels(); ++c) {
+            std::fill_n(out.channel_ptr(c), n, 0.0f);
+        }
+    }
+
+    PluginInfo info_;
+};
+
 // Stateful counting generator (mirrors the anticipation suite's CountingGen):
 // block n, channel c -> (c+1)*10 + n. Used as an anticipation-eligible interior
 // source for T4. Counts process() calls so the test can confirm the interior is
@@ -240,6 +311,33 @@ TEST_CASE("SignalGraph transport overload is bit-identical for transport-inert n
     }
     // No anticipation in play, so nothing was suppressed.
     REQUIRE(withT.transport_suppressed_for_anticipation() == 0);
+}
+
+TEST_CASE("SignalGraph routed plugin binding delivers transport to opted-in slots",
+          "[host][signal-graph][transport]") {
+    SignalGraph graph;
+    graph.set_canonical_executor_routing_enabled(true);
+    const auto in = graph.add_input_node(1, "In");
+    auto slot = std::make_unique<TransportAwareSlot>();
+    auto* slot_ptr = slot.get();
+    const auto plug = graph.add_plugin_node(std::move(slot), 1, 1, "TransportAware");
+    const auto out = graph.add_output_node(1, "Out");
+    REQUIRE(graph.connect(in, 0, plug, 0));
+    REQUIRE(graph.connect(plug, 0, out, 0));
+    REQUIRE(graph.prepare(kSr, kFrames));
+
+    auto transport = non_default_transport();
+    transport.process_mode = pulp::format::ProcessMode::Offline;
+    const auto rendered = render_block(graph, &transport);
+
+    REQUIRE(slot_ptr->transport_calls == 1);
+    REQUIRE(slot_ptr->transportless_calls == 0);
+    REQUIRE(slot_ptr->last_transport.is_playing);
+    REQUIRE(slot_ptr->last_transport.tempo_bpm == 140.0);
+    REQUIRE(slot_ptr->last_transport.position_samples == 4096);
+    REQUIRE(slot_ptr->last_transport.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(rendered[0][0] == 0.0f);
+    REQUIRE(rendered[0][1] == 0.01f);
 }
 
 // ── T2 / T3: plumbing proof at the consumer ──────────────────────────────────

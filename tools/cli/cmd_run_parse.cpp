@@ -352,10 +352,11 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     // other single-consumer capture modes.
     if (!r.audio_capture_rolling_path.empty()
         && (r.audio_inspector || !r.audio_scope_json_path.empty()
-            || !r.audio_capture_wav_path.empty())) {
+            || !r.audio_capture_wav_path.empty()
+            || !r.audio_probe_json_path.empty())) {
         r.error = "--audio-capture-rolling cannot be combined with --audio-inspector, "
-                  "--audio-scope-json, or --audio-capture-wav; the standalone runs one "
-                  "capture mode per invocation";
+                  "--audio-probe-json, --audio-scope-json, or --audio-capture-wav; "
+                  "the standalone runs one capture mode per invocation";
     }
     if (audio_capture_rolling_frames_option_seen && r.audio_capture_rolling_path.empty()) {
         r.error = "--audio-capture-rolling-frames requires --audio-capture-rolling";
