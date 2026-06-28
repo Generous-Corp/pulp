@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// pulp #1031 — versioned import-design detection.
+// Versioned import-design detection.
 //
 // Two layers of coverage:
 //   1. Unit tests over the manifest parser and clause matcher.
@@ -9,9 +9,8 @@
 //      parser-version, match counts, confidence) match the
 //      `expected.json` sidecar.
 //
-// The fixture loop doubles as the CI gate from the issue body — every
-// new fixture adds one assertion automatically. No need for a separate
-// CI workflow step beyond ctest --test-dir build, which CI already runs.
+// The fixture loop doubles as the regression gate: every new fixture adds
+// one assertion automatically, so the normal CTest run covers new rows.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -940,8 +939,14 @@ TEST_CASE("new-format reports cap unknown tailwind tokens and keep fallbacks sta
 
     det::DetectionResult none;
     auto fallback = det::build_new_format_report(manifest, {}, none);
-    CHECK(fallback.candidate_format_version == "TODO-set-version");
+    CHECK(fallback.candidate_source.empty());
+    CHECK(fallback.candidate_format_version.empty());
     CHECK(fallback.additions.empty());
+
+    auto fallback_json = det::render_new_format_json(fallback);
+    CHECK(fallback_json.find("\"candidate-source\": \"\"") != std::string::npos);
+    CHECK(fallback_json.find("\"candidate-format-version\": \"\"") != std::string::npos);
+    CHECK(fallback_json.find("TODO") == std::string::npos);
 }
 
 TEST_CASE("render_new_format_json includes removals and empty additions",
