@@ -11,7 +11,7 @@ platforms:
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
   linux:
     status: experimental
-    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2. CI enabled.
+    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2, .deb/.tar.gz plugin packaging, standalone AppImage packaging. CI enabled.
   ios:
     status: experimental
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
