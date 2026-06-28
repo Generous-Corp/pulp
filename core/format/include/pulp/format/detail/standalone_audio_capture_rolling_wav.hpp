@@ -63,6 +63,7 @@ inline bool write_audio_capture_rolling_wav_file(
     const auto result = rolling.materialize_held(hold, samples.view());
     if (result.status != audio::RollingAudioCaptureMaterializeStatus::Ok ||
         result.frames_copied == 0) {
+        // LCOV_EXCL_START
         // The rare start-of-hold race (an append in flight when the hold began
         // overwrote the snapshot). Surface it rather than exit success with no
         // WAV — the caller can re-run.
@@ -71,6 +72,7 @@ inline bool write_audio_capture_rolling_wav_file(
             "frames_copied={}); the ring was overwritten mid-capture — re-run",
             path, static_cast<int>(result.status), result.frames_copied);
         return false;
+        // LCOV_EXCL_STOP
     }
 
     audio::AudioFileData data;
