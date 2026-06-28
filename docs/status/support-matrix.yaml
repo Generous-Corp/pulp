@@ -960,8 +960,14 @@ widgets:
   checkbox:         { status: usable, header: widgets.hpp }
   toggle_button:    { status: usable, header: widgets.hpp }
   icon:             { status: usable, header: widgets.hpp }
-  image_view:       { status: partial, header: widgets.hpp,
-                      notes: "Placeholder rendering; Skia decode planned." }
+  image_view:
+    status: usable
+    header: widgets.hpp
+    notes: >
+      File-backed images render through Canvas::draw_image_from_file /
+      draw_image_from_file_rect on supported backends; missing files or
+      canvas backends without image decode support fall back to a filename
+      placeholder.
   meter:            { status: usable, header: widgets.hpp }
   multi_meter:      { status: usable, header: widgets.hpp }
   correlation_meter: { status: usable, header: widgets.hpp }
