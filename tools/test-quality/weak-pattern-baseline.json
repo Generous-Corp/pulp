@@ -1,14 +1,14 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-audio-hotplug-final.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-announce-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 129,
+    "succeed": 128,
     "skip": 668
   },
   "classifications": {
-    "needs-review": 797
+    "needs-review": 796
   },
   "notes": [
     "Restored current-branch Phase 0 weak-test pattern baseline after the report tooling was replayed onto the smaller active branch stack.",

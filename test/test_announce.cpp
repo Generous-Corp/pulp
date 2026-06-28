@@ -22,11 +22,14 @@ struct Captured {
 
 TEST_CASE("announce_accessibility with no sink is a safe no-op",
           "[a11y][announce]") {
-    // Default state: no sink installed. Should not throw or crash.
+    int calls = 0;
+    set_announcement_sink([&](std::string_view, AnnouncementPriority) {
+        ++calls;
+    });
     set_announcement_sink(nullptr);
     announce_accessibility("this goes to the log");
     announce_accessibility("this too", AnnouncementPriority::Assertive);
-    SUCCEED("announcement with no sink returned cleanly");
+    REQUIRE(calls == 0);
 }
 
 TEST_CASE("set_announcement_sink captures announcements",
