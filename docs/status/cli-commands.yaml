@@ -854,15 +854,15 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX,
-      or Google DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The
-      designmd source is tokens-only (no ui.js); other sources can emit a full
-      ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
+      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
+      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
+      other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)
