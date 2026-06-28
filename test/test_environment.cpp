@@ -489,16 +489,19 @@ TEST_CASE("Environment: callback that drops its own token does not deadlock",
           "[environment]") {
     Environment::reset_for_test();
     std::unique_ptr<Environment::Token> token;
+    int callback_count = 0;
     token = std::make_unique<Environment::Token>(
         Environment::instance().subscribe(
             [&](const EnvironmentState&, EnvironmentChange) {
+                ++callback_count;
                 token.reset();  // unsubscribe from inside the callback
             }));
 
     // If publish() held the mutex during dispatch, this would deadlock
     // when the listener calls back into unsubscribe.
     Environment::inject_for_test(make_state(ColorScheme::dark));
-    SUCCEED("no deadlock");
+    REQUIRE(callback_count == 1);
+    REQUIRE(token == nullptr);
 }
 
 TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "

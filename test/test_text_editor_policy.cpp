@@ -166,7 +166,7 @@ TEST_CASE("TextEditor line ending policy applies to input paste and IME",
         REQUIRE(editor.paste_from_clipboard());
         REQUIRE(editor.text() == "xy");
     } else {
-        SUCCEED("platform clipboard text backend unavailable");
+        REQUIRE(editor.text() == "abcd");
     }
 
     TextEditor strip_ime;

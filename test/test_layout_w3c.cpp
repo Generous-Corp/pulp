@@ -527,8 +527,7 @@ TEST_CASE("Grid: parse_template caps recursion on pathologically nested repeat",
     // Past the depth cap the inner body yields no tracks, so the doubling
     // collapses to empty — the contract under test is "returns without
     // crashing", not a specific track count.
-    SUCCEED("parse_template returned without unbounded recursion");
-    (void)tracks;
+    REQUIRE(tracks.empty());
 
     // A shallow nest still expands normally (2 * 3 = 6 fractional tracks).
     auto shallow = GridStyle::parse_template("repeat(2, repeat(3, 1fr))");
