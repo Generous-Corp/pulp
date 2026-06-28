@@ -126,7 +126,7 @@ std::string compact_json_for_assertion(std::string text) {
 
 TEST_CASE("pulp inspect one-shot prints a server response",
           "[cli][shellout][inspect][coverage][requested]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
 
     InspectServerFixture fixture;
     fixture.server.set_request_handler([&](const InspectorMessage& request) {
@@ -162,7 +162,7 @@ TEST_CASE("pulp inspect one-shot prints a server response",
 
 TEST_CASE("pulp inspect one-shot can discover the advertised server port",
           "[cli][shellout][inspect][coverage][requested]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
 
     InspectServerFixture fixture;
     fixture.server.set_request_handler([&](const InspectorMessage& request) {
@@ -192,7 +192,7 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
 
 TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
           "[cli][shellout][inspect][coverage][requested]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
 
     InspectServerFixture fixture;
     const auto out = fixture.temp / "inspect-response.json";
@@ -238,7 +238,7 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
 
 TEST_CASE("pulp inspect validates missing values before connecting",
           "[cli][shellout][inspect][coverage][requested]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     update_disabled.set("1");
