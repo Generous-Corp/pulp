@@ -5503,9 +5503,7 @@ target_link_libraries(pulp-test-cli-import-design
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-import-design PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import-design pulp-cli)
-endif()
+pulp_bind_cli_shellout_target(pulp-test-cli-import-design)
 # The `import-design` command delegates to the standalone pulp-import-design
 # helper; without it the revived shell-out cases fail (exit 1) instead of
 # exercising the real path, so build it alongside this suite.

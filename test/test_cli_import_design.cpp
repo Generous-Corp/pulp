@@ -69,27 +69,21 @@ bool json_structurally_equal(const std::string& a, const std::string& b) {
 }
 
 // Locate a runnable CLI that implements `import-design`. The C++ delegate
-// target `pulp-cli` emits `pulp-cpp` (CMake OUTPUT_NAME) in <build>/tools/cli;
-// the Rust front-end lands at <build>/pulp and forwards import-design to that
-// delegate. The test runner's working directory at invocation is <build>/test.
-// Prefer an explicit override, then the C++ delegate (the real implementation
-// of this command), then the legacy/Rust names. An empty PULP_CLI_PATH is the
-// explicit unavailable-CLI sentinel for skip-path tests; a configured but
-// missing binary is a test setup failure.
+// target `pulp-cli` emits `pulp-cpp` (CMake OUTPUT_NAME); CMake passes its
+// exact path when that target exists in the current configure. Warm CI build
+// directories can contain stale CLI artifacts from older profiles, so only an
+// explicit override or the current CMake-provided target path counts. An empty
+// PULP_CLI_PATH is the explicit unavailable-CLI sentinel for skip-path tests; a
+// configured but missing binary is a test setup failure.
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
-    const auto build = fs::current_path() / "..";
-    for (const auto& candidate : {
-             build / "tools" / "cli" / "pulp-cpp",  // C++ delegate (current name)
-             build / "tools" / "cli" / "pulp",      // legacy name
-             build / "pulp",                         // Rust front-end
-         }) {
-        std::error_code ec;
-        if (fs::is_regular_file(candidate, ec)) return candidate;
-    }
-    return build / "tools" / "cli" / "pulp-cpp";
+#if defined(PULP_CLI_BINARY)
+    return fs::path(PULP_CLI_BINARY);
+#else
+    return {};
+#endif
 }
 
 bool binary_available() {
