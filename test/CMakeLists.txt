@@ -4698,11 +4698,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D compatibility cheap-wiring surface.
-# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
-# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
-# dedicated-command routing — five partial → supported
-# compat.json entries.
+# Widget bridge — recovered Canvas2D/CSS compatibility regressions.
+# The canonical Wave 2 Canvas2D cheap-wiring surface is in
+# pulp-test-widget-bridge-wave2-cheap below; this older split keeps
+# recovered CSS cases and later Canvas2D bridge regressions.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga

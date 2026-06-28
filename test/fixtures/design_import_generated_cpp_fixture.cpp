@@ -112,7 +112,7 @@ std::unique_ptr<pulp::view::View> build_imported_ui() {
     drive_flex.preferred_height = 72.0f;
     drive_flex.dim_height = {72.0f, pulp::view::DimensionUnit::px};
     node_1->set_label("Drive");
-    node_1->set_value(/* TODO: bind to param */ 0.5f);
+    node_1->set_value(/* imported static param value */ 0.5f);
     node_1->set_default_value(0.5f);
     node_0->add_child(std::move(node_1));
 
