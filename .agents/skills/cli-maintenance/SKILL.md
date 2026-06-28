@@ -739,15 +739,19 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
-## `pulp project pin / unpin / bump` shell helpers
+## CLI Git/CMake shell helpers
 
-`tools/cli/cmd_project.cpp` shells out to `git` / `cmake` from unit-tested
-helper paths, including Windows CI. Keep output redirection platform-aware:
-POSIX uses `/dev/null`, but Windows `cmd.exe` needs `NUL`. Do not add raw
-`2>/dev/null` or `>/dev/null 2>&1` in this file; route new call sites through
-the local null-redirection helpers instead. Otherwise Windows Namespace can
-misreport clean/dirty git state or fail origin-main probes even though the
-same tests pass on macOS/Linux.
+`tools/cli/cmd_project_common.cpp` and `tools/cli/cmd_misc.cpp` shell out to
+`git` / `cmake` from unit-tested helper paths, including Windows CI. Keep
+output redirection platform-aware: POSIX uses `/dev/null`, but Windows
+`cmd.exe` needs `NUL`. Do not add raw `2>/dev/null` or `>/dev/null 2>&1` in
+these files; route new call sites through the shared `stderr_to_null()` or
+`output_to_null()` helpers in `tools/cli/shell_redirect.*` instead. Otherwise
+Windows can leak "The system cannot find the path specified." into stderr,
+misreport clean/dirty git state, or fail origin-main probes even though the
+same tests pass on macOS/Linux. The `pulp status quotes source checkout paths
+before reading Git metadata` test covers the stderr contract locally; Windows
+CI is the platform proof for the null-device behavior.
 
 ### pin / unpin / floating SDK mode
 

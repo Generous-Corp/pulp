@@ -920,7 +920,7 @@ configure_file(
     @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
