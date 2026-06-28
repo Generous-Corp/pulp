@@ -81,8 +81,8 @@ set(PULP_CORE_SOURCES
     # Headless replacements for Processor::create_view() (format.cpp pulls
     # core/view -> canvas) and create_ara_document_controller() (ara.cpp pulls
     # the optional ARA SDK). The WASM DSP module is headless and never calls
-    # either, so we link local nullptr stubs instead of those layers.
-    ${CMAKE_CURRENT_SOURCE_DIR}/wasm_processor_stubs.cpp
+    # either; core/format owns these WASM-only defaults (see the file header).
+    ${PULP_ROOT}/core/format/src/wasm/headless_defaults.cpp
 )
 
 # ── PulpGain WASM ────────────────────────────────────────────────────────
