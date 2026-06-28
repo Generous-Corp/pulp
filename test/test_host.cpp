@@ -322,7 +322,7 @@ TEST_CASE("PluginScanner VST3 bundle uses FUID as unique_id when SDK available",
         SUCCEED("scanned " << total_vst3 << " VST3 plugin(s), "
                            << fuid_shaped << " with FUID-shaped unique_id");
     } else {
-        SUCCEED("no VST3 plugins installed — structural test skipped");
+        SKIP("no VST3 plugins installed for structural unique_id test");
     }
 }
 
@@ -376,8 +376,7 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
         if (fs::exists(p, ec)) { found = p; break; }
     }
     if (found.empty()) {
-        SUCCEED("pulpsynth.clap not built — skipping CLAP set_parameter integration");
-        return;
+        SKIP("pulpsynth.clap not built for CLAP set_parameter integration");
     }
 
     PluginInfo info;
@@ -425,8 +424,7 @@ TEST_CASE("ClapSlot::process is allocation-free after prepare() reserves",
           "[host][slot][clap][rt-safety][no-alloc]") {
     namespace fs = std::filesystem;
     if (!fs::exists(PULP_TEST_CLAP_PATH)) {
-        SUCCEED("PulpGain.clap not built — skipping ClapSlot process no-alloc test");
-        return;
+        SKIP("PulpGain.clap not built for ClapSlot process no-alloc test");
     }
 
     PluginInfo info;
@@ -518,8 +516,7 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
     }
 
     if (found.empty()) {
-        SUCCEED("No .vst3 plugin installed on this system — skipping VST3 set_parameter integration");
-        return;
+        SKIP("No .vst3 plugin installed for VST3 set_parameter integration");
     }
 
     PluginInfo info;
