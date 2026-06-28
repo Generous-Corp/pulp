@@ -62,17 +62,17 @@
     },
     {
       "path": "test/test_renderer3d_materials.cpp",
-      "max_loc": 1093,
+      "max_loc": 1065,
       "note": "Renderer3D material test split"
     },
     {
       "path": "test/test_renderer3d_scene.cpp",
-      "max_loc": 717,
+      "max_loc": 698,
       "note": "Renderer3D scene test split"
     },
     {
       "path": "test/test_renderer3d_loading.cpp",
-      "max_loc": 564,
+      "max_loc": 555,
       "note": "Renderer3D loading test split"
     },
     {
