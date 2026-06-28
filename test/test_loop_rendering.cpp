@@ -113,6 +113,32 @@ TEST_CASE("LoopRenderer ping-pong reflects at the loop boundaries",
         REQUIRE(output.channel(0)[i] == expected[i]);
 }
 
+TEST_CASE("LoopRenderer ReverseOnce plays backward once then stops",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 6);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::ReverseOnce;
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.rendered_frames == 6);
+    // End -> start (3,2,1,0), then silent (no wrap): 3 2 1 0 0 0.
+    REQUIRE(output.channel(0)[0] == 3.0f);
+    REQUIRE(output.channel(0)[1] == 2.0f);
+    REQUIRE(output.channel(0)[2] == 1.0f);
+    REQUIRE(output.channel(0)[3] == 0.0f);
+    REQUIRE(output.channel(0)[4] == 0.0f);
+    REQUIRE(output.channel(0)[5] == 0.0f);
+    REQUIRE(result.silent_frames >= 2);
+}
+
 TEST_CASE("LoopRenderer set_playback_mode flips Forward<->OneShot in place",
           "[audio][loop][render]") {
     Buffer<float> source(1, 4);

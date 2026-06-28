@@ -50,9 +50,10 @@ float sample_at(BufferView<const float> source,
 double LoopReader::normalize_position(const LoopRegion& region,
                                       double position) noexcept {
     if (region.end_frame <= region.start_frame) return static_cast<double>(region.start_frame);
-    // OneShot and PingPong positions are bounded by the renderer (PingPong reflects
-    // at the loop edges), so they are not modulo-wrapped here.
+    // OneShot/ReverseOnce/PingPong positions are bounded by the renderer (PingPong
+    // reflects at the loop edges; the others play once), so no modulo wrap here.
     if (region.playback_mode == LoopPlaybackMode::OneShot ||
+        region.playback_mode == LoopPlaybackMode::ReverseOnce ||
         region.playback_mode == LoopPlaybackMode::PingPong)
         return position;
 

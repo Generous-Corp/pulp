@@ -171,10 +171,10 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
     REQUIRE(s.param_count() == 17);
-    // Play to End defaults ON: a dropped loop's root yields the whole loop even
-    // after chopping (raising SENS), matching Logic Quick Sampler's slice ergonomics.
-    REQUIRE(s.get_value(kPlayToEnd) == 1.0f);
-    REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop direction = Forward
+    // Default Playback Mode = Slice (1): a drum/loop chopper. SENS 0 leaves it a
+    // single whole-loop slice; raise SENS to chop, each key plays just its slice.
+    REQUIRE(s.get_value(kPlaybackMode) == 1.0f);
+    REQUIRE(s.get_value(kDirection) == 0.0f);  // default playback direction = Forward
     REQUIRE(s.get_value(kSliceMode) == 0.0f);  // default Onset/Transient slicing
     REQUIRE(s.get_value(kGate) == 1.0f);       // default Gate on (key-up releases)
     REQUIRE(s.get_value(kFlexSpeed) == 2.0f);  // default 1x (index 2 of {1/4,1/2,1,2,4})
@@ -757,10 +757,9 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
     f.proc->set_loop_bpm_for_test(120.0);
-    f.store.set_value(kTempoLoop, 0.0f);              // one-shot so a voice stops at region end
-    f.store.set_value(kPlayToEnd, 0.0f);              // per-slice chop: this test measures
-                                                      // each slice's OWN region length, not
-                                                      // the whole-loop Play-to-End default.
+    f.store.set_value(kTempoLoop, 0.0f);              // loop off so a voice stops at region end
+    f.store.set_value(kPlaybackMode, 1.0f);           // Slice mode: each key plays just its
+                                                      // own slice (this test measures slice length).
     std::vector<float> l(512), r(512);
     { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // host==loop -> R=1
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
@@ -1076,19 +1075,17 @@ TEST_CASE("whole-loop LOOP tiles under stretch (slowed host)",
     CHECK(worst <= 256);   // within ~5 ms of the host grid even when stretched 1.33x
 }
 
-// PLAY TO END (Logic Quick Sampler parity), precise region semantics: with the
-// loop CHOPPED into >1 slice, the root with Play-to-End ON spans the whole loop
-// (so chopping never steals whole-loop looping), while OFF stops at the next
-// slice boundary. Every slice key still maps; under Play-to-End it plays from its
-// own start to the loop end.
-TEST_CASE("Play to End: root spans the whole loop even when chopped (>1 slice)",
-          "[tempo-sampler][issue-loop-tile][play-to-end]") {
+// PLAYBACK MODE region semantics: with the loop CHOPPED into >1 slice, a SLICE-mode
+// key plays ONLY its slice (a fraction), while Classic/One-Shot play the WHOLE
+// sample on every key. A Slice-mode key outside the slice range plays nothing.
+TEST_CASE("Playback mode: Slice plays just the slice; Classic/One-Shot play the whole sample",
+          "[tempo-sampler][issue-loop-tile][playback-mode]") {
     Fixture f;
     const double sr = 48000.0, bpm = 120.0;
     const long beat = std::lround(60.0 / bpm * sr);        // 24000
     const int beats = 4; const long frames = beat * beats; // 96000 (1 bar)
     std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
-    const float amp[4] = {1.0f, 0.5f, 0.8f, 0.4f};         // distinct beats
+    const float amp[4] = {1.0f, 0.5f, 0.8f, 0.4f};
     for (int b = 0; b < beats; ++b) { const long p = b * beat;
         buf[static_cast<size_t>(p)] = amp[b];
         if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
@@ -1098,76 +1095,84 @@ TEST_CASE("Play to End: root spans the whole loop even when chopped (>1 slice)",
     f.store.set_value(kOnsetSens, 1.0f);                   // CHOP: max slices
     f.proc->request_reanalyze();
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
-    f.proc->set_loop_bpm_for_test(bpm);                    // identity stretch (R=1)
+    f.proc->set_loop_bpm_for_test(bpm);
     std::vector<float> l(512), r(512);
     { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }   // publish
     REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
     const auto pub = static_cast<std::uint64_t>(f.proc->published_frames());
 
-    const auto whole0 = f.proc->region_range_for_note_test(kRoot, true, /*play_to_end=*/true);
-    const auto chop0  = f.proc->region_range_for_note_test(kRoot, true, /*play_to_end=*/false);
-    const auto whole1 = f.proc->region_range_for_note_test(kRoot + 1, true, true);
-    const auto chop1  = f.proc->region_range_for_note_test(kRoot + 1, true, false);
+    // Slice mode (1): each key = just its slice; out-of-range key = silent.
+    const auto s0 = f.proc->region_range_for_note_test(kRoot, 1);
+    const auto s1 = f.proc->region_range_for_note_test(kRoot + 1, 1);
+    const auto soob = f.proc->region_range_for_note_test(kRoot + 99, 1);
+    CHECK(s0.first == 0u);
+    CHECK(s0.second < pub);                 // slice 0 is a FRACTION, not the whole loop
+    CHECK(s0.second == s1.first);           // contiguous: slice-1 start = slice-0 end
+    CHECK(s1.second > s1.first);
+    CHECK(s1.second <= pub);
+    CHECK((soob.first == 0u && soob.second == 0u));   // out of range -> nothing
 
-    CHECK(whole0.first == 0u);
-    CHECK(whole0.second == pub);            // root + Play-to-End ON = the WHOLE loop
-    CHECK(chop0.first == 0u);
-    CHECK(chop0.second < pub);              // OFF = just slice 0 (a fraction)
-    CHECK(chop0.second == chop1.first);     // slice-1 boundary is shared start
-    CHECK(whole1.first == chop1.first);     // root+1 starts at slice 1 ...
-    CHECK(whole1.second == pub);            // ... and (Play-to-End ON) plays to the end
-    CHECK(chop1.second > chop1.first);
-    CHECK(chop1.second <= pub);
+    // Classic (0) and One-Shot (2): the WHOLE sample on every key.
+    for (int pm : {0, 2}) {
+        const auto whole = f.proc->region_range_for_note_test(kRoot, pm);
+        const auto wany  = f.proc->region_range_for_note_test(kRoot + 99, pm);
+        CHECK(whole.first == 0u);
+        CHECK(whole.second == pub);
+        CHECK(wany.first == 0u);
+        CHECK(wany.second == pub);          // any note plays the whole sample
+    }
 }
 
-// PLAY TO END, audio-level: chopped (SENS 1) + LOOP + Play-to-End ON, holding the
-// root must reproduce the FULL multi-beat loop (distinct beat amplitudes) every
-// pass — proving the whole loop loops, not slice 0. This is the exact "raising
-// SLICES no longer steals whole-loop looping" guarantee at the audio path.
-TEST_CASE("Play to End: chopped + LOOP still loops the whole loop (audio)",
-          "[tempo-sampler][issue-loop-tile][play-to-end]") {
-    Fixture f;
-    const double sr = 48000.0, bpm = 120.0;
-    const long beat = std::lround(60.0 / bpm * sr);
-    const int beats = 4; const long frames = beat * beats;
-    std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
-    const float amp[4] = {1.0f, 0.45f, 0.8f, 0.35f};
-    for (int b = 0; b < beats; ++b) { const long p = b * beat;
-        buf[static_cast<size_t>(p)] = amp[b];
-        if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
-    const float* ch[1] = {buf.data()};
-    REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
-    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-    f.store.set_value(kOnsetSens, 1.0f);                   // CHOP
-    f.proc->request_reanalyze();
-    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
-    f.proc->set_loop_bpm_for_test(bpm);
-    f.store.set_value(kTempoLoop, 1.0f);                   // LOOP on
-    CHECK(f.store.get_value(kPlayToEnd) == 1.0f);          // default ON
-    std::vector<float> l(512), r(512);
-    { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
-    REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
-
-    std::vector<float> out; out.reserve(300000);
-    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
-      process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
-    for (int blk = 0; blk < 520; ++blk) {                  // ~2.7 bars
-        midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
-        out.insert(out.end(), l.begin(), l.end());
-    }
-    std::vector<float> peaks;
-    for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
-        const float a = std::abs(out[static_cast<size_t>(i)]);
-        if (a > 0.2f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
-            a > std::abs(out[static_cast<size_t>(i + 1)])) peaks.push_back(a);
-    }
-    REQUIRE(peaks.size() >= 8);                            // >= 8 beats over ~2.7 bars
-    float pmin = peaks[0], pmax = peaks[0];
-    for (float a : peaks) { pmin = std::min(pmin, a); pmax = std::max(pmax, a); }
-    // Distinct beat amplitudes present => more than slice 0 is looping. If only
-    // slice 0 (Play-to-End OFF behavior) looped, every peak would be ~1.0.
-    INFO("peak amp range = [" << pmin << ", " << pmax << "]");
-    CHECK(pmax - pmin > 0.2f);
+// PLAYBACK MODE, audio-level: chopped + LOOP + hold the root. In SLICE mode only
+// slice 0 loops (uniform peak amplitude); in ONE-SHOT mode the WHOLE sample loops
+// (its distinct beat amplitudes repeat). Proves a Slice loops just the slice.
+TEST_CASE("Playback mode: Slice+loop loops the slice, One-Shot+loop loops the whole sample (audio)",
+          "[tempo-sampler][issue-loop-tile][playback-mode]") {
+    auto peak_range = [](int playback_mode) -> float {
+        Fixture f;
+        const double sr = 48000.0, bpm = 120.0;
+        const long beat = std::lround(60.0 / bpm * sr);
+        const int beats = 4; const long frames = beat * beats;
+        std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+        const float amp[4] = {1.0f, 0.45f, 0.8f, 0.35f};
+        for (int b = 0; b < beats; ++b) { const long p = b * beat;
+            buf[static_cast<size_t>(p)] = amp[b];
+            if (p + 1 < frames) buf[static_cast<size_t>(p + 1)] = -amp[b] * 0.9f; }
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.store.set_value(kOnsetSens, 1.0f);               // CHOP (cuts on beats 1,2,3)
+        f.proc->request_reanalyze();
+        REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+        f.proc->set_loop_bpm_for_test(bpm);
+        f.store.set_value(kPlaybackMode, static_cast<float>(playback_mode));
+        f.store.set_value(kTempoLoop, 1.0f);               // LOOP on (Forward)
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
+        REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
+        std::vector<float> out; out.reserve(300000);
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+          process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
+        for (int blk = 0; blk < 520; ++blk) {              // ~2.7 bars
+            midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        std::vector<float> peaks;
+        for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
+            const float a = std::abs(out[static_cast<size_t>(i)]);
+            if (a > 0.2f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
+                a > std::abs(out[static_cast<size_t>(i + 1)])) peaks.push_back(a);
+        }
+        REQUIRE(peaks.size() >= 6);
+        float pmin = peaks[0], pmax = peaks[0];
+        for (float a : peaks) { pmin = std::min(pmin, a); pmax = std::max(pmax, a); }
+        return pmax - pmin;
+    };
+    const float slice_range = peak_range(1);     // Slice: only slice 0 (amp 1.0) loops
+    const float oneshot_range = peak_range(2);   // One-Shot: whole sample (4 distinct amps)
+    INFO("slice peak-range=" << slice_range << "  one-shot peak-range=" << oneshot_range);
+    CHECK(slice_range < 0.2f);                    // uniform => just the slice loops
+    CHECK(oneshot_range > 0.3f);                  // varied  => the whole sample loops
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't
@@ -1713,35 +1718,38 @@ TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 }
 
-// MODE dropdown: One-Shot / Forward / Reverse drives loop on/off (kTempoLoop) and
-// the loop direction (kLoopMode) from a single control. Drive the REAL combo
-// (set_selected -> on_change -> set_value).
-TEST_CASE("MODE dropdown sets loop on/off and direction", "[tempo-sampler][loop-mode]") {
+// PLAYBACK / LOOP / DIRECTION are three SEPARATE dropdowns (Logic/PlunderTube
+// 3-axis model): Playback = Classic/Slice/One-Shot, Loop = None/On, Direction =
+// Forward/Reverse/Ping-Pong (Detail page). Each drives its own param.
+TEST_CASE("Playback/Loop/Direction dropdowns drive their params", "[tempo-sampler][modes-ui]") {
     Fixture f;
     auto buf = sine(440.0, 48000.0, 24000);
     const float* ch[1] = {buf.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
-
     auto editor = f.proc->create_view();
     REQUIRE(editor);
-    auto* mode = find_combo(editor.get(), "1-Shot");
-    REQUIRE(mode != nullptr);
+    auto* playback = find_combo(editor.get(), "Classic");   // Playback dropdown
+    auto* loop = find_combo(editor.get(), "None");          // Loop dropdown
+    auto* dir = find_combo(editor.get(), "Forward");        // Direction dropdown (Detail)
+    REQUIRE(playback != nullptr);
+    REQUIRE(loop != nullptr);
+    REQUIRE(dir != nullptr);
 
-    CHECK(f.store.get_value(kTempoLoop) < 0.5f);     // default: one-shot
-    mode->set_selected(1);                           // Forward -> loop on, dir Forward
-    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
-    CHECK(f.store.get_value(kLoopMode) == 0.0f);
-    mode->set_selected(2);                           // Reverse -> loop on, dir Reverse
-    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
-    CHECK(f.store.get_value(kLoopMode) == 1.0f);
-    mode->set_selected(3);                           // Ping-Pong -> loop on, dir Ping-Pong
-    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
-    CHECK(f.store.get_value(kLoopMode) == 2.0f);
-    mode->set_selected(0);                           // 1-Shot -> loop off
-    CHECK(f.store.get_value(kTempoLoop) < 0.5f);
-    // The dropdown reflects external param changes (e.g. preset load) too.
-    f.store.set_value(kTempoLoop, 1.0f); f.store.set_value(kLoopMode, 1.0f);
-    CHECK(mode->selected() == 2);                    // Reverse
+    // Defaults: Slice playback, Loop None, Direction Forward.
+    CHECK(playback->selected() == 1);
+    CHECK(loop->selected() == 0);
+    CHECK(dir->selected() == 0);
+
+    playback->set_selected(2); CHECK(f.store.get_value(kPlaybackMode) == 2.0f);  // One-Shot
+    playback->set_selected(0); CHECK(f.store.get_value(kPlaybackMode) == 0.0f);  // Classic
+    loop->set_selected(1);     CHECK(f.store.get_value(kTempoLoop) >= 0.5f);     // On
+    loop->set_selected(0);     CHECK(f.store.get_value(kTempoLoop) < 0.5f);      // None
+    dir->set_selected(1);      CHECK(f.store.get_value(kDirection) == 1.0f);     // Reverse
+    dir->set_selected(2);      CHECK(f.store.get_value(kDirection) == 2.0f);     // Ping-Pong
+
+    // Dropdowns reflect external param changes (preset load).
+    f.store.set_value(kPlaybackMode, 1.0f);
+    CHECK(playback->selected() == 1);
 }
 
 // REVERSE direction: a whole-loop region played in Reverse reads end->start, so a
@@ -1762,8 +1770,8 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
         REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
         REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
         f.proc->set_loop_bpm_for_test(bpm);
-        f.store.set_value(kTempoLoop, 1.0f);
-        f.store.set_value(kLoopMode, static_cast<float>(dir));   // 0 Forward, 1 Reverse
+        f.store.set_value(kTempoLoop, 1.0f);                     // loop on
+        f.store.set_value(kDirection, static_cast<float>(dir));  // 0 Forward, 1 Reverse
         std::vector<float> l(512), r(512);
         { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
         REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));

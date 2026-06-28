@@ -8,7 +8,8 @@ enum class LoopPlaybackMode : std::uint8_t {
     OneShot,
     Forward,
     Reverse,
-    PingPong,  // forward then backward, reflecting at the loop boundaries
+    PingPong,      // forward then backward, reflecting at the loop boundaries
+    ReverseOnce,   // play once from end to start, then stop (no loop)
 };
 
 enum class LoopCrossfadeCurve : std::uint8_t {
