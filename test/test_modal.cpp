@@ -157,15 +157,22 @@ TEST_CASE("ModalOverlay ignores mouse-up and missing dismiss callback",
           "[view][modal][coverage][issue-653]") {
     ModalOverlay modal;
     modal.set_bounds({0, 0, 80, 40});
+    int dismiss_count = 0;
+    modal.on_dismiss = [&] { ++dismiss_count; };
 
     MouseEvent up;
     up.position = {10, 10};
     up.is_down = false;
     modal.on_mouse_event(up);
+    REQUIRE(dismiss_count == 0);
 
     MouseEvent down;
     down.position = {10, 10};
     down.is_down = true;
     modal.on_mouse_event(down);
-    SUCCEED("modal mouse paths tolerate missing callbacks");
+    REQUIRE(dismiss_count == 1);
+
+    modal.on_dismiss = {};
+    REQUIRE_NOTHROW(modal.on_mouse_event(down));
+    REQUIRE(dismiss_count == 1);
 }
