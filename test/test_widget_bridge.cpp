@@ -1711,7 +1711,7 @@ TEST_CASE("WidgetBridge __gpuComputeDispatchImpl parses bufferDataBase64 payload
     // Smoke: the script ran to completion. If __computeType is
     // undefined the JS errored before assigning, so this test fails
     // loudly instead of silently passing.
-    REQUIRE(true); // Reaching here means the bridge didn't throw.
+    REQUIRE(engine.evaluate("globalThis.__computeType").toString() == "boolean");
 }
 
 // Malformed base64 must not crash the bridge — runtime::base64_decode
