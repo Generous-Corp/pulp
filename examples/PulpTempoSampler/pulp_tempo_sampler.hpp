@@ -125,6 +125,9 @@ enum TempoSamplerParams : state::ParamID {
     kPlayToEnd    = 13, // Logic Quick Sampler "Play to End": a triggered slice
                         // plays through to the loop end (root => whole loop) so
                         // chopping (SENS>0) never steals whole-loop looping.
+    kLoopMode     = 14, // loop DIRECTION when kTempoLoop is on: 0 Forward,
+                        // 1 Reverse, 2 Ping-Pong. Surfaced (with One-Shot) as the
+                        // MODE dropdown, which also drives kTempoLoop on/off.
 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
@@ -551,6 +554,9 @@ public:
         // "Play to End"). Persisted via StateStore; pre-kPlayToEnd states load
         // the default ON. No custom-state version bump needed.
         store.add_parameter({.id = kPlayToEnd, .name = "Play To End", .unit = "", .range = {0, 1, 1, 1}});
+        // Loop direction (used only when kTempoLoop is on): 0 Forward, 1 Reverse,
+        // 2 Ping-Pong. The MODE dropdown writes this alongside kTempoLoop.
+        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 1, 0, 1}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -1406,23 +1412,41 @@ public:
             root->add_child(std::move(tick));
         }
 
-        // LOOP toggle: enable/disable Forward looping for triggered slices
-        // (one-shot when off). Bound to kTempoLoop; region_for_note reads it per
-        // note (playback_mode = loop ? Forward : OneShot). Top-level for now;
-        // per-slice loop / reverse are a future UX.
+        // MODE dropdown: the loop behavior (Logic Quick Sampler-style). "1-Shot"
+        // disables looping (kTempoLoop=0); the looping modes set kTempoLoop=1 and
+        // pick the direction via kLoopMode (0 Forward, 1 Reverse). One control
+        // drives both params; region_for_note resolves playback_mode per note.
         {
-            auto loopBtn = std::make_unique<ToggleButton>();
-            loopBtn->set_label("LOOP");
-            loopBtn->set_font_size(10.0f);
-            loopBtn->set_corner_radius(6.0f);
-            loopBtn->set_on_background_color(teal);
-            loopBtn->set_on_text_color(bg900);
-            loopBtn->set_off_background_color(raised);
-            loopBtn->set_off_text_color(muted);
-            loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 614, 316, 56, 26);
-            root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
-            root->add_child(std::move(loopBtn));
+            auto combo = std::make_unique<ComboBox>();
+            combo->set_items({"1-Shot", "Forward", "Reverse"});
+            auto sel_for_state = [this]() -> int {
+                if (state().get_value(kTempoLoop) < 0.5f) return 0;  // one-shot
+                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 2);
+            };
+            combo->set_selected_silent(sel_for_state());
+            combo->on_change = [this](int idx) {
+                if (idx <= 0) {
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 0.0f);
+                    state().end_gesture(kTempoLoop);
+                } else {
+                    state().begin_gesture(kLoopMode);
+                    state().set_value(kLoopMode, static_cast<float>(idx - 1));
+                    state().end_gesture(kLoopMode);
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 1.0f);
+                    state().end_gesture(kTempoLoop);
+                }
+            };
+            auto* modePtr = combo.get();
+            place(*combo, 614, 316, 64, 26);
+            root->listeners.push_back(state().add_listener(
+                [this, modePtr, sel_for_state](state::ParamID id, float) {
+                    if (id == kTempoLoop || id == kLoopMode)
+                        modePtr->set_selected_silent(sel_for_state());
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(combo));
         }
 
         // TO END toggle (Logic Quick Sampler "Play to End"): when on, a triggered
@@ -1440,7 +1464,7 @@ public:
             endBtn->set_off_background_color(raised);
             endBtn->set_off_text_color(muted);
             endBtn->set_off_border_color(faint);
-            place(*endBtn, 676, 316, 64, 26);
+            place(*endBtn, 682, 316, 58, 26);
             root->bindings.push_back(bind_parameter(*endBtn, state(), kPlayToEnd));
             root->add_child(std::move(endBtn));
         }
@@ -1529,8 +1553,8 @@ public:
                     bool has = false;
                     for (auto& v : voices_)
                         if (v.active && v.note == n && !v.released) {
-                            v.region.playback_mode = audio::LoopPlaybackMode::Forward;
-                            v.renderer.set_playback_mode(audio::LoopPlaybackMode::Forward);
+                            v.region.playback_mode = params.loop_mode;
+                            v.renderer.set_playback_mode(params.loop_mode);
                             has = true;
                         }
                     // Re-trigger a finished one-shot ONLY into a free voice. Stealing
@@ -1637,6 +1661,7 @@ private:
         signal::Adsr::Params adsr;
         bool loop = false;
         bool play_to_end = true;  // triggered slice plays to the loop end (root => whole loop)
+        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::Forward;  // direction when looping
     };
 
     // Publish the most-recently-triggered active voice's slice + progress for
@@ -1985,6 +2010,10 @@ private:
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
         p.play_to_end = state().get_value(kPlayToEnd) >= 0.5f;
+        // 0 Forward, 1 Reverse (2 Ping-Pong arrives with the engine mode).
+        p.loop_mode = (static_cast<int>(state().get_value(kLoopMode)) == 1)
+                          ? audio::LoopPlaybackMode::Reverse
+                          : audio::LoopPlaybackMode::Forward;
         return p;
     }
 
@@ -1994,8 +2023,9 @@ private:
     }
 
     // Region for a note: a slice of the published (already tempo-matched) buffer.
-    std::optional<audio::LoopRegion> region_for_note(int note, const audio::PublishedSampleView& sample,
-                                                     bool loop, bool play_to_end) const noexcept {
+    std::optional<audio::LoopRegion> region_for_note(
+        int note, const audio::PublishedSampleView& sample, bool loop, bool play_to_end,
+        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::Forward) const noexcept {
         std::uint64_t start = 0, end = 0;
         const int root = static_cast<int>(state().get_value(kRootNote));
         {
@@ -2029,7 +2059,7 @@ private:
         region.start_frame = start;
         region.end_frame = end;
         region.source_sample_rate = sample.sample_rate;
-        region.playback_mode = loop ? audio::LoopPlaybackMode::Forward : audio::LoopPlaybackMode::OneShot;
+        region.playback_mode = loop ? loop_mode : audio::LoopPlaybackMode::OneShot;
         region.interpolation = audio::LoopInterpolationMode::Linear;
         region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
         return region;
@@ -2095,7 +2125,7 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.loop, params.play_to_end);
+        const auto region = region_for_note(note, sample, params.loop, params.play_to_end, params.loop_mode);
         if (!region) return;  // note maps to no slice -> silent (don't play the whole sample)
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }

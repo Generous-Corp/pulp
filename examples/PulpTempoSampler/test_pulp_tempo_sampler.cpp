@@ -170,10 +170,11 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 13);
+    REQUIRE(s.param_count() == 14);
     // Play to End defaults ON: a dropped loop's root yields the whole loop even
     // after chopping (raising SENS), matching Logic Quick Sampler's slice ergonomics.
     REQUIRE(s.get_value(kPlayToEnd) == 1.0f);
+    REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop direction = Forward
 }
 
 TEST_CASE("PulpTempoSampler package metadata uses the descriptor version", "[tempo-sampler]") {
@@ -1614,6 +1615,16 @@ view::ToggleButton* find_toggle(view::View* v, const std::string& label) {
     return nullptr;
 }
 
+// Find a ComboBox by its first item (e.g. the MODE dropdown's "1-Shot").
+view::ComboBox* find_combo(view::View* v, const std::string& first_item) {
+    if (auto* c = dynamic_cast<view::ComboBox*>(v);
+        c && !c->items().empty() && c->items().front() == first_item)
+        return c;
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        if (auto* c = find_combo(v->child_at(i), first_item)) return c;
+    return nullptr;
+}
+
 // RAII fake FileDialog backend so the Open-button path is testable headlessly
 // (no native panel). open_file() returns the given path.
 struct FakeFileDialog {
@@ -1699,9 +1710,10 @@ TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 }
 
-// LOOP toggle: enable/disable Forward looping (default one-shot). Drive the REAL
-// toggle -> on_toggle -> bound kTempoLoop param.
-TEST_CASE("LOOP toggle flips the loop parameter (default one-shot)", "[tempo-sampler]") {
+// MODE dropdown: One-Shot / Forward / Reverse drives loop on/off (kTempoLoop) and
+// the loop direction (kLoopMode) from a single control. Drive the REAL combo
+// (set_selected -> on_change -> set_value).
+TEST_CASE("MODE dropdown sets loop on/off and direction", "[tempo-sampler][loop-mode]") {
     Fixture f;
     auto buf = sine(440.0, 48000.0, 24000);
     const float* ch[1] = {buf.data()};
@@ -1709,15 +1721,66 @@ TEST_CASE("LOOP toggle flips the loop parameter (default one-shot)", "[tempo-sam
 
     auto editor = f.proc->create_view();
     REQUIRE(editor);
-    auto* loop = find_toggle(editor.get(), "LOOP");
-    REQUIRE(loop != nullptr);
+    auto* mode = find_combo(editor.get(), "1-Shot");
+    REQUIRE(mode != nullptr);
 
-    CHECK(f.store.get_value(kTempoLoop) < 0.5f);   // default: one-shot
-    const auto b = loop->local_bounds();
-    loop->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_toggle(true) -> set_value
-    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);  // looping enabled
-    loop->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // toggle back off
+    CHECK(f.store.get_value(kTempoLoop) < 0.5f);     // default: one-shot
+    mode->set_selected(1);                           // Forward -> loop on, dir Forward
+    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
+    CHECK(f.store.get_value(kLoopMode) == 0.0f);
+    mode->set_selected(2);                           // Reverse -> loop on, dir Reverse
+    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
+    CHECK(f.store.get_value(kLoopMode) == 1.0f);
+    mode->set_selected(0);                           // 1-Shot -> loop off
     CHECK(f.store.get_value(kTempoLoop) < 0.5f);
+    // The dropdown reflects external param changes (e.g. preset load) too.
+    f.store.set_value(kTempoLoop, 1.0f); f.store.set_value(kLoopMode, 1.0f);
+    CHECK(mode->selected() == 2);                    // Reverse
+}
+
+// REVERSE direction: a whole-loop region played in Reverse reads end->start, so a
+// STRONG impulse near the loop start and a WEAK impulse near the end come out in
+// the OPPOSITE order vs Forward. A/B the first audible peak to prove direction.
+TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]") {
+    auto first_peak = [](int dir) -> float {
+        Fixture f;
+        const double sr = 48000.0, bpm = 120.0;
+        const long frames = 96000;                          // 1 bar @120 (identity stretch)
+        std::vector<float> buf(static_cast<size_t>(frames), 0.0f);
+        buf[2000] = 1.0f;  buf[2001] = -0.9f;               // STRONG impulse near the start
+        buf[static_cast<size_t>(frames - 2000)] = 0.5f;
+        buf[static_cast<size_t>(frames - 1999)] = -0.45f;   // WEAK impulse near the end
+        f.store.set_value(kOnsetSens, 0.0f);                // whole loop (1 region): set BEFORE load
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, frames, sr));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+        f.proc->set_loop_bpm_for_test(bpm);
+        f.store.set_value(kTempoLoop, 1.0f);
+        f.store.set_value(kLoopMode, static_cast<float>(dir));   // 0 Forward, 1 Reverse
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
+        REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
+        std::vector<float> out; out.reserve(120000);
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+          process_midi(*f.proc, bpm, m, l, r); out.insert(out.end(), l.begin(), l.end()); }
+        for (int blk = 0; blk < 150; ++blk) {               // < 1 loop pass, so only the FIRST impulse
+            midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        for (long i = 1; i + 1 < static_cast<long>(out.size()); ++i) {
+            const float a = std::abs(out[static_cast<size_t>(i)]);
+            if (a > 0.2f && a >= std::abs(out[static_cast<size_t>(i - 1)]) &&
+                a > std::abs(out[static_cast<size_t>(i + 1)])) return a;
+        }
+        return 0.0f;
+    };
+    const float fwd_first = first_peak(0);   // Forward: STRONG start impulse first => ~1.0
+    const float rev_first = first_peak(1);   // Reverse: WEAK end impulse first    => ~0.5
+    INFO("forward first peak=" << fwd_first << "  reverse first peak=" << rev_first);
+    CHECK(fwd_first > 0.7f);
+    CHECK(rev_first < 0.7f);
+    CHECK(rev_first > 0.2f);                 // it IS the weak impulse, not silence
 }
 
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
