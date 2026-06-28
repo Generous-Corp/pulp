@@ -149,10 +149,17 @@ static DragSession& mac_drag_session(const void* view) {
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 @end
+// PulpGpuPluginView (and its drag category below) only exist when the GPU host
+// is compiled in — its @implementation in plugin_view_host_mac.mm sits inside
+// that file's PULP_HAS_SKIA guard. A CoreGraphics-only build has no such class,
+// so a category here referencing it would emit an unresolved
+// _OBJC_CLASS_$_PulpGpuPluginView at link. Mirror the same guard.
+#ifdef PULP_HAS_SKIA
 @interface PulpGpuPluginView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 @end
+#endif  // PULP_HAS_SKIA
 
 namespace pulp::view {
 // Shared bodies so the CPU + GPU categories don't duplicate the dispatch.
@@ -203,6 +210,11 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
 }
 @end
 
+// GPU hosted-view drag category — only when the GPU host (and thus the
+// PulpGpuPluginView class) is compiled in. See the guard on the forward
+// declaration above. The shared pulp::view::hosted_* helpers stay outside the
+// guard so the CPU category keeps using them in a no-Skia build.
+#ifdef PULP_HAS_SKIA
 @interface PulpGpuPluginView (PulpDragDrop) <NSDraggingDestination>
 @end
 @implementation PulpGpuPluginView (PulpDragDrop)
@@ -218,6 +230,7 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
     return pulp::view::hosted_perform_drop(self, self.rootView, self.pointTransform, s);
 }
 @end
+#endif  // PULP_HAS_SKIA
 
 // A self-retaining NSDraggingSource for outbound file drags (see
 // begin_file_drag below). AppKit does NOT keep the source alive for the
