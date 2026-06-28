@@ -50,9 +50,8 @@ public:
 TEST_CASE("default on_host_transport_changed is a no-op",
           "[processor][transport]") {
     PlainProcessor p;
-    p.on_host_transport_changed(true, 0.0);
-    p.on_host_transport_changed(false, 42.5);
-    SUCCEED("default override returned cleanly");
+    REQUIRE_NOTHROW(p.on_host_transport_changed(true, 0.0));
+    REQUIRE_NOTHROW(p.on_host_transport_changed(false, 42.5));
 }
 
 TEST_CASE("overriding plugin receives play/stop + locate events",
@@ -149,9 +148,8 @@ TEST_CASE("tempo hook override receives host tempo changes",
 TEST_CASE("default tempo hook is a no-op",
           "[processor][transport][coverage][phase3]") {
     PlainProcessor p;
-    p.on_host_tempo_changed(60.0);
-    p.on_host_tempo_changed(240.0);
-    SUCCEED("default tempo hook returned cleanly");
+    REQUIRE_NOTHROW(p.on_host_tempo_changed(60.0));
+    REQUIRE_NOTHROW(p.on_host_tempo_changed(240.0));
 }
 
 TEST_CASE("exception thrown by tempo hook propagates to the caller",

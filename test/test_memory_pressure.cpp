@@ -37,9 +37,8 @@ public:
 
 TEST_CASE("default on_memory_pressure is a no-op", "[processor][memory]") {
     PlainProcessor p;
-    p.on_memory_pressure(Processor::MemoryPressure::Advisory);
-    p.on_memory_pressure(Processor::MemoryPressure::Critical);
-    SUCCEED("default override returned cleanly");
+    REQUIRE_NOTHROW(p.on_memory_pressure(Processor::MemoryPressure::Advisory));
+    REQUIRE_NOTHROW(p.on_memory_pressure(Processor::MemoryPressure::Critical));
 }
 
 TEST_CASE("plugin receives pressure levels and can drop caches",

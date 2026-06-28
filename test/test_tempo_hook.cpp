@@ -40,9 +40,8 @@ public:
 TEST_CASE("default on_host_tempo_changed is a no-op",
           "[processor][tempo]") {
     PlainProcessor p;
-    p.on_host_tempo_changed(128.0);
-    p.on_host_tempo_changed(90.5);
-    SUCCEED("default override returned cleanly");
+    REQUIRE_NOTHROW(p.on_host_tempo_changed(128.0));
+    REQUIRE_NOTHROW(p.on_host_tempo_changed(90.5));
 }
 
 TEST_CASE("overriding plugin receives tempo updates",
