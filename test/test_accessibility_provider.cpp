@@ -30,8 +30,7 @@ TEST_CASE("accessibility_tree_changed tolerates a null handle",
           "[a11y][provider]") {
     // Widgets that raise events before init_accessibility ran should
     // never crash — pin the invariant.
-    accessibility_tree_changed(nullptr);
-    SUCCEED();
+    REQUIRE_NOTHROW(accessibility_tree_changed(nullptr));
 }
 
 TEST_CASE("shutdown_accessibility: repeated init+shutdown cycles are safe",
@@ -71,13 +70,17 @@ TEST_CASE("shutdown_accessibility: repeated init+shutdown cycles are safe",
         notify_accessibility_name_changed(h, root);
         shutdown_accessibility(h);
     }
-    SUCCEED("no crash across repeated attach/detach");
+
+    REQUIRE_NOTHROW(accessibility_tree_changed(nullptr));
+    REQUIRE_NOTHROW(notify_accessibility_value_changed(nullptr, root));
+    REQUIRE_NOTHROW(notify_accessibility_focus_changed(nullptr, root));
+    REQUIRE_NOTHROW(notify_accessibility_name_changed(nullptr, root));
 }
 #else
 TEST_CASE("accessibility_provider is a no-op on this platform",
           "[a11y][provider]") {
     // macOS / iOS / Android don't link the provider symbols; this
-    // placeholder keeps the suite buildable on every platform.
-    SUCCEED();
+    // stub keeps the suite buildable on every platform.
+    SKIP("accessibility_provider bridge is only linked on Windows and Linux desktop");
 }
 #endif
