@@ -91,7 +91,7 @@ TEST_CASE("FileChooser null callback discards results without crashing",
     c.choose_folder(nullptr);
     SUCCEED("no-callback invocations completed without throwing");
 #else
-    SUCCEED("skipped on Apple: open/save/choose_folder spawn NSOpenPanel");
+    SKIP("open/save/choose_folder spawn NSOpenPanel on Apple");
 #endif
 }
 
