@@ -854,15 +854,15 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX,
-      or Google DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The
-      designmd source is tokens-only (no ui.js); other sources can emit a full
-      ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
+      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
+      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
+      other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)
@@ -1771,14 +1771,14 @@ commands:
 
   - name: scan
     status: usable
-    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.
+    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle found. Installed Rust pulp scan is filesystem-only with filename-derived names; rich PluginScanner metadata remains in pulp-cpp scan.
     args:
       - name: --format
         kind: option
         description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
       - name: --no-load
         kind: flag
-        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
+        description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host

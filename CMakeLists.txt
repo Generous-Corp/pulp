@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.516.1
+    VERSION 0.528.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -73,15 +73,16 @@ option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
        "Build the opt-in Rust staticlib reference core + FFI/RT-safety tests \
         (requires a Rust toolchain). OFF by default; no Rust for default builds."
        OFF)
-# SDK-release safety net. When ON, configure FAILS if PULP_ENABLE_GPU is set
-# but Skia binaries weren't located. The release workflow flips this ON so an
-# SDK tarball can never ship with the GPU code path silently #ifdef'd out.
-# Local developer builds leave it OFF (the default) so a no-Skia incremental
-# rebuild still configures and transparently falls back to the CG path.
+# SDK-release safety net for pulp #1817. When ON, configure FAILS if
+# PULP_ENABLE_GPU is set but Skia binaries weren't located. The release
+# workflow flips this ON so an SDK tarball can never ship with the GPU
+# code path silently #ifdef'd out. Local developer builds leave it OFF
+# (the default) so a no-Skia incremental rebuild still configures and
+# transparently falls back to the CG path.
 option(PULP_REQUIRE_GPU_FOR_SDK
        "Fail configure if PULP_ENABLE_GPU=ON but Skia was not found. \
         Set ON in .github/workflows/release-cli.yml to prevent silently \
-        shipping CG-only SDKs."
+        shipping CG-only SDKs (pulp #1817)."
        OFF)
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.

@@ -56,7 +56,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
 
-`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`.
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`. `pulp audio render` is also exposed as the `pulp_audio_render` MCP tool (`tools/mcp/mcp_tools.cpp` handler + `pulp_mcp.cpp` tools_list/dispatch + `test/test_mcp_server.cpp` membership/required-arg coverage + the `docs/guides/claude-code-plugin.md` tool table); it takes a single `param`/`midi` token (the hand-rolled MCP JSON has no array extractor), returns the metrics JSON, and defaults `--out` to a temp WAV. When adding a render flag worth exposing, mirror it there too.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
@@ -424,8 +424,20 @@ sibling build tree first, honor `PULP_BUILD_DIR` when present, and keep
 `test/test_cli_shellout.cpp` subprocess-output `INFO(...)` diagnostics so
 future failures show the delegated binary's stderr.
 
+On multi-config generators (MSVC / Visual Studio), the helper executable lives
+under the configuration directory, e.g.
+`build-windows/tools/import-design/Release/pulp-import-design.exe`, while the
+delegated relative path remains `tools/import-design/pulp-import-design`.
+Candidate lookup must therefore check both the direct single-config path and
+`Release` / `RelWithDebInfo` / `Debug` / `MinSizeRel` subdirectories, preferring
+the config inferred from the running `pulp-cpp` path when it is itself under
+`tools/cli/<config>/`. Add or keep a focused `delegate_to_build_binary` test
+that asserts the missing-helper diagnostic includes a `Release` candidate; a
+macOS/Linux single-config build will otherwise miss this Windows-only failure
+mode.
+
 **Cwd independence (2026-05-14):** `delegate_to_build_binary` in
-`tools/cli/cli_common.cpp` MUST NOT require `cwd` to be inside a Pulp
+`tools/cli/cli_delegate.cpp` MUST NOT require `cwd` to be inside a Pulp
 project to find a delegate. Sibling helpers live next to the CLI binary
 itself, so the argv[0]-relative resolution path is authoritative and
 project-root is a fallback. The original `require_project_root()` gate
@@ -1183,14 +1195,14 @@ options struct per iteration.
 
 #### `pulp scan --no-load`
 
-Filesystem-only enumeration mode. The default `pulp scan` opens each
-discovered bundle via `dlopen` to read entry-point metadata; one
-malformed plugin throwing in static-init aborts the whole scan
-(`libc++abi: terminating`). `--no-load` lists bundles by path/format
-without dlopen — the safe escape hatch when a host plugin crashes
-the scanner. `pulp scan --help` short-circuits before plugin
-enumeration so users can discover the flag even when the underlying
-scan path is broken.
+Filesystem-only enumeration mode. Installed Rust `pulp scan` is
+already filesystem-only and filename-derived; it accepts `--no-load`
+for C++ surface parity. The sibling `pulp-cpp scan` rich path opens
+bundles where needed to read entry-point metadata, so `pulp-cpp scan
+--no-load` is the safe escape hatch when a malformed plug-in crashes
+the scanner. `pulp scan --help` is handled by the Rust CLI help path;
+`pulp-cpp scan --help` likewise returns before rich scanning so users
+can discover the flag while diagnosing a broken plug-in.
 
 #### Cross-binary `pulp project bump` ↔ `undo` parity
 

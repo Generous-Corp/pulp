@@ -251,6 +251,17 @@ private:
     // exactly as before.
     state::ParameterEventQueue param_events_;
 
+    // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
+    // and given reserved, realtime-capacity-limited storage in Initialize() so
+    // the drain loop's add()/add_sysex_copy() never grows a vector on the audio
+    // thread. Reset with clear()+clear_sysex() each block. Capacities match the
+    // VST3 adapter so behaviour is uniform across formats.
+    static constexpr std::size_t kMaxEventsPerBlock = 2048;
+    static constexpr std::size_t kMaxSysexPerBlock = 64;
+    static constexpr std::size_t kMaxSysexPayloadBytes = 512;
+    midi::MidiBuffer midi_in_;
+    midi::MidiBuffer midi_out_;
+
     // Host accommodations, resolved once in the constructor via the
     // runtime policy.
     HostQuirks host_quirks_{};

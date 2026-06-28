@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "tolerance": 0.03,
+  "note": "real OfflineStretch detector scalars; regenerate with `engine-baseline --capture`",
+  "matrix": {
+    "ratio=1.5,character=clean": {
+      "transient_sharpness": 1.0,
+      "spectral_centroid": 0.0136,
+      "hf_fizz": 0.0
+    },
+    "ratio=1.5,character=varispeed": {
+      "transient_sharpness": 1.0,
+      "spectral_centroid": 0.3065,
+      "hf_fizz": 0.0
+    },
+    "ratio=2.0,character=clean": {
+      "transient_sharpness": 1.0,
+      "spectral_centroid": 0.0214,
+      "hf_fizz": 0.0
+    },
+    "ratio=2.0,character=varispeed": {
+      "transient_sharpness": 1.0,
+      "spectral_centroid": 0.5026,
+      "hf_fizz": 0.0
+    }
+  }
+}

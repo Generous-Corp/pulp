@@ -79,6 +79,8 @@ prints the trace_id so you can copy it into `motion stop`):
 
 ```bash
 pulp motion record --view Card --fps 30 --out card-fade.jsonl
+# → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
+#   in the app or test when you need an on-disk JSONL artifact.
 # → trace started — trace_id=1
 # →   stop with: pulp motion stop --trace-id 1
 ```

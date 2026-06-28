@@ -57,7 +57,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_engine(args: argparse.Namespace) -> int:
-    report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
+    if args.input:
+        report = pipeline.run_real_audio(args.input, ratio=args.ratio, character=args.character)
+    else:
+        report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
     if report["verdict"] == "SKIPPED":
         print(f"[quality-lab engine] SKIPPED — {report['reason']} "
               f"(build: cmake --build build --target stretchcli)")
@@ -99,6 +102,28 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_engine_baseline(args: argparse.Namespace) -> int:
+    from . import engine, engine_baseline
+    if not engine.available():
+        print("[quality-lab engine-baseline] SKIPPED — stretchcli not built "
+              "(cmake --build build --target stretchcli)")
+        return 0
+    if args.capture:
+        path = engine_baseline.write_baseline(engine_baseline.capture())
+        print(f"[quality-lab engine-baseline] captured baseline -> {path}")
+        return 0
+    deviations = engine_baseline.check()
+    if not deviations:
+        print("[quality-lab engine-baseline] OK — engine matches committed baseline")
+        return 0
+    print(f"[quality-lab engine-baseline] REGRESSION — {len(deviations)} deviation(s):")
+    for d in deviations:
+        tag = " (WORSE)" if d.get("worse") else ""
+        print(f"  {d['case']} {d['detector']}: {d.get('baseline')} -> {d.get('current')} "
+              f"(delta {d.get('delta')}){tag}")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -122,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     rn.set_defaults(func=_cmd_run)
 
     re = sub.add_parser("engine", help="validate the REAL Pulp stretch engine (stretchcli)")
+    re.add_argument("--input", default="", help="a REAL audio WAV (reference-free dry-input check); "
+                    "omit to use the synthetic drum corpus")
     re.add_argument("--ratio", type=float, default=2.0)
     re.add_argument("--character", default="clean",
                     choices=["clean", "varispeed", "phase_vocoder", "granular"])
@@ -141,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--expect", required=True, help="one-line: what should sound wrong")
     ca.add_argument("--family", default="tonal")
     cp.set_defaults(func=_cmd_corpus)
+
+    eb = sub.add_parser("engine-baseline",
+                        help="regression gate vs the real engine: --capture or --check")
+    eb.add_argument("--capture", action="store_true", help="(re)write the committed baseline")
+    eb.set_defaults(func=_cmd_engine_baseline)
 
     args = p.parse_args(argv)
     return args.func(args)

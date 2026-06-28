@@ -32,11 +32,18 @@ use std::process::Command;
 use assert_cmd::prelude::*;
 use tempfile::tempdir;
 
-/// Shell out to the built `pulp-rs` binary with a fresh `PULP_HOME`
-/// pointing at a test-owned tempdir.
+/// Shell out to the built `pulp-rs` binary with common test-only
+/// environment cleanup. Callers set `PULP_HOME` when they need a
+/// test-owned config/cache root.
 fn pulp_rs() -> Command {
     let mut c = Command::cargo_bin("pulp").expect("pulp-rs binary");
     c.env_remove("PULP_UPDATE_CHECK_DISABLED");
+    c
+}
+
+fn pulp_rs_no_fallthrough() -> Command {
+    let mut c = pulp_rs();
+    c.env("PULP_RS_NO_FALLTHROUGH", "1");
     c
 }
 
@@ -106,7 +113,7 @@ fn sdk_clean_removes_cache_roots_and_reports_count() {
 #[test]
 fn sdk_install_prints_stub_notice_and_exits_non_zero() {
     let home = tempdir().unwrap();
-    let out = pulp_rs()
+    let out = pulp_rs_no_fallthrough()
         .arg("sdk")
         .arg("install")
         .env("PULP_HOME", home.path())
@@ -296,7 +303,10 @@ fn projects_remove_without_path_is_bad_usage() {
 
 #[test]
 fn pr_errors_cleanly_when_native_flag_is_used() {
-    let out = pulp_rs().args(["pr", "--native"]).output().expect("run");
+    let out = pulp_rs_no_fallthrough()
+        .args(["pr", "--native"])
+        .output()
+        .expect("run");
     assert!(!out.status.success());
     let combined = format!(
         "{}{}",

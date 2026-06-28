@@ -21,8 +21,11 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <clap/clap.h>
+#include <cctype>
+#include <charconv>
 #include <cstring>
 #include <cstdio>
+#include <string>
 
 // Internal implementation — do not call directly
 namespace pulp::format::clap_generic {
@@ -169,18 +172,48 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     if (info->to_string) {
         auto str = info->to_string(static_cast<float>(value));
         snprintf(display, size, "%s", str.c_str());
-    } else if (!info->unit.empty()) {
-        snprintf(display, size, "%.2f %s", value, info->unit.c_str());
-    } else {
-        snprintf(display, size, "%.2f", value);
+        return true;
     }
+
+    // Format the numeric value with locale-independent std::to_chars so a
+    // comma-decimal host locale (de_DE, fr_FR, …) can never turn "0.50" into
+    // "0,50". This matches the previous "%.2f": fixed notation, two fractional
+    // digits. The CLAP-supplied `size` is the byte cap of the `display` buffer.
+    // The buffer is sized generously because chars_format::fixed for a very
+    // large-magnitude double needs hundreds of integer digits; if it still
+    // overflows we return false rather than emit a host-visible lie.
+    char number[512];
+    auto conv = std::to_chars(number, number + sizeof(number), value,
+                              std::chars_format::fixed, 2);
+    if (conv.ec != std::errc{}) return false;
+    std::string out(number, conv.ptr);
+    if (!info->unit.empty()) {
+        out += ' ';
+        out += info->unit;
+    }
+    snprintf(display, size, "%s", out.c_str());
     return true;
 }
 
 inline bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* value) {
-    char* end;
-    *value = strtod(text, &end);
-    return end != text;
+    if (!text) return false;
+    const char* p = text;
+    // Skip all leading whitespace, as strtod did (not just ' ').
+    while (*p != '\0' && std::isspace(static_cast<unsigned char>(*p))) ++p;
+    // strtod accepted a leading sign; from_chars accepts '-' but not '+', so
+    // strip one optional leading '+' to preserve that leniency.
+    if (*p == '+') ++p;
+    const char* end = text + std::strlen(text);
+    double parsed = 0.0;
+    // Locale-independent parse: std::from_chars always uses the C locale's
+    // decimal point, so a comma-decimal global locale cannot misparse "0.5".
+    // Trailing text (e.g. a unit suffix) is allowed, matching strtod.
+    auto result = std::from_chars(p, end, parsed);
+    // Require both: some characters consumed AND no error (e.g. out-of-range
+    // like "1e999999" advances ptr but sets ec — must reject, not write 0).
+    if (result.ptr == p || result.ec != std::errc{}) return false;
+    *value = parsed;
+    return true;
 }
 
 inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in,

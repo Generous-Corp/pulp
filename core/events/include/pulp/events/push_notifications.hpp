@@ -20,8 +20,9 @@
 // Backends (runtime-detected; build never hard-fails on a missing SDK):
 //   * macOS / iOS: `UNUserNotificationCenter` from `UserNotifications.framework`.
 //   * Linux: `libnotify.so.4` via runtime-dlopen.
-//   * Windows: `Windows.UI.Notifications.ToastNotificationManager` via WinRT
-//     activation (runtime-LoadLibrary `combase.dll`).
+//   * Windows: scaffold-only `winrt-toast-scaffold` backend that probes WinRT
+//     availability via runtime-LoadLibrary `combase.dll`, but reports
+//     unavailable until full toast activator / AUMID integration ships.
 //   * Other platforms / build configurations: `is_available()` returns false
 //     and `post_local_notification` reports a posted notification id of 0.
 
@@ -77,7 +78,7 @@ public:
     virtual bool is_available() const = 0;
 
     /// Short identifier of the active backend ("user-notifications", "libnotify",
-    /// "winrt-toast", or "none"). Useful for diagnostics and host reports.
+    /// "winrt-toast-scaffold", or "none"). Useful for diagnostics and host reports.
     virtual std::string backend_id() const = 0;
 
     /// Ask the OS for permission to post notifications. The callback fires once

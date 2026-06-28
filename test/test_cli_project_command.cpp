@@ -997,6 +997,24 @@ TEST_CASE("cli common delegates fail cleanly before shelling out",
     }
 }
 
+TEST_CASE("cli common build-binary delegation checks multi-config helper dirs",
+          "[cli][common][issue-643][windows]") {
+    TempDir tmp;
+    auto repo = tmp.path / "repo";
+    fs::create_directories(repo / "core");
+    write_file(repo / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+
+    ScopedCwd cwd(repo);
+    CapturedStreams capture;
+    REQUIRE(delegate_to_build_binary("tools/fake/pulp-helper", {},
+                                     std::string{}) == 1);
+
+    const auto expected = platform_executable(repo / "build" / "tools" /
+                                              "fake" / "Release" /
+                                              "pulp-helper");
+    REQUIRE(capture.err.str().find(expected.string()) != std::string::npos);
+}
+
 TEST_CASE("cli common interactive prompts accept defaults and parsed answers",
           "[cli][common][issue-643]") {
     ScopedColorDisabled color;
