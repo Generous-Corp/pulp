@@ -484,10 +484,25 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // code can post work to the DAW's main thread.
     main_thread_token_ = pulp::events::register_plugin_backend();
 
+    // Liveness token shared with every main-thread lambda the restart path
+    // posts, and the active flag that gates the paced poll loop. Created here
+    // so a callback posted before terminate() but run after it sees a false
+    // flag and skips touching this (now-destroyed) instance.
+    drain_alive_ = std::make_shared<std::atomic<bool>>(true);
+    poll_active_ = std::make_shared<std::atomic<bool>>(false);
+
     return kResultOk;
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
+    // Invalidate the liveness token FIRST so any main-thread lambda still
+    // queued on the host run loop (a one-shot drain or a paced poll tick)
+    // becomes a no-op and cannot dereference this instance after it is freed.
+    // unregister_plugin_backend() additionally waits for in-flight backend
+    // callbacks to drain, but the flag is the authoritative guard.
+    if (poll_active_) poll_active_->store(false, std::memory_order_release);
+    if (drain_alive_) drain_alive_->store(false, std::memory_order_release);
+
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // initialize().
     if (main_thread_token_ != 0) {
@@ -695,6 +710,81 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     return SingleComponentEffect::setupProcessing(setup);
 }
 
+// Cadence of the paced main-thread restart poll. ~33ms (≈30 Hz) is well below
+// any audible / PDC-relevant latency, far above a busy loop, and cheap: an
+// idle tick is one relaxed atomic load and an early return.
+namespace { constexpr int kRestartPollIntervalMs = 33; }
+
+// Main-thread drain of the restart publisher. process() only accumulates the
+// pending restart flags into restart_publisher_ (RT-safe); the host callback
+// fires here, off the audio thread. Called from the paced poll tick and from
+// main-thread host entrypoints (setActive / getLatencySamples /
+// getTailSamples / getState).
+void PulpVst3Processor::drain_pending_restart() {
+    // Nothing armed — cheap early-out (one acquire atomic load).
+    if (!restart_publisher_.dispatch_armed()) return;
+
+    // If a main-thread backend is registered, only deliver when we are
+    // genuinely on the main thread. When no backend is registered, VST3's
+    // threading contract says these entrypoints run on the host's UI/main
+    // thread, so delivery is safe; we degrade to delivering directly.
+    if (pulp::events::MainThreadDispatcher::has_backend() &&
+        !pulp::events::MainThreadDispatcher::is_main_thread()) {
+        // We are not on the main thread (e.g. a host that calls a query from a
+        // worker). Arrange a one-shot main-thread post. call_async may allocate
+        // / lock, which is fine here because this never runs on the audio
+        // thread. The lambda is lifetime-safe: it captures the shared alive
+        // flag and only touches `this` while the flag is true (terminate()
+        // clears it before the component is destroyed).
+        auto alive = drain_alive_;
+        pulp::events::MainThreadDispatcher::call_async([this, alive] {
+            if (alive && alive->load(std::memory_order_acquire))
+                deliver_pending_restart();
+        });
+        return;
+    }
+
+    deliver_pending_restart();
+}
+
+void PulpVst3Processor::deliver_pending_restart() {
+    auto* handler = getComponentHandler();
+    restart_publisher_.poll_main_thread([handler](int32 flags) {
+        // restartComponent is a host callback: may lock / allocate / re-enter.
+        // Safe here because this only ever runs on the main thread.
+        if (handler) handler->restartComponent(flags);
+    });
+}
+
+void PulpVst3Processor::start_restart_poll() {
+    if (!poll_active_) return;
+    // Mark active and kick the first tick. Idempotent: re-marking active while
+    // a tick chain is already running just keeps it running (the chain checks
+    // poll_active_ before re-posting, so there is at most one live chain per
+    // activation as long as start is only called from setActive(true)).
+    poll_active_->store(true, std::memory_order_release);
+    schedule_restart_poll_tick();
+}
+
+void PulpVst3Processor::schedule_restart_poll_tick() {
+    // Capture the shared liveness + active flags by value so a tick that fires
+    // after terminate()/deactivation is a safe no-op and never re-posts.
+    auto alive = drain_alive_;
+    auto active = poll_active_;
+    pulp::events::MainThreadDispatcher::call_async_after(
+        [this, alive, active] {
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            if (!active || !active->load(std::memory_order_acquire)) return;
+            deliver_pending_restart();
+            // Re-post only while still active. Stopping is cooperative: when
+            // setActive(false)/terminate() clears `active`, the next tick
+            // returns early above and the chain ends.
+            if (active->load(std::memory_order_acquire))
+                schedule_restart_poll_tick();
+        },
+        kRestartPollIntervalMs);
+}
+
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     if (!state && processor_) {
         processor_->release();
@@ -703,10 +793,25 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
         mpe_tracker_.reset();
         note_id_map_clear();
     }
+    // Activation transitions run on the main thread — flush any restart the
+    // audio thread accumulated, and start/stop the paced poll so a mid-stream
+    // change while active is delivered without an incidental host query.
+    drain_pending_restart();
+    if (poll_active_) {
+        if (state) {
+            start_restart_poll();
+        } else {
+            poll_active_->store(false, std::memory_order_release);
+        }
+    }
     return SingleComponentEffect::setActive(state);
 }
 
 uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
+    // Host re-queries latency on the main thread after a restart; flush any
+    // pending restart notification first so the report and the host's PDC
+    // refresh stay in step. (Belt-and-suspenders alongside the paced poll.)
+    drain_pending_restart();
     if (!processor_) return 0;
     // VST3 reports latency as unsigned, so a negative latency_samples()
     // would wrap to a huge value without the host-quirk clamp. When the
@@ -716,6 +821,9 @@ uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
 }
 
 uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
+    // Same rationale as getLatencySamples: a host re-queries the tail on the
+    // main thread after a kReloadComponent restart, so flush here.
+    drain_pending_restart();
     if (!processor_) return 0;
     auto tail = processor_->descriptor().tail_samples;
     if (tail < 0) return Steinberg::Vst::kInfiniteTail;
@@ -1319,18 +1427,28 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
-    // Publish latency / tail changes the processor flagged during
-    // process(). VST3's IComponentHandler::restartComponent is documented
-    // as safe to call from the host's audio callback; the handler is
-    // expected to queue it for main-thread delivery. We still drain the
-    // atomic flag so process() never has to take a lock or allocate.
-    if (componentHandler) {
+    // Publish latency / tail changes the processor flagged during process().
+    //
+    // IComponentHandler::restartComponent is a HOST callback that may take
+    // locks, allocate, and synchronously re-enter the plug-in — none of which
+    // is safe on the real-time audio thread. So process() never calls it
+    // directly. Instead it consumes the processor's RT-safe pending flags and
+    // OR-accumulates them into restart_publisher_ (a lock-free, allocation-free
+    // atomic). The matching restartComponent(flags) call fires on the main
+    // thread via drain_pending_restart(). Coalescing in the publisher means a
+    // burst of changes still produces exactly one host notification.
+    {
         int32 flags = 0;
         if (processor_->consume_latency_changed_flag()) flags |= kLatencyChanged;
         if (processor_->consume_tail_changed_flag())    flags |= kReloadComponent;
-        if (flags != 0) {
-            componentHandler->restartComponent(flags);
-        }
+        // note_pending() is the only thing the audio thread does here: an
+        // atomic OR plus an exchange, no allocation and no lock. The matching
+        // restartComponent(flags) host callback is delivered later by
+        // drain_pending_restart() on the main thread (driven by the main-thread
+        // host entrypoints getLatencySamples / getTailSamples / setActive,
+        // which a host re-queries after a latency/tail change). Calling
+        // call_async here is deliberately avoided — it allocates and locks.
+        restart_publisher_.note_pending(flags);
     }
 
     // Write MIDI output
@@ -1358,6 +1476,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 }
 
 tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
+    // getState runs on the main thread — another opportunity to flush a
+    // pending restart (alongside the paced poll and the latency/tail queries).
+    drain_pending_restart();
     if (!processor_) return kResultFalse;
     auto data = plugin_state_io::serialize(store_, *processor_);
     int32 written;

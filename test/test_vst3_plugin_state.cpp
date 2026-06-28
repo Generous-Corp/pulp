@@ -7,7 +7,9 @@
 #include <pulp/midi/message.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pluginterfaces/vst/ivstnoteexpression.h>
+#include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
@@ -21,6 +23,8 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <atomic>
+#include <thread>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -78,6 +82,63 @@ private:
     std::optional<std::string> prev_;
 };
 
+// Controllable MainThreadDispatcher backend for deterministic testing of the
+// adapter's paced restart poll. It registers itself as the active backend
+// (last registration wins) and captures every posted / delayed task instead of
+// running it on a live OS run loop, so a test can drive ticks by hand and
+// observe re-scheduling, delivery, and post-teardown no-ops. `is_main_thread`
+// reports true (the test thread acts as the main thread here).
+class ScopedMainThreadBackend {
+public:
+    ScopedMainThreadBackend() {
+        pulp::events::MainThreadDispatcher::Backend backend;
+        backend.post = [this](pulp::events::Task task) {
+            immediate_.push_back(std::move(task));
+            return true;
+        };
+        backend.is_main_thread = [] { return true; };
+        backend.post_after = [this](pulp::events::Task task, int) {
+            delayed_.push_back(std::move(task));
+            return true;
+        };
+        token_ = pulp::events::MainThreadDispatcher::register_backend(std::move(backend));
+    }
+    ~ScopedMainThreadBackend() {
+        if (token_ != 0)
+            pulp::events::MainThreadDispatcher::unregister_backend(token_);
+    }
+
+    ScopedMainThreadBackend(const ScopedMainThreadBackend&) = delete;
+    ScopedMainThreadBackend& operator=(const ScopedMainThreadBackend&) = delete;
+
+    std::size_t delayed_pending() const { return delayed_.size(); }
+    std::size_t immediate_pending() const { return immediate_.size(); }
+
+    // Run every currently-queued delayed task once. Tasks the running tasks
+    // enqueue (the next poll tick) are NOT run in the same call — they land in
+    // a fresh queue and require another run_delayed() to fire, matching a real
+    // timer's one-tick-per-interval cadence.
+    int run_delayed() {
+        std::vector<pulp::events::Task> batch;
+        batch.swap(delayed_);
+        for (auto& t : batch)
+            if (t) t();
+        return static_cast<int>(batch.size());
+    }
+    int run_immediate() {
+        std::vector<pulp::events::Task> batch;
+        batch.swap(immediate_);
+        for (auto& t : batch)
+            if (t) t();
+        return static_cast<int>(batch.size());
+    }
+
+private:
+    pulp::events::MainThreadDispatcher::Token token_ = 0;
+    std::vector<pulp::events::Task> immediate_;
+    std::vector<pulp::events::Task> delayed_;
+};
+
 struct TestVst3Config {
     pulp::format::PluginDescriptor descriptor{
         .name = "Vst3PluginStateTest",
@@ -91,6 +152,12 @@ struct TestVst3Config {
     bool add_bypass_param = false;
     bool mutate_gain_in_process = false;
     bool emit_midi_out = false;
+    // When set, the test processor flags a latency / tail change from inside
+    // process() (the audio-thread render callback), exercising the adapter's
+    // RT-safe restart-publisher path. It flags once on the first block so the
+    // edge is observable without flagging on every block.
+    bool flag_latency_in_process = false;
+    bool flag_tail_in_process = false;
     bool veto_bus_layout = false;  // is_bus_layout_supported() always returns false
     bool capture_param_event_vector = true;
     int latency_samples = 0;
@@ -199,6 +266,7 @@ public:
     float first_param_event_value = 0.0f;
     float last_param_event_value = 0.0f;
     float gain_seen_in_process = 0.0f;
+    bool flagged_restart_in_process_ = false;
     // Per-note expression (MPE) sidecar observation, captured each process().
     bool mpe_input_attached = false;
     std::size_t mpe_event_count = 0;
@@ -287,6 +355,16 @@ void TestVst3Processor::process(
 
     if (config_.mutate_gain_in_process) {
         state().set_value(kGainParamId, -6.0f);
+    }
+    // Flag a latency / tail change from the audio thread exactly once, on the
+    // first block. The adapter must marshal the resulting restartComponent call
+    // to the main thread; it must NOT fire the host callback from here.
+    if (!flagged_restart_in_process_) {
+        if (config_.flag_latency_in_process) flag_latency_changed();
+        if (config_.flag_tail_in_process) flag_tail_changed();
+        if (config_.flag_latency_in_process || config_.flag_tail_in_process) {
+            flagged_restart_in_process_ = true;
+        }
     }
     if (config_.emit_midi_out) {
         auto note = pulp::midi::MidiEvent::note_on(1, 64, 100);
@@ -409,6 +487,49 @@ public:
 
     Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
     Steinberg::uint32 PLUGIN_API release() override { return 1; }
+};
+
+// Capturing IComponentHandler: records every restartComponent call — the
+// coalesced flags, a call count, and the std::thread::id it ran on — so a test
+// can assert the host callback never fires on the audio (process) thread and
+// does fire, with the right flags, on the main/poll thread.
+class CapturingComponentHandler final : public Steinberg::Vst::IComponentHandler {
+public:
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID,
+                                              Steinberg::Vst::ParamValue) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
+        ++restart_calls;
+        last_flags = flags;
+        accumulated_flags |= flags;
+        last_thread = std::this_thread::get_id();
+        return Steinberg::kResultOk;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                 void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+
+    int restart_calls = 0;
+    Steinberg::int32 last_flags = 0;
+    Steinberg::int32 accumulated_flags = 0;
+    std::thread::id last_thread{};
 };
 
 class VectorStream final : public Steinberg::IBStream {
@@ -585,6 +706,294 @@ TEST_CASE("VST3 latency and tail report processor runtime contract",
         REQUIRE(processor.getTailSamples() == Steinberg::Vst::kInfiniteTail);
         REQUIRE(processor.terminate() == Steinberg::kResultOk);
     }
+}
+
+TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
+          "[vst3][latency][realtime][rt-safety]") {
+    // IComponentHandler::restartComponent is a host callback that may lock,
+    // allocate, and synchronously re-enter the plug-in, so it must never run on
+    // the real-time audio thread. When the processor flags a latency/tail change
+    // during process(), the adapter only accumulates RT-safe atomic flags; the
+    // host callback fires later on the main thread.
+    using Steinberg::Vst::kLatencyChanged;
+    using Steinberg::Vst::kReloadComponent;
+
+    TestVst3Config config;
+    config.flag_latency_in_process = true;
+    config.flag_tail_in_process = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    CapturingComponentHandler handler;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE(processor.setComponentHandler(&handler) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    const std::thread::id main_thread_id = std::this_thread::get_id();
+
+    SECTION("process() flags a restart without calling the host callback") {
+        // Run process() on a DEDICATED thread so its identity is provably
+        // distinct from the main thread. The host callback must not fire here.
+        std::thread audio_thread([&] {
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        });
+        audio_thread.join();
+
+        // No restartComponent during the audio render — only the atomic flag.
+        REQUIRE(handler.restart_calls == 0);
+        REQUIRE(processor.restart_dispatch_armed_for_test());
+
+        // Draining on the main thread (here, the test thread) delivers exactly
+        // one restartComponent with the coalesced flags.
+        const Steinberg::int32 delivered = processor.poll_pending_restart_for_test();
+        REQUIRE(delivered == (kLatencyChanged | kReloadComponent));
+        REQUIRE(handler.restart_calls == 1);
+        REQUIRE(handler.last_flags == (kLatencyChanged | kReloadComponent));
+        REQUIRE(handler.last_thread == main_thread_id);
+        REQUIRE_FALSE(processor.restart_dispatch_armed_for_test());
+
+        // A second drain with nothing pending is a no-op (no duplicate notify).
+        REQUIRE(processor.poll_pending_restart_for_test() == 0);
+        REQUIRE(handler.restart_calls == 1);
+    }
+
+    SECTION("multiple flagged blocks coalesce into a single host notification") {
+        // The test processor flags only on its first block, but flag the
+        // processor again directly to simulate a multi-block burst before any
+        // drain. Both edges must collapse to ONE restartComponent call.
+        std::thread audio_thread([&] {
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);  // flags
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);  // no flag
+        });
+        audio_thread.join();
+        REQUIRE(handler.restart_calls == 0);
+
+        processor.poll_pending_restart_for_test();
+        REQUIRE(handler.restart_calls == 1);
+    }
+
+    SECTION("a main-thread host entrypoint drains the pending restart") {
+        // getLatencySamples() runs on the main thread; a host re-queries it
+        // after a latency change. It must flush the pending restartComponent.
+        std::thread audio_thread([&] {
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        });
+        audio_thread.join();
+        REQUIRE(handler.restart_calls == 0);
+
+        (void)processor.getLatencySamples();
+        REQUIRE(handler.restart_calls == 1);
+        REQUIRE(handler.last_flags == (kLatencyChanged | kReloadComponent));
+        REQUIRE(handler.last_thread == main_thread_id);
+    }
+
+    SECTION("flagging a restart adds no allocation to the process() path") {
+        // process() has unrelated per-block allocations (e.g. the test
+        // processor's bookkeeping), so the RT-safety claim is differential: a
+        // block that flags a restart must allocate NO MORE than an otherwise-
+        // identical block that does not — i.e. note_pending() itself is
+        // allocation-free. (It is a pure atomic OR + exchange.)
+        auto* tp = TestVst3Processor::g_last_processor;
+        REQUIRE(tp != nullptr);
+
+        auto allocs_for_block = [&](bool flag) -> std::size_t {
+            // Drain any prior pending restart and arm/disarm flagging.
+            processor.poll_pending_restart_for_test();
+            tp->flagged_restart_in_process_ = !flag;  // true => won't flag
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);  // warm
+            processor.poll_pending_restart_for_test();
+            tp->flagged_restart_in_process_ = !flag;
+            pulp::test::RtAllocationProbe probe;
+            REQUIRE(processor.process(data) == Steinberg::kResultOk);
+            return probe.allocation_count();
+        };
+
+        const std::size_t without_flag = allocs_for_block(false);
+        const std::size_t with_flag = allocs_for_block(true);
+        INFO("process() allocations: without_flag=" << without_flag
+             << ", with_flag=" << with_flag);
+        REQUIRE(with_flag <= without_flag);
+        // And the flagged block did arm a pending restart.
+        REQUIRE(processor.restart_dispatch_armed_for_test());
+    }
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 paced main-thread poll delivers a restart without a host query",
+          "[vst3][latency][realtime][rt-safety]") {
+    // Liveness: a mid-stream latency change must reach the host even if the
+    // host never calls another main-thread query (getLatency/Tail/getState).
+    // The adapter's paced poll on the main-thread dispatcher delivers it.
+    using Steinberg::Vst::kLatencyChanged;
+
+    TestVst3Config config;
+    config.flag_latency_in_process = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    CapturingComponentHandler handler;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    // Install the controllable backend AFTER initialize() so it is the active
+    // one (last registration wins over the adapter's plugin backend).
+    ScopedMainThreadBackend backend;
+    REQUIRE(processor.setComponentHandler(&handler) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    // Activating starts the paced poll: exactly one delayed tick is scheduled.
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+    REQUIRE(backend.delayed_pending() == 1);
+
+    // A render block flags a latency change on the audio thread.
+    std::array<float, 8> in_l{}, in_r{}, out_l{}, out_r{};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = 8;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+
+    std::thread audio_thread([&] {
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    });
+    audio_thread.join();
+
+    // No host query was made — the restart is only delivered by the poll tick.
+    REQUIRE(handler.restart_calls == 0);
+    REQUIRE(processor.restart_dispatch_armed_for_test());
+
+    // Run the scheduled tick: it drains the publisher (delivering the restart)
+    // AND re-schedules the next tick (still active).
+    REQUIRE(backend.run_delayed() == 1);
+    REQUIRE(handler.restart_calls == 1);
+    REQUIRE(handler.last_flags == kLatencyChanged);
+    REQUIRE_FALSE(processor.restart_dispatch_armed_for_test());
+    REQUIRE(backend.delayed_pending() == 1);  // poll keeps running while active
+
+    // A subsequent tick with nothing pending delivers nothing but keeps polling.
+    REQUIRE(backend.run_delayed() == 1);
+    REQUIRE(handler.restart_calls == 1);
+    REQUIRE(backend.delayed_pending() == 1);
+
+    // Deactivating stops the poll: the next tick is a no-op and does not re-post.
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(backend.run_delayed() == 1);
+    REQUIRE(backend.delayed_pending() == 0);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 a restart callback queued past terminate() is a safe no-op",
+          "[vst3][latency][realtime][rt-safety]") {
+    // P0 lifetime safety: a main-thread lambda the adapter posted before
+    // terminate() must not touch the (destroyed) instance when it finally runs.
+    // The shared liveness flag, cleared in terminate(), makes it a no-op.
+    using Steinberg::Vst::kLatencyChanged;
+
+    TestVst3Config config;
+    config.flag_latency_in_process = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    CapturingComponentHandler handler;
+    // Declared before the processor scope so it outlives the processor and can
+    // run the stale tick after the processor is destroyed. Registered as the
+    // ACTIVE backend below, after initialize() installs the adapter's plugin
+    // backend (last registration wins).
+    std::optional<ScopedMainThreadBackend> backend;
+
+    {
+        auto processor =
+            std::make_unique<pulp::format::vst3::PulpVst3Processor>(create_test_processor);
+        REQUIRE(processor->initialize(&host_app) == Steinberg::kResultOk);
+        backend.emplace();
+        REQUIRE(processor->setComponentHandler(&handler) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 8;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor->setupProcessing(setup) == Steinberg::kResultOk);
+
+        // Activate (schedules a poll tick), then arm a restart from a render
+        // block — so the queued tick has real work to deliver — and terminate
+        // WITHOUT running the tick. The tick now references a soon-to-be-
+        // destroyed instance and a still-armed restart.
+        REQUIRE(processor->setActive(true) == Steinberg::kResultOk);
+        REQUIRE(backend->delayed_pending() >= 1);
+
+        std::array<float, 8> in_l{}, in_r{}, out_l{}, out_r{};
+        float* ins[2] = {in_l.data(), in_r.data()};
+        float* outs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+        ab_in[0].numChannels = 2;
+        ab_in[0].channelBuffers32 = ins;
+        Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+        ab_out[0].numChannels = 2;
+        ab_out[0].channelBuffers32 = outs;
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = 8;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = ab_in;
+        data.outputs = ab_out;
+        REQUIRE(processor->process(data) == Steinberg::kResultOk);
+        REQUIRE(processor->restart_dispatch_armed_for_test());
+
+        // terminate() directly (no setActive(false), which would drain
+        // synchronously on this main thread). The pending poll tick survives.
+        REQUIRE(processor->terminate() == Steinberg::kResultOk);
+        // processor destroyed here.
+    }
+
+    // Run the stale tick(s). With the liveness flag cleared, they must not call
+    // restartComponent and must not crash (no use-after-free).
+    backend->run_delayed();
+    backend->run_immediate();
+    REQUIRE(handler.restart_calls == 0);
 }
 
 TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",

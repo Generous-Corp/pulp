@@ -49,6 +49,19 @@ MainThreadDispatcher::Backend make_backend(std::shared_ptr<std::atomic<bool>> al
             if (!alive || !alive->load(std::memory_order_acquire)) return false;
             return static_cast<bool>([NSThread isMainThread]);
         },
+        [alive](Task task, int delay_ms) -> bool {
+            if (!task) return false;
+            if (!alive || !alive->load(std::memory_order_acquire)) return false;
+            auto* heap_task = new Task(std::move(task));
+            const dispatch_time_t when = dispatch_time(
+                DISPATCH_TIME_NOW,
+                static_cast<int64_t>(delay_ms) * NSEC_PER_MSEC);
+            dispatch_after(when, dispatch_get_main_queue(), ^{
+                std::unique_ptr<Task> owned(heap_task);
+                if (*owned) (*owned)();
+            });
+            return true;
+        },
     };
 }
 
