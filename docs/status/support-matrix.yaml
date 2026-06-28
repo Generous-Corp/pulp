@@ -895,7 +895,7 @@ limitations:
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
-    - text: "MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed."
+    - text: "Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
   formats.au_v2:
     - text: "Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify)."
