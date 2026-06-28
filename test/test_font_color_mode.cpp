@@ -6,7 +6,6 @@
 // policy enum.
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 
@@ -34,8 +33,7 @@ TEST_CASE("ColorFont: Inter (non-color) reports supports_color_font=false",
     opts.size = 14.0f;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        WARN("Inter not resolved; skipping color-table check");
-        return;
+        SKIP("Inter not resolved; color-table check requires bundled/system font resolution");
     }
     REQUIRE_FALSE(resolved.supports_color_font());
 }
@@ -51,10 +49,10 @@ TEST_CASE("ColorFont: Apple Color Emoji on macOS reports true if installed",
         // Apple Color Emoji uses the `sbix` bitmap strikes table.
         REQUIRE(resolved.supports_color_font());
     } else {
-        WARN("Apple Color Emoji not resolvable on this host");
+        SKIP("Apple Color Emoji not resolvable on this host");
     }
 #else
-    SUCCEED("non-Apple host; Apple Color Emoji unavailable");
+    SKIP("non-Apple host; Apple Color Emoji unavailable");
 #endif
 }
 
@@ -70,10 +68,10 @@ TEST_CASE("ColorFont: color_font_active respects ForceMonochrome override",
         REQUIRE(resolved.supports_color_font());
         REQUIRE_FALSE(resolved.color_font_active());  // forced mono
     } else {
-        SUCCEED("Apple Color Emoji not resolvable; skipped");
+        SKIP("Apple Color Emoji not resolvable");
     }
 #else
-    SUCCEED("non-Apple host; emoji-policy check skipped");
+    SKIP("non-Apple host; emoji-policy check requires Apple Color Emoji");
 #endif
 }
 
@@ -85,8 +83,7 @@ TEST_CASE("ColorFont: Auto mode delegates to font capability",
     opts.color_font_mode = ColorFontMode::Auto;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Inter not resolved; skipped");
-        return;
+        SKIP("Inter not resolved; Auto-mode policy check requires bundled/system font resolution");
     }
     // Inter has no color tables → Auto means inactive.
     REQUIRE_FALSE(resolved.color_font_active());
@@ -119,8 +116,7 @@ TEST_CASE("ColorFont: explicit COLR mode rejects font without COLR table",
     opts.color_font_mode = ColorFontMode::COLR;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host");
     }
     // Apple Color Emoji uses sbix bitmaps, not COLR → supports_color_font
     // is still true (any color table) but color_font_active under an
@@ -128,7 +124,7 @@ TEST_CASE("ColorFont: explicit COLR mode rejects font without COLR table",
     REQUIRE(resolved.supports_color_font());
     REQUIRE_FALSE(resolved.color_font_active());
 #else
-    SUCCEED("requires macOS + Skia for Apple Color Emoji probe");
+    SKIP("requires macOS + Skia for Apple Color Emoji probe");
 #endif
 }
 
@@ -144,13 +140,12 @@ TEST_CASE("ColorFont: explicit Bitmap mode accepts sbix-strikes font",
     opts.color_font_mode = ColorFontMode::Bitmap;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host");
     }
     REQUIRE(resolved.supports_color_font());
     REQUIRE(resolved.color_font_active());
 #else
-    SUCCEED("requires macOS + Skia for Apple Color Emoji probe");
+    SKIP("requires macOS + Skia for Apple Color Emoji probe");
 #endif
 }
 
@@ -165,12 +160,11 @@ TEST_CASE("ColorFont: explicit SVG mode rejects font without SVG table",
     opts.color_font_mode = ColorFontMode::SVG;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host");
     }
     REQUIRE(resolved.supports_color_font());
     REQUIRE_FALSE(resolved.color_font_active());
 #else
-    SUCCEED("requires macOS + Skia for Apple Color Emoji probe");
+    SKIP("requires macOS + Skia for Apple Color Emoji probe");
 #endif
 }
