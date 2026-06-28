@@ -2574,3 +2574,26 @@ TEST_CASE("reset_triggers_rt respects the duplicate-id latest-wins contract",
     REQUIRE(store2.reset_triggers_rt());
     REQUIRE_THAT(store2.get_value(9), WithinAbs(0.0, 0.0001));
 }
+
+TEST_CASE("StateStore clamps an out-of-range default and round-trips it",
+          "[state]") {
+    StateStore store;
+    // Default 0.0 is BELOW the [0.001, 2.0] range — a realistic authoring slip
+    // (e.g. a skewed ADSR control whose default was left at 0).
+    store.add_parameter(make_param_info(1, "Attack", "s", {0.001f, 2.0f, 0.0f}));
+
+    // Registration clamps the default into range, consistently with set_value()
+    // and reset_to_default() (which both clamp); get_default() reports it too.
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.001, 1e-9));
+    REQUIRE_THAT(store.get_default(1), WithinAbs(0.001, 1e-9));
+
+    // State now round-trips byte-exactly. Before the registration clamp the
+    // unclamped 0.0 serialized, but deserialize()'s set_value clamped it to
+    // 0.001, so a save -> change -> load -> save was not idempotent.
+    auto first = store.serialize();
+    store.set_value(1, 1.5f);
+    REQUIRE(store.deserialize(first));
+    auto second = store.serialize();
+    REQUIRE(first == second);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.001, 1e-9));
+}
