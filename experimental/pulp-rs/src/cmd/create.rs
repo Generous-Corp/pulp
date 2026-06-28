@@ -25,6 +25,7 @@
 //! | `ensure_sdk()` / network fetch                  | **Skipped** |
 //! | Post-scaffold build / ctest                     | **Skipped** |
 //! | `--pin` / `--debug` effects                     | **Skipped** |
+//! | AAX SDK default-format gating                   | Ported      |
 //! | AAX/AU SDK availability warnings                | **Skipped** |
 //! | Android template tree copy                      | Ported      |
 //! | `~/.pulp/projects.json` registry add            | **Skipped** |
@@ -51,6 +52,7 @@ use std::path::{Component, Path, PathBuf};
 
 use rand::RngCore;
 
+use super::create_formats::default_formats;
 use crate::error::{CliError, Result};
 
 /// Parsed argument surface for `pulp-rs create`.
@@ -358,20 +360,6 @@ pub fn expand_template(body: &str, vars: &[(&str, &str)]) -> String {
         s = s.replace(&pat, v);
     }
     s
-}
-
-/// Pick the default formats string for a given project kind.
-///
-/// Mirrors `default_create_formats` behaviour where the SDK is fully
-/// available — the Rust port doesn't probe the checkout, so we just
-/// emit the canonical default per kind and let `cmake_template_dir`
-/// pick up whatever templates are actually present.
-#[must_use]
-pub fn default_formats(kind: &str) -> String {
-    match kind {
-        "app" | "bare" => "Standalone".to_owned(),
-        _ => "VST3 CLAP LV2 AU AAX Standalone".to_owned(),
-    }
 }
 
 // ── Scaffolding ──────────────────────────────────────────────────────
@@ -879,11 +867,7 @@ mod tests {
             "project({{CLASS_NAME}})\n",
         )
         .unwrap();
-        fs::write(
-            templates.join("test.cpp.template"),
-            "t={{LOWER_NAME}}\n",
-        )
-        .unwrap();
+        fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
     }
 
     #[test]
@@ -1098,7 +1082,9 @@ mod tests {
             ..CreateArgs::default()
         };
         let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
-        assert!(err.to_string().contains("--in-tree projects must live under"));
+        assert!(err
+            .to_string()
+            .contains("--in-tree projects must live under"));
     }
 
     #[test]
@@ -1222,7 +1208,10 @@ mod tests {
             "--targets".to_owned(),
             "android,ios".to_owned(),
         ]);
-        assert_eq!(p.output.as_deref().map(Path::to_str), Some(Some("/tmp/out")));
+        assert_eq!(
+            p.output.as_deref().map(Path::to_str),
+            Some(Some("/tmp/out"))
+        );
         assert_eq!(p.targets, vec!["android", "ios"]);
     }
 
@@ -1245,11 +1234,7 @@ mod tests {
 
     #[test]
     fn parse_args_first_non_flag_wins_as_name() {
-        let p = parse_args(&[
-            "first".to_owned(),
-            "second".to_owned(),
-            "third".to_owned(),
-        ]);
+        let p = parse_args(&["first".to_owned(), "second".to_owned(), "third".to_owned()]);
         assert_eq!(p.name, "first");
     }
 
@@ -1270,17 +1255,6 @@ mod tests {
         assert_eq!(split_targets("a b c"), vec!["a", "b", "c"]);
         assert_eq!(split_targets("a, b , c"), vec!["a", "b", "c"]);
         assert!(split_targets("").is_empty());
-    }
-
-    #[test]
-    fn default_formats_picks_per_kind() {
-        // "effect" / unknown kind → full plugin matrix.
-        let s = default_formats("effect");
-        assert!(s.contains("VST3"));
-        assert!(s.contains("CLAP"));
-        // app / bare → Standalone only.
-        assert_eq!(default_formats("app"), "Standalone");
-        assert_eq!(default_formats("bare"), "Standalone");
     }
 
     #[test]
