@@ -12,6 +12,7 @@
 #include <pulp/audio/rolling_audio_capture_buffer.hpp>
 #include <pulp/format/detail/standalone_audio_capture_rolling_wav.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
+#include <pulp/format/detail/standalone_rolling_capture.hpp>
 #include <pulp/format/standalone.hpp>
 
 #include <cmath>
@@ -22,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include <atomic>
 #include <cstdlib>
 
 namespace {
@@ -193,6 +195,75 @@ TEST_CASE("rolling capture WAV with an empty path or unprepared buffer is a no-o
 }
 
 #if PULP_ENABLE_AUDIO_PROBES
+TEST_CASE("standalone rolling capture prepares the configured last-window ring",
+          "[standalone][audio-capture-rolling]") {
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::format::StandaloneConfig inactive;
+    inactive.output_channels = 2;
+    CHECK_FALSE(pulp::format::detail::prepare_standalone_rolling_capture(
+        rolling, inactive));
+    CHECK(rolling.num_channels() == 0u);
+    CHECK(rolling.capacity_frames() == 0u);
+
+    pulp::format::StandaloneConfig cfg;
+    cfg.audio_capture_rolling_path = "out.wav";
+    cfg.output_channels = 2;
+    cfg.audio_capture_rolling_frames =
+        pulp::format::detail::kMaxCaptureWindowSamples + 1024;
+    REQUIRE(pulp::format::detail::prepare_standalone_rolling_capture(
+        rolling, cfg));
+    CHECK(rolling.num_channels() == 2u);
+    CHECK(rolling.capacity_frames() ==
+          static_cast<std::uint64_t>(
+              pulp::format::detail::kMaxCaptureWindowSamples));
+
+    pulp::audio::RollingAudioCaptureBuffer no_channels;
+    cfg.output_channels = 0;
+    CHECK_FALSE(pulp::format::detail::prepare_standalone_rolling_capture(
+        no_channels, cfg));
+    CHECK(no_channels.capacity_frames() == 0u);
+}
+
+TEST_CASE("standalone rolling capture append tap publishes delivered channels",
+          "[standalone][audio-capture-rolling]") {
+    constexpr int kPrepared = 2;
+    constexpr int kDelivered = 1;
+    constexpr int kFrames = 4;
+
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::audio::RollingAudioCaptureBufferConfig rc;
+    rc.num_channels = kPrepared;
+    rc.max_frames = 8;
+    REQUIRE(rolling.prepare(rc));
+
+    std::vector<float> mono{0.10f, 0.11f, 0.12f, 0.13f};
+    const float* ptrs[] = {mono.data()};
+    pulp::audio::BufferView<const float> output(ptrs, kDelivered, kFrames);
+    std::atomic<int> delivered{99};
+
+    pulp::format::detail::append_standalone_rolling_capture_output(
+        false, rolling, delivered, output);
+    CHECK(delivered.load(std::memory_order_relaxed) == 99);
+    CHECK_FALSE(rolling.snapshot_last(1).valid);
+
+    pulp::format::detail::append_standalone_rolling_capture_output(
+        true, rolling, delivered, output);
+    CHECK(delivered.load(std::memory_order_relaxed) == kDelivered);
+
+    pulp::audio::Buffer<float> materialized(kPrepared, kFrames);
+    const auto hold = rolling.hold_last(kFrames);
+    REQUIRE(hold.valid());
+    const auto result = rolling.materialize_held(hold, materialized.view());
+    REQUIRE(result.status ==
+            pulp::audio::RollingAudioCaptureMaterializeStatus::Ok);
+    REQUIRE(result.frames_copied == kFrames);
+    const auto materialized_view = materialized.view();
+    CHECK(materialized_view.channel_ptr(0)[0] == mono[0]);
+    CHECK(materialized_view.channel_ptr(0)[3] == mono[3]);
+    CHECK(materialized_view.channel_ptr(1)[0] == 0.0f);
+    CHECK(materialized_view.channel_ptr(1)[3] == 0.0f);
+}
+
 TEST_CASE("a rolling-capture-only headless run does not require a screenshot",
           "[standalone][audio-capture-rolling]") {
     pulp::format::StandaloneConfig cfg;

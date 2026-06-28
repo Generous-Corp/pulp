@@ -42,6 +42,7 @@
 #include <pulp/format/detail/standalone_audio_capture_rolling_wav.hpp>
 #include <pulp/format/detail/standalone_audio_capture_wav.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_rolling_capture.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
 #include <pulp/view/command_registry.hpp>
@@ -239,23 +240,8 @@ bool StandaloneApp::start() {
     // float-storage ring, fed from the same audio-thread output tap. Sized to the
     // requested window (0 = the shared capture cap). Gated so the audio thread
     // does zero extra work when --audio-capture-rolling is off.
-    rolling_capture_active_ = !config_.audio_capture_rolling_path.empty();
-    if (rolling_capture_active_) {
-        const int rolling_frames = config_.audio_capture_rolling_frames > 0
-            ? std::clamp(config_.audio_capture_rolling_frames, 1,
-                         detail::kMaxCaptureWindowSamples)
-            : detail::kMaxCaptureWindowSamples;
-        if (config_.audio_capture_rolling_frames > detail::kMaxCaptureWindowSamples) {
-            runtime::log_info(
-                "Standalone: --audio-capture-rolling-frames {} exceeds the {}-sample cap; clamping",
-                config_.audio_capture_rolling_frames, detail::kMaxCaptureWindowSamples);
-        }
-        audio::RollingAudioCaptureBufferConfig rolling_config;
-        rolling_config.num_channels =
-            static_cast<std::uint32_t>(std::max(config_.output_channels, 0));
-        rolling_config.max_frames = static_cast<std::uint64_t>(rolling_frames);
-        rolling_capture_active_ = rolling_capture_.prepare(rolling_config);
-    }
+    rolling_capture_active_ =
+        detail::prepare_standalone_rolling_capture(rolling_capture_, config_);
 #endif
 
     // Set up MIDI input (optional)
@@ -348,11 +334,9 @@ bool StandaloneApp::start() {
                 output_probe_ptrs_.data(), probe_ch, output.num_samples());
             output_probe_.analyze_output(out_view);
             // Same tap feeds the rolling last-N capture (RT-safe append).
-            if (rolling_capture_active_) {
-                rolling_capture_.append(out_view, output.num_samples());
-                rolling_capture_channels_.store(static_cast<int>(probe_ch),
-                                                std::memory_order_relaxed);
-            }
+            detail::append_standalone_rolling_capture_output(
+                rolling_capture_active_, rolling_capture_, rolling_capture_channels_,
+                out_view);
         };
 #endif
 
