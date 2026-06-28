@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
 // kit_commands.cpp — metadata-only Pulp package/kit commands.
-// This file intentionally performs no package execution: no CMake, JS,
-// scripts, dylibs, or tool hooks are invoked while validating or inspecting.
-// The explicit `verify --execute-screenshots` path is the only opt-in exception:
-// it runs exported UI entries through the local pulp-screenshot tool.
+// This file intentionally performs no package execution while validating or
+// inspecting; `verify --execute-screenshots` is the only explicit opt-in path.
 
 #include "kit_commands.hpp"
 
