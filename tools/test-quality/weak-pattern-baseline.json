@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-audio-inspector-window-skip-final.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-canvas-fonts-skip-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 301,
+    "succeed": 299,
     "require_true": 16,
-    "skip": 509
+    "skip": 511
   },
   "classifications": {
-    "needs-review": 785,
+    "needs-review": 787,
     "placeholder": 4,
-    "skip-as-pass": 21,
+    "skip-as-pass": 19,
     "unconditional-true": 16
   },
   "notes": [

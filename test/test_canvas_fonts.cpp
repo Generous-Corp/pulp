@@ -82,8 +82,8 @@ TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
           "[canvas][skia][fonts][issue-932]") {
     auto mgr = test_platform_font_mgr();
     if (!mgr) {
-        SUCCEED("Skipping bundled-font lookup — no platform font manager "
-                "linked into pulp-test-canvas on this platform.");
+        SKIP("bundled-font lookup requires a platform font manager linked into "
+             "pulp-test-canvas");
         return;
     }
 
@@ -319,8 +319,7 @@ TEST_CASE("register_font is idempotent — re-registering the same family is "
     const bool first = pulp::canvas::register_font_file(PULP_TEST_FONT_PATH,
                                                         family);
     if (!first) {
-        SUCCEED("Soft-fail on this build (no platform SkFontMgr). Skipping "
-                "idempotence assertion.");
+        SKIP("register_font idempotence assertion requires platform SkFontMgr");
         return;
     }
     REQUIRE(pulp::canvas::is_font_registered(family));
