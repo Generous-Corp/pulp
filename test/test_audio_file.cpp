@@ -649,6 +649,12 @@ TEST_CASE("Float32 WAV preserves precision below the int16 floor", "[audio][file
     auto i16 = read_audio_file(i16_path.string());
     REQUIRE(f32.has_value());
     REQUIRE(i16.has_value());
+    auto f32_info = read_audio_file_info(f32_path.string());
+    auto i16_info = read_audio_file_info(i16_path.string());
+    REQUIRE(f32_info.has_value());
+    REQUIRE(i16_info.has_value());
+    REQUIRE(f32_info->bits_per_sample == 32);
+    REQUIRE(i16_info->bits_per_sample == 16);
 
     // Float32 round-trips the sub-int16 values exactly; int16 quantizes them to 0.
     for (size_t i = 0; i < data.channels[0].size(); ++i) {
@@ -662,6 +668,9 @@ TEST_CASE("Float32 WAV preserves precision below the int16 floor", "[audio][file
     auto def = read_audio_file(default_path.string());
     REQUIRE(def.has_value());
     REQUIRE(def->channels[0][0] == 0.0f);
+    auto def_info = read_audio_file_info(default_path.string());
+    REQUIRE(def_info.has_value());
+    REQUIRE(def_info->bits_per_sample == 16);
 
     std::filesystem::remove(f32_path);
     std::filesystem::remove(i16_path);

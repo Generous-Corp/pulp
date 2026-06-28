@@ -93,6 +93,23 @@ TEST_CASE("SvgImage rasterize guards invalid image and dimensions", "[canvas][sv
     REQUIRE(img.rasterize(16, -1).empty());
 }
 
+TEST_CASE("SvgImage rasterize rejects parsed SVGs with zero intrinsic size",
+          "[canvas][svg]") {
+    auto zero_width = SvgImage::from_string(
+        R"(<svg xmlns="http://www.w3.org/2000/svg" width="0" height="16"></svg>)");
+    REQUIRE(zero_width.is_valid());
+    REQUIRE(zero_width.width() == 0.0f);
+    REQUIRE(zero_width.height() > 0.0f);
+    REQUIRE(zero_width.rasterize(16, 16).empty());
+
+    auto zero_height = SvgImage::from_string(
+        R"(<svg xmlns="http://www.w3.org/2000/svg" width="16" height="0"></svg>)");
+    REQUIRE(zero_height.is_valid());
+    REQUIRE(zero_height.width() > 0.0f);
+    REQUIRE(zero_height.height() == 0.0f);
+    REQUIRE(zero_height.rasterize(16, 16).empty());
+}
+
 TEST_CASE("SvgImage render to RecordingCanvas", "[canvas][svg]") {
     auto img = SvgImage::from_string(test_svg);
     REQUIRE(img.is_valid());
