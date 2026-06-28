@@ -7,6 +7,7 @@
 //!
 //! [`main`]: ../../../src/main.rs
 
+mod aax_sdk;
 pub mod audit;
 pub mod config;
 pub mod create;
