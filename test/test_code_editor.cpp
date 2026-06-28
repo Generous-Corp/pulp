@@ -186,13 +186,20 @@ TEST_CASE("CodeEditor paint emits gutter line numbers when enabled",
 TEST_CASE("SystemTrayIcon lifecycle methods are safe without native handles",
           "[gui][code-editor][coverage]") {
     SystemTrayIcon tray;
-    tray.set_icon("pulp-status");
-    tray.set_tooltip("Pulp");
-    tray.show();
-    tray.hide();
-    tray.on_click = [] {};
-    tray.on_right_click = [] {};
-    SUCCEED("SystemTrayIcon public lifecycle completed");
+    REQUIRE_NOTHROW(tray.set_icon("pulp-status"));
+    REQUIRE_NOTHROW(tray.set_tooltip("Pulp"));
+    REQUIRE_NOTHROW(tray.show());
+    REQUIRE_NOTHROW(tray.hide());
+
+    int click_count = 0;
+    int right_click_count = 0;
+    tray.on_click = [&] { ++click_count; };
+    tray.on_right_click = [&] { ++right_click_count; };
+
+    REQUIRE_NOTHROW(tray.on_click());
+    REQUIRE_NOTHROW(tray.on_right_click());
+    REQUIRE(click_count == 1);
+    REQUIRE(right_click_count == 1);
 }
 
 TEST_CASE("FileBasedDocument title from path", "[gui][code-editor]") {
