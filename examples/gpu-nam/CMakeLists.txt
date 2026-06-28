@@ -12,3 +12,19 @@ if(TARGET pulp::render)
         add_test(NAME gpu-nam-test COMMAND gpu-nam-test)
     endif()
 endif()
+
+# Exact, reference-faithful NAM WaveNet CPU inference + .nam loader. This is the
+# oracle the GPU primitive is validated against; it only needs choc::json (via
+# pulp::runtime), not the GPU/render stack, so it builds independently of pulp::render.
+if(TARGET pulp::runtime)
+    add_executable(gpu-nam-model-check nam_model_check.cpp)
+    target_link_libraries(gpu-nam-model-check PRIVATE pulp::runtime)
+    target_include_directories(gpu-nam-model-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    if(TARGET Catch2::Catch2WithMain)
+        add_executable(gpu-nam-model-test test_nam_model.cpp)
+        target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
+    endif()
+endif()
