@@ -481,7 +481,8 @@ public:
     static constexpr int kMaxVoices = 8;
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
-    static constexpr int kDefaultRootNote = 60;  // C3 in C-2..C8 labeling (see note_name)
+    static constexpr int kDefaultRootNote = 48;  // C2 in C-2..C8 labeling (see note_name) —
+                                                 // aligns with the DAW Musical Typing default octave
     static constexpr int kRootNoteMin = 0;       // C-2
     static constexpr int kRootNoteMax = 120;     // C8
 

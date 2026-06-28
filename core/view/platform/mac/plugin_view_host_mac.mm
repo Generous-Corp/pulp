@@ -310,15 +310,13 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // never another open plugin editor's focused field (focused_input_ is
     // process-global).
     auto* fv = pulp_focus_under_root(root);
-    // No focused input widget: still give the editor ROOT a shot at the key, so a
-    // plugin's own key handling (e.g. the tempo-sampler's Musical Typing, wired on
-    // the root's on_key_event) fires when hosted — matching the standalone path,
-    // where the window host routes every keystroke to root->on_global_key. The
-    // base View::on_key_event is a no-op returning false, so plugins WITHOUT a root
-    // key handler are unaffected: the key falls through to the host (below) for DAW
-    // shortcuts. Only KEYS THE ROOT CONSUMES are swallowed.
-    const bool has_focused_widget = (fv != nullptr);
-    if (!fv) fv = root;
+    // Only a FOCUSED text field consumes keys in a plugin host. With nothing
+    // focused the editor isn't first responder (acceptsFirstResponder is gated on a
+    // focused field), so the key never reaches here — it stays with the DAW for
+    // transport + Musical Typing. A plugin must NOT route the bare computer keyboard
+    // into its own musical typing; that fights the host. (The standalone drives its
+    // own QWERTY musical typing through a different window host.)
+    if (!fv) return false;
     pulp::view::KeyEvent ke;
     ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
@@ -328,15 +326,6 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // The return value tells us whether the editor already handled this key as a
     // command — if so it must NOT also be inserted as text.
     const bool consumed = fv->on_key_event(ke);
-
-    // Unfocused (root-fallback) path: the root only consumes keys it owns (e.g. a
-    // Musical Typing note). Anything it did NOT consume must go back to the host so
-    // DAW transport/shortcuts keep working — and there is no text field to insert
-    // into, so skip text insertion + the focus-blur affordance entirely.
-    if (!has_focused_widget) {
-        if (consumed) root->request_repaint();
-        return consumed;
-    }
 
     // Printable characters → text insertion, but only when the key was NOT
     // consumed as a command above. Without the !consumed gate an arrow key both
@@ -554,7 +543,12 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // but left no path to hand transport keys back after the user left a field;
 // the forward supersedes that approach.)
 - (BOOL)acceptsFirstResponder {
-    return YES;
+    // Take the keyboard ONLY while a pulp text field is focused. Otherwise the DAW
+    // owns it, so host transport keys (Space/R) and the host's Musical Typing keep
+    // working while the plugin editor is open — a plugin must not hijack the DAW
+    // keyboard. (The standalone uses a different window host that drives its own
+    // QWERTY musical typing; this path is DAW-only.)
+    return pulp_focus_under_root(self.rootView) != nullptr;
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
@@ -562,15 +556,13 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
+    } else if (!wants && win.firstResponder == self) {
+        // No field focused — hand the keyboard back to the DAW so transport keys
+        // and the host's Musical Typing resume immediately (e.g. after a type-in
+        // commits). Without this the editor would keep first responder and swallow
+        // DAW shortcuts until the user clicked a host control.
+        [win makeFirstResponder:nil];
     }
-    // No resign-on-blur. The editor KEEPS first responder so it keeps
-    // intercepting keys and forwards the non-text ones to the host (DAW
-    // transport Space/R AND Musical Typing) via pulp_plugin_forward_key_to_host
-    // in -keyDown:. Resigning here is exactly what left Space/R dead after the
-    // user left a field — the keyboard went to the editor's own window with no
-    // path back. The host still reclaims the keyboard through
-    // -resignFirstResponder: when it makes one of its own views first responder
-    // (e.g. the user clicks a host control), which ends any open text input.
 }
 // The host moved the keyboard elsewhere (click on a host control, window
 // switching) while a widget still held text-input focus: close that text
@@ -1211,7 +1203,10 @@ private:
 // focused field and forward everything else back to the host (transport +
 // Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
-    return YES;
+    // DAW-only path: take the keyboard ONLY while a pulp text field is focused, so
+    // the host keeps transport keys (Space/R) + Musical Typing. See
+    // PulpPluginView::acceptsFirstResponder.
+    return pulp_focus_under_root(self.rootView) != nullptr;
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
@@ -1219,9 +1214,9 @@ private:
     const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
+    } else if (!wants && win.firstResponder == self) {
+        [win makeFirstResponder:nil];  // hand the keyboard back to the DAW
     }
-    // No resign-on-blur — keep first responder and forward non-text keys to the
-    // host. See PulpPluginView::syncKeyFocus for the rationale.
 }
 // Host took the keyboard while a type-in was open: close it, don't re-claim.
 // See PulpPluginView::resignFirstResponder.

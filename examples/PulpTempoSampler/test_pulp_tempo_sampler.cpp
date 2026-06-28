@@ -43,6 +43,10 @@ using namespace pulp::examples;
 
 namespace {
 
+// The default root note (slice 0 plays here). Tests trigger root-relative notes so
+// they don't break when the default octave changes.
+constexpr int kRoot = PulpTempoSamplerProcessor::kDefaultRootNote;
+
 std::vector<float> sine(double f, double sr, long n) {
     std::vector<float> v(static_cast<size_t>(n));
     const double w = 2.0 * 3.14159265358979323846 * f / sr;
@@ -272,7 +276,7 @@ TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
 
     double energy = 0.0;
     for (int b = 0; b < 8; ++b) {
-        process_block(*f.proc, 100.0, b == 0, 60, l, r);
+        process_block(*f.proc, 100.0, b == 0, kRoot, l, r);
         for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
         for (float v : l) REQUIRE(std::isfinite(v));
     }
@@ -298,7 +302,7 @@ TEST_CASE("sustain pedal (CC64) holds a note through note-off",
     { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }   // kick the render
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
 
-    const int note = 60;  // root
+    const int note = kRoot;
     // Pedal DOWN, play the note, then release the KEY (note-off).
     { midi::MidiBuffer m; m.add(midi::MidiEvent::cc(0, 64, 127));
       m.add(midi::MidiEvent::note_on(0, note, 100)); process_midi(*f.proc, 120.0, m, l, r); }
@@ -335,7 +339,7 @@ TEST_CASE("pitch-bend and mod-wheel reach the rendered audio",
         { midi::MidiBuffer m;
           if (mode == 1) m.add(midi::MidiEvent::pitch_bend(0, 16383));  // full up bend
           if (mode == 2) m.add(midi::MidiEvent::cc(0, 1, 127));         // full mod wheel
-          m.add(midi::MidiEvent::note_on(0, 60, 100));
+          m.add(midi::MidiEvent::note_on(0, kRoot, 100));
           process_midi(*f.proc, 120.0, m, l, r); }
         acc.clear();
         for (int b = 0; b < 16; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
@@ -382,7 +386,7 @@ TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)"
     // Sanity: the root note (slice 0) still plays (we didn't mute everything).
     double inr = 0.0;
     for (int b = 0; b < 8; ++b) {
-        process_block(*f.proc, 120.0, b == 0, 60, l, r);
+        process_block(*f.proc, 120.0, b == 0, kRoot, l, r);
         for (int i = 0; i < 512; ++i) inr += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
     }
     CHECK(inr > 1e-6);
@@ -414,7 +418,7 @@ TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sam
         return e;
     };
 
-    const int root = 60;  // default C3
+    const int root = kRoot;
 
     // High sensitivity -> several slices; key root+6 maps to a slice.
     f.store.set_value(kOnsetSens, 1.0f);
@@ -443,7 +447,7 @@ TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
     // Hold a note while sweeping host tempo (re-renders fire on the worker).
     for (int b = 0; b < 40; ++b) {
         const double tempo = 80.0 + (b % 10) * 8.0;
-        process_block(*f.proc, tempo, b == 0, 60, l, r);
+        process_block(*f.proc, tempo, b == 0, kRoot, l, r);
         for (float v : l) REQUIRE(std::isfinite(v));
         for (float v : r) REQUIRE(std::isfinite(v));
     }
@@ -469,7 +473,7 @@ TEST_CASE("tempo sweep under held voices keeps fresh triggers audible",
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 
-    const int root = 60;
+    const int root = kRoot;
     // Hold two distinct slice notes (different store generations as renders land),
     // and sweep host tempo so the worker keeps re-rendering / re-publishing.
     process_block(*f.proc, 100.0, true, root, l, r);       // voice A on
@@ -581,9 +585,9 @@ TEST_CASE("UI play_slice triggers audio with no host MIDI", "[tempo-sampler]") {
 
 TEST_CASE("root note remaps slice-to-key (idx = note - root)", "[tempo-sampler]") {
     Fixture f;
-    // Default root is 60 (C3 in this editor's labeling).
-    REQUIRE(f.proc->slice_index_for_note_test(60) == 0);
-    REQUIRE(f.proc->slice_index_for_note_test(63) == 3);
+    // Default root is C2 (48 in this editor's labeling).
+    REQUIRE(f.proc->slice_index_for_note_test(kRoot) == 0);
+    REQUIRE(f.proc->slice_index_for_note_test(kRoot + 3) == 3);
 
     f.store.set_value(kRootNote, 48.0f);
     REQUIRE(f.proc->slice_index_for_note_test(48) == 0);
@@ -628,7 +632,7 @@ TEST_CASE("LOOP toggle engages/disengages a currently-held note",
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 
     // Press + HOLD note 60 (slice 0); play the one-shot out until it goes silent.
-    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 100));
       process_midi(*f.proc, 120.0, m, l, r); }
     double tail = 0.0;
     for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
@@ -668,7 +672,7 @@ TEST_CASE("MIDI panic clears the held set so LOOP cannot resurrect a phantom not
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 
     // Press + HOLD note 60 (no note-off); let the one-shot play out to silence.
-    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 100));
       process_midi(*f.proc, 120.0, m, l, r); }
     double tail = 0.0;
     for (int b = 0; b < 240; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
@@ -704,7 +708,7 @@ TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
 
     // Hold note 60; let the loop establish a steady ring.
-    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, 60, 100));
+    { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 100));
       process_midi(*f.proc, 120.0, m, l, r); }
     double ringing = 0.0;
     for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
@@ -1127,7 +1131,7 @@ TEST_CASE("QWERTY typing keeps triggering audio across tempo + slice changes",
 
     // Wire the editor's QWERTY typing to the processor exactly like the running app.
     SamplerEditorRoot root;
-    root.current_root_note = [] { return 60; };          // 'a' = root note 60 = slice 0
+    root.current_root_note = [] { return kRoot; };          // 'a' = root note 60 = slice 0
     root.keyboard_window_visible = [] { return true; };  // typing only plays when shown
     root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
     root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
@@ -1183,7 +1187,7 @@ TEST_CASE("QWERTY typing maps every key to a unique chromatic slice (no doubling
     // trigger note keyboard_play_on fired (not the controller's note) so a remap that
     // collapsed two keys onto one slice would be caught.
     SamplerEditorRoot root;
-    root.current_root_note = [] { return 60; };
+    root.current_root_note = [] { return kRoot; };
     root.keyboard_window_visible = [] { return true; };
     root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
     root.typing.on_note_off = [&](int n) { f.proc->keyboard_play_off(n); };
@@ -1256,7 +1260,7 @@ TEST_CASE("overlapping slices at slow tempo never clip the output",
 
     // Trigger every slice simultaneously at full velocity -> max overlapping voices.
     { midi::MidiBuffer m;
-      for (int n = 0; n < 8; ++n) m.add(midi::MidiEvent::note_on(0, 60 + n, 127));
+      for (int n = 0; n < 8; ++n) m.add(midi::MidiEvent::note_on(0, kRoot + n, 127));
       process_midi(*f.proc, slow, m, l, r); }
 
     float peak = 0.0f;
@@ -1313,7 +1317,7 @@ TEST_CASE("QWERTY note-off releases the original slice after root changes",
     { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
 
-    int root_note = 60;
+    int root_note = kRoot;
     SamplerEditorRoot root;
     root.current_root_note = [&] { return root_note; };
     root.keyboard_window_visible = [] { return true; };
@@ -1344,7 +1348,7 @@ TEST_CASE("QWERTY note-off releases the original slice after root changes",
 
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
     SamplerEditorRoot root;
-    root.current_root_note = [] { return 60; };  // base 'a' = root note
+    root.current_root_note = [] { return kRoot; };  // base 'a' = root note
     // Musical typing only plays while the keyboard window is shown — simulate the
     // window being on-screen so this exercises the QWERTY->note MAPPING itself.
     root.keyboard_window_visible = [] { return true; };
@@ -1354,16 +1358,16 @@ TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo
     auto key = [](view::KeyCode k, bool down, bool rep = false) {
         view::KeyEvent e; e.key = k; e.is_down = down; e.is_repeat = rep; return e;
     };
-    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));         // root + 0 -> note 60
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));         // root + 0
     REQUIRE(root.on_key_event(key(view::KeyCode::a, true, true)));   // auto-repeat ignored
-    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));        // note off 60
-    REQUIRE(root.on_key_event(key(view::KeyCode::s, true)));         // root + 2 -> note 62
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));        // note off root
+    REQUIRE(root.on_key_event(key(view::KeyCode::s, true)));         // root + 2
     REQUIRE_FALSE(root.on_key_event(key(view::KeyCode::num1, true)));  // unmapped -> host
 
     REQUIRE(notes.size() == 3);
-    CHECK(notes[0] == std::make_pair(60, true));   // 'a' down  (slice 0 = root)
-    CHECK(notes[1] == std::make_pair(60, false));  // 'a' up
-    CHECK(notes[2] == std::make_pair(62, true));   // 's' down  (slice 2)
+    CHECK(notes[0] == std::make_pair(kRoot, true));      // 'a' down  (slice 0 = root)
+    CHECK(notes[1] == std::make_pair(kRoot, false));     // 'a' up
+    CHECK(notes[2] == std::make_pair(kRoot + 2, true));  // 's' down  (slice 2)
 }
 
 namespace {
