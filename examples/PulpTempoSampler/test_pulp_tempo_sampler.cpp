@@ -1362,6 +1362,7 @@ TEST_CASE("QWERTY typing keeps triggering audio across tempo + slice changes",
 
     // Wire the editor's QWERTY typing to the processor exactly like the running app.
     SamplerEditorRoot root;
+    root.hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     root.current_root_note = [] { return kRoot; };          // 'a' = root note 60 = slice 0
     root.keyboard_window_visible = [] { return true; };  // typing only plays when shown
     root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
@@ -1418,6 +1419,7 @@ TEST_CASE("QWERTY typing maps every key to a unique chromatic slice (no doubling
     // trigger note keyboard_play_on fired (not the controller's note) so a remap that
     // collapsed two keys onto one slice would be caught.
     SamplerEditorRoot root;
+    root.hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     root.current_root_note = [] { return kRoot; };
     root.keyboard_window_visible = [] { return true; };
     root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
@@ -1550,6 +1552,7 @@ TEST_CASE("QWERTY note-off releases the original slice after root changes",
 
     int root_note = kRoot;
     SamplerEditorRoot root;
+    root.hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     root.current_root_note = [&] { return root_note; };
     root.keyboard_window_visible = [] { return true; };
     root.typing.on_note_on  = [&](int n, float v) { f.proc->keyboard_play_on(n, v); };
@@ -1579,6 +1582,7 @@ TEST_CASE("QWERTY note-off releases the original slice after root changes",
 
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
     SamplerEditorRoot root;
+    root.hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     root.current_root_note = [] { return kRoot; };  // base 'a' = root note
     // Musical typing only plays while the keyboard window is shown — simulate the
     // window being on-screen so this exercises the QWERTY->note MAPPING itself.
@@ -1847,6 +1851,7 @@ TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-samp
     auto editor = f.proc->create_view();
     REQUIRE(editor);
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
     // Typing only plays while the keyboard window is on-screen — simulate it open
@@ -1883,6 +1888,7 @@ TEST_CASE("musical typing is gated on the keyboard window being visible",
 
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     REQUIRE(root->on_global_key);
 
@@ -1931,6 +1937,7 @@ TEST_CASE("Cmd+K toggles the keyboard window in both visibility states",
     Fixture f;
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     int toggles = 0;
     root->on_toggle_keyboard = [&] { ++toggles; };
@@ -1989,6 +1996,7 @@ TEST_CASE("Cmd+K routes to the keyboard-window toggle", "[tempo-sampler]") {
     auto editor = f.proc->create_view();
     REQUIRE(editor);
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
     int toggles = 0;
@@ -2008,6 +2016,7 @@ TEST_CASE("toolbar Keyboard button routes to the keyboard-window toggle",
     Fixture f;
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     int toggles = 0;
     root->on_toggle_keyboard = [&] { ++toggles; };
@@ -2037,6 +2046,7 @@ TEST_CASE("Settings button reveals + opens the Audio/MIDI panel in the chrome",
 
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
     REQUIRE(root->settings_button != nullptr);
     REQUIRE_FALSE(root->settings_button->visible());  // hidden outside the chrome
@@ -2138,6 +2148,7 @@ TEST_CASE("single-input: typed key lights the keyboard only while visible",
 
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    if (root) root->hosted_in_standalone_ = true;  // typing+keyboard are standalone-only
     REQUIRE(root != nullptr);
 
     // Inject the SDK keyboard (display-only) so the held-note → set_active_notes

@@ -467,10 +467,16 @@ public:
 
 private:
     bool on_musical_key(const view::KeyEvent& e) {
+        // The on-screen musical-typing keyboard (and its ⌘K toggle) is a STANDALONE
+        // app feature only. In a plugin (AU/VST3/CLAP) the DAW owns the computer
+        // keyboard — ⌘K, Space, R, etc. must pass straight through to the host, so
+        // we never capture a key here. (The macOS host still routes Cmd chords via
+        // performKeyEquivalent:, which is why ⌘K reached here and opened our window
+        // inside Logic — this gate stops that.)
+        if (!hosted_in_standalone_) return false;
         // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the MusicalTypingKeyboard
         // window. Checked before the modifier-chord rejection below so the
-        // command-combo reaches here (the macOS host routes Cmd chords via
-        // performKeyEquivalent:).
+        // command-combo reaches here.
         const uint16_t toggle_mod = view::kModCmd | view::kModCtrl;
         if (e.key == view::KeyCode::k && (e.modifiers & toggle_mod) && e.is_down && !e.is_repeat) {
             toggle_keyboard();
@@ -985,22 +991,44 @@ public:
     // The result always makes raw_frames·loop_bpm == N·60·sr, so published_frames =
     // round(N·60·sr / host) is an exact N beats at ANY host tempo. Pure + static so
     // it is unit-testable. `reference_bpm <= 0` ⇒ no host hint (use the analyzer).
+    // Derive the loop tempo assuming the loop is a whole number of BARS (4/4).
+    // A tempo sampler loops on the bar, so the loop MUST be an integer bar count —
+    // otherwise it can never tile a DAW's bar grid (a 2.5-bar loop shifts its
+    // downbeat half a bar every pass, however you stretch it). We pick the bar
+    // count whose implied tempo is closest (octave-aware) to the reference (the
+    // host/project tempo when known, else the analyzer's estimate); stretching
+    // that to the host then yields an exact whole-bar loop that always lines up.
     static double bar_exact_bpm(long frames, double sr, double reference_bpm,
                                 double analyzer_bpm) {
         if (analyzer_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return analyzer_bpm;
         const double dur = static_cast<double>(frames) / sr;
         if (dur <= 0.0) return analyzer_bpm;
-        const double base_beats = std::round(dur * analyzer_bpm / 60.0);
-        if (base_beats < 1.0) return analyzer_bpm;                // too short to be a loop
+        constexpr double kBeatsPerBar = 4.0;
+        // The analyzer's estimate of how many BARS the loop is. Candidates are
+        // whole-bar counts around it (floor/ceil) plus octave neighbours (x2/x0.5)
+        // to correct a doubled/halved detection. We force a WHOLE-BAR count — a
+        // tempo sampler loops on the bar, so a non-integer-bar loop (e.g. 2.5 bars)
+        // could never tile a DAW's bar grid. The host/reference tempo only resolves
+        // which octave/neighbour is closest; it never overrides the content's bar
+        // count with a far-off one (a real 3-bar loop stays 3 bars).
+        const double est_bars = dur * analyzer_bpm / 60.0 / kBeatsPerBar;
+        if (est_bars <= 0.0) return analyzer_bpm;
         const double ref = reference_bpm > 0.0 ? reference_bpm : analyzer_bpm;
-        const double mults[] = {0.25, 0.5, 1.0, 2.0, 4.0};        // octave neighbours
+        // Whole-bar candidates around the analyzer's estimate, plus octave
+        // neighbours (x2 / /2) to correct a doubled/halved detection. The eps pad
+        // keeps a genuine integer estimate (e.g. 2.999 bars) from spuriously also
+        // offering its neighbour, while a truly ambiguous estimate (e.g. 2.5 bars)
+        // DOES offer both 2 and 3 so the host/reference tempo can pick the nearer.
+        constexpr double kEps = 0.06;
+        const long lo = std::max<long>(1, static_cast<long>(std::floor(est_bars + kEps)));
+        const long hi = std::max<long>(1, static_cast<long>(std::ceil(est_bars - kEps)));
+        const long cands[] = {lo, hi, lo * 2, hi * 2,
+                              std::max<long>(1, lo / 2), std::max<long>(1, hi / 2)};
         double best = 0.0, best_d = 1e30;
-        for (double m : mults) {
-            const double beats = std::round(base_beats * m);
-            if (beats < 1.0) continue;
-            const double t = beats * 60.0 / dur;                  // tempo that tiles exactly
+        for (long bars : cands) {
+            const double t = static_cast<double>(bars) * kBeatsPerBar * 60.0 / dur;
             if (t < kTargetBpmMin || t > kTargetBpmMax) continue;
-            const double d = std::abs(std::log2(t / ref));        // octave-aware distance
+            const double d = std::abs(std::log2(t / ref));
             if (d < best_d) { best_d = d; best = t; }
         }
         return best > 0.0 ? best : analyzer_bpm;
