@@ -215,6 +215,10 @@ TEST_CASE("render_notes_json - stable-shape keys present for agent consumers",
     REQUIRE(out.find("\"from\": \"0.23.0\"") != std::string::npos);
     REQUIRE(out.find("\"to\": \"0.29.0\"")   != std::string::npos);
     REQUIRE(out.find("\"entries\":")          != std::string::npos);
+    // Top-level breaking summary so agents can branch without parsing entries.
+    // fixture[2] is breaking; fixture[0] is not → exactly one breaking note.
+    REQUIRE(out.find("\"has_breaking\": true") != std::string::npos);
+    REQUIRE(out.find("\"breaking_count\": 1") != std::string::npos);
     // Per-entry keys in the JSON contract.
     REQUIRE(out.find("\"version\":")    != std::string::npos);
     REQUIRE(out.find("\"breaking\":")   != std::string::npos);
@@ -235,6 +239,9 @@ TEST_CASE("render_notes_json - empty entries emits valid JSON with empty array",
     REQUIRE(out.find("\"entries\": []") != std::string::npos);
     REQUIRE(out.find("\"from\": \"0.29.0\"") != std::string::npos);
     REQUIRE(out.find("\"to\": \"0.29.0\"")   != std::string::npos);
+    // No entries → no breaking changes.
+    REQUIRE(out.find("\"has_breaking\": false") != std::string::npos);
+    REQUIRE(out.find("\"breaking_count\": 0") != std::string::npos);
 }
 
 TEST_CASE("render_notes_json - escapes strings and control characters",
