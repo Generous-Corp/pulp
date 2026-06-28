@@ -653,17 +653,30 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
 
     // Pre-size per-bus channel-pointer storage for the secondary (aux) output
     // buses the descriptor declares (everything past the main bus at index 0).
-    // Each sub-vector is sized to that bus's declared channel count so the
-    // multi-out routing path in process() reuses this storage and never
-    // allocates on the audio thread.
+    // Each sub-vector is sized to the ACCEPTED VST3 bus arrangement — which
+    // setBusArrangements() may have shifted mono↔stereo away from the descriptor
+    // default — so the routing path in process() reuses this storage, never
+    // allocates on the audio thread, and never drops a channel the host
+    // negotiated. We size to max(accepted, declared) so a host that presents
+    // the descriptor default after a wider negotiation still fits. The declared
+    // count is recorded separately for the aux view's declared_channels.
     const std::size_t declared_output_buses = desc.output_buses.size();
-    aux_output_ptrs_.assign(declared_output_buses > 0 ? declared_output_buses - 1
-                                                       : 0,
-                            {});
+    const std::size_t aux_bus_count =
+        declared_output_buses > 0 ? declared_output_buses - 1 : 0;
+    aux_output_ptrs_.assign(aux_bus_count, {});
+    declared_aux_channels_.assign(aux_bus_count, 0);
     for (std::size_t b = 1; b < declared_output_buses; ++b) {
-        int ch = desc.output_buses[b].default_channels;
-        aux_output_ptrs_[b - 1].assign(ch > 0 ? static_cast<std::size_t>(ch) : 0,
-                                       nullptr);
+        const int declared = desc.output_buses[b].default_channels;
+        declared_aux_channels_[b - 1] = declared;
+        int accepted = declared;
+        if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                audioOutputs.at(static_cast<int32>(b)))) {
+            accepted = static_cast<int>(
+                Steinberg::Vst::SpeakerArr::getChannelCount(bus->getArrangement()));
+        }
+        const int storage = (std::max)(declared, accepted);
+        aux_output_ptrs_[b - 1].assign(
+            storage > 0 ? static_cast<std::size_t>(storage) : 0, nullptr);
     }
 
     // Pre-allocate the per-block MIDI buffers and switch them to
@@ -1027,9 +1040,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
         if (!active) aux_channels = 0;
+        // declared_channels reports the descriptor's declared layout (captured
+        // in setupProcessing); buffer.num_channels() carries the actual routed
+        // count. Keeping these distinct lets matches_declared_layout() detect a
+        // host-vs-declared channel-count mismatch instead of being tautological.
         output_buses[routed_output_buses++] = {
             .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
-                     aux_channels, true, active},
+                     declared_aux_channels_[b - 1], true, active},
             .buffer = audio::BufferView<float>(ptrs.data(), aux_channels,
                                                num_samples),
         };

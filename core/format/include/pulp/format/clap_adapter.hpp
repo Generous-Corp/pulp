@@ -78,10 +78,17 @@ struct PulpClapPlugin {
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
     // Per-bus channel-pointer storage for secondary (aux) output buses, indexed
-    // [aux_bus][channel]. aux_output_ptrs[i] backs the BufferView for the host
-    // output bus at index i+1. Pre-allocated so the multi-out routing path
-    // allocates nothing on the audio thread.
-    float* aux_output_ptrs[kMaxOutputBuses][kMaxChannels] = {};
+    // [aux_bus_minus_1][channel]: row i backs the BufferView for the host output
+    // bus at index i+1 (the main bus at index 0 uses output_ptrs above). Pre-
+    // allocated so the multi-out routing path allocates nothing on the audio
+    // thread.
+    float* aux_output_ptrs[kMaxOutputBuses - 1][kMaxChannels] = {};
+    // Descriptor-declared channel count per secondary output bus, cached in
+    // clap_activate() (off the audio thread) so the process path can report a
+    // bus's declared layout without calling descriptor() on the audio thread.
+    // declared_aux_channels[i] is the declared channel count for the host
+    // output bus at index i+1; 0 when the descriptor declares no such bus.
+    int declared_aux_channels[kMaxOutputBuses - 1] = {};
     // Second input bus routed to Processor::set_sidechain(). Up to
     // kMaxChannels. Additional input buses beyond index 1 are currently
     // ignored; the Processor API is single-sidechain today.

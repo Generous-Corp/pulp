@@ -154,6 +154,19 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.output_channels = desc.default_output_channels();
     self->processor->prepare(ctx);
 
+    // Cache the descriptor-declared channel count of each secondary (aux)
+    // output bus so clap_process() can report a bus's declared layout without
+    // calling descriptor() — which allocates — on the audio thread. Index i
+    // corresponds to host output bus i+1 (the main bus at index 0 is handled
+    // separately). Buses beyond the preallocated row count are not routed.
+    for (int i = 0; i < kMaxOutputBuses - 1; ++i) {
+        const std::size_t bus_index = static_cast<std::size_t>(i) + 1;
+        self->declared_aux_channels[i] =
+            bus_index < desc.output_buses.size()
+                ? desc.output_buses[bus_index].default_channels
+                : 0;
+    }
+
     // Size the per-channel dry delay used by the bypass pass-through. The host
     // compensates the plugin path by its reported latency, so the bypassed dry
     // copy must be delayed by exactly that many samples to stay aligned with
@@ -366,6 +379,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                    static_cast<uint32_t>(kMaxOutputBuses));
     for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
         auto& bus = process->audio_outputs[b];
+        // An inactive/deactivated bus can report channel_count > 0 while
+        // data32 == nullptr. Guard the bus pointer before indexing it so the
+        // pre-zero loop never dereferences null on the audio thread.
+        if (!bus.data32) continue;
         for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
             if (bus.data32[ch]) {
                 std::memset(bus.data32[ch], 0, sizeof(float) * original_num_samples);
@@ -404,7 +421,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         auto& bus = process->audio_outputs[b];
         int aux_channels =
             (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
-        float** ptrs = self->aux_output_ptrs[b];
+        // Row b-1 backs host output bus b (the main bus at index 0 uses
+        // output_ptrs, not this storage).
+        float** ptrs = self->aux_output_ptrs[b - 1];
         bool active = bus.data32 != nullptr;
         if (active) {
             for (int ch = 0; ch < aux_channels; ++ch) {
@@ -419,9 +438,13 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             }
         }
         if (!active) aux_channels = 0;
+        // declared_channels reports the descriptor's declared layout (cached in
+        // clap_activate); buffer.num_channels() carries the actual routed count.
+        // Keeping these distinct lets matches_declared_layout() detect a
+        // host-vs-declared channel-count mismatch instead of being tautological.
         output_buses[b] = {
             .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
-                     aux_channels, true, active},
+                     self->declared_aux_channels[b - 1], true, active},
             .buffer = audio::BufferView<float>(ptrs, aux_channels, num_samples),
         };
     }
