@@ -47,7 +47,7 @@ TEST_CASE("query returns a concrete state for every permission class",
 TEST_CASE("desktop backend reports mobile-only classes as Restricted",
           "[platform][permissions]") {
     if (has_platform_backend()) {
-        SUCCEED("platform backend active; skipping desktop default assertions");
+        SKIP("platform backend active; desktop default assertions do not apply");
         return;
     }
     REQUIRE(query(Permission::BackgroundAudio) == PermissionState::Restricted);
@@ -57,7 +57,7 @@ TEST_CASE("desktop backend reports mobile-only classes as Restricted",
 TEST_CASE("desktop backend reports generic classes as Granted",
           "[platform][permissions]") {
     if (has_platform_backend()) {
-        SUCCEED("platform backend active; skipping desktop default assertions");
+        SKIP("platform backend active; desktop default assertions do not apply");
         return;
     }
     REQUIRE(query(Permission::Microphone) == PermissionState::Granted);
@@ -82,8 +82,7 @@ TEST_CASE("request() invokes the callback exactly once and forwards query state"
 TEST_CASE("request() tolerates an empty callback",
           "[platform][permissions]") {
     // Must not crash or invoke UB when the caller doesn't need a result.
-    request(Permission::Microphone, {});
-    SUCCEED();
+    REQUIRE_NOTHROW(request(Permission::Microphone, {}));
 }
 
 TEST_CASE("PermissionsOverride redirects query and request",
