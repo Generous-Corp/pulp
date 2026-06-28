@@ -218,9 +218,11 @@ TEST_CASE("MultiBackendFft optional backends report unavailable cleanly",
     // return a bool. Constructing with an unavailable backend must
     // throw, not segfault.
     SECTION("availability query is total") {
-        (void)fft_backend_available(FftBackend::fftw3);
-        (void)fft_backend_available(FftBackend::mkl);
-        SUCCEED();
+        const bool fftw3_available = fft_backend_available(FftBackend::fftw3);
+        const bool mkl_available = fft_backend_available(FftBackend::mkl);
+
+        REQUIRE(fft_backend_available(FftBackend::fftw3) == fftw3_available);
+        REQUIRE(fft_backend_available(FftBackend::mkl) == mkl_available);
     }
 
     SECTION("unavailable backend throws on construct") {

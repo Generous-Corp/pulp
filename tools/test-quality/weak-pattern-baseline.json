@@ -4,11 +4,11 @@
   "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-modal-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 119,
+    "succeed": 118,
     "skip": 669
   },
   "classifications": {
-    "needs-review": 788
+    "needs-review": 787
   },
   "notes": [
     "Restored current-branch Phase 0 weak-test pattern baseline after the report tooling was replayed onto the smaller active branch stack.",
