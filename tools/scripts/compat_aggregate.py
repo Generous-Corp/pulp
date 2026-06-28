@@ -20,7 +20,7 @@ setting reproduces that mix, so re-serialization would NOT be
 byte-stable. Instead this tool slices the raw text at the top-level
 key boundaries: every part holds the exact bytes of its key block,
 and the aggregate is rebuilt by concatenating those bytes with the
-original ``{\\n`` prefix, ``,\\n`` separators, and ``\\n}`` suffix.
+original ``{\\n`` prefix, ``,\\n`` separators, and ``\\n}\\n`` suffix.
 
 Layout produced::
 
@@ -104,7 +104,7 @@ def slice_aggregate(raw: str) -> dict[str, str]:
           "k1": <v1>,\\n
           ...
           "kN": <vN>\\n
-        }
+        }\\n
 
     so block_i is the substring ``  "ki": <vi>`` with no surrounding
     separators. Returns ``{key: block_text}``.
@@ -112,8 +112,8 @@ def slice_aggregate(raw: str) -> dict[str, str]:
     if not raw.startswith("{\n"):
         raise ValueError("compat.json does not start with '{\\n' — "
                           "structure assumption broken, refusing to slice")
-    if not raw.endswith("\n}"):
-        raise ValueError("compat.json does not end with '\\n}' — "
+    if not raw.endswith("\n}\n"):
+        raise ValueError("compat.json does not end with '\\n}\\n' — "
                           "structure assumption broken, refusing to slice")
 
     # Find the byte offset where each top-level key block begins.
@@ -153,7 +153,7 @@ def slice_aggregate(raw: str) -> dict[str, str]:
                 )
             blocks[key] = raw[start:nxt - 2]
         else:
-            blocks[key] = raw[start:-2]  # trim trailing '\n}'
+            blocks[key] = raw[start:-3]  # trim trailing '\n}\n'
     return blocks
 
 
@@ -164,7 +164,7 @@ def assemble_aggregate(blocks: dict[str, str]) -> str:
     if missing:
         raise ValueError(f"missing key block(s): {missing}")
     body = ",\n".join(blocks[k] for k in ALL_KEYS_ORDER)
-    return "{\n" + body + "\n}"
+    return "{\n" + body + "\n}\n"
 
 
 def part_text_for(keys: list[str], blocks: dict[str, str]) -> str:

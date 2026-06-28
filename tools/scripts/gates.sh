@@ -10,6 +10,7 @@
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
 #   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
+#   - compat-aggregate (compat.json stays byte-identical to compat/ parts)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
@@ -57,6 +58,7 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
@@ -121,7 +123,16 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     fi
 fi
 
-# ── 4. node ABI virtual-order gate ─────────────────────────────────────────
+# ── 4. compat aggregate/part consistency ───────────────────────────────────
+if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; then
+    echo "" >&2
+    echo "▸ compat aggregate check" >&2
+    if ! "$PYTHON" "$COMPAT_AGG" check; then
+        fail=1
+    fi
+fi
+
+# ── 5. node ABI virtual-order gate ─────────────────────────────────────────
 if [ -f "$NAG" ]; then
     echo "" >&2
     echo "▸ node-ABI virtual-order check" >&2
@@ -130,7 +141,7 @@ if [ -f "$NAG" ]; then
     fi
 fi
 
-# ── 5. hotspot-size guard ──────────────────────────────────────────────────
+# ── 6. hotspot-size guard ──────────────────────────────────────────────────
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "" >&2
     echo "▸ hotspot-size guard" >&2
@@ -140,7 +151,7 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     fi
 fi
 
-# ── 6. deps-audit ──────────────────────────────────────────────────────────
+# ── 7. deps-audit ──────────────────────────────────────────────────────────
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
     echo "▸ deps-audit (attribution drift)" >&2
@@ -152,7 +163,7 @@ if [ -f "$DEPS_AUDIT" ]; then
     fi
 fi
 
-# ── 7. codecov-config drift ────────────────────────────────────────────────
+# ── 8. codecov-config drift ────────────────────────────────────────────────
 # Global invariant — runs unconditionally (not diff-scoped), because the
 # usual way codecov.yml goes stale is a NEW core/<sub>/ subsystem landing
 # with no codecov.yml edit at all (graph/scene drifted onto main exactly
@@ -177,7 +188,7 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
     fi
 fi
 
-# ── 8. SignalGraph single-backend governance ──────────────────────────────
+# ── 9. SignalGraph single-backend governance ──────────────────────────────
 # Global structural invariants (not diff-scoped): one routing backend
 # (GraphRuntimeExecutor), no second authoring surface, no unsanctioned
 # generated-DSP ABI entrypoint, and the differential parity safety-net stays
@@ -195,7 +206,7 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
     fi
 fi
 
-# ── 9. import-provenance (opt-in) ──────────────────────────────────────────
+# ── 10. import-provenance (opt-in) ─────────────────────────────────────────
 # Audits that any emitted/migrated project carries a well-formed clean-room
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands

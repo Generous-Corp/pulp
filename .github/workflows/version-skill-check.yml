@@ -115,6 +115,12 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --mode=report --enforce
 
+      - name: Compat aggregate check
+        # Keeps the repo-root aggregate byte-identical to the split
+        # compat/ part files. No trailer bypass: regenerate the stale side.
+        run: |
+          python3 tools/scripts/compat_aggregate.py check
+
       - name: Node ABI virtual-order check
         run: |
           python3 tools/scripts/node_abi_gate.py \
@@ -169,6 +175,7 @@ jobs:
           python3 tools/scripts/test_downstream_validation_manifest.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
+          python3 tools/scripts/test_compat_aggregate.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest

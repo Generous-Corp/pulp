@@ -30,7 +30,8 @@ Layer 2 (pre-push, agent-agnostic, enforcing by default)
 Layer 3 (PR gate, authoritative)
     .github/workflows/version-skill-check.yml
     → compat_sync_check.py --mode=report --enforce
-    → no bypass without commit trailer
+    → compat_aggregate.py check
+    → compat-sync bypass requires a commit trailer; compat aggregate has no trailer bypass
 ```
 
 All three layers call into the same script

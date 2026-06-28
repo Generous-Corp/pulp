@@ -67,7 +67,7 @@ SAMPLE_AGGREGATE = (
     '  "imports": {\n'
     '    "figma": {}\n'
     "  }\n"
-    "}"
+    "}\n"
 )
 
 
@@ -93,7 +93,7 @@ class SliceAssembleTests(unittest.TestCase):
 
     def test_rejects_bad_suffix_missing_key_and_bad_separator(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not end"):
-            ca.slice_aggregate(SAMPLE_AGGREGATE[:-1])
+            ca.slice_aggregate(SAMPLE_AGGREGATE[:-2])
 
         without_imports = SAMPLE_AGGREGATE.replace(
             ',\n  "imports": {\n    "figma": {}\n  }',
@@ -118,7 +118,7 @@ class SliceAssembleTests(unittest.TestCase):
                 "compat-schema-version", "_comment", "_audit", "rn", "css",
                 "yoga", "react", "html", "canvas2d", "imports",
             ]
-        ) + "\n}"
+        ) + "\n}\n"
 
         with self.assertRaisesRegex(ValueError, "unexpected top-level key order"):
             ca.slice_aggregate(swapped)
@@ -152,7 +152,7 @@ class SliceAssembleTests(unittest.TestCase):
                 ca._aggregate_from_parts(parts_dir)
 
     def test_slicers_tolerate_first_key_found_without_line_prefix(self) -> None:
-        malformed_but_recoverable = '{\nxx  "css": {}\n}'
+        malformed_but_recoverable = '{\nxx  "css": {}\n}\n'
         with mock.patch.object(ca, "ALL_KEYS_ORDER", ["css"]):
             self.assertEqual(
                 ca.slice_aggregate(malformed_but_recoverable),
