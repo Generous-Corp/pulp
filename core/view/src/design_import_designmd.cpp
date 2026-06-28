@@ -106,7 +106,71 @@ bool looks_like_hex_color(const std::string& s) {
     for (size_t i = 1; i < s.size(); ++i) {
         if (!std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
     }
-    return s.size() == 4 || s.size() == 7 || s.size() == 9;
+    // #RGB, #RGBA, #RRGGBB, #RRGGBBAA per the CSS hex syntax (sizes 4/5/7/9).
+    return s.size() == 4 || s.size() == 5 || s.size() == 7 || s.size() == 9;
+}
+
+// A DESIGN.md color token is "any valid CSS color string" (spec §Colors):
+// hex, named keywords, and functional notations. We do not convert to sRGB
+// here — the raw value is preserved for downstream display/export, exactly as
+// the upstream spec prescribes — so acceptance is a syntactic predicate. The
+// goal is only to recognize a valid CSS color so we don't emit a spurious
+// `color-shape` warning for, e.g., `rgb(...)`, `oklch(...)`, or `cornflowerblue`.
+bool is_css_functional_color(const std::string& s) {
+    auto paren = s.find('(');
+    if (paren == std::string::npos || s.empty() || s.back() != ')') return false;
+    std::string fn = lower(trim(s.substr(0, paren)));
+    static const std::unordered_set<std::string> fns = {
+        "rgb", "rgba", "hsl", "hsla", "hwb",
+        "lab", "lch", "oklab", "oklch",
+        "color", "color-mix",
+    };
+    return fns.count(fn) != 0;
+}
+
+// Standard CSS Color Module Level 4 named keywords (a W3C-defined open list of
+// color names — not vendored upstream code). `transparent` and `currentColor`
+// are included as CSS-wide keywords valid in a color position.
+bool is_css_named_color(const std::string& s) {
+    static const std::unordered_set<std::string> names = {
+        "transparent", "currentcolor",
+        "aliceblue", "antiquewhite", "aqua", "aquamarine", "azure", "beige",
+        "bisque", "black", "blanchedalmond", "blue", "blueviolet", "brown",
+        "burlywood", "cadetblue", "chartreuse", "chocolate", "coral",
+        "cornflowerblue", "cornsilk", "crimson", "cyan", "darkblue", "darkcyan",
+        "darkgoldenrod", "darkgray", "darkgrey", "darkgreen", "darkkhaki",
+        "darkmagenta", "darkolivegreen", "darkorange", "darkorchid", "darkred",
+        "darksalmon", "darkseagreen", "darkslateblue", "darkslategray",
+        "darkslategrey", "darkturquoise", "darkviolet", "deeppink",
+        "deepskyblue", "dimgray", "dimgrey", "dodgerblue", "firebrick",
+        "floralwhite", "forestgreen", "fuchsia", "gainsboro", "ghostwhite",
+        "gold", "goldenrod", "gray", "grey", "green", "greenyellow", "honeydew",
+        "hotpink", "indianred", "indigo", "ivory", "khaki", "lavender",
+        "lavenderblush", "lawngreen", "lemonchiffon", "lightblue", "lightcoral",
+        "lightcyan", "lightgoldenrodyellow", "lightgray", "lightgrey",
+        "lightgreen", "lightpink", "lightsalmon", "lightseagreen",
+        "lightskyblue", "lightslategray", "lightslategrey", "lightsteelblue",
+        "lightyellow", "lime", "limegreen", "linen", "magenta", "maroon",
+        "mediumaquamarine", "mediumblue", "mediumorchid", "mediumpurple",
+        "mediumseagreen", "mediumslateblue", "mediumspringgreen",
+        "mediumturquoise", "mediumvioletred", "midnightblue", "mintcream",
+        "mistyrose", "moccasin", "navajowhite", "navy", "oldlace", "olive",
+        "olivedrab", "orange", "orangered", "orchid", "palegoldenrod",
+        "palegreen", "paleturquoise", "palevioletred", "papayawhip", "peachpuff",
+        "peru", "pink", "plum", "powderblue", "purple", "rebeccapurple", "red",
+        "rosybrown", "royalblue", "saddlebrown", "salmon", "sandybrown",
+        "seagreen", "seashell", "sienna", "silver", "skyblue", "slateblue",
+        "slategray", "slategrey", "snow", "springgreen", "steelblue", "tan",
+        "teal", "thistle", "tomato", "turquoise", "violet", "wheat", "white",
+        "whitesmoke", "yellow", "yellowgreen",
+    };
+    return names.count(lower(trim(s))) != 0;
+}
+
+bool looks_like_css_color(const std::string& s) {
+    return looks_like_hex_color(s)
+        || is_css_functional_color(s)
+        || is_css_named_color(s);
 }
 
 bool is_token_reference(const std::string& s) {
@@ -190,34 +254,43 @@ int yaml_line(const YAML::Node& node, int fallback) {
 
 // ── Top-level token group walkers ───────────────────────────────────────
 
+// Walk one color node at `path`. A color token is either a primitive
+// (CSS color string or token reference) or a nested map. Nested maps recurse
+// to arbitrary depth, joining segments with `.` so the emitted token key
+// matches the `{path.to.token}` reference syntax (e.g. a nested
+// `colors.background.light` resolves a `{colors.background.light}` reference).
+// (DESIGN.md 0.3.0 added arbitrary-depth nested token declarations.)
+void walk_color_node(const std::string& path,
+                     const YAML::Node& node,
+                     DesignMdParseResult& result) {
+    if (node.IsScalar()) {
+        std::string value = node.as<std::string>("");
+        if (is_token_reference(value) || looks_like_css_color(value)) {
+            result.ir.tokens.colors.emplace(path, value);
+        } else {
+            result.diagnostics.push_back(make_diag(
+                DesignMdSeverity::warning, "color-shape", "colors." + path,
+                yaml_line(node, 0), 0,
+                "expected a CSS color or token reference; got \"" + value + "\""));
+            result.ir.tokens.colors.emplace(path, value);
+        }
+    } else if (node.IsMap()) {
+        for (auto sub = node.begin(); sub != node.end(); ++sub) {
+            std::string key = sub->first.as<std::string>("");
+            if (key.empty()) continue;
+            walk_color_node(path.empty() ? key : path + "." + key,
+                            sub->second, result);
+        }
+    }
+}
+
 void walk_colors_map(const YAML::Node& node,
                       DesignMdParseResult& result) {
     if (!node || !node.IsMap()) return;
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string name = it->first.as<std::string>("");
         if (name.empty()) continue;
-        // Per spec, a color token can be either a primitive (string hex) or
-        // a nested map (palette with shade levels). We handle the primitive
-        // case directly and walk one level for nested palettes.
-        if (it->second.IsScalar()) {
-            std::string value = it->second.as<std::string>("");
-            if (is_token_reference(value) || looks_like_hex_color(value)) {
-                result.ir.tokens.colors.emplace(name, value);
-            } else {
-                result.diagnostics.push_back(make_diag(
-                    DesignMdSeverity::warning, "color-shape", "colors." + name,
-                    yaml_line(it->second, 0), 0,
-                    "expected hex color or token reference; got \"" + value + "\""));
-                result.ir.tokens.colors.emplace(name, value);
-            }
-        } else if (it->second.IsMap()) {
-            for (auto sub = it->second.begin(); sub != it->second.end(); ++sub) {
-                std::string shade = sub->first.as<std::string>("");
-                std::string value = sub->second.as<std::string>("");
-                if (shade.empty() || value.empty()) continue;
-                result.ir.tokens.colors.emplace(name + "-" + shade, value);
-            }
-        }
+        walk_color_node(name, it->second, result);
     }
 }
 
@@ -240,21 +313,45 @@ void walk_typography_map(const YAML::Node& node,
     }
 }
 
+// Walk one `rounded`/`spacing` node. Scalars become dimension tokens named
+// `prefix-subpath` (e.g. `rounded-sm`); nested maps recurse to arbitrary depth,
+// joining deeper segments with `.` so `{spacing.scale.lg}` resolves to the
+// `spacing-scale.lg` token via `lookup_dimension`. A `spacing` value may be a
+// bare number per spec (e.g. `base: 8`); `parse_dimension`'s unit is optional,
+// so a unitless number is read as px. Non-dimension values fall back to strings.
+void walk_dimension_node(const std::string& prefix,
+                         const std::string& subpath,
+                         const YAML::Node& node,
+                         DesignMdParseResult& result) {
+    if (node.IsScalar()) {
+        std::string raw = node.as<std::string>("");
+        std::string token_name = prefix + "-" + subpath;
+        if (auto px = parse_dimension(raw)) {
+            result.ir.tokens.dimensions.emplace(token_name, *px);
+        } else {
+            // Per spec: unknown spacing values stored as strings (incl. refs,
+            // which resolve_references resolves in a later pass).
+            result.ir.tokens.strings.emplace(token_name, raw);
+        }
+    } else if (node.IsMap()) {
+        for (auto sub = node.begin(); sub != node.end(); ++sub) {
+            std::string key = sub->first.as<std::string>("");
+            if (key.empty()) continue;
+            walk_dimension_node(prefix,
+                                subpath.empty() ? key : subpath + "." + key,
+                                sub->second, result);
+        }
+    }
+}
+
 void walk_dimension_map(const YAML::Node& node,
                          const std::string& prefix,
                          DesignMdParseResult& result) {
     if (!node || !node.IsMap()) return;
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string key = it->first.as<std::string>("");
-        if (key.empty() || !it->second.IsScalar()) continue;
-        std::string raw = it->second.as<std::string>("");
-        std::string token_name = prefix + "-" + key;
-        if (auto px = parse_dimension(raw)) {
-            result.ir.tokens.dimensions.emplace(token_name, *px);
-        } else {
-            // Per spec: unknown spacing values stored as strings.
-            result.ir.tokens.strings.emplace(token_name, raw);
-        }
+        if (key.empty()) continue;
+        walk_dimension_node(prefix, key, it->second, result);
     }
 }
 
@@ -604,6 +701,24 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     walk_dimension_map(root["rounded"],   "rounded", result);
     walk_dimension_map(root["spacing"],   "spacing", result);
     walk_components_map(root["components"], result);
+
+    // Warn on frontmatter keys outside the DESIGN.md schema. Unknown keys are
+    // not an error (the file still imports — known groups are already parsed),
+    // but flagging them catches typos like `color:`/`typgrphy:` and signals
+    // that a key was silently ignored. (DESIGN.md 0.3.0 added this lint.)
+    static const std::unordered_set<std::string> known_keys = {
+        "version", "name", "description",
+        "colors", "typography", "rounded", "spacing", "components",
+    };
+    for (auto it = root.begin(); it != root.end(); ++it) {
+        std::string key = it->first.as<std::string>("");
+        if (key.empty() || known_keys.count(key)) continue;
+        result.diagnostics.push_back(make_diag(
+            DesignMdSeverity::warning, "unknown-key", key,
+            yaml_line(it->first, 0), 0,
+            "unrecognized top-level frontmatter key \"" + key +
+            "\"; not part of the DESIGN.md schema (ignored)"));
+    }
 
     resolve_references(result);
 

@@ -100,9 +100,11 @@ Audio port count and info come from `descriptor().input_buses` and `descriptor()
 - `in_place_pair` set to `CLAP_INVALID_ID`
 
 The process callback routes bus 0 as the main input/output and routes input bus
-1 to `Processor::sidechain_input()` when present. Additional input buses and
-secondary output buses require a richer process surface than the current simple
-`Processor::process()` signature.
+1 to `Processor::sidechain_input()` when present. Descriptor-declared secondary
+output buses are routed through the richer `ProcessBuffers` surface for
+processors that override it; processors that only implement the simple
+`Processor::process()` signature write the main output and leave aux outputs
+silent. Additional input buses beyond bus 1 are not exposed today.
 
 `format::ProcessBuffers` and `format::ProcessBusBufferSet` are the additive
 shared vocabulary for that richer surface. They are non-owning views over
@@ -133,9 +135,10 @@ half-valid buffer.
 
 ### Known Limitations
 
-- Bus 0 and one sidechain input are routed. Additional input buses and
-  secondary output buses are not exposed through the simple `Processor`
-  callback.
+- Bus 0 and one sidechain input are routed. Descriptor-declared secondary
+  output buses are writable through `ProcessBuffers`; additional input buses
+  beyond the sidechain are not exposed through the simple `Processor` process
+  surface.
 - Desktop CLAP plugin targets expose `CLAP_EXT_GUI` when built with
   `PULP_CLAP_GUI=1`; headless/CI/test environments and WCLAP builds do not
   expose a live desktop editor.
@@ -200,6 +203,13 @@ The adapter adds event buses based on `descriptor()`:
 
 VST3 note events (`Event::kNoteOnEvent`, `Event::kNoteOffEvent`) are converted to/from `MidiEvent`. Velocity is scaled between float 0-1 (VST3) and integer 0-127 (MIDI). Sample offsets are preserved.
 
+MIDI controllers are host-mediated in VST3. For MIDI-accepting plug-ins, the
+adapter implements `IMidiMapping` so hosts can map CC, pitch bend, and channel
+aftertouch to hidden ParamIDs; `process()` decodes those parameter changes back
+into sample-accurate MIDI messages. MPE-enabled plug-ins also expose
+`INoteExpressionController`, routing VST3 tuning, volume, and brightness
+note-expression events into Pulp's MPE sidecar.
+
 ### State Save/Load
 
 - **Save (`getState`):** Writes a combined host-facing blob containing the
@@ -237,7 +247,10 @@ non-interactive runs do not launch editor windows.
 
 ### Known Limitations
 
-- Bus 0 and one sidechain input are routed through `ProcessBuffers`. Secondary output buses are zero-filled today rather than exposed as writable processor outputs.
+- Bus 0, one sidechain input, and descriptor-declared secondary output buses
+  are routed through `ProcessBuffers`. A multi-out processor that overrides
+  `process(ProcessBuffers&)` writes each aux output bus; processors that only
+  implement the simple callback leave aux buses silent.
 - Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation.
 
 ---
@@ -300,19 +313,37 @@ Instruments have zero audio inputs and one audio output. MIDI is received via `H
 
 ### Parameter Sync
 
-**Host to plugin (effects):** Each buffer, `ProcessBufferLists()` reads every parameter from the AU system via `GetParameter()` and writes to `StateStore::set_value()`. This brute-force sync is acceptable for typical parameter counts (< 50).
+**Host to plugin (effects and instruments):** `GetParameter()` and
+`SetParameter()` are backed directly by the plugin `StateStore`, so AU host
+automation playback, generic AU host UI edits, and preset recall all land in
+the same store that `Processor::process()` reads. There is no per-buffer
+`Globals()`-to-`StateStore` reconcile path. Initial AU parameter defaults are
+seeded from the `StateStore` during construction so hosts can inspect them
+before initialization.
 
-**Host to plugin (instruments):** `Render()` reads parameters via `Globals()->GetParameterRT()`.
+**Editor/UI to host:** Editor/UI edits write the `StateStore` and the adapter's
+inline store listener notifies the AU host with
+`kAudioUnitEvent_ParameterValueChange`, guarded so host-originated
+`SetParameter()` calls do not echo back into the host. This lets AU hosts
+re-read via `GetParameter()` and record UI automation without calling
+`AudioUnitSetParameter()` on the render path.
 
 **Parameter event model:** AU v2 exposes current parameter values through the
 AU parameter store rather than a render-event list. The effect adapter attaches
-an empty `ParameterEventQueue` before `Processor::process()` so plugins see the
-same non-null queue contract as other adapters, but AU v2 parameter changes are
-block-rate `StateStore` values today.
+an empty `ParameterEventQueue` before `Processor::process()` so AU v2 effects
+see the same non-null queue contract as other adapters. The instrument adapter
+reads host parameters through the `StateStore` and does not expose a separate
+AU v2 parameter-event sidecar. AU v2 parameter changes are block-rate
+`StateStore` values today.
 
-**Plugin to host:** Parameter output changes are not yet emitted back to the AU host. Initial defaults are set via `Globals()->SetParameter()` during `Initialize()`.
+**Render-thread plugin output to host:** Parameter output changes made during
+`Processor::process()` are not emitted back to the AU host. The render thread
+neither pulls, pushes, nor notifies AU host parameters.
 
-**Gesture callbacks (effects):** The adapter wires `StateStore` gesture callbacks to `AUEventListenerNotify()` with `kAudioUnitEvent_BeginParameterChangeGesture` and `kAudioUnitEvent_EndParameterChangeGesture` event types.
+**Gesture callbacks:** The effect and instrument adapters wire `StateStore`
+gesture callbacks to `AUEventListenerNotify()` with
+`kAudioUnitEvent_BeginParameterChangeGesture` and
+`kAudioUnitEvent_EndParameterChangeGesture` event types.
 
 ### AU Parameter Units
 
@@ -778,7 +809,8 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
 | State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
 | Multi-bus declared | Yes | Yes | No | Main input + sidechain input |
-| Plugin-side param output | Yes | Yes | Not yet | Yes |
+| Editor/UI param write-back | Yes | Yes | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
+| Render-thread param output | Yes | Yes | Not yet | Yes |
 | Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
 | Tail reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
 | Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist | Bundle identifier |

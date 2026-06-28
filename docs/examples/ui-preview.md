@@ -50,6 +50,33 @@ target when the desktop UI/GPU dependencies are available.
 | `test/test_ui_preview_viewport.cpp` | Headless tests for the imported-design viewport probe |
 | `test/test_bench_integration.cpp` | Optional benchmark-mode integration test when `PULP_BENCHMARK` and `pulp-ui-preview` are built |
 
+## Benchmark Mode
+
+Benchmark mode is available when Pulp is configured with
+`-DPULP_BENCHMARK=ON` and the `pulp-ui-preview` target is built. It runs a
+headless, frame-paced visualization loop and writes the JSON schema consumed by
+`tools/scripts/bench_diff.py`.
+
+```bash
+cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DPULP_BENCHMARK=ON
+cmake --build build-bench --target pulp-ui-preview pulp-test-bench-integration
+./build-bench/examples/ui-preview/pulp-ui-preview \
+  --benchmark-seconds=10 \
+  --widget=oscilloscope \
+  --output=/tmp/pulp-ui-preview-bench.json \
+  --target-fps=60
+```
+
+`--benchmark-seconds=<n>` enables benchmark mode and sets the run duration.
+`--output=<path>` is required when benchmark mode is enabled. `--widget=<name>`
+defaults to `oscilloscope`, and `--target-fps=<n>` defaults to `60`.
+
+Compare two captured runs with:
+
+```bash
+tools/scripts/bench_diff.py baseline.json /tmp/pulp-ui-preview-bench.json
+```
+
 ## Known Limitations
 
 - macOS desktop only. The CMakeLists.txt requires Apple desktop, GPU enabled,

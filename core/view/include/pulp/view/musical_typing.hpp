@@ -122,6 +122,7 @@ public:
             case KeyCode::u: return 10;  case KeyCode::j: return 11;
             case KeyCode::k: return 12;  case KeyCode::o: return 13;
             case KeyCode::l: return 14;  case KeyCode::p: return 15;
+            case KeyCode::semicolon: return 16;  case KeyCode::apostrophe: return 17;
             default: return -1;
         }
     }

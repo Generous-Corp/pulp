@@ -8,6 +8,98 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05280"></a>
+## [0.528.0] - 2026-06-28
+
+- feat(format): route secondary output buses to the Processor in CLAP and VST3 ([#5191](https://github.com/danielraffel/pulp/pull/5191))
+
+<a id="v05270"></a>
+## [0.527.0] - 2026-06-28
+
+- fix(format): marshal VST3 restartComponent off the audio thread ([#5190](https://github.com/danielraffel/pulp/pull/5190))
+
+<a id="v05260"></a>
+## [0.526.0] - 2026-06-28
+
+- fix(format): make CLAP and .pulpset param text conversion locale-independent ([#5181](https://github.com/danielraffel/pulp/pull/5181))
+- fix(view): guard GPU hosted-view drag category behind PULP_HAS_SKIA ([#5185](https://github.com/danielraffel/pulp/pull/5185))
+- docs(view): align modulation matrix status ([#5187](https://github.com/danielraffel/pulp/pull/5187))
+- docs(format): align AU v2 parameter sync guide ([#5069](https://github.com/danielraffel/pulp/pull/5069))
+
+<a id="v05240"></a>
+## [0.524.0] - 2026-06-28
+
+- feat(format): VST3 per-note expression (MPE) via INoteExpressionController ([#5170](https://github.com/danielraffel/pulp/pull/5170))
+
+<a id="v05230"></a>
+## [0.523.0] - 2026-06-27
+
+- fix(host): serialize control-thread SignalGraph node-field access against prepare ([#5167](https://github.com/danielraffel/pulp/pull/5167))
+
+<a id="v05220"></a>
+## [0.522.0] - 2026-06-28
+
+- feat(designmd): track DESIGN.md format spec 0.3.0 in the importer ([#5136](https://github.com/danielraffel/pulp/pull/5136))
+
+<a id="v05211"></a>
+## [0.521.1] - 2026-06-27
+
+- fix(rt): coalesce live main-listener notifications and clamp native-core event offsets ([#5161](https://github.com/danielraffel/pulp/pull/5161))
+
+<a id="v05210"></a>
+## [0.521.0] - 2026-06-27
+
+- feat(format): deliver MIDI controllers to VST3 instruments via IMidiMapping ([#5155](https://github.com/danielraffel/pulp/pull/5155))
+
+<a id="v05200"></a>
+## [0.520.0] - 2026-06-28
+
+- feature/au render rt safety ([#5152](https://github.com/danielraffel/pulp/pull/5152))
+
+<a id="v05190"></a>
+## [0.519.0] - 2026-06-27
+
+- fix(midi): correct MPE glide refcount on steal and retrigger expression re-seed ([#5149](https://github.com/danielraffel/pulp/pull/5149))
+
+<a id="v05180"></a>
+## [0.518.0] - 2026-06-27
+
+- fix(host): pin live snapshot in SignalGraph control-thread readers ([#5142](https://github.com/danielraffel/pulp/pull/5142))
+
+<a id="v05173"></a>
+## [0.517.3] - 2026-06-27
+
+- fix(sampler): unlinked tempo follows the sample + fractional BPM readout ([#5132](https://github.com/danielraffel/pulp/pull/5132))
+- fix(mcp): pulp_audio_render temp-dir leak + opaque-error hardening ([#5134](https://github.com/danielraffel/pulp/pull/5134))
+- docs(quality-lab): clean public-facing copy, attribute perceptual models ([#5131](https://github.com/danielraffel/pulp/pull/5131))
+- feat(mcp): pulp_audio_render MCP tool + refresh /audio-harness ([#5122](https://github.com/danielraffel/pulp/pull/5122))
+
+<a id="v05172"></a>
+## [0.517.2] - 2026-06-27
+
+- fix(view,sampler): file drag-drop in hosted plugins + bar-exact loop tempo ([#5113](https://github.com/danielraffel/pulp/pull/5113))
+
+<a id="v05171"></a>
+## [0.517.1] - 2026-06-27
+
+- fix(view,sampler): hosted Musical Typing, tempo persistence, DAW-tempo LINK ([#5108](https://github.com/danielraffel/pulp/pull/5108))
+- feat(quality-lab): real-engine regression gate ([#5075](https://github.com/danielraffel/pulp/pull/5075))
+- fix(ci): gate diff uses three-dot (merge-base) so behind-branch files aren't flagged ([#5106](https://github.com/danielraffel/pulp/pull/5106))
+
+<a id="v05170"></a>
+## [0.517.0] - 2026-06-27
+
+- feature/bypass dry latency ([#5094](https://github.com/danielraffel/pulp/pull/5094))
+- feat(quality-lab): real-audio input path (reference-free dry-input) ([#5091](https://github.com/danielraffel/pulp/pull/5091))
+- fix(view): map ; and ' so Musical Typing reaches all 18 keys ([#5089](https://github.com/danielraffel/pulp/pull/5089))
+
+<a id="v05160"></a>
+## [0.516.0] - 2026-06-27
+
+- fix(state): enforce lock-free param contract and fix CachedProperty default/short-circuit ([#5086](https://github.com/danielraffel/pulp/pull/5086))
+- feat(quality-lab): versioned license-guarded corpus + add-source ([#5078](https://github.com/danielraffel/pulp/pull/5078))
+- fix(format): guard VST3 and CLAP against oversized render blocks ([#5081](https://github.com/danielraffel/pulp/pull/5081))
+
 <a id="v05150"></a>
 ## [0.515.0] - 2026-06-27
 
@@ -5399,6 +5491,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.528.0]: https://github.com/danielraffel/pulp/releases/tag/v0.528.0
+[0.527.0]: https://github.com/danielraffel/pulp/releases/tag/v0.527.0
+[0.526.0]: https://github.com/danielraffel/pulp/releases/tag/v0.526.0
+[0.524.0]: https://github.com/danielraffel/pulp/releases/tag/v0.524.0
+[0.523.0]: https://github.com/danielraffel/pulp/releases/tag/v0.523.0
+[0.522.0]: https://github.com/danielraffel/pulp/releases/tag/v0.522.0
+[0.521.1]: https://github.com/danielraffel/pulp/releases/tag/v0.521.1
+[0.521.0]: https://github.com/danielraffel/pulp/releases/tag/v0.521.0
+[0.520.0]: https://github.com/danielraffel/pulp/releases/tag/v0.520.0
+[0.519.0]: https://github.com/danielraffel/pulp/releases/tag/v0.519.0
+[0.518.0]: https://github.com/danielraffel/pulp/releases/tag/v0.518.0
+[0.517.3]: https://github.com/danielraffel/pulp/releases/tag/v0.517.3
+[0.517.2]: https://github.com/danielraffel/pulp/releases/tag/v0.517.2
+[0.517.1]: https://github.com/danielraffel/pulp/releases/tag/v0.517.1
+[0.517.0]: https://github.com/danielraffel/pulp/releases/tag/v0.517.0
+[0.516.0]: https://github.com/danielraffel/pulp/releases/tag/v0.516.0
 [0.515.0]: https://github.com/danielraffel/pulp/releases/tag/v0.515.0
 [0.514.0]: https://github.com/danielraffel/pulp/releases/tag/v0.514.0
 [0.513.0]: https://github.com/danielraffel/pulp/releases/tag/v0.513.0

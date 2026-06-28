@@ -135,6 +135,11 @@ The parser handles the canonical frontmatter keys (`version`, `name`,
 `components`), resolves `{group.key}` references at parse time, and
 preserves composite typography references inside `components.*`
 verbatim so downstream tooling can resolve them in widget context.
+It tracks the upstream format spec at tag `0.3.0`: color values may be
+any valid CSS color (hex, named, `rgb()`/`hsl()`/`oklch()`/`color-mix()`,
+…), token groups nest to arbitrary depth (keyed on the dot-joined path),
+`spacing` accepts bare numbers, and an unrecognized top-level key is
+flagged with a warning rather than silently dropped.
 
 Detection is strict: filename must be `DESIGN.md`, the frontmatter
 fence must be present, and the frontmatter must declare `name:` plus

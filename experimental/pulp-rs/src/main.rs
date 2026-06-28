@@ -50,8 +50,8 @@ enum Command {
     /// Per-project SDK pin: `pin`, `unpin`, `undo`.
     Project(ProjectArgs),
 
-    /// Scan system paths for VST3 / AU / CLAP / LV2 plug-ins using
-    /// file enumeration rather than deep plug-in metadata.
+    /// File-enumerate VST3 / AU / AUv3 / CLAP / LV2 plug-in bundles
+    /// without loading plug-ins or querying factories.
     Scan(ScanArgs),
 
     /// Read + write `~/.pulp/config.toml`.
@@ -203,11 +203,17 @@ struct ProjectArgs {
 }
 
 #[derive(clap::Args, Debug)]
+// Keep this visible flag list in sync with `cmd::scan::parse_args`.
+#[command(
+    after_help = "Flags:\n  --format <clap|vst3|au|auv3|lv2>, -f <fmt>\n      Restrict the filesystem inventory to one format.\n  --no-load\n      Compatibility no-op on Rust; Rust scan is already filesystem-only.\n\nNotes:\n  Names are filename-derived. Use `pulp-cpp scan` for rich PluginScanner\n  metadata when the C++ delegate is installed."
+)]
 struct ScanArgs {
-    /// The full tail — parsed by `cmd::scan::parse_args` so the flag
-    /// surface stays in lockstep with the C++ CLI without fighting
-    /// clap over `--format`.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Scan options: `--format <fmt>`, `-f <fmt>`, or `--no-load`.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "FLAGS"
+    )]
     tail: Vec<String>,
 }
 

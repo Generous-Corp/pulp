@@ -55,6 +55,8 @@ public:
     }
     MidiBuffer(MidiBuffer&& other) noexcept
         : events_(std::move(other.events_)),
+          sort_index_(std::move(other.sort_index_)),
+          sort_reorder_(std::move(other.sort_reorder_)),
           sysex_copy_payload_pool_(std::move(other.sysex_copy_payload_pool_)),
           sysex_(std::move(other.sysex_)),
           ump_(other.ump_),
@@ -73,6 +75,8 @@ public:
         if (this != &other) {
             sysex_.clear();
             events_ = std::move(other.events_);
+            sort_index_ = std::move(other.sort_index_);
+            sort_reorder_ = std::move(other.sort_reorder_);
             sysex_copy_payload_pool_ = std::move(other.sysex_copy_payload_pool_);
             sysex_ = std::move(other.sysex_);
             ump_ = other.ump_;
@@ -117,7 +121,10 @@ public:
     }
     bool empty() const { return events_.empty(); }
     std::size_t size() const { return events_.size(); }
-    void reserve_events(std::size_t capacity) { events_.reserve(capacity); }
+    void reserve_events(std::size_t capacity) {
+        events_.reserve(capacity);
+        reserve_sort_scratch(capacity);
+    }
     void reserve_sysex(std::size_t capacity) { sysex_.reserve(capacity); }
 
     /// Preallocate storage for realtime callers that append during process().
@@ -125,6 +132,7 @@ public:
                  std::size_t sysex_capacity = 0,
                  std::size_t sysex_copy_payload_capacity = 0) {
         events_.reserve(event_capacity);
+        reserve_sort_scratch(event_capacity);
         sysex_.reserve(sysex_capacity);
         if (sysex_copy_payload_capacity > 0) {
             reserve_sysex_copy_payloads(sysex_capacity,
@@ -150,15 +158,42 @@ public:
     std::uint32_t dropped_sysex_count() const { return dropped_sysex_events_; }
 
     /// Sort events by sample_offset for sample-accurate processing.
-    /// Call this before iterating in the audio callback. Sorting is
-    /// in-place over the existing event storage; realtime callers must not
-    /// append while sorting and should rely on adapters to have bounded the
-    /// event count before process().
+    /// Call this before iterating in the audio callback. Realtime callers
+    /// must not append while sorting and should rely on adapters to have
+    /// bounded the event count before process().
+    ///
+    /// The sort is **insertion-stable**: events at the same sample offset keep
+    /// the relative order in which they were add()'ed (a controller appended
+    /// before a note-on at the same offset stays before it). This preserves
+    /// the same-offset musical semantics every consumer had, while remaining
+    /// deterministic run-to-run. Implemented as an index sort with a
+    /// pre-reserved scratch (an std::sort over indices keyed by
+    /// (sample_offset, original_index) — a valid strict-weak total order —
+    /// then a one-pass reorder through the scratch), NOT std::stable_sort
+    /// (which may allocate a temporary buffer). The comparator never touches
+    /// variable-length sysex payload bytes. Allocation-free when the scratch
+    /// was reserved (reserve()/reserve_events() size it to the event
+    /// capacity); only an unreserved, growing buffer can allocate here.
     void sort() {
-        std::sort(events_.begin(), events_.end(),
-            [](const MidiEvent& a, const MidiEvent& b) {
-                return a.sample_offset < b.sample_offset;
+        const std::size_t n = events_.size();
+        if (n < 2) return;
+        sort_index_.resize(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            sort_index_[i] = static_cast<std::uint32_t>(i);
+        }
+        const std::vector<MidiEvent>& ev = events_;
+        std::sort(sort_index_.begin(), sort_index_.end(),
+            [&ev](std::uint32_t a, std::uint32_t b) {
+                if (ev[a].sample_offset != ev[b].sample_offset) {
+                    return ev[a].sample_offset < ev[b].sample_offset;
+                }
+                return a < b;  // tie-break = original insertion order
             });
+        sort_reorder_.resize(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            sort_reorder_[i] = std::move(events_[sort_index_[i]]);
+        }
+        events_.swap(sort_reorder_);
     }
 
     auto begin() { return events_.begin(); }
@@ -472,7 +507,21 @@ private:
     void record_event_drop() { saturating_increment(dropped_events_); }
     void record_sysex_drop() { saturating_increment(dropped_sysex_events_); }
 
+    // Size the insertion-stable sort()'s scratch (index list + reorder buffer)
+    // to the event capacity so sort() is allocation-free for realtime callers.
+    // events_.swap(sort_reorder_) means the two reorder buffers ping-pong, so
+    // BOTH must hold the capacity for the swap to stay alloc-free across blocks.
+    void reserve_sort_scratch(std::size_t capacity) {
+        sort_index_.reserve(capacity);
+        sort_reorder_.reserve(capacity);
+    }
+
     std::vector<MidiEvent> events_;
+    // Scratch for the insertion-stable sort(). Not part of the buffer's logical
+    // contents — excluded from copy/move/clear; reserved by reserve()/
+    // reserve_events() and resized in place by sort().
+    std::vector<std::uint32_t> sort_index_;
+    std::vector<MidiEvent> sort_reorder_;
     std::vector<std::vector<uint8_t>> sysex_copy_payload_pool_;
     std::vector<SysexEvent> sysex_;
     class UmpBuffer* ump_ = nullptr;

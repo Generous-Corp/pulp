@@ -132,23 +132,22 @@ enum class AnnouncementPriority {
     Assertive,
 };
 
-/// Request the current platform screen reader speak `text`. On platforms
-/// without a wired backend (or when no screen reader is active) the call
-/// is logged at info level and otherwise a no-op — it is always safe to
-/// call, including from test harnesses.
+/// Request the installed accessibility announcement sink speak `text`. When no
+/// sink is installed (or no screen reader is active), the call is logged at info
+/// level and otherwise a no-op — it is always safe to call, including from test
+/// harnesses.
 ///
-/// Backends (populated via set_announcement_sink at window-attach time):
-///   macOS   — NSAccessibilityAnnouncementRequestedNotification
-///   iOS     — UIAccessibilityPostNotification(AnnouncementNotification)
-///   Android — Kotlin-side TalkBack TYPE_ANNOUNCEMENT (pending)
-///   Windows — UIA UiaRaiseNotificationEvent (not wired yet)
-///   Linux   — AT-SPI object:announcement (not wired yet)
+/// The C++ API and sink plumbing are present. Built-in platform bridge sinks are
+/// still pending: macOS/iOS should install the native announcement notification
+/// path, Android should route through TalkBack TYPE_ANNOUNCEMENT, Windows
+/// through UiaRaiseNotificationEvent, and Linux through AT-SPI announcement
+/// events.
 void announce_accessibility(std::string_view text,
                             AnnouncementPriority priority = AnnouncementPriority::Polite);
 
-/// Install a platform-specific announcement sink. Called by accessibility
-/// bridges at window-attach time. Pass nullptr to detach (the default
-/// logger is restored). Not thread-safe — UI thread only.
+/// Install a platform-specific announcement sink when a live-region backend is
+/// available. Pass nullptr to detach (the default logger is restored). Not
+/// thread-safe — UI thread only.
 using AnnouncementSink =
     std::function<void(std::string_view text, AnnouncementPriority)>;
 void set_announcement_sink(AnnouncementSink sink);

@@ -330,6 +330,91 @@ public:
     bool process_buffer_storage_valid = false;
 };
 
+// Declares two output buses and writes a distinct constant to each via the
+// richer process(ProcessBuffers&) surface. Proves the adapter routes every
+// declared output bus to the Processor instead of zero-filling secondary buses.
+class MultiOutProcessor : public Processor {
+public:
+    static constexpr float kMainValue = 0.5f;
+    static constexpr float kAuxValue = -0.25f;
+    static constexpr state::ParamID kBypassParamId = 12000;
+
+    // Per-instance config seeded by the factory from pending flags. Lets a test
+    // declare a Bypass param (to exercise the adapter's bypass short-circuit) or
+    // declare a 1-channel aux bus (to exercise host-vs-declared mismatch).
+    bool declares_bypass = false;
+    int declared_aux_channels = 2;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "MultiOutCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.multiout";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Instrument;
+        d.input_buses = {};
+        d.output_buses = {{"Main Out", 2}, {"Aux Out", declared_aux_channels}};
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        if (declares_bypass) {
+            store.add_parameter({.id = kBypassParamId, .name = "Bypass",
+                                 .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        }
+    }
+    void prepare(const PrepareContext&) override { ++prepare_count; }
+
+    using Processor::process;
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        // Fallback for the single-output legacy path: only fills the main bus.
+        fill(audio_output, kMainValue);
+    }
+
+    void process(ProcessBuffers& audio,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++process_buffer_calls;
+        captured_output_bus_count = static_cast<int>(audio.outputs.size());
+        captured_layouts_match = audio.layouts_match_descriptors();
+        if (auto* main = audio.outputs.main(); main && main->active()) {
+            fill(main->buffer, kMainValue);
+            wrote_main = true;
+        }
+        if (auto* aux = audio.outputs.find(BusRole::Aux); aux) {
+            aux_was_active = aux->active();
+            captured_aux_declared = aux->info.declared_channels;
+            if (aux->active()) {
+                fill(aux->buffer, kAuxValue);
+                wrote_aux = true;
+                captured_aux_channels = static_cast<int>(aux->num_channels());
+            }
+        }
+    }
+
+    int prepare_count = 0;
+    int process_buffer_calls = 0;
+    int captured_output_bus_count = 0;
+    int captured_aux_channels = 0;
+    int captured_aux_declared = -1;
+    bool aux_was_active = false;
+    bool captured_layouts_match = false;
+    bool wrote_main = false;
+    bool wrote_aux = false;
+
+private:
+    static void fill(audio::BufferView<float>& view, float value) {
+        for (std::size_t ch = 0; ch < view.num_channels(); ++ch) {
+            auto data = view.channel(ch);
+            for (std::size_t n = 0; n < view.num_samples(); ++n) data[n] = value;
+        }
+    }
+};
+
 // Copies the main input to the main output (unity gain) and records the
 // block size it was handed. Used to prove the oversized-block guard: the
 // processor must only ever see the prepared max, and the adapter zeros the
@@ -678,6 +763,38 @@ public:
     int tail_samples = 0;
 };
 
+// Declares a real Bypass parameter and reports a non-zero latency, so the
+// adapter routes the bypass pass-through through the per-channel dry delay.
+class BypassLatencyProcessor : public Processor {
+public:
+    static constexpr state::ParamID kBypassId = 7777;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "BypassLatencyCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.bypass-latency";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kBypassId,
+            .name = "Bypass",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
+        });
+    }
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+    int latency_samples() const override { return latency; }
+
+    int latency = 0;
+};
+
 // Processor factory hooks have to be raw function pointers. Route through
 // singletons so the tests can configure the active processor before the
 // adapter instantiates one.
@@ -735,6 +852,19 @@ std::unique_ptr<Processor> make_unity_copy() {
     return up;
 }
 
+MultiOutProcessor* g_multi_out = nullptr;
+bool g_pending_multi_out_bypass = false;
+int g_pending_multi_out_aux_channels = 2;
+std::unique_ptr<Processor> make_multi_out() {
+    auto up = std::make_unique<MultiOutProcessor>();
+    up->declares_bypass = g_pending_multi_out_bypass;
+    up->declared_aux_channels = g_pending_multi_out_aux_channels;
+    g_pending_multi_out_bypass = false;
+    g_pending_multi_out_aux_channels = 2;
+    g_multi_out = up.get();
+    return up;
+}
+
 std::unique_ptr<Processor> make_emitting() {
     auto up = std::make_unique<EmittingProcessor>();
     g_emitting = up.get();
@@ -787,6 +917,15 @@ std::unique_ptr<Processor> make_latency_tail() {
     up->tail_samples = g_pending_tail_samples;
     g_pending_latency_samples = 0;
     g_pending_tail_samples = 0;
+    return up;
+}
+
+int g_pending_bypass_latency = 0;
+
+std::unique_ptr<Processor> make_bypass_latency() {
+    auto up = std::make_unique<BypassLatencyProcessor>();
+    up->latency = g_pending_bypass_latency;
+    g_pending_bypass_latency = 0;
     return up;
 }
 
@@ -1207,6 +1346,283 @@ TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer s
     REQUIRE(g_capturing->captured_sidechain_first_sample == 0.25f);
     REQUIRE(g_capturing->captured_sidechain_second_sample == -0.5f);
     REQUIRE(g_capturing->sidechain_input() == nullptr);
+}
+
+TEST_CASE("CLAP routes a declared secondary output bus to the Processor",
+          "[clap][audio][multi-out]") {
+    g_multi_out = nullptr;
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+
+    // Two host output buses, stereo each, pre-seeded with a sentinel that must
+    // be overwritten by the routed processor (proves it is not left untouched).
+    std::vector<float> main_l(Harness::kFrames, 99.0f);
+    std::vector<float> main_r(Harness::kFrames, 99.0f);
+    std::vector<float> aux_l(Harness::kFrames, 99.0f);
+    std::vector<float> aux_r(Harness::kFrames, 99.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    float* aux_ptrs[2] = {aux_l.data(), aux_r.data()};
+
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 2;
+
+    clap_audio_buffer_t outputs[2] = {main_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+
+    // The Processor saw both output buses via the richer surface.
+    REQUIRE(g_multi_out->process_buffer_calls == 1);
+    REQUIRE(g_multi_out->captured_output_bus_count == 2);
+    REQUIRE(g_multi_out->wrote_main);
+    REQUIRE(g_multi_out->wrote_aux);
+    REQUIRE(g_multi_out->captured_aux_channels == 2);
+    // declared_channels reflects the descriptor (2), and with host == declared
+    // the layout matches — proving declared_channels is sourced from the
+    // descriptor, not echoed from the routed count.
+    REQUIRE(g_multi_out->captured_aux_declared == 2);
+    REQUIRE(g_multi_out->captured_layouts_match);
+
+    // BOTH buses carry their distinct audio — the aux bus is no longer
+    // zero-filled, and main and aux hold different signals.
+    REQUIRE(std::all_of(main_l.begin(), main_l.end(),
+                        [](float v) { return v == MultiOutProcessor::kMainValue; }));
+    REQUIRE(std::all_of(main_r.begin(), main_r.end(),
+                        [](float v) { return v == MultiOutProcessor::kMainValue; }));
+    REQUIRE(std::all_of(aux_l.begin(), aux_l.end(),
+                        [](float v) { return v == MultiOutProcessor::kAuxValue; }));
+    REQUIRE(std::all_of(aux_r.begin(), aux_r.end(),
+                        [](float v) { return v == MultiOutProcessor::kAuxValue; }));
+    REQUIRE(MultiOutProcessor::kMainValue != MultiOutProcessor::kAuxValue);
+}
+
+TEST_CASE("CLAP single-output processor leaves a host aux bus silent",
+          "[clap][audio][multi-out]") {
+    // Regression: a processor declaring ONE output bus is unchanged — the
+    // adapter pre-zeros any extra host output bus and the default
+    // process(ProcessBuffers&) path only writes the main bus, so the aux bus
+    // reads silence (no uninitialised memory, no routing).
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);  // CapturingProcessor declares one output bus
+    REQUIRE(g_capturing != nullptr);
+
+    std::vector<float> aux_l(Harness::kFrames, 7.0f);
+    std::vector<float> aux_r(Harness::kFrames, -7.0f);
+    float* aux_ptrs[2] = {aux_l.data(), aux_r.data()};
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 2;
+
+    clap_audio_buffer_t outputs[2] = {h.audio_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->process_count == 1);
+    REQUIRE(g_capturing->captured_output_channels == 2);  // main bus unchanged
+    REQUIRE(std::all_of(aux_l.begin(), aux_l.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(aux_r.begin(), aux_r.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE("CLAP tolerates an inactive secondary output bus (null data32)",
+          "[clap][audio][multi-out][rt-safety]") {
+    // P0 regression: a host can present a deactivated aux output bus with
+    // channel_count > 0 but data32 == nullptr. The pre-zero loop and the
+    // routing path must both guard the bus pointer — no null deref on the audio
+    // thread — and the processor must see the aux bus as inactive.
+    g_multi_out = nullptr;
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+
+    std::vector<float> main_l(Harness::kFrames, 99.0f);
+    std::vector<float> main_r(Harness::kFrames, 99.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+
+    // Inactive aux bus: channel_count reported but no channel-pointer array.
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = nullptr;
+    aux_out.channel_count = 2;
+
+    clap_audio_buffer_t outputs[2] = {main_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_multi_out->process_buffer_calls == 1);
+    REQUIRE(g_multi_out->captured_output_bus_count == 2);
+    REQUIRE(g_multi_out->wrote_main);
+    REQUIRE_FALSE(g_multi_out->aux_was_active);  // inactive => not written
+    REQUIRE_FALSE(g_multi_out->wrote_aux);
+    REQUIRE(std::all_of(main_l.begin(), main_l.end(),
+                        [](float v) { return v == MultiOutProcessor::kMainValue; }));
+}
+
+TEST_CASE("CLAP reports declared aux channels distinct from the routed count",
+          "[clap][audio][multi-out]") {
+    // P1: declared_channels comes from the descriptor; num_channels() carries
+    // the routed count. A processor declaring a 1-channel aux bus that the host
+    // drives with 2 channels must see declared=1, routed=2 — a detectable
+    // mismatch, not a tautology.
+    g_multi_out = nullptr;
+    g_pending_multi_out_aux_channels = 1;  // descriptor declares mono aux
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+    REQUIRE(g_multi_out->declared_aux_channels == 1);
+
+    std::vector<float> main_l(Harness::kFrames, 0.0f);
+    std::vector<float> main_r(Harness::kFrames, 0.0f);
+    std::vector<float> aux_l(Harness::kFrames, 99.0f);
+    std::vector<float> aux_r(Harness::kFrames, 99.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    float* aux_ptrs[2] = {aux_l.data(), aux_r.data()};
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 2;  // host drives 2 channels on a mono-declared bus
+
+    clap_audio_buffer_t outputs[2] = {main_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_multi_out->wrote_aux);
+    REQUIRE(g_multi_out->captured_aux_declared == 1);   // descriptor
+    REQUIRE(g_multi_out->captured_aux_channels == 2);    // routed
+    REQUIRE_FALSE(g_multi_out->captured_layouts_match);  // mismatch detectable
+}
+
+TEST_CASE("CLAP clamps an oversized block on a secondary output bus",
+          "[clap][audio][multi-out][rt-safety]") {
+    // The clamp + tail-zero applies to aux buses too: with a host block larger
+    // than the prepared max, the processor only writes [0, prepared_max) and the
+    // un-processable tail [prepared_max, original) on the aux bus reads silence.
+    constexpr uint32_t kPreparedMax = 64;
+    constexpr uint32_t kRenderFrames = 256;
+    g_multi_out = nullptr;
+    Harness h(make_multi_out, kPreparedMax);
+    REQUIRE(g_multi_out != nullptr);
+
+    std::vector<float> main_l(kRenderFrames, -9.0f);
+    std::vector<float> main_r(kRenderFrames, -9.0f);
+    std::vector<float> aux_l(kRenderFrames, -9.0f);
+    std::vector<float> aux_r(kRenderFrames, -9.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    float* aux_ptrs[2] = {aux_l.data(), aux_r.data()};
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 2;
+
+    clap_audio_buffer_t outputs[2] = {main_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         outputs, 2, kRenderFrames, nullptr) != CLAP_PROCESS_ERROR);
+
+    // Processed region carries the aux signal; the tail is silence.
+    for (uint32_t i = 0; i < kPreparedMax; ++i) {
+        REQUIRE(aux_l[i] == MultiOutProcessor::kAuxValue);
+        REQUIRE(aux_r[i] == MultiOutProcessor::kAuxValue);
+    }
+    for (uint32_t i = kPreparedMax; i < kRenderFrames; ++i) {
+        REQUIRE(aux_l[i] == 0.0f);
+        REQUIRE(aux_r[i] == 0.0f);
+    }
+}
+
+TEST_CASE("CLAP leaves a secondary output bus silent while bypassed",
+          "[clap][audio][multi-out][bypass]") {
+    // When the plugin-declared Bypass is engaged the adapter skips the
+    // Processor entirely. The aux bus is pre-zeroed and never written, so it
+    // reads silence (no stale/uninitialised aux audio leaks while bypassed).
+    g_multi_out = nullptr;
+    g_pending_multi_out_bypass = true;
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+    REQUIRE(h.plugin.bypass_param_id == MultiOutProcessor::kBypassParamId);
+    h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+
+    std::vector<float> main_l(Harness::kFrames, 99.0f);
+    std::vector<float> main_r(Harness::kFrames, 99.0f);
+    std::vector<float> aux_l(Harness::kFrames, 99.0f);
+    std::vector<float> aux_r(Harness::kFrames, 99.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    float* aux_ptrs[2] = {aux_l.data(), aux_r.data()};
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 2;
+
+    clap_audio_buffer_t outputs[2] = {main_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         outputs, 2) != CLAP_PROCESS_ERROR);
+
+    REQUIRE(g_multi_out->process_buffer_calls == 0);  // Processor skipped
+    REQUIRE(std::all_of(aux_l.begin(), aux_l.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(aux_r.begin(), aux_r.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE("CLAP caps routed output buses and wide channel counts without OOB",
+          "[clap][audio][multi-out][rt-safety]") {
+    // A host that presents more output buses than kMaxOutputBuses, and an aux
+    // bus wider than kMaxChannels, must not index past the preallocated storage.
+    // Surplus buses are zero-filled but not routed; surplus channels are zeroed.
+    g_multi_out = nullptr;
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+
+    constexpr int kHostBuses = pulp::format::clap_adapter::kMaxOutputBuses + 4;
+    constexpr int kWideChannels = pulp::format::clap_adapter::kMaxChannels + 3;
+
+    // Backing storage for each bus's channels (wide aux at bus 1).
+    std::vector<std::vector<float>> storage;
+    std::vector<std::vector<float*>> ptr_storage;
+    std::vector<clap_audio_buffer_t> buses(kHostBuses);
+    for (int b = 0; b < kHostBuses; ++b) {
+        int chans = (b == 1) ? kWideChannels : 2;
+        ptr_storage.emplace_back();
+        for (int c = 0; c < chans; ++c) {
+            storage.emplace_back(Harness::kFrames, 99.0f);
+            ptr_storage.back().push_back(storage.back().data());
+        }
+        buses[b].data32 = ptr_storage.back().data();
+        buses[b].channel_count = static_cast<uint32_t>(chans);
+    }
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         nullptr, 0,
+                         buses.data(), static_cast<uint32_t>(kHostBuses))
+            != CLAP_PROCESS_ERROR);
+
+    // Only kMaxOutputBuses are routed to the processor.
+    REQUIRE(g_multi_out->captured_output_bus_count ==
+            pulp::format::clap_adapter::kMaxOutputBuses);
+    // The wide aux bus is routed clamped to kMaxChannels; the surplus channels
+    // were pre-zeroed (the pre-zero loop covers all host buses).
+    REQUIRE(g_multi_out->captured_aux_channels ==
+            pulp::format::clap_adapter::kMaxChannels);
+    // Surplus (unrouted) buses beyond kMaxOutputBuses read silence.
+    for (int b = pulp::format::clap_adapter::kMaxOutputBuses; b < kHostBuses; ++b) {
+        for (uint32_t c = 0; c < buses[b].channel_count; ++c) {
+            const float* ch = buses[b].data32[c];
+            REQUIRE(std::all_of(ch, ch + Harness::kFrames,
+                                [](float v) { return v == 0.0f; }));
+        }
+    }
 }
 
 TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
@@ -2786,4 +3202,89 @@ TEST_CASE("CLAP clamps an oversized render block and zeros the tail",
         REQUIRE(out_l[i] == 0.0f);
         REQUIRE(out_r[i] == 0.0f);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Bypass pass-through must delay the dry signal by the plugin's reported
+// latency. A latency-reporting plugin gets host plugin-delay-compensation
+// on its path; the bypassed dry copy must be delayed by the same amount or
+// it arrives `latency` samples early and comb-filters against parallel
+// tracks. Drive a continuous ramp through the real clap_process() path with
+// bypass engaged across several blocks, then assert steady-state
+// output[n] == input[n - latency].
+// ─────────────────────────────────────────────────────────────────────
+TEST_CASE("CLAP bypass pass-through delays the dry signal by the reported latency",
+          "[clap][bypass][latency][pdc]") {
+    constexpr int kLatency = 16;
+    g_pending_bypass_latency = kLatency;
+
+    constexpr uint32_t kBlock = 32;
+    Harness h(make_bypass_latency, kBlock);
+    REQUIRE(h.plugin.bypass_param_id == BypassLatencyProcessor::kBypassId);
+
+    // Engage bypass for the whole run.
+    h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+
+    constexpr int kBlocks = 6;
+    constexpr int kTotal = static_cast<int>(kBlock) * kBlocks;
+    std::vector<float> source(kTotal);
+    for (int n = 0; n < kTotal; ++n) source[n] = static_cast<float>(n + 1);
+
+    std::vector<float> captured_l(kTotal, 0.0f);
+    std::vector<float> captured_r(kTotal, 0.0f);
+
+    for (int b = 0; b < kBlocks; ++b) {
+        std::vector<float> in_l(kBlock), in_r(kBlock), out_l(kBlock, 99.0f),
+            out_r(kBlock, 99.0f);
+        for (uint32_t i = 0; i < kBlock; ++i) {
+            in_l[i] = source[b * static_cast<int>(kBlock) + static_cast<int>(i)];
+            in_r[i] = -in_l[i];
+        }
+        const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+        float* out_ptrs[2] = {out_l.data(), out_r.data()};
+        clap_audio_buffer_t ab_in{};
+        ab_in.data32 = const_cast<float**>(in_ptrs);
+        ab_in.channel_count = 2;
+        clap_audio_buffer_t ab_out{};
+        ab_out.data32 = out_ptrs;
+        ab_out.channel_count = 2;
+
+        InputEventList empty;
+        REQUIRE(h.run_custom(&empty, nullptr, &ab_in, 1, &ab_out, 1, kBlock,
+                             nullptr) != CLAP_PROCESS_ERROR);
+        for (uint32_t i = 0; i < kBlock; ++i) {
+            captured_l[b * static_cast<int>(kBlock) + static_cast<int>(i)] = out_l[i];
+            captured_r[b * static_cast<int>(kBlock) + static_cast<int>(i)] = out_r[i];
+        }
+    }
+
+    // Steady state: output[n] == input[n - kLatency].
+    for (int n = kLatency; n < kTotal; ++n) {
+        REQUIRE(captured_l[n] == source[n - kLatency]);
+        REQUIRE(captured_r[n] == -source[n - kLatency]);
+    }
+    // Warm-up: the first kLatency samples reflect the pre-bypass (silent)
+    // delay-line contents, confirming a real delay rather than a no-op copy.
+    for (int n = 0; n < kLatency; ++n) {
+        REQUIRE(captured_l[n] == 0.0f);
+    }
+}
+
+TEST_CASE("CLAP bypass pass-through is a zero-delay copy when latency is zero",
+          "[clap][bypass][latency][pdc]") {
+    // The bug only exists for latency > 0; a 0-latency plugin keeps the
+    // original verbatim pass-through with no warm-up delay.
+    g_pending_bypass_latency = 0;
+    Harness h(make_bypass_latency);
+    REQUIRE(h.plugin.bypass_param_id == BypassLatencyProcessor::kBypassId);
+
+    h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+    for (uint32_t i = 0; i < Harness::kFrames; ++i) {
+        h.in_left[i]  = 0.1f + static_cast<float>(i);
+        h.in_right[i] = -(0.1f + static_cast<float>(i));
+    }
+    InputEventList empty;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(h.out_left == h.in_left);
+    REQUIRE(h.out_right == h.in_right);
 }

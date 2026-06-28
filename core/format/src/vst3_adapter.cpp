@@ -7,6 +7,8 @@
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_frame_rate.hpp>
+#include <pulp/format/detail/vst3_midi_mapping.hpp>
+#include <pulp/midi/message.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
@@ -18,7 +20,11 @@
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
 #include <pluginterfaces/base/ustring.h>
+#include <algorithm>
 #include <array>
+#include <span>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace pulp::format::vst3 {
@@ -26,9 +32,263 @@ namespace pulp::format::vst3 {
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
+namespace {
+
+// Per-note expression types Pulp's VST3 adapter declares to the host when the
+// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a clean-room
+// choice derived from the VST3 note-expression value ranges (ivstnoteexpression.h)
+// and the MPE spec's three per-note axes (pitch bend, pressure, timbre):
+//
+//   kTuningTypeID     -> per-note pitch bend  (VST3 plain = 240*(norm-0.5) st)
+//   kVolumeTypeID     -> per-note pressure    (loudness axis -> channel pressure)
+//   kBrightnessTypeID -> per-note timbre      (CC74, the MPE timbre controller)
+//   kPanTypeID        -> declared for host completeness; not an MPE axis, so it
+//                        is accepted but not routed into the sidecar.
+//
+// The host queries these via getNoteExpressionInfo(); process() consumes the
+// matching kNoteExpressionValueEvent stream.
+struct NoteExprTypeEntry {
+    NoteExpressionTypeID type_id;
+    const char* title;
+    const char* short_title;
+    const char* units;
+    NoteExpressionValue default_value;  // normalized [0,1]
+    bool bipolar;
+};
+
+constexpr std::array<NoteExprTypeEntry, 4> kNoteExprTypes{{
+    {kTuningTypeID,     "Tuning",     "Tun", "semitones", 0.5, true},
+    {kVolumeTypeID,     "Volume",     "Vol", "",          1.0, false},
+    {kBrightnessTypeID, "Brightness", "Brt", "",          0.5, false},
+    {kPanTypeID,        "Pan",        "Pan", "",          0.5, true},
+}};
+
+// Convert a normalized VST3 tuning value to a signed semitone offset.
+// ivstnoteexpression.h: plain = 240 * (norm - 0.5), so the full [0,1] range
+// spans -120 .. +120 semitones (ten octaves either way), 0.5 == no detune.
+inline double vst3_tuning_norm_to_semitones(double norm) {
+    return 240.0 * (std::clamp(norm, 0.0, 1.0) - 0.5);
+}
+
+// True iff `id` is one of the note-expression types this adapter declares.
+inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
+    for (const auto& entry : kNoteExprTypes) {
+        if (entry.type_id == id) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
+}
+
+tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
+    // Expose the interfaces this subclass adds on top of SingleComponentEffect
+    // (IMidiMapping for MIDI controllers, INoteExpressionController for per-note
+    // expression), then delegate everything else to the base so its IComponent /
+    // IAudioProcessor / IEditController surface stays intact.
+    QUERY_INTERFACE(iid, obj, IMidiMapping::iid, IMidiMapping)
+    QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, INoteExpressionController)
+    return SingleComponentEffect::queryInterface(iid, obj);
+}
+
+bool PulpVst3Processor::is_registered_controller(state::ParamID id) const {
+    if (!detail::is_vst3_midi_cc_param(id)) return false;
+    const auto index = static_cast<std::size_t>(id - detail::kVst3MidiCcParamBase);
+    return index < registered_controller_ids_.size() &&
+           registered_controller_ids_[index];
+}
+
+tresult PLUGIN_API PulpVst3Processor::getMidiControllerAssignment(
+    int32 busIndex, int16 channel, CtrlNumber midiControllerNumber, ParamID& id) {
+    // VST3 controllers reach the plug-in only as parameter changes: the host
+    // calls this to learn which ParamID a given controller maps to. Decline
+    // when this plug-in does not accept MIDI input, when the controller is
+    // outside the standard range, or for any bus/channel beyond the single
+    // 16-channel MIDI input bus the adapter registers.
+    if (!midi_controller_mapping_active_) return kResultFalse;
+    if (busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (midiControllerNumber < 0 ||
+        midiControllerNumber >= detail::kVst3ControllersPerChannel) {
+        return kResultFalse;
+    }
+    const auto candidate = detail::vst3_midi_cc_param_id(
+        static_cast<int>(channel), static_cast<int>(midiControllerNumber));
+    // Never hand the host a ParamID that collided with a real plug-in
+    // parameter and was therefore NOT registered as a controller. The host
+    // owns that ID as an automatable parameter; reporting it as a controller
+    // would make the same ID both a parameter and a controller assignment.
+    if (!is_registered_controller(candidate)) return kResultFalse;
+    id = candidate;
+    return kResultTrue;
+}
+
+// ── INoteExpressionController ──────────────────────────────────────────────
+
+int32 PLUGIN_API PulpVst3Processor::getNoteExpressionCount(
+    int32 busIndex, int16 channel) {
+    // Per-note expression only makes sense for an MPE-aware instrument. A
+    // plug-in that did not opt in declares zero types, so a host never offers
+    // its tracks per-note lanes and process() does no MPE work.
+    if (!mpe_enabled_) return 0;
+    // Note expression is carried on the single event input bus (index 0). Any
+    // other bus has no note-expression surface. The same type set applies to
+    // every channel of that bus.
+    if (busIndex != 0) return 0;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return 0;
+    return static_cast<int32>(kNoteExprTypes.size());
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionInfo(
+    int32 busIndex, int16 channel, int32 noteExpressionIndex,
+    NoteExpressionTypeInfo& info /*out*/) {
+    if (!mpe_enabled_) return kResultFalse;
+    if (busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (noteExpressionIndex < 0 ||
+        noteExpressionIndex >= static_cast<int32>(kNoteExprTypes.size())) {
+        return kResultFalse;
+    }
+
+    const auto& entry =
+        kNoteExprTypes[static_cast<std::size_t>(noteExpressionIndex)];
+
+    info = NoteExpressionTypeInfo{};
+    info.typeId = entry.type_id;
+    Steinberg::UString(info.title, 128).fromAscii(entry.title);
+    Steinberg::UString(info.shortTitle, 128).fromAscii(entry.short_title);
+    Steinberg::UString(info.units, 128).fromAscii(entry.units);
+    info.unitId = Steinberg::Vst::kRootUnitId;
+    info.valueDesc.defaultValue = entry.default_value;
+    info.valueDesc.minimum = 0.0;
+    info.valueDesc.maximum = 1.0;
+    info.valueDesc.stepCount = 0;  // continuous
+    // No global parameter is associated with these note-expression types, so
+    // use the SDK's "no parameter" sentinel rather than a literal 0 — a host
+    // must not associate the type with real plug-in parameter id 0. The
+    // kAssociatedParameterIDValid flag stays clear, so this field is advisory.
+    info.associatedParameterId = Steinberg::Vst::kNoParamId;
+    info.flags = entry.bipolar
+                     ? NoteExpressionTypeInfo::kIsBipolar
+                     : 0;
+    return kResultTrue;
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionStringByValue(
+    int32 busIndex, int16 channel, NoteExpressionTypeID id,
+    NoteExpressionValue valueNormalized /*in*/, String128 string /*out*/) {
+    // Decline anything outside the surface the plug-in actually declares:
+    // not MPE, wrong bus, a channel outside the event bus, or a type id that
+    // is not one of the declared kNoteExprTypes.
+    if (!mpe_enabled_ || busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (!is_declared_note_expr_type(id)) return kResultFalse;
+
+    // Tuning gets a semitone read-out; the remaining types fall back to the
+    // normalized value. A minimal identity-style conversion is acceptable per
+    // the interface contract — the value events drive the audio, not the string.
+    char buf[128] = {0};
+    if (id == kTuningTypeID) {
+        std::snprintf(buf, sizeof(buf), "%.2f",
+                      vst3_tuning_norm_to_semitones(valueNormalized));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%.4f",
+                      std::clamp(static_cast<double>(valueNormalized), 0.0, 1.0));
+    }
+    Steinberg::UString(string, 128).fromAscii(buf);
+    return kResultTrue;
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionValueByString(
+    int32 busIndex, int16 channel, NoteExpressionTypeID id,
+    const TChar* string /*in*/, NoteExpressionValue& valueNormalized /*out*/) {
+    if (!mpe_enabled_ || busIndex != 0 || string == nullptr) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (!is_declared_note_expr_type(id)) return kResultFalse;
+
+    // Parse the ASCII rendering of the string back to a normalized value, the
+    // inverse of getNoteExpressionStringByValue.
+    char ascii[128] = {0};
+    Steinberg::UString(const_cast<TChar*>(string), 128).toAscii(ascii, sizeof(ascii));
+    char* end = nullptr;
+    const double parsed = std::strtod(ascii, &end);
+    if (end == ascii) return kResultFalse;  // not a number
+
+    if (id == kTuningTypeID) {
+        // Inverse of plain = 240*(norm-0.5): norm = plain/240 + 0.5.
+        valueNormalized = std::clamp(parsed / 240.0 + 0.5, 0.0, 1.0);
+    } else {
+        valueNormalized = std::clamp(parsed, 0.0, 1.0);
+    }
+    return kResultTrue;
+}
+
+// ── noteId -> (channel, note) linkage ──────────────────────────────────────
+
+bool PulpVst3Processor::note_id_map_insert(int32 note_id, uint8_t channel,
+                                           uint8_t note) {
+    // A host that supplies no noteId (-1) is not a drop: there is simply
+    // nothing to track, and a later expression with noteId -1 would not match
+    // anyway. Report success so the caller does not count it as a failure.
+    if (note_id < 0) return true;
+    // Reuse an existing slot for the same noteId (a retrigger), else claim a
+    // free slot. If the table is full the mapping is dropped (RT-safe); the
+    // expression for that note simply won't route — never an allocation. The
+    // caller bumps note_expression_drops_ on a false return.
+    NoteIdSlot* free_slot = nullptr;
+    for (auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) {
+            slot.channel = channel;
+            slot.note = note;
+            return true;
+        }
+        if (!slot.active && free_slot == nullptr) {
+            free_slot = &slot;
+        }
+    }
+    if (free_slot) {
+        free_slot->active = true;
+        free_slot->note_id = note_id;
+        free_slot->channel = channel;
+        free_slot->note = note;
+        return true;
+    }
+    return false;  // table full — mapping dropped
+}
+
+void PulpVst3Processor::note_id_map_erase(int32 note_id) {
+    if (note_id < 0) return;
+    for (auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) {
+            slot.active = false;
+            slot.note_id = -1;
+            return;
+        }
+    }
+}
+
+const PulpVst3Processor::NoteIdSlot*
+PulpVst3Processor::note_id_map_find(int32 note_id) const {
+    if (note_id < 0) return nullptr;
+    for (const auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) return &slot;
+    }
+    return nullptr;
+}
+
+void PulpVst3Processor::note_id_map_clear() {
+    for (auto& slot : note_id_map_) {
+        slot.active = false;
+        slot.note_id = -1;
+    }
+    // Reset the saturating drop counter at session boundaries (setup /
+    // deactivate) so it reflects the current activation, not stale history.
+    // Not reset per block — a host polls it to learn it exceeded capacity.
+    note_expression_drops_.store(0, std::memory_order_relaxed);
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
@@ -72,6 +332,19 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
 
+    // Wire the MPE sidecar when the plug-in opts in. The tracker's callbacks
+    // append per-note expression deltas to mpe_buffer_; bind them once here on
+    // the host thread (never on the audio thread). The buffer is reserved +
+    // capacity-limited in setupProcessing(). mpe_enabled_ also gates the
+    // INoteExpressionController surface so a non-MPE plug-in advertises nothing.
+    mpe_enabled_ = desc.effective_capabilities().supports_mpe;
+    if (mpe_enabled_) {
+        midi::bind_tracker_to_buffer(
+            mpe_tracker_, mpe_buffer_, mpe_current_sample_offset_);
+        runtime::log_info("VST3: MPE note-expression sidecar enabled for '{}'",
+                          desc.name);
+    }
+
     // If a host accommodation synthesizes a bypass parameter, inject it
     // before parameter registration so the loop below tags it kIsBypass
     // and caches bypass_param_id_. No-op when the accommodation is off.
@@ -105,9 +378,11 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             bus.optional ? 0 : Steinberg::Vst::BusInfo::kDefaultActive);
     }
 
-    // Add event buses for MIDI
+    // Add event buses for MIDI. The event input bus carries all 16 MIDI
+    // channels (the second argument is the channel count, default 16), so
+    // per-channel controller mapping below has a channel to bind to.
     if (desc.accepts_midi) {
-        addEventInput(STR16("MIDI In"), 1);
+        addEventInput(STR16("MIDI In"), 16);
     }
     if (desc.produces_midi) {
         addEventOutput(STR16("MIDI Out"), 1);
@@ -144,6 +419,63 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         parameters.addParameter(pinfo);
     }
 
+    // Register hidden MIDI-controller parameters so the host accepts the
+    // IMidiMapping assignments. VST3 requires every ParamID returned from
+    // getMidiControllerAssignment to be a registered parameter; these are
+    // flagged kIsHidden (NOT kCanAutomate) so they carry controller traffic
+    // without cluttering the host's automation lanes. Only registered when
+    // the plug-in accepts MIDI input, mirroring the event-bus gating — an
+    // effect that ignores MIDI keeps its exact author-declared parameter
+    // set, so existing parameter-count contracts are unaffected.
+    //
+    // Count: 16 channels × 130 controllers (128 CCs + channel aftertouch +
+    // pitch bend) = 2080 hidden parameters, in the reserved ParamID range
+    // [kVst3MidiCcParamBase, kVst3MidiCcParamEnd). The range is far above
+    // any author-assigned ID; the per-ID collision guard below makes the
+    // no-overlap guarantee hold even for a pathological high-ID plug-in.
+    if (desc.accepts_midi) {
+        midi_controller_mapping_active_ = true;
+        // Membership bitmap: one bit per reserved controller slot. A slot is
+        // set only when its ID was actually registered as a hidden controller
+        // — i.e. it did not collide with a real plug-in parameter. This is the
+        // single predicate used by getMidiControllerAssignment() and the
+        // process()-side diversion below.
+        registered_controller_ids_.assign(
+            static_cast<std::size_t>(detail::kVst3MidiChannels *
+                                     detail::kVst3ControllersPerChannel),
+            false);
+        for (int channel = 0; channel < detail::kVst3MidiChannels; ++channel) {
+            for (int controller = 0;
+                 controller < detail::kVst3ControllersPerChannel; ++controller) {
+                const auto cc_id =
+                    detail::vst3_midi_cc_param_id(channel, controller);
+                // Never shadow a real plug-in parameter. The reserved range
+                // cannot collide in practice, but if a plug-in ever picked an
+                // ID inside it, the real parameter wins: we leave the bitmap
+                // slot clear so this controller is neither registered, nor
+                // reported by getMidiControllerAssignment, nor diverted from
+                // store_ in process(). One consistent predicate, no corruption.
+                if (store_.info(static_cast<state::ParamID>(cc_id)) != nullptr) {
+                    runtime::log_info(
+                        "VST3: MIDI controller ParamID {} collides with a "
+                        "plugin parameter; skipping controller mapping for "
+                        "channel {} controller {}",
+                        cc_id, channel, controller);
+                    continue;
+                }
+                Steinberg::Vst::ParameterInfo cinfo{};
+                cinfo.id = cc_id;
+                cinfo.stepCount = 0;
+                cinfo.defaultNormalizedValue = 0.0;
+                cinfo.flags = ParameterInfo::kIsHidden;
+                cinfo.unitId = Steinberg::Vst::kRootUnitId;
+                parameters.addParameter(cinfo);
+                registered_controller_ids_[static_cast<std::size_t>(
+                    cc_id - detail::kVst3MidiCcParamBase)] = true;
+            }
+        }
+    }
+
     runtime::log_info("VST3: initialized '{}' with {} parameters",
                       desc.name, store_.param_count());
 
@@ -153,10 +485,25 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // code can post work to the DAW's main thread.
     main_thread_token_ = pulp::events::register_plugin_backend();
 
+    // Liveness token shared with every main-thread lambda the restart path
+    // posts, and the active flag that gates the paced poll loop. Created here
+    // so a callback posted before terminate() but run after it sees a false
+    // flag and skips touching this (now-destroyed) instance.
+    drain_alive_ = std::make_shared<std::atomic<bool>>(true);
+    poll_active_ = std::make_shared<std::atomic<bool>>(false);
+
     return kResultOk;
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
+    // Invalidate the liveness token FIRST so any main-thread lambda still
+    // queued on the host run loop (a one-shot drain or a paced poll tick)
+    // becomes a no-op and cannot dereference this instance after it is freed.
+    // unregister_plugin_backend() additionally waits for in-flight backend
+    // callbacks to drain, but the flag is the authoritative guard.
+    if (poll_active_) poll_active_->store(false, std::memory_order_release);
+    if (drain_alive_) drain_alive_->store(false, std::memory_order_release);
+
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // initialize().
     if (main_thread_token_ != 0) {
@@ -319,6 +666,34 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     input_ptrs_.resize(ctx.input_channels);
     output_ptrs_.resize(ctx.output_channels);
 
+    // Pre-size per-bus channel-pointer storage for the secondary (aux) output
+    // buses the descriptor declares (everything past the main bus at index 0).
+    // Each sub-vector is sized to the ACCEPTED VST3 bus arrangement — which
+    // setBusArrangements() may have shifted mono↔stereo away from the descriptor
+    // default — so the routing path in process() reuses this storage, never
+    // allocates on the audio thread, and never drops a channel the host
+    // negotiated. We size to max(accepted, declared) so a host that presents
+    // the descriptor default after a wider negotiation still fits. The declared
+    // count is recorded separately for the aux view's declared_channels.
+    const std::size_t declared_output_buses = desc.output_buses.size();
+    const std::size_t aux_bus_count =
+        declared_output_buses > 0 ? declared_output_buses - 1 : 0;
+    aux_output_ptrs_.assign(aux_bus_count, {});
+    declared_aux_channels_.assign(aux_bus_count, 0);
+    for (std::size_t b = 1; b < declared_output_buses; ++b) {
+        const int declared = desc.output_buses[b].default_channels;
+        declared_aux_channels_[b - 1] = declared;
+        int accepted = declared;
+        if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                audioOutputs.at(static_cast<int32>(b)))) {
+            accepted = static_cast<int>(
+                Steinberg::Vst::SpeakerArr::getChannelCount(bus->getArrangement()));
+        }
+        const int storage = (std::max)(declared, accepted);
+        aux_output_ptrs_[b - 1].assign(
+            storage > 0 ? static_cast<std::size_t>(storage) : 0, nullptr);
+    }
+
     // Pre-allocate the per-block MIDI buffers and switch them to
     // realtime-capacity mode so add()/add_sysex_copy() in process() never grow
     // (and therefore never heap-allocate) on the audio thread. The worst-case
@@ -333,17 +708,139 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    // Reserve the MPE sidecar so process() never allocates: one inbound MIDI
+    // event can fan out to several MPE callbacks (note-on + bend + pressure +
+    // timbre), so size the buffer at the same worst-case event ceiling as the
+    // MIDI buffers and pin it to realtime-capacity mode. Reset the noteId map
+    // and tracker so a fresh activation starts with no stale per-note state.
+    mpe_buffer_.reserve(kMaxEventsPerBlock);
+    mpe_buffer_.set_realtime_capacity_limit(true);
+    mpe_tracker_.reset();
+    note_id_map_clear();
+
+    // Size the per-channel dry-delay used by the bypass pass-through. The
+    // host compensates the plugin path by getLatencySamples(), so the
+    // bypassed dry copy must be delayed by exactly that many samples to stay
+    // aligned with the host's plugin-delay-compensation. Allocate here, never
+    // in process(); a 0 latency keeps the delay line empty so the bypass
+    // pass-through stays a zero-copy memcpy.
+    bypass_delay_samples_ = static_cast<int>(
+        reported_latency_samples(processor_->latency_samples(), quirks_));
+    if (bypass_delay_samples_ < 0) bypass_delay_samples_ = 0;
+    if (bypass_delay_samples_ > 0) {
+        bypass_dry_delay_.resize(static_cast<std::size_t>(ctx.output_channels));
+        for (auto& line : bypass_dry_delay_) {
+            line.prepare(bypass_delay_samples_);
+        }
+    } else {
+        bypass_dry_delay_.clear();
+    }
+
     return SingleComponentEffect::setupProcessing(setup);
+}
+
+// Cadence of the paced main-thread restart poll. ~33ms (≈30 Hz) is well below
+// any audible / PDC-relevant latency, far above a busy loop, and cheap: an
+// idle tick is one relaxed atomic load and an early return.
+namespace { constexpr int kRestartPollIntervalMs = 33; }
+
+// Main-thread drain of the restart publisher. process() only accumulates the
+// pending restart flags into restart_publisher_ (RT-safe); the host callback
+// fires here, off the audio thread. Called from the paced poll tick and from
+// main-thread host entrypoints (setActive / getLatencySamples /
+// getTailSamples / getState).
+void PulpVst3Processor::drain_pending_restart() {
+    // Nothing armed — cheap early-out (one acquire atomic load).
+    if (!restart_publisher_.dispatch_armed()) return;
+
+    // If a main-thread backend is registered, only deliver when we are
+    // genuinely on the main thread. When no backend is registered, VST3's
+    // threading contract says these entrypoints run on the host's UI/main
+    // thread, so delivery is safe; we degrade to delivering directly.
+    if (pulp::events::MainThreadDispatcher::has_backend() &&
+        !pulp::events::MainThreadDispatcher::is_main_thread()) {
+        // We are not on the main thread (e.g. a host that calls a query from a
+        // worker). Arrange a one-shot main-thread post. call_async may allocate
+        // / lock, which is fine here because this never runs on the audio
+        // thread. The lambda is lifetime-safe: it captures the shared alive
+        // flag and only touches `this` while the flag is true (terminate()
+        // clears it before the component is destroyed).
+        auto alive = drain_alive_;
+        pulp::events::MainThreadDispatcher::call_async([this, alive] {
+            if (alive && alive->load(std::memory_order_acquire))
+                deliver_pending_restart();
+        });
+        return;
+    }
+
+    deliver_pending_restart();
+}
+
+void PulpVst3Processor::deliver_pending_restart() {
+    auto* handler = getComponentHandler();
+    restart_publisher_.poll_main_thread([handler](int32 flags) {
+        // restartComponent is a host callback: may lock / allocate / re-enter.
+        // Safe here because this only ever runs on the main thread.
+        if (handler) handler->restartComponent(flags);
+    });
+}
+
+void PulpVst3Processor::start_restart_poll() {
+    if (!poll_active_) return;
+    // Mark active and kick the first tick. Idempotent: re-marking active while
+    // a tick chain is already running just keeps it running (the chain checks
+    // poll_active_ before re-posting, so there is at most one live chain per
+    // activation as long as start is only called from setActive(true)).
+    poll_active_->store(true, std::memory_order_release);
+    schedule_restart_poll_tick();
+}
+
+void PulpVst3Processor::schedule_restart_poll_tick() {
+    // Capture the shared liveness + active flags by value so a tick that fires
+    // after terminate()/deactivation is a safe no-op and never re-posts.
+    auto alive = drain_alive_;
+    auto active = poll_active_;
+    pulp::events::MainThreadDispatcher::call_async_after(
+        [this, alive, active] {
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            if (!active || !active->load(std::memory_order_acquire)) return;
+            deliver_pending_restart();
+            // Re-post only while still active. Stopping is cooperative: when
+            // setActive(false)/terminate() clears `active`, the next tick
+            // returns early above and the chain ends.
+            if (active->load(std::memory_order_acquire))
+                schedule_restart_poll_tick();
+        },
+        kRestartPollIntervalMs);
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     if (!state && processor_) {
         processor_->release();
+        // Drop any per-note expression state so a re-activation does not route
+        // a stale noteId to a voice that no longer exists.
+        mpe_tracker_.reset();
+        note_id_map_clear();
+    }
+    // Activation transitions run on the main thread — flush any restart the
+    // audio thread accumulated, and start/stop the paced poll so a mid-stream
+    // change while active is delivered without an incidental host query.
+    drain_pending_restart();
+    if (poll_active_) {
+        if (state) {
+            start_restart_poll();
+        } else {
+            poll_active_->store(false, std::memory_order_release);
+        }
     }
     return SingleComponentEffect::setActive(state);
 }
 
 uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
+    // Host re-queries latency on the main thread after a restart; flush any
+    // pending restart notification first so the report and the host's PDC
+    // refresh stay in step. (Belt-and-suspenders alongside the paced poll.)
+    drain_pending_restart();
     if (!processor_) return 0;
     // VST3 reports latency as unsigned, so a negative latency_samples()
     // would wrap to a huge value without the host-quirk clamp. When the
@@ -353,6 +850,9 @@ uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
 }
 
 uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
+    // Same rationale as getLatencySamples: a host re-queries the tail on the
+    // main thread after a kReloadComponent restart, so flush here.
+    drain_pending_restart();
     if (!processor_) return 0;
     auto tail = processor_->descriptor().tail_samples;
     if (tail < 0) return Steinberg::Vst::kInfiniteTail;
@@ -370,6 +870,17 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     param_events_.clear();
 
+    // Reset the reused per-block MIDI buffers up front. They are cleared here
+    // (not just before the event loop below) because MIDI controllers arrive
+    // as parameter changes in the loop that follows and are decoded straight
+    // into midi_in_; both the reserved short-event store and the SysEx sidecar
+    // must be empty before either source appends. clear()/clear_sysex() recycle
+    // reserved capacity, so this stays allocation-free.
+    midi_in_.clear();
+    midi_in_.clear_sysex();
+    midi_out_.clear();
+    midi_out_.clear_sysex();
+
     // Read parameter changes from host and sync to Pulp StateStore
     if (data.inputParameterChanges) {
         int32 count = data.inputParameterChanges->getParameterCount();
@@ -379,6 +890,77 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 ParamID id = queue->getParameterId();
                 int32 point_count = queue->getPointCount();
                 if (point_count > 0) {
+                    // Parameter changes whose ID is a REGISTERED hidden
+                    // controller are MIDI controllers the host routed through
+                    // IMidiMapping, not real plug-in parameters. The predicate
+                    // is is_registered_controller() (the same bitmap the
+                    // registration and assignment paths use), NOT a bare range
+                    // test: a real plug-in parameter that happens to fall in
+                    // the reserved range was never registered as a controller,
+                    // so it is NOT diverted here and still reaches store_.
+                    // Decode each point into a sample-accurate MIDI message on
+                    // the same midi_in_ buffer the note/SysEx path uses; these
+                    // never touch store_ or param_events_.
+                    if (is_registered_controller(static_cast<state::ParamID>(id))) {
+                        const auto decoded = detail::vst3_decode_midi_cc_param(
+                            static_cast<state::ParamID>(id));
+                        const auto channel =
+                            static_cast<uint8_t>(decoded.channel);
+                        for (int32 point = 0; point < point_count; ++point) {
+                            ParamValue value;
+                            int32 offset;
+                            if (queue->getPoint(point, offset, value) !=
+                                kResultTrue) {
+                                continue;
+                            }
+                            // Defensive value/offset hardening. Hosts normally
+                            // send normalized 0..1 at a valid in-block offset,
+                            // but the bridge must not emit a malformed MIDI byte
+                            // or an out-of-block sample offset.
+                            const double norm = std::clamp(
+                                static_cast<double>(value), 0.0, 1.0);
+                            if (offset < 0 || offset >= data.numSamples) {
+                                continue;  // outside [0, numSamples): drop
+                            }
+                            midi::MidiEvent me;
+                            if (decoded.controller == detail::kVst3CtrlPitchBend) {
+                                // Normalized 0..1 → 14-bit pitch bend
+                                // (0..16383, centre 8192).
+                                const auto bend14 = static_cast<uint16_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 16383.0 + 0.5),
+                                        0, 16383));
+                                me = midi::MidiEvent::pitch_bend(channel, bend14);
+                            } else if (decoded.controller ==
+                                       detail::kVst3CtrlAfterTouch) {
+                                // Channel pressure (status 0xD0): 7-bit value,
+                                // no factory helper, so build the message
+                                // directly.
+                                const auto v7 = static_cast<uint8_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 127.0 + 0.5),
+                                        0, 127));
+                                me = midi::MidiEvent{
+                                    choc::midi::ShortMessage(
+                                        static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
+                                        v7, 0),
+                                    0, 0.0};
+                            } else {
+                                // Standard CC 0..127.
+                                const auto v7 = static_cast<uint8_t>(
+                                    std::clamp<int>(
+                                        static_cast<int>(norm * 127.0 + 0.5),
+                                        0, 127));
+                                me = midi::MidiEvent::cc(
+                                    channel,
+                                    static_cast<uint8_t>(decoded.controller),
+                                    v7);
+                            }
+                            me.sample_offset = offset;
+                            midi_in_.add(me);
+                        }
+                        continue;
+                    }
                     for (int32 point = 0; point < point_count; ++point) {
                         ParamValue value;
                         int32 offset;
@@ -473,10 +1055,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
-    // Secondary output buses are zero-filled so hosts do not read
-    // uninitialised memory on multi-out instruments. The Processor API
-    // currently exposes only the main output bus. Zero the full original block
-    // here — these channels are never processed, so the clamp does not apply.
+    // Secondary (aux) output buses route to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments (drum
+    // machines, multitimbral, stem renderers). Each routed aux bus is
+    // pre-zeroed here first so a single-output Processor (the default
+    // process(ProcessBuffers&) only writes the main output) leaves aux buses
+    // silent rather than handing the host uninitialised memory, and a multi-out
+    // Processor that writes only some aux channels still emits silence on the
+    // channels it skipped. The aux views are assembled below from
+    // aux_output_ptrs_ (pre-sized in setupProcessing()).
     for (int32 b = 1; b < data.numOutputs; ++b) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
@@ -525,16 +1112,57 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             .buffer = sidechain_view,
         },
     }};
-    std::array<ProcessBusBufferView<float>, 1> output_buses{{
-        {
-            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                     proc_out, false, data.numOutputs > 0},
-            .buffer = output_view,
-        },
-    }};
+    // Build one ProcessBusBufferView per routed output bus. Index 0 is the
+    // main output; each subsequent entry wires the host's aux output channel
+    // pointers into aux_output_ptrs_ (pre-sized in setupProcessing()). Host
+    // output buses beyond the declared/pre-sized set are zero-filled (above)
+    // but not routed — the same safe fallback as before.
+    static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    output_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 proc_out, false, data.numOutputs > 0},
+        .buffer = output_view,
+    };
+    std::size_t routed_output_buses = 1;
+    const std::size_t max_routed =
+        (std::min)(static_cast<std::size_t>(data.numOutputs),
+                   (std::min)(aux_output_ptrs_.size() + 1, kMaxOutputBuses));
+    for (std::size_t b = 1; b < max_routed; ++b) {
+        auto& bus = data.outputs[b];
+        auto& ptrs = aux_output_ptrs_[b - 1];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.numChannels),
+                       static_cast<int>(ptrs.size()));
+        bool active = bus.channelBuffers32 != nullptr;
+        if (active) {
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[static_cast<std::size_t>(ch)] = bus.channelBuffers32[ch];
+                if (!ptrs[static_cast<std::size_t>(ch)]) {
+                    // A null per-channel pointer demotes the whole bus to
+                    // inactive so the Processor sees an empty bus rather than a
+                    // half-valid BufferView.
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (!active) aux_channels = 0;
+        // declared_channels reports the descriptor's declared layout (captured
+        // in setupProcessing); buffer.num_channels() carries the actual routed
+        // count. Keeping these distinct lets matches_declared_layout() detect a
+        // host-vs-declared channel-count mismatch instead of being tautological.
+        output_buses[routed_output_buses++] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     declared_aux_channels_[b - 1], true, active},
+            .buffer = audio::BufferView<float>(ptrs.data(), aux_channels,
+                                               num_samples),
+        };
+    }
     ProcessBuffers process_buffers{
         .inputs = ProcessBusBufferSet<const float>(input_buses),
-        .outputs = ProcessBusBufferSet<float>(output_buses),
+        .outputs = ProcessBusBufferSet<float>(
+            std::span(output_buses.data(), routed_output_buses)),
     };
 
     // VST3 `processBlockBypassed` behaviour. When the current bypass
@@ -544,6 +1172,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // bypassed MIDI FX does not leak notes into the host bus.
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
+        // All-or-nothing across the block: only delay when a line was prepared
+        // for every output channel. If the host ever drives more channels than
+        // setupProcessing() negotiated (channel count is pinned by
+        // setBusArrangements in practice, so this is a corner), the whole block
+        // falls back to a zero-delay copy — degrading to pre-fix behaviour, not
+        // a mix of delayed and undelayed channels.
+        const bool delayed = bypass_delay_samples_ > 0 &&
+            static_cast<int>(bypass_dry_delay_.size()) >= out_channels;
         for (int ch = 0; ch < out_channels; ++ch) {
             // A VST3 bus can report numChannels > 0 while individual
             // channelBuffers32[ch] entries are null; null-check before
@@ -551,10 +1187,31 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             if (output_ptrs_[ch] == nullptr) continue;
             // Bypass is pure host-buffer passthrough (no processor scratch),
             // so it safely handles the full original block rather than the
-            // clamped count.
+            // clamped count. The dry-delay line is sized independently of the
+            // block size (to the reported latency in setupProcessing()), so it
+            // too processes the full `original_num_samples` — bypass stays a
+            // true 1:1 host passthrough with no clamp tail to zero.
             if (ch < in_channels && input_ptrs_[ch] != nullptr) {
-                std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
-                            sizeof(float) * original_num_samples);
+                if (delayed) {
+                    // The plugin path is host-compensated by its reported
+                    // latency, so the bypassed dry signal must be delayed by
+                    // the same amount to stay sample-aligned with the host's
+                    // plugin-delay-compensation. The delay line is fed only
+                    // while bypassed: a one-time transient in the first
+                    // `bypass_delay_samples_` samples after engaging bypass is
+                    // accepted (bypass toggling is a user action, not
+                    // sample-critical) in exchange for a zero-cost
+                    // non-bypassed path. Steady state emits input[n - latency].
+                    auto& line = bypass_dry_delay_[ch];
+                    const float* in = input_ptrs_[ch];
+                    float* out = output_ptrs_[ch];
+                    for (int n = 0; n < original_num_samples; ++n) {
+                        out[n] = line.process(in[n], bypass_delay_samples_);
+                    }
+                } else {
+                    std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
+                                sizeof(float) * original_num_samples);
+                }
             } else {
                 std::memset(output_ptrs_[ch], 0,
                             sizeof(float) * original_num_samples);
@@ -564,36 +1221,132 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         return kResultOk;
     }
 
-    // Reuse the reserved, realtime-capacity-limited per-block MIDI buffers so
-    // translating VST3 events never allocates on the audio thread (see
-    // setupProcessing()). Both the short-event store AND the SysEx sidecar must
-    // be reset every block: clear() empties only events_, so clear_sysex() is
-    // required as well — otherwise a SysEx payload from one block would leak
-    // into later blocks. clear_sysex() recycles pooled payloads, so it stays
-    // allocation-free.
-    midi_in_.clear();
-    midi_in_.clear_sysex();
-    midi_out_.clear();
-    midi_out_.clear_sysex();
+    // midi_in_ / midi_out_ were reset at the top of process() (the controller
+    // decode that runs in the parameter-change loop appends to midi_in_, so
+    // the buffers cannot be cleared here). Note and SysEx events append on top
+    // of any controllers already decoded for this block.
     if (data.inputEvents) {
         int32 event_count = data.inputEvents->getEventCount();
         for (int32 i = 0; i < event_count; ++i) {
             Event evt;
             if (data.inputEvents->getEvent(i, evt) == kResultOk) {
                 if (evt.type == Event::kNoteOnEvent) {
+                    const auto channel =
+                        static_cast<uint8_t>(evt.noteOn.channel);
+                    const auto note =
+                        static_cast<uint8_t>(evt.noteOn.pitch);
                     auto me = midi::MidiEvent::note_on(
-                        static_cast<uint8_t>(evt.noteOn.channel),
-                        static_cast<uint8_t>(evt.noteOn.pitch),
+                        channel, note,
                         static_cast<uint8_t>(evt.noteOn.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
                     midi_in_.add(me);
+                    // Remember this note's (channel, note) under its noteId so a
+                    // later kNoteExpressionValueEvent referencing the same noteId
+                    // routes to the right MPE voice. No-op when MPE is off or the
+                    // host supplied no noteId (-1). A full table drops the
+                    // mapping (RT-safe) and bumps the observable drop counter.
+                    if (mpe_enabled_) {
+                        if (!note_id_map_insert(evt.noteOn.noteId, channel,
+                                                note)) {
+                            note_expression_drops_.fetch_add(
+                                1, std::memory_order_relaxed);
+                        }
+                    }
                 } else if (evt.type == Event::kNoteOffEvent) {
+                    const auto channel =
+                        static_cast<uint8_t>(evt.noteOff.channel);
                     auto me = midi::MidiEvent::note_off(
-                        static_cast<uint8_t>(evt.noteOff.channel),
+                        channel,
                         static_cast<uint8_t>(evt.noteOff.pitch),
                         static_cast<uint8_t>(evt.noteOff.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
                     midi_in_.add(me);
+                    if (mpe_enabled_) {
+                        note_id_map_erase(evt.noteOff.noteId);
+                    }
+                } else if (evt.type == Event::kNoteExpressionValueEvent &&
+                           mpe_enabled_) {
+                    // Per-note expression. The event references the noteId of a
+                    // live note-on; look up its (channel, note) and synthesize
+                    // the channel-wide MIDI message the MpeVoiceTracker narrows
+                    // back to the matching member-channel voice — the same
+                    // sidecar contract the CLAP adapter uses
+                    // (clap_adapter.cpp kNoteExpression path). Mapping:
+                    //   kTuningTypeID     -> per-note pitch bend
+                    //   kVolumeTypeID     -> per-note pressure (channel AT)
+                    //   kBrightnessTypeID -> per-note timbre (CC74)
+                    //
+                    // SCOPING (by design, matches CLAP): VST3 note expression is
+                    // noteId-targeted, but Pulp's per-note model IS MPE — one
+                    // note per member channel — and the Processor has no
+                    // noteId-targeted expression API. We therefore bridge to the
+                    // MPE (channel-per-note) model via a channel-wide message.
+                    // Routing is exact when each note lives on its own MPE member
+                    // channel (the expressive-controller case MPE is built for);
+                    // when multiple notes share one channel the expression
+                    // collapses to channel-wide — identical to the CLAP path.
+                    const auto& ne = evt.noteExpressionValue;
+                    const NoteIdSlot* slot = note_id_map_find(ne.noteId);
+                    if (slot == nullptr) {
+                        // Expression for an unknown / already-released noteId
+                        // (or one whose mapping was dropped on a full table).
+                        // Nothing to route — count it as an observable drop.
+                        note_expression_drops_.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                    if (slot != nullptr) {
+                        const uint8_t channel = slot->channel;
+                        const double norm =
+                            std::clamp(ne.value, 0.0, 1.0);
+                        midi::MidiEvent me{};
+                        bool emitted = false;
+                        if (ne.typeId == kTuningTypeID) {
+                            // VST3 tuning spans ±120 st; normalise to the MPE
+                            // member-bend default so the tracker expands it
+                            // back to the right per-note bend (mirrors CLAP).
+                            const double semis =
+                                vst3_tuning_norm_to_semitones(norm);
+                            const double bend_norm = std::clamp(
+                                semis / static_cast<double>(
+                                    midi::MpeVoiceTracker::
+                                        kDefaultMemberBendSemitones),
+                                -1.0, 1.0);
+                            const int bend14 = static_cast<int>(
+                                std::lround(8192.0 + bend_norm * 8191.0));
+                            me = midi::MidiEvent::pitch_bend(
+                                channel,
+                                static_cast<uint16_t>(
+                                    std::clamp(bend14, 0, 16383)));
+                            emitted = true;
+                        } else if (ne.typeId == kVolumeTypeID) {
+                            // Loudness axis -> channel pressure (status 0xD0).
+                            const auto v7 = static_cast<uint8_t>(
+                                std::clamp<int>(
+                                    static_cast<int>(norm * 127.0 + 0.5),
+                                    0, 127));
+                            me = midi::MidiEvent{
+                                choc::midi::ShortMessage(
+                                    static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
+                                    v7, 0),
+                                0, 0.0};
+                            emitted = true;
+                        } else if (ne.typeId == kBrightnessTypeID) {
+                            // Timbre -> CC 74.
+                            const auto v7 = static_cast<uint8_t>(
+                                std::clamp<int>(
+                                    static_cast<int>(norm * 127.0 + 0.5),
+                                    0, 127));
+                            me = midi::MidiEvent::cc(channel, 74, v7);
+                            emitted = true;
+                        }
+                        // kPanTypeID (and any other declared/unknown type) has
+                        // no MPE axis, so it is accepted by the host but not
+                        // routed into the sidecar.
+                        if (emitted) {
+                            me.sample_offset = evt.sampleOffset;
+                            midi_in_.add(me);
+                        }
+                    }
                 } else if (evt.type == Event::kDataEvent
                            && evt.data.type == DataEvent::kMidiSysEx) {
                     // Route kData/kMidiSysEx payloads into MidiBuffer's
@@ -615,6 +1368,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
+
+    // Controllers (decoded from parameter changes) and note/SysEx events are
+    // appended from two independent sources, so the combined stream may not be
+    // in sample order. Sort once so the Processor sees sample-accurate,
+    // monotonically increasing offsets. std::sort over the reserved, bounded
+    // events vector does not allocate.
+    midi_in_.sort();
 
     // Build process context
     pulp::format::ProcessContext ctx;
@@ -697,6 +1457,23 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     }
     processor_->set_param_events(&param_events_);
 
+    // MPE sidecar: run the (sorted) inbound MIDI — note on/off plus the
+    // channel-wide messages synthesized from kNoteExpressionValueEvent above —
+    // through the voice tracker, then hand the resulting per-note expression
+    // buffer to the processor for the duration of this process() call. Events
+    // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
+    // adapter's set_mpe_input contract; clears per block, allocation-free.
+    if (mpe_enabled_) {
+        mpe_buffer_.clear();
+        for (const auto& ev : midi_in_) {
+            mpe_current_sample_offset_ = ev.sample_offset;
+            mpe_tracker_.process(ev);
+        }
+        processor_->set_mpe_input(&mpe_buffer_);
+    } else {
+        processor_->set_mpe_input(nullptr);
+    }
+
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.
     {
@@ -725,18 +1502,28 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
-    // Publish latency / tail changes the processor flagged during
-    // process(). VST3's IComponentHandler::restartComponent is documented
-    // as safe to call from the host's audio callback; the handler is
-    // expected to queue it for main-thread delivery. We still drain the
-    // atomic flag so process() never has to take a lock or allocate.
-    if (componentHandler) {
+    // Publish latency / tail changes the processor flagged during process().
+    //
+    // IComponentHandler::restartComponent is a HOST callback that may take
+    // locks, allocate, and synchronously re-enter the plug-in — none of which
+    // is safe on the real-time audio thread. So process() never calls it
+    // directly. Instead it consumes the processor's RT-safe pending flags and
+    // OR-accumulates them into restart_publisher_ (a lock-free, allocation-free
+    // atomic). The matching restartComponent(flags) call fires on the main
+    // thread via drain_pending_restart(). Coalescing in the publisher means a
+    // burst of changes still produces exactly one host notification.
+    {
         int32 flags = 0;
         if (processor_->consume_latency_changed_flag()) flags |= kLatencyChanged;
         if (processor_->consume_tail_changed_flag())    flags |= kReloadComponent;
-        if (flags != 0) {
-            componentHandler->restartComponent(flags);
-        }
+        // note_pending() is the only thing the audio thread does here: an
+        // atomic OR plus an exchange, no allocation and no lock. The matching
+        // restartComponent(flags) host callback is delivered later by
+        // drain_pending_restart() on the main thread (driven by the main-thread
+        // host entrypoints getLatencySamples / getTailSamples / setActive,
+        // which a host re-queries after a latency/tail change). Calling
+        // call_async here is deliberately avoided — it allocates and locks.
+        restart_publisher_.note_pending(flags);
     }
 
     // Write MIDI output
@@ -764,6 +1551,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 }
 
 tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
+    // getState runs on the main thread — another opportunity to flush a
+    // pending restart (alongside the paced poll and the latency/tail queries).
+    drain_pending_restart();
     if (!processor_) return kResultFalse;
     auto data = plugin_state_io::serialize(store_, *processor_);
     int32 written;

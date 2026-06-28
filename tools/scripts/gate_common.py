@@ -46,8 +46,17 @@ def repo_root() -> Path:
 
 
 def git_diff_names(base: str, head: str) -> list[str]:
+    """Files this branch actually changed, via a THREE-dot (merge-base) diff.
+
+    Two-dot ``base..head`` diffs the two *trees*, so it also reports files the branch
+    is merely BEHIND ``base`` on (e.g. a long-lived PR whose branch predates other
+    merges to main) — falsely attributing unrelated files to the PR and tripping the
+    skill-sync / version-bump / compat gates on a busy main. Three-dot ``base...head``
+    diffs from ``merge-base(base, head)`` to ``head``, i.e. only what this branch added
+    since it diverged. That is what every gate means by "what did this PR touch".
+    """
     out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}..{head}"],
+        ["git", "diff", "--name-only", f"{base}...{head}"],
         check=True, capture_output=True, text=True,
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
