@@ -176,9 +176,13 @@ audio_io:
       Output path works. Input capture and real device-metadata
       enumeration remain pending.
   jack:
-    status: planned
+    status: experimental
     platform: linux
-    notes: Source exists at core/audio/platform/linux/jack_device.cpp but the factory unconditionally returns AlsaSystem; JACK is never selected at runtime. See production-readiness workstream 02.2.
+    notes: >-
+      Optional backend compiled when libjack is available; the Linux audio
+      factory prefers JACK when a running server is detected, then falls back
+      to ALSA. JACK-gated enumeration/open smoke coverage exists, but broader
+      hotplug and device-manager policy remain pending.
 
 midi_io:
   coremidi:
@@ -923,7 +927,7 @@ limitations:
     - text: "Hardcoded sample-rate list; no real enumeration."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   audio_io.jack:
-    - text: "Dead code — factory always returns AlsaSystem; JACK is never selected at runtime."
+    - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."

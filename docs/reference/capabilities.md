@@ -31,7 +31,7 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.alsa` | No input capture path. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
 | `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
 | `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
