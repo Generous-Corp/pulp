@@ -166,9 +166,8 @@ TEST_CASE("ProgressParser ignores non-progress lines and tolerates empty callbac
     REQUIRE(calls == 0);
 
     ProgressParser empty_callback({});
-    empty_callback.feed_line("PROGRESS:OVERALL:100");
-    empty_callback.feed_line("PROGRESS:TYPE_ONLY");
-    SUCCEED("empty callbacks are inert");
+    REQUIRE_NOTHROW(empty_callback.feed_line("PROGRESS:OVERALL:100"));
+    REQUIRE_NOTHROW(empty_callback.feed_line("PROGRESS:TYPE_ONLY"));
 }
 
 TEST_CASE("ProgressParser preserves payload colons and empty event types",
