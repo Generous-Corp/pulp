@@ -110,8 +110,9 @@ TEST_CASE("callback state persists across fires", "[audio][hotplug]") {
 
 TEST_CASE("fire is a no-op with no callback", "[audio][hotplug]") {
     StubSystem sys;
-    sys.fire_device_change();   // must not crash
-    SUCCEED("fire_device_change returned cleanly with no callback");
+    REQUIRE_FALSE(sys.has_device_change_callback());
+    sys.fire_device_change();
+    REQUIRE_FALSE(sys.has_device_change_callback());
 }
 
 TEST_CASE("nullptr unregisters the callback", "[audio][hotplug]") {
