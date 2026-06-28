@@ -38,6 +38,10 @@ SKIP_SLASH_COMMANDS = {
     # the same underlying script (tools/scripts/local_diff_cover.sh).
     # Both surfaces are documented in the cli-maintenance and ci skills.
     "coverage",
+    # `pulp identity` is lockfile audit/record plumbing for host-visible
+    # plugin identity. It is documented and tested, but agents call it
+    # directly instead of through a slash command.
+    "identity",
 }
 
 
@@ -84,6 +88,41 @@ def extract_command_table_names(root):
         if command not in hidden_aliases:
             names.add(command)
 
+    return names
+
+
+def _camel_to_kebab(name):
+    """Convert a Rust enum variant like ImportDesign to import-design."""
+    return re.sub(r"(?<!^)([A-Z])", r"-\1", name).lower()
+
+
+def extract_rust_command_names(root):
+    """Parse user-visible command names from the Rust CLI enum."""
+    main_path = root / "experimental" / "pulp-rs" / "src" / "main.rs"
+    if not main_path.exists():
+        return set()
+
+    content = main_path.read_text()
+    enum = re.search(
+        r"(?m)^\s*enum\s+Command\s*\{(?P<body>.*?)^\s*\}",
+        content,
+        re.DOTALL,
+    )
+    if not enum:
+        return set()
+
+    names = set()
+    explicit_name = None
+    for line in enum.group("body").splitlines():
+        attr = re.search(r'#\[command\([^]]*name\s*=\s*"([^"]+)"', line)
+        if attr:
+            explicit_name = attr.group(1)
+            continue
+        variant = re.match(r"\s*([A-Z][A-Za-z0-9]*)\s*(?:\(|,)", line)
+        if not variant:
+            continue
+        names.add(explicit_name or _camel_to_kebab(variant.group(1)))
+        explicit_name = None
     return names
 
 
@@ -144,7 +183,7 @@ def main():
     issues = []
     checks = []
 
-    cli_commands = extract_command_table_names(root)
+    cli_commands = extract_command_table_names(root) | extract_rust_command_names(root)
     yaml_commands = extract_yaml_commands(root)
     slash_commands = extract_slash_commands(root)
     skill_refs = extract_skill_cli_refs(root)

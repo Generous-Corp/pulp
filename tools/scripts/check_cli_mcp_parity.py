@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """CLI ↔ MCP parity check.
 
-Closes part 2 of issue #1997: when a new top-level CLI command lands in
-``tools/cli/pulp_cli.cpp``, the developer should consciously decide
-whether to expose it via MCP (``tools/mcp/pulp_mcp.cpp``). Today we have
-no forcing function and the surface has drifted.
+When a new top-level CLI command lands in ``tools/cli/pulp_cli.cpp`` or the
+Rust front-end command enum, the developer should consciously decide whether
+to expose it via MCP
+(``tools/mcp/pulp_mcp.cpp``). Today we have no forcing function and the
+surface has drifted.
 
 This script is a structural invariant gate, mirroring
 ``cli_sync_check.py``, ``skill_sync_check.py``, and the versioning gate:
 
-- Parse the CLI command set from ``tools/cli/pulp_cli.cpp``
+- Parse the CLI command set from ``tools/cli/pulp_cli.cpp`` and
+  ``experimental/pulp-rs/src/main.rs``
 - Parse the MCP tool set from ``tools/mcp/pulp_mcp.cpp``
 - Diff the two sets against ``tools/scripts/cli_mcp_parity_baseline.json``
 - Fail in ``--mode=report`` when a NEW gap appears (CLI command added
@@ -113,6 +115,40 @@ def extract_cli_commands(cli_cpp: Path) -> set[str]:
         names.add(entry.group(1))
 
     return names - HIDDEN_CLI_ALIASES
+
+
+def _camel_to_kebab(name: str) -> str:
+    """Convert a Rust enum variant like ImportDesign to import-design."""
+    return re.sub(r"(?<!^)([A-Z])", r"-\1", name).lower()
+
+
+def extract_rust_cli_commands(rust_main: Path) -> set[str]:
+    """Return the set of user-visible command names from Rust ``enum Command``."""
+    if not rust_main.exists():
+        return set()
+
+    content = rust_main.read_text()
+    enum = re.search(
+        r"(?m)^\s*enum\s+Command\s*\{(?P<body>.*?)^\s*\}",
+        content,
+        re.DOTALL,
+    )
+    if not enum:
+        return set()
+
+    names: set[str] = set()
+    explicit_name: str | None = None
+    for line in enum.group("body").splitlines():
+        attr = re.search(r'#\[command\([^]]*name\s*=\s*"([^"]+)"', line)
+        if attr:
+            explicit_name = attr.group(1)
+            continue
+        variant = re.match(r"\s*([A-Z][A-Za-z0-9]*)\s*(?:\(|,)", line)
+        if not variant:
+            continue
+        names.add(explicit_name or _camel_to_kebab(variant.group(1)))
+        explicit_name = None
+    return names
 
 
 # ── MCP parsing ──────────────────────────────────────────────────────────
@@ -337,6 +373,13 @@ def make_arg_parser() -> argparse.ArgumentParser:
         help="Override CLI source file (default: <repo>/tools/cli/pulp_cli.cpp).",
     )
     p.add_argument(
+        "--rust-cli-source",
+        type=Path,
+        default=None,
+        help="Override Rust CLI source file "
+        "(default: <repo>/experimental/pulp-rs/src/main.rs).",
+    )
+    p.add_argument(
         "--mcp-source",
         type=Path,
         default=None,
@@ -361,12 +404,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     cli_source = args.cli_source or (repo / "tools" / "cli" / "pulp_cli.cpp")
+    rust_cli_source = args.rust_cli_source or (
+        repo / "experimental" / "pulp-rs" / "src" / "main.rs"
+    )
     mcp_source = args.mcp_source or (repo / "tools" / "mcp" / "pulp_mcp.cpp")
     baseline_path = args.baseline or (
         repo / "tools" / "scripts" / "cli_mcp_parity_baseline.json"
     )
 
-    cli_commands = extract_cli_commands(cli_source)
+    cli_commands = extract_cli_commands(cli_source) | extract_rust_cli_commands(
+        rust_cli_source
+    )
     mcp_tools = extract_mcp_tools(mcp_source)
     baseline = load_baseline(baseline_path)
     diff = compute_diff(cli_commands, mcp_tools, baseline)

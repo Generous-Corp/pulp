@@ -81,6 +81,29 @@ class CommandExtractionEdgeTests(unittest.TestCase):
                 {"build", "docs", "host", "projects"},
             )
 
+    def test_extract_rust_command_names_includes_explicit_names(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            rust_src = root / "experimental" / "pulp-rs" / "src"
+            rust_src.mkdir(parents=True)
+            (rust_src / "main.rs").write_text(
+                """
+                enum Command {
+                    Build(BuildArgs),
+                    ImportDesign(PkgTailArgs),
+                    #[command(name = "motion")]
+                    Motion(PkgTailArgs),
+                    Identity(PkgTailArgs),
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                csc.extract_rust_command_names(root),
+                {"build", "import-design", "motion", "identity"},
+            )
+
     def test_extract_yaml_commands_stops_at_next_top_level_block(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(pathlib.Path(td) / "repo")
@@ -142,6 +165,45 @@ class MainOutputEdgeTests(unittest.TestCase):
                 "Commands in CLI but not in cli-commands.yaml: ship", text
             )
             self.assertNotIn("Commands in cli-commands.yaml but not in CLI", text)
+
+    def test_main_json_reports_rust_only_command_missing_from_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            (root / "tools" / "cli" / "pulp_cli.cpp").write_text(
+                """
+                static const Command commands[] = {
+                    {"build", "Build", handle_build},
+                \n};
+                """,
+                encoding="utf-8",
+            )
+            rust_src = root / "experimental" / "pulp-rs" / "src"
+            rust_src.mkdir(parents=True)
+            (rust_src / "main.rs").write_text(
+                """
+                enum Command {
+                    Build(BuildArgs),
+                    #[command(name = "motion")]
+                    Motion(PkgTailArgs),
+                }
+                """,
+                encoding="utf-8",
+            )
+            (root / "docs" / "status" / "cli-commands.yaml").write_text(
+                "commands:\n  - name: build\n    summary: Build\n",
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with chdir(root), argv(["cli_sync_check.py", "--strict", "--json"]):
+                with contextlib.redirect_stdout(out):
+                    rc = csc.main()
+
+            self.assertEqual(rc, 1)
+            self.assertIn(
+                "Commands in CLI but not in cli-commands.yaml: motion",
+                out.getvalue(),
+            )
 
     def test_main_json_reports_yaml_only_mismatch_without_cli_only_branch(self) -> None:
         with tempfile.TemporaryDirectory() as td:

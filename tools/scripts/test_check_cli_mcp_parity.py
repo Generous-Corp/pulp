@@ -60,6 +60,13 @@ def write_cli(root: pathlib.Path, *commands: str, with_audit: bool = False) -> N
     )
 
 
+def write_rust_cli(root: pathlib.Path, body: str) -> pathlib.Path:
+    rust_path = root / "experimental" / "pulp-rs" / "src" / "main.rs"
+    rust_path.parent.mkdir(parents=True, exist_ok=True)
+    rust_path.write_text(body, encoding="utf-8")
+    return rust_path
+
+
 def write_mcp(root: pathlib.Path, *tool_names: str) -> None:
     mcp_path = root / "tools" / "mcp" / "pulp_mcp.cpp"
     body = ",\n".join(
@@ -173,6 +180,27 @@ class CliExtractor(unittest.TestCase):
             self.assertEqual(
                 parity.extract_cli_commands(pathlib.Path(td) / "missing.cpp"),
                 set(),
+            )
+
+    def test_extracts_rust_enum_commands_and_explicit_names(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            rust_path = write_rust_cli(
+                root,
+                """
+                enum Command {
+                    Build(BuildArgs),
+                    ImportDesign(PkgTailArgs),
+                    #[command(name = "motion")]
+                    Motion(PkgTailArgs),
+                    Identity(PkgTailArgs),
+                }
+                """,
+            )
+
+            self.assertEqual(
+                parity.extract_rust_cli_commands(rust_path),
+                {"build", "import-design", "motion", "identity"},
             )
 
 
@@ -397,6 +425,27 @@ class MainExitCodes(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("ship", out)
             self.assertIn("FAIL", out)
+
+    def test_report_mode_counts_rust_only_commands_for_parity(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_cli(root, "build")
+            write_rust_cli(
+                root,
+                """
+                enum Command {
+                    Build(BuildArgs),
+                    #[command(name = "motion")]
+                    Motion(PkgTailArgs),
+                }
+                """,
+            )
+            write_mcp(root, "pulp_build")
+            write_baseline(root, {}, {})
+            rc, out, _ = self._run(root, "--mode=report")
+            self.assertEqual(rc, 1)
+            self.assertIn("motion", out)
+            self.assertIn("expected MCP tool: pulp_motion", out)
 
     def test_report_mode_passes_with_baselined_gap(self) -> None:
         with tempfile.TemporaryDirectory() as td:

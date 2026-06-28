@@ -1218,6 +1218,51 @@ reserved inspector protocol methods, but currently return explicit unavailable
 errors until script-engine and host-capture references are wired into the
 inspector domain.
 
+### motion
+
+**Status**: experimental
+
+Agent-facing wrappers around the inspector `Motion.*` protocol. The command
+requires a running Pulp host with the motion inspector server enabled, for
+example by launching the host with `PULP_MOTION_SERVER=1`.
+
+```bash
+pulp motion                                      # Show motion command help
+pulp motion record --view Card --out card.motion.jsonl
+pulp motion stop --trace-id 1
+pulp motion snapshot
+pulp motion list-traces
+pulp motion load-fixture card.motion.jsonl
+pulp motion scrub 30
+pulp motion play
+pulp motion pause
+pulp motion cost enable
+pulp motion cost disable
+```
+
+Subcommands:
+
+| Subcommand | Inspector method | Description |
+|------------|------------------|-------------|
+| `record [--view NAME] [--out FIXTURE.jsonl] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Start a trace for a view or metric probe. `--out` names the fixture path for the live event stream; the CLI does not write the fixture file itself. |
+| `stop [--trace-id N]` | `Motion.stopTrace` | Stop a running trace. |
+| `snapshot` | `Motion.snapshot` | Print the current motion subsystem snapshot. |
+| `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
+| `load-fixture <PATH>` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
+| `scrub <FRAME>` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
+| `play` | `Motion.play` | Resume scrubber playback. |
+| `pause` | `Motion.pause` | Pause scrubber playback. |
+| `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the per-frame cost-attribution channel. |
+
+Global flags:
+
+- `--json` - print the raw inspector JSON response
+- `--port N` - override the inspector port (default `9147`, or
+  `PULP_INSPECTOR_PORT` when set)
+
+If no inspector is listening, `pulp motion` exits non-zero with a hint naming
+the expected port and `PULP_MOTION_SERVER=1` launch knob.
+
 ### tweaks
 
 **Status**: experimental

@@ -43,14 +43,15 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, macos, overflow, projects, project, tool, tweaks
+audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, identity, macos, overflow, projects, project, tool, tweaks
 
-`project`, `tool`, and `tweaks` intentionally stay slashless: `project`
-is a per-project SDK pin helper, `tool` is registry/install plumbing
-for optional developer tools and importer add-ons, and `tweaks` is a
-local `pulp-tweaks.json` drift diagnostic that mirrors the inspector
-drawer. Agents call these CLIs directly. Keep this classification in
-sync with `tools/scripts/cli_sync_check.py` and
+`project`, `identity`, `tool`, and `tweaks` intentionally stay
+slashless: `project` is a per-project SDK pin helper, `identity` is
+host-visible identity lockfile audit/record plumbing, `tool` is
+registry/install plumbing for optional developer tools and importer
+add-ons, and `tweaks` is a local `pulp-tweaks.json` drift diagnostic
+that mirrors the inspector drawer. Agents call these CLIs directly.
+Keep this classification in sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
@@ -213,6 +214,25 @@ on PATH for installed users and `./build/pulp` for source-tree examples.
 Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
+
+### Rust-native top-level command inventory
+
+Some real user-facing commands now exist only in the Rust front end
+(`experimental/pulp-rs/src/main.rs::Command`) and never appear in the C++
+`tools/cli/pulp_cli.cpp` command tables. Treat those Rust enum variants as
+first-class top-level CLI commands for docs/status/sync purposes:
+
+- Add the command to `experimental/pulp-rs/src/help.rs` unless it is hidden
+  compatibility plumbing.
+- Add it to `docs/status/cli-commands.yaml` and `docs/reference/cli.md` when
+  it is public user-facing behavior.
+- Keep `tools/scripts/cli_sync_check.py` and
+  `tools/scripts/check_cli_mcp_parity.py` inventorying the Rust enum as well
+  as the C++ command tables.
+- If no umbrella MCP tool exists because the command is covered by MCP
+  sub-tools (for example `pulp motion` ↔ `pulp_motion_*`), record that decision
+  in `tools/scripts/cli_mcp_parity_baseline.json` rather than letting the
+  parity gate stay blind to the Rust command.
 
 ### `pulp import` — framework-importer substrate
 

@@ -133,6 +133,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Connect to a running plugin inspector",
     },
     Entry {
+        name: "motion",
+        summary: "Trace and scrub Motion.* inspector data",
+    },
+    Entry {
         name: "scan",
         summary: "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins",
     },
@@ -143,6 +147,10 @@ pub const COMMANDS: &[Entry] = &[
     Entry {
         name: "import",
         summary: "Detect a framework project and emit a Pulp migration scaffold",
+    },
+    Entry {
+        name: "identity",
+        summary: "Manage .pulp/identity.lock",
     },
     Entry {
         name: "kit",

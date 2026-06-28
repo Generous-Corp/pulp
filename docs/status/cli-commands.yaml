@@ -830,6 +830,64 @@ commands:
         description: File path for the one-shot command response
     docs: reference/cli.md#inspect
 
+  - name: motion
+    status: experimental
+    summary: Agent-facing wrappers around the inspector Motion.* protocol. Requires a running host with the motion inspector server enabled (`PULP_MOTION_SERVER=1`).
+    args:
+      - name: --json
+        kind: flag
+        required: false
+        description: Print the raw inspector JSON response
+      - name: --port
+        kind: option
+        required: false
+        description: Override the inspector port (default 9147 or PULP_INSPECTOR_PORT)
+    subcommands:
+      - name: record
+        summary: Start a Motion.startTrace probe; --out names the fixture path for the live event stream but the CLI does not write the fixture file itself.
+        args:
+          - name: --view
+            kind: option
+            required: false
+          - name: --out
+            kind: option
+            required: false
+          - name: --fps
+            kind: option
+            required: false
+          - name: --metrics
+            kind: option
+            required: false
+      - name: stop
+        summary: Stop a running trace via Motion.stopTrace
+        args:
+          - name: --trace-id
+            kind: option
+            required: false
+      - name: snapshot
+        summary: Print Motion.snapshot
+      - name: list-traces
+        summary: List inspector-owned trace IDs via Motion.listTraces
+      - name: load-fixture
+        summary: Load a .motion.jsonl fixture into the scrubber via Motion.loadFixture
+        args:
+          - name: path
+            kind: positional
+            required: true
+      - name: scrub
+        summary: Move the scrubber playhead via Motion.scrubTo
+        args:
+          - name: frame
+            kind: positional
+            required: true
+      - name: play
+        summary: Resume scrubber playback via Motion.play
+      - name: pause
+        summary: Pause scrubber playback via Motion.pause
+      - name: cost
+        summary: Toggle the cost-attribution channel via Motion.enableCost / Motion.disableCost
+    docs: reference/cli.md#motion
+
   - name: tweaks
     status: experimental
     summary: Inspect the `pulp-tweaks.json` sidecar written by the inspector overlay. `tweaks diff` classifies stored tweaks against a design snapshot as clean, drifted (anchor survives, property gone), or orphaned (anchor gone) — the CLI mirror of the inspector drift drawer.
@@ -1857,6 +1915,27 @@ commands:
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
     docs: reference/cli.md#import
+
+  - name: identity
+    status: experimental
+    summary: Manage `.pulp/identity.lock`, the committed pin of each plugin's host-visible identity fields.
+    subcommands:
+      - name: record
+        summary: Write or refresh .pulp/identity.lock; refuses identity drift unless --allow-identity-change is passed.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+          - name: --dry-run
+            kind: flag
+            required: false
+      - name: check
+        summary: Compare the lockfile against the current project and exit non-zero on drift.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+    docs: reference/cli.md#identity
 
   - name: tool
     status: usable
