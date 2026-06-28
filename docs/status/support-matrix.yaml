@@ -376,15 +376,22 @@ css_parity:
     notes: CSS white-space (normal/nowrap/pre). Maps to Label multi_line flag.
   text_shadow:
     status: partial
-    notes: CSS text-shadow parsed (offset, blur, color). Bridge stub — rendering planned.
+    notes: CSS text-shadow parsed and routed through setTextShadow / setTextShadow* storage; Label paint shadow rendering remains planned.
   font_family:
-    status: partial
-    notes: CSS font-family property parsed. Bridge stub — font selection planned.
+    status: usable
+    notes: >
+      CSS font-family property parsed and routed through setFontFamily. Labels honor
+      own and inherited font-family during measurement and paint; Skia/TextShaper
+      resolve comma-separated fallback lists, with registerFont for bundled faces.
+      Validated by pulp-test-widget-bridge-wave5-css and pulp-test-canvas-fonts.
 
 widgets:
   image_view:
     status: usable
-    notes: ImageWidget with placeholder rendering, JS bridge createImage/setImageSource.
+    notes: >
+      ImageView via createImage/setImageSource decodes file-backed images through
+      Canvas::draw_image_from_file / draw_image_from_file_rect on supported backends;
+      missing files or non-image backends fall back to a filename placeholder.
   list_box:
     status: usable
     notes: >
@@ -567,8 +574,13 @@ platform_maturity:
     platform: macos
     notes: Full NSTextInputClient — setMarkedText, unmarkText, firstRectForCharacterRange for candidate window positioning.
   context_menu:
-    status: usable
-    notes: on_context_menu callback on View, rightMouseDown dispatch, showContextMenu/registerContextMenu bridge.
+    status: partial
+    notes: >-
+      on_context_menu callback, rightMouseDown dispatch, and view-tree
+      ContextMenu actions are usable. registerContextMenu dispatches coordinates
+      to JS; showContextMenu delegates to platform PopupMenu but current in-tree
+      backends return -1/no selection because native item selection is not wired
+      through the bridge yet.
   keyboard_shortcuts:
     status: usable
     notes: registerShortcut bridge function, shortcuts checked before global key dispatch.
@@ -708,7 +720,10 @@ runtime_apis:
     notes: setTimeout/setInterval/requestAnimationFrame via __requestFrame__ bridge.
   canvas_draw_image:
     status: partial
-    notes: canvasDrawImage renders placeholder; full Skia image decode pipeline planned.
+    notes: >
+      Canvas2D drawImage supports file-backed 3-, 5-, and 9-argument forms,
+      including source rectangles, through Skia image decode. data: URI image
+      sources still fall back to the placeholder path.
   drag_and_drop:
     status: usable
     notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
@@ -980,7 +995,8 @@ widgets:
   canvas_widget:    { status: usable, header: canvas_widget.hpp }
   table:            { status: partial, header: table.hpp,
                       notes: "Basic rows; sortable columns + virtualization planned." }
-  modulation_matrix:   { status: planned, notes: "Planned modulation-matrix widget." }
+  modulation_matrix:   { status: usable, header: modulation_matrix_widget.hpp,
+                          notes: "Source-to-destination route widget backed by ModulationMatrix; focused data-model and widget interaction tests exist." }
   ab_compare:          { status: planned, notes: "Planned A/B comparison widget." }
   resizable_shell:     { status: planned, notes: "Planned documented resizable-shell pattern." }
 

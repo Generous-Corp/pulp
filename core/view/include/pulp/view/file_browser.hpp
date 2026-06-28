@@ -88,14 +88,18 @@ private:
     std::vector<FileTreeNode> nodes_;
 };
 
-/// Content sharer — platform-native share sheet for files/text.
-/// On macOS: NSSharingServicePicker. On other platforms: stub.
+/// Content opener for files and text.
+/// Current backends launch the platform's default opener where available:
+/// macOS uses `/usr/bin/open`, Windows uses `ShellExecuteW`, and Linux uses
+/// `xdg-open`. Text opening is implemented on macOS by writing a temporary
+/// file and opening it. Android paths and unsupported text paths are currently
+/// no-ops.
 class ContentSharer {
 public:
-    /// Share a file via the system share sheet.
+    /// Open a file with the platform's default opener when supported.
     static void share_file(const std::filesystem::path& file, void* parent_window = nullptr);
 
-    /// Share text via the system share sheet.
+    /// Open text through a temporary file on supported platforms.
     static void share_text(const std::string& text, void* parent_window = nullptr);
 };
 
