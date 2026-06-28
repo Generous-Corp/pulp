@@ -2144,6 +2144,51 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
     REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
 }
 
+TEST_CASE("pulp-import-design validates style selector values",
+          "[cli][import-design][tool][style]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-style-selector-values");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                      R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                      R"("source_uri":"figma://x/1:1"},)"
+                      R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+
+    auto ok = run_import_design({"--from", "figma-plugin",
+                                 "--file", scene.string(),
+                                 "--output", (tmp.path / "ok.js").string(),
+                                 "--no-tokens",
+                                 "--knob-style", "auto",
+                                 "--fader-style=skin",
+                                 "--meter-style", "plain"});
+    REQUIRE_FALSE(ok.timed_out);
+    REQUIRE(ok.exit_code == 0);
+
+    struct BadCase {
+        std::vector<std::string> args;
+        const char* error;
+    };
+    const std::vector<BadCase> cases = {
+        {{"--knob-style", "chrome"}, "--knob-style must be"},
+        {{"--fader-style=chrome"}, "--fader-style must be"},
+        {{"--meter-style", "chrome"}, "--meter-style must be"},
+    };
+
+    for (const auto& c : cases) {
+        auto args = std::vector<std::string>{"--from", "figma-plugin",
+                                             "--file", scene.string(),
+                                             "--output", (tmp.path / "bad.js").string(),
+                                             "--no-tokens"};
+        args.insert(args.end(), c.args.begin(), c.args.end());
+        auto r = run_import_design(args);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.error) != std::string::npos);
+    }
+}
+
 // `--emit swiftui` per-view theme naming. The theme artifact/type derive from
 // the view name (<RootView>Theme[.swift]) so the view and theme are always
 // distinct files (no clobber, even for --output PulpTheme.swift) and two

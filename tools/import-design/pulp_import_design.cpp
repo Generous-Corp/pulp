@@ -312,6 +312,21 @@ std::optional<RuntimeMode> parse_runtime_mode_pref(const std::string& raw) {
     return std::nullopt;
 }
 
+std::optional<bool> parse_knob_style_pref(const std::string& raw) {
+    const auto value = normalize_pref_value(raw);
+    if (value == "sprite") return false;
+    if (value == "silver" || value == "default" || value == "standard" || value == "auto")
+        return true;
+    return std::nullopt;
+}
+
+std::optional<bool> parse_skin_style_pref(const std::string& raw) {
+    const auto value = normalize_pref_value(raw);
+    if (value == "default" || value == "plain") return false;
+    if (value == "skin" || value == "skinned") return true;
+    return std::nullopt;
+}
+
 std::string lower_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -905,6 +920,9 @@ static void print_usage() {
     std::cout << "                    Render backend for --validate (default: skia). Only the\n";
     std::cout << "                    Skia backend composites file-backed images; coregraphics\n";
     std::cout << "                    draws an image's filename placeholder (not faithful).\n";
+    std::cout << "  --knob-style {silver|sprite|auto|standard|default}\n";
+    std::cout << "  --fader-style {skin|skinned|default|plain}\n";
+    std::cout << "  --meter-style {skin|skinned|default|plain}\n";
     std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
@@ -922,7 +940,7 @@ static void print_usage() {
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
     std::cout << "  --classnames <path>     Output classname → style map (default: classnames.json,\n";
-    std::cout << "                          only emitted for --from claude — pulp #1035)\n";
+    std::cout << "                          only emitted for Claude static classname extraction)\n";
     std::cout << "  --emit classnames       Legacy sidecar: force-emit classnames.json (claude)\n";
     std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
     std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
@@ -1672,16 +1690,8 @@ int main(int argc, char* argv[]) {
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
-    // figma-plugin lane only: knob render style.
-    // Default ON (silver) because the native vector path produces cleaner
-    // results across the board (no PNG bleed artefacts around the bottom
-    // edges of the gradient panel, no shadow-halo "brush stroke" bands
-    // around big knobs, crisp at any scale, works on CPU raster + GPU
-    // Graphite). Sprite is still available via --knob-style=sprite when
-    // a designer wants pixel-exact Figma reproduction.
-    //
-    // Per-node override: a Figma node name ending in `@sprite` or
-    // `@silver` overrides the global default for THAT knob only.
+    // figma-plugin lane only: native knobs default on; @sprite/@silver node
+    // suffixes override the global flag per knob.
     bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
     bool skin_faders = true;         // plain via --fader-style=default
     bool skin_meters = true;         // plain via --meter-style=default
@@ -1689,12 +1699,8 @@ int main(int argc, char* argv[]) {
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
     int render_height = 280;
-    // --validate render backend. Default to Skia: it composites file-backed
-    // images (ImageView decodes via the canvas's draw_image_from_file
-    // primitive, which the Skia canvas implements but the CoreGraphics one
-    // does not — CG renders an image as its filename placeholder). A
-    // CoreGraphics render is therefore NOT faithful for designs with assets;
-    // it's offered only as an explicit escape hatch.
+    // --validate backend: Skia is faithful for file-backed images; CoreGraphics
+    // renders filename placeholders and is an explicit escape hatch.
     pulp::view::ScreenshotBackend screenshot_backend =
         pulp::view::ScreenshotBackend::skia;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
@@ -1704,15 +1710,11 @@ int main(int argc, char* argv[]) {
     std::string classnames_output = "classnames.json";   // claude classname map
     bool classnames_output_explicit = false;             // classname output was set explicitly
     bool emit_classnames = true;                          // default on for --from claude
-    // Keyboard shortcuts are auto-imported from source.
-    // Default-on; opt out with --no-import-shortcuts.
+    // Keyboard shortcuts are imported from source by default.
     std::string shortcuts_output = "shortcuts.json";
     bool shortcuts_output_explicit = false;
     bool import_shortcuts = true;
-    // Auto-bind platform conventions (Cmd+, → Settings,
-    // etc.) when the source has a high-confidence component match. Default-on;
-    // `--no-default-shortcuts` opts out without affecting the source-extracted
-    // path above.
+    // Platform-convention shortcut defaults are separate from source extraction.
     bool default_shortcuts = true;
     bool output_explicit = false;                         // output path was set explicitly
     bool tokens_file_explicit = false;                    // tokens file was set explicitly
@@ -1730,11 +1732,7 @@ int main(int argc, char* argv[]) {
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
     std::unordered_map<std::string, std::string> expected_asset_hashes;
-    // --recognition-manifest: a user-supplied recognition manifest mapping the
-    // designer's OWN Figma component-set keys (and/or name prefixes) to Pulp
-    // control kinds, MERGED OVER the built-in Pulp Figma Library. Lets the
-    // importer wire controls on third-party designs that don't use the
-    // published Pulp library. See recognition_resolver.hpp for the merge module.
+    // User recognition mappings are merged over the built-in Figma library.
     std::string recognition_manifest_path;
 
     for (int i = 1; i < argc; ++i) {
@@ -1801,28 +1799,30 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
-        } else if (std::strcmp(argv[i], "--knob-style") == 0 && i + 1 < argc) {
-            std::string ks = argv[++i];
-            if (ks == "silver")      use_silver_knobs = true;
-            else if (ks == "sprite") use_silver_knobs = false;
-            // Other values (auto, standard) fall through; auto could
-            // pick by per-design heuristic in the future.
-        } else if (std::strncmp(argv[i], "--knob-style=", 13) == 0) {
-            std::string ks = argv[i] + 13;
-            if (ks == "silver")      use_silver_knobs = true;
-            else if (ks == "sprite") use_silver_knobs = false;
-        } else if ((std::strcmp(argv[i], "--fader-style") == 0 && i + 1 < argc)) {
-            std::string fs = argv[++i];
-            skin_faders = (fs != "default" && fs != "plain");
-        } else if (std::strncmp(argv[i], "--fader-style=", 14) == 0) {
-            std::string fs = argv[i] + 14;
-            skin_faders = (fs != "default" && fs != "plain");
-        } else if ((std::strcmp(argv[i], "--meter-style") == 0 && i + 1 < argc)) {
-            std::string ms = argv[++i];
-            skin_meters = (ms != "default" && ms != "plain");
-        } else if (std::strncmp(argv[i], "--meter-style=", 14) == 0) {
-            std::string ms = argv[i] + 14;
-            skin_meters = (ms != "default" && ms != "plain");
+        } else if ((std::strcmp(argv[i], "--knob-style") == 0 && i + 1 < argc)
+                   || std::strncmp(argv[i], "--knob-style=", 13) == 0) {
+            if (auto parsed = parse_knob_style_pref(argv[i][12] == '=' ? argv[i] + 13 : argv[++i])) {
+                use_silver_knobs = *parsed;
+            } else {
+                std::cerr << "Error: --knob-style must be silver, sprite, auto, standard, or default\n";
+                return 2;
+            }
+        } else if ((std::strcmp(argv[i], "--fader-style") == 0 && i + 1 < argc)
+                   || std::strncmp(argv[i], "--fader-style=", 14) == 0) {
+            if (auto parsed = parse_skin_style_pref(argv[i][13] == '=' ? argv[i] + 14 : argv[++i])) {
+                skin_faders = *parsed;
+            } else {
+                std::cerr << "Error: --fader-style must be skin, skinned, default, or plain\n";
+                return 2;
+            }
+        } else if ((std::strcmp(argv[i], "--meter-style") == 0 && i + 1 < argc)
+                   || std::strncmp(argv[i], "--meter-style=", 14) == 0) {
+            if (auto parsed = parse_skin_style_pref(argv[i][13] == '=' ? argv[i] + 14 : argv[++i])) {
+                skin_meters = *parsed;
+            } else {
+                std::cerr << "Error: --meter-style must be skin, skinned, default, or plain\n";
+                return 2;
+            }
         } else if (std::strcmp(argv[i], "--debug") == 0) {
             debug_json = true;
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
@@ -2428,7 +2428,7 @@ int main(int argc, char* argv[]) {
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
-    // ── Extensible key-based recognition (issue #4676) ───────────────────────
+    // ── Extensible key-based recognition manifest merge ──────────────────────
     // Re-resolve each Figma component instance's component-set key / name prefix
     // against the MERGED recognition table (built-in Pulp Figma Library + the
     // user-supplied --recognition-manifest, the latter merged OVER the former),
@@ -3026,7 +3026,7 @@ int main(int argc, char* argv[]) {
         };
         resolve_node(ir.root);
 
-        // Resolve bundled-font asset_ids → absolute paths (#43b) so codegen can
+        // Resolve bundled-font asset_ids to absolute paths so codegen can
         // emit registerFont(family, path). Same base_dir + manifest resolution
         // as the node asset-path pass above.
         for (auto& fa : ir.font_family_assets) {
