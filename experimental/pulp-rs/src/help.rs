@@ -24,8 +24,9 @@
 //!   re-implement them; the banner just lists them so users can see
 //!   they're available on the C++ binary).
 //! - `binary_commands[]` — built-binary delegates (same treatment).
-//! - Package-manager pseudo-commands (`add`, `audit`) — parked in a
-//!   second block to match the C++ banner's shape.
+//! - Inline/trailing pseudo-commands (`audit`, package/tool commands,
+//!   `help`) — parked in a second block to match the C++ banner's
+//!   shape.
 //!
 //! Entries are ordered to match the C++ banner byte-for-byte. The
 //! `help_parity_test` integration test pins that.
@@ -218,8 +219,8 @@ pub const BINARY_COMMANDS: &[Entry] = &[
     },
 ];
 
-/// Package-manager + legacy pseudo-entries — mirrors the last three
-/// lines in the C++ banner (`audit`, `add`, `help`).
+/// Package-manager + legacy pseudo-entries — mirrors the trailing
+/// inline entries in the C++ banner.
 pub const PACKAGE_EXTRAS: &[Entry] = &[
     Entry {
         name: "audit",
@@ -228,6 +229,34 @@ pub const PACKAGE_EXTRAS: &[Entry] = &[
     Entry {
         name: "add",
         summary: "Add a component to the project",
+    },
+    Entry {
+        name: "remove",
+        summary: "Remove a previously added package",
+    },
+    Entry {
+        name: "list",
+        summary: "Show installed packages",
+    },
+    Entry {
+        name: "search",
+        summary: "Search the package registry",
+    },
+    Entry {
+        name: "update",
+        summary: "Check for and apply package updates",
+    },
+    Entry {
+        name: "suggest",
+        summary: "Context-aware package recommendations",
+    },
+    Entry {
+        name: "target",
+        summary: "Manage project platform targets",
+    },
+    Entry {
+        name: "tool",
+        summary: "Manage third-party developer tools",
     },
     Entry {
         name: "help",
@@ -252,8 +281,9 @@ pub const EXAMPLES: &[&str] = &[
 /// native-Rust ports.
 #[must_use]
 pub fn known_commands() -> Vec<&'static str> {
-    let mut v =
-        Vec::with_capacity(COMMANDS.len() + SCRIPT_COMMANDS.len() + BINARY_COMMANDS.len() + 4);
+    let mut v = Vec::with_capacity(
+        COMMANDS.len() + SCRIPT_COMMANDS.len() + BINARY_COMMANDS.len() + PACKAGE_EXTRAS.len(),
+    );
     for e in COMMANDS {
         v.push(e.name);
     }
@@ -263,12 +293,10 @@ pub fn known_commands() -> Vec<&'static str> {
     for e in BINARY_COMMANDS {
         v.push(e.name);
     }
-    // Package-manager commands handled inline in the C++ if-ladder —
-    // list them here so the suggester can land on them too.
-    v.extend_from_slice(&[
-        "add", "remove", "list", "search", "update", "suggest", "target", "audit", "tool",
-    ]);
-    v.push("help");
+    // Package-manager commands handled inline in the C++ if-ladder.
+    for e in PACKAGE_EXTRAS {
+        v.push(e.name);
+    }
     v
 }
 
@@ -404,20 +432,43 @@ pub fn suggest_hint(typed: &str, binary: &str, threshold: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+
+    fn assert_banner_rows(output: &str, entries: &[Entry]) {
+        for e in entries {
+            let row = format!("  {:<14} {}", e.name, e.summary);
+            assert!(
+                output.lines().any(|line| line == row),
+                "banner missing row `{row}`:\n{output}"
+            );
+        }
+    }
 
     #[test]
     fn usage_banner_lists_every_native_command() {
         let mut buf = Vec::new();
         write_usage(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        for e in COMMANDS {
-            assert!(s.contains(e.name), "banner missing `{}`:\n{s}", e.name);
-            assert!(
-                s.contains(e.summary),
-                "banner missing summary for `{}`:\n{s}",
-                e.name
-            );
+        assert_banner_rows(&s, COMMANDS);
+    }
+
+    #[test]
+    fn usage_banner_lists_every_package_extra() {
+        let mut buf = Vec::new();
+        write_usage(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_banner_rows(&s, PACKAGE_EXTRAS);
+    }
+
+    #[test]
+    fn command_tables_do_not_duplicate_names() {
+        let mut seen = HashSet::new();
+        for entries in [COMMANDS, SCRIPT_COMMANDS, BINARY_COMMANDS, PACKAGE_EXTRAS] {
+            for e in entries {
+                assert!(seen.insert(e.name), "duplicate command `{}`", e.name);
+            }
         }
+        assert_eq!(known_commands().len(), seen.len());
     }
 
     #[test]
@@ -475,9 +526,11 @@ mod tests {
     #[test]
     fn known_commands_contains_help_and_package_surface() {
         let c = known_commands();
-        assert!(c.contains(&"help"));
-        assert!(c.contains(&"add"));
-        assert!(c.contains(&"remove"));
-        assert!(c.contains(&"tool"));
+        for name in [
+            "help", "add", "remove", "list", "search", "update", "suggest", "target", "audit",
+            "tool",
+        ] {
+            assert!(c.contains(&name), "known_commands missing `{name}`");
+        }
     }
 }
