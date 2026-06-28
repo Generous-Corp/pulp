@@ -109,6 +109,26 @@ public:
     }
 };
 
+class ZeroLengthProbeDsp : public MockFaustDsp<1, 1> {
+public:
+    static inline int compute_calls = 0;
+    static inline int last_count = -1;
+    static inline FAUSTFLOAT last_gain_seen = -1.0f;
+
+    static void reset_probe() {
+        compute_calls = 0;
+        last_count = -1;
+        last_gain_seen = -1.0f;
+    }
+
+    void compute(int count, FAUSTFLOAT** inputs, FAUSTFLOAT** outputs) override {
+        ++compute_calls;
+        last_count = count;
+        last_gain_seen = gain_;
+        MockFaustDsp<1, 1>::compute(count, inputs, outputs);
+    }
+};
+
 }  // namespace
 
 // ── PulpFaustUI contract ────────────────────────────────────────────────
@@ -497,11 +517,14 @@ TEST_CASE("FaustProcessor::process supports instrument topology with no inputs",
 
 TEST_CASE("FaustProcessor::process honours zero-length buffer (num_samples == 0)",
           "[dsl][faust-processor][process][edge]") {
-    pulp::dsl::FaustProcessor<MockFxDsp> proc;
+    ZeroLengthProbeDsp::reset_probe();
+
+    pulp::dsl::FaustProcessor<ZeroLengthProbeDsp> proc;
     pulp::state::StateStore store;
     proc.set_state_store(&store);
     proc.define_parameters(store);
     proc.prepare({48000.0, 128, 1, 1});
+    store.set_value(1, 0.25f);
 
     pulp::audio::Buffer<float> in(1, 0);
     pulp::audio::Buffer<float> out(1, 0);
@@ -513,8 +536,13 @@ TEST_CASE("FaustProcessor::process honours zero-length buffer (num_samples == 0)
     pctx.sample_rate = 48000.0;
     pctx.num_samples = 0;
 
-    // Must not crash or UB on zero-length input. If FAUST compute() is
-    // called at all, it gets count == 0 and does nothing.
     proc.process(out_view, in_view, midi_in, midi_out, pctx);
-    SUCCEED("FaustProcessor handled zero-length block without crashing");
+
+    REQUIRE(ZeroLengthProbeDsp::compute_calls == 1);
+    REQUIRE(ZeroLengthProbeDsp::last_count == 0);
+    REQUIRE_THAT(ZeroLengthProbeDsp::last_gain_seen, WithinAbs(0.25f, 1e-6f));
+    REQUIRE(in.num_samples() == 0);
+    REQUIRE(out.num_samples() == 0);
+    REQUIRE(midi_in.size() == 0);
+    REQUIRE(midi_out.size() == 0);
 }
