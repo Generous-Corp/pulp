@@ -318,7 +318,12 @@ TEST_CASE("pulp_node_v1: a C node drives the full lifecycle + state",
             PULP_NODE_ERR_MALFORMED_STATE_V1);
 
     e->reset(inst);
+    g_written.clear();
+    REQUIRE(e->save_state(inst, &writer) == PULP_NODE_OK_V1);
+    REQUIRE(g_written.size() == sizeof(float));
+    std::memcpy(&saved, g_written.data(), sizeof(float));
+    REQUIRE(saved == 1.0f);
+
     e->release(inst);
     e->destroy(inst);
-    SUCCEED("lifecycle completed");
 }
