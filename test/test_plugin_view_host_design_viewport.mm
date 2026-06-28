@@ -176,7 +176,7 @@ TEST_CASE("PluginViewHost (mac GPU) — set_design_viewport renders + inverse-ma
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — GPU design-viewport smoke skipped.");
+            SKIP("Cocoa window unavailable — GPU design-viewport smoke cannot run");
             return;
         }
 
@@ -192,7 +192,7 @@ TEST_CASE("PluginViewHost (mac GPU) — set_design_viewport renders + inverse-ma
 
         if (!host->is_gpu_backed()) {
             // Dawn/Metal adapter not available — host fell back to CPU.
-            SUCCEED("No Dawn/Metal adapter — GPU design-viewport smoke skipped.");
+            SKIP("Dawn/Metal adapter unavailable — GPU design-viewport smoke cannot run");
             [window close];
             return;
         }
