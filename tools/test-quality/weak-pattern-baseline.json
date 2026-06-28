@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-plugin-view-host-design-viewport-skip-final.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-text-accessibility-linux-skip-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 297,
+    "succeed": 295,
     "require_true": 16,
-    "skip": 513
+    "skip": 514
   },
   "classifications": {
-    "needs-review": 789,
+    "needs-review": 790,
     "placeholder": 4,
-    "skip-as-pass": 17,
+    "skip-as-pass": 15,
     "unconditional-true": 16
   },
   "notes": [

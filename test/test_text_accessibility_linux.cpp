@@ -3,8 +3,8 @@
 // Compile-gated on Linux (excluding Android, which uses a different
 // platform-a11y path via TalkBack). The Pulp CI matrix currently runs
 // macOS as the only required gate; this file is structured to:
-//   - compile on every platform with a sentinel SUCCEED("...skipped...")
-//     case off Linux, so ctest -N stays stable; AND
+//   - compile on every platform with an honest off-Linux sentinel skip
+//     case, so ctest -N stays stable; AND
 //   - run the real backend-name + role-mapping assertions on Linux only.
 //
 // The Linux backend ships as a documented stub
@@ -29,7 +29,7 @@ TEST_CASE("TextAccessibilityNode linux backend: skipped (non-Linux host)",
     // NOT be the Linux-only stub value.
     REQUIRE(accessibility_backend_name() != "linux-accesskit-stub");
     REQUIRE(accessibility_backend_name() != "linux-accesskit");
-    SUCCEED("Linux AccessKit backend test skipped — not a Linux host");
+    SKIP("Linux AccessKit backend test cannot run on a non-Linux host");
 }
 
 #else  // __linux__ && !__ANDROID__
