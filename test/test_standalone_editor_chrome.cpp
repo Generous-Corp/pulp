@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/detail/standalone_one_shot_action.hpp>
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
@@ -1217,6 +1218,134 @@ TEST_CASE("Standalone delayed action fires exactly once after the configured del
     action();
     REQUIRE(actions == 1);
     REQUIRE(closes == 1);
+}
+
+TEST_CASE("Standalone audio one-shot request chooses the first active capture mode",
+          "[standalone][chrome][audio-inspector]") {
+    StandaloneConfig config;
+    config.screenshot_frame_delay = 4;
+    config.audio_probe_json_path = "/tmp/probe.json";
+    config.audio_scope_json_path = "/tmp/scope.json";
+    config.audio_capture_wav_path = "/tmp/capture.wav";
+    config.audio_capture_rolling_path = "/tmp/rolling.wav";
+
+    auto request = standalone_audio_one_shot_action_request(config);
+    REQUIRE(request.kind == StandaloneOneShotActionKind::audio_probe_json);
+    REQUIRE(request.path == "/tmp/probe.json");
+    REQUIRE(request.delay == 4);
+
+    config.audio_probe_json_path.clear();
+    request = standalone_audio_one_shot_action_request(config);
+    REQUIRE(request.kind == StandaloneOneShotActionKind::audio_scope_json);
+    REQUIRE(request.path == "/tmp/scope.json");
+
+    config.audio_scope_json_path.clear();
+    request = standalone_audio_one_shot_action_request(config);
+    REQUIRE(request.kind == StandaloneOneShotActionKind::audio_capture_wav);
+    REQUIRE(request.path == "/tmp/capture.wav");
+
+    config.audio_capture_wav_path.clear();
+    request = standalone_audio_one_shot_action_request(config);
+    REQUIRE(request.kind == StandaloneOneShotActionKind::audio_capture_rolling);
+    REQUIRE(request.path == "/tmp/rolling.wav");
+}
+
+TEST_CASE("Standalone audio one-shot request defers to screenshot capture",
+          "[standalone][chrome][audio-inspector]") {
+    StandaloneConfig config;
+    config.screenshot_path = "/tmp/screenshot.png";
+    config.screenshot_frame_delay = 0;
+    config.audio_probe_json_path = "/tmp/probe.json";
+    config.audio_capture_rolling_path = "/tmp/rolling.wav";
+
+    const auto request = standalone_audio_one_shot_action_request(config);
+
+    REQUIRE(request.kind == StandaloneOneShotActionKind::none);
+    REQUIRE(request.path.empty());
+    REQUIRE(request.delay == 30);
+}
+
+TEST_CASE("Standalone one-shot idle callback preserves prior idle until action fires",
+          "[standalone][chrome][audio-inspector]") {
+    std::vector<std::string> calls;
+    DelayedAction action;
+    action.delay = 2;
+    action.action_fn = [&] { calls.push_back("action"); };
+    action.close_fn = [&] { calls.push_back("close"); };
+
+    auto idle = make_standalone_one_shot_idle_callback(
+        [&] { calls.push_back("prior"); }, std::move(action));
+
+    idle();
+    REQUIRE(calls == std::vector<std::string>{"prior"});
+
+    idle();
+    REQUIRE(calls == std::vector<std::string>{"prior", "prior", "action", "close"});
+
+    idle();
+    REQUIRE(calls == std::vector<std::string>{"prior", "prior", "action", "close",
+                                              "prior"});
+}
+
+TEST_CASE("Standalone one-shot action dispatches only the selected writer",
+          "[standalone][chrome][audio-inspector]") {
+    std::vector<std::string> calls;
+    auto writer = [&](const std::string& name) {
+        return [&, name](const std::string& path) {
+            calls.push_back(name + ":" + path);
+        };
+    };
+
+    struct Case {
+        StandaloneOneShotActionKind kind;
+        std::string path;
+        std::string expected_call;
+        std::string expected_log_name;
+    };
+    const std::vector<Case> cases{
+        {StandaloneOneShotActionKind::audio_probe_json, "/tmp/probe.json",
+         "probe:/tmp/probe.json", "audio-probe-json"},
+        {StandaloneOneShotActionKind::audio_scope_json, "/tmp/scope.json",
+         "scope:/tmp/scope.json", "audio-scope-json"},
+        {StandaloneOneShotActionKind::audio_capture_wav, "/tmp/capture.wav",
+         "wav:/tmp/capture.wav", "audio-capture-wav"},
+        {StandaloneOneShotActionKind::audio_capture_rolling, "/tmp/rolling.wav",
+         "rolling:/tmp/rolling.wav", "audio-capture-rolling"},
+    };
+
+    for (const auto& c : cases) {
+        calls.clear();
+        auto action = make_standalone_one_shot_action(
+            {c.kind, c.path, 30},
+            writer("probe"),
+            writer("scope"),
+            writer("wav"),
+            writer("rolling"));
+        action();
+
+        REQUIRE(calls == std::vector<std::string>{c.expected_call});
+        REQUIRE(standalone_one_shot_action_log_name(c.kind) == c.expected_log_name);
+    }
+
+    calls.clear();
+    make_standalone_one_shot_action(
+        {StandaloneOneShotActionKind::none, "/tmp/unused", 30},
+        writer("probe"),
+        writer("scope"),
+        writer("wav"),
+        writer("rolling"))();
+
+    REQUIRE(calls.empty());
+    REQUIRE(standalone_one_shot_action_log_name(StandaloneOneShotActionKind::none)
+            == "none");
+
+    make_standalone_one_shot_action(
+        {StandaloneOneShotActionKind::audio_probe_json, "/tmp/probe.json", 30},
+        {},
+        writer("scope"),
+        writer("wav"),
+        writer("rolling"))();
+    REQUIRE(calls.empty());
 }
 
 #if PULP_ENABLE_AUDIO_PROBES
