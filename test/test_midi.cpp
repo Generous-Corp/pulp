@@ -1096,7 +1096,18 @@ TEST_CASE("CoreMIDI system enumerates ports", "[midi][coremidi]") {
     auto inputs = system->enumerate_inputs();
     auto outputs = system->enumerate_outputs();
 
-    // Just verify the calls succeed
-    REQUIRE(true);
+    for (const auto& input : inputs) {
+        REQUIRE_FALSE(input.id.empty());
+        REQUIRE_FALSE(input.name.empty());
+        REQUIRE(input.is_input);
+        REQUIRE_FALSE(input.is_output);
+    }
+
+    for (const auto& output : outputs) {
+        REQUIRE_FALSE(output.id.empty());
+        REQUIRE_FALSE(output.name.empty());
+        REQUIRE(output.is_output);
+        REQUIRE_FALSE(output.is_input);
+    }
 }
 #endif

@@ -121,8 +121,9 @@ TEST_CASE("create_pkg on nonexistent component is false",
 
 TEST_CASE("list_signing_identities does not crash", "[ship][codesign]") {
     auto ids = list_signing_identities();
-    // May be empty on CI, but should not crash
-    REQUIRE(true);
+    // May be empty on CI, but any reported identity should be usable display text.
+    for (const auto& id : ids)
+        REQUIRE_FALSE(id.empty());
 }
 
 TEST_CASE("default_audio_entitlements returns valid plist", "[ship][codesign]") {
