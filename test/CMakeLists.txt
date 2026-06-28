@@ -1169,6 +1169,9 @@ pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 # Validation harness tests
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
+# Reusable validation assertion helpers (validation_assertions.hpp)
+pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
