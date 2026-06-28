@@ -907,6 +907,109 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     REQUIRE(retire_iterations.load(std::memory_order_relaxed) > 0);
 }
 
+TEST_CASE("SignalGraph control-thread node-field edits serialize against prepare",
+          "[host][graph][race][rt-safety][tsan]") {
+    // Companion to the snapshot-lifetime test above, which deliberately left the
+    // control-thread GraphNode-field race out of scope (see its note). The race
+    // closed here is between two CONTROL threads — never the audio thread:
+    //   * a UI thread mutating control-owned source-of-truth state —
+    //     set_node_gain() writes the plain GraphNode::gain scalar and scans nodes_
+    //     via node(); add_gain_node()/add_input_node()/add_plugin_node()/
+    //     remove_node()/connect()/disconnect() push/erase nodes_/connections_;
+    //   * a host thread calling prepare() -> compile_(), which iterates nodes_ /
+    //     connections_ and reads GraphNode::gain (signal_graph.cpp, `rt.gain =
+    //     ... n.gain`) plus validate_generated_graph()'s nodes_/connections_ scan.
+    // These touch the plain nodes_/connections_ vectors + GraphNode plain fields,
+    // which the ProcessReadGuard snapshot pin does NOT protect (that pins the
+    // compiled snapshot, not the source GraphNode). Without graph_mutation_mutex_
+    // this is a data race; with it the accesses are serialized. The audio render
+    // path is intentionally absent: it reads only the immutable CompiledGraph
+    // snapshot, never nodes_/GraphNode fields, so it takes no lock here.
+    //
+    // Thread A churns a spread of mutators — set_node_gain (GraphNode::gain),
+    // add_gain_node/add_input_node/add_plugin_node + remove_node (nodes_
+    // push/erase), and a connect/disconnect toggle (connections_) — so the race
+    // coverage is not limited to add_gain_node/remove_node. Proof is under
+    // ThreadSanitizer: reverting the locks reports write/read data races on the
+    // nodes_/connections_ vector storage and GraphNode::gain; with the locks the
+    // run is clean.
+    SignalGraph graph;
+    auto in   = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out  = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> all_gain_ok{true};
+    std::atomic<int> destroyed{0};  // for the churned plugin nodes
+    std::atomic<long> mutate_iterations{0};
+    std::atomic<long> prepare_iterations{0};
+
+    // Thread A — control-thread topology + node-field mutator. Each iteration
+    // exercises a different previously-unlocked surface so the test catches the
+    // broad mutator gap, not just add_gain_node/remove_node:
+    //   * set_node_gain  -> GraphNode::gain write + node() scan
+    //   * add_input_node / add_gain_node / add_plugin_node(unique_ptr) ->
+    //     nodes_.push_back on three distinct add paths
+    //   * remove_node    -> nodes_/connections_ erase
+    //   * connect/disconnect -> connections_ push/erase + node() scan
+    // The scratch nodes are added then removed so the graph size stays bounded
+    // while nodes_ is mutated under compile_()'s iteration.
+    std::thread mutate_thread([&] {
+        long i = 0;
+        while (!stop.load(std::memory_order_acquire)) {
+            const float g = static_cast<float>(i % 17) / 16.0f;
+            if (!graph.set_node_gain(gain, g)) {
+                all_gain_ok.store(false, std::memory_order_relaxed);
+            }
+            // Rotate across the previously-unlocked add_* paths.
+            NodeId scratch = 0;
+            switch (i % 3) {
+            case 0: scratch = graph.add_gain_node("scratch"); break;
+            case 1: scratch = graph.add_input_node(1, "scratch-in"); break;
+            case 2:
+                scratch = graph.add_plugin_node(
+                    std::make_unique<LifetimeTrackedPlugin>(destroyed),
+                    1, 1, "scratch-plugin");
+                break;
+            }
+            // connections_ churn: briefly wire the scratch node, then tear it down.
+            graph.connect(scratch, 0, out, 0);
+            graph.disconnect(scratch, 0, out, 0);
+            graph.remove_node(scratch);
+            mutate_iterations.fetch_add(1, std::memory_order_relaxed);
+            ++i;
+            if ((i % 64) == 0) std::this_thread::yield();
+        }
+    });
+
+    // Thread B — host prepare()/compile_() loop. compile_() reads GraphNode::gain
+    // and iterates nodes_; this is the read side of the race.
+    std::thread prepare_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.prepare(48000.0, 32);
+            prepare_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    mutate_thread.join();
+    prepare_thread.join();
+
+    REQUIRE(all_gain_ok.load(std::memory_order_relaxed));
+    REQUIRE(mutate_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(prepare_iterations.load(std::memory_order_relaxed) > 0);
+    graph.release();
+}
+
 TEST_CASE("SignalGraph retired snapshots do not own removed plugins",
           "[host][graph][lifetime]") {
     std::atomic<int> destroyed{0};
