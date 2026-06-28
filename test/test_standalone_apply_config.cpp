@@ -53,7 +53,7 @@ TEST_CASE("StandaloneApp::apply_config preserves the processor instance",
     if (!app.start()) {
         // No usable audio device (e.g. headless Linux CI). The running-path
         // soft-restart is exercised on hosts with an audio device (macOS CI).
-        SUCCEED("no audio device available — running-path check skipped");
+        SKIP("no audio device available; running-path check cannot run");
         return;
     }
 
@@ -105,7 +105,7 @@ TEST_CASE("StandaloneApp routes the test tone to output for an instrument",
     app.set_config(cfg);
 
     if (!app.start()) {
-        SUCCEED("no audio device available — instrument routing check skipped");
+        SKIP("no audio device available; instrument routing check cannot run");
         return;
     }
     // Instrument => no input bus to inject the tone into => it must route to output.
