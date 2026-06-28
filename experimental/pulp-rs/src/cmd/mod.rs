@@ -10,6 +10,7 @@
 pub mod audit;
 pub mod config;
 pub mod create;
+mod create_paths;
 pub mod design;
 pub mod dev;
 pub mod docs;

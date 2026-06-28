@@ -51,6 +51,7 @@ use std::path::{Component, Path, PathBuf};
 
 use rand::RngCore;
 
+use super::create_paths;
 use crate::error::{CliError, Result};
 
 /// Parsed argument surface for `pulp-rs create`.
@@ -403,6 +404,15 @@ fn path_is_within(path: &Path, root: &Path) -> bool {
 /// or when the output path collides with an existing directory or violates
 /// create's standalone/in-tree containment policy.
 pub fn resolve_out_dir(args: &CreateArgs, root: Option<&Path>, cwd: &Path) -> Result<PathBuf> {
+    resolve_out_dir_with_projects_base(args, root, cwd, None)
+}
+
+fn resolve_out_dir_with_projects_base(
+    args: &CreateArgs,
+    root: Option<&Path>,
+    cwd: &Path,
+    projects_base: Option<&Path>,
+) -> Result<PathBuf> {
     let lower = to_lower_name(&args.name);
     let out_dir = if let Some(o) = args.output.as_deref() {
         if o.is_absolute() {
@@ -418,12 +428,15 @@ pub fn resolve_out_dir(args: &CreateArgs, root: Option<&Path>, cwd: &Path) -> Re
         };
         root.join("examples").join(&lower)
     } else {
-        // Standalone default: alongside the Pulp repo root when known,
-        // otherwise cwd. Matches C++ `resolve_create_projects_base_dir`
-        // collapsed to the common case.
-        let base = root
-            .and_then(Path::parent)
-            .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
+        // Standalone default: explicit user projects base when configured,
+        // then alongside the Pulp repo root when known, otherwise cwd.
+        let base = projects_base.map_or_else(
+            || {
+                root.and_then(Path::parent)
+                    .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf)
+            },
+            Path::to_path_buf,
+        );
         base.join(&lower)
     };
 
@@ -831,7 +844,13 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
         }
     };
 
-    let out_dir = resolve_out_dir(args, project_root.as_deref(), cwd)?;
+    let projects_base = create_paths::configured_projects_base_dir(cwd);
+    let out_dir = resolve_out_dir_with_projects_base(
+        args,
+        project_root.as_deref(),
+        cwd,
+        projects_base.as_deref(),
+    )?;
     if args.pin_sdk || args.debug_build {
         let ignored = if args.pin_sdk && args.debug_build {
             "--pin/--debug"
@@ -879,11 +898,7 @@ mod tests {
             "project({{CLASS_NAME}})\n",
         )
         .unwrap();
-        fs::write(
-            templates.join("test.cpp.template"),
-            "t={{LOWER_NAME}}\n",
-        )
-        .unwrap();
+        fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
     }
 
     #[test]
@@ -1098,7 +1113,9 @@ mod tests {
             ..CreateArgs::default()
         };
         let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
-        assert!(err.to_string().contains("--in-tree projects must live under"));
+        assert!(err
+            .to_string()
+            .contains("--in-tree projects must live under"));
     }
 
     #[test]
@@ -1222,7 +1239,10 @@ mod tests {
             "--targets".to_owned(),
             "android,ios".to_owned(),
         ]);
-        assert_eq!(p.output.as_deref().map(Path::to_str), Some(Some("/tmp/out")));
+        assert_eq!(
+            p.output.as_deref().map(Path::to_str),
+            Some(Some("/tmp/out"))
+        );
         assert_eq!(p.targets, vec!["android", "ios"]);
     }
 
@@ -1245,11 +1265,7 @@ mod tests {
 
     #[test]
     fn parse_args_first_non_flag_wins_as_name() {
-        let p = parse_args(&[
-            "first".to_owned(),
-            "second".to_owned(),
-            "third".to_owned(),
-        ]);
+        let p = parse_args(&["first".to_owned(), "second".to_owned(), "third".to_owned()]);
         assert_eq!(p.name, "first");
     }
 
@@ -1376,5 +1392,99 @@ mod tests {
         };
         let resolved = resolve_out_dir(&args, None, td.path()).unwrap();
         assert_eq!(resolved, td.path().join("relout"));
+    }
+
+    #[test]
+    fn resolve_out_dir_uses_projects_base_for_standalone_default() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        let projects = td.path().join("projects");
+        fs::create_dir_all(&root).unwrap();
+        let args = CreateArgs {
+            name: "Project Base".to_owned(),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+
+        let resolved =
+            resolve_out_dir_with_projects_base(&args, Some(&root), td.path(), Some(&projects))
+                .unwrap();
+        assert_eq!(resolved, projects.join("project-base"));
+    }
+
+    #[test]
+    fn resolve_out_dir_keeps_explicit_output_ahead_of_projects_base() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        let explicit = td.path().join("explicit");
+        let projects = td.path().join("projects");
+        fs::create_dir_all(&root).unwrap();
+        let args = CreateArgs {
+            name: "Explicit".to_owned(),
+            output: Some(explicit.clone()),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+
+        let resolved =
+            resolve_out_dir_with_projects_base(&args, Some(&root), td.path(), Some(&projects))
+                .unwrap();
+        assert_eq!(resolved, explicit);
+    }
+
+    #[test]
+    fn resolve_out_dir_keeps_in_tree_ahead_of_projects_base() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        let projects = td.path().join("projects");
+        fs::create_dir_all(root.join("examples")).unwrap();
+        let args = CreateArgs {
+            name: "Example Plug".to_owned(),
+            in_tree: true,
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+
+        let resolved =
+            resolve_out_dir_with_projects_base(&args, Some(&root), td.path(), Some(&projects))
+                .unwrap();
+        assert_eq!(resolved, root.join("examples").join("example-plug"));
+    }
+
+    #[test]
+    fn run_native_ci_uses_pulp_projects_dir_for_default_output() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("repo");
+        let projects = td.path().join("configured-projects");
+        fs::create_dir_all(root.join("core")).unwrap();
+        fs::write(root.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        write_minimal_effect_templates(
+            &root,
+            "#include <pulp/format/processor.hpp>\n        .accepts_midi = true,\n",
+        );
+        let _env = crate::test_support::EnvVarGuard::set_many(&[
+            ("PULP_PROJECTS_DIR", Some(projects.to_str().unwrap())),
+            ("PULP_HOME", None),
+        ]);
+
+        let mut buf = Vec::new();
+        let rc = run(
+            &root,
+            &CreateArgs {
+                name: "Configured Base".to_owned(),
+                ci_mode: true,
+                no_build: true,
+                ..CreateArgs::default()
+            },
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(rc, 0);
+        assert!(projects.join("configured-base").join("pulp.toml").is_file());
+        let stdout = String::from_utf8(buf).unwrap();
+        assert!(stdout.contains(&format!(
+            "Scaffolding complete at {}",
+            projects.join("configured-base").display()
+        )));
     }
 }
