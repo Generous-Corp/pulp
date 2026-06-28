@@ -1504,25 +1504,25 @@ See [docs/guides/focus-mode.md](../guides/focus-mode.md) for the full playbook (
 
 **Status**: usable
 
-Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in that was found. Mirrors what `pulp::host::PluginScanner` does at runtime. Useful for sanity-checking your local plug-in installation or for narrowing down which plug-in to feed to `pulp host`.
+Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle that was found. The installed Rust `pulp scan` path is a filesystem inventory: it does not dlopen plug-ins or query factories, so names are filename-derived and vendor / version / unique-id metadata is not surfaced. The C++ delegate (`pulp-cpp scan`) still owns the rich `pulp::host::PluginScanner` metadata path.
 
 ```bash
-pulp scan                           # Scan every supported format the build includes
+pulp scan                           # Filesystem inventory for every supported format
 pulp scan --format clap             # Scan only CLAP
 pulp scan --format vst3             # Only VST3
 pulp scan --format au               # Only AU v2
 pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
-pulp scan --no-load                 # Filesystem-only walk escape hatch
+pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
 Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary. Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
+On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
-`pulp scan --help` is short-circuited — it does NOT dlopen any plug-in, so it remains safe even when one of the installed plug-ins would crash the rich path.
+`pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
 
 ### host
 

@@ -1769,14 +1769,14 @@ commands:
 
   - name: scan
     status: usable
-    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.
+    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle found. Installed Rust pulp scan is filesystem-only with filename-derived names; rich PluginScanner metadata remains in pulp-cpp scan.
     args:
       - name: --format
         kind: option
         description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
       - name: --no-load
         kind: flag
-        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
+        description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host

@@ -51,7 +51,7 @@ static const Command commands[] = {
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
     {"loop",     "Leveraged-prototype focus mode: single-platform watch + rebuild (#940)", cmd_loop},
     {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
-    {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
+    {"scan",     "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"import",   "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
     {"kit",      "Inspect and apply local Pulp package manifests", pulp::cli::kit::cmd_kit},

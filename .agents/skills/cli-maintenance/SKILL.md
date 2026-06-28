@@ -1183,14 +1183,14 @@ options struct per iteration.
 
 #### `pulp scan --no-load`
 
-Filesystem-only enumeration mode. The default `pulp scan` opens each
-discovered bundle via `dlopen` to read entry-point metadata; one
-malformed plugin throwing in static-init aborts the whole scan
-(`libc++abi: terminating`). `--no-load` lists bundles by path/format
-without dlopen — the safe escape hatch when a host plugin crashes
-the scanner. `pulp scan --help` short-circuits before plugin
-enumeration so users can discover the flag even when the underlying
-scan path is broken.
+Filesystem-only enumeration mode. Installed Rust `pulp scan` is
+already filesystem-only and filename-derived; it accepts `--no-load`
+for C++ surface parity. The sibling `pulp-cpp scan` rich path opens
+bundles where needed to read entry-point metadata, so `pulp-cpp scan
+--no-load` is the safe escape hatch when a malformed plug-in crashes
+the scanner. `pulp scan --help` is handled by the Rust CLI help path;
+`pulp-cpp scan --help` likewise returns before rich scanning so users
+can discover the flag while diagnosing a broken plug-in.
 
 #### Cross-binary `pulp project bump` ↔ `undo` parity
 
