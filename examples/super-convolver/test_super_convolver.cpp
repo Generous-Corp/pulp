@@ -792,3 +792,41 @@ TEST_CASE("SuperConvolver changes Rooms live (16->64) without crashing",
     REQUIRE(proc.gpu_block_stats().first > 0);
     proc.release();
 }
+
+// Regression: raising Rooms past what the GPU's storage limit holds at a long
+// IR must CLAMP to the largest feasible room count and STAY on the GPU — never
+// silently revert to the CPU engine (the reported bug).
+TEST_CASE("SuperConvolver clamps Rooms to the GPU limit instead of reverting to CPU",
+          "[gpu][superconvolver]") {
+    using P = SuperConvolverProcessor;
+    constexpr std::size_t BLOCK = P::kInternalBlock;
+    constexpr double SR = 48000.0;
+
+    P proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, 4.0f);     // long IR → few rooms fit the storage limit
+    store.set_value(kEngine, 1.0f);   // GPU
+    store.set_value(kRooms, 256.0f);  // far past what fits at this IR length
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+    if (!proc.gpu_engine_active() && proc.gpu_backend().empty()) {
+        WARN("no GPU device; skipping");
+        return;
+    }
+    DirectDriver d(proc, BLOCK, SR);
+    const bool up = pump_until(d, 200, 8, [&] { return proc.gpu_engine_active(); });
+    REQUIRE(up);                        // stayed on the GPU
+    REQUIRE(proc.gpu_multi_active());   // multi-room path, not the single-IR fallback
+    const int r = proc.gpu_rooms();
+    INFO("clamped rooms = " << r);
+    REQUIRE(r > 1);                     // genuinely multi-room
+    REQUIRE(r <= 256);                  // clamped to a feasible count (not the raw request)
+    proc.release();
+}

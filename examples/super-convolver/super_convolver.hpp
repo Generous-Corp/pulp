@@ -102,7 +102,11 @@ public:
     // Fixed convolver block. Independent of the host's block size; the
     // re-blocking FIFO chunks the host stream into this. Power of two for the
     // radix-2 FFT. 256 samples ≈ 5.3 ms latency at 48 kHz — fine for a reverb.
-    static constexpr std::size_t kInternalBlock = 256;
+    // 512-sample internal block: the GPU multi-room path amortizes its CPU<->GPU
+    // round-trip over the whole block, so a larger block raises how many rooms
+    // run within the real-time budget (the budget grows with the block too). The
+    // re-block FIFO adds this much latency, reported for host PDC.
+    static constexpr std::size_t kInternalBlock = 512;
 
     ~SuperConvolverProcessor() override { stop_worker(); }
 
@@ -530,23 +534,43 @@ private:
     // audio thread.
     std::unique_ptr<GpuStack> build_gpu_stack(int rooms, float size) {
         auto stack = std::make_unique<GpuStack>();
-        stack->rooms = rooms > 1 ? rooms : 1;
+        stack->rooms = 1;  // single-IR default; the multi branch sets the real count
         const std::size_t len = ir_length_for(size);
         gpu_audio::GpuAudioNode* node = nullptr;
 
         if (rooms > 1) {
-            // N decorrelated rooms from `size`, distinct per-room seeds.
-            std::vector<std::vector<float>> irs;
-            irs.reserve(static_cast<std::size_t>(rooms));
-            for (int k = 0; k < rooms; ++k)
-                irs.push_back(make_reverb_ir(
-                    len, 0x51C04711u + static_cast<std::uint32_t>(k) * 2654435761u));
-            stack->multi = std::make_unique<gpu_audio::GpuMultiConvolver>(
-                static_cast<uint32_t>(kInternalBlock),
-                static_cast<uint32_t>(sample_rate_), std::move(irs));
-            if (stack->multi->prepare() && stack->multi->gpu_available())
-                node = stack->multi.get();
-        } else {
+            // The resident IR spectra are fft_size*2*num_ir floats; past the GPU's
+            // per-binding storage limit the multi-convolver can't be built. Rather
+            // than silently revert to CPU when Rooms is raised past what fits at
+            // this IR length, CLAMP to the largest room count the device holds and
+            // stay on the GPU. Estimate the fit (128 MiB validated on Metal), then
+            // step down if a build still doesn't take.
+            uint32_t fft = 1;
+            while (fft < static_cast<uint32_t>(kInternalBlock) + static_cast<uint32_t>(len))
+                fft <<= 1;
+            const std::uint64_t per_room = static_cast<std::uint64_t>(fft) * 2u * sizeof(float);
+            int max_fit = per_room > 0 ? static_cast<int>((128ull * 1024 * 1024) / per_room) - 1 : 1;
+            if (max_fit < 1) max_fit = 1;
+            int try_rooms = rooms < max_fit ? rooms : max_fit;
+            while (try_rooms > 1) {
+                std::vector<std::vector<float>> irs;
+                irs.reserve(static_cast<std::size_t>(try_rooms));
+                for (int k = 0; k < try_rooms; ++k)
+                    irs.push_back(make_reverb_ir(
+                        len, 0x51C04711u + static_cast<std::uint32_t>(k) * 2654435761u));
+                auto m = std::make_unique<gpu_audio::GpuMultiConvolver>(
+                    static_cast<uint32_t>(kInternalBlock),
+                    static_cast<uint32_t>(sample_rate_), std::move(irs));
+                if (m->prepare() && m->gpu_available()) {
+                    stack->multi = std::move(m);
+                    stack->rooms = try_rooms;   // the ACTUAL (possibly clamped) count
+                    node = stack->multi.get();
+                    break;
+                }
+                try_rooms = try_rooms > 2 ? (try_rooms / 2 < 2 ? 2 : try_rooms / 2) : 1;
+            }
+        }
+        if (!node) {
             auto ir = make_reverb_ir(len);
             stack->single = std::make_unique<gpu_audio::GpuConvolver>(
                 static_cast<uint32_t>(kChannels), static_cast<uint32_t>(kInternalBlock),
