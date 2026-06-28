@@ -162,14 +162,25 @@
 
     Animation.prototype.play = function() {
         if (this._cancelled) return;
+        if (this.playState === "running") return;
+        var wasPaused = this.playState === "paused";
         if (this._finished) {
             this._finished = false;
             this._elapsedBeforePause = 0;
             this._startTime = null;
+            wasPaused = false;
         }
         this.playState = "running";
         this._captureStartProps();
-        this._applyAt(0);
+        if (this._duration <= 0) {
+            this._applyAt(1);
+            this._complete();
+            return;
+        }
+        if (!wasPaused) {
+            this._elapsedBeforePause = 0;
+            this._applyAt(0);
+        }
         this._startTime = nowMs() - this._elapsedBeforePause;
         this._schedule();
     };
