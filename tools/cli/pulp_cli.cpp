@@ -160,6 +160,13 @@ static void print_usage() {
     }
     std::cout << "  " << std::left << std::setw(14) << "audit" << " License and clean-room audit\n";
     std::cout << "  " << std::left << std::setw(14) << "add" << " Add a component to the project\n";
+    std::cout << "  " << std::left << std::setw(14) << "remove" << " Remove a previously added package\n";
+    std::cout << "  " << std::left << std::setw(14) << "list" << " Show installed packages\n";
+    std::cout << "  " << std::left << std::setw(14) << "search" << " Search the package registry\n";
+    std::cout << "  " << std::left << std::setw(14) << "update" << " Check for and apply package updates\n";
+    std::cout << "  " << std::left << std::setw(14) << "suggest" << " Context-aware package recommendations\n";
+    std::cout << "  " << std::left << std::setw(14) << "target" << " Manage project platform targets\n";
+    std::cout << "  " << std::left << std::setw(14) << "tool" << " Manage third-party developer tools\n";
     std::cout << "  " << std::left << std::setw(14) << "help" << " Show this help\n";
     std::cout << "\nExamples:\n";
     std::cout << "  pulp create MyPlugin              # Create a new effect plugin\n";
