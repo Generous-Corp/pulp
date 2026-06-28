@@ -1024,8 +1024,8 @@ Apache License, Version 2.0
 
 https://github.com/google-labs-code/design.md
 
-Upstream pin: tag `0.1.1` (commit `6589f05166473ddc54ca01a615254a673add492c`,
-published 2026-04-21). Update this pin together with `compat.json`'s
+Upstream pin: tag `0.3.0` (commit `2a19f5dd97ab887971b417ebdf1e7e8fda0c7f79`,
+published 2026-06-15). Update this pin together with `compat.json`'s
 `imports.designmd.detected-formats[].format-version` and the upstream
 attribution in `docs/reference/licensing.md` whenever the format spec
 moves to a new tag.
@@ -1037,7 +1037,7 @@ reimplemented in C++; no upstream source code is vendored. One
 example file from the upstream `examples/paws-and-paths/` directory
 is redistributed verbatim under this license as the test fixture
 `test/fixtures/imports/designmd/alpha/DESIGN.md` (byte-identical to
-the upstream copy at tag `0.1.1`).
+the upstream copy at tag `0.3.0`).
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
