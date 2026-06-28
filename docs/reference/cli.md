@@ -1229,6 +1229,50 @@ reserved inspector protocol methods, but currently return explicit unavailable
 errors until script-engine and host-capture references are wired into the
 inspector domain.
 
+### motion
+
+**Status**: experimental
+
+Agent-facing wrappers around the inspector `Motion.*` protocol. Start the
+host with `PULP_MOTION_SERVER=1`, then use `pulp motion` to record traces,
+inspect active traces, replay `.motion.jsonl` fixtures, and toggle motion-cost
+sampling from a terminal.
+
+```bash
+pulp motion record --view Card --out card-fade.motion.jsonl
+pulp motion stop --trace-id 1
+pulp motion snapshot
+pulp motion list-traces
+pulp motion load-fixture card-fade.motion.jsonl
+pulp motion scrub 30
+pulp motion play
+pulp motion pause
+pulp motion cost enable
+pulp motion cost disable
+```
+
+Options:
+
+- `--host HOST` - inspector host, defaulting to `127.0.0.1`
+- `--port PORT` - inspector port; defaults to auto-discovery from the same temp-file hint as `pulp inspect`
+- `--json` - emit JSON where the subcommand supports it
+
+Subcommands:
+
+| Subcommand | Inspector method | Description |
+|------------|------------------|-------------|
+| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Start a trace and print the trace id. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
+| `stop [--trace-id N]` | `Motion.stopTrace` | Release an active trace. |
+| `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
+| `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
+| `load-fixture PATH` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
+| `scrub FRAME` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
+| `play` / `pause` | `Motion.play` / `Motion.pause` | Control fixture playback. |
+| `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the session. |
+
+See [Motion Observability](../guides/motion-observability.md) for the full
+runtime trace, fixture replay, and cost-attribution workflow.
+
 ### tweaks
 
 **Status**: experimental

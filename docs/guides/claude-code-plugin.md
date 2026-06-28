@@ -104,6 +104,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
+| Motion tracing + fixture replay | `pulp_motion_start_trace`, `pulp_motion_stop_trace`, `pulp_motion_snapshot`, `pulp_motion_list_traces`, `pulp_motion_load_fixture`, `pulp_motion_scrub_to`, `pulp_motion_play`, `pulp_motion_pause`, `pulp_motion_enable_cost`, `pulp_motion_disable_cost` |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / offline render | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_render` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
@@ -290,6 +291,8 @@ pulp_add_plugin(MySynth
 
 ## Staying in Sync
 
-The `cli-plugin-sync` hook alerts you when the CLI (`tools/cli/pulp_cli.cpp`) or MCP server (`tools/mcp/pulp_mcp.cpp`) are modified. This is a reminder to check whether commands, skills, or hooks need matching updates.
+The `cli-plugin-sync` hook alerts you when the CLI C++ tables, Rust front-end
+command enum, or MCP server (`tools/mcp/pulp_mcp.cpp`) are modified. This is a
+reminder to check whether commands, skills, or hooks need matching updates.
 
 When adding a new CLI command, consider whether it should also become a slash command or skill.
