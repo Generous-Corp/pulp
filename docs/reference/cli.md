@@ -83,7 +83,8 @@ Default formats are platform-gated:
 
 On macOS and Windows, AAX is optional. `pulp create` only scaffolds `aax_entry.cpp`
 and includes the AAX target when an AAX SDK is already configured via
-`PULP_AAX_SDK_DIR`. Linux and Ubuntu do not support AAX.
+`PULP_AAX_SDK_DIR` or auto-discovered in a standard user-local SDK path. Linux
+and Ubuntu do not support AAX.
 
 ### build
 
