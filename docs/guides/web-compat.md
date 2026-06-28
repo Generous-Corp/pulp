@@ -473,7 +473,8 @@ Use `element._id` to get the internal widget ID for native bridge calls.
 - No per-side borders (border-top, border-right, etc.) — only uniform border
 - No per-corner border-radius — only single radius value
 - No CSS `@keyframes` animations (use Pulp's `animate()` bridge)
-- No `transitionend` / `animationend` events yet
+- No CSS `transitionend` events yet; `element.animate()` dispatches a Pulp-specific `animationend` event on the element
+- `element.animate()` interpolates the first and last keyframe for single numeric values with optional units; transforms, colors, multi-value properties, and intermediate keyframes / offsets / easing snap to the final value
 - No general per-element `resize` event yet — window resize is available via `window.addEventListener('resize', ...)`
 - No `<form>`, `<table>`, `<video>`, `<audio>` elements
 - No `::before` / `::after` pseudo-elements

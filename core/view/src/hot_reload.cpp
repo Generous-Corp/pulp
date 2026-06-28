@@ -43,7 +43,7 @@ HotReloader::HotReloader(const std::filesystem::path& js_file, ReloadCallback on
     , entry_file_(js_file.filename().string())
     , on_reload_(std::move(on_reload))
 {
-    seed_observed_write_times();
+    seed_observed_content_hashes();
 
     auto dir = js_file.parent_path();
     watcher_ = std::make_unique<choc::file::Watcher>(
@@ -62,7 +62,7 @@ HotReloader::HotReloader(const std::filesystem::path& directory,
     , entry_file_(entry_file)
     , on_reload_(std::move(on_reload))
 {
-    seed_observed_write_times();
+    seed_observed_content_hashes();
 
     watcher_ = std::make_unique<choc::file::Watcher>(
         directory,
@@ -120,24 +120,28 @@ void HotReloader::on_file_changed(const choc::file::Watcher::Event& event) {
 }
 #endif  // !TARGET_OS_IPHONE
 
-std::string HotReloader::read_file(const std::filesystem::path& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) return {};
+std::optional<std::string> HotReloader::try_read_file(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return std::nullopt;
     std::ostringstream ss;
     ss << file.rdbuf();
     return ss.str();
 }
 
-void HotReloader::seed_observed_write_times() {
+std::string HotReloader::read_file(const std::filesystem::path& path) {
+    return try_read_file(path).value_or(std::string{});
+}
+
+void HotReloader::seed_observed_content_hashes() {
     auto remember = [this](const std::filesystem::path& path) {
         const auto ext = path.extension().string();
         if (ext != ".js" && ext != ".mjs")
             return;
 
-        std::error_code ec;
-        const auto write_time = std::filesystem::last_write_time(path, ec);
-        if (!ec)
-            observed_write_times_[path.lexically_normal().string()] = write_time;
+        if (auto content = try_read_file(path)) {
+            const auto key = path.lexically_normal().string();
+            observed_content_hashes_[key] = content_hash(*content);
+        }
     };
 
     std::error_code ec;
@@ -158,18 +162,30 @@ void HotReloader::seed_observed_write_times() {
 }
 
 bool HotReloader::should_reload_for_modified_file(const std::filesystem::path& path) {
-    std::error_code ec;
-    const auto write_time = std::filesystem::last_write_time(path, ec);
-    if (ec)
+    auto content = try_read_file(path);
+    if (!content)
         return false;
 
     const auto key = path.lexically_normal().string();
-    auto it = observed_write_times_.find(key);
-    if (it != observed_write_times_.end() && write_time <= it->second)
+    const auto next_hash = content_hash(*content);
+    auto hash_it = observed_content_hashes_.find(key);
+    if (hash_it != observed_content_hashes_.end() && next_hash == hash_it->second)
         return false;
 
-    observed_write_times_[key] = write_time;
+    observed_content_hashes_[key] = next_hash;
     return true;
+}
+
+std::uint64_t HotReloader::content_hash(std::string_view content) {
+    constexpr std::uint64_t offset = 14695981039346656037ull;
+    constexpr std::uint64_t prime = 1099511628211ull;
+
+    std::uint64_t hash = offset;
+    for (unsigned char c : content) {
+        hash ^= c;
+        hash *= prime;
+    }
+    return hash;
 }
 
 } // namespace pulp::view

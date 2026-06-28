@@ -301,6 +301,20 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
         outWritable = false;
         return noErr;
     }
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(CFArrayRef);
+        outWritable = false;  // read: host queries the output name list
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AUMIDIOutputCallbackStruct);
+        outWritable = true;  // write: host installs the delivery callback
+        return noErr;
+    }
     return AUMIDIEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
 }
 
@@ -321,7 +335,89 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         if (!outData) return kAudioUnitErr_InvalidProperty;
         return g_cocoa_view_info_filler(outData) ? noErr : kAudioUnitErr_InvalidProperty;
     }
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        // One MIDI output stream named after the plugin. The host owns the array
+        // and its element (it releases them), so create with +1 retain.
+        CFStringRef name = CFStringCreateWithCString(
+            kCFAllocatorDefault,
+            processor_ ? processor_->descriptor().name.c_str() : "MIDI Out",
+            kCFStringEncodingUTF8);
+        CFStringRef values[1] = {name};
+        CFArrayRef array = CFArrayCreate(kCFAllocatorDefault,
+                                         reinterpret_cast<const void**>(values),
+                                         1, &kCFTypeArrayCallBacks);
+        if (name) CFRelease(name);  // the array retained it
+        *static_cast<CFArrayRef*>(outData) = array;
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback &&
+        plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        // Reflect the currently published pair (acquire-load the snapshot).
+        auto* out = static_cast<AUMIDIOutputCallbackStruct*>(outData);
+        const auto* pair =
+            midi_output_callback_.load(std::memory_order_acquire);
+        if (pair) {
+            out->midiOutputCallback = pair->callback;
+            out->userData = pair->user_data;
+        } else {
+            out->midiOutputCallback = nullptr;
+            out->userData = nullptr;
+        }
+        return noErr;
+    }
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
+}
+
+OSStatus PulpAUEffect::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                                   AudioUnitElement inElement, const void* inData,
+                                   UInt32 inDataSize)
+{
+    // The host installs (or clears) the MIDI-output delivery callback here on the
+    // main thread; the render thread reads it each block. Publish the
+    // (callback, userData) pair atomically via a double-buffered slot so the
+    // render thread never observes a torn pair (a fresh callback paired with a
+    // stale userData). Write the inactive slot, then release-store the pointer to
+    // it; the render side acquire-loads a single, internally-consistent pair.
+    if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!inData || inDataSize < sizeof(AUMIDIOutputCallbackStruct))
+            return kAudioUnitErr_InvalidPropertyValue;
+        const auto* in = static_cast<const AUMIDIOutputCallbackStruct*>(inData);
+        const std::uint8_t slot =
+            midi_output_callback_write_slot_.load(std::memory_order_relaxed);
+        midi_output_callback_slots_[slot].callback = in->midiOutputCallback;
+        midi_output_callback_slots_[slot].user_data = in->userData;
+        // Publish the freshly written slot, then flip the write cursor so the
+        // next SetProperty writes the other slot (never the one the render thread
+        // may still be reading).
+        midi_output_callback_.store(&midi_output_callback_slots_[slot],
+                                    std::memory_order_release);
+        midi_output_callback_write_slot_.store(slot ^ 1,
+                                               std::memory_order_relaxed);
+        return noErr;
+    }
+    return AUMIDIEffectBase::SetProperty(inID, inScope, inElement, inData, inDataSize);
+}
+
+UInt32 PulpAUEffect::SupportedNumChannels(const AUChannelInfo** outInfo)
+{
+    if (!processor_) return 0;
+    // Fill the per-instance member table so the returned pointer outlives the
+    // call (the host reads it after we return) without per-call allocation.
+    const UInt32 count =
+        build_channel_info(processor_->descriptor(), channel_info_.data());
+    if (outInfo) *outInfo = channel_info_.data();
+    return count;
+}
+
+bool PulpAUEffect::plugin_produces_midi() const noexcept
+{
+    return processor_ && processor_->descriptor().produces_midi;
 }
 
 OSStatus PulpAUEffect::Initialize()
@@ -562,6 +658,30 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // now that the Processor has observed this block. GetParameter reads the
     // store directly, so the host sees the control settle back automatically.
     store_.reset_triggers_rt();
+
+    // Deliver any MIDI the Processor emitted this block to the host via the
+    // installed kAudioUnitProperty_MIDIOutputCallback. Outside the ScopedNoAlloc
+    // scope above because the callback is host code we don't control; the packet
+    // list itself is built into pre-reserved storage (no allocation). The
+    // (callback, userData) pair is read via a single atomic acquire-load so a
+    // concurrent SetProperty on the main thread can never hand us a torn pair.
+    // When no callback is installed (host hasn't wired the MIDI output, or this
+    // is a plain audio effect), this is a cheap no-op. Packet timestamps are
+    // sample offsets within the block, clamped to it; the host callback receives
+    // the current render time as its base, the documented contract.
+    const auto* midi_cb =
+        midi_output_callback_.load(std::memory_order_acquire);
+    if (midi_cb != nullptr && midi_cb->callback != nullptr &&
+        (midi_out.size() > 0 || midi_out.sysex_size() > 0)) {
+        const MIDIPacketList* list =
+            midi_out_packet_builder_.build(midi_out, inFramesToProcess);
+        if (list != nullptr) {
+            midi_cb->callback(midi_cb->user_data,
+                              &CurrentRenderTime(),
+                              /*midiOutNum=*/0,
+                              list);
+        }
+    }
 
     // No plugin→host parameter diff/push here. Because GetParameter reads the
     // store directly, any value the Processor wrote during process() is already

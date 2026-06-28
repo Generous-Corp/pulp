@@ -259,7 +259,9 @@ css_parity:
       CSS Backgrounds Level 3: background-color, linear-gradient (4 directions +
       multi-stop). Border: width, color, radius (per-corner planned). Box shadow:
       offset, blur, spread, color. JS bridge: setBackground, setBorder,
-      setBackgroundGradient, setBoxShadow.
+      setBackgroundGradient, setBackgroundRepeat, setBackgroundPosition,
+      setBackgroundSize, setBoxShadow. The size/position/repeat bridge slots
+      are storage-only until raster background-image paint is wired.
   filters:
     status: usable
     notes: >
@@ -361,7 +363,8 @@ css_parity:
     notes: >
       flex-flow, place-items, place-content, inset, box-sizing (parsed),
       margin-inline/block, padding-inline/block (CSS logical properties),
-      -webkit-line-clamp, background-repeat (parsed).
+      -webkit-line-clamp, background-repeat/position/size (parsed and
+      round-tripped; raster background paint deferred).
   media_queries:
     status: usable
     notes: >

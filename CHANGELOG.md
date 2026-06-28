@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05290"></a>
+## [0.529.0] - 2026-06-28
+
+- feat(format): MIDI sub-block split iterator for sample-accurate event handling ([#5235](https://github.com/danielraffel/pulp/pull/5235))
+- docs(cli): clarify dev watch fallback ([#5227](https://github.com/danielraffel/pulp/pull/5227))
+- fix(sampler): bar-exact loop tempo with host-prior octave resolution ([#5143](https://github.com/danielraffel/pulp/pull/5143))
+
 <a id="v05282"></a>
 ## [0.528.2] - 2026-06-28
 
@@ -5533,6 +5540,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.529.0]: https://github.com/danielraffel/pulp/releases/tag/v0.529.0
 [0.528.2]: https://github.com/danielraffel/pulp/releases/tag/v0.528.2
 [0.528.1]: https://github.com/danielraffel/pulp/releases/tag/v0.528.1
 [0.528.0]: https://github.com/danielraffel/pulp/releases/tag/v0.528.0

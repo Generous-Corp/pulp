@@ -161,9 +161,9 @@ specifics are out of scope.
     multiple-bg / size-in-shorthand are `arch-single-bg`. `backgroundClip text` is
     `arch-paint-deferred` (SkBlendMode::kSrcIn against text glyphs is
     queued; the slot stores the value). `backgroundPosition` /
-    `backgroundSize` are `partial-deferred-paint-time` — the JS shim
-    type-guards the bridge call, parser is ready, bridge fn
-    registration lands in a follow-up.
+    `backgroundSize` are `partial-deferred-paint-time`: the JS shim
+    routes to registered bridge functions, and the bridge stores the
+    value on the View for future raster background paint to consume.
   * **Mask family (2 entries — `mask`, `maskImage`):** mask
     sub-properties (mode/repeat/position/size/origin/clip/composite)
     are `arch-paint-deferred`; the shorthand routes mask-image to
@@ -436,8 +436,8 @@ specifics are out of scope.
   `background_repeat_` (storage-only — paint-time honoring lands
   with the `background-image: url(...)` / repeating-gradient work).
   Reclassified `css/lineClamp` and `css/webkitLineClamp` to
-  `supported`; `css/backgroundRepeat` stays `partial` with the
-  honest "storage-only" caveat.
+  `supported`; `css/backgroundRepeat` is also `supported` as a stored
+  and queryable value, with the honest "storage-only" paint caveat.
 - **Already-implemented CSS features promoted to catalog entries** —
   13 already-implemented CSS features
   promoted to first-class catalog entries. Pure catalog add — no
@@ -690,12 +690,12 @@ specifics are out of scope.
   translator forwards `'NN%'` strings verbatim and the bridge
   routes them via `FlexStyle.dim_*` / `YGNodeStyleSet*Percent`).
   `css/backgroundSize`, `css/backgroundPosition`, `css/backgroundRepeat`,
-  `css/lineClamp`, `css/webkitLineClamp`, and `css/wordWrap` flipped
-  `missing` → `partial` to reflect that the JS translator (in
-  `web-compat-style-decl.js`) already routes them; the bridge functions
-  remain unregistered so the values silently drop at runtime, but the
-  catalog status now matches the harness verdict (DIVERGE). Drift on
-  these six entries is cleared. Nine remaining `css/animation*` and
+  `css/lineClamp`, `css/webkitLineClamp`, and `css/wordWrap` were
+  refreshed to match the JS translator and bridge surface. The
+  background size/position/repeat bridge functions are now registered
+  and store the values on View; visual paint for raster backgrounds
+  remains deferred. Drift on these six entries is cleared. Nine remaining
+  `css/animation*` and
   `css/touchAction` entries closed via the `noop` vocabulary extension
   (see next entry).
 - **Catalog vocabulary extension** — The harness
@@ -777,31 +777,16 @@ specifics are out of scope.
 - `css/__hover_pseudo`: new entry. Documents the bounded `:hover`
   support in `web-compat-document.js`.
 
-## Silent no-ops (parser exists, backend stub)
+## No-op And Storage-Only Caveats
 
-The JS adapter parses these and calls the bridge function; the bridge
-function is **not registered**, so the value is silently dropped.
-`typeof` guards prevent runtime errors.
+Use `compat.json` as the source of truth for current noop, partial, and
+storage-only CSS entries. This narrative avoids a hand-maintained static
+list because these properties move as bridge functions land.
 
-1. `css/animation*` (8 props) — `setAnimation` is registered but the
-   body is `(void)id; (void)prop; …` (widget_bridge.cpp:3242). All
-   `@keyframes` UIs animate nothing.
-2. `css/aspectRatio` — JS routes via `setFlex(id, "aspect_ratio", …)`
-   but `setFlex`'s C++ switch has no `aspect_ratio` branch.
-3. `css/boxSizing` — `setBoxSizing` referenced, never registered.
-4. `css/lineClamp` / `css/webkitLineClamp` — `setLineClamp` referenced,
-   never registered. Multi-line truncation impossible.
-5. `css/backgroundSize` / `css/backgroundPosition` /
-   `css/backgroundRepeat` — three setters referenced, none registered.
-   Tied to `backgroundImage: url()` which is also missing.
-6. `css/outline` / `css/outlineWidth` / `css/outlineColor` —
-   `setOutline` referenced, never registered. Affects accessibility
-   focus rings.
-7. `css/textShadow` — `setTextShadow` referenced, never registered.
-8. `css/wordBreak` / `css/overflowWrap` / `css/wordWrap` —
-   `setWordBreak` referenced, never registered.
-9. `css/touchAction` — parsed and stored on the JS Element instance
-   but never propagated to the C++ hit-test.
+The current background-size / background-position / background-repeat caveat is
+storage-only rather than missing bridge wiring: the JS style adapter calls the
+registered bridge functions, and View preserves the values. They have no visual
+effect until raster `background-image: url(...)` paint is wired.
 
 ## Known buggy-but-supported
 
