@@ -85,13 +85,57 @@ TEST_CASE("FileChooser null callback discards results without crashing",
     // returns no-selection synchronously which is what we want to test.
 #if !defined(__APPLE__)
     FileDialog::clear_backend();
+
+    FileDialog::Backend b;
+    int open_calls = 0;
+    int save_calls = 0;
+    int folder_calls = 0;
+    b.open_file = [&](const std::string& title,
+                      const std::vector<FileFilter>& filters,
+                      const std::string& default_path) {
+        ++open_calls;
+        REQUIRE(title.empty());
+        REQUIRE(filters.empty());
+        REQUIRE(default_path.empty());
+        return std::optional<std::string>("ignored.wav");
+    };
+    b.save_file = [&](const std::string& title,
+                      const std::vector<FileFilter>& filters,
+                      const std::string& default_path,
+                      const std::string& default_name) {
+        ++save_calls;
+        REQUIRE(title.empty());
+        REQUIRE(filters.empty());
+        REQUIRE(default_path.empty());
+        REQUIRE(default_name.empty());
+        return std::optional<std::string>("ignored.pulp");
+    };
+    b.choose_folder = [&](const std::string& title,
+                          const std::string& default_path) {
+        ++folder_calls;
+        REQUIRE(title.empty());
+        REQUIRE(default_path.empty());
+        return std::optional<std::string>("/ignored");
+    };
+    FileDialog::set_backend(b);
+
     FileChooser c;
-    c.open(nullptr);          // no callback set; must not crash
-    c.save(nullptr);
-    c.choose_folder(nullptr);
-    SUCCEED("no-callback invocations completed without throwing");
+    REQUIRE_NOTHROW(c.open(nullptr));
+    REQUIRE_NOTHROW(c.save(nullptr));
+    REQUIRE_NOTHROW(c.choose_folder(nullptr));
+
+    REQUIRE(open_calls == 1);
+    REQUIRE(save_calls == 1);
+    REQUIRE(folder_calls == 1);
+    REQUIRE(c.title().empty());
+    REQUIRE(c.initial_directory().empty());
+    REQUIRE(c.default_name().empty());
+    REQUIRE(c.filters().empty());
+    REQUIRE_FALSE(c.allow_multiple());
+
+    FileDialog::clear_backend();
 #else
-    SUCCEED("skipped on Apple: open/save/choose_folder spawn NSOpenPanel");
+    SKIP("open/save/choose_folder spawn NSOpenPanel on Apple");
 #endif
 }
 
