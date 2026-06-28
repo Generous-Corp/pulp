@@ -44,7 +44,7 @@ Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) 
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.1.1`. | [github.com/google-labs-code/design.md @ 0.1.1](https://github.com/google-labs-code/design.md/releases/tag/0.1.1) |
+| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.3.0`. | [github.com/google-labs-code/design.md @ 0.3.0](https://github.com/google-labs-code/design.md/releases/tag/0.3.0) |
 | **Khronos Box Textured fixture** | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture at `test/fixtures/scene3d/BoxTextured/BoxTextured.glb`. | [github.com/KhronosGroup/glTF-Sample-Assets/Models/BoxTextured](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured) |
 
 ### Embedded Fonts
@@ -171,10 +171,28 @@ Full inventory and boundary live in `DEPENDENCIES.md`.
 | **Vitest** | MIT | Unit tests for `@pulp/react` and `pulp-import-ir` |
 | **json-schema-to-typescript** | MIT | TypeScript type generation for the Figma plugin |
 | **fflate** | MIT | Deflate/zip in the developer-only Figma plugin |
-| **numpy** | BSD-3-Clause | Motion visual-analysis lane (`tools/motion/visual`) |
+| **numpy** | BSD-3-Clause | Motion visual-analysis lane (`tools/motion/visual`) and the Audio Quality Lab (`tools/audio/quality-lab`) |
 | **Pillow** | HPND (BSD-style) | Image IO for the Motion visual-analysis lane |
 | **scikit-image** | BSD-3-Clause | Image metrics for the Motion visual-analysis lane |
 | **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
+| **soundfile** (libsndfile) | BSD-3-Clause (package); libsndfile LGPL-2.1 | WAV/audio IO for the Audio Quality Lab |
+
+**Audio Quality Lab — optional perceptual models (not bundled, developer-supplied).**
+The Audio Quality Lab (`tools/audio/quality-lab`) can optionally consult full-reference
+perceptual audio-quality models as an advisory cross-check. These are **never bundled,
+vendored, fetched, or shipped**; each is reached only across a process boundary via an
+explicit env-path the developer sets (e.g. `PULP_VISQOL_BIN`), and the lab degrades to
+"skipped" when one is absent (the default, and always in public CI). They are acknowledged
+here even though Pulp does not distribute them:
+
+| Name | License | Role |
+|------|---------|------|
+| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | full-reference perceptual MOS (music + speech) |
+| PEAQ (ITU-R BS.1387; e.g. GstPEAQ, PeaqB) | GPL | classic broadcast perceptual metric — developer-local only |
+| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | bundles a PEAQ port + embedding distances — developer-local only |
+
+The GPL-licensed tools above are used only as separate developer-installed programs over a
+process boundary; no GPL code is compiled, linked, or redistributed with Pulp.
 
 Type-only `@types/*` and `@figma/plugin-typings`, and environment-supplied
 prerequisites — the Rust toolchain (`cargo`/`rustc`), `yamllint` (GPL-3.0),
@@ -216,9 +234,6 @@ React-compatible renderer (via `react-reconciler`) over the same `WidgetBridge`.
 | [W3C Design Tokens (DTCG)](https://www.designtokens.org/) | W3C Community Group | Design-token interchange format (import / export) |
 | [Unicode Bidirectional Algorithm (UAX #9)](https://www.unicode.org/reports/tr9/) | Unicode Consortium | Bidirectional text layout (via SheenBidi) |
 | [glTF 2.0](https://www.khronos.org/gltf/) | Khronos Group | Optional 3D scene/asset format (Scene3D) |
-
-Google's [DESIGN.md](#design-formats-and-test-fixtures) (above) is an import
-**format**, not a standard.
 
 ## Projects That Inspired Pulp
 

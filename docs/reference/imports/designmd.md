@@ -44,21 +44,22 @@ pulp import-design --from designmd --file DESIGN.md --detect-only
 
 ## Supported subset
 
-The parser handles the canonical frontmatter keys. Everything else
-passes through as opaque strings, mirroring the upstream spec's "ignore
-unknowns" policy.
+The parser handles the canonical frontmatter keys (tracked against the
+upstream format spec, pinned at tag `0.3.0`). Unrecognized top-level keys
+are flagged with a warning and otherwise ignored, so a typo'd key surfaces
+instead of silently dropping its tokens.
 
 | Key | Parsed | Notes |
 |-----|--------|-------|
 | `version` | yes | Stored on the IR; not emitted into `tokens.json`. |
 | `name` | yes | Required for detection. Stored on the IR. |
 | `description` | yes | Block scalars (`|`, `>`) handled by yaml-cpp. |
-| `colors.*` | yes | Each entry becomes a `color` token. |
+| `colors.*` | yes | Each entry becomes a `color` token. The value may be any valid CSS color — hex (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA`), a named keyword (`cornflowerblue`, `transparent`), or a functional notation (`rgb()`, `hsl()`, `hwb()`, `oklch()`, `lab()`, `color-mix()`, …) — and is preserved verbatim. Nested palettes nest to arbitrary depth and key on the dot-joined path (e.g. `colors.background.light` → token `background.light`). |
 | `typography.*` | yes | Composite `typography` tokens with `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `fontFeature`, `fontVariation`. |
-| `rounded.*` | yes | `dimension` tokens. |
-| `spacing.*` | yes | `dimension` tokens. Non-dimensional values (e.g. `"5"`) are preserved as strings. |
-| `components.*` | yes | Each component is a flat map of token references and literal style values. References are *not* resolved at parse time (see below). |
-| Unknown top-level keys | passthrough | Stored on the IR, not emitted into `tokens.json`. The parser warns once per unknown key. |
+| `rounded.*` | yes | `dimension` tokens. Nested levels nest to arbitrary depth (dot-joined path). |
+| `spacing.*` | yes | `dimension` tokens. A bare number (e.g. `base: 8`) is read as px per spec; nested levels nest to arbitrary depth. Genuinely non-dimensional values (e.g. `auto`) are preserved as strings. |
+| `components.*` | yes | Each component is a flat map of token references and literal style values; numeric and boolean YAML scalars (e.g. `fontWeight: 600`, `enabled: true`) flow through as strings. References are *not* resolved at parse time (see below). |
+| Unknown top-level keys | warn | The parser emits one `designmd.unknown-key` warning per unrecognized top-level key (catches typos like `color:`/`typgrphy:`) and otherwise ignores it. The file still imports. |
 | Unknown component properties | passthrough | Per the spec, unknown component props are preserved as opaque strings. |
 
 When frontmatter is present it is the sole token source; the Markdown body

@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -790,6 +791,146 @@ TEST_CASE("all slices play back at the same (native) rate — none faster/slower
     CHECK(within_rate1(played_long, smax));
     // And the longer region genuinely plays longer — the SAME rate orders them.
     CHECK(played_long > played_short);
+}
+
+// Bar-snap: the analyzer reports an INTEGER bpm, but a real loop's tempo is
+// usually fractional, so stretching to the rounded value tiles slightly short
+// ("ends a bit early"). bar_snap_bpm recovers the exact bar-multiple tempo.
+TEST_CASE("bar-snap derives the exact loop tempo so loops tile perfectly",
+          "[tempo-sampler][issue-tempo-barsnap]") {
+    using P = PulpTempoSamplerProcessor;
+    const double sr = 48000.0;
+    // A 2-bar (8-beat) loop whose TRUE tempo is fractional (103.4). The analyzer
+    // rounds to 103, which would tile short; snapping recovers ~103.4.
+    const double true_bpm = 103.4;
+    const long frames = std::lround(8.0 * 60.0 / true_bpm * sr);  // exactly 8 beats long
+    const double rough = std::round(true_bpm);                    // 103 (analyzer output)
+    const double snapped = P::bar_snap_bpm(rough, frames, sr);
+    CHECK(std::abs(snapped - true_bpm) < 0.05);
+    // Tiling invariant: frames * snapped == 8 beats * 60 * sr (host-independent),
+    // so the loop fills an exact 2 bars at ANY host tempo.
+    const double ideal = 8.0 * 60.0 * sr;
+    CHECK(std::abs(static_cast<double>(frames) * snapped - ideal) < 0.002 * ideal);
+
+    // Non-loop material (beat count far from an integer) is left on the estimate.
+    const long odd = std::lround(7.5 * 60.0 / 100.0 * sr);        // 7.5 beats at 100
+    CHECK(P::bar_snap_bpm(100.0, odd, sr) == 100.0);
+
+    // Degenerate inputs pass straight through.
+    CHECK(P::bar_snap_bpm(0.0, frames, sr) == 0.0);
+    CHECK(P::bar_snap_bpm(120.0, 0, sr) == 120.0);
+}
+
+// A manually-set TEMPO must survive close+reopen (serialize/deserialize) — it
+// lives in a non-param atomic that v1 state did not persist.
+TEST_CASE("tempo override persists across serialize/deserialize",
+          "[tempo-sampler][issue-tempo-persist]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_target_bpm(150.0);                 // manual tempo (auto-unlinks)
+    CHECK_FALSE(f.proc->tempo_linked());
+    const auto blob = f.proc->serialize_plugin_state();
+    REQUIRE(!blob.empty());
+
+    Fixture g;                                     // a freshly reopened plugin instance
+    REQUIRE(g.proc->deserialize_plugin_state(
+        std::span<const std::uint8_t>(blob.data(), blob.size())));
+    REQUIRE(wait_for([&] { return g.proc->has_sample(); }));
+    CHECK(std::lround(g.proc->effective_bpm()) == 150);  // tempo restored, not reset
+    CHECK_FALSE(g.proc->tempo_linked());                 // still manual
+}
+
+// TEMPO LINK: default linked (follows host); a manual value unlinks; re-link
+// follows the host again. Mirrors the editor's LINK toggle + drag-to-unlink.
+TEST_CASE("tempo LINK: default-linked follows host, manual unlinks, relink re-follows",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+
+    // Default LINKED → follows the host transport.
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    const long exp90 = std::llround(48000.0 * 120.0 / 90.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+    process_block(*f.proc, 140.0, false, 0, l, r);       // change host tempo
+    const long exp140 = std::llround(48000.0 * 120.0 / 140.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp140; }));  // auto-follows
+
+    // Manual tempo UNLINKS — host changes are now ignored.
+    f.proc->set_target_bpm(100.0);
+    CHECK_FALSE(f.proc->tempo_linked());
+    process_block(*f.proc, 200.0, false, 0, l, r);       // host ignored
+    const long exp100 = std::llround(48000.0 * 120.0 / 100.0);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp100; }));
+
+    // Re-link → follows the host again.
+    f.proc->set_tempo_linked(true);
+    CHECK(f.proc->tempo_linked());
+    process_block(*f.proc, 90.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == exp90; }));
+}
+
+// In the standalone (no DAW transport) LINKED resolves to the loop's OWN detected
+// tempo, so a dropped loop plays at its natural tempo (R≈1) rather than a host
+// default. set_standalone_host(true) is what the editor reports on view-open.
+TEST_CASE("standalone LINKED follows the loop's detected tempo, not the host default",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    f.proc->set_standalone_host(true);
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);            // detected = 120
+    CHECK(f.proc->tempo_linked());
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 90.0, false, 0, l, r);    // host says 90 — ignored in standalone
+    // Linked-standalone renders at the detected tempo → R = 120/120 = 1 → raw length.
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == 48000; }));
+}
+
+// Unlinking engages the SAMPLE's own (fractional, bar-snapped) tempo so the loop
+// plays at its natural speed and the readout shows it — not the host BPM.
+TEST_CASE("unlinking engages the sample's own detected tempo (not the host)",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 48000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(103.4);   // the loop's fractional detected tempo
+    REQUIRE(f.proc->tempo_linked());        // default linked
+    f.proc->set_tempo_linked(false);        // unlink → adopt the sample's tempo
+    CHECK_FALSE(f.proc->tempo_linked());
+    CHECK(std::abs(f.proc->effective_bpm() - 103.4) < 0.01);
+}
+
+// A fresh drop WHILE UNLINKED adopts the new sample's detected tempo (the readout
+// follows the dropped sample, not a stale value).
+TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
+          "[tempo-sampler][issue-tempo-link]") {
+    Fixture f;
+    auto a = percussive_loop(48000, 8);
+    const float* ca[1] = {a.data()};
+    REQUIRE(f.proc->load_loop(ca, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_tempo_linked(false);        // unlink
+    auto b = percussive_loop(48000, 4);     // a DIFFERENT loop
+    const float* cb[1] = {b.data()};
+    REQUIRE(f.proc->load_loop(cb, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    CHECK_FALSE(f.proc->tempo_linked());
+    const double det = f.proc->detected_bpm();
+    if (det > 0.0)                          // when the analyzer found a tempo for the drop
+        CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
 }
 
 // Slicing quality: no sliver slices (incl. the first, which onset spacing doesn't

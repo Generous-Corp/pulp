@@ -184,14 +184,52 @@ audio thread via `flag_latency_changed()` / `flag_tail_changed()`
 (RT-safe atomic store-release). Never call host APIs from `process()`
 directly — the format adapter owns the host-thread publish path.
 
-VST3 wiring (post-process): the adapter checks
+VST3 wiring: `process()` consumes
 `consume_latency_changed_flag()` / `consume_tail_changed_flag()` and
-calls `componentHandler->restartComponent(kLatencyChanged |
-kReloadComponent)`. Steinberg documents `restartComponent` as safe
-from the audio callback (the handler queues main-thread delivery), so
-no extra dispatch is needed on the VST3 side. Tests in
-`pulp-test-processor-layout-latency` pin the round-trip and the
-two-thread hammer for data-race freedom.
+OR-accumulates the resulting restart flags into `restart_publisher_`
+(`detail::Vst3RestartPublisher`) — a lock-free, allocation-free atomic.
+It does **not** call `componentHandler->restartComponent()` from
+`process()`. `restartComponent` is a HOST callback that may take locks,
+allocate, and synchronously re-enter the plug-in (some hosts deactivate
+and reactivate the component inside it), so calling it on the real-time
+audio thread is an RT-safety violation even though latency changes are
+infrequent. The matching `restartComponent(flags)` fires on the main
+thread via `drain_pending_restart()` / `deliver_pending_restart()`.
+
+Delivery is driven primarily by a **paced self-rescheduling poll on the
+host main thread** (`MainThreadDispatcher::call_async_after`, ~33ms,
+started at `setActive(true)` and stopped at `setActive(false)` /
+`terminate()`). VST3 — unlike CLAP, which has
+`clap_host->request_callback` — exposes no RT-safe host wakeup an
+audio-thread block could trigger, and the audio thread must not post
+(`call_async` allocates/locks). The poll closes that gap: a mid-stream
+latency/tail change is delivered within one tick even if the host never
+issues another query. The poll tick is cheap (an idle tick is one
+acquire load + early return). As belt-and-suspenders the drain also runs
+from the main-thread host entrypoints the adapter already receives
+(`getLatencySamples` / `getTailSamples` / `setActive` / `getState`).
+When a backend reports the call is running off the main thread, the
+delivery is marshaled to the main thread via a one-shot `call_async`.
+The publisher coalesces a burst of flagged blocks into a single host
+notification.
+
+**Lifetime safety.** Every main-thread lambda the adapter posts (the
+paced tick and the off-main one-shot) captures a shared `alive` flag and
+only touches `this` while it is true. `terminate()` clears that flag
+before the component is destroyed, so a tick still queued on the host
+run loop becomes a safe no-op rather than a use-after-free. `terminate()`
+and the queued lambda both run on the host main thread, so they cannot
+race; the flag check is authoritative. The `poll_active_` flag is
+cleared on deactivate/terminate so the chain stops re-posting.
+
+Tests: `pulp-test-processor-layout-latency` pins the processor round-trip
+and the two-thread hammer; the `[vst3][rt-safety]` cases in
+`pulp-test-vst3-plugin-state` assert `restartComponent` never fires
+synchronously on the audio thread, fires once with the coalesced flags
+on the main thread, that the paced poll delivers a change with **no**
+host query, that flagging a restart adds no allocation to `process()`,
+and that a tick queued past `terminate()` is a no-op (no UAF). The
+publisher `static_assert`s its atomics are always lock-free.
 
 ### MIDI events
 
@@ -203,10 +241,62 @@ Event::kNoteOffEvent → MidiEvent::note_off
 Event::kDataEvent (type=kMidiSysEx) → midi_in_.add_sysex_copy(bytes, size, sampleOffset, 0.0)
 ```
 
-Non-note short MIDI (CC, pitch bend, aftertouch) is **not** delivered
-by Steinberg's event list — VST3 hosts translate those into parameter
-automation using `kIsMidiCC`-tagged parameters. If you need them, model
-them as Pulp parameters, not MIDI. See `docs/guides/formats.md`.
+Non-note short MIDI (CC, mod wheel, sustain, pitch bend, channel
+aftertouch) is **not** delivered by Steinberg's event list — VST3 routes
+controllers through `IMidiMapping` instead. The adapter implements it so
+these reach MIDI-accepting plug-ins on the same `midi_in_` buffer as notes:
+
+```
+IMidiMapping::getMidiControllerAssignment(bus, channel, cc) → reserved hidden ParamID
+host then sends that controller as a normal parameter change
+process(): a param change whose ID is a REGISTERED controller
+  → decode (channel, controller) → CC / pitch-bend / channel-pressure MidiEvent → midi_in_
+```
+
+See `core/format/include/pulp/format/detail/vst3_midi_mapping.hpp` for the
+ParamID scheme (base `0xC0000000`, 16 channels × 130 controllers; controller
+0..127 = CCs, 128 = aftertouch, 129 = pitch bend) and the decode helpers.
+Load-bearing constraints:
+- **The reserved ParamIDs MUST be registered parameters** (flagged
+  `kIsHidden`, NOT `kCanAutomate`) — VST3 rejects a mapping to an
+  unregistered ID, and the SDK's MIDI-mapping validation suite asserts every
+  returned tag is in the parameter set. That is why `initialize()` registers
+  2080 hidden controller params (only when `desc.accepts_midi`).
+- **ONE predicate for register / map / divert — `is_registered_controller()`,
+  NOT a bare range test.** `initialize()` builds a `std::vector<bool>` bitmap
+  (`registered_controller_ids_`, indexed by `id - base`) recording exactly the
+  controller IDs it registered. A reserved ID that collides with a real
+  plug-in parameter is **skipped** at registration AND its bitmap bit stays
+  clear, so `getMidiControllerAssignment()` declines that controller and
+  `process()` does NOT divert that ID to MIDI — the host's param-change for it
+  still reaches `store_`. Using a bare `is_vst3_midi_cc_param()` range test in
+  `process()` would silently hijack a colliding real param into MIDI (state
+  corruption). The bitmap lookup is O(1) and allocation-free on the audio
+  thread (built once at init). Regression: `[vst3][midimapping][collision]`.
+- **Gate on `desc.accepts_midi`.** An effect that ignores MIDI registers
+  none of these, so its host-visible parameter count is exactly what it
+  declared — existing param-count / state-format contracts are unaffected.
+  (Controllers never enter `store_`, so saved state never contains a
+  controller ID — verified by `[vst3][midimapping][state]`.)
+- **The event input bus must declare 16 channels** (`addEventInput(name, 16)`),
+  not 1 — the host queries `getMidiControllerAssignment` per channel up to the
+  bus's `channelCount`, so a 1-channel bus only ever maps channel 0.
+- Controllers are decoded in the parameter-change loop (before the note/SysEx
+  loop), so `midi_in_` is cleared at the **top** of `process()`, not just
+  before the event loop, and `midi_in_.sort()` runs after both sources append
+  so controllers and notes interleave in sample order. Real plug-in param
+  changes still flow to `store_` / `param_events_` unchanged.
+- **Decode is defensively hardened:** value `std::clamp`ed to 0..1 before
+  encoding, CC/AT clamped to 0..127, bend to 0..16383, and a param-change
+  `sampleOffset` outside `[0, numSamples)` is dropped. The controller `add()`
+  is the same capacity-limited, drop-on-overflow, alloc-free path as notes.
+- **`MidiBuffer::sort()` is insertion-stable** (index sort over a pre-reserved
+  scratch keyed by `(sample_offset, original_index)`, NOT `std::stable_sort` —
+  which can allocate, and NOT a byte tie-break — which would silently reorder
+  same-offset events by status byte and change musical semantics). A controller
+  add()'ed before a note-on at the same offset stays before it, deterministic
+  run-to-run. The scratch is reserved by `reserve()`/`reserve_events()`, so the
+  sort stays allocation-free on the audio thread.
 
 MIDI output mirrors the inverse: note_on / note_off in
 `midi_out_` are written back into `data.outputEvents`.
@@ -227,6 +317,95 @@ Prove no-alloc with the `RtAllocationProbe` harness (see
 `test_vst3_plugin_state.cpp` `[vst3][realtime][perf]`). Note: a pooled-SysEx
 residual allocation inside `MidiBuffer` itself is a known `core/midi` follow-up.
 
+### Per-note expression (MPE) — `INoteExpressionController`
+
+VST3 carries per-note pitch / pressure / timbre as
+`Event::kNoteExpressionValueEvent` in `data.inputEvents`, **not** as channel
+MIDI. The host first queries `INoteExpressionController` to learn which
+expression types the plug-in accepts, then sends value events keyed by the
+originating note-on's `noteId`. The adapter implements this so an MPE/expressive
+synth that works in CLAP isn't flat in Cubase/VST3. It reuses the **same**
+`MpeVoiceTracker` + `MpeBuffer` + `Processor::set_mpe_input()` sidecar contract
+the CLAP adapter uses (`core/midi/.../mpe_buffer.hpp`, `mpe_voice_tracker.hpp`).
+
+```
+INoteExpressionController::getNoteExpressionCount / getNoteExpressionInfo
+  → declare Tuning / Volume / Brightness / Pan  (ONLY when desc.supports_mpe)
+process(): Event::kNoteExpressionValueEvent (noteId, typeId, value)
+  → look up noteId → (channel, note)
+  → synthesize the channel-wide MidiEvent the MpeVoiceTracker narrows to that voice:
+       kTuningTypeID     → per-note pitch bend  (VST3 plain = 240*(norm-0.5) st)
+       kVolumeTypeID     → per-note pressure    (status 0xD0 channel aftertouch)
+       kBrightnessTypeID → per-note timbre      (CC74)
+       kPanTypeID        → declared for host completeness, NOT routed (no MPE axis)
+  → run midi_in_ through mpe_tracker_ → mpe_buffer_ → processor_->set_mpe_input(&mpe_buffer_)
+```
+
+Load-bearing constraints:
+- **Expose the interface in `queryInterface`.** `PulpVst3Processor` adds
+  `INoteExpressionController` alongside `IMidiMapping`; the override does
+  `QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, …)` then delegates to
+  `SingleComponentEffect`. Forgetting the iid means the host never asks for the
+  types and per-note expression is silently dead. Regression:
+  `[vst3][noteexpression][mpe]` (`resolves via queryInterface`).
+- **Gate everything on `desc.effective_capabilities().supports_mpe`.** A non-MPE
+  plug-in returns `getNoteExpressionCount == 0`, declines `getNoteExpressionInfo`,
+  and does **zero** per-note work in `process()` (`set_mpe_input(nullptr)`) — no
+  overhead, no host-visible note-expression lanes.
+- **noteId → (channel, note) linkage is mandatory.** VST3 note expressions
+  reference the note-on's `noteId`, not (channel, note). The adapter keeps a
+  fixed-capacity (`kMaxLiveNoteIds = 128`) `note_id_map_` populated on note-on
+  (when `noteId >= 0`), cleared on note-off, looked up on each value event.
+  Bounded + allocation-free; a full table drops the mapping (the expression just
+  won't route) rather than allocating. An expression for an unknown/released
+  noteId is ignored. Regressions: `[vst3][noteexpression][mpe][process]`
+  (unknown-noteId ignored, note-off releases the mapping).
+- **MPE lower zone: channel 0 is the manager, channels 1-15 are members.** A
+  note-on must land on a **member** channel for the tracker to create a voice the
+  expression then narrows to — a note-on on channel 0 is a manager message and
+  creates no per-note record. Tests use channels 1-4.
+- **Synthesized expression messages go into `midi_in_`** (same buffer as notes),
+  so `midi_in_.sort()` keeps the note-on (offset 0) at/before its expression, and
+  the existing per-block `mpe_tracker_.process(ev)` loop turns them into per-note
+  `MpeExpressionEvent`s. The sidecar is reserved + `set_realtime_capacity_limit`
+  in `setupProcessing()` and cleared per block — alloc-free
+  (`[vst3][noteexpression][mpe][realtime][perf]`).
+- **Reset on re-activation.** `setupProcessing()` and `setActive(false)` reset
+  `mpe_tracker_` and clear `note_id_map_` so a stale noteId never routes to a
+  voice that no longer exists.
+
+The VST3 type → MPE axis mapping is a **clean-room** choice derived from the SDK
+note-expression value ranges (`ivstnoteexpression.h`) and the MPE spec's three
+axes — not transcribed from any reference adapter.
+
+**Scoping (by design, matches CLAP):** VST3 note expression is noteId-targeted,
+but Pulp's per-note model IS MPE (one note per member channel) and the Processor
+exposes no noteId-targeted expression API. The adapter therefore bridges to the
+MPE model via a channel-wide MIDI message — **identical to the CLAP path**
+(`clap_adapter.cpp` does the same: note-expression → channel-wide ShortMessage
+onto the MPE sidecar). Per-note targeting is **exact when each note is on its own
+MPE member channel** (the expressive-controller case MPE is designed for) and
+**collapses to channel-wide when multiple notes share a channel** — same trade-off
+as CLAP, not a VST3-specific defect. Do not build a separate noteId-targeted path:
+there is nowhere on the Processor for it to land.
+
+**Drop observability:** `note_expression_drop_count()` is a saturating atomic
+(reset at session boundaries) bumped when the bounded noteId map (128 slots) is
+full on a note-on insert, or a value event references an unmapped/released noteId.
+It mirrors `MpeBuffer::dropped_event_count()` — a host-pollable signal that a
+session exceeded the adapter's fixed per-note capacity. RT-safe (no audio-thread
+logging). Regression: `[vst3][noteexpression][mpe][realtime]` (overflow).
+
+**`associatedParameterId` = `kNoParamId`** (the SDK sentinel `0xFFFFFFFF`), not a
+literal 0 — the types associate with no global parameter, and a literal 0 would
+point a host at real plug-in parameter id 0. The `kAssociatedParameterIDValid`
+flag stays clear, so the field is advisory.
+
+**String conversions are surface-validated:** `getNoteExpressionStringByValue` /
+`getNoteExpressionValueByString` decline (`kResultFalse`) unless MPE is on, the
+bus is 0, the channel is in `[0, 16)`, AND the type id is one of the declared
+`kNoteExprTypes` — they don't blindly convert an arbitrary type id.
+
 ### Audio buses (incl. sidechain)
 
 Same "bus 0 = main, bus 1 = sidechain" rule as CLAP/AU. The adapter
@@ -241,12 +420,30 @@ if (data.numInputs > 1 &&
 }
 ```
 
-Secondary **output** buses are zero-filled every block — identical rationale
-to CLAP.
+Secondary **output** buses **are routed** to the richer
+`Processor::process(ProcessBuffers&)` surface (role `Aux`, index ≥1) for
+multi-out instruments — identical model to CLAP. Each aux bus is
+pre-zeroed before `process()`, so a single-output processor leaves aux
+buses silent; a multi-out processor that overrides
+`process(ProcessBuffers&)` writes each declared aux bus.
+
+**Size aux storage from the ACCEPTED arrangement, not the descriptor
+default.** `setBusArrangements` can accept a mono→stereo shift on an aux
+bus (when `is_bus_layout_supported` permits it). `setupProcessing` sizes
+each `aux_output_ptrs_[i]` sub-vector from the live `AudioBus`
+arrangement (`bus->getArrangement()` → `SpeakerArr::getChannelCount`),
+not `desc.output_buses[b].default_channels` — otherwise the routing path
+clamps to the descriptor default and silently drops the channel the host
+negotiated. The aux view's `declared_channels` reports the descriptor
+count (cached in `declared_aux_channels_`) while `buffer.num_channels()`
+carries the routed count, so `matches_declared_layout()` detects a
+mismatch. Sizing is `max(declared, accepted)`. Storage is bounded by
+`BusBufferSet::kMaxBuses`; wider host layouts are zero-filled, not routed.
 
 The process callback builds a stack-owned `ProcessBuffers` block for
-the active main input, optional sidechain input, and main output, then
-dispatches through `Processor::process(ProcessBuffers&, ...)`.
+the active main input, optional sidechain input, main output, **and each
+routed aux output**, then dispatches through
+`Processor::process(ProcessBuffers&, ...)`.
 Processors that only override the legacy main-in/main-out callback
 still run through the base projection; processors that override the
 richer surface can inspect the VST3 bus set directly.
@@ -505,10 +702,13 @@ Do not remove this environment just because `pluginval` also has
   `vst3_plug_view.cpp` edits route through that skill.
 - `.agents/skills/ara/SKILL.md` — IHostApplication-based factory
   negotiation (`kVst3AraFactoryContextKey`).
-- `.agents/skills/mpe/SKILL.md` — MPE sidecar (VST3 hosts deliver MPE
-  as channel-per-note short MIDI, but the adapter forwards plain MIDI
-  only; processors that need per-note state must extract it from
-  `MidiBuffer` until VST3 grows adapter-side `MpeBuffer` wiring).
+- `.agents/skills/mpe/SKILL.md` — MPE sidecar. The adapter now wires
+  per-note expression directly: it implements `INoteExpressionController`
+  and routes `Event::kNoteExpressionValueEvent` through the shared
+  `MpeVoiceTracker` / `MpeBuffer` to `Processor::set_mpe_input()` (gated on
+  `desc.supports_mpe`). See "Per-note expression (MPE)" above. Channel
+  per-note short MIDI (member-channel pitch bend / pressure / CC74) also
+  still reaches the tracker via the normal `IMidiMapping` → `midi_in_` path.
 - `.agents/skills/clap/SKILL.md` and `.agents/skills/auv3/SKILL.md` —
   cross-format parity for host-specific regressions.
 - `docs/guides/formats.md` — user-facing format overview.

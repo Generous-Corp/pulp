@@ -1064,7 +1064,7 @@ Packaging and distribution — from code signing to installer to update feed.
 # Sign all plugin bundles
 pulp ship sign --identity "Developer ID Application: My Company"
 
-# Package — creates .pkg (macOS) or NSIS installer (Windows)
+# Package — creates .pkg/.dmg (macOS), NSIS (Windows), or .deb/.tar.gz (Linux)
 pulp ship package --version 1.2.0
 
 # Check signing status

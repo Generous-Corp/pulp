@@ -129,6 +129,47 @@ class GitHelperTests(unittest.TestCase):
         with mock.patch.object(gc.subprocess, "run", return_value=completed):
             self.assertEqual(gc.git_diff_names("main", "HEAD"), [" a.txt "])
 
+    def test_git_diff_names_uses_three_dot_merge_base_range(self) -> None:
+        """The diff must be three-dot (merge-base), not two-dot tree-compare — else a
+        branch behind base on unrelated files gets them falsely attributed."""
+        completed = subprocess.CompletedProcess([], 0, stdout="")
+        with mock.patch.object(gc.subprocess, "run", return_value=completed) as run:
+            gc.git_diff_names("origin/main", "HEAD")
+        argv = run.call_args.args[0]
+        self.assertIn("origin/main...HEAD", argv)
+        self.assertNotIn("origin/main..HEAD", argv)
+
+    def test_git_diff_names_ignores_files_branch_is_behind_on(self) -> None:
+        """Integration: a branch that adds only Y, while base advances with X, must
+        report ONLY Y (not X). This is the bug the three-dot diff fixes."""
+        import os
+        import tempfile
+
+        def run_git(cwd, *args):
+            subprocess.run(["git", *args], cwd=cwd, check=True,
+                           capture_output=True, text=True)
+
+        with tempfile.TemporaryDirectory() as d:
+            run_git(d, "init", "-q", "-b", "main")
+            run_git(d, "config", "user.email", "t@t")
+            run_git(d, "config", "user.name", "t")
+            (open(os.path.join(d, "base.txt"), "w")).write("base\n")
+            run_git(d, "add", "."); run_git(d, "commit", "-qm", "base")
+            run_git(d, "checkout", "-qb", "feature")
+            (open(os.path.join(d, "Y.txt"), "w")).write("y\n")  # the PR's real change
+            run_git(d, "add", "."); run_git(d, "commit", "-qm", "add Y")
+            run_git(d, "checkout", "-q", "main")
+            (open(os.path.join(d, "X.txt"), "w")).write("x\n")  # an unrelated later merge
+            run_git(d, "add", "."); run_git(d, "commit", "-qm", "add X")
+
+            cwd = os.getcwd()
+            try:
+                os.chdir(d)
+                changed = gc.git_diff_names("main", "feature")
+            finally:
+                os.chdir(cwd)
+            self.assertEqual(changed, ["Y.txt"])  # NOT X.txt (branch is behind on it)
+
     def test_parse_trailer_block_ignores_non_trailer_output(self) -> None:
         completed = subprocess.CompletedProcess(
             [], 0, stdout="not a trailer\nAlso not one\nKey: value\n",

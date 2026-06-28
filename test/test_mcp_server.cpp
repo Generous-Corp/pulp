@@ -625,6 +625,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_excerpt_find")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_probe_json")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_scope")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     require_contains(tools, R"JSON("name":"pulp_inspect_audio")JSON");
     require_contains(tools, R"JSON("name":"pulp_kit")JSON");
@@ -672,6 +673,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_model_status",
         "pulp_audio_probe_json",
         "pulp_audio_read_bundle",
+        "pulp_audio_render",
         "pulp_audio_scope",
         "pulp_build",
         "pulp_compat",
@@ -740,6 +742,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_audio_model_activate", "Error: model_id is required"},
         std::pair{"pulp_audio_excerpt_find", "Error: text and input_path are required"},
         std::pair{"pulp_audio_read_bundle", "Error: bundle_path is required"},
+        std::pair{"pulp_audio_render", "Error: plugin is required"},
         std::pair{"pulp_create", "Error: name is required"},
         std::pair{"pulp_docs_search", "Error: query is required"},
         std::pair{"pulp_content", "Error: subcommand is required"},

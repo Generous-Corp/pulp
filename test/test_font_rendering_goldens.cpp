@@ -12,12 +12,12 @@
 // Design choices (read this header before "fixing" a failure):
 //
 //  1. Goldens live in the source file (not on disk). The
-//     committed expected values are the contract — a real font
-//     regression manifests as a hash mismatch on a host where
-//     the rendering used to be stable. There is no golden-file
-//     sync workflow to forget about. If a Skia bump genuinely
-//     changes rendering, update the constants in this file
-//     deliberately as part of the bump PR.
+//     committed expected values are the contract for each CI host
+//     class — a real font regression manifests as a hash mismatch
+//     on a host where the rendering used to be stable. There is no
+//     golden-file sync workflow to forget about. If a Skia bump
+//     genuinely changes rendering, update the constants in this
+//     file deliberately as part of the bump PR.
 //
 //  2. We use a *structural* digest, not a byte-exact pixel hash.
 //     The structural fingerprint is
@@ -215,14 +215,16 @@ void expect_digest_matches(const Digest& actual, const Digest& expected,
     REQUIRE(ok);
 }
 
-// ── Committed expected digests (macOS-arm64 reference) ──────────
+// ── Committed expected digests ──────────────────────────────────
 //
-// These numbers were captured on a macOS-arm64 host running the
-// repo's pinned Skia. The 5% tolerance above keeps them stable
-// across minor Skia point releases. If a future Skia bump shifts
-// these by more than 5% on the reference host, regenerate the
-// constants in the same PR as the bump and keep the LOC diff
-// auditable.
+// These numbers were captured on CI hosts running the repo's
+// pinned Skia. The 5% tolerance above keeps each host-class
+// baseline stable across minor Skia point releases while avoiding
+// false equivalence between CoreText-backed macOS rasterization
+// and FreeType/fontconfig-backed Linux rasterization. If a future
+// Skia bump shifts these by more than 5% on a reference host,
+// regenerate the constants in the same PR as the bump and keep
+// the LOC diff auditable.
 //
 // Reference host: macos-arm64 · Xcode 26.5 (17F42) · Skia chrome/m149.
 // The 'Hello'/Inter digest was regenerated for the Xcode 26.4.1→26.5
@@ -234,16 +236,34 @@ void expect_digest_matches(const Digest& actual, const Digest& expected,
 // from the INFO line into the constants below, rebuild, rerun,
 // expect green.
 
-constexpr Digest kHelloInter14 {
-    /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/244,
-    /*darkness_sum=*/31403,
-};
-
 constexpr Digest kCjkInter14 {
     /*width=*/128, /*height=*/32,
     /*opaque_pixels=*/190,
     /*darkness_sum=*/24749,
+};
+
+// Hosted Linux x64 renders the bundled Latin fonts through
+// FreeType/fontconfig, which produces stable but lighter AA than
+// the macOS CoreText reference. Keep separate constants instead
+// of widening the global tolerance and weakening the regression
+// signal on every platform.
+#if defined(__linux__)
+constexpr Digest kHelloInter14 {
+    /*width=*/128, /*height=*/32,
+    /*opaque_pixels=*/197,
+    /*darkness_sum=*/23436,
+};
+
+constexpr Digest kHelloWorldMono12 {
+    /*width=*/128, /*height=*/32,
+    /*opaque_pixels=*/332,
+    /*darkness_sum=*/34617,
+};
+#else
+constexpr Digest kHelloInter14 {
+    /*width=*/128, /*height=*/32,
+    /*opaque_pixels=*/244,
+    /*darkness_sum=*/31403,
 };
 
 constexpr Digest kHelloWorldMono12 {
@@ -251,6 +271,7 @@ constexpr Digest kHelloWorldMono12 {
     /*opaque_pixels=*/355,
     /*darkness_sum=*/47560,
 };
+#endif
 
 } // namespace
 
