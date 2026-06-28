@@ -22,14 +22,21 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
+#include <pluginterfaces/vst/ivstnoteexpression.h>
 #include <pluginterfaces/base/ibstream.h>
 
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
+#include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/signal/delay_line.hpp>
+
+#include <array>
+#include <atomic>
+#include <cstdint>
 
 #include <pluginterfaces/gui/iplugview.h>
 
@@ -45,8 +52,19 @@ namespace pulp::format::vst3 {
 // parameter changes. The adapter reserves a private ParamID range for these
 // controllers (see detail/vst3_midi_mapping.hpp) and decodes them back into
 // MIDI messages in process().
+//
+// Implements INoteExpressionController so per-note expression (MPE) reaches
+// MPE-aware instruments. VST3 delivers per-note pitch / pressure / timbre as
+// Event::kNoteExpressionValueEvent keyed by the originating note-on's noteId.
+// The host first queries getNoteExpressionInfo to learn which expression
+// types the plug-in accepts; the adapter declares them only when the
+// descriptor opts into MPE. process() routes each value event through the
+// shared MpeVoiceTracker / MpeBuffer sidecar (the same contract the CLAP
+// adapter uses), mapping VST3 tuning -> per-note pitch bend, a volume-domain
+// expression -> per-note pressure, and brightness -> per-note timbre (CC74).
 class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
-                          public Steinberg::Vst::IMidiMapping {
+                          public Steinberg::Vst::IMidiMapping,
+                          public Steinberg::Vst::INoteExpressionController {
 public:
     PulpVst3Processor(ProcessorFactory factory);
 
@@ -72,6 +90,28 @@ public:
         Steinberg::int32 busIndex, Steinberg::int16 channel,
         Steinberg::Vst::CtrlNumber midiControllerNumber,
         Steinberg::Vst::ParamID& id) override;
+
+    // INoteExpressionController — declare the per-note expression types the
+    // plug-in accepts and convert between normalized values and strings.
+    // getNoteExpressionCount returns 0 (and the info/string methods decline)
+    // unless the descriptor opted into MPE, so a non-MPE plug-in advertises
+    // no note-expression surface and pays zero per-note cost in process().
+    Steinberg::int32 PLUGIN_API getNoteExpressionCount(
+        Steinberg::int32 busIndex, Steinberg::int16 channel) override;
+    Steinberg::tresult PLUGIN_API getNoteExpressionInfo(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::int32 noteExpressionIndex,
+        Steinberg::Vst::NoteExpressionTypeInfo& info /*out*/) override;
+    Steinberg::tresult PLUGIN_API getNoteExpressionStringByValue(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::Vst::NoteExpressionTypeID id,
+        Steinberg::Vst::NoteExpressionValue valueNormalized /*in*/,
+        Steinberg::Vst::String128 string /*out*/) override;
+    Steinberg::tresult PLUGIN_API getNoteExpressionValueByString(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::Vst::NoteExpressionTypeID id,
+        const Steinberg::Vst::TChar* string /*in*/,
+        Steinberg::Vst::NoteExpressionValue& valueNormalized /*out*/) override;
 
     // IEditController — editor view creation
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
@@ -101,6 +141,17 @@ public:
     /// pass-through when this parameter's value is >= 0.5. Returns 0
     /// when no bypass parameter is available.
     state::ParamID bypass_parameter_id() const { return bypass_param_id_; }
+
+    /// Saturating count of per-note expression routings the adapter could not
+    /// deliver: a note-on whose noteId could not claim a slot in the bounded
+    /// noteId map (table full), plus any kNoteExpressionValueEvent whose noteId
+    /// is not mapped to a live note (unknown or already released). Mirrors
+    /// MpeBuffer::dropped_event_count() in spirit — an observable signal that a
+    /// host exceeded the adapter's fixed per-note capacity. RT-safe (atomic,
+    /// never logs on the audio thread).
+    std::uint32_t note_expression_drop_count() const {
+        return note_expression_drops_.load(std::memory_order_relaxed);
+    }
 
     // IComponent (state)
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
@@ -132,6 +183,51 @@ private:
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
+
+    // ── Per-note expression (MPE) sidecar ───────────────────────────────────
+    //
+    // Mirrors the CLAP adapter's MPE wiring: inbound note events plus the MIDI
+    // messages synthesized from note-expression value events run through
+    // mpe_tracker_, whose callbacks append per-note expression deltas to
+    // mpe_buffer_. The buffer is handed to the Processor via set_mpe_input()
+    // for the duration of each process() call. Reserved + capacity-limited in
+    // setupProcessing() so the process path never allocates. Only active when
+    // the descriptor opts into MPE (mpe_enabled_).
+    midi::MpeVoiceTracker mpe_tracker_;
+    midi::MpeBuffer mpe_buffer_;
+    int32_t mpe_current_sample_offset_ = 0;
+    bool mpe_enabled_ = false;
+
+    // noteId -> (channel, note) linkage. VST3 note-expression value events
+    // reference the noteId carried by the originating note-on, so the adapter
+    // must remember which (channel, note) each live noteId maps to in order to
+    // route an expression to the right MPE voice. Fixed-capacity and
+    // allocation-free: a note-on with noteId >= 0 claims a slot, the matching
+    // note-off releases it. A slot's `active` flag identifies a live mapping.
+    struct NoteIdSlot {
+        bool active = false;
+        Steinberg::int32 note_id = -1;
+        uint8_t channel = 0;
+        uint8_t note = 0;
+    };
+    static constexpr std::size_t kMaxLiveNoteIds = 128;
+    std::array<NoteIdSlot, kMaxLiveNoteIds> note_id_map_{};
+
+    // Saturating drop counter for per-note expression routing failures (full
+    // noteId map on insert, or a value event for an unmapped noteId). Atomic so
+    // a host thread can read it via note_expression_drop_count() while the audio
+    // thread increments it; never the source of an audio-thread log.
+    std::atomic<std::uint32_t> note_expression_drops_{0};
+
+    // Record / release / look up a noteId -> (channel, note) mapping. All
+    // O(kMaxLiveNoteIds), allocation-free, audio-thread safe.
+    // note_id_map_insert returns false when the table is full (the mapping was
+    // dropped) so the caller can bump the drop counter.
+    bool note_id_map_insert(Steinberg::int32 note_id, uint8_t channel,
+                            uint8_t note);
+    void note_id_map_erase(Steinberg::int32 note_id);
+    const NoteIdSlot* note_id_map_find(Steinberg::int32 note_id) const;
+    void note_id_map_clear();
 
     // Cached parameter ID of the VST3 bypass parameter. 0 when none is
     // available, so process() never short-circuits.

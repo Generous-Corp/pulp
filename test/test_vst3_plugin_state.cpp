@@ -5,6 +5,8 @@
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
+#include <pluginterfaces/vst/ivstnoteexpression.h>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
 #include <public.sdk/source/vst/hosting/eventlist.h>
@@ -197,6 +199,12 @@ public:
     float first_param_event_value = 0.0f;
     float last_param_event_value = 0.0f;
     float gain_seen_in_process = 0.0f;
+    // Per-note expression (MPE) sidecar observation, captured each process().
+    bool mpe_input_attached = false;
+    std::size_t mpe_event_count = 0;
+    std::size_t mpe_capacity = 0;
+    std::uint32_t mpe_drops = 0;
+    std::vector<pulp::midi::MpeExpressionEvent> last_mpe_events;
     static TestVst3Processor* g_last_processor;
     static TestVst3Config g_next_config;
 
@@ -257,6 +265,19 @@ void TestVst3Processor::process(
         }
     }
     gain_seen_in_process = state().get_value(kGainParamId);
+
+    // Snapshot the MPE sidecar the adapter handed us for this block.
+    mpe_input_attached = (mpe_input() != nullptr);
+    mpe_event_count = 0;
+    mpe_capacity = 0;
+    mpe_drops = 0;
+    last_mpe_events.clear();
+    if (const auto* mpe = mpe_input()) {
+        mpe_event_count = mpe->size();
+        mpe_capacity = mpe->capacity();
+        mpe_drops = mpe->dropped_event_count();
+        last_mpe_events.assign(mpe->begin(), mpe->end());
+    }
 
     const auto channels = std::min(audio_output.num_channels(), audio_input.num_channels());
     for (std::size_t ch = 0; ch < channels; ++ch) {
@@ -2675,4 +2696,637 @@ TEST_CASE("VST3 queryInterface exposes base interfaces and IMidiMapping with one
     static_cast<Steinberg::FUnknown*>(mm)->release();
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── INoteExpressionController — per-note expression (MPE) input ─────────────
+//
+// VST3 delivers per-note pitch / pressure / timbre as
+// Event::kNoteExpressionValueEvent keyed by the originating note-on's noteId.
+// The host first queries getNoteExpressionInfo to learn which expression types
+// the plug-in accepts; the adapter declares them only when the descriptor opts
+// into MPE. process() routes each value event through the shared MpeVoiceTracker
+// / MpeBuffer sidecar, mapping VST3 tuning -> per-note pitch bend, volume ->
+// per-note pressure, and brightness -> per-note timbre (CC74). A note-on on an
+// MPE member channel (lower zone: channels 1-15) creates the voice the
+// expression then narrows to.
+// ─────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Drive note-on / note-expression events for an MPE-capable plug-in and expose
+// the per-note expression buffer the processor saw. Lower-zone MPE: channel 0
+// is the manager, channels 1-15 are member channels.
+struct NoteExpressionSetup {
+    pulp::format::vst3::PulpVst3Processor processor{create_test_processor};
+    TestVst3Processor* test_processor = nullptr;
+    HostApp host_app;
+
+    explicit NoteExpressionSetup(bool supports_mpe = true) {
+        TestVst3Config config;
+        config.descriptor.accepts_midi = true;
+        config.descriptor.supports_mpe = supports_mpe;
+        reset_test_processor(config);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        test_processor = TestVst3Processor::g_last_processor;
+        REQUIRE(test_processor != nullptr);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 32;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    }
+
+    // Run a process() block over the given event list (and optional parameter
+    // changes, e.g. IMidiMapping controllers) with a small stereo buffer. The
+    // lists are owned by the caller.
+    void run(Steinberg::Vst::IEventList* events,
+             Steinberg::Vst::IParameterChanges* params = nullptr) {
+        constexpr int kFrames = 32;
+        std::array<float, kFrames> in_l{};
+        std::array<float, kFrames> in_r{};
+        std::array<float, kFrames> out_l{};
+        std::array<float, kFrames> out_r{};
+        float* main_inputs[2] = {in_l.data(), in_r.data()};
+        float* main_outputs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+        audio_inputs[0].numChannels = 2;
+        audio_inputs[0].channelBuffers32 = main_inputs;
+        Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+        audio_outputs[0].numChannels = 2;
+        audio_outputs[0].channelBuffers32 = main_outputs;
+
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = audio_inputs;
+        data.outputs = audio_outputs;
+        data.inputEvents = events;
+        data.inputParameterChanges = params;
+
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    }
+};
+
+// Build a note-on event on an MPE member channel with the given noteId.
+Steinberg::Vst::Event make_note_on(Steinberg::int16 channel,
+                                   Steinberg::int16 pitch, float velocity,
+                                   Steinberg::int32 note_id,
+                                   Steinberg::int32 offset) {
+    Steinberg::Vst::Event e{};
+    e.type = Steinberg::Vst::Event::kNoteOnEvent;
+    e.sampleOffset = offset;
+    e.noteOn.channel = channel;
+    e.noteOn.pitch = pitch;
+    e.noteOn.velocity = velocity;
+    e.noteOn.noteId = note_id;
+    return e;
+}
+
+Steinberg::Vst::Event make_note_off(Steinberg::int16 channel,
+                                    Steinberg::int16 pitch,
+                                    Steinberg::int32 note_id,
+                                    Steinberg::int32 offset) {
+    Steinberg::Vst::Event e{};
+    e.type = Steinberg::Vst::Event::kNoteOffEvent;
+    e.sampleOffset = offset;
+    e.noteOff.channel = channel;
+    e.noteOff.pitch = pitch;
+    e.noteOff.velocity = 0.0f;
+    e.noteOff.noteId = note_id;
+    return e;
+}
+
+Steinberg::Vst::Event make_note_expr(
+    Steinberg::Vst::NoteExpressionTypeID type_id, Steinberg::int32 note_id,
+    double value, Steinberg::int32 offset) {
+    Steinberg::Vst::Event e{};
+    e.type = Steinberg::Vst::Event::kNoteExpressionValueEvent;
+    e.sampleOffset = offset;
+    e.noteExpressionValue.typeId = type_id;
+    e.noteExpressionValue.noteId = note_id;
+    e.noteExpressionValue.value = value;
+    return e;
+}
+
+// Find the newest expression event of a given kind in the captured buffer.
+const pulp::midi::MpeExpressionEvent* find_mpe(
+    const std::vector<pulp::midi::MpeExpressionEvent>& events,
+    pulp::midi::MpeExpressionEvent::Kind kind) {
+    const pulp::midi::MpeExpressionEvent* found = nullptr;
+    for (const auto& e : events) {
+        if (e.kind == kind) found = &e;
+    }
+    return found;
+}
+
+}  // namespace
+
+TEST_CASE("VST3 INoteExpressionController declares types only for an MPE plug-in",
+          "[vst3][midi][noteexpression][mpe]") {
+    namespace V = Steinberg::Vst;
+
+    SECTION("MPE plug-in declares the supported note-expression types") {
+        NoteExpressionSetup s(/*supports_mpe=*/true);
+        const Steinberg::int32 count = s.processor.getNoteExpressionCount(0, 1);
+        REQUIRE(count > 0);
+
+        // Every declared type must resolve to valid info, and the set must
+        // include the three MPE axes: tuning, volume (pressure), brightness.
+        bool has_tuning = false, has_volume = false, has_brightness = false;
+        for (Steinberg::int32 i = 0; i < count; ++i) {
+            V::NoteExpressionTypeInfo info{};
+            REQUIRE(s.processor.getNoteExpressionInfo(0, 1, i, info) ==
+                    Steinberg::kResultTrue);
+            if (info.typeId == V::kTuningTypeID) has_tuning = true;
+            if (info.typeId == V::kVolumeTypeID) has_volume = true;
+            if (info.typeId == V::kBrightnessTypeID) has_brightness = true;
+            // Declared range is the full normalized [0,1] window.
+            REQUIRE(info.valueDesc.minimum == 0.0);
+            REQUIRE(info.valueDesc.maximum == 1.0);
+        }
+        REQUIRE(has_tuning);
+        REQUIRE(has_volume);
+        REQUIRE(has_brightness);
+
+        // Tuning is bipolar (centered at 0.5).
+        V::NoteExpressionTypeInfo tuning{};
+        bool found_tuning_info = false;
+        for (Steinberg::int32 i = 0; i < count; ++i) {
+            V::NoteExpressionTypeInfo info{};
+            REQUIRE(s.processor.getNoteExpressionInfo(0, 1, i, info) ==
+                    Steinberg::kResultTrue);
+            if (info.typeId == V::kTuningTypeID) {
+                tuning = info;
+                found_tuning_info = true;
+            }
+        }
+        REQUIRE(found_tuning_info);
+        REQUIRE((tuning.flags & V::NoteExpressionTypeInfo::kIsBipolar) != 0);
+        REQUIRE(tuning.valueDesc.defaultValue == 0.5);
+
+        // Out-of-range index / wrong bus / wrong channel are declined.
+        V::NoteExpressionTypeInfo dummy{};
+        REQUIRE(s.processor.getNoteExpressionInfo(0, 1, count, dummy) ==
+                Steinberg::kResultFalse);
+        REQUIRE(s.processor.getNoteExpressionCount(1, 1) == 0);
+        REQUIRE(s.processor.getNoteExpressionCount(0, 16) == 0);
+
+        REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("non-MPE plug-in declares zero note-expression types") {
+        NoteExpressionSetup s(/*supports_mpe=*/false);
+        REQUIRE(s.processor.getNoteExpressionCount(0, 1) == 0);
+        V::NoteExpressionTypeInfo dummy{};
+        REQUIRE(s.processor.getNoteExpressionInfo(0, 1, 0, dummy) ==
+                Steinberg::kResultFalse);
+        REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+    }
+}
+
+TEST_CASE("VST3 note-expression tuning routes to per-note pitch bend",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // Note-on (noteId 42) on member channel 1, then a tuning expression for
+    // that noteId. norm 0.5 + (1/240) == one half-semitone up.
+    constexpr Steinberg::int32 kNoteId = 42;
+    constexpr Steinberg::int16 kChannel = 1;
+    constexpr Steinberg::int16 kPitch = 60;
+    // +1 semitone up: norm = plain/240 + 0.5, plain = 1.0 -> norm = 0.5 + 1/240.
+    const double tuning_norm = 0.5 + 1.0 / 240.0;
+
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(kChannel, kPitch, 0.8f, kNoteId, 0);
+    auto expr = make_note_expr(V::kTuningTypeID, kNoteId, tuning_norm, 4);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    REQUIRE(s.test_processor->mpe_input_attached);
+    // The tracker must have created the note and applied a per-note pitch bend.
+    const auto* pb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(pb != nullptr);
+    REQUIRE(pb->state.channel == static_cast<uint8_t>(kChannel));
+    REQUIRE(pb->state.note == static_cast<uint8_t>(kPitch));
+    // +1 semitone up, within the tracker's quantization tolerance.
+    REQUIRE_THAT(pb->state.pitch_bend_semitones, WithinAbs(1.0f, 0.05f));
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 note-expression volume routes to per-note pressure",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    constexpr Steinberg::int32 kNoteId = 7;
+    constexpr Steinberg::int16 kChannel = 2;
+    constexpr Steinberg::int16 kPitch = 64;
+
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(kChannel, kPitch, 0.5f, kNoteId, 0);
+    auto expr = make_note_expr(V::kVolumeTypeID, kNoteId, 1.0, 8);  // full
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    const auto* pr = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::Pressure);
+    REQUIRE(pr != nullptr);
+    REQUIRE(pr->state.channel == static_cast<uint8_t>(kChannel));
+    REQUIRE(pr->state.note == static_cast<uint8_t>(kPitch));
+    REQUIRE_THAT(pr->state.pressure, WithinAbs(1.0f, 0.01f));
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 note-expression brightness routes to per-note timbre",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    constexpr Steinberg::int32 kNoteId = 99;
+    constexpr Steinberg::int16 kChannel = 3;
+    constexpr Steinberg::int16 kPitch = 67;
+
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(kChannel, kPitch, 0.6f, kNoteId, 0);
+    auto expr = make_note_expr(V::kBrightnessTypeID, kNoteId, 0.5, 2);  // mid
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    const auto* tb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::Timbre);
+    REQUIRE(tb != nullptr);
+    REQUIRE(tb->state.channel == static_cast<uint8_t>(kChannel));
+    REQUIRE(tb->state.note == static_cast<uint8_t>(kPitch));
+    // CC74 64/127 ~= 0.5.
+    REQUIRE_THAT(tb->state.timbre, WithinAbs(64.0f / 127.0f, 0.02f));
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 note-expression for an unknown noteId is ignored",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // A tuning expression referencing a noteId that was never opened must not
+    // synthesize any per-note state (no matching voice to route it to).
+    Steinberg::Vst::EventList events(2);
+    auto expr = make_note_expr(V::kTuningTypeID, /*note_id=*/1234, 0.7, 0);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    REQUIRE(s.test_processor->mpe_input_attached);
+    const auto* pb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(pb == nullptr);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 note-off releases the noteId so later expressions don't route",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    constexpr Steinberg::int32 kNoteId = 5;
+    constexpr Steinberg::int16 kChannel = 4;
+    constexpr Steinberg::int16 kPitch = 62;
+
+    // Block 1: note-on then note-off for the same noteId.
+    {
+        Steinberg::Vst::EventList events(4);
+        auto on = make_note_on(kChannel, kPitch, 0.7f, kNoteId, 0);
+        auto off = make_note_off(kChannel, kPitch, kNoteId, 16);
+        REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+        REQUIRE(events.addEvent(off) == Steinberg::kResultOk);
+        s.run(&events);
+    }
+
+    // Block 2: a tuning expression for the now-released noteId. With the
+    // mapping erased, the adapter does not synthesize a bend for it.
+    {
+        Steinberg::Vst::EventList events(2);
+        auto expr = make_note_expr(V::kTuningTypeID, kNoteId, 0.75, 0);
+        REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+        s.run(&events);
+    }
+
+    const auto* pb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(pb == nullptr);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 non-MPE plug-in ignores note expressions and gets no MPE input",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s(/*supports_mpe=*/false);
+
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(1, 60, 0.8f, /*note_id=*/1, 0);
+    auto expr = make_note_expr(V::kTuningTypeID, /*note_id=*/1, 0.75, 4);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    // No MPE sidecar is attached, so the processor sees mpe_input() == nullptr.
+    REQUIRE_FALSE(s.test_processor->mpe_input_attached);
+    REQUIRE(s.test_processor->mpe_event_count == 0);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 note-expression decode does not allocate on the audio thread",
+          "[vst3][midi][noteexpression][mpe][realtime][perf]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // Build the event list once outside the probe (EventList's ctor allocates),
+    // then measure only process(): a note-on plus all three expression axes.
+    constexpr Steinberg::int32 kNoteId = 21;
+    Steinberg::Vst::EventList events(8);
+    auto on = make_note_on(1, 60, 0.8f, kNoteId, 0);
+    auto tun = make_note_expr(V::kTuningTypeID, kNoteId, 0.6, 1);
+    auto vol = make_note_expr(V::kVolumeTypeID, kNoteId, 0.5, 2);
+    auto brt = make_note_expr(V::kBrightnessTypeID, kNoteId, 0.4, 3);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(tun) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(vol) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(brt) == Steinberg::kResultOk);
+
+    s.run(&events);  // warm: capacity established
+    {
+        pulp::test::RtAllocationProbe probe;
+        s.run(&events);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 INoteExpressionController resolves via queryInterface",
+          "[vst3][midi][noteexpression][mpe]") {
+    namespace V = Steinberg::Vst;
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    config.descriptor.supports_mpe = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    void* nec = nullptr;
+    REQUIRE(processor.queryInterface(V::INoteExpressionController::iid, &nec) ==
+            Steinberg::kResultOk);
+    REQUIRE(nec != nullptr);
+    auto* controller = static_cast<V::INoteExpressionController*>(nec);
+    REQUIRE(controller->getNoteExpressionCount(0, 1) > 0);
+    static_cast<Steinberg::FUnknown*>(nec)->release();
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── INoteExpressionController — adversarial / documented-semantics cases ────
+//
+// These pin the ACCEPTED behavior (they document, they do not change it): the
+// channel-wide MPE bridge, the bounded noteId map's drop observability, and the
+// IMidiMapping ∩ note-expression interleave on midi_in_.
+// ─────────────────────────────────────────────────────────────────────
+
+namespace {
+
+std::size_t count_mpe(const std::vector<pulp::midi::MpeExpressionEvent>& events,
+                      pulp::midi::MpeExpressionEvent::Kind kind) {
+    std::size_t n = 0;
+    for (const auto& e : events) {
+        if (e.kind == kind) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("VST3 note-expression on a shared channel is channel-wide by design (matches CLAP)",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // Two notes share the SAME MPE member channel (atypical for MPE, where one
+    // note owns a member channel). A tuning expression for noteId A is bridged
+    // to a channel-wide pitch bend; the MpeVoiceTracker applies channel pitch
+    // bend to EVERY active note on that channel. This is the documented,
+    // CLAP-consistent collapse — pinned here, not "fixed".
+    constexpr Steinberg::int16 kChannel = 1;
+    Steinberg::Vst::EventList events(4);
+    auto onA = make_note_on(kChannel, 60, 0.8f, /*note_id=*/1, 0);
+    auto onB = make_note_on(kChannel, 64, 0.8f, /*note_id=*/2, 0);
+    // +1 semitone up tuning for note A only (noteId 1).
+    auto expr = make_note_expr(V::kTuningTypeID, /*note_id=*/1,
+                               0.5 + 1.0 / 240.0, 4);
+    REQUIRE(events.addEvent(onA) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(onB) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    // BOTH notes on the channel see the bend (channel-wide by design). The
+    // tracker holds two active notes on the member channel, and the pitch-bend
+    // callback fires for each. Assert both reached +1 st.
+    std::size_t bent_notes = 0;
+    for (const auto& e : s.test_processor->last_mpe_events) {
+        if (e.kind == pulp::midi::MpeExpressionEvent::Kind::PitchBend) {
+            REQUIRE(e.state.channel == static_cast<uint8_t>(kChannel));
+            REQUIRE_THAT(e.state.pitch_bend_semitones, WithinAbs(1.0f, 0.05f));
+            ++bent_notes;
+        }
+    }
+    // At least the two notes share the channel-wide bend (one PitchBend event
+    // per active note on the channel). Documented semantics, identical to CLAP.
+    REQUIRE(bent_notes >= 2);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 noteId-map overflow bumps the drop counter without allocating",
+          "[vst3][midi][noteexpression][mpe][realtime]") {
+    NoteExpressionSetup s;
+
+    // kMaxLiveNoteIds == 128 live noteId slots. Open 128 notes (fills the map),
+    // then a 129th whose mapping must be dropped. Spread across member channels
+    // 1..15 (channel 0 is the MPE manager and creates no voice). Build the event
+    // list outside the probe; the only allocation in process() we care about is
+    // none.
+    constexpr int kCapacity = 128;
+    Steinberg::Vst::EventList events(kCapacity + 1);
+    for (int i = 0; i < kCapacity + 1; ++i) {
+        const Steinberg::int16 channel =
+            static_cast<Steinberg::int16>(1 + (i % 15));  // 1..15
+        const Steinberg::int16 pitch =
+            static_cast<Steinberg::int16>(36 + (i % 60));
+        auto on = make_note_on(channel, pitch, 0.7f, /*note_id=*/i, 0);
+        REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    }
+
+    // Warm once outside the probe so the adapter's reserved buffers AND the test
+    // processor's capture vector reach steady-state capacity; the probe then
+    // measures only the adapter's process() path (which must not allocate even
+    // when the noteId map overflows). The overflow drop is RT-safe — the only
+    // "allocation" a naive impl could hit is the bounded map, which we don't
+    // grow. setActive(false)/setupProcessing reset the map + drop counter, so
+    // re-warm via a second setup-free run instead: run twice, measure the
+    // second.
+    s.run(&events);
+    const auto drops_after_warm = s.processor.note_expression_drop_count();
+    REQUIRE(drops_after_warm >= 1);  // overflow already observed on warm run
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        s.run(&events);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+
+    // The drop counter is monotonic within an activation (saturating, not reset
+    // per block), so after two overflowing blocks it is >= 2.
+    REQUIRE(s.processor.note_expression_drop_count() >= 2);
+    // The processor still ran and saw the MPE sidecar.
+    REQUIRE(s.test_processor->mpe_input_attached);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 expression for an unmapped noteId bumps the drop counter",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // No note-on for this noteId — the expression has nowhere to route, which
+    // the adapter records as an observable drop (not silently ignored).
+    Steinberg::Vst::EventList events(2);
+    auto expr = make_note_expr(V::kTuningTypeID, /*note_id=*/9999, 0.7, 0);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    REQUIRE(s.processor.note_expression_drop_count() >= 1);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 IMidiMapping pitch bend and note-expression tuning coexist on midi_in_",
+          "[vst3][midi][noteexpression][mpe][midimapping][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // A note-on (creates the voice) + a note-expression tuning, AND an
+    // IMidiMapping pitch-bend controller change, all on the same channel at the
+    // same offset. Both reach midi_in_, are sorted deterministically, and the
+    // MpeVoiceTracker consumes both without crashing — the last pitch bend in
+    // sample order wins. This pins that the two per-note input paths interleave
+    // cleanly.
+    constexpr Steinberg::int16 kChannel = 1;
+    constexpr Steinberg::int32 kNoteId = 11;
+
+    // Resolve the pitch-bend controller ParamID for channel 1.
+    V::ParamID pb_id = 0;
+    REQUIRE(s.processor.getMidiControllerAssignment(
+                0, kChannel, V::kPitchBend, pb_id) == Steinberg::kResultTrue);
+
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(kChannel, 60, 0.8f, kNoteId, 0);
+    // Note-expression tuning: +1 semitone up.
+    auto expr = make_note_expr(V::kTuningTypeID, kNoteId, 0.5 + 1.0 / 240.0, 5);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+
+    // IMidiMapping pitch bend to centre (0.5 -> 8192 -> 0 semitones) at a LATER
+    // offset, so in sorted order it is the last bend the tracker sees.
+    Steinberg::Vst::ParameterChanges params(1);
+    Steinberg::int32 pidx = 0;
+    auto* q = params.addParameterData(pb_id, pidx);
+    REQUIRE(q != nullptr);
+    Steinberg::int32 ptidx = 0;
+    REQUIRE(q->addPoint(10, 0.5, ptidx) == Steinberg::kResultTrue);
+
+    s.run(&events, &params);
+
+    // Both per-note input sources were consumed: there is at least one pitch
+    // bend, and the final bend state is the IMidiMapping centre (0 st), proving
+    // deterministic sample-ordered interleave (the later controller wins).
+    REQUIRE(count_mpe(s.test_processor->last_mpe_events,
+                      pulp::midi::MpeExpressionEvent::Kind::PitchBend) >= 1);
+    const auto* last_pb = find_mpe(s.test_processor->last_mpe_events,
+                                   pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(last_pb != nullptr);
+    REQUIRE(last_pb->state.channel == static_cast<uint8_t>(kChannel));
+    REQUIRE_THAT(last_pb->state.pitch_bend_semitones, WithinAbs(0.0f, 0.05f));
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 expression on the MPE manager channel creates no per-note voice",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // Lower-zone MPE: channel 0 is the manager. A note-on on channel 0 does NOT
+    // create a member voice, so a tuning expression for its noteId produces no
+    // per-note pitch bend (no mis-route onto a member voice). The noteId still
+    // maps (so it is not an unmapped-drop), but the tracker holds no member note.
+    constexpr Steinberg::int16 kManager = 0;
+    constexpr Steinberg::int32 kNoteId = 3;
+    Steinberg::Vst::EventList events(4);
+    auto on = make_note_on(kManager, 60, 0.8f, kNoteId, 0);
+    auto expr = make_note_expr(V::kTuningTypeID, kNoteId, 0.75, 4);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    s.run(&events);
+
+    // No member-channel note exists, so no per-note PitchBend event is emitted.
+    const auto* pb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(pb == nullptr);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 expression before its note-on at the same offset is dropped (event order)",
+          "[vst3][midi][noteexpression][mpe][process]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    // VST3's IEventList is host-sorted and an expression for a noteId can only
+    // occur AFTER its NoteOnEvent (ivstnoteexpression.h). The adapter relies on
+    // that ordering: the note-on populates note_id_map_ as events are walked in
+    // list order, so an expression that the host (incorrectly) places before the
+    // note-on at the same offset finds no mapping yet and is dropped. This pins
+    // the documented dependency on VST3 event ordering.
+    constexpr Steinberg::int16 kChannel = 1;
+    constexpr Steinberg::int32 kNoteId = 8;
+    Steinberg::Vst::EventList events(4);
+    // Expression FIRST (same offset 0), note-on SECOND — the host contract
+    // forbids this, but we assert the adapter degrades safely (drop, no route).
+    auto expr = make_note_expr(V::kTuningTypeID, kNoteId, 0.75, 0);
+    auto on = make_note_on(kChannel, 60, 0.8f, kNoteId, 0);
+    REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
+    REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
+    s.run(&events);
+
+    // The expression was processed before the note-on populated the map, so it
+    // routed nothing and was counted as a drop.
+    REQUIRE(s.processor.note_expression_drop_count() >= 1);
+    const auto* pb = find_mpe(s.test_processor->last_mpe_events,
+                              pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE(pb == nullptr);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
 }

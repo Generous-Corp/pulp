@@ -279,6 +279,95 @@ Prove no-alloc with the `RtAllocationProbe` harness (see
 `test_vst3_plugin_state.cpp` `[vst3][realtime][perf]`). Note: a pooled-SysEx
 residual allocation inside `MidiBuffer` itself is a known `core/midi` follow-up.
 
+### Per-note expression (MPE) — `INoteExpressionController`
+
+VST3 carries per-note pitch / pressure / timbre as
+`Event::kNoteExpressionValueEvent` in `data.inputEvents`, **not** as channel
+MIDI. The host first queries `INoteExpressionController` to learn which
+expression types the plug-in accepts, then sends value events keyed by the
+originating note-on's `noteId`. The adapter implements this so an MPE/expressive
+synth that works in CLAP isn't flat in Cubase/VST3. It reuses the **same**
+`MpeVoiceTracker` + `MpeBuffer` + `Processor::set_mpe_input()` sidecar contract
+the CLAP adapter uses (`core/midi/.../mpe_buffer.hpp`, `mpe_voice_tracker.hpp`).
+
+```
+INoteExpressionController::getNoteExpressionCount / getNoteExpressionInfo
+  → declare Tuning / Volume / Brightness / Pan  (ONLY when desc.supports_mpe)
+process(): Event::kNoteExpressionValueEvent (noteId, typeId, value)
+  → look up noteId → (channel, note)
+  → synthesize the channel-wide MidiEvent the MpeVoiceTracker narrows to that voice:
+       kTuningTypeID     → per-note pitch bend  (VST3 plain = 240*(norm-0.5) st)
+       kVolumeTypeID     → per-note pressure    (status 0xD0 channel aftertouch)
+       kBrightnessTypeID → per-note timbre      (CC74)
+       kPanTypeID        → declared for host completeness, NOT routed (no MPE axis)
+  → run midi_in_ through mpe_tracker_ → mpe_buffer_ → processor_->set_mpe_input(&mpe_buffer_)
+```
+
+Load-bearing constraints:
+- **Expose the interface in `queryInterface`.** `PulpVst3Processor` adds
+  `INoteExpressionController` alongside `IMidiMapping`; the override does
+  `QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, …)` then delegates to
+  `SingleComponentEffect`. Forgetting the iid means the host never asks for the
+  types and per-note expression is silently dead. Regression:
+  `[vst3][noteexpression][mpe]` (`resolves via queryInterface`).
+- **Gate everything on `desc.effective_capabilities().supports_mpe`.** A non-MPE
+  plug-in returns `getNoteExpressionCount == 0`, declines `getNoteExpressionInfo`,
+  and does **zero** per-note work in `process()` (`set_mpe_input(nullptr)`) — no
+  overhead, no host-visible note-expression lanes.
+- **noteId → (channel, note) linkage is mandatory.** VST3 note expressions
+  reference the note-on's `noteId`, not (channel, note). The adapter keeps a
+  fixed-capacity (`kMaxLiveNoteIds = 128`) `note_id_map_` populated on note-on
+  (when `noteId >= 0`), cleared on note-off, looked up on each value event.
+  Bounded + allocation-free; a full table drops the mapping (the expression just
+  won't route) rather than allocating. An expression for an unknown/released
+  noteId is ignored. Regressions: `[vst3][noteexpression][mpe][process]`
+  (unknown-noteId ignored, note-off releases the mapping).
+- **MPE lower zone: channel 0 is the manager, channels 1-15 are members.** A
+  note-on must land on a **member** channel for the tracker to create a voice the
+  expression then narrows to — a note-on on channel 0 is a manager message and
+  creates no per-note record. Tests use channels 1-4.
+- **Synthesized expression messages go into `midi_in_`** (same buffer as notes),
+  so `midi_in_.sort()` keeps the note-on (offset 0) at/before its expression, and
+  the existing per-block `mpe_tracker_.process(ev)` loop turns them into per-note
+  `MpeExpressionEvent`s. The sidecar is reserved + `set_realtime_capacity_limit`
+  in `setupProcessing()` and cleared per block — alloc-free
+  (`[vst3][noteexpression][mpe][realtime][perf]`).
+- **Reset on re-activation.** `setupProcessing()` and `setActive(false)` reset
+  `mpe_tracker_` and clear `note_id_map_` so a stale noteId never routes to a
+  voice that no longer exists.
+
+The VST3 type → MPE axis mapping is a **clean-room** choice derived from the SDK
+note-expression value ranges (`ivstnoteexpression.h`) and the MPE spec's three
+axes — not transcribed from any reference adapter.
+
+**Scoping (by design, matches CLAP):** VST3 note expression is noteId-targeted,
+but Pulp's per-note model IS MPE (one note per member channel) and the Processor
+exposes no noteId-targeted expression API. The adapter therefore bridges to the
+MPE model via a channel-wide MIDI message — **identical to the CLAP path**
+(`clap_adapter.cpp` does the same: note-expression → channel-wide ShortMessage
+onto the MPE sidecar). Per-note targeting is **exact when each note is on its own
+MPE member channel** (the expressive-controller case MPE is designed for) and
+**collapses to channel-wide when multiple notes share a channel** — same trade-off
+as CLAP, not a VST3-specific defect. Do not build a separate noteId-targeted path:
+there is nowhere on the Processor for it to land.
+
+**Drop observability:** `note_expression_drop_count()` is a saturating atomic
+(reset at session boundaries) bumped when the bounded noteId map (128 slots) is
+full on a note-on insert, or a value event references an unmapped/released noteId.
+It mirrors `MpeBuffer::dropped_event_count()` — a host-pollable signal that a
+session exceeded the adapter's fixed per-note capacity. RT-safe (no audio-thread
+logging). Regression: `[vst3][noteexpression][mpe][realtime]` (overflow).
+
+**`associatedParameterId` = `kNoParamId`** (the SDK sentinel `0xFFFFFFFF`), not a
+literal 0 — the types associate with no global parameter, and a literal 0 would
+point a host at real plug-in parameter id 0. The `kAssociatedParameterIDValid`
+flag stays clear, so the field is advisory.
+
+**String conversions are surface-validated:** `getNoteExpressionStringByValue` /
+`getNoteExpressionValueByString` decline (`kResultFalse`) unless MPE is on, the
+bus is 0, the channel is in `[0, 16)`, AND the type id is one of the declared
+`kNoteExprTypes` — they don't blindly convert an arbitrary type id.
+
 ### Audio buses (incl. sidechain)
 
 Same "bus 0 = main, bus 1 = sidechain" rule as CLAP/AU. The adapter
@@ -557,10 +646,13 @@ Do not remove this environment just because `pluginval` also has
   `vst3_plug_view.cpp` edits route through that skill.
 - `.agents/skills/ara/SKILL.md` — IHostApplication-based factory
   negotiation (`kVst3AraFactoryContextKey`).
-- `.agents/skills/mpe/SKILL.md` — MPE sidecar (VST3 hosts deliver MPE
-  as channel-per-note short MIDI, but the adapter forwards plain MIDI
-  only; processors that need per-note state must extract it from
-  `MidiBuffer` until VST3 grows adapter-side `MpeBuffer` wiring).
+- `.agents/skills/mpe/SKILL.md` — MPE sidecar. The adapter now wires
+  per-note expression directly: it implements `INoteExpressionController`
+  and routes `Event::kNoteExpressionValueEvent` through the shared
+  `MpeVoiceTracker` / `MpeBuffer` to `Processor::set_mpe_input()` (gated on
+  `desc.supports_mpe`). See "Per-note expression (MPE)" above. Channel
+  per-note short MIDI (member-channel pitch bend / pressure / CC74) also
+  still reaches the tracker via the normal `IMidiMapping` → `midi_in_` path.
 - `.agents/skills/clap/SKILL.md` and `.agents/skills/auv3/SKILL.md` —
   cross-format parity for host-specific regressions.
 - `docs/guides/formats.md` — user-facing format overview.

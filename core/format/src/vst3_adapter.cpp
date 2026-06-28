@@ -22,6 +22,8 @@
 #include <pluginterfaces/base/ustring.h>
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace pulp::format::vst3 {
@@ -29,16 +31,66 @@ namespace pulp::format::vst3 {
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
+namespace {
+
+// Per-note expression types Pulp's VST3 adapter declares to the host when the
+// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a clean-room
+// choice derived from the VST3 note-expression value ranges (ivstnoteexpression.h)
+// and the MPE spec's three per-note axes (pitch bend, pressure, timbre):
+//
+//   kTuningTypeID     -> per-note pitch bend  (VST3 plain = 240*(norm-0.5) st)
+//   kVolumeTypeID     -> per-note pressure    (loudness axis -> channel pressure)
+//   kBrightnessTypeID -> per-note timbre      (CC74, the MPE timbre controller)
+//   kPanTypeID        -> declared for host completeness; not an MPE axis, so it
+//                        is accepted but not routed into the sidecar.
+//
+// The host queries these via getNoteExpressionInfo(); process() consumes the
+// matching kNoteExpressionValueEvent stream.
+struct NoteExprTypeEntry {
+    NoteExpressionTypeID type_id;
+    const char* title;
+    const char* short_title;
+    const char* units;
+    NoteExpressionValue default_value;  // normalized [0,1]
+    bool bipolar;
+};
+
+constexpr std::array<NoteExprTypeEntry, 4> kNoteExprTypes{{
+    {kTuningTypeID,     "Tuning",     "Tun", "semitones", 0.5, true},
+    {kVolumeTypeID,     "Volume",     "Vol", "",          1.0, false},
+    {kBrightnessTypeID, "Brightness", "Brt", "",          0.5, false},
+    {kPanTypeID,        "Pan",        "Pan", "",          0.5, true},
+}};
+
+// Convert a normalized VST3 tuning value to a signed semitone offset.
+// ivstnoteexpression.h: plain = 240 * (norm - 0.5), so the full [0,1] range
+// spans -120 .. +120 semitones (ten octaves either way), 0.5 == no detune.
+inline double vst3_tuning_norm_to_semitones(double norm) {
+    return 240.0 * (std::clamp(norm, 0.0, 1.0) - 0.5);
+}
+
+// True iff `id` is one of the note-expression types this adapter declares.
+inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
+    for (const auto& entry : kNoteExprTypes) {
+        if (entry.type_id == id) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
 }
 
 tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
-    // Expose IMidiMapping (the only interface this subclass adds) and then
-    // delegate everything else to SingleComponentEffect so its IComponent /
+    // Expose the interfaces this subclass adds on top of SingleComponentEffect
+    // (IMidiMapping for MIDI controllers, INoteExpressionController for per-note
+    // expression), then delegate everything else to the base so its IComponent /
     // IAudioProcessor / IEditController surface stays intact.
     QUERY_INTERFACE(iid, obj, IMidiMapping::iid, IMidiMapping)
+    QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, INoteExpressionController)
     return SingleComponentEffect::queryInterface(iid, obj);
 }
 
@@ -72,6 +124,170 @@ tresult PLUGIN_API PulpVst3Processor::getMidiControllerAssignment(
     if (!is_registered_controller(candidate)) return kResultFalse;
     id = candidate;
     return kResultTrue;
+}
+
+// ── INoteExpressionController ──────────────────────────────────────────────
+
+int32 PLUGIN_API PulpVst3Processor::getNoteExpressionCount(
+    int32 busIndex, int16 channel) {
+    // Per-note expression only makes sense for an MPE-aware instrument. A
+    // plug-in that did not opt in declares zero types, so a host never offers
+    // its tracks per-note lanes and process() does no MPE work.
+    if (!mpe_enabled_) return 0;
+    // Note expression is carried on the single event input bus (index 0). Any
+    // other bus has no note-expression surface. The same type set applies to
+    // every channel of that bus.
+    if (busIndex != 0) return 0;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return 0;
+    return static_cast<int32>(kNoteExprTypes.size());
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionInfo(
+    int32 busIndex, int16 channel, int32 noteExpressionIndex,
+    NoteExpressionTypeInfo& info /*out*/) {
+    if (!mpe_enabled_) return kResultFalse;
+    if (busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (noteExpressionIndex < 0 ||
+        noteExpressionIndex >= static_cast<int32>(kNoteExprTypes.size())) {
+        return kResultFalse;
+    }
+
+    const auto& entry =
+        kNoteExprTypes[static_cast<std::size_t>(noteExpressionIndex)];
+
+    info = NoteExpressionTypeInfo{};
+    info.typeId = entry.type_id;
+    Steinberg::UString(info.title, 128).fromAscii(entry.title);
+    Steinberg::UString(info.shortTitle, 128).fromAscii(entry.short_title);
+    Steinberg::UString(info.units, 128).fromAscii(entry.units);
+    info.unitId = Steinberg::Vst::kRootUnitId;
+    info.valueDesc.defaultValue = entry.default_value;
+    info.valueDesc.minimum = 0.0;
+    info.valueDesc.maximum = 1.0;
+    info.valueDesc.stepCount = 0;  // continuous
+    // No global parameter is associated with these note-expression types, so
+    // use the SDK's "no parameter" sentinel rather than a literal 0 — a host
+    // must not associate the type with real plug-in parameter id 0. The
+    // kAssociatedParameterIDValid flag stays clear, so this field is advisory.
+    info.associatedParameterId = Steinberg::Vst::kNoParamId;
+    info.flags = entry.bipolar
+                     ? NoteExpressionTypeInfo::kIsBipolar
+                     : 0;
+    return kResultTrue;
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionStringByValue(
+    int32 busIndex, int16 channel, NoteExpressionTypeID id,
+    NoteExpressionValue valueNormalized /*in*/, String128 string /*out*/) {
+    // Decline anything outside the surface the plug-in actually declares:
+    // not MPE, wrong bus, a channel outside the event bus, or a type id that
+    // is not one of the declared kNoteExprTypes.
+    if (!mpe_enabled_ || busIndex != 0) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (!is_declared_note_expr_type(id)) return kResultFalse;
+
+    // Tuning gets a semitone read-out; the remaining types fall back to the
+    // normalized value. A minimal identity-style conversion is acceptable per
+    // the interface contract — the value events drive the audio, not the string.
+    char buf[128] = {0};
+    if (id == kTuningTypeID) {
+        std::snprintf(buf, sizeof(buf), "%.2f",
+                      vst3_tuning_norm_to_semitones(valueNormalized));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%.4f",
+                      std::clamp(static_cast<double>(valueNormalized), 0.0, 1.0));
+    }
+    Steinberg::UString(string, 128).fromAscii(buf);
+    return kResultTrue;
+}
+
+tresult PLUGIN_API PulpVst3Processor::getNoteExpressionValueByString(
+    int32 busIndex, int16 channel, NoteExpressionTypeID id,
+    const TChar* string /*in*/, NoteExpressionValue& valueNormalized /*out*/) {
+    if (!mpe_enabled_ || busIndex != 0 || string == nullptr) return kResultFalse;
+    if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
+    if (!is_declared_note_expr_type(id)) return kResultFalse;
+
+    // Parse the ASCII rendering of the string back to a normalized value, the
+    // inverse of getNoteExpressionStringByValue.
+    char ascii[128] = {0};
+    Steinberg::UString(const_cast<TChar*>(string), 128).toAscii(ascii, sizeof(ascii));
+    char* end = nullptr;
+    const double parsed = std::strtod(ascii, &end);
+    if (end == ascii) return kResultFalse;  // not a number
+
+    if (id == kTuningTypeID) {
+        // Inverse of plain = 240*(norm-0.5): norm = plain/240 + 0.5.
+        valueNormalized = std::clamp(parsed / 240.0 + 0.5, 0.0, 1.0);
+    } else {
+        valueNormalized = std::clamp(parsed, 0.0, 1.0);
+    }
+    return kResultTrue;
+}
+
+// ── noteId -> (channel, note) linkage ──────────────────────────────────────
+
+bool PulpVst3Processor::note_id_map_insert(int32 note_id, uint8_t channel,
+                                           uint8_t note) {
+    // A host that supplies no noteId (-1) is not a drop: there is simply
+    // nothing to track, and a later expression with noteId -1 would not match
+    // anyway. Report success so the caller does not count it as a failure.
+    if (note_id < 0) return true;
+    // Reuse an existing slot for the same noteId (a retrigger), else claim a
+    // free slot. If the table is full the mapping is dropped (RT-safe); the
+    // expression for that note simply won't route — never an allocation. The
+    // caller bumps note_expression_drops_ on a false return.
+    NoteIdSlot* free_slot = nullptr;
+    for (auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) {
+            slot.channel = channel;
+            slot.note = note;
+            return true;
+        }
+        if (!slot.active && free_slot == nullptr) {
+            free_slot = &slot;
+        }
+    }
+    if (free_slot) {
+        free_slot->active = true;
+        free_slot->note_id = note_id;
+        free_slot->channel = channel;
+        free_slot->note = note;
+        return true;
+    }
+    return false;  // table full — mapping dropped
+}
+
+void PulpVst3Processor::note_id_map_erase(int32 note_id) {
+    if (note_id < 0) return;
+    for (auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) {
+            slot.active = false;
+            slot.note_id = -1;
+            return;
+        }
+    }
+}
+
+const PulpVst3Processor::NoteIdSlot*
+PulpVst3Processor::note_id_map_find(int32 note_id) const {
+    if (note_id < 0) return nullptr;
+    for (const auto& slot : note_id_map_) {
+        if (slot.active && slot.note_id == note_id) return &slot;
+    }
+    return nullptr;
+}
+
+void PulpVst3Processor::note_id_map_clear() {
+    for (auto& slot : note_id_map_) {
+        slot.active = false;
+        slot.note_id = -1;
+    }
+    // Reset the saturating drop counter at session boundaries (setup /
+    // deactivate) so it reflects the current activation, not stale history.
+    // Not reset per block — a host polls it to learn it exceeded capacity.
+    note_expression_drops_.store(0, std::memory_order_relaxed);
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
@@ -114,6 +330,19 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     auto desc = processor_->descriptor();
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+
+    // Wire the MPE sidecar when the plug-in opts in. The tracker's callbacks
+    // append per-note expression deltas to mpe_buffer_; bind them once here on
+    // the host thread (never on the audio thread). The buffer is reserved +
+    // capacity-limited in setupProcessing(). mpe_enabled_ also gates the
+    // INoteExpressionController surface so a non-MPE plug-in advertises nothing.
+    mpe_enabled_ = desc.effective_capabilities().supports_mpe;
+    if (mpe_enabled_) {
+        midi::bind_tracker_to_buffer(
+            mpe_tracker_, mpe_buffer_, mpe_current_sample_offset_);
+        runtime::log_info("VST3: MPE note-expression sidecar enabled for '{}'",
+                          desc.name);
+    }
 
     // If a host accommodation synthesizes a bypass parameter, inject it
     // before parameter registration so the loop below tags it kIsBypass
@@ -435,6 +664,16 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    // Reserve the MPE sidecar so process() never allocates: one inbound MIDI
+    // event can fan out to several MPE callbacks (note-on + bend + pressure +
+    // timbre), so size the buffer at the same worst-case event ceiling as the
+    // MIDI buffers and pin it to realtime-capacity mode. Reset the noteId map
+    // and tracker so a fresh activation starts with no stale per-note state.
+    mpe_buffer_.reserve(kMaxEventsPerBlock);
+    mpe_buffer_.set_realtime_capacity_limit(true);
+    mpe_tracker_.reset();
+    note_id_map_clear();
+
     // Size the per-channel dry-delay used by the bypass pass-through. The
     // host compensates the plugin path by getLatencySamples(), so the
     // bypassed dry copy must be delayed by exactly that many samples to stay
@@ -459,6 +698,10 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     if (!state && processor_) {
         processor_->release();
+        // Drop any per-note expression state so a re-activation does not route
+        // a stale noteId to a voice that no longer exists.
+        mpe_tracker_.reset();
+        note_id_map_clear();
     }
     return SingleComponentEffect::setActive(state);
 }
@@ -805,19 +1048,122 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             Event evt;
             if (data.inputEvents->getEvent(i, evt) == kResultOk) {
                 if (evt.type == Event::kNoteOnEvent) {
+                    const auto channel =
+                        static_cast<uint8_t>(evt.noteOn.channel);
+                    const auto note =
+                        static_cast<uint8_t>(evt.noteOn.pitch);
                     auto me = midi::MidiEvent::note_on(
-                        static_cast<uint8_t>(evt.noteOn.channel),
-                        static_cast<uint8_t>(evt.noteOn.pitch),
+                        channel, note,
                         static_cast<uint8_t>(evt.noteOn.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
                     midi_in_.add(me);
+                    // Remember this note's (channel, note) under its noteId so a
+                    // later kNoteExpressionValueEvent referencing the same noteId
+                    // routes to the right MPE voice. No-op when MPE is off or the
+                    // host supplied no noteId (-1). A full table drops the
+                    // mapping (RT-safe) and bumps the observable drop counter.
+                    if (mpe_enabled_) {
+                        if (!note_id_map_insert(evt.noteOn.noteId, channel,
+                                                note)) {
+                            note_expression_drops_.fetch_add(
+                                1, std::memory_order_relaxed);
+                        }
+                    }
                 } else if (evt.type == Event::kNoteOffEvent) {
+                    const auto channel =
+                        static_cast<uint8_t>(evt.noteOff.channel);
                     auto me = midi::MidiEvent::note_off(
-                        static_cast<uint8_t>(evt.noteOff.channel),
+                        channel,
                         static_cast<uint8_t>(evt.noteOff.pitch),
                         static_cast<uint8_t>(evt.noteOff.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
                     midi_in_.add(me);
+                    if (mpe_enabled_) {
+                        note_id_map_erase(evt.noteOff.noteId);
+                    }
+                } else if (evt.type == Event::kNoteExpressionValueEvent &&
+                           mpe_enabled_) {
+                    // Per-note expression. The event references the noteId of a
+                    // live note-on; look up its (channel, note) and synthesize
+                    // the channel-wide MIDI message the MpeVoiceTracker narrows
+                    // back to the matching member-channel voice — the same
+                    // sidecar contract the CLAP adapter uses
+                    // (clap_adapter.cpp kNoteExpression path). Mapping:
+                    //   kTuningTypeID     -> per-note pitch bend
+                    //   kVolumeTypeID     -> per-note pressure (channel AT)
+                    //   kBrightnessTypeID -> per-note timbre (CC74)
+                    //
+                    // SCOPING (by design, matches CLAP): VST3 note expression is
+                    // noteId-targeted, but Pulp's per-note model IS MPE — one
+                    // note per member channel — and the Processor has no
+                    // noteId-targeted expression API. We therefore bridge to the
+                    // MPE (channel-per-note) model via a channel-wide message.
+                    // Routing is exact when each note lives on its own MPE member
+                    // channel (the expressive-controller case MPE is built for);
+                    // when multiple notes share one channel the expression
+                    // collapses to channel-wide — identical to the CLAP path.
+                    const auto& ne = evt.noteExpressionValue;
+                    const NoteIdSlot* slot = note_id_map_find(ne.noteId);
+                    if (slot == nullptr) {
+                        // Expression for an unknown / already-released noteId
+                        // (or one whose mapping was dropped on a full table).
+                        // Nothing to route — count it as an observable drop.
+                        note_expression_drops_.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                    if (slot != nullptr) {
+                        const uint8_t channel = slot->channel;
+                        const double norm =
+                            std::clamp(ne.value, 0.0, 1.0);
+                        midi::MidiEvent me{};
+                        bool emitted = false;
+                        if (ne.typeId == kTuningTypeID) {
+                            // VST3 tuning spans ±120 st; normalise to the MPE
+                            // member-bend default so the tracker expands it
+                            // back to the right per-note bend (mirrors CLAP).
+                            const double semis =
+                                vst3_tuning_norm_to_semitones(norm);
+                            const double bend_norm = std::clamp(
+                                semis / static_cast<double>(
+                                    midi::MpeVoiceTracker::
+                                        kDefaultMemberBendSemitones),
+                                -1.0, 1.0);
+                            const int bend14 = static_cast<int>(
+                                std::lround(8192.0 + bend_norm * 8191.0));
+                            me = midi::MidiEvent::pitch_bend(
+                                channel,
+                                static_cast<uint16_t>(
+                                    std::clamp(bend14, 0, 16383)));
+                            emitted = true;
+                        } else if (ne.typeId == kVolumeTypeID) {
+                            // Loudness axis -> channel pressure (status 0xD0).
+                            const auto v7 = static_cast<uint8_t>(
+                                std::clamp<int>(
+                                    static_cast<int>(norm * 127.0 + 0.5),
+                                    0, 127));
+                            me = midi::MidiEvent{
+                                choc::midi::ShortMessage(
+                                    static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
+                                    v7, 0),
+                                0, 0.0};
+                            emitted = true;
+                        } else if (ne.typeId == kBrightnessTypeID) {
+                            // Timbre -> CC 74.
+                            const auto v7 = static_cast<uint8_t>(
+                                std::clamp<int>(
+                                    static_cast<int>(norm * 127.0 + 0.5),
+                                    0, 127));
+                            me = midi::MidiEvent::cc(channel, 74, v7);
+                            emitted = true;
+                        }
+                        // kPanTypeID (and any other declared/unknown type) has
+                        // no MPE axis, so it is accepted by the host but not
+                        // routed into the sidecar.
+                        if (emitted) {
+                            me.sample_offset = evt.sampleOffset;
+                            midi_in_.add(me);
+                        }
+                    }
                 } else if (evt.type == Event::kDataEvent
                            && evt.data.type == DataEvent::kMidiSysEx) {
                     // Route kData/kMidiSysEx payloads into MidiBuffer's
@@ -927,6 +1273,23 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         param_snapshot_[i] = store_.get_value(all_params[i].id);
     }
     processor_->set_param_events(&param_events_);
+
+    // MPE sidecar: run the (sorted) inbound MIDI — note on/off plus the
+    // channel-wide messages synthesized from kNoteExpressionValueEvent above —
+    // through the voice tracker, then hand the resulting per-note expression
+    // buffer to the processor for the duration of this process() call. Events
+    // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
+    // adapter's set_mpe_input contract; clears per block, allocation-free.
+    if (mpe_enabled_) {
+        mpe_buffer_.clear();
+        for (const auto& ev : midi_in_) {
+            mpe_current_sample_offset_ = ev.sample_offset;
+            mpe_tracker_.process(ev);
+        }
+        processor_->set_mpe_input(&mpe_buffer_);
+    } else {
+        processor_->set_mpe_input(nullptr);
+    }
 
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.
