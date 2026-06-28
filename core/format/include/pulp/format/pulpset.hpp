@@ -28,10 +28,12 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <locale>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::format {
@@ -58,10 +60,10 @@ struct Pulpset {
             if (hash != std::string::npos) line = line.substr(0, hash);
 
             // Whitespace-delimited tokenizer over the line. Tokens are parsed
-            // with std::from_chars so numbers (including the fractional value)
-            // are locale-independent: a comma-decimal global locale can never
-            // make a `.pulpset` round-trip "0.5" as "0,5". (The previous
-            // std::istringstream >> path honored the stream's global locale.)
+            // with locale-independent rules so a comma-decimal global locale
+            // can never make a `.pulpset` round-trip "0.5" as "0,5". (The
+            // previous std::istringstream >> path honored the stream's global
+            // locale.)
             std::string_view rest{line};
             auto next_token = [&rest]() -> std::string_view {
                 std::size_t b = rest.find_first_not_of(" \t\r");
@@ -85,10 +87,18 @@ struct Pulpset {
             // cleanly rather than silently replaying 0.5 as 0.0.
             auto parse_full = [](std::string_view tok, auto& out) {
                 if (tok.empty()) return false;
-                const char* first = tok.data();
-                const char* last = first + tok.size();
-                auto r = std::from_chars(first, last, out);
-                return r.ec == std::errc{} && r.ptr == last;
+                using Out = std::remove_reference_t<decltype(out)>;
+                if constexpr (std::is_floating_point_v<Out>) {
+                    std::istringstream stream{std::string(tok)};
+                    stream.imbue(std::locale::classic());
+                    stream >> out;
+                    return static_cast<bool>(stream) && stream.eof();
+                } else {
+                    const char* first = tok.data();
+                    const char* last = first + tok.size();
+                    auto r = std::from_chars(first, last, out);
+                    return r.ec == std::errc{} && r.ptr == last;
+                }
             };
 
             PulpsetEvent e;
