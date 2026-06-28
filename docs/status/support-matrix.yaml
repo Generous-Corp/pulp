@@ -376,15 +376,22 @@ css_parity:
     notes: CSS white-space (normal/nowrap/pre). Maps to Label multi_line flag.
   text_shadow:
     status: partial
-    notes: CSS text-shadow parsed (offset, blur, color). Bridge stub — rendering planned.
+    notes: CSS text-shadow parsed and routed through setTextShadow / setTextShadow* storage; Label paint shadow rendering remains planned.
   font_family:
-    status: partial
-    notes: CSS font-family property parsed. Bridge stub — font selection planned.
+    status: usable
+    notes: >
+      CSS font-family property parsed and routed through setFontFamily. Labels honor
+      own and inherited font-family during measurement and paint; Skia/TextShaper
+      resolve comma-separated fallback lists, with registerFont for bundled faces.
+      Validated by pulp-test-widget-bridge-wave5-css and pulp-test-canvas-fonts.
 
 widgets:
   image_view:
     status: usable
-    notes: ImageWidget with placeholder rendering, JS bridge createImage/setImageSource.
+    notes: >
+      ImageView via createImage/setImageSource decodes file-backed images through
+      Canvas::draw_image_from_file / draw_image_from_file_rect on supported backends;
+      missing files or non-image backends fall back to a filename placeholder.
   list_box:
     status: usable
     notes: >
@@ -708,7 +715,10 @@ runtime_apis:
     notes: setTimeout/setInterval/requestAnimationFrame via __requestFrame__ bridge.
   canvas_draw_image:
     status: partial
-    notes: canvasDrawImage renders placeholder; full Skia image decode pipeline planned.
+    notes: >
+      Canvas2D drawImage supports file-backed 3-, 5-, and 9-argument forms,
+      including source rectangles, through Skia image decode. data: URI image
+      sources still fall back to the placeholder path.
   drag_and_drop:
     status: usable
     notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
