@@ -98,7 +98,8 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "hr") {
         createCol(id, "");
         setFlex(id, "height", 1);
-        setBackground(id, "#666666");
+        var hrColor = "#666666";
+        setBackground(id, hrColor);
     } else if (tag === "img") {
         createLabel(id, "", ""); // placeholder until image loading
     } else if (tag === "details") {
@@ -749,102 +750,6 @@ Element.prototype.blur = function() {
     }
 };
 
-// ── Web Animations API: element.animate(keyframes, options) ──────────────
-
-function Animation(el, keyframes, duration, easing, fill) {
-    this._el = el;
-    this._keyframes = keyframes;
-    this._duration = duration || 300;
-    this._easing = easing || "ease";
-    this._fill = fill || "none";
-    this._startTime = null;
-    this._finished = false;
-    this._cancelled = false;
-    this._onfinish = null;
-    this.playState = "idle";
-
-    // Create a promise-like finished property
-    var self = this;
-    this.finished = { then: function(fn) { self._onfinish = fn; } };
-}
-
-Animation.prototype.play = function() {
-    if (this._cancelled) return;
-    this.playState = "running";
-    var self = this;
-    var el = this._el;
-    var keyframes = this._keyframes;
-    var duration = this._duration;
-    var startProps = {};
-
-    // Capture start values
-    for (var k in keyframes[0]) {
-        startProps[k] = el.style[k] || keyframes[0][k];
-    }
-
-    var startTime = performance.now();
-    function tick() {
-        if (self._cancelled) return;
-        var elapsed = performance.now() - startTime;
-        var t = Math.min(elapsed / duration, 1);
-
-        // Apply easing (simple ease-out for now)
-        if (self._easing === "ease-out") t = 1 - Math.pow(1 - t, 3);
-        else if (self._easing === "ease-in") t = Math.pow(t, 3);
-        else if (self._easing === "ease-in-out") t = t < 0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
-
-        // Interpolate between first and last keyframe
-        var from = keyframes[0];
-        var to = keyframes[keyframes.length - 1];
-        for (var prop in to) {
-            var fromVal = from[prop] || startProps[prop] || "";
-            var toVal = to[prop];
-            // Try numeric interpolation for px values
-            var fromNum = parseFloat(fromVal);
-            var toNum = parseFloat(toVal);
-            if (!isNaN(fromNum) && !isNaN(toNum)) {
-                var interp = fromNum + (toNum - fromNum) * t;
-                var unit = String(toVal).replace(/[\d.-]/g, "") || "px";
-                el.style[prop] = interp + unit;
-            } else if (t >= 1) {
-                el.style[prop] = toVal;
-            }
-        }
-
-        if (t < 1) {
-            window.requestAnimationFrame(tick);
-        } else {
-            self._finished = true;
-            self.playState = "finished";
-            if (self._fill === "none") {
-                // Revert to start values
-                for (var p in startProps) el.style[p] = startProps[p];
-            }
-            if (self._onfinish) self._onfinish();
-            el.dispatchEvent(_makeEvent("animationend", el));
-        }
-    }
-
-    window.requestAnimationFrame(tick);
-};
-
-Animation.prototype.cancel = function() {
-    this._cancelled = true;
-    this.playState = "idle";
-};
-
-Animation.prototype.pause = function() { this.playState = "paused"; };
-Animation.prototype.finish = function() { this._finished = true; this.playState = "finished"; };
-
-Element.prototype.animate = function(keyframes, options) {
-    var duration = typeof options === "number" ? options : (options && options.duration || 300);
-    var easing = (options && options.easing) || "ease";
-    var fill = (options && options.fill) || "none";
-    var anim = new Animation(this, keyframes, duration, easing, fill);
-    anim.play();
-    return anim;
-};
-
 Element.prototype._registerNativeEvent = function(type) {
     var id = this._id;
     var self = this;
@@ -1048,7 +953,8 @@ function _reparentNative(child, parentId) {
     } else if (tag === "hr") {
         createCol(id, parentId);
         setFlex(id, "height", 1);
-        setBackground(id, "#666666");
+        var childHrColor = "#666666";
+        setBackground(id, childHrColor);
     } else if (tag === "img") {
         createLabel(id, "", parentId);
     } else if (tag === "dialog") {

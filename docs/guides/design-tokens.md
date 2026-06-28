@@ -236,9 +236,11 @@ Generate CSS from a theme:
 pulp export-tokens --file theme.json --format css-variables --tokens tokens.css
 ```
 
-## Exporting to WGSL
+## Using Tokens in WGSL
 
-For custom shader widgets, tokens are available as uniforms:
+`pulp export-tokens` does not generate WGSL or C++ headers today. For custom
+shader widgets, load the exported W3C JSON or CSS custom-property values in the
+host code that configures the shader, then map those values into uniforms:
 
 ```wgsl
 struct ThemeUniforms {

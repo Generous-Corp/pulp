@@ -268,7 +268,7 @@ When implementing a feature or assessing a compat gap, **don't reach for non-Yog
 2. **React Native parity.** RN is also flex+grid-only. `@pulp/react` and the JS bridge depend on this contract.
 3. **GPU-first render pipeline.** Skia/Dawn favor a single tree-walk layout pass; multi-pass sequential algorithms (block flow, table cell auto-sizing, multi-column balancing, float wrap, paginated layout) don't compose with the render pipeline cleanly.
 4. **Use case is structured panels.** Pulp targets audio plugin UIs + cross-platform apps — knobs, faders, side panels, popovers. Newspaper columns and complex tables are not real Pulp use cases.
-5. **Modern design tools output flex/grid.** Figma, Stitch, v0, Pencil all produce flex containers + grid as their default layout primitives. Tooling alignment matters for the design-import path (#1434).
+5. **Modern design tools output flex/grid.** Figma, Stitch, v0, Pencil all produce flex containers + grid as their default layout primitives. Tooling alignment matters for the design-import path.
 
 The honest tradeoff: Pulp will never be a general-purpose web browser. It IS the right shape for cross-platform native UI. CSS coverage at ~95% raw / ~100% on non-OOS denominator IS the architectural ceiling, not a goal to push past by adding layout primitives.
 
@@ -572,7 +572,7 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 - Catch2 tag names cannot contain `#` (reserved). Use `[issue-NNN]` not `[#NNN]`.
 - Place tests next to existing `test/test_<subsystem>.cpp` files where one exists; only create a new file for a genuinely new surface.
 - Tests that need a runtime binary (CLI, validator) can shell out — don't skip them because the infrastructure is "too heavy."
-- Parser tests should exercise the edge cases the fix actually addresses (e.g., the #292 UMP test must include "second word's top nibble is 0x3" specifically, not just happy-path single-packet sysex).
+- Parser tests should exercise the edge cases the fix actually addresses (e.g., the UMP regression test must include "second word's top nibble is 0x3" specifically, not just happy-path single-packet sysex).
 
 **Subsystems under active coverage hardening** (tracked by `#290`): `platform`, `host`, `format`, `runtime`, `view`, `osc`, `dsl`. When touching any of these, grow the test surface — do not leave the coverage number where you found it.
 
@@ -659,7 +659,7 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 **Enforcement (three layers, one source of truth):**
 
 1. **Agent hooks (Layer 1)** — `hooks/scripts/cli-plugin-sync.sh` runs `version_bump_check.py` and `skill_sync_check.py` in `--mode=hint` on every PostToolUse so you see drift while iterating. Advisory only.
-2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. **Enforcing by default** (pulp #1144 — was advisory pre-#1144 and burned 80+ minutes per multi-touch PR on CI roundtrips). `PULP_DISABLE_PREPUSH_GATES=1` demotes back to advisory; `PULP_SKIP_PREPUSH=1` skips entirely (emergencies only).
+2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. **Enforcing by default** after the advisory-only mode burned 80+ minutes per multi-touch PR on CI roundtrips. `PULP_DISABLE_PREPUSH_GATES=1` demotes back to advisory; `PULP_SKIP_PREPUSH=1` skips entirely (emergencies only).
 3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report`. CI is hard-failing (no env-var demotion). No bypass other than the commit trailers below.
 
 **Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `shipyard pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `shipyard pr` orchestrates:
@@ -835,8 +835,8 @@ pulp coverage diff pulp-test-widget-bridge
 The threshold + surface filters live in
 `tools/scripts/coverage_config.json` — edit there once and CI
 (`.github/workflows/coverage.yml`) plus this local script stay in
-sync. The pre-push hook runs this check enforcing-by-default
-(pulp #1144); `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to
+sync. The pre-push hook runs this check enforcing-by-default;
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to
 advisory if you genuinely need to push a known coverage gap.
 
 **Two different knobs — pick the right one.** `PULP_DISABLE_PREPUSH_DIFF_COVER=1`
@@ -883,7 +883,7 @@ tools/scripts/gates.sh main            # custom base
 ```
 
 **Bypass priority — reach for the surgical knob first.** The 2026-05-18
-PR #2374 lesson: `PULP_SKIP_PREPUSH=1` on a brand-new commit (not a
+pre-push lesson: `PULP_SKIP_PREPUSH=1` on a brand-new commit (not a
 rebase) skipped skill-sync, the missed SKILL.md update caught the PR
 in CI ~20 minutes later, and burned a roundtrip. Pick the bypass that
 maps to the one gate you genuinely need to skip, not the nuclear
@@ -961,7 +961,7 @@ git worktree add /tmp/pulp-audit origin/main
 - AI tools are collaborators, not autopilots. Review all generated code.
 - Tests validate AI output. Don't trust, verify.
 
-### Local-dev audio etiquette (interim — see issue #3173)
+### Local-dev audio etiquette
 
 Several Pulp dev workflows can produce host audio out of the user's
 speakers without warning: `xcrun simctl launch` of an iOS Sim app that
@@ -1052,7 +1052,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `motion` | Trace and validate animations, transitions, scroll geometry, reduced motion, and motion fixtures |
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
-| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): single-platform watch + rebuild, AOT analyzer, ar-swap, PR-state monitor |
+| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
@@ -1132,7 +1132,7 @@ The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for la
 4. GitHub Actions runs Linux and Windows on GitHub-hosted runners as advisory checks
 5. Posts a closeout comment
 
-`local_ci.py` remains in the repo as a legacy fallback but is scheduled for removal (see issue #120).
+`local_ci.py` remains in the repo as a legacy fallback but is scheduled for removal.
 
 #### GitHub Actions
 

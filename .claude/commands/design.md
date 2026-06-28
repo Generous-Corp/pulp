@@ -16,4 +16,6 @@ Workflow:
 
 For headless/automated design iteration, use `pulp design-debug` which captures before/after screenshots and diffs.
 
-Design tokens export to JSON, CSS variables, C++ headers, GPU shader uniforms, and OKLCH color systems via `pulp export-tokens`.
+Design tokens export to W3C Design Tokens JSON or CSS custom properties via
+`pulp export-tokens`. Tailwind token variants are generated only through the
+designmd import path today.

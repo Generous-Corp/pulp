@@ -34,7 +34,7 @@ The Figma import is **semantic, not visual**. A Pulp library component — "Pulp
 
 Describe a look in natural language — "80s Macintosh", "neon cyberpunk", "minimal Dieter Rams" — and watch the entire interface transform. The design system is structured data, not compiled C++, so any AI tool that can read JSON can modify your theme.
 
-Tokens export to JSON, CSS variables, C++ headers, GPU shader uniforms, and OKLCH color systems.
+Tokens export to W3C Design Tokens JSON or CSS custom properties.
 
 ### Start from conversation
 
