@@ -567,8 +567,13 @@ platform_maturity:
     platform: macos
     notes: Full NSTextInputClient — setMarkedText, unmarkText, firstRectForCharacterRange for candidate window positioning.
   context_menu:
-    status: usable
-    notes: on_context_menu callback on View, rightMouseDown dispatch, showContextMenu/registerContextMenu bridge.
+    status: partial
+    notes: >-
+      on_context_menu callback, rightMouseDown dispatch, and view-tree
+      ContextMenu actions are usable. registerContextMenu dispatches coordinates
+      to JS; showContextMenu delegates to platform PopupMenu but current in-tree
+      backends return -1/no selection because native item selection is not wired
+      through the bridge yet.
   keyboard_shortcuts:
     status: usable
     notes: registerShortcut bridge function, shortcuts checked before global key dispatch.

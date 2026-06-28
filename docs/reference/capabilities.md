@@ -296,7 +296,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | UIA accessibility | partial | Windows | Role map only; provider pending (production-readiness 04) |
 | AT-SPI accessibility | partial | Linux | Role map only; D-Bus registration pending (production-readiness 04) |
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
-| Right-click context menu | usable | macOS | on_context_menu + PopupMenu |
+| Right-click context menu | partial | all | on_context_menu/registerContextMenu fire; view-tree ContextMenu is actionable; native showContextMenu currently renders only on macOS and does not report selection |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
 | File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
 | Drag and drop | usable | macOS | File + text drop targets |
