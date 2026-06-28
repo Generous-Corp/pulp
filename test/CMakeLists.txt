@@ -181,6 +181,17 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
+# PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
+# option. ON must produce a clear configure warning rather than silently doing
+# nothing or implying Swift is globally enabled.
+if(UNIX)
+    add_test(NAME cmake-swift-option-reserved
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_swift_option_reserved.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-swift-option-reserved PROPERTIES
+        LABELS "cmake;swift;config;slow"
+        TIMEOUT 600)
+endif()
 # retry_git_clone unit test: a partial clone target is
 # scrubbed between retries so attempt 2+ re-runs the fetch. Same UNIX block runs
 # the ensure_signing_ready.sh doctor test (PATH-shims security/xcrun, hermetic).
@@ -4687,11 +4698,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D compatibility cheap-wiring surface.
-# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
-# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
-# dedicated-command routing — five partial → supported
-# compat.json entries.
+# Widget bridge — recovered Canvas2D/CSS compatibility regressions.
+# The canonical Wave 2 Canvas2D cheap-wiring surface is in
+# pulp-test-widget-bridge-wave2-cheap below; this older split keeps
+# recovered CSS cases and later Canvas2D bridge regressions.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga

@@ -21,12 +21,15 @@
 #include <choc/platform/choc_FileWatcher.h>
 #endif
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
-#include <atomic>
+#include <string_view>
 #include <unordered_map>
 
 namespace pulp::view {
@@ -69,7 +72,7 @@ private:
 #if !TARGET_OS_IPHONE
     std::unique_ptr<choc::file::Watcher> watcher_;
 #endif
-    std::unordered_map<std::string, std::filesystem::file_time_type> observed_write_times_;
+    std::unordered_map<std::string, std::uint64_t> observed_content_hashes_;
 
     std::mutex pending_mutex_;
     std::string pending_code_;
@@ -79,9 +82,11 @@ private:
 #if !TARGET_OS_IPHONE
     void on_file_changed(const choc::file::Watcher::Event& event);
 #endif
+    std::optional<std::string> try_read_file(const std::filesystem::path& path);
     std::string read_file(const std::filesystem::path& path);
-    void seed_observed_write_times();
+    void seed_observed_content_hashes();
     bool should_reload_for_modified_file(const std::filesystem::path& path);
+    static std::uint64_t content_hash(std::string_view content);
 };
 
 } // namespace pulp::view

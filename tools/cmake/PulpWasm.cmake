@@ -11,7 +11,7 @@
 # This module:
 #   - Detects Emscripten and sets PULP_WASM=ON
 #   - Configures appropriate compile/link flags
-#   - Adds Web Audio API and Web MIDI API integration
+#   - Adds Web Audio API integration; Web MIDI remains scaffolded but not wired here yet
 #   - Enables WebGPU when available in the browser
 #   - Creates .html/.js/.wasm output for each standalone target
 

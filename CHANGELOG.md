@@ -8,6 +8,55 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05290"></a>
+## [0.529.0] - 2026-06-28
+
+- feat(format): MIDI sub-block split iterator for sample-accurate event handling ([#5235](https://github.com/danielraffel/pulp/pull/5235))
+- docs(cli): clarify dev watch fallback ([#5227](https://github.com/danielraffel/pulp/pull/5227))
+- fix(sampler): bar-exact loop tempo with host-prior octave resolution ([#5143](https://github.com/danielraffel/pulp/pull/5143))
+
+<a id="v05282"></a>
+## [0.528.2] - 2026-06-28
+
+- docs(cli): align coverage diff guidance ([#5095](https://github.com/danielraffel/pulp/pull/5095))
+- chore(cli): align loop focus marker contract ([#5073](https://github.com/danielraffel/pulp/pull/5073))
+- chore(cmake): clarify plugin MIDI option contract ([#5092](https://github.com/danielraffel/pulp/pull/5092))
+- build(cmake): warn on reserved Swift option ([#5150](https://github.com/danielraffel/pulp/pull/5150))
+- docs(platform): clarify file dialog backend status ([#5147](https://github.com/danielraffel/pulp/pull/5147))
+- docs(events): clarify IAP scaffold scope ([#5133](https://github.com/danielraffel/pulp/pull/5133))
+- docs(midi): clarify Web MIDI scaffold status ([#5116](https://github.com/danielraffel/pulp/pull/5116))
+- docs(cmake): expose app icon helper in status manifest ([#5110](https://github.com/danielraffel/pulp/pull/5110))
+- docs(web): clarify WAM and WCLAP helper status ([#5104](https://github.com/danielraffel/pulp/pull/5104))
+- docs(cli): clean docs command source comment ([#5076](https://github.com/danielraffel/pulp/pull/5076))
+- docs: align token export format guidance ([#5148](https://github.com/danielraffel/pulp/pull/5148))
+- test(harness): sync compat aggregate parts ([#5084](https://github.com/danielraffel/pulp/pull/5084))
+- docs(examples): align offline stretch defaults ([#5117](https://github.com/danielraffel/pulp/pull/5117))
+- docs(events): clarify Windows notification scaffold ([#5130](https://github.com/danielraffel/pulp/pull/5130))
+- docs(motion): clarify record out fixture hint ([#5145](https://github.com/danielraffel/pulp/pull/5145))
+- ci: keep workflow_dispatch builds example-free ([#5184](https://github.com/danielraffel/pulp/pull/5184))
+- test(format): make rolling WAV env test portable ([#5186](https://github.com/danielraffel/pulp/pull/5186))
+- fix(cli): align scan inventory docs ([#5192](https://github.com/danielraffel/pulp/pull/5192))
+- test(cli): make Rust parity tests hermetic ([#5200](https://github.com/danielraffel/pulp/pull/5200))
+- docs(view): align accessibility status evidence ([#5209](https://github.com/danielraffel/pulp/pull/5209))
+- test(canvas): add Linux font golden baselines ([#5210](https://github.com/danielraffel/pulp/pull/5210))
+
+<a id="v05281"></a>
+## [0.528.1] - 2026-06-28
+
+- fix(cli): find delegated helpers in multi-config builds ([#5211](https://github.com/danielraffel/pulp/pull/5211))
+- docs(canvas): align drawImage status with Skia path ([#5096](https://github.com/danielraffel/pulp/pull/5096))
+- docs(examples): document ui-preview benchmark mode ([#5118](https://github.com/danielraffel/pulp/pull/5118))
+- docs(view): align ImageView decode status ([#5119](https://github.com/danielraffel/pulp/pull/5119))
+- docs(ci): align desktop automation examples ([#5120](https://github.com/danielraffel/pulp/pull/5120))
+- docs(import): align import-design source status ([#5129](https://github.com/danielraffel/pulp/pull/5129))
+- docs(ship): align capabilities packaging status ([#5139](https://github.com/danielraffel/pulp/pull/5139))
+- docs(windows): correct WASAPI capture status ([#5140](https://github.com/danielraffel/pulp/pull/5140))
+- docs(claude): clarify plugin guide examples ([#5141](https://github.com/danielraffel/pulp/pull/5141))
+- docs(format): align ProcessBuffers multi-bus status ([#5194](https://github.com/danielraffel/pulp/pull/5194))
+- docs(view): correct table widget status ([#5203](https://github.com/danielraffel/pulp/pull/5203))
+- docs(audio): align JACK status ([#5207](https://github.com/danielraffel/pulp/pull/5207))
+- docs(aax): clarify create scaffold gating ([#5208](https://github.com/danielraffel/pulp/pull/5208))
+
 <a id="v05280"></a>
 ## [0.528.0] - 2026-06-28
 
@@ -5491,6 +5540,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.529.0]: https://github.com/danielraffel/pulp/releases/tag/v0.529.0
+[0.528.2]: https://github.com/danielraffel/pulp/releases/tag/v0.528.2
+[0.528.1]: https://github.com/danielraffel/pulp/releases/tag/v0.528.1
 [0.528.0]: https://github.com/danielraffel/pulp/releases/tag/v0.528.0
 [0.527.0]: https://github.com/danielraffel/pulp/releases/tag/v0.527.0
 [0.526.0]: https://github.com/danielraffel/pulp/releases/tag/v0.526.0

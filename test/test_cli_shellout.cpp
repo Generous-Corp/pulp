@@ -722,7 +722,7 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     auto get_mode = run_pulp({"config", "get", "update.mode"}, 10000);
     REQUIRE_FALSE(get_mode.timed_out);
     REQUIRE(get_mode.exit_code == 0);
-    REQUIRE(get_mode.stdout_output == "manual\n");
+    REQUIRE(normalize_newlines(get_mode.stdout_output) == "manual\n");
 
     auto set_channel = run_pulp({"config", "set", "update.channel", "beta"}, 10000);
     REQUIRE_FALSE(set_channel.timed_out);

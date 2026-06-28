@@ -29,7 +29,7 @@ If the script fails:
 
 - Read `/tmp/diff-cover.html` (printed at the end) for the per-file uncovered-line breakdown.
 - Add a test that exercises the new lines, or refactor to remove the dead branch.
-- The pre-push hook also runs this check advisory-by-default; `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` upgrades it to a hard block.
+- The pre-push hook enforces this check by default when relevant code changed; `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes only diff-cover to advisory.
 
 If the script can't run because `diff-cover` isn't installed:
 

@@ -5,10 +5,10 @@
 //   * Singleton returns a usable backend whose `backend_id()` matches
 //     one of the documented identifiers.
 //   * The default stub returns false from `is_available()` on builds
-//     without a real backend, and every operation reports `Unavailable`
+//     without a host backend, and every operation reports `Unavailable`
 //     synchronously without charging.
 //   * A test-double backend installed through the same registration
-//     hook real backends use can intercept product lookups, purchases,
+//     hook host backends use can intercept product lookups, purchases,
 //     restore, observer notification, and finish_transaction end-to-end.
 
 #include <pulp/events/in_app_purchase.hpp>
@@ -25,7 +25,7 @@
 
 namespace pulp::events {
 // Defined in src/in_app_purchase.cpp — exposed here so tests can install
-// a mock backend in place of the stub / real platform backend.
+// a mock backend in place of the built-in stub.
 void install_iap_backend(std::unique_ptr<IapClient>);
 } // namespace pulp::events
 
@@ -157,12 +157,11 @@ TEST_CASE("IapClient singleton is always available", "[in-app-purchase]") {
     auto& iap = IapClient::instance();
     REQUIRE_FALSE(iap.backend_id().empty());
 
-    // Documented backend identifiers — keep this list synced with the
-    // header comment in in_app_purchase.hpp.
+    // Built-in/test backend identifiers — keep this list synced with the
+    // current repo-provided backends. Host-specific billing backends should
+    // update this smoke test when they become part of Pulp.
     const std::vector<std::string> known = {
         "none",
-        "storekit2",
-        "winrt-store",
         "test-mock",
     };
     bool matched = false;
@@ -181,10 +180,10 @@ TEST_CASE("IapClient stub backend reports unavailable", "[in-app-purchase]") {
 
     auto& iap = IapClient::instance();
     if (iap.backend_id() != "none") {
-        // Real platform backend got installed via static initializer —
-        // skip the stub-specific assertions. The mock-backend case below
-        // still covers the API contract end-to-end.
-        SUCCEED("Platform backend installed; stub path not exercised here.");
+        // A host/test backend got installed via static initializer — skip the
+        // stub-specific assertions. The mock-backend case below still covers
+        // the API contract end-to-end.
+        SUCCEED("Non-stub backend installed; stub path not exercised here.");
         return;
     }
 
