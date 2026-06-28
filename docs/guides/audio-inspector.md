@@ -21,7 +21,7 @@ question you're asking:
 |---|---|---|---|
 | **Audio Inspector** | A floating **developer** window in the standalone host (this guide). | Pulp's *own* running plugin/standalone, at the output-boundary probe. | No — time-domain levels/counters/waveform only. |
 | **Audio Scope** | A **mode of the Audio Inspector** (see "Signal mode vs Scope mode" below), not a separate tool. | Same probe as the Inspector. | No — triggered, measurable time-domain trace. |
-| **Spectrum Analyzer** | A **shippable FX example plugin** (clean-room, MIT, maintained in its own repository) with a GPU spectrogram and a cross-instance before/after spectral **diff**. | *Any* signal in a host chain, including third-party plugins — not limited to Pulp's own plugins. | Yes — FFT-based spectrum, computed off the audio callback. |
+| **Spectrum Analyzer** | A **shippable FX example plugin** (clean-room, MIT, in its own repo: [pulp-spectrum-analyzer](https://github.com/danielraffel/pulp-spectrum-analyzer)) with a GPU spectrogram and a cross-instance before/after spectral **diff**. | *Any* signal in a host chain, including third-party plugins — not limited to Pulp's own plugins. | Yes — FFT-based spectrum, computed off the audio callback. |
 
 The Audio Inspector is deliberately a time-domain developer diagnostic and does
 **not** do frequency-domain analysis; the Spectrum Analyzer example is the
