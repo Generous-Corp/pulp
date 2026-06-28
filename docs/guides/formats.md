@@ -300,19 +300,37 @@ Instruments have zero audio inputs and one audio output. MIDI is received via `H
 
 ### Parameter Sync
 
-**Host to plugin (effects):** Each buffer, `ProcessBufferLists()` reads every parameter from the AU system via `GetParameter()` and writes to `StateStore::set_value()`. This brute-force sync is acceptable for typical parameter counts (< 50).
+**Host to plugin (effects and instruments):** `GetParameter()` and
+`SetParameter()` are backed directly by the plugin `StateStore`, so AU host
+automation playback, generic AU host UI edits, and preset recall all land in
+the same store that `Processor::process()` reads. There is no per-buffer
+`Globals()`-to-`StateStore` reconcile path. Initial AU parameter defaults are
+seeded from the `StateStore` during construction so hosts can inspect them
+before initialization.
 
-**Host to plugin (instruments):** `Render()` reads parameters via `Globals()->GetParameterRT()`.
+**Editor/UI to host:** Editor/UI edits write the `StateStore` and the adapter's
+inline store listener notifies the AU host with
+`kAudioUnitEvent_ParameterValueChange`, guarded so host-originated
+`SetParameter()` calls do not echo back into the host. This lets AU hosts
+re-read via `GetParameter()` and record UI automation without calling
+`AudioUnitSetParameter()` on the render path.
 
 **Parameter event model:** AU v2 exposes current parameter values through the
 AU parameter store rather than a render-event list. The effect adapter attaches
-an empty `ParameterEventQueue` before `Processor::process()` so plugins see the
-same non-null queue contract as other adapters, but AU v2 parameter changes are
-block-rate `StateStore` values today.
+an empty `ParameterEventQueue` before `Processor::process()` so AU v2 effects
+see the same non-null queue contract as other adapters. The instrument adapter
+reads host parameters through the `StateStore` and does not expose a separate
+AU v2 parameter-event sidecar. AU v2 parameter changes are block-rate
+`StateStore` values today.
 
-**Plugin to host:** Parameter output changes are not yet emitted back to the AU host. Initial defaults are set via `Globals()->SetParameter()` during `Initialize()`.
+**Render-thread plugin output to host:** Parameter output changes made during
+`Processor::process()` are not emitted back to the AU host. The render thread
+neither pulls, pushes, nor notifies AU host parameters.
 
-**Gesture callbacks (effects):** The adapter wires `StateStore` gesture callbacks to `AUEventListenerNotify()` with `kAudioUnitEvent_BeginParameterChangeGesture` and `kAudioUnitEvent_EndParameterChangeGesture` event types.
+**Gesture callbacks:** The effect and instrument adapters wire `StateStore`
+gesture callbacks to `AUEventListenerNotify()` with
+`kAudioUnitEvent_BeginParameterChangeGesture` and
+`kAudioUnitEvent_EndParameterChangeGesture` event types.
 
 ### AU Parameter Units
 
@@ -778,7 +796,8 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
 | State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
 | Multi-bus declared | Yes | Yes | No | Main input + sidechain input |
-| Plugin-side param output | Yes | Yes | Not yet | Yes |
+| Editor/UI param write-back | Yes | Yes | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
+| Render-thread param output | Yes | Yes | Not yet | Yes |
 | Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
 | Tail reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
 | Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist | Bundle identifier |
