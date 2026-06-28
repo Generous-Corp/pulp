@@ -2,6 +2,7 @@
 #include <pulp/events/message_loop_integration.hpp>
 
 #include <atomic>
+#include <string>
 
 using namespace pulp::events;
 
@@ -139,11 +140,19 @@ TEST_CASE("MessageLoopIntegration kind tag override and revert transitions",
 
 TEST_CASE("MessageLoopIntegration register_kind with token=0 is a no-op",
           "[events][message-loop-integration]") {
+    const auto before_kind = MessageLoopIntegration::active_kind();
+    const auto before_name = std::string(MessageLoopIntegration::active_name());
+    const bool before_available = MessageLoopIntegration::available();
+
     MessageLoopIntegration::register_kind(0, MainLoopKind::Cocoa);
+    REQUIRE(MessageLoopIntegration::active_kind() == before_kind);
+    REQUIRE(MessageLoopIntegration::active_name() == before_name);
+    REQUIRE(MessageLoopIntegration::available() == before_available);
+
     MessageLoopIntegration::unregister_kind(0);
-    // No crash, no assertion — just that calling with the sentinel
-    // zero token is safe.
-    SUCCEED();
+    REQUIRE(MessageLoopIntegration::active_kind() == before_kind);
+    REQUIRE(MessageLoopIntegration::active_name() == before_name);
+    REQUIRE(MessageLoopIntegration::available() == before_available);
 }
 
 TEST_CASE("MessageLoopIntegration call_sync forwards return value",
