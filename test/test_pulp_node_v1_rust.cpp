@@ -34,6 +34,7 @@ TEST_CASE("pulp_node_v1: a Rust node loads through the same contract as C",
     REQUIRE(std::string_view(d->stable_id, d->stable_id_len) ==
             "pulp.test.node.rust-gain");
     REQUIRE((d->capability_flags & PULP_NODE_CAP_STATE_V1) != 0);
+    REQUIRE((d->capability_flags & PULP_NODE_CAP_RESET_V1) != 0);
 
     pulp_node_host_services_v1 host{};
     host.size = sizeof(host);
@@ -88,7 +89,13 @@ TEST_CASE("pulp_node_v1: a Rust node loads through the same contract as C",
     REQUIRE(e->load_state(inst, bad, sizeof(bad)) ==
             PULP_NODE_ERR_MALFORMED_STATE_V1);
 
+    e->reset(inst);
+    g_written.clear();
+    REQUIRE(e->save_state(inst, &writer) == PULP_NODE_OK_V1);
+    REQUIRE(g_written.size() == sizeof(float));
+    std::memcpy(&saved, g_written.data(), sizeof(float));
+    REQUIRE(saved == 1.0f);
+
     e->release(inst);
     e->destroy(inst);
-    SUCCEED("Rust node completed the lifecycle");
 }
