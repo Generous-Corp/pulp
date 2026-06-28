@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-permissions-skip-report.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-inline-babel-skip-report.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 313,
+    "succeed": 311,
     "require_true": 16,
-    "skip": 497
+    "skip": 499
   },
   "classifications": {
-    "needs-review": 773,
+    "needs-review": 775,
     "placeholder": 4,
-    "skip-as-pass": 33,
+    "skip-as-pass": 31,
     "unconditional-true": 16
   },
   "notes": [

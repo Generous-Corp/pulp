@@ -542,12 +542,12 @@ TEST_CASE("real Spectr Claude bundle materialises widgets when "
           "[view][import][issue-758][.fixture]") {
     const char* fixture = std::getenv("PULP_CLAUDE_BUNDLE_FIXTURE");
     if (!fixture || !*fixture) {
-        SUCCEED("PULP_CLAUDE_BUNDLE_FIXTURE not set — skipping real-bundle test");
+        SKIP("PULP_CLAUDE_BUNDLE_FIXTURE not set; real-bundle test cannot run");
         return;
     }
     std::ifstream f(fixture);
     if (!f.is_open()) {
-        SUCCEED(std::string("fixture not readable, skipping: ") + fixture);
+        SKIP(std::string("fixture not readable; real-bundle test cannot run: ") + fixture);
         return;
     }
     std::ostringstream ss;
