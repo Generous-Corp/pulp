@@ -26,9 +26,12 @@ live-stream ingest, and frame-level video effects are not in scope.
 
 ### In-app purchases, marketplace, product unlocking
 
-Pulp does not provide a built-in IAP / product-key / marketplace
-layer. Plugin developers who sell commercial products handle license
-validation through their own stack.
+Pulp does not provide a production IAP / product-key / marketplace
+layer. The `pulp::events::IapClient` API is only a host-overridable
+stub and mock seam: Pulp's built-in backend reports `Unavailable`
+everywhere and never performs a purchase. Plugin developers who sell
+commercial products handle billing and license validation through their
+own stack.
 
 - **Why:** App-store IAP and license-server integration are
   business-domain decisions (receipt format, fraud detection, refund

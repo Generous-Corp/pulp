@@ -25,7 +25,11 @@
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioUnit.h>
 
+#include <array>
+#include <atomic>
 #include <cstdint>
+#include <thread>
+#include <vector>
 
 using namespace pulp;
 using pulp::format::au::decode_midi_event;
@@ -455,4 +459,329 @@ TEST_CASE("AU v2 render context is explicit realtime for effects and instruments
     REQUIRE_FALSE(ctx.is_offline());
     REQUIRE_FALSE(ctx.allows_offline_quality_work());
     REQUIRE_FALSE(ctx.is_maintenance_render());
+}
+
+// ── Channel-config negotiation (kAudioUnitProperty_SupportedNumChannels) ─────
+//
+// build_channel_info derives the AUChannelInfo table a host (and auval) reads to
+// discover which (input, output) channel-count pairs the plugin handles. Pure
+// over the descriptor, so it is unit-testable without an AudioComponentInstance.
+TEST_CASE("AU v2 channel info: stereo effect reports mono+stereo matched pairs",
+          "[au][au-v2][channels]")
+{
+    pulp::format::PluginDescriptor desc;  // default = stereo in / stereo out
+    AUChannelInfo info[pulp::format::au::kMaxChannelInfoPairs];
+    const UInt32 n = pulp::format::au::build_channel_info(desc, info);
+
+    REQUIRE(n == 2);
+    // {1,1} then {2,2}: an effect supports its declared width and the narrower
+    // mono flex, always matching in==out.
+    REQUIRE(info[0].inChannels == 1);
+    REQUIRE(info[0].outChannels == 1);
+    REQUIRE(info[1].inChannels == 2);
+    REQUIRE(info[1].outChannels == 2);
+}
+
+TEST_CASE("AU v2 channel info: mono effect reports only the mono pair",
+          "[au][au-v2][channels]")
+{
+    pulp::format::PluginDescriptor desc;
+    desc.input_buses = {{"Main In", 1, false}};
+    desc.output_buses = {{"Main Out", 1, false}};
+    AUChannelInfo info[pulp::format::au::kMaxChannelInfoPairs];
+    const UInt32 n = pulp::format::au::build_channel_info(desc, info);
+
+    REQUIRE(n == 1);
+    REQUIRE(info[0].inChannels == 1);
+    REQUIRE(info[0].outChannels == 1);
+}
+
+TEST_CASE("AU v2 channel info: instrument (0 inputs) reports 0-in / N-out pairs",
+          "[au][au-v2][channels]")
+{
+    pulp::format::PluginDescriptor desc;
+    desc.category = pulp::format::PluginCategory::Instrument;
+    desc.input_buses = {};                               // no audio input
+    desc.output_buses = {{"Main Out", 2, false}};        // stereo synth
+    AUChannelInfo info[pulp::format::au::kMaxChannelInfoPairs];
+    const UInt32 n = pulp::format::au::build_channel_info(desc, info);
+
+    REQUIRE(n == 2);
+    // {0,1} then {0,2}: zero inputs, mono and stereo output widths.
+    REQUIRE(info[0].inChannels == 0);
+    REQUIRE(info[0].outChannels == 1);
+    REQUIRE(info[1].inChannels == 0);
+    REQUIRE(info[1].outChannels == 2);
+}
+
+TEST_CASE("AU v2 channel info: never exceeds the declared output width",
+          "[au][au-v2][channels]")
+{
+    // A degenerate over-wide declaration clamps into the supported {1,2} flex.
+    pulp::format::PluginDescriptor desc;
+    desc.input_buses = {{"Main In", 7, false}};
+    desc.output_buses = {{"Main Out", 7, false}};
+    AUChannelInfo info[pulp::format::au::kMaxChannelInfoPairs];
+    const UInt32 n = pulp::format::au::build_channel_info(desc, info);
+    REQUIRE(n == 2);
+    REQUIRE(info[1].inChannels == 2);
+    REQUIRE(info[1].outChannels == 2);
+}
+
+TEST_CASE("AU v2 channel info: asymmetric mono-in / stereo-out reports the exact pair",
+          "[au][au-v2][channels]")
+{
+    // A widener (1 in, 2 out) must NOT be hidden behind a matched {1,1}/{2,2}
+    // ladder — the host has to see the real asymmetric capability.
+    pulp::format::PluginDescriptor desc;
+    desc.input_buses = {{"Main In", 1, false}};
+    desc.output_buses = {{"Main Out", 2, false}};
+    AUChannelInfo info[pulp::format::au::kMaxChannelInfoPairs];
+    const UInt32 n = pulp::format::au::build_channel_info(desc, info);
+
+    REQUIRE(n == 1);
+    REQUIRE(info[0].inChannels == 1);
+    REQUIRE(info[0].outChannels == 2);
+}
+
+// ── MIDI output (kAudioUnitProperty_MIDIOutputCallback) ──────────────────────
+//
+// The render path packs the Processor's output MidiBuffer into a MIDIPacketList
+// (built into pre-reserved storage — no audio-thread allocation) and hands it to
+// the host callback. MidiOutputPacketBuilder is the delivery buffer; testing it
+// directly exercises the exact bytes + sample offsets a host callback receives,
+// without an AudioComponentInstance / live AU host. We then drive the builder
+// through the host-callback signature to prove the full delivery contract.
+namespace {
+// Capture struct that mimics a host installing kAudioUnitProperty_MIDIOutputCallback.
+struct CapturedMidi {
+    uint8_t status = 0, d1 = 0, d2 = 0, length = 0;
+    MIDITimeStamp time = 0;
+    int packets = 0;
+};
+}  // namespace
+
+TEST_CASE("AU v2 MIDI out: builder packs a short message with its sample offset",
+          "[au][au-v2][midi-out]")
+{
+    pulp::midi::MidiBuffer midi_out;
+    auto cc = pulp::midi::MidiEvent::cc(/*channel=*/2, /*controller=*/74,
+                                        /*value=*/100);
+    cc.sample_offset = 64;
+    midi_out.add(cc);
+
+    pulp::format::au::MidiOutputPacketBuilder builder;
+    const MIDIPacketList* list = builder.build(midi_out, /*frame_count=*/256);
+
+    REQUIRE(list != nullptr);
+    REQUIRE(list->numPackets == 1);
+    const MIDIPacket* pkt = &list->packet[0];
+    REQUIRE(pkt->length == 3);
+    REQUIRE(pkt->data[0] == 0xB2);   // CC on channel 2
+    REQUIRE(pkt->data[1] == 74);
+    REQUIRE(pkt->data[2] == 100);
+    // The packet timestamp carries the event's in-block sample offset.
+    REQUIRE(pkt->timeStamp == 64);
+    REQUIRE(builder.dropped == 0);
+}
+
+TEST_CASE("AU v2 MIDI out: empty buffer yields no packet list (callback skipped)",
+          "[au][au-v2][midi-out]")
+{
+    pulp::midi::MidiBuffer midi_out;  // nothing emitted
+    pulp::format::au::MidiOutputPacketBuilder builder;
+    REQUIRE(builder.build(midi_out, /*frame_count=*/256) == nullptr);
+}
+
+TEST_CASE("AU v2 MIDI out: multiple events deliver in order to the host callback",
+          "[au][au-v2][midi-out]")
+{
+    pulp::midi::MidiBuffer midi_out;
+    auto n_on = pulp::midi::MidiEvent::note_on(/*channel=*/0, /*note=*/60,
+                                               /*velocity=*/127);
+    n_on.sample_offset = 0;
+    auto n_off = pulp::midi::MidiEvent::note_off(/*channel=*/0, /*note=*/60,
+                                                 /*velocity=*/0);
+    n_off.sample_offset = 128;
+    midi_out.add(n_on);
+    midi_out.add(n_off);
+
+    pulp::format::au::MidiOutputPacketBuilder builder;
+    const MIDIPacketList* list = builder.build(midi_out, /*frame_count=*/256);
+    REQUIRE(list != nullptr);
+    REQUIRE(list->numPackets == 2);
+
+    // Drive the documented host-callback signature, exactly as the render path
+    // does, and confirm the host sees both events with correct bytes + offsets.
+    std::vector<CapturedMidi> received;
+    AUMIDIOutputCallback cb = [](void* userData, const AudioTimeStamp* /*ts*/,
+                                 UInt32 midiOutNum,
+                                 const MIDIPacketList* pl) -> OSStatus {
+        REQUIRE(midiOutNum == 0);
+        auto* out = static_cast<std::vector<CapturedMidi>*>(userData);
+        const MIDIPacket* p = &pl->packet[0];
+        for (UInt32 i = 0; i < pl->numPackets; ++i) {
+            CapturedMidi c;
+            c.length = p->length;
+            c.status = p->data[0];
+            c.d1 = p->length > 1 ? p->data[1] : 0;
+            c.d2 = p->length > 2 ? p->data[2] : 0;
+            c.time = p->timeStamp;
+            out->push_back(c);
+            p = MIDIPacketNext(p);
+        }
+        return noErr;
+    };
+    AudioTimeStamp render_time{};
+    render_time.mSampleTime = 0;
+    cb(&received, &render_time, /*midiOutNum=*/0, list);
+
+    REQUIRE(received.size() == 2);
+    REQUIRE(received[0].status == 0x90);   // note on, channel 0
+    REQUIRE(received[0].d1 == 60);
+    REQUIRE(received[0].d2 == 127);
+    REQUIRE(received[0].time == 0);
+    REQUIRE(received[1].status == 0x80);   // note off, channel 0
+    REQUIRE(received[1].d1 == 60);
+    REQUIRE(received[1].time == 128);
+}
+
+// Plain audio effects (no produces_midi) must NOT advertise a MIDI output, so
+// the builder only ever runs for declared MIDI producers. This guards the
+// descriptor gate that plugin_produces_midi() reads in the adapter.
+TEST_CASE("AU v2 MIDI out: produces_midi flag gates the output surface",
+          "[au][au-v2][midi-out]")
+{
+    pulp::format::PluginDescriptor effect;          // default effect
+    REQUIRE_FALSE(effect.produces_midi);
+
+    pulp::format::PluginDescriptor midi_fx;
+    midi_fx.category = pulp::format::PluginCategory::MidiEffect;
+    midi_fx.accepts_midi = true;
+    midi_fx.produces_midi = true;
+    REQUIRE(midi_fx.produces_midi);
+}
+
+TEST_CASE("AU v2 MIDI out: interleaved short + SysEx deliver in ascending offset order",
+          "[au][au-v2][midi-out]")
+{
+    // SysEx@0 must be delivered BEFORE a note@64 even though the two live in
+    // separate sidecars — CoreMIDI packet lists are expected time-ordered, and
+    // the host plays them back in list order.
+    pulp::midi::MidiBuffer midi_out;
+    auto note = pulp::midi::MidiEvent::note_on(/*channel=*/0, /*note=*/60,
+                                               /*velocity=*/100);
+    note.sample_offset = 64;
+    midi_out.add(note);
+    const std::vector<uint8_t> id_request{0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7};
+    midi_out.add_sysex(id_request, /*sample_offset=*/0);
+
+    pulp::format::au::MidiOutputPacketBuilder builder;
+    const MIDIPacketList* list = builder.build(midi_out, /*frame_count=*/256);
+    REQUIRE(list != nullptr);
+    REQUIRE(list->numPackets == 2);
+
+    // Walk the list and confirm ascending packet timestamps with the SysEx first.
+    const MIDIPacket* p0 = &list->packet[0];
+    REQUIRE(p0->timeStamp == 0);
+    REQUIRE(p0->data[0] == 0xF0);          // SysEx start at offset 0
+    const MIDIPacket* p1 = MIDIPacketNext(p0);
+    REQUIRE(p1->timeStamp == 64);
+    REQUIRE(p1->data[0] == 0x90);          // note-on at offset 64
+    REQUIRE(builder.dropped == 0);
+}
+
+TEST_CASE("AU v2 MIDI out: offsets are clamped into the current block",
+          "[au][au-v2][midi-out]")
+{
+    pulp::midi::MidiBuffer midi_out;
+    auto early = pulp::midi::MidiEvent::cc(0, 7, 10);
+    early.sample_offset = -5;              // stray negative
+    auto late = pulp::midi::MidiEvent::cc(0, 7, 20);
+    late.sample_offset = 9999;             // past the block
+    midi_out.add(early);
+    midi_out.add(late);
+
+    pulp::format::au::MidiOutputPacketBuilder builder;
+    const MIDIPacketList* list = builder.build(midi_out, /*frame_count=*/128);
+    REQUIRE(list != nullptr);
+    REQUIRE(list->numPackets == 2);
+    // Negative clamps to 0; over-block clamps to frame_count - 1 = 127.
+    const MIDIPacket* p0 = &list->packet[0];
+    REQUIRE(p0->timeStamp == 0);
+    const MIDIPacket* p1 = MIDIPacketNext(p0);
+    REQUIRE(p1->timeStamp == 127);
+}
+
+// Atomic snapshot of the (callback, userData) pair. The pair is written on the
+// main thread (SetProperty) and read on the render thread, so a torn read could
+// pair a fresh callback with a stale userData. Hammer the publish/consume cycle
+// from two threads and assert every observed pair is internally consistent —
+// the consumer must never see callback_A with userData_B.
+TEST_CASE("AU v2 MIDI out: callback pair publishes atomically (no torn pair)",
+          "[au][au-v2][midi-out][realtime]")
+{
+    // Two distinct (callback, userData) identities; the consumer asserts the
+    // observed pair always matches one of them as a whole, never a cross.
+    struct Pair {
+        AUMIDIOutputCallback cb;
+        void* ud;
+    };
+    static int marker_a = 1, marker_b = 2;
+    AUMIDIOutputCallback cb_a = [](void*, const AudioTimeStamp*, UInt32,
+                                   const MIDIPacketList*) -> OSStatus {
+        return noErr;
+    };
+    AUMIDIOutputCallback cb_b = [](void*, const AudioTimeStamp*, UInt32,
+                                   const MIDIPacketList*) -> OSStatus {
+        return 1;
+    };
+    const Pair pair_a{cb_a, &marker_a};
+    const Pair pair_b{cb_b, &marker_b};
+
+    // Mirror the adapter's double-buffer publish exactly.
+    std::array<Pair, 2> slots{};
+    std::atomic<std::uint8_t> write_slot{0};
+    std::atomic<const Pair*> published{nullptr};
+
+    auto publish = [&](const Pair& p) {
+        const std::uint8_t s = write_slot.load(std::memory_order_relaxed);
+        slots[s] = p;
+        published.store(&slots[s], std::memory_order_release);
+        write_slot.store(s ^ 1, std::memory_order_relaxed);
+    };
+    publish(pair_a);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> torn{false};
+    std::atomic<long> reads{0};
+
+    std::thread reader([&] {
+        while (!stop.load(std::memory_order_relaxed)) {
+            const Pair* p = published.load(std::memory_order_acquire);
+            if (!p) continue;
+            // Snapshot the fields, then verify they form one of the two known
+            // whole pairs. A torn publish would surface as a cross here.
+            AUMIDIOutputCallback c = p->cb;
+            void* u = p->ud;
+            const bool ok =
+                (c == cb_a && u == &marker_a) || (c == cb_b && u == &marker_b);
+            if (!ok) torn.store(true, std::memory_order_relaxed);
+            reads.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    std::thread writer([&] {
+        for (int i = 0; i < 200000; ++i) publish((i & 1) ? pair_b : pair_a);
+    });
+
+    writer.join();
+    // Let the reader observe a bit more, then stop.
+    while (reads.load(std::memory_order_relaxed) < 1000 &&
+           !torn.load(std::memory_order_relaxed)) { /* spin briefly */ }
+    stop.store(true, std::memory_order_relaxed);
+    reader.join();
+
+    REQUIRE_FALSE(torn.load(std::memory_order_relaxed));
+    REQUIRE(reads.load(std::memory_order_relaxed) > 0);
 }

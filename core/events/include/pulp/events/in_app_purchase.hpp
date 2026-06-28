@@ -1,6 +1,11 @@
 #pragma once
 
-// pulp::events::IapClient — cross-platform in-app purchase surface.
+// pulp::events::IapClient — host-overridable in-app purchase seam.
+//
+// Pulp does not ship a production billing, marketplace, or entitlement
+// layer. This API gives hosts a small testable seam they can replace with
+// product-specific StoreKit / Microsoft Store / Play Billing code while the
+// built-in backend reports `Unavailable` everywhere.
 //
 // Supported operations:
 //   * Product lookup: `request_products(skus, callback)` resolves an SKU list
@@ -13,27 +18,21 @@
 //     whenever the backend resolves a purchase asynchronously (out-of-band
 //     transactions, subscription renewals, family-sharing grants).
 //
-// Not currently implemented by the built-in backends:
+// Not currently implemented by Pulp's built-in backend:
 //   * Real StoreKit2 wiring on Apple platforms (sandbox round-trip).
-//   * Microsoft Store SDK wiring on Windows (currently a runtime-dlopen
-//     scaffold that reports `Unavailable`).
+//   * Microsoft Store SDK / StoreContext wiring on Windows.
 //   * Google Play Billing on Android.
 //   * Server-side receipt validation helpers.
 //   * Subscription-specific surfaces (auto-renew status, grace periods,
 //     promotional offers).
 //
-// Backends (runtime-detected; build never hard-fails on a missing SDK):
-//   * macOS / iOS: `StoreKit` (StoreKit 2 when available, StoreKit 1 fallback).
-//     The built-in backend currently returns `Unavailable`; production
-//     StoreKit wiring stays host-owned so the framework remains MIT-clean and
-//     doesn't pull in any non-public Apple framework headers at configure
-//     time.
-//   * Linux: no IAP surface; `is_available()` returns false.
-//   * Windows: `Windows.Services.Store.StoreContext` via WinRT activation
-//     (runtime-LoadLibrary `combase.dll`). Scaffolded only — a real
-//     purchase flow requires MSIX packaging or a transient activator.
-//   * Other platforms / build configurations: `is_available()` returns
-//     false and every call reports `Unavailable` / empty result.
+// Built-in behavior:
+//   * All platforms default to the stub backend unless a host or test installs
+//     another `IapClient` with `install_iap_backend()`.
+//   * The stub returns `is_available() == false`, `backend_id() == "none"`,
+//     and every operation reports `Unavailable` / empty result.
+//   * Production billing stays host-owned so Pulp remains MIT-clean and avoids
+//     app-store-specific policy, packaging, and receipt-validation choices.
 
 #include <cstdint>
 #include <functional>
@@ -88,7 +87,7 @@ struct Purchase {
     std::string sku;            ///< Matches the SKU passed to `purchase()`.
     PurchaseState state = PurchaseState::Unknown;
     std::string transaction_id; ///< Backend-assigned transaction identifier.
-    std::string receipt;        ///< Opaque receipt bytes (StoreKit / WinRT / etc.).
+    std::string receipt;        ///< Opaque receipt bytes from a host backend, if any.
     std::string error;          ///< Empty unless `state == Failed`.
 };
 
@@ -100,10 +99,10 @@ using PurchaseObserver = std::function<void(const Purchase&)>;
 /// Cross-platform in-app purchase surface.
 ///
 /// Use the singleton via `IapClient::instance()`. The implementation is
-/// thread-safe: any thread may invoke any method, but callbacks are
-/// dispatched on a platform-defined thread (typically a StoreKit /
-/// WinRT delegate queue) — callers must hop back to their own UI
-/// thread if the callback touches view state.
+/// thread-safe: any thread may invoke any method. The built-in stub invokes
+/// callbacks synchronously; host backends may dispatch on their own platform
+/// queue, so callers must hop back to their UI thread before touching view
+/// state.
 class IapClient {
 public:
     static IapClient& instance();
@@ -114,8 +113,9 @@ public:
     /// On `false`, every method reports `Unavailable` and never charges.
     virtual bool is_available() const = 0;
 
-    /// Short identifier of the active backend ("storekit2", "winrt-store",
-    /// "test-mock", or "none"). Useful for diagnostics and host reports.
+    /// Short identifier of the active backend. Pulp's built-in backend reports
+    /// "none"; tests use "test-mock"; host backends should choose a stable
+    /// diagnostic id such as "storekit2", "winrt-store", or "play-billing".
     virtual std::string backend_id() const = 0;
 
     /// Ask the backend for metadata + localized pricing of the given SKUs.

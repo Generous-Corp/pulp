@@ -1696,29 +1696,29 @@ commands:
 
   - name: dev
     status: usable
-    summary: Unified development loop — watch, rebuild, and optionally test, validate, or relaunch an app on every change.
+    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice.
     args:
       - name: --test
         kind: flag
-        description: Run tests after each successful build
+        description: Run tests after each successful build in delegated watch mode, or after the one Rust fallback build pass
       - name: --test-filter
         kind: option
         description: Run only tests matching PATTERN (implies --test)
       - name: --validate
         kind: flag
-        description: Run quick plugin dlopen validation after build
+        description: Run quick plugin dlopen validation after build in the delegated C++ dev loop; Rust fallback prints a validator-not-ported notice and continues without validation
       - name: --run
         kind: option
-        description: Launch a build-dir binary and relaunch it on rebuild
+        description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
       - name: --design
         kind: option
-        description: Build pulp-design-tool and launch it with the given JS script
+        description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once
       - name: --target
         kind: option
         description: Pass --target to cmake --build
       - name: --allow-unsupported-sdk
         kind: flag
-        description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
+        description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
       - name: passthrough
         kind: passthrough
         description: Arguments after `--` are forwarded to the launched binary
@@ -1726,7 +1726,7 @@ commands:
 
   - name: loop
     status: experimental
-    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
       - name: --platform
         kind: option

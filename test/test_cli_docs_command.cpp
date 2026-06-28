@@ -168,6 +168,13 @@ commands:
   summary: Register a plugin target
   arguments:
     - NAME
+- name: pulp_app_icon
+  status: usable
+  summary: Attach app icon assets
+  arguments:
+    - target
+    - SOURCE
+  docs: reference/cmake.md#pulp_app_icon
 )YAML");
 
     write_file(root / "docs" / "status" / "style-rules.yaml", R"YAML(
@@ -295,6 +302,12 @@ TEST_CASE("docs command shows command cmake and style manifests",
         ScopedOutput output;
         REQUIRE(cmd_docs({"show", "cmake", "pulp_add_plugin"}) == 0);
         REQUIRE(output.out.str().find("CMake function: pulp_add_plugin") != std::string::npos);
+    }
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_docs({"show", "cmake", "pulp_app_icon"}) == 0);
+        REQUIRE(output.out.str().find("CMake function: pulp_app_icon") != std::string::npos);
+        REQUIRE(output.out.str().find("reference/cmake.md#pulp_app_icon") != std::string::npos);
     }
     {
         ScopedOutput output;

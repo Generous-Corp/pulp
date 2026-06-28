@@ -11,10 +11,9 @@
 #
 # Usage:
 #   cmake -S . -B build-wclap \
-#     -DCMAKE_TOOLCHAIN_FILE=tools/cmake/wasi-toolchain.cmake \
-#     -DPULP_BUILD_WCLAP=ON
+#     -DCMAKE_TOOLCHAIN_FILE=tools/cmake/wasi-toolchain.cmake
 #
-# Or use the helper function in your CMakeLists.txt:
+# Use this helper from your CMakeLists.txt before configuring the project:
 #   pulp_add_wclap(MyPlugin
 #       PLUGIN_ID "com.mycompany.myplugin"
 #       PLUGIN_NAME "My Plugin"

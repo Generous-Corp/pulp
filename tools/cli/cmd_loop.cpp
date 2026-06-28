@@ -221,6 +221,14 @@ int cmd_loop(const std::vector<std::string>& args) {
         return 1;
     }
     if (focus_platform.empty()) {
+        focus_platform = read_focus_state();
+        if (!focus_platform.empty() && !is_known_focus_platform(focus_platform)) {
+            std::cerr << "pulp loop: ignoring unknown persisted focus platform '"
+                      << focus_platform << "'. Expected one of: macos, linux, windows.\n";
+            focus_platform.clear();
+        }
+    }
+    if (focus_platform.empty()) {
         // No override — fall back to detected host.
         auto detected = detect_platform();
         focus_platform = umbrella_from_detected(detected);

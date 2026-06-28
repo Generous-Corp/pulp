@@ -49,7 +49,7 @@ static const Command commands[] = {
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
     {"version",  "Show, bump, or check version info",     cmd_version},
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
-    {"loop",     "Leveraged-prototype focus mode: single-platform watch + rebuild (#940)", cmd_loop},
+    {"loop",     "Leveraged-prototype focus marker + watch loop", cmd_loop},
     {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
     {"scan",     "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
@@ -320,8 +320,7 @@ void kick_background_refresh(const fs::path& cache_path) {
 // Returns true if the marker was successfully written; false otherwise
 // (empty args, unwritable PULP_HOME, etc.). The auto-mode banner
 // suppresses its "downloaded / will complete next invocation" notice
-// on false so the user isn't promised a completion that can't happen
-// (#590).
+// on false so the user isn't promised a completion that cannot happen.
 bool kick_auto_stage(const fs::path& marker_path,
                      const std::string& staged_version) {
     if (marker_path.empty() || staged_version.empty()) return false;
@@ -349,7 +348,7 @@ void maybe_complete_pending_upgrade() {
     // missing or unreadable. The opportunistic tombstone sweep at the
     // bottom of this function must also run for the common "no marker"
     // path so `*.pulp.old` files left behind by direct `pulp upgrade`
-    // flows get cleaned up (#590).
+    // flows get cleaned up.
     if (!marker.empty()) {
         if (auto pending = um::read_pending_upgrade(marker)) {
             if (pending->version == std::string(PULP_SDK_VERSION)) {
@@ -465,7 +464,7 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
                 // marker actually landed. If PULP_HOME is read-only,
                 // full, or otherwise unwritable, suppress the notice
                 // so users aren't promised a completion that cannot
-                // happen (#590).
+                // happen.
                 if (kick_auto_stage(marker, latest)) {
                     std::cerr << um::compose_auto_staged_notice(latest) << "\n";
                     cache.banner_shown_for_version = latest;
