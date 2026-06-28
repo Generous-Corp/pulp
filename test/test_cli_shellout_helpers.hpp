@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -142,6 +143,11 @@ inline std::string read_file(const fs::path& path) {
     if (!f.is_open()) return {};
     return std::string(std::istreambuf_iterator<char>(f),
                        std::istreambuf_iterator<char>());
+}
+
+inline std::string normalize_newlines(std::string text) {
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
 }
 
 inline void write_text(const fs::path& path, const std::string& text) {

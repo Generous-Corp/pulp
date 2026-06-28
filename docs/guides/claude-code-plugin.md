@@ -54,6 +54,9 @@ Then restart Claude Code or run `/reload-plugins` to activate.
 
 ### Slash Commands
 
+The plugin loads commands from `.claude/commands`; this table lists common
+examples rather than the full source-tree inventory.
+
 | Command | Description |
 |---------|-------------|
 | `/build` | Build the project (configure + compile) |
@@ -70,7 +73,9 @@ Then restart Claude Code or run `/reload-plugins` to activate.
 
 ### Skills
 
-Skills activate automatically based on context. You don't need to invoke them explicitly — just describe what you want.
+The plugin loads skills from `.agents/skills`. Skills activate automatically
+based on context, and the table below lists common examples rather than the full
+source-tree inventory.
 
 | Skill | Activates when you... |
 |-------|-----------------------|

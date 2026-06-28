@@ -380,6 +380,18 @@ canvasScale(id, sx, sy)          // Scale drawing
 canvasRotate(id, radians)        // Rotate drawing
 ```
 
+### Images
+
+```js
+canvasDrawImage(id, src, dx, dy, dw, dh)                 // Draw file-backed image
+canvasDrawImage(id, src, dx, dy, dw, dh, sx, sy, sw, sh) // Draw source sub-rect
+canvasSetImageSmoothing(id, enabled, quality)            // Sticky image sampling state
+```
+
+On Skia-backed canvases, file-backed images decode and render through the
+active canvas. Missing files, unsupported image formats, data URIs, and
+non-Skia backends render the labeled placeholder fallback.
+
 ## Theme
 
 ```js

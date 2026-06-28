@@ -597,7 +597,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(source.find("std::make_unique<pulp::view::Knob>()") != std::string::npos);
         REQUIRE(source.find("->set_anchor_id(\"pr_2c\");") != std::string::npos);
         REQUIRE(source.find("->set_label(\"freq\");") != std::string::npos);
-        REQUIRE(source.find("->set_value(/* TODO: bind to param */ 0.35f);") != std::string::npos);
+        REQUIRE(source.find("->set_value(/* imported static param value */ 0.35f);") != std::string::npos);
         REQUIRE(source.find("tokens::kChainerOrange") != std::string::npos);
         REQUIRE(binding_manifest.find("\"id\": \"chainer.knob.0.osc_freq\"") != std::string::npos);
         REQUIRE(binding_manifest.find("\"native_primitive\": \"knob\"") != std::string::npos);

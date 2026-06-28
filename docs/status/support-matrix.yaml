@@ -11,13 +11,13 @@ platforms:
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
   linux:
     status: experimental
-    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2. CI enabled.
+    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2, .deb/.tar.gz plugin packaging, standalone AppImage packaging. CI enabled.
   ios:
     status: experimental
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: experimental
-    notes: WAMv2, WebCLAP adapters, Emscripten build pipeline, browser test host. Not yet runtime-validated in browser.
+    notes: WAMv2/WebCLAP adapter scaffolding, Emscripten demo build pipeline, and browser-host shell. C++ bridge tests exist; browser-host plugin audio is not yet fully wired or runtime-validated.
 
 formats:
   vst3:
@@ -54,8 +54,10 @@ formats:
     linux: experimental
   wam_v2:
     web: experimental
+    notes: C++ WamProcessorBridge and checked-in Emscripten demo outputs exist; host-compatible WAM ES-module / browser AudioWorklet loading remains scaffolded.
   webclap:
     web: experimental
+    notes: Adapter macro and CMake helper exist; no checked-in PulpGain_WCLAP target or Pulp browser-host wclap-host-js integration yet.
   aax:
     macos: experimental
     windows: experimental
@@ -122,8 +124,10 @@ format_limitations:
     - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
+    - "Pulp Browser Host WAM loading is scaffolded; checked-in demo outputs are not runtime-validated in browser and are not loaded into a plugin AudioWorkletNode yet."
   webclap:
     - "Same browser-sandbox-only constraint as wam_v2."
+    - "Pulp Browser Host recognizes WCLAP URLs/files, but .wclap.tar.gz unpack/instantiate via wclap-host-js is still placeholder work."
 
 scripted_ui:
   ui_script_target_wiring:
@@ -176,9 +180,13 @@ audio_io:
       Output path works. Input capture and real device-metadata
       enumeration remain pending.
   jack:
-    status: planned
+    status: experimental
     platform: linux
-    notes: Source exists at core/audio/platform/linux/jack_device.cpp but the factory unconditionally returns AlsaSystem; JACK is never selected at runtime. See production-readiness workstream 02.2.
+    notes: >-
+      Optional backend compiled when libjack is available; the Linux audio
+      factory prefers JACK when a running server is detected, then falls back
+      to ALSA. JACK-gated enumeration/open smoke coverage exists, but broader
+      hotplug and device-manager policy remain pending.
 
 midi_io:
   coremidi:
@@ -251,7 +259,9 @@ css_parity:
       CSS Backgrounds Level 3: background-color, linear-gradient (4 directions +
       multi-stop). Border: width, color, radius (per-corner planned). Box shadow:
       offset, blur, spread, color. JS bridge: setBackground, setBorder,
-      setBackgroundGradient, setBoxShadow.
+      setBackgroundGradient, setBackgroundRepeat, setBackgroundPosition,
+      setBackgroundSize, setBoxShadow. The size/position/repeat bridge slots
+      are storage-only until raster background-image paint is wired.
   filters:
     status: usable
     notes: >
@@ -286,7 +296,7 @@ css_parity:
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
       setFillColor, setStrokeColor, setLineWidth, beginPath, moveTo, lineTo,
       quadTo, cubicTo, closePath, fillPath, strokePath, save, restore, translate,
-      scale, rotate, clipRect. Full JS canvas bridge API.
+      scale, rotate, clipRect. Image APIs are scoped separately under runtime_apis.
   opacity:
     status: usable
     notes: Per-element opacity (0.0–1.0) applied as layer alpha in paint_all.
@@ -353,7 +363,8 @@ css_parity:
     notes: >
       flex-flow, place-items, place-content, inset, box-sizing (parsed),
       margin-inline/block, padding-inline/block (CSS logical properties),
-      -webkit-line-clamp, background-repeat (parsed).
+      -webkit-line-clamp, background-repeat/position/size (parsed and
+      round-tripped; raster background paint deferred).
   media_queries:
     status: usable
     notes: >
@@ -565,10 +576,18 @@ platform_maturity:
       notes: TalkBack via JNI bridge exposing role, label, value, table metadata, and click/increment/decrement actions. See core/view/platform/android/accessibility_android.cpp.
     windows:
       status: partial
-      notes: UIA stub — role mapping defined, IRawElementProviderSimple/WM_GETOBJECT/event firing pending. See production-readiness workstream 04.
+      notes: >
+        UIA provider tree, WM_GETOBJECT hook, per-widget fragments, and
+        value/focus/name event helpers are implemented in
+        core/view/platform/win/accessibility_win.cpp. Direct UIA client and
+        screen-reader regression tests are still pending.
     linux:
       status: partial
-      notes: AT-SPI2 over direct D-Bus (no libatk) — a11y-bus connect, root Accessible/Application export, and Socket.Embed registration done; per-widget tree + value/events pending. See core/view/platform/linux/accessibility_linux.cpp and production-readiness workstream 04.
+      notes: >
+        AT-SPI2 over direct D-Bus (no libatk) exports root/application objects,
+        per-widget Accessible/Component/Value objects, and event-hook
+        marshalling; session-bus loopback tests cover tree/value behavior.
+        Real registry/Orca signal receipt remains pending.
   ime_composition:
     status: usable
     platform: macos
@@ -587,17 +606,17 @@ platform_maturity:
   file_dialogs:
     status: partial
     notes: >-
-      macOS native (NSOpenPanel/NSSavePanel) — `usable`. Linux ships a
-      built-in xdg-desktop-portal FileChooser backend (open/open-many/
-      save/choose-folder) over a runtime-dlopen libdbus client; a host
-      opts in via FileDialog::install_native_backend() (the standalone
-      app does this automatically), and it honest-fails when libdbus or
-      the portal service is absent. File-type filters and a preselected
-      folder are a follow-up (the portal marshals those as nested
-      variants the minimal client does not yet emit). No native provider
-      ships yet for Windows/Android; callers there register their own
-      backend or receive explicit no-selection. has_backend() stays
-      honest on every platform.
+      macOS native (NSOpenPanel/NSSavePanel) — `usable`. Windows ships
+      an opt-in built-in IFileDialog backend (open/open-many/save/
+      choose-folder); Linux ships an opt-in built-in xdg-desktop-portal
+      FileChooser backend over a runtime-dlopen libdbus client. Hosts
+      opt in with FileDialog::install_native_backend() (the standalone
+      app does this automatically), and Linux honest-fails when libdbus
+      or the portal service is absent. File-type filters and a
+      preselected folder are a follow-up for the Windows/Linux built-in
+      backends. No native provider ships yet for iOS/Android; callers
+      there register their own backend or receive explicit no-selection.
+      has_backend() stays honest on every platform.
   native_child_view_embedding_window_host:
     status: partial
     notes: >-
@@ -721,9 +740,13 @@ runtime_apis:
   canvas_draw_image:
     status: partial
     notes: >
-      Canvas2D drawImage supports file-backed 3-, 5-, and 9-argument forms,
-      including source rectangles, through Skia image decode. data: URI image
-      sources still fall back to the placeholder path.
+      canvasDrawImage records Canvas2D drawImage calls. The JS shim normalizes
+      the 3-arg form to destination bounds from the image dimensions; the native
+      bridge records the 5-arg destination form and the 9-arg source-rectangle
+      form. Skia-backed canvases decode and draw file-backed images with
+      source-rect slicing and image-smoothing state; CoreGraphics/base backends,
+      missing files, unsupported encoded formats, and data-URI replay fall back
+      to the labeled placeholder.
   drag_and_drop:
     status: usable
     notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
@@ -895,7 +918,7 @@ limitations:
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
-    - text: "MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed."
+    - text: "Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
   formats.au_v2:
     - text: "Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify)."
@@ -913,7 +936,7 @@ limitations:
     - text: "Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process()."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.5"
   audio_io.wasapi:
-    - text: "Input capture not wired — input_view is always empty."
+    - text: "Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
     # Hotplug: IMMNotificationClient device-change callbacks are wired;
     # no stale stub limitation remains.
@@ -923,7 +946,7 @@ limitations:
     - text: "Hardcoded sample-rate list; no real enumeration."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   audio_io.jack:
-    - text: "Dead code — factory always returns AlsaSystem; JACK is never selected at runtime."
+    - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
@@ -935,15 +958,14 @@ limitations:
     - text: "Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.5"
   platform_maturity.accessibility.windows:
-    # UIA bootstrap is in place (UIAutomationCore linked, session init
-    # wired). Remaining: IRawElementProviderSimple provider tree +
-    # WM_GETOBJECT integration + value/focus/selection event emission.
-    - text: "UIA provider tree and event emission pending (UIAutomationCore linked, session init wired)."
+    # UIA provider tree + event helpers are implemented in source. Remaining:
+    # direct client/screen-reader regression coverage and hardening.
+    - text: "Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.1"
   platform_maturity.accessibility.linux:
-    # AT-SPI D-Bus bridge bootstrap is in place. Remaining: per-view
-    # AtkObject model + value/text/focus event emission.
-    - text: "AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place)."
+    # AT-SPI object tree and event-hook marshalling are loopback-tested on the
+    # session bus. Remaining: real a11y registry / Orca signal receipt.
+    - text: "Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
 
 # ── Schema-v2 additions ──────────────────────────────────────────────────────
@@ -960,8 +982,8 @@ widgets:
   checkbox:         { status: usable, header: widgets.hpp }
   toggle_button:    { status: usable, header: widgets.hpp }
   icon:             { status: usable, header: widgets.hpp }
-  image_view:       { status: partial, header: widgets.hpp,
-                      notes: "Placeholder rendering; Skia decode planned." }
+  image_view:       { status: usable, header: widgets.hpp,
+                      notes: "File-backed decode through Canvas::draw_image_from_file / draw_image_from_file_rect on supported backends; placeholder fallback when decode/backend support is missing." }
   meter:            { status: usable, header: widgets.hpp }
   multi_meter:      { status: usable, header: widgets.hpp }
   correlation_meter: { status: usable, header: widgets.hpp }
@@ -993,8 +1015,12 @@ widgets:
   graph_editor_view: { status: usable, header: graph_editor_view.hpp,
                        notes: "Canvas-based node editor driving SignalGraph." }
   canvas_widget:    { status: usable, header: canvas_widget.hpp }
-  table:            { status: partial, header: table.hpp,
-                      notes: "Basic rows; sortable columns + virtualization planned." }
+  table:
+    status: partial
+    header: table.hpp
+    notes: >
+      Rows, themed cells, and click-to-sort columns are implemented; built-in
+      table scrolling/scrollbar remains planned.
   modulation_matrix:   { status: usable, header: modulation_matrix_widget.hpp,
                           notes: "Source-to-destination route widget backed by ModulationMatrix; focused data-model and widget interaction tests exist." }
   ab_compare:          { status: planned, notes: "Planned A/B comparison widget." }
@@ -1035,11 +1061,25 @@ accessibility_features:
     status: planned
     notes: Per-widget std::vector<Action> exposure planned.
   live_region_announce:
-    status: planned
-    notes: announce(text, politeness) cross-platform API planned.
+    status: partial
+    notes: >
+      announce_accessibility(text, priority) and set_announcement_sink() are
+      implemented and covered by pulp-test-announce. Built-in platform bridges
+      do not install live-region sinks yet, so calls log/no-op unless a host or
+      platform backend supplies one.
   tree_invalidation_events:
-    status: planned
-    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) planned.
+    status: partial
+    notes: >
+      Cross-platform provider event helpers exist, Windows raises UIA
+      structure/value/focus/name events, and Linux rebuilds AT-SPI trees plus
+      marshals value/focus/name events. test/test_accessibility_provider.cpp
+      and test/test_accessibility_tree.cpp cover the no-op/live helper paths.
+      macOS/iOS/Android notification parity and real client signal receipt are
+      still pending.
   a11y_test_harness:
-    status: planned
-    notes: Headless AX introspection tests per platform planned.
+    status: partial
+    notes: >
+      Headless cross-platform snapshots are covered by
+      test/test_accessibility_tree.cpp, and Linux has a session-bus AT-SPI
+      loopback harness. Direct per-platform assistive-client harnesses remain
+      planned.

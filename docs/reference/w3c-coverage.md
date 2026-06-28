@@ -22,7 +22,7 @@ Pulp's web-compat layer was audited against **28 web specifications** — 16 W3C
 | 14 | [CSS Filter Effects L1](https://www.w3.org/TR/filter-effects-1/) | L1 | ⚠️ Partial | blur() | brightness, contrast, grayscale, etc. |
 | 15 | [Selectors L4](https://www.w3.org/TR/selectors-4/) | L4 | ✅ Complete | Type, class, ID, combinators, :nth-child, :not, :*-of-type, [attr] selectors | :valid/:invalid, ::before/::after |
 | 16 | [DOM / UI Events](https://dom.spec.whatwg.org/) | Living | ✅ Complete | Full element API, events, bubbling, innerHTML, closest, matches | MutationObserver, IntersectionObserver |
-| 17 | [Canvas 2D Context](https://html.spec.whatwg.org/multipage/canvas.html) | Living | ✅ Mostly | 30+ commands, gradients, arc, clip, blend, text align | drawImage (placeholder), getImageData |
+| 17 | [Canvas 2D Context](https://html.spec.whatwg.org/multipage/canvas.html) | Living | ✅ Mostly | 30+ commands, gradients, arc, clip, blend, text align, Skia file-backed drawImage | data-URI / non-Skia drawImage fallback, getImageData |
 | 18 | [Clipboard API](https://www.w3.org/TR/clipboard-apis/) | — | ✅ Complete | readText, writeText | — |
 | 19 | [Drag and Drop](https://html.spec.whatwg.org/multipage/dnd.html) | Living | ⚠️ Receive only | registerDrop + on_drop callback | Initiating drags from JS, dataTransfer |
 | 20 | [Web Storage](https://html.spec.whatwg.org/multipage/webstorage.html) | Living | ✅ Complete | getItem/setItem/removeItem (file-backed) | — |
@@ -122,9 +122,9 @@ ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup
 | `background-color` | ✅ | Full CSS Color L4 |
 | `background-image` (gradient) | ✅ | linear-gradient with multi-stop |
 | `background-image` (URL) | ❌ | Only gradients, not images |
-| `background-size` | ⚠️ | CSS parsed, bridge stub |
-| `background-position` | ⚠️ | CSS parsed, bridge stub |
-| `background-repeat` | ⚠️ | CSS parsed, bridge stub |
+| `background-size` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
+| `background-position` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
+| `background-repeat` | ⚠️ | CSS parsed and round-tripped to a storage-only View slot; raster background paint is deferred |
 | `border` (shorthand) | ✅ | width + style + color |
 | `border-top` / `right` / `bottom` / `left` | ✅ | Per-side borders |
 | `border-width` / `color` per-side | ✅ | |
@@ -363,7 +363,7 @@ These are the 12 additional Web API specifications that frontend developers use 
 | globalCompositeOperation | ✅ | source-over, multiply, screen, overlay |
 | createLinearGradient / createRadialGradient | ✅ | With color stops |
 | measureText | ⚠️ | Approximate (no Skia font shaping) |
-| drawImage | ❌ | Cannot render images on canvas |
+| drawImage | ⚠️ | File-backed images render on Skia canvases, including source-rect slicing; data-URI replay and non-Skia backends fall back to a labeled placeholder |
 | getImageData / putImageData | ❌ | Structurally hard with command list |
 | createPattern | ❌ | Needs Skia shader pattern |
 

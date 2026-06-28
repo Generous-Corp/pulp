@@ -83,7 +83,8 @@ Default formats are platform-gated:
 
 On macOS and Windows, AAX is optional. `pulp create` only scaffolds `aax_entry.cpp`
 and includes the AAX target when an AAX SDK is already configured via
-`PULP_AAX_SDK_DIR`. Linux and Ubuntu do not support AAX.
+`PULP_AAX_SDK_DIR` or auto-discovered in a standard user-local SDK path. Linux
+and Ubuntu do not support AAX.
 
 ### build
 
@@ -1271,7 +1272,7 @@ file error.
 
 ### import-design
 
-**Status**: experimental
+**Status**: partial
 
 Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
 React JSX, or Google DESIGN.md source files into generated Pulp UI code.
@@ -1437,6 +1438,15 @@ Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
 Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
 
+The live watch/relaunch loop is implemented by the C++ delegate (`pulp-cpp`).
+Normal installed/source builds ship the Rust `pulp` front end with that sibling
+delegate, so `pulp dev` forwards to the full watch loop when `pulp-cpp` is
+available. If the delegate is unavailable or fallthrough is disabled, the Rust
+fallback runs one configure/build pass, optionally runs tests, optionally
+launches once, and prints a watch-loop stub notice instead of watching for
+changes. The `--validate` and `--allow-unsupported-sdk` dev-loop behavior is
+therefore part of the delegated C++ path.
+
 ```bash
 pulp dev                                      # Watch and rebuild
 pulp dev --test                               # Watch, rebuild, run tests
@@ -1453,13 +1463,13 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--test`, `-t` | Run tests after each successful build |
+| `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
-| `--validate` | Run quick plugin dlopen validation after build |
-| `--run TARGET` | Launch TARGET from the build dir; relaunch on rebuild |
-| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT |
+| `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
-| `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
 | `-- args...` | Arguments passed to the launched app |
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
@@ -1468,7 +1478,7 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" marker. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling can read the advisory focus marker when it needs platform-specific behavior; `pulp loop` itself does not rewrite the build graph.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
@@ -1504,25 +1514,25 @@ See [docs/guides/focus-mode.md](../guides/focus-mode.md) for the full playbook (
 
 **Status**: usable
 
-Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in that was found. Mirrors what `pulp::host::PluginScanner` does at runtime. Useful for sanity-checking your local plug-in installation or for narrowing down which plug-in to feed to `pulp host`.
+Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle that was found. The installed Rust `pulp scan` path is a filesystem inventory: it does not dlopen plug-ins or query factories, so names are filename-derived and vendor / version / unique-id metadata is not surfaced. The C++ delegate (`pulp-cpp scan`) still owns the rich `pulp::host::PluginScanner` metadata path.
 
 ```bash
-pulp scan                           # Scan every supported format the build includes
+pulp scan                           # Filesystem inventory for every supported format
 pulp scan --format clap             # Scan only CLAP
 pulp scan --format vst3             # Only VST3
 pulp scan --format au               # Only AU v2
 pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
-pulp scan --no-load                 # Filesystem-only walk escape hatch
+pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
 Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary. Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
+On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
-`pulp scan --help` is short-circuited — it does NOT dlopen any plug-in, so it remains safe even when one of the installed plug-ins would crash the rich path.
+`pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
 
 ### host
 

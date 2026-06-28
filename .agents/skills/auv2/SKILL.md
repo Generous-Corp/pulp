@@ -47,6 +47,12 @@ The resulting mapping (`_pulp_add_au` / `_pulp_add_auv3` in `tools/cmake/PulpUti
 
 When you add a new example or change an existing one's descriptor to declare `accepts_midi = true`, you **must** also add `ACCEPTS_MIDI` to its `pulp_add_plugin()` call. There is no runtime fallback — the two surfaces are independent and the CMake flag is what ends up in the Info.plist.
 
+Do **not** pass `PRODUCES_MIDI` to `pulp_add_plugin()`. MIDI output is
+declared by `PluginDescriptor::produces_midi` in processor code and consumed
+by the format/runtime layer where supported; it is not a CMake packaging flag.
+If a caller passes `PRODUCES_MIDI` anyway, CMake warns and ignores it so stale
+docs/tests cannot imply a fake packaging effect.
+
 ## MIDI Input Wiring
 
 ### The entry FACTORY must dispatch MusicDevice selectors — not just the base class
@@ -143,11 +149,78 @@ the audio callback path. Tests live in
 `pulp-test-processor-layout-latency` plus the existing
 `pulp-test-au-v2-effect` suite.
 
+### Channel-config negotiation (`kAudioUnitProperty_SupportedNumChannels`)
+
+`PulpAUEffect::SupportedNumChannels()` reports the supported (input, output)
+channel-count pairs so hosts and `auval` can negotiate a layout instead of
+guessing. The base class returned 0 ("property unsupported"), leaving every
+channel query unanswered. The table is derived from the descriptor by the pure
+free function `build_channel_info(descriptor, out)` in the adapter header:
+
+- Symmetric effect (declared in width == out width) → matched `in == out` pairs
+  up to the declared width: `{1,1}` for mono, `{1,1}` + `{2,2}` for stereo.
+- **Asymmetric** effect (in width != out width, e.g. a mono-in / stereo-out
+  widener) → the single exact declared pair, e.g. `{1,2}`. Report what the
+  descriptor actually declares — do NOT collapse an asymmetric plugin into a
+  matched ladder, which would mis-report its capability to the host.
+- Instrument / generator with **0 inputs** → `{0,1}` (mono synth) or `{0,1}` +
+  `{0,2}` (stereo synth).
+
+Widths are clamped into Pulp's supported `{1, 2}` flex range (consistent with
+`validate_channel_layout`). The returned pointer must outlive the call (the host
+reads it after return), so it points at a per-instance member array
+(`channel_info_`) — never call-local or shared `static` storage. `build_channel_info`
+is unit-tested over several descriptors in `test_au_v2_effect.cpp` (`[channels]`).
+
+### MIDI output (`kAudioUnitProperty_MIDIOutputCallback`)
+
+A Processor that declares `produces_midi = true` now delivers the MIDI it writes
+to `midi_out` during `process()` back to the host on AU v2. The adapter:
+
+1. Advertises the output stream via `kAudioUnitProperty_MIDIOutputCallbackInfo`
+   (a one-element `CFArrayRef` named after the plugin) and accepts the host's
+   callback via `SetProperty(kAudioUnitProperty_MIDIOutputCallback)`. Both
+   properties are gated on `plugin_produces_midi()` so plain audio effects never
+   advertise a MIDI output. The AudioUnitSDK itself implements **neither**
+   property, so the adapter handles them directly in `GetPropertyInfo` /
+   `GetProperty` / `SetProperty`.
+2. In `ProcessBufferLists`, packs `midi_out` into a `MIDIPacketList` via the
+   header-inlined `MidiOutputPacketBuilder` and calls the host callback with
+   `CurrentRenderTime()` as the base timestamp.
+
+**Callback-pair publishing (data-race fix).** The `(callback, userData)` pair is
+written on the main thread (SetProperty) and read on the render thread. A plain
+two-pointer struct is a data race that can pair a fresh callback with a stale
+`userData`. The adapter publishes through a **double-buffered atomic snapshot**:
+SetProperty writes the inactive of two slots then release-stores an
+`std::atomic<const Pair*>` to it (flipping the write cursor); the render thread
+does a single acquire-load. "AU serializes property writes vs render" is NOT
+relied on. The torn-pair invariant is hammered by a two-thread test
+(`[midi-out][realtime]`).
+
+**Packet ordering + clamping.** CoreMIDI packet lists must be time-ordered, but
+short events and SysEx live in separate `MidiBuffer` sidecars. `build()` merges
+both into one ascending-`sample_offset` order (stable insertion sort over a
+fixed-capacity index — no allocation) before appending, so a SysEx@0 is
+delivered before a note@64. `build(midi_out, frame_count)` clamps every offset to
+`[0, frame_count - 1]` (mirrors the AU v3 input-side defensive clamp).
+
+**RT-safety + capacity.** The builder owns a fixed byte buffer sized to the
+per-block event budget (`kMaxOutputEvents == kMaxEventsPerBlock`, ~16 B/event)
+and uses `MIDIPacketListInit` / `MIDIPacketListAdd` (write into caller storage,
+no allocation). Overflow stops appending and increments a `dropped` diagnostic
+rather than growing. The callback invocation sits **outside** the `ScopedNoAlloc`
+scope (it is host code), matching the AU v3 `MIDIOutputEventBlock` pattern in
+`au_adapter.mm`. CoreMIDI is linked into `pulp-format` (PUBLIC) for the
+packet-list builders. The instrument adapter (`PulpAUInstrument`) does not yet
+deliver its local `midi_out` — only the effect path is wired, and it does NOT
+half-advertise the property.
+
 ## Current Gaps
 
-- **MIDI output from AU v2 effects** is not wired yet; `#626` tracks the missing render-notify / `MIDIOutput` path. `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is *not* wired to a CMake flag yet — the AU type selection is driven entirely by `accepts_midi`.
-
 - **AU v3 parity** for MIDI on effects is not re-audited in this pass. If you touch `core/format/src/au_adapter.mm`, confirm the AUv3 `componentType` logic in `_pulp_add_auv3` still matches the fix in `_pulp_add_au`.
+
+- **AU v2 instrument MIDI output** is still unwired: `PulpAUInstrument::Render` builds a local `midi_out` that is discarded. Mirror the effect's `kAudioUnitProperty_MIDIOutputCallback` path against `MusicDeviceBase` when an instrument needs to emit MIDI.
 
 ## Gotchas
 
