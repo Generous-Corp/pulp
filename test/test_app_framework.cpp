@@ -432,7 +432,6 @@ TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
 
     REQUIRE(tb.items().size() == 3);
     REQUIRE(tb.items()[1].is_separator);
-    tb.install_native(nullptr);
 }
 
 TEST_CASE("NativeToolbar stores callable item actions",

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Capture the OfflineStretch quality baseline over the corpus.
 
-This captures the historical realtime-engine baseline. Offline-only refinements
-such as transient relocation or multi-res STFT should beat THESE numbers before
-becoming the default.
+This captures the historical realtime-engine baseline. Offline-only refinements,
+or making an opt-in refinement the default, should beat THESE numbers before
+shipping as the default path.
 
 Runs stretchcli over the synthetic corpus at a sweep of ratios, computes the
 metrics (metrics.py), and writes a JSON baseline + a readable table.
