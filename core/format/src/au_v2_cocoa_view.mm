@@ -33,6 +33,15 @@
 #define PULP_STRINGIFY(x) PULP_STRINGIFY_IMPL(x)
 static const char* const kPulpAUCocoaViewClassName = PULP_STRINGIFY(PULP_AU_COCOA_VIEW_CLASS);
 
+// PulpAUEditorOwner is an internal helper attached to the editor view (its name
+// is never advertised to the host). Give it a per-plugin-unique runtime name —
+// derived from the already-unique cocoa view class — so two Pulp AU plug-ins in
+// one host don't register the same ObjC class (which warns and lets the
+// first-loaded copy shadow the others).
+#define PULP_AU_CONCAT_IMPL(a, b) a##b
+#define PULP_AU_CONCAT(a, b) PULP_AU_CONCAT_IMPL(a, b)
+#define PulpAUEditorOwner PULP_AU_CONCAT(PulpAUEditorOwner_, PULP_AU_COCOA_VIEW_CLASS)
+
 // ── Ownership wrapper ──────────────────────────────────────────────────
 // Wraps C++ ownership objects in an ObjC class so they share the NSView's
 // lifetime via an associated object.
