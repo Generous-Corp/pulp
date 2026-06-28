@@ -17,9 +17,9 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
-| `formats.clap` | Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.vst3` | Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.vst3` | MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
@@ -74,16 +74,20 @@ this section mirrors it for human readers. A status of `usable` means the
 adapter compiles and loads — not that every host-facing feature is wired.
 
 - **VST3** — Dynamic bus arrangements limited; `setBusArrangements` only
-  renegotiates the primary stereo bus today. Tracked: production-readiness
-  workstream 01.
+  renegotiates the primary stereo bus today. Descriptor-declared secondary
+  output buses are routed through `ProcessBuffers`, so a multi-out processor
+  that overrides `process(ProcessBuffers&)` writes each aux output bus.
+  Tracked: production-readiness workstream 01.
 - **Audio Unit v2** — Outbound parameter changes are not emitted to the host;
   automation read on AU v2 effects only flows host → plugin. Tracked:
   workstream 01.
 - **CLAP** — Bus 0 routes to `Processor::process()` and bus 1 routes to
-  `Processor::set_sidechain()`. Additional input buses and secondary output
-  buses are not exposed through the simple `Processor` process surface. CLAP
-  `PARAM_MOD` note identity fields are accepted but not routed with per-note
-  modulation scope.
+  `Processor::set_sidechain()`. Descriptor-declared secondary output buses are
+  routed through `ProcessBuffers`, so a multi-out processor that overrides
+  `process(ProcessBuffers&)` writes each aux output bus; additional input buses
+  beyond the sidechain are not exposed through the simple `Processor` process
+  surface. CLAP `PARAM_MOD` note identity fields are accepted but not routed
+  with per-note modulation scope.
 - **LV2** — Atom sysex is ignored; the `run()` loop only promotes 1–3-byte
   short MIDI messages out of the input atom sequence.
 - **AAX** — Custom editor surface not wired; Pro Tools shows the

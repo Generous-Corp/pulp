@@ -173,6 +173,21 @@ private:
     // bus 1 is consumed; additional buses are ignored because the
     // Processor API exposes a single sidechain slot.
     std::vector<float*> sidechain_ptrs_;
+    // Per-bus channel-pointer storage for secondary (aux) output buses,
+    // indexed [aux_bus][channel]. aux_output_ptrs_[i] backs the BufferView for
+    // the host output bus at index i+1, routed to the Processor's richer
+    // process(ProcessBuffers&) surface for multi-out instruments. Each
+    // sub-vector is sized in setupProcessing() from the ACCEPTED VST3 bus
+    // arrangement (which setBusArrangements() may have shifted mono↔stereo away
+    // from the descriptor default), so the routing path reuses this storage,
+    // allocates nothing on the audio thread, and never silently drops a channel
+    // the host negotiated.
+    std::vector<std::vector<float*>> aux_output_ptrs_;
+    // Descriptor-declared channel count per secondary output bus (index i = host
+    // output bus i+1), captured in setupProcessing(). Reported as the aux
+    // ProcessBusBufferView's declared_channels so matches_declared_layout()
+    // compares the routed count against the declared layout rather than itself.
+    std::vector<int> declared_aux_channels_;
 
     // Per-block MIDI buffers, reused across process() calls. Reserved +
     // realtime-capacity-limited in setupProcessing() so add()/add_sysex_copy()

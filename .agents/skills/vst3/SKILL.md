@@ -420,12 +420,30 @@ if (data.numInputs > 1 &&
 }
 ```
 
-Secondary **output** buses are zero-filled every block — identical rationale
-to CLAP.
+Secondary **output** buses **are routed** to the richer
+`Processor::process(ProcessBuffers&)` surface (role `Aux`, index ≥1) for
+multi-out instruments — identical model to CLAP. Each aux bus is
+pre-zeroed before `process()`, so a single-output processor leaves aux
+buses silent; a multi-out processor that overrides
+`process(ProcessBuffers&)` writes each declared aux bus.
+
+**Size aux storage from the ACCEPTED arrangement, not the descriptor
+default.** `setBusArrangements` can accept a mono→stereo shift on an aux
+bus (when `is_bus_layout_supported` permits it). `setupProcessing` sizes
+each `aux_output_ptrs_[i]` sub-vector from the live `AudioBus`
+arrangement (`bus->getArrangement()` → `SpeakerArr::getChannelCount`),
+not `desc.output_buses[b].default_channels` — otherwise the routing path
+clamps to the descriptor default and silently drops the channel the host
+negotiated. The aux view's `declared_channels` reports the descriptor
+count (cached in `declared_aux_channels_`) while `buffer.num_channels()`
+carries the routed count, so `matches_declared_layout()` detects a
+mismatch. Sizing is `max(declared, accepted)`. Storage is bounded by
+`BusBufferSet::kMaxBuses`; wider host layouts are zero-filled, not routed.
 
 The process callback builds a stack-owned `ProcessBuffers` block for
-the active main input, optional sidechain input, and main output, then
-dispatches through `Processor::process(ProcessBuffers&, ...)`.
+the active main input, optional sidechain input, main output, **and each
+routed aux output**, then dispatches through
+`Processor::process(ProcessBuffers&, ...)`.
 Processors that only override the legacy main-in/main-out callback
 still run through the base projection; processors that override the
 richer surface can inspect the VST3 bus set directly.
