@@ -281,9 +281,9 @@ public:
 
     /// Run the fused forward for one mono block (`block_size` samples in/out):
     /// input projection, the dilated gated conv layers, and the linear head, all
-    /// in one submit. Each call processes the block with zero left-context before
-    /// its first sample (the within-block causal history is exact), and
-    /// reproduces the CPU reference bit-for-bit for a from-zero block. Returns
+    /// in one submit. Carries each layer's dilation history across calls (the
+    /// activation window slides every block), so streaming blocks are continuous
+    /// and bit-for-bit match the CPU reference run sample-continuously. Returns
     /// false if the plan was not prepared for `block_size`.
     virtual bool conv_stack_forward(const float* in_block, float* out_block,
                                     uint32_t block_size) = 0;

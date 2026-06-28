@@ -55,8 +55,22 @@ int main(){
         int it=50;
         auto t0=clk::now(); for(int i=0;i<it;i++){net.reset();net.process(in.data(),oc.data(),B);} double cu=us(t0)/it;
         t0=clk::now(); for(int i=0;i<it;i++)gpu->conv_stack_forward(in.data(),og.data(),B); double gu=us(t0)/it;
-        std::printf("%-22s  xcorr=%.5f %s | CPU %8.1f us %s | GPU %8.1f us %s | %.1fx\n",
+        // Streaming continuity: process two consecutive blocks. CPU carries its
+        // history (no reset between); GPU carries the slid window. Block 2 must
+        // match — proving cross-block context, not a per-block restart.
+        std::vector<float> in2(B), c1(B), c2(B), g1(B), g2(B);
+        for (uint32_t i = 0; i < B; ++i) in2[i] = 0.2f*std::sin(0.03f*(i+B)) + 0.05f*std::sin(0.21f*(i+B));
+        net.reset();
+        net.process(in.data(), c1.data(), B);
+        net.process(in2.data(), c2.data(), B);    // continues, no reset
+        gpu->prepare_conv_stack(cf.C,cf.K,cfg.dilations.data(),cf.L,w.data(),(uint32_t)w.size(),B,cfg.head_scale);
+        gpu->conv_stack_forward(in.data(), g1.data(), B);
+        gpu->conv_stack_forward(in2.data(), g2.data(), B);   // carries history
+        double scorr = xcorr(c2, g2);
+
+        std::printf("%-22s  xcorr=%.5f %s  stream=%.5f %s | CPU %8.1f us %s | GPU %8.1f us %s | %.1fx\n",
             cf.name,corr, corr>0.99?"[match]":"[MISMATCH]",
+            scorr, scorr>0.99?"[ok]":"[BROKEN]",
             cu, cu<budget?"<bud":"OVER", gu, gu<budget?"<bud":"OVER", cu/gu);
     }
     return 0;

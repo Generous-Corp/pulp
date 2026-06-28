@@ -338,10 +338,12 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 // buffers; only the final mono block is read back.
 
 static constexpr const char* kConvStackInputShader = R"wgsl(
-struct P { C:u32, B:u32, in_off:u32, pad:u32 };
+// Project the mono block to C channels, writing into the block region of act
+// (after PAD left-history columns the layers read for cross-block continuity).
+struct P { C:u32, B:u32, in_off:u32, pad:u32 };  // pad = PAD history columns
 @group(0) @binding(0) var<storage, read>       wts : array<f32>;
 @group(0) @binding(1) var<storage, read>       inp : array<f32>;   // B mono
-@group(0) @binding(2) var<storage, read_write> act : array<f32>;   // C*B
+@group(0) @binding(2) var<storage, read_write> act : array<f32>;   // C*(PAD+B)
 @group(0) @binding(3) var<uniform>             p   : P;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
@@ -349,8 +351,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     if (t >= p.B) { return; }
     let x = inp[t];
     let wb = p.in_off + p.C;
+    let col = (p.pad + t) * p.C;
     for (var c = 0u; c < p.C; c = c + 1u) {
-        act[t * p.C + c] = wts[p.in_off + c] * x + wts[wb + c];
+        act[col + c] = wts[p.in_off + c] * x + wts[wb + c];
     }
 }
 )wgsl";
@@ -358,10 +361,10 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 static constexpr const char* kConvStackLayerShader = R"wgsl(
 // One gated dilated causal conv layer: z = dilated_conv(in) [2C], gate =
 // tanh(z[:C])*sigmoid(z[C:]), out = in + residual(gate), skip += skip(gate).
-struct P { C:u32, K:u32, B:u32, dil:u32, woff:u32, p0:u32, p1:u32, p2:u32 };
+struct P { C:u32, K:u32, B:u32, dil:u32, woff:u32, pad:u32, p1:u32, p2:u32 };  // pad = PAD
 @group(0) @binding(0) var<storage, read>       wts  : array<f32>;
-@group(0) @binding(1) var<storage, read>       ina  : array<f32>;  // C*B
-@group(0) @binding(2) var<storage, read_write> outa : array<f32>;  // C*B
+@group(0) @binding(1) var<storage, read>       ina  : array<f32>;  // C*(PAD+B)
+@group(0) @binding(2) var<storage, read_write> outa : array<f32>;  // C*(PAD+B)
 @group(0) @binding(3) var<storage, read_write> skip : array<f32>;  // C*B (accumulate)
 @group(0) @binding(4) var<uniform>             p    : P;
 
@@ -380,17 +383,18 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let sw = rb + C;                   // skip W [C*C]
     let sb = sw + C * C;               // skip b [C]
 
+    // Absolute column of this sample in the padded buffer; taps reach back into
+    // the PAD history (carried from the previous block) so blocks are continuous.
+    let acol = p.pad + t;
     let two_c = 2u * C;
     for (var oc = 0u; oc < two_c; oc = oc + 1u) {
         var acc = wts[cb + oc];
         for (var k = 0u; k < K; k = k + 1u) {
             let back = p.dil * (K - 1u - k);
-            if (t >= back) {
-                let base = (t - back) * C;
-                let wbase = cw + oc * C * K + k;
-                for (var ic = 0u; ic < C; ic = ic + 1u) {
-                    acc = acc + wts[wbase + ic * K] * ina[base + ic];
-                }
+            let base = (acol - back) * C;   // valid: pad >= max back
+            let wbase = cw + oc * C * K + k;
+            for (var ic = 0u; ic < C; ic = ic + 1u) {
+                acc = acc + wts[wbase + ic * K] * ina[base + ic];
             }
         }
         zbuf[oc] = acc;
@@ -400,7 +404,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         let sg = 1.0 / (1.0 + exp(-zbuf[C + c]));
         gbuf[c] = tg * sg;
     }
-    let tc = t * C;
+    let tc = acol * C;       // residual writes into the block region of outa
+    let sc = t * C;          // skip is block-sized (no history needed)
     for (var oc = 0u; oc < C; oc = oc + 1u) {
         var r = wts[rb + oc];
         var s = wts[sb + oc];
@@ -411,7 +416,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             s = s + wts[srow + ic] * gbuf[ic];
         }
         outa[tc + oc] = ina[tc + oc] + r;
-        skip[tc + oc] = skip[tc + oc] + s;
+        skip[sc + oc] = skip[sc + oc] + s;
     }
 }
 )wgsl";
@@ -1459,28 +1464,43 @@ public:
         const uint64_t need = per_layer * L + (C + C) + (C + 1);
         if (weights_len < need) return false;
 
+        // Left-history pad: the deepest tap reaches max_dilation*(K-1) samples
+        // back, so each activation buffer carries that many history columns the
+        // conv reads for cross-block continuity.
+        uint32_t max_dil = 1;
+        for (uint32_t l = 0; l < L; ++l) max_dil = dilations[l] > max_dil ? dilations[l] : max_dil;
+        const uint32_t PAD = max_dil * (K - 1u);
+
         ConvStackPlan plan;
-        plan.C = C; plan.K = K; plan.L = L; plan.B = B;
+        plan.C = C; plan.K = K; plan.L = L; plan.B = B; plan.pad = PAD;
         plan.head_scale = head_scale;
         plan.per_layer = static_cast<uint32_t>(per_layer);
 
         const uint32_t wbytes = static_cast<uint32_t>(need) * 4u;
-        const uint32_t act_bytes = C * B * 4u;
+        const uint32_t act_bytes = C * (PAD + B) * 4u;   // padded activation buffer
+        const uint32_t skip_bytes = C * B * 4u;
         const uint32_t blk_bytes = B * 4u;
+        const uint32_t hist_bytes = C * PAD * 4u;
+        const auto act_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc
+                             | wgpu::BufferUsage::CopyDst;
         plan.weights = create_storage_buffer(wbytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.skip = create_storage_buffer(act_bytes,
+        plan.skip = create_storage_buffer(skip_bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         plan.input = create_storage_buffer(blk_bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         plan.output = create_storage_buffer(blk_bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
         plan.readback = create_readback_buffer(blk_bytes);
-        if (!plan.weights || !plan.skip || !plan.input || !plan.output || !plan.readback)
+        plan.hist_temp = create_storage_buffer(hist_bytes, act_usage);  // history slide scratch
+        if (!plan.weights || !plan.skip || !plan.input || !plan.output ||
+            !plan.readback || !plan.hist_temp)
             return false;
+        std::vector<float> act_zero(static_cast<std::size_t>(C) * (PAD + B), 0.0f);
         for (uint32_t l = 0; l <= L; ++l) {
-            wgpu::Buffer a = create_storage_buffer(act_bytes, wgpu::BufferUsage::Storage);
+            wgpu::Buffer a = create_storage_buffer(act_bytes, act_usage);
             if (!a) return false;
+            queue_.WriteBuffer(a, 0, act_zero.data(), act_bytes);  // zero history at start
             plan.act.push_back(std::move(a));
         }
         queue_.WriteBuffer(plan.weights, 0, weights, wbytes);
@@ -1495,7 +1515,7 @@ public:
         const uint32_t h_off = in_off + (C + C);
 
         plan.input_u = make_uniform(16);
-        struct InU { uint32_t C, B, in_off, pad; } inu{C, B, in_off, 0};
+        struct InU { uint32_t C, B, in_off, pad; } inu{C, B, in_off, PAD};
         queue_.WriteBuffer(plan.input_u, 0, &inu, sizeof(inu));
         plan.input_bg = create_bind_group(conv_in_pipeline_,
             {plan.weights, plan.input, plan.act[0], plan.input_u});
@@ -1503,8 +1523,8 @@ public:
 
         for (uint32_t l = 0; l < L; ++l) {
             wgpu::Buffer u = make_uniform(32);
-            struct LyU { uint32_t C, K, B, dil, woff, p0, p1, p2; }
-                lyu{C, K, B, dilations[l], static_cast<uint32_t>(per_layer) * l, 0, 0, 0};
+            struct LyU { uint32_t C, K, B, dil, woff, pad, p1, p2; }
+                lyu{C, K, B, dilations[l], static_cast<uint32_t>(per_layer) * l, PAD, 0, 0};
             queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
             wgpu::BindGroup bg = create_bind_group(conv_layer_pipeline_,
                 {plan.weights, plan.act[l], plan.act[l + 1], plan.skip, u});
@@ -1554,6 +1574,20 @@ public:
         for (uint32_t l = 0; l < plan.L; ++l) run(conv_layer_pipeline_, plan.layer_bg[l]);
         run(conv_head_pipeline_, plan.head_bg);
         encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
+
+        // Slide each activation buffer's window: the most-recent PAD columns
+        // (the tail of [history|block]) become the next block's history, so taps
+        // reach across the block boundary. Via a temp so source/dest can't
+        // overlap; copies in one encoder are ordered, so reusing temp is safe.
+        if (plan.pad > 0) {
+            const uint32_t C = plan.C;
+            const uint64_t hist_bytes = static_cast<uint64_t>(C) * plan.pad * 4u;
+            const uint64_t tail_off = static_cast<uint64_t>(C) * plan.B * 4u;  // [B .. B+PAD) columns
+            for (auto& a : plan.act) {
+                encoder.CopyBufferToBuffer(a, tail_off, plan.hist_temp, 0, hist_bytes);
+                encoder.CopyBufferToBuffer(plan.hist_temp, 0, a, 0, hist_bytes);
+            }
+        }
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
@@ -2195,12 +2229,13 @@ private:
     std::unordered_map<uint32_t, SpectralStackPlan> spectral_stack_plans_;
 
     struct ConvStackPlan {
-        uint32_t C = 0, K = 0, L = 0, B = 0, per_layer = 0;
+        uint32_t C = 0, K = 0, L = 0, B = 0, per_layer = 0, pad = 0;
         float head_scale = 1.0f;
         wgpu::Buffer weights;                 // all model weights, resident
-        std::vector<wgpu::Buffer> act;        // L+1 activation buffers (C*B)
+        std::vector<wgpu::Buffer> act;        // L+1 activation buffers (C*(PAD+B))
         wgpu::Buffer skip, input, output;     // skip accum (C*B), in/out blocks (B)
         wgpu::Buffer readback;
+        wgpu::Buffer hist_temp;               // C*PAD history-slide scratch
         wgpu::Buffer input_u, head_u;
         std::vector<wgpu::Buffer> layer_u;
         wgpu::BindGroup input_bg, head_bg;
