@@ -113,7 +113,7 @@ TEST_CASE("system volume Linux path parses amixer output",
 
     std::filesystem::remove_all(root);
 #else
-    SUCCEED("Linux amixer path is not active on this platform.");
+    SKIP("Linux amixer path is not active on this platform.");
 #endif
 }
 
@@ -139,7 +139,7 @@ TEST_CASE("system volume Linux path rejects empty or malformed amixer output",
 
     std::filesystem::remove_all(root);
 #else
-    SUCCEED("Linux amixer path is not active on this platform.");
+    SKIP("Linux amixer path is not active on this platform.");
 #endif
 }
 
@@ -165,7 +165,7 @@ TEST_CASE("system volume Linux setter invokes amixer with integer percent",
 
     std::filesystem::remove_all(root);
 #else
-    SUCCEED("Linux amixer path is not active on this platform.");
+    SKIP("Linux amixer path is not active on this platform.");
 #endif
 }
 
@@ -176,6 +176,6 @@ TEST_CASE("system mute API reports unsupported on Linux",
     REQUIRE_FALSE(pulp::audio::set_system_muted(true));
     REQUIRE_FALSE(pulp::audio::set_system_muted(false));
 #else
-    SUCCEED("Linux mute stubs are not active on this platform.");
+    SKIP("Linux mute stubs are not active on this platform.");
 #endif
 }
