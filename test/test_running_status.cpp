@@ -593,7 +593,29 @@ TEST_CASE("feed tolerates missing sinks and empty buffers",
     std::vector<uint8_t> stream = {0xF6, 0x90, 0x3C, 0x7F, 0xF0, 0x01, 0xF7};
     p.feed(stream.data(), stream.size());
 
-    SUCCEED("missing callbacks are ignored");
+    std::vector<Captured> shorts;
+    std::vector<std::vector<uint8_t>> sysex;
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+    p.on_sysex([&](const uint8_t* data, std::size_t size) {
+        sysex.emplace_back(data, data + size);
+    });
+
+    std::vector<uint8_t> after_missing_sinks = {
+        0x90, 0x40, 0x7F,
+        0xF0, 0x7D, 0x02, 0xF7,
+    };
+    p.feed(after_missing_sinks.data(), after_missing_sinks.size());
+
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x40);
+    REQUIRE(shorts[0].d2 == 0x7F);
+    REQUIRE(sysex == std::vector<std::vector<uint8_t>>{{0x7D, 0x02}});
 }
 
 TEST_CASE("reset clears running status", "[midi][running-status]") {
