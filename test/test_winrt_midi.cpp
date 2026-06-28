@@ -22,6 +22,7 @@
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -51,12 +52,12 @@ TEST_CASE("MidiSystem: port-change callback contract on the active backend",
     auto sys = create_midi_system();
     REQUIRE(sys != nullptr);
 
-    bool fired = false;
-    sys->set_port_change_callback([&fired] { fired = true; });
+    std::atomic<int> change_calls{0};
+    sys->set_port_change_callback(
+        [&] { change_calls.fetch_add(1, std::memory_order_relaxed); });
     // Unregister — must not fire or crash on teardown.
     sys->set_port_change_callback(nullptr);
-    SUCCEED("set_port_change_callback registers + unregisters cleanly");
-    (void)fired;
+    REQUIRE(change_calls.load(std::memory_order_relaxed) == 0);
 }
 
 TEST_CASE("WinRT MIDI: MIDI 2.0 channel-voice UMP decodes to MIDI 1.0 events",
