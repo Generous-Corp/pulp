@@ -29,6 +29,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/detail/vst3_restart_publisher.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -37,6 +38,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 #include <pluginterfaces/gui/iplugview.h>
 
@@ -311,6 +313,60 @@ private:
     // view-side code marshal work onto the DAW's main thread via
     // `pulp::events::MainThreadDispatcher::call_async`.
     pulp::events::MainThreadDispatcher::Token main_thread_token_ = 0;
+
+    // Marshals IComponentHandler::restartComponent off the audio thread.
+    // process() OR-accumulates latency/tail restart flags into this publisher
+    // (RT-safe); the actual host callback fires on the main thread via
+    // drain_pending_restart(). See vst3_restart_publisher.hpp for the contract.
+    detail::Vst3RestartPublisher restart_publisher_;
+
+    // Liveness/lifetime token shared with every main-thread lambda this adapter
+    // posts to the MainThreadDispatcher. A posted lambda captures this shared_ptr
+    // (keeping the flag alive) plus a raw `this`, and checks the flag before
+    // touching `this`. terminate() flips it to false, so a callback still queued
+    // on the host's main thread when the component is destroyed becomes a no-op
+    // instead of dereferencing freed memory. Created in initialize().
+    std::shared_ptr<std::atomic<bool>> drain_alive_;
+
+    // True between setActive(true) and setActive(false)/terminate(): drives the
+    // self-rescheduling paced main-thread poll so a mid-stream latency/tail
+    // change is delivered without depending on an incidental host query.
+    std::shared_ptr<std::atomic<bool>> poll_active_;
+
+    // Main-thread drain of restart_publisher_: if a restart is pending, call
+    // componentHandler->restartComponent(flags) here (never from process()).
+    // Driven by (a) a paced self-rescheduling poll on the host main thread while
+    // the component is active and (b) main-thread host entrypoints the adapter
+    // already receives (getLatencySamples / getTailSamples / setActive / getState).
+    // When a MainThreadDispatcher backend reports we are off the main thread, the
+    // call is marshaled there. All paths run off the audio thread only.
+    void drain_pending_restart();
+    void deliver_pending_restart();
+
+    // Start / stop the paced main-thread poll loop. start is idempotent; stop
+    // relies on poll_active_ going false so the next scheduled tick does not
+    // re-post. Both are main-thread only.
+    void start_restart_poll();
+    void schedule_restart_poll_tick();
+
+public:
+    // Test-only hook: drive the main-thread restart drain directly. Mirrors
+    // what a host-driven main-thread entrypoint does in production. Returns the
+    // coalesced flags delivered (0 when nothing was pending).
+    std::int32_t poll_pending_restart_for_test() {
+        std::int32_t delivered = 0;
+        auto* handler = getComponentHandler();
+        restart_publisher_.poll_main_thread(
+            [&](std::int32_t flags) {
+                delivered = flags;
+                if (handler) handler->restartComponent(flags);
+            });
+        return delivered;
+    }
+
+    bool restart_dispatch_armed_for_test() const {
+        return restart_publisher_.dispatch_armed();
+    }
 };
 
 } // namespace pulp::format::vst3

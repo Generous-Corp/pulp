@@ -26,6 +26,11 @@ public:
     struct Backend {
         std::function<bool(Task)> post;
         std::function<bool()> is_main_thread;
+        // Optional: post `task` to the main thread after `delay_ms`
+        // milliseconds. Lets callers run a paced main-thread poll without
+        // busy-reposting. A backend that cannot schedule may leave this empty;
+        // `call_async_after` then falls back to an immediate `post`.
+        std::function<bool(Task, int /*delay_ms*/)> post_after;
     };
 
     // Registers a backend and makes it active. If another live backend was
@@ -42,6 +47,13 @@ public:
     // accepts the task. Task exceptions are swallowed so they cannot escape into
     // native event queues.
     static bool call_async(Task task);
+
+    // Posts work to the active main-thread backend after `delay_ms`
+    // milliseconds. Falls back to an immediate `call_async` if the backend has
+    // no `post_after`. Returns false if no backend accepts the task. Task
+    // exceptions are swallowed. Used to drive a paced (non-busy) main-thread
+    // poll loop.
+    static bool call_async_after(Task task, int delay_ms);
 
     // Runs work on the active main thread, blocking the caller when needed.
     // Returns false if no backend accepts the task. Task exceptions propagate

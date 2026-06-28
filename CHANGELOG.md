@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05260"></a>
+## [0.526.0] - 2026-06-28
+
+- fix(format): make CLAP and .pulpset param text conversion locale-independent ([#5181](https://github.com/danielraffel/pulp/pull/5181))
+- fix(view): guard GPU hosted-view drag category behind PULP_HAS_SKIA ([#5185](https://github.com/danielraffel/pulp/pull/5185))
+- docs(view): align modulation matrix status ([#5187](https://github.com/danielraffel/pulp/pull/5187))
+- docs(format): align AU v2 parameter sync guide ([#5069](https://github.com/danielraffel/pulp/pull/5069))
+
 <a id="v05240"></a>
 ## [0.524.0] - 2026-06-28
 
@@ -5473,6 +5481,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.526.0]: https://github.com/danielraffel/pulp/releases/tag/v0.526.0
 [0.524.0]: https://github.com/danielraffel/pulp/releases/tag/v0.524.0
 [0.523.0]: https://github.com/danielraffel/pulp/releases/tag/v0.523.0
 [0.522.0]: https://github.com/danielraffel/pulp/releases/tag/v0.522.0

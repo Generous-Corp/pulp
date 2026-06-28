@@ -184,14 +184,52 @@ audio thread via `flag_latency_changed()` / `flag_tail_changed()`
 (RT-safe atomic store-release). Never call host APIs from `process()`
 directly — the format adapter owns the host-thread publish path.
 
-VST3 wiring (post-process): the adapter checks
+VST3 wiring: `process()` consumes
 `consume_latency_changed_flag()` / `consume_tail_changed_flag()` and
-calls `componentHandler->restartComponent(kLatencyChanged |
-kReloadComponent)`. Steinberg documents `restartComponent` as safe
-from the audio callback (the handler queues main-thread delivery), so
-no extra dispatch is needed on the VST3 side. Tests in
-`pulp-test-processor-layout-latency` pin the round-trip and the
-two-thread hammer for data-race freedom.
+OR-accumulates the resulting restart flags into `restart_publisher_`
+(`detail::Vst3RestartPublisher`) — a lock-free, allocation-free atomic.
+It does **not** call `componentHandler->restartComponent()` from
+`process()`. `restartComponent` is a HOST callback that may take locks,
+allocate, and synchronously re-enter the plug-in (some hosts deactivate
+and reactivate the component inside it), so calling it on the real-time
+audio thread is an RT-safety violation even though latency changes are
+infrequent. The matching `restartComponent(flags)` fires on the main
+thread via `drain_pending_restart()` / `deliver_pending_restart()`.
+
+Delivery is driven primarily by a **paced self-rescheduling poll on the
+host main thread** (`MainThreadDispatcher::call_async_after`, ~33ms,
+started at `setActive(true)` and stopped at `setActive(false)` /
+`terminate()`). VST3 — unlike CLAP, which has
+`clap_host->request_callback` — exposes no RT-safe host wakeup an
+audio-thread block could trigger, and the audio thread must not post
+(`call_async` allocates/locks). The poll closes that gap: a mid-stream
+latency/tail change is delivered within one tick even if the host never
+issues another query. The poll tick is cheap (an idle tick is one
+acquire load + early return). As belt-and-suspenders the drain also runs
+from the main-thread host entrypoints the adapter already receives
+(`getLatencySamples` / `getTailSamples` / `setActive` / `getState`).
+When a backend reports the call is running off the main thread, the
+delivery is marshaled to the main thread via a one-shot `call_async`.
+The publisher coalesces a burst of flagged blocks into a single host
+notification.
+
+**Lifetime safety.** Every main-thread lambda the adapter posts (the
+paced tick and the off-main one-shot) captures a shared `alive` flag and
+only touches `this` while it is true. `terminate()` clears that flag
+before the component is destroyed, so a tick still queued on the host
+run loop becomes a safe no-op rather than a use-after-free. `terminate()`
+and the queued lambda both run on the host main thread, so they cannot
+race; the flag check is authoritative. The `poll_active_` flag is
+cleared on deactivate/terminate so the chain stops re-posting.
+
+Tests: `pulp-test-processor-layout-latency` pins the processor round-trip
+and the two-thread hammer; the `[vst3][rt-safety]` cases in
+`pulp-test-vst3-plugin-state` assert `restartComponent` never fires
+synchronously on the audio thread, fires once with the coalesced flags
+on the main thread, that the paced poll delivers a change with **no**
+host query, that flagging a restart adds no allocation to `process()`,
+and that a tick queued past `terminate()` is a no-op (no UAF). The
+publisher `static_assert`s its atomics are always lock-free.
 
 ### MIDI events
 

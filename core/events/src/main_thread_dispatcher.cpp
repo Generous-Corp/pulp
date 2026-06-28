@@ -213,6 +213,22 @@ bool MainThreadDispatcher::call_async(Task task) {
     return backend->post(make_noexcept_task(std::move(task)));
 }
 
+bool MainThreadDispatcher::call_async_after(Task task, int delay_ms) {
+    if (!task)
+        return false;
+
+    auto lease = acquire_current_backend();
+    auto* backend = lease.backend();
+    if (!backend || !backend->post)
+        return false;
+
+    BackendCallbackScope scope(lease.token());
+    auto wrapped = make_noexcept_task(std::move(task));
+    if (backend->post_after && delay_ms > 0)
+        return backend->post_after(std::move(wrapped), delay_ms);
+    return backend->post(std::move(wrapped));
+}
+
 bool MainThreadDispatcher::call_sync(Task task) {
     if (!task)
         return false;
