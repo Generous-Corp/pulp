@@ -97,7 +97,19 @@ function(_pulp_apply_view_mac_objc_suffix target)
     if(NOT APPLE OR IOS)
         return()
     endif()
+    # When the cluster sources aren't present (an installed SDK that didn't ship
+    # them), the per-binary suffix can't be applied and `target` falls back to
+    # pulp-view-core's shared fixed-name copies — which reintroduces the
+    # cross-plug-in ObjC class collision. That's a real regression for SDK
+    # consumers, so warn loudly rather than degrade silently. PulpInstallRules.cmake
+    # ships the cluster to src/pulp/view/platform/mac specifically to avoid this.
+    set(_pulp_view_objc_warn
+        "pulp: ${target}: macOS view ObjC sources not found — its view/window/"
+        "accessibility classes keep their shared fixed names, so loading this "
+        "binary alongside another Pulp plug-in in one host may collide. The SDK "
+        "should ship core/view/platform/mac under src/pulp/view/platform/mac.")
     if(NOT _PULP_VIEW_PLATFORM_MAC_DIR)
+        message(WARNING ${_pulp_view_objc_warn})
         return()
     endif()
     set(_pulp_view_objc_srcs
@@ -112,6 +124,7 @@ function(_pulp_apply_view_mac_objc_suffix target)
     )
     foreach(_src IN LISTS _pulp_view_objc_srcs)
         if(NOT EXISTS "${_src}")
+            message(WARNING ${_pulp_view_objc_warn})
             return()
         endif()
     endforeach()

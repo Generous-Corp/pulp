@@ -421,7 +421,12 @@ void print_migration_notes(const pb::UndoBatch& batch) {
     std::size_t breaking = 0;
     for (const auto* e : entries) if (e->breaking) ++breaking;
     if (breaking == 0) return;
-    const bool env_off = std::getenv("PULP_NO_BREAKING_NOTES") != nullptr;
+    // Suppress only on a TRUTHY env value, so PULP_NO_BREAKING_NOTES=0 (or empty)
+    // does not silently disable the banner — matches the documented `=1` usage.
+    const char* env = std::getenv("PULP_NO_BREAKING_NOTES");
+    const std::string env_v = env ? env : "";
+    const bool env_off =
+        (env_v == "1" || env_v == "true" || env_v == "on" || env_v == "yes");
     const std::string cfg = read_user_config_value("upgrade", "breaking_notes");
     const bool cfg_off = (cfg == "false" || cfg == "0" || cfg == "off" || cfg == "no");
     if (env_off || cfg_off) return;

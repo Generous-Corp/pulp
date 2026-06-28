@@ -232,6 +232,19 @@ TEST_CASE("render_notes_json - stable-shape keys present for agent consumers",
     REQUIRE(out.find("v27 body\\n") != std::string::npos);
 }
 
+TEST_CASE("render_notes_json - breaking_count tallies multiple breaking entries",
+          "[cli][migration][issue-548]") {
+    // The shared breaking tally (used by both the JSON signal and the
+    // project-bump banner) must count every breaking entry, not just flag one.
+    mig::MigrationEntry a{"1.0.0", true,  "", "first break",  "a\n"};
+    mig::MigrationEntry b{"1.1.0", false, "", "feature",      "b\n"};
+    mig::MigrationEntry c{"1.2.0", true,  "", "second break", "c\n"};
+    std::vector<const mig::MigrationEntry*> entries = {&a, &b, &c};
+    auto out = mig::render_notes_json(entries, "0.9.0", "1.2.0");
+    REQUIRE(out.find("\"has_breaking\": true") != std::string::npos);
+    REQUIRE(out.find("\"breaking_count\": 2") != std::string::npos);
+}
+
 TEST_CASE("render_notes_json - empty entries emits valid JSON with empty array",
           "[cli][migration][issue-548]") {
     std::vector<const mig::MigrationEntry*> empty;

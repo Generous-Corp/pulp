@@ -315,6 +315,7 @@ int cmd_config(const std::vector<std::string>& args) {
         show("import_design", "default_mode", "live");
         show("import_design", "default_emit", "js");
         show("claude", "send_user_file", "on");
+        show("upgrade", "breaking_notes", "true");
         return 0;
     }
 
