@@ -2155,15 +2155,26 @@ TEST_CASE("pulp-import-design validates style selector values",
                       R"("source_uri":"figma://x/1:1"},)"
                       R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
 
-    auto ok = run_import_design({"--from", "figma-plugin",
-                                 "--file", scene.string(),
-                                 "--output", (tmp.path / "ok.js").string(),
-                                 "--no-tokens",
-                                 "--knob-style", "auto",
-                                 "--fader-style=skin",
-                                 "--meter-style", "plain"});
-    REQUIRE_FALSE(ok.timed_out);
-    REQUIRE(ok.exit_code == 0);
+    const std::vector<std::vector<std::string>> ok_cases = {
+        {"--knob-style", "auto"},
+        {"--knob-style=sprite"},
+        {"--fader-style", "skin"},
+        {"--fader-style=plain"},
+        {"--meter-style", "skinned"},
+        {"--meter-style=default"},
+    };
+
+    for (std::size_t idx = 0; idx < ok_cases.size(); ++idx) {
+        auto args = std::vector<std::string>{"--from", "figma-plugin",
+                                             "--file", scene.string(),
+                                             "--output", (tmp.path / ("ok" + std::to_string(idx) + ".js")).string(),
+                                             "--no-tokens"};
+        args.insert(args.end(), ok_cases[idx].begin(), ok_cases[idx].end());
+        auto ok = run_import_design(args);
+        INFO(ok.stderr_output);
+        REQUIRE_FALSE(ok.timed_out);
+        REQUIRE(ok.exit_code == 0);
+    }
 
     struct BadCase {
         std::vector<std::string> args;
@@ -2171,8 +2182,11 @@ TEST_CASE("pulp-import-design validates style selector values",
     };
     const std::vector<BadCase> cases = {
         {{"--knob-style", "chrome"}, "--knob-style must be"},
+        {{"--knob-style=chrome"}, "--knob-style must be"},
+        {{"--fader-style", "chrome"}, "--fader-style must be"},
         {{"--fader-style=chrome"}, "--fader-style must be"},
         {{"--meter-style", "chrome"}, "--meter-style must be"},
+        {{"--meter-style=chrome"}, "--meter-style must be"},
     };
 
     for (const auto& c : cases) {

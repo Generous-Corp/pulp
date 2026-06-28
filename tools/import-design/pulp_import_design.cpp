@@ -327,6 +327,14 @@ std::optional<bool> parse_skin_style_pref(const std::string& raw) {
     return std::nullopt;
 }
 
+std::optional<std::string> consume_value_option(int& i, int argc, char* argv[], std::string_view name) {
+    const std::string_view arg(argv[i]);
+    if (arg == name) return i + 1 < argc ? std::optional<std::string>{argv[++i]} : std::nullopt;
+    if (arg.size() <= name.size() || arg.compare(0, name.size(), name) != 0 || arg[name.size()] != '=')
+        return std::nullopt;
+    return std::string(arg.substr(name.size() + 1));
+}
+
 std::string lower_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1710,11 +1718,9 @@ int main(int argc, char* argv[]) {
     std::string classnames_output = "classnames.json";   // claude classname map
     bool classnames_output_explicit = false;             // classname output was set explicitly
     bool emit_classnames = true;                          // default on for --from claude
-    // Keyboard shortcuts are imported from source by default.
     std::string shortcuts_output = "shortcuts.json";
     bool shortcuts_output_explicit = false;
     bool import_shortcuts = true;
-    // Platform-convention shortcut defaults are separate from source extraction.
     bool default_shortcuts = true;
     bool output_explicit = false;                         // output path was set explicitly
     bool tokens_file_explicit = false;                    // tokens file was set explicitly
@@ -1799,27 +1805,21 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
-        } else if ((std::strcmp(argv[i], "--knob-style") == 0 && i + 1 < argc)
-                   || std::strncmp(argv[i], "--knob-style=", 13) == 0) {
-            if (auto parsed = parse_knob_style_pref(argv[i][12] == '=' ? argv[i] + 13 : argv[++i])) {
-                use_silver_knobs = *parsed;
-            } else {
+        } else if (auto value = consume_value_option(i, argc, argv, "--knob-style")) {
+            if (auto parsed = parse_knob_style_pref(*value)) use_silver_knobs = *parsed;
+            else {
                 std::cerr << "Error: --knob-style must be silver, sprite, auto, standard, or default\n";
                 return 2;
             }
-        } else if ((std::strcmp(argv[i], "--fader-style") == 0 && i + 1 < argc)
-                   || std::strncmp(argv[i], "--fader-style=", 14) == 0) {
-            if (auto parsed = parse_skin_style_pref(argv[i][13] == '=' ? argv[i] + 14 : argv[++i])) {
-                skin_faders = *parsed;
-            } else {
+        } else if (auto value = consume_value_option(i, argc, argv, "--fader-style")) {
+            if (auto parsed = parse_skin_style_pref(*value)) skin_faders = *parsed;
+            else {
                 std::cerr << "Error: --fader-style must be skin, skinned, default, or plain\n";
                 return 2;
             }
-        } else if ((std::strcmp(argv[i], "--meter-style") == 0 && i + 1 < argc)
-                   || std::strncmp(argv[i], "--meter-style=", 14) == 0) {
-            if (auto parsed = parse_skin_style_pref(argv[i][13] == '=' ? argv[i] + 14 : argv[++i])) {
-                skin_meters = *parsed;
-            } else {
+        } else if (auto value = consume_value_option(i, argc, argv, "--meter-style")) {
+            if (auto parsed = parse_skin_style_pref(*value)) skin_meters = *parsed;
+            else {
                 std::cerr << "Error: --meter-style must be skin, skinned, default, or plain\n";
                 return 2;
             }
