@@ -1,3 +1,5 @@
+// Per-binary-unique ObjC class names (see header).
+#include "pulp_mac_objc_names.h"
 #include "window_host_mac_view.h"
 
 #include <TargetConditionals.h>

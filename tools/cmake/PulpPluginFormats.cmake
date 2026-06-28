@@ -63,6 +63,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${_PULP_VST3_SDK_TARGET}
     )
     target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
+    _pulp_apply_view_mac_objc_suffix(${target}_VST3)
     _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
         "_bundleEntry"
@@ -147,6 +148,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         ${_PULP_CLAP_TARGET}
     )
     target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
+    _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
     _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
@@ -329,6 +331,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     target_compile_definitions(${target}_AU PRIVATE
         PULP_AU_GUI=1
         PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix})
+    _pulp_apply_view_mac_objc_suffix(${target}_AU)
     _pulp_apply_macho_exports(${target}_AU "${target}_AU"
         "_${target}AUFactory"
         "_OBJC_CLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}"

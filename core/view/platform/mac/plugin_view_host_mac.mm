@@ -3,6 +3,11 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
+// Per-binary-unique ObjC class names (renames PulpPluginView / PulpGpuPluginView
+// / PulpAccessibilityElement when a shipped binary defines
+// PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
+#include "pulp_mac_objc_names.h"
+
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/input_events.hpp>
