@@ -238,6 +238,7 @@ pulp ship sign                                          # Uses identity from con
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
+pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/Plugin.pkg --sign-key <base64-key>
 ```
 
 #### Notarization credentials (`pulp ship notarize`)
@@ -621,6 +622,12 @@ creating the output directory, guard empty `parent_path()` values before calling
 `std::filesystem::create_directories`; otherwise a bare filename can throw
 instead of writing the feed. Keep this covered in
 `test/test_cli_ship_shellout.cpp`.
+
+When signing appcast entries, `--url` must be the local artifact path used for
+file size and Ed25519 signing. Use `--download-url` to write the public
+Sparkle enclosure URL into the feed. The hosted file must be byte-identical to
+the local artifact passed as `--url`; otherwise Sparkle rejects the update
+because the feed length and signature describe different bytes.
 
 ### Android package tests fail only on Windows
 

@@ -12,7 +12,10 @@ mapping notes, supported/unsupported values, and issue links, consult
 
 ## Generation
 
-Last refresh: **2026-05-04** against `origin/main` at SHA `a5f4f5ac`.
+The original catalog seed was generated on **2026-05-04** against
+`origin/main` at SHA `a5f4f5ac`. Current status counts come from the
+checked-in split catalog (`compat/css.json`, aggregated into `compat.json`);
+this page is a hand-maintained narrative companion to that catalog.
 
 Spec walk: top ~150 properties from
 [MDN CSS Reference](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties)
@@ -24,13 +27,14 @@ specifics are out of scope.
 
 | Status | Count |
 |--------|------:|
-| supported | ~177 |
-| partial | ~0 |
-| noop | ~10 |
+| supported | 185 |
+| partial | 0 |
+| noop | 0 |
 | missing | 0 |
-| wontfix | ~25 |
+| wontfix | 32 |
 
-(See `_audit.counts.css` in `compat.json` for the exact totals.)
+Total CSS entries: 217. Use `compat.json` for exact per-entry status,
+mapping, evidence, and caveat text.
 
 ## Recently changed
 
@@ -259,8 +263,10 @@ specifics are out of scope.
       the relative-unit resolver lands.
     - `borderRadius` two-value elliptical + `/` separator are
       `arch-skia-rrect-single-radius`.
-    - `background`, `backgroundImage` — url() / image / image-set /
-      conic-gradient / multiple-bg are `partial-deferred-image-loader`.
+    - `background`, `backgroundImage` — url() / image / image-set are
+      `partial-deferred-image-loader`; linear, radial, and conic
+      gradients render through the canvas gradient path; multiple-bg is
+      `arch-single-bg`.
     - `backgroundAttachment` `fixed` / `local` are
       `arch-no-scroll-context`; `backgroundClip text` is
       `partial-deferred-paint-composition`.
@@ -392,10 +398,13 @@ specifics are out of scope.
   independently.
   Reclassified 11 entries from `noop` / `missing` / `partial` →
   `supported` (transition* + animation/animationDelay/Duration/
-  IterationCount/Name/TimingFunction). animationDirection +
-  animationFillMode stay `partial` pending specialized per-property
-  dispatch. animationPlayState stays `missing` per the
-  noop-vocabulary convention. css drift -11.
+  IterationCount/Name/TimingFunction). The current catalog also marks
+  `animationDirection`, `animationFillMode`, and `animationPlayState`
+  `supported`: direction/fill-mode store the spec enums on `CssAnimation`
+  entries, and play-state routes through `setAnimation(id, "play_state",
+  value)` so `View::tick_animations(dt)` honors `paused` / `running`. The
+  per-property tween-to-View commit step remains a separate caveat in the
+  catalog notes.
 - **`css/listStyle` cluster** — four entries
   flipped `missing` → `partial`. New `View::ListStyleType` enum
   (`none` / `disc` / `circle` / `square` / `decimal`),
@@ -488,9 +497,10 @@ specifics are out of scope.
   equivalents on CIFilter are a follow-up). Reclassified DIVERGE →
   PASS. The Skia ImageFilter chain is the same primitive Pulp uses
   for `boxShadow`, so reusing it avoids a parallel filter path.
-- **No-op CSS entries** — Eight CSS entries reclassified `wontfix` /
-  `missing` → `noop` (silently accepted, no paint impact in pulp's
-  non-scrolling / hint-free model). The entries split into two clusters:
+- **Historical no-op CSS entries** — An older catalog pass reclassified eight
+  CSS entries from `wontfix` / `missing` to `noop` (silently accepted, no paint
+  impact in pulp's non-scrolling / hint-free model). The entries split into two
+  clusters:
   * **Optimization / compositor hints (3):** `css/willChange`,
     `css/contain`, `css/contentVisibility`. These are browser-only
     hints — pulp's GPU renderer doesn't expose composition layers in a
@@ -502,17 +512,10 @@ specifics are out of scope.
     (smooth-scroll programmatic jumps, scroll-snap landing areas,
     rubber-band gestures). Pulp has Overflow scroll/visible but doesn't
     actually scroll today, so the declarations silently noop.
-  All eight properties already noop at runtime by JS-shim fall-through
-  (no `case` arm in `web-compat-style-decl.js`); this catalog update
-  only changes classification + harness verdict (drift cleared on all eight).
-  Lifts the css "effective denominator" by reclassifying 4 OOS entries
-  (`status: wontfix`) and 4 NOT-IMPL entries (`status: missing`) into the
-  noop bucket — NO_OP entries semantically count as "supported in the
-  silent-accept sense", consumers can paste browser CSS verbatim. Catalog
-  noop count: 9 → 17. The css adapter
-  (`tools/harness/adapters/css.py`) gained an explicit
-  `status == "noop"` early-return so future entries don't have to rely on
-  mapsTo string-marker matching.
+  These entries have since been resolved or reclassified; the current checked-in
+  CSS catalog has no `noop` entries. Keep `compat.json` as the source of truth
+  for current status, and treat this paragraph as history for why the harness
+  vocabulary exists.
 - **Background sub-properties** — wired through
   the JS shim and bridge: `backgroundAttachment` / `backgroundClip` /
   `backgroundOrigin` flipped from `missing` to `noop` / `partial` /
@@ -694,26 +697,18 @@ specifics are out of scope.
   refreshed to match the JS translator and bridge surface. The
   background size/position/repeat bridge functions are now registered
   and store the values on View; visual paint for raster backgrounds
-  remains deferred. Drift on these six entries is cleared. Nine remaining
-  `css/animation*` and
-  `css/touchAction` entries closed via the `noop` vocabulary extension
-  (see next entry).
-- **Catalog vocabulary extension** — The harness
-  verifier (`tools/harness/status.py`) now recognizes a fifth catalog
-  status value, `noop`, which maps to the harness `NO_OP` outcome.
-  Distinct from `missing` (no implementation at all) and `partial`
-  (something is implemented but lacks coverage), `noop` says the bridge
-  has an explicit registration but the body is intentionally a stub
-  pending a future subsystem. Nine css entries flipped to the new
-  status: `css/animation`, `css/animationDelay`, `css/animationDirection`,
-  `css/animationDuration`, `css/animationFillMode`,
-  `css/animationIterationCount`, `css/animationName`,
-  `css/animationTimingFunction` (all pending the Phase A2 animations
-  subsystem) and `css/touchAction` (pending gesture routing in the
-  C++ hit-test path). css drift dropped by 9 entries (60 → 51).
-  `css/animationPlayState` stays `missing` because its `mapsTo` is
-  `"no branch"` — the bridge has no entry point for it at all, which
-  is NOT_IMPL semantics, not NO-OP.
+  remains deferred. Drift on these six entries is cleared. The old
+  animation/touch-action noop bucket has since been resolved: all
+  `css/animation*` entries are `supported`, and `css/touchAction` is `wontfix`
+  with the architectural native-gesture rationale recorded in `compat.json`.
+- **Catalog vocabulary extension** — The harness verifier
+  (`tools/harness/status.py`) recognizes a fifth catalog status value, `noop`,
+  which maps to the harness `NO_OP` outcome. Distinct from `missing` (no
+  implementation at all) and `partial` (something is implemented but lacks
+  coverage), `noop` says the bridge has an explicit registration but the body is
+  intentionally a stub pending a future subsystem. The vocabulary remains valid
+  for the broader compatibility schema, but the current CSS catalog has no
+  `noop` entries.
 - **`css/textAlign: match-parent`** — `css/textAlign` now also
   accepts `match-parent`, closing the last value gap on this property.
   CSS spec: `match-parent` resolves to the parent's *computed*
@@ -779,9 +774,9 @@ specifics are out of scope.
 
 ## No-op And Storage-Only Caveats
 
-Use `compat.json` as the source of truth for current noop, partial, and
-storage-only CSS entries. This narrative avoids a hand-maintained static
-list because these properties move as bridge functions land.
+Use `compat.json` as the source of truth for current CSS status and
+storage-only caveats. The current CSS catalog has no `noop`, `partial`, or
+`missing` entries; older mentions above are historical change-log context.
 
 The current background-size / background-position / background-repeat caveat is
 storage-only rather than missing bridge wiring: the JS style adapter calls the

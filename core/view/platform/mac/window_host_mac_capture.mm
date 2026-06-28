@@ -1,3 +1,5 @@
+// Per-binary-unique ObjC class names (see header).
+#include "pulp_mac_objc_names.h"
 // window_host_mac_capture.mm — PNG / capture helpers for the macOS
 // window host.
 //

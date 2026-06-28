@@ -396,13 +396,25 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         int32 step_count = 0;
         if (param.range.step >= 1.0f && param.range.min == 0.0f && param.range.max == 1.0f) {
             step_count = 1;
-            if (param.name == "Bypass") {
-                flags |= ParameterInfo::kIsBypass;
-                // Remember which ParamID carries kIsBypass so process()
-                // can short-circuit to pass-through audio without
-                // invoking the Processor when the host sets it.
-                bypass_param_id_ = param.id;
-            }
+        }
+
+        // Tag the bypass param via the shared designation-first contract: a
+        // declared `Bypass` designation wins, otherwise the legacy
+        // boolean-"Bypass" name/range heuristic applies (see is_bypass_param).
+        if (state::is_bypass_param(param)) {
+            flags |= ParameterInfo::kIsBypass;
+            // kIsBypass must advertise a toggle. A declared `Bypass`
+            // designation is interpreted as off<0.5 / on>=0.5 regardless of its
+            // ParamRange, and process() short-circuits on that same threshold,
+            // so FORCE a 2-state step count here even when the range is
+            // continuous. (The legacy heuristic only ever matches a boolean
+            // range, so this is a no-op for it.) Hosts must see a bypass control
+            // as a toggle, not a continuous knob.
+            step_count = 1;
+            // Remember which ParamID carries kIsBypass so process()
+            // can short-circuit to pass-through audio without
+            // invoking the Processor when the host sets it.
+            bypass_param_id_ = param.id;
         }
 
         // Build ParameterInfo with unit assignment
@@ -1218,6 +1230,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
         processor_->set_sidechain(nullptr);
+        // Trigger reset is a single-exit invariant: a Reset/trigger param the
+        // host raised this block must settle even though we short-circuited
+        // before process(), or a panic/reset raised while bypassed would fire
+        // late on the next non-bypassed block.
+        store_.reset_triggers_rt();
         return kResultOk;
     }
 
@@ -1480,6 +1497,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in_, midi_out_, ctx);
     }
+
+    // Return trigger / momentary params (panic, reset, tap) to their default
+    // now that the Processor has observed this block. Done before the
+    // output-change scan below so the host records the auto-reset as automation.
+    store_.reset_triggers_rt();
 
     // Write parameter output changes — lets the host record automation
     // from parameter changes made by the plugin during process()

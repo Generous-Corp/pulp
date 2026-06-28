@@ -94,6 +94,22 @@ const char* provenance_name(Provenance p) {
     }
 }
 
+std::string format_unresolved_summary(const Manifest& manifest) {
+    std::string out = std::to_string(manifest.unresolved.size()) +
+                      " item(s) to migrate";
+    if (!manifest.migration_status_json.empty())
+        out += " (see migration_status.json)";
+    else
+        out += " (no migration_status.json emitted)";
+    return out;
+}
+
+std::string format_parity_review_step(const Manifest& manifest) {
+    if (!manifest.migration_status_json.empty())
+        return "Review migration_status.json for the unresolved DSP/UI parity work.";
+    return "Review the importer-reported unresolved DSP/UI parity work.";
+}
+
 Manifest parse_manifest(const std::string& result_json) {
     Manifest m;
     JsonParser parser{result_json};

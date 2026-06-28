@@ -126,6 +126,26 @@ public:
     /// Reset all parameters to their default values.
     void reset_all_to_defaults();
 
+    /// Reset every trigger / momentary parameter to its range default.
+    ///
+    /// A trigger parameter (see `ParamInfo::is_trigger` / a `Reset`
+    /// designation) is a one-shot "do this now" control. Format adapters call
+    /// this once at the end of each process block, after the Processor has
+    /// observed the value, so the control returns to its resting default for
+    /// the next block.
+    ///
+    /// Real-time safe: writes directly to the lock-free atomic value of each
+    /// trigger parameter (no allocation, no listener dispatch, no queueing).
+    /// The set of trigger indices is cached at registration, so this is O(number
+    /// of trigger params), and a store with no triggers does no work.
+    ///
+    /// @return true if any trigger parameter was reset this call.
+    bool reset_triggers_rt();
+
+    /// True when at least one registered parameter is a trigger / momentary
+    /// control. Adapters can skip calling `reset_triggers_rt()` when false.
+    bool has_trigger_params() const { return !trigger_indices_.empty(); }
+
     /// Look up immutable metadata for a parameter.
     /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
@@ -301,6 +321,10 @@ private:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    // Indices (into values_/params_) of trigger / momentary parameters, cached
+    // at registration so reset_triggers_rt() is allocation-free on the audio
+    // thread. Empty for the overwhelmingly common no-trigger store.
+    std::vector<std::size_t> trigger_indices_;
     std::shared_ptr<detail::ListenerRegistry> registry_;
     std::vector<ListenerToken> permanent_listener_tokens_;
     StateMigrationRegistry migrations_;

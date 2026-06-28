@@ -114,7 +114,10 @@ warning: confidence below 80% — this export may be a newer
 ## Adding a new format-version
 
 1. Run `pulp import-design --file <new-export> --report-new-format` to
-   diff the new export against the closest known format.
+   diff the new export against the closest known format. If no known
+   source/version is close enough to detect, the generated `candidate-source`
+   and `candidate-format-version` fields are empty and must be filled in
+   manually.
 2. Hand-edit the output into a new entry under
    `compat.json[imports/<source>/detected-formats]` — set
    `introduced` to the export date.
