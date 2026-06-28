@@ -128,6 +128,9 @@ enum TempoSamplerParams : state::ParamID {
     kLoopMode     = 14, // loop DIRECTION when kTempoLoop is on: 0 Forward,
                         // 1 Reverse, 2 Ping-Pong. Surfaced (with One-Shot) as the
                         // MODE dropdown, which also drives kTempoLoop on/off.
+    kSliceMode    = 15, // how cut points are chosen (Logic Slice "Mode" pop-up):
+                        // 0 Onset/Transient (SENS=count), 1 Beat divisions
+                        // (SENS=division 1/2/4/8/16), 2 Equal divisions (SENS=count).
 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
@@ -557,6 +560,8 @@ public:
         // Loop direction (used only when kTempoLoop is on): 0 Forward, 1 Reverse,
         // 2 Ping-Pong. The MODE dropdown writes this alongside kTempoLoop.
         store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Slicing mode (Logic Slice "Mode" pop-up): 0 Onset, 1 Beat, 2 Equal.
+        store.add_parameter({.id = kSliceMode, .name = "Slice Mode", .unit = "", .range = {0, 2, 0, 1}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -1297,13 +1302,33 @@ public:
             root->add_child(std::move(combo));
         }
 
-        // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
-        // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        // Slice-Mode dropdown (Logic Slice "Mode") + the amount fader beside it.
+        // Onset keeps the strongest transients, Beat cuts on the tempo grid, Equal
+        // cuts N uniform segments; the fader (kOnsetSens) is the amount control for
+        // all three. Either re-slices on the worker (coalesced) via request_reanalyze().
+        {
+            auto smode = std::make_unique<ComboBox>();
+            smode->set_items({"Onset", "Beat", "Equal"});
+            smode->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kSliceMode)), 0, 2));
+            smode->on_change = [this](int idx) {
+                state().begin_gesture(kSliceMode);
+                state().set_value(kSliceMode, static_cast<float>(std::clamp(idx, 0, 2)));
+                state().end_gesture(kSliceMode);
+                request_reanalyze();
+            };
+            auto* smodePtr = smode.get();
+            place(*smode, 124, 316, 64, 26);
+            root->listeners.push_back(state().add_listener(
+                [this, smodePtr](state::ParamID id, float v) {
+                    if (id == kSliceMode) smodePtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 2));
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(smode));
+        }
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 162, 322, 86, 16);
+            place(*fader, 192, 322, 56, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -1810,25 +1835,56 @@ private:
             return best;
         };
 
-        std::vector<audio::OnsetMarker> cand;
-        for (const auto& m : onsets.markers)
-            if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
-                cand.push_back(m);
-        std::sort(cand.begin(), cand.end(),
-                  [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-
-        // Greedily accept the highest-confidence cuts (preserving the
-        // sensitivity->count mapping) that keep EVERY slice — including the first
-        // and last — at least kMinSlice long, snapping each to a zero-crossing.
+        // Slicing mode (Logic Slice "Mode" pop-up). Onset (default) keeps the
+        // strongest transients; Equal cuts N uniform segments; Beat cuts on the
+        // detected tempo's (sub)beat grid. SENS is the amount control for all.
+        const int slice_mode = static_cast<int>(state().get_value(kSliceMode) + 0.5f);
         std::vector<long> cuts;
-        for (const auto& m : cand) {
-            if (static_cast<int>(cuts.size()) >= keep) break;
-            const long f = snap_zc(static_cast<long>(m.frame));
-            if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
-            bool ok = true;
-            for (long c : cuts)
-                if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
-            if (ok) cuts.push_back(f);
+        if (slice_mode == 2) {
+            // Equal divisions: s -> N equal segments (1..kMaxSlices).
+            const int n = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));
+            for (int k = 1; k < n; ++k) {
+                const long f = snap_zc(static_cast<long>(
+                    std::llround(static_cast<double>(raw_frames_) * k / n)));
+                if (f >= kMinSlice && raw_frames_ - f >= kMinSlice &&
+                    (cuts.empty() || f - cuts.back() >= kMinSlice)) cuts.push_back(f);
+            }
+        } else if (slice_mode == 1) {
+            // Beat divisions: cut every (sub)beat of the detected loop tempo.
+            // s -> {1,2,4,8,16} subdivisions per beat.
+            const double bpm = loop_bpm_.load(std::memory_order_relaxed);
+            static constexpr int kDivs[] = {1, 2, 4, 8, 16};
+            const int di = std::clamp(static_cast<int>(std::lround(s * 4.0)), 0, 4);
+            const double step = bpm > 0.0
+                ? (60.0 / bpm * raw_sr_) / static_cast<double>(kDivs[di]) : 0.0;
+            if (step >= static_cast<double>(kMinSlice))
+                for (double f = step;
+                     f < static_cast<double>(raw_frames_ - 1) &&
+                     static_cast<int>(cuts.size()) < kMaxSlices - 1; f += step) {
+                    const long c = snap_zc(static_cast<long>(std::llround(f)));
+                    if (c >= kMinSlice && raw_frames_ - c >= kMinSlice &&
+                        (cuts.empty() || c - cuts.back() >= kMinSlice)) cuts.push_back(c);
+                }
+        } else {
+            // Onset/Transient (default): greedily accept the highest-confidence
+            // cuts (preserving the sensitivity->count mapping) that keep EVERY
+            // slice — incl. first and last — at least kMinSlice long, each snapped
+            // to a zero-crossing so both shared edges declick.
+            std::vector<audio::OnsetMarker> cand;
+            for (const auto& m : onsets.markers)
+                if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
+                    cand.push_back(m);
+            std::sort(cand.begin(), cand.end(),
+                      [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
+            for (const auto& m : cand) {
+                if (static_cast<int>(cuts.size()) >= keep) break;
+                const long f = snap_zc(static_cast<long>(m.frame));
+                if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
+                bool ok = true;
+                for (long c : cuts)
+                    if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
+                if (ok) cuts.push_back(f);
+            }
         }
         std::sort(cuts.begin(), cuts.end());
 

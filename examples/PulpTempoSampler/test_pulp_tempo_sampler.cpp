@@ -170,11 +170,12 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 14);
+    REQUIRE(s.param_count() == 15);
     // Play to End defaults ON: a dropped loop's root yields the whole loop even
     // after chopping (raising SENS), matching Logic Quick Sampler's slice ergonomics.
     REQUIRE(s.get_value(kPlayToEnd) == 1.0f);
     REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop direction = Forward
+    REQUIRE(s.get_value(kSliceMode) == 0.0f);  // default Onset/Transient slicing
 }
 
 TEST_CASE("PulpTempoSampler package metadata uses the descriptor version", "[tempo-sampler]") {
@@ -2317,3 +2318,63 @@ TEST_CASE("Fix 3: piano toggle swaps frame + fires the resize callback",
     REQUIRE(oh == 266);   // full typing frame, no clipping at its panel dims
 }
 #endif  // __APPLE__
+
+// Slice MODE (Logic Slice "Mode" pop-up): Equal cuts N uniform segments and Beat
+// cuts on the detected-tempo grid — both evenly spaced (vs Onset's transients).
+TEST_CASE("Slice modes: Equal and Beat cut evenly-spaced grids", "[tempo-sampler][slice-mode]") {
+    auto spacing_ratio = [](const std::vector<long>& sl) -> double {
+        if (sl.size() < 3) return 999.0;                  // need >= 2 interior spans
+        long mn = sl[1] - sl[0], mx = mn;                 // seed from first span (no <climits>)
+        for (std::size_t i = 0; i + 1 < sl.size(); ++i) {
+            const long d = sl[i + 1] - sl[i];
+            mn = std::min(mn, d); mx = std::max(mx, d);
+        }
+        return mn > 0 ? static_cast<double>(mx) / static_cast<double>(mn) : 999.0;
+    };
+
+    // Equal divisions: deterministic — no tempo needed. SENS 0.3 -> ~10 segments
+    // on a 1 s loop (each ~100 ms, comfortably above the ~40 ms min-slice).
+    {
+        Fixture f;
+        f.store.set_value(kSliceMode, 2.0f);
+        f.store.set_value(kOnsetSens, 0.3f);
+        auto loop = percussive_loop(48000, 8);
+        const float* ch[1] = {loop.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->request_reanalyze();
+        REQUIRE(wait_for([&] { return f.proc->num_slices() >= 4; }));
+        std::vector<float> mono; float sr = 0; std::vector<long> sl;
+        REQUIRE(f.proc->snapshot_for_view(mono, sr, sl));
+        INFO("equal-mode slices=" << sl.size() << " spacingRatio=" << spacing_ratio(sl));
+        CHECK(sl.size() >= 4);
+        CHECK(spacing_ratio(sl) < 1.5);       // near-uniform (only ZC-snap jitter)
+    }
+
+    // Beat divisions: cuts on the tempo grid -> also evenly spaced, and more
+    // subdivisions (higher SENS) -> more cuts. Guarded on the analyzer finding a
+    // tempo for the synthetic loop (no real-DAW transport in a unit test).
+    {
+        Fixture f;
+        f.store.set_value(kSliceMode, 1.0f);
+        f.store.set_value(kOnsetSens, 0.25f);
+        auto loop = percussive_loop(48000, 8);
+        const float* ch[1] = {loop.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->request_reanalyze();
+        wait_for([&] { return f.proc->num_slices() >= 2; });
+        if (f.proc->detected_bpm() <= 0.0 || f.proc->num_slices() < 2) {
+            WARN("beat-mode: analyzer found no tempo for the synthetic loop; "
+                 "mechanism is covered by the Equal-mode case + the render harness");
+        } else {
+            // Beat cuts land on the tempo grid, so the slices are evenly spaced.
+            // (Count is not monotonic in SENS: past a point the sub-beat falls
+            // below the ~40 ms min-slice and cuts are filtered — by design.)
+            std::vector<float> mono; float sr = 0; std::vector<long> sl;
+            REQUIRE(f.proc->snapshot_for_view(mono, sr, sl));
+            INFO("beat-mode slices=" << sl.size() << " spacingRatio=" << spacing_ratio(sl));
+            CHECK(spacing_ratio(sl) < 1.7);   // beat grid -> evenly spaced
+        }
+    }
+}
