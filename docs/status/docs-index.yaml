@@ -247,7 +247,7 @@ docs:
   - slug: web-plugins
     path: guides/web-plugins.md
     kind: guide
-    summary: WAMv2 and WebCLAP web plugin formats — build, deploy, and browser demo
+    summary: WAMv2 and WebCLAP web plugin formats — build scaffolds and browser-host status
 
   - slug: from-react-css
     path: guides/from-react-css.md

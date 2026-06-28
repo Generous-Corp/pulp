@@ -17,7 +17,7 @@ platforms:
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: experimental
-    notes: WAMv2, WebCLAP adapters, Emscripten build pipeline, browser test host. Not yet runtime-validated in browser.
+    notes: WAMv2/WebCLAP adapter scaffolding, Emscripten demo build pipeline, and browser-host shell. C++ bridge tests exist; browser-host plugin audio is not yet fully wired or runtime-validated.
 
 formats:
   vst3:
@@ -54,8 +54,10 @@ formats:
     linux: experimental
   wam_v2:
     web: experimental
+    notes: C++ WamProcessorBridge and checked-in Emscripten demo outputs exist; host-compatible WAM ES-module / browser AudioWorklet loading remains scaffolded.
   webclap:
     web: experimental
+    notes: Adapter macro and CMake helper exist; no checked-in PulpGain_WCLAP target or Pulp browser-host wclap-host-js integration yet.
   aax:
     macos: experimental
     windows: experimental
@@ -122,8 +124,10 @@ format_limitations:
     - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
+    - "Pulp Browser Host WAM loading is scaffolded; checked-in demo outputs are not runtime-validated in browser and are not loaded into a plugin AudioWorkletNode yet."
   webclap:
     - "Same browser-sandbox-only constraint as wam_v2."
+    - "Pulp Browser Host recognizes WCLAP URLs/files, but .wclap.tar.gz unpack/instantiate via wclap-host-js is still placeholder work."
 
 scripted_ui:
   ui_script_target_wiring:
