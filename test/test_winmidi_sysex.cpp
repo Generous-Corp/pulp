@@ -29,8 +29,7 @@ TEST_CASE("WinMIDI: open + sysex callback registration leaks nothing",
     REQUIRE(sys != nullptr);
     auto inputs = sys->enumerate_inputs();
     if (inputs.empty()) {
-        SUCCEED("no MIDI input devices on this host; skipping");
-        return;
+        SKIP("no MIDI input devices on this host");
     }
 
     auto in = sys->create_input();
@@ -45,8 +44,7 @@ TEST_CASE("WinMIDI: open + sysex callback registration leaks nothing",
     // no SysEx packet ever arrives.
     bool opened = in->open(inputs[0].id, [](const auto&) {});
     if (!opened) {
-        SUCCEED("first input device couldn't open (probably busy); skipping");
-        return;
+        SKIP("first input device couldn't open, probably busy");
     }
     REQUIRE(in->is_open());
     in->close();
