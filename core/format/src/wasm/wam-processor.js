@@ -81,13 +81,13 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       case "param": this._wam.setParam(String(msg.id), msg.value); break;
       case "midi":  this._wam.midi(msg.status, msg.data1, msg.data2, msg.offset | 0); break;
       case "getState":
-        this.port.postMessage({ type: "state", id: msg.id, data: this._wam.readState() });
+        this.port.postMessage({ type: "state", reqId: msg.reqId, data: this._wam.readState() });
         break;
       case "setState":
         if (msg.data) this._wam.writeState(msg.data instanceof Uint8Array ? msg.data : new Uint8Array(msg.data));
         break;
       case "getParam":
-        this.port.postMessage({ type: "paramValue", id: msg.id, value: this._wam.getParam(String(msg.id)) });
+        this.port.postMessage({ type: "paramValue", reqId: msg.reqId, value: this._wam.getParam(String(msg.paramId)) });
         break;
     }
   }

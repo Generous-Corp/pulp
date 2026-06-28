@@ -77,27 +77,34 @@ export default class PulpWAM {
         try { this._descriptor = JSON.parse(msg.json); } catch { this._descriptor = {}; }
         this._resolveDescriptor?.(this._descriptor);
         break;
+      case "error":
+        // Surface a worklet-side failure rather than silently timing out.
+        console.error("PulpWAM worklet error:", msg.error);
+        this._lastError = msg.error;
+        break;
       case "state":
       case "paramValue": {
-        const r = this._pending.get(msg.id);
-        if (r) { this._pending.delete(msg.id); r(msg.type === "state" ? msg.data : msg.value); }
+        const r = this._pending.get(msg.reqId);
+        if (r) { this._pending.delete(msg.reqId); r(msg.type === "state" ? msg.data : msg.value); }
         break;
       }
     }
   }
 
+  // Request/response over the port. reqId correlates the reply; any other fields
+  // (e.g. paramId) are payload and must not collide with reqId.
   _request(type, extra) {
-    const id = ++this._reqId;
+    const reqId = ++this._reqId;
     return new Promise((resolve) => {
-      this._pending.set(id, resolve);
-      this._audioNode.port.postMessage({ type, id, ...extra });
+      this._pending.set(reqId, resolve);
+      this._audioNode.port.postMessage({ type, reqId, ...extra });
     });
   }
 
   setParameterValue(id, value) {
     this._audioNode?.port.postMessage({ type: "param", id, value });
   }
-  async getParameterValue(id) { return this._request("getParam", { paramId: id, id: undefined }); }
+  async getParameterValue(id) { return this._request("getParam", { paramId: id }); }
 
   scheduleMidi(status, data1, data2, offset = 0) {
     this._audioNode?.port.postMessage({ type: "midi", status, data1, data2, offset });
