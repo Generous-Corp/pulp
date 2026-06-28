@@ -23,6 +23,7 @@ set(PULP_INCLUDES
     ${PULP_ROOT}/core/state/include
     ${PULP_ROOT}/core/audio/include
     ${PULP_ROOT}/core/midi/include
+    ${PULP_ROOT}/core/events/include
     ${PULP_ROOT}/core/format/include
     ${PULP_ROOT}/core/signal/include
     ${PULP_ROOT}/examples/web-demos
@@ -65,12 +66,23 @@ set(WASM_LINK_FLAGS
 
 string(JOIN " " WASM_LINK_FLAGS_STR ${WASM_LINK_FLAGS})
 
-# Pulp source files needed for WASM (minimal set — no platform-specific code)
+# Pulp source files needed for WASM (minimal set — no platform-specific code).
+# Keep this list in sync with the transitive deps of the WAM bridge: store.cpp
+# pulls EventLoop (event_loop.cpp) and state migration (state_migration.cpp);
+# the Processor base's create_view()/create_ara_document_controller() defaults
+# live in format.cpp.
 set(PULP_CORE_SOURCES
     ${PULP_ROOT}/core/runtime/src/runtime.cpp
     ${PULP_ROOT}/core/runtime/src/identity.cpp
     ${PULP_ROOT}/core/state/src/store.cpp
+    ${PULP_ROOT}/core/state/src/state_migration.cpp
+    ${PULP_ROOT}/core/events/src/event_loop.cpp
     ${PULP_ROOT}/core/format/src/registry.cpp
+    # Headless replacements for Processor::create_view() (format.cpp pulls
+    # core/view -> canvas) and create_ara_document_controller() (ara.cpp pulls
+    # the optional ARA SDK). The WASM DSP module is headless and never calls
+    # either, so we link local nullptr stubs instead of those layers.
+    ${CMAKE_CURRENT_SOURCE_DIR}/wasm_processor_stubs.cpp
 )
 
 # ── PulpGain WASM ────────────────────────────────────────────────────────
