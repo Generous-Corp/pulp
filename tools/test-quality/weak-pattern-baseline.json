@@ -1,17 +1,17 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-cli-inspect-skip-report.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-key-focus-skip-report.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 332,
+    "succeed": 328,
     "require_true": 16,
-    "skip": 479
+    "skip": 483
   },
   "classifications": {
-    "needs-review": 756,
+    "needs-review": 760,
     "placeholder": 4,
-    "skip-as-pass": 51,
+    "skip-as-pass": 47,
     "unconditional-true": 16
   },
   "notes": [

@@ -95,8 +95,7 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — key-focus contract test skipped.");
-            return;
+            SKIP("No Cocoa window for key-focus contract test");
         }
 
         FocusRecordingView root;
@@ -191,8 +190,7 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — multi-editor focus test skipped.");
-            return;
+            SKIP("No Cocoa window for multi-editor focus test");
         }
 
         NSView* containerA =
@@ -300,8 +298,7 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted key-routing test skipped.");
-            return;
+            SKIP("No Cocoa window for hosted key-routing test");
         }
 
         View root;
@@ -411,8 +408,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — focus-affordance test skipped.");
-            return;
+            SKIP("No Cocoa window for focus-affordance test");
         }
 
         View root;
