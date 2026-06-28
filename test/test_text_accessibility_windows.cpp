@@ -4,8 +4,8 @@
 // the Windows lane on every PR (macOS is the only required gate), so
 // this file is structured so it:
 //   - compiles into pulp-test-text-accessibility-windows on every platform,
-//     reporting SUCCEED("...stub on non-Windows...") so the test name shows
-//     up consistently in ctest output everywhere; AND
+//     reporting the non-Windows path as skipped so the test name shows up
+//     consistently in ctest output everywhere; AND
 //   - runs the real COM-bridge assertions only on Windows.
 //
 // When a Windows CI lane is added, the gated TEST_CASEs validate the
@@ -28,7 +28,7 @@ TEST_CASE("TextAccessibilityNode windows backend: skipped (non-Windows host)",
     // "windows-uia" off Windows. If a future build accidentally pulls
     // the Windows TU on the wrong platform this assertion catches it.
     REQUIRE(accessibility_backend_name() != "windows-uia");
-    SUCCEED("Windows UIA backend test skipped — not a Windows host");
+    SKIP("Windows UIA backend test requires a Windows host");
 }
 
 #else  // _WIN32
