@@ -56,7 +56,7 @@ if(TARGET pulp::gpu-audio)
         PLUGIN_NAME       "SpectralLab"
         BUNDLE_ID         "com.pulp.spectrallab"
         MANUFACTURER      "Pulp"
-        VERSION           "1.0.0"
+        VERSION           "1.0.1"
         CATEGORY          Effect
         PLUGIN_CODE       "SpLb"
         MANUFACTURER_CODE "Pulp"
