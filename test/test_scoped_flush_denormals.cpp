@@ -43,7 +43,7 @@ TEST_CASE("ScopedFlushDenormals nests and restores to the enclosing mode",
 TEST_CASE("ScopedFlushDenormals flushes a denormal arithmetic result to zero",
           "[signal][denormal][numeric-mode]") {
     if constexpr (!kHardwareFlushSupported) {
-        SUCCEED("hardware flush-to-zero not available on this target");
+        SKIP("hardware flush-to-zero not available on this target");
     } else {
         // volatile defeats constant folding so the multiply happens at runtime
         // under the active FP mode. 1e-30 * 1e-15 ~= 1e-45, below FLT_MIN
