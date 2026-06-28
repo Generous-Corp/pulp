@@ -2438,3 +2438,139 @@ TEST_CASE("StateStore::snapshot works with a single parameter",
     REQUIRE(snap.size() == 1);
     REQUIRE_THAT(snap[0], WithinAbs(0.33, 0.001));
 }
+
+// ─── Parameter designation + trigger / momentary params ─────────────────────
+
+TEST_CASE("ParamInfo defaults to no designation and is not a trigger",
+          "[state][param-designation]") {
+    ParamInfo info = make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    REQUIRE(info.designation == ParamDesignation::None);
+    REQUIRE(info.is_trigger == false);
+    REQUIRE(info.auto_resets() == false);
+}
+
+TEST_CASE("is_bypass_param honors a declared Bypass designation regardless of name",
+          "[state][param-designation]") {
+    // A param NOT named "Bypass" and NOT in boolean range — the legacy
+    // heuristic would reject it — is still a bypass when declared.
+    ParamInfo declared = make_param_info(1, "Engine Active", "",
+                                         {0.0f, 4.0f, 0.0f, 0.25f});
+    declared.designation = ParamDesignation::Bypass;
+    REQUIRE(is_bypass_param(declared));
+}
+
+TEST_CASE("is_bypass_param falls back to the legacy name/range heuristic",
+          "[state][param-designation]") {
+    // No designation declared: the boolean "Bypass" name/range heuristic
+    // still detects it, so existing plugins keep working unchanged.
+    ParamInfo legacy = make_param_info(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    REQUIRE(legacy.designation == ParamDesignation::None);
+    REQUIRE(is_bypass_param(legacy));
+
+    // A param merely named "Bypass" but with a non-boolean range is NOT a
+    // bypass under the legacy heuristic (matches prior adapter behavior).
+    ParamInfo named_only = make_param_info(2, "Bypass", "", {0.0f, 10.0f, 0.0f});
+    REQUIRE_FALSE(is_bypass_param(named_only));
+
+    // An ordinary parameter is never a bypass.
+    ParamInfo ordinary = make_param_info(3, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    REQUIRE_FALSE(is_bypass_param(ordinary));
+}
+
+TEST_CASE("A non-Bypass designation is never treated as bypass",
+          "[state][param-designation]") {
+    // Even with a boolean "Bypass"-shaped range, a Reset designation must not
+    // be mistaken for a bypass control.
+    ParamInfo reset = make_param_info(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    reset.designation = ParamDesignation::Reset;
+    REQUIRE_FALSE(is_bypass_param(reset));
+}
+
+TEST_CASE("A trigger parameter auto-resets to default after a block",
+          "[state][param-designation][rt-safety]") {
+    StateStore store;
+    // Default 0, raised to 1 by a "do this now" event.
+    ParamInfo tap = make_param_info(1, "Tap", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    tap.is_trigger = true;
+    store.add_parameter(tap);
+    // An ordinary parameter alongside it must NOT be reset.
+    store.add_parameter(make_param_info(2, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(2, -6.0f);
+
+    REQUIRE(store.has_trigger_params());
+
+    // Host/UI raises the trigger; the Processor observes it during the block.
+    store.set_value(1, 1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.0001));
+
+    // End-of-block auto-reset returns the trigger to its default, leaving the
+    // ordinary parameter untouched.
+    bool reset_any = false;
+    {
+        pulp::test::RtAllocationProbe probe;  // proves no audio-thread alloc.
+        reset_any = store.reset_triggers_rt();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(reset_any);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.0001));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(-6.0, 0.0001));
+}
+
+TEST_CASE("A Reset-designated parameter is a trigger and auto-resets",
+          "[state][param-designation][rt-safety]") {
+    StateStore store;
+    // Reset designation implies trigger behavior (auto_resets()), even though
+    // is_trigger was not set explicitly.
+    ParamInfo panic = make_param_info(1, "Panic", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    panic.designation = ParamDesignation::Reset;
+    REQUIRE(panic.is_trigger == false);
+    REQUIRE(panic.auto_resets());
+    store.add_parameter(panic);
+    REQUIRE(store.has_trigger_params());
+
+    store.set_value(1, 1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.0001));
+    REQUIRE(store.reset_triggers_rt());
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.0001));
+}
+
+TEST_CASE("reset_triggers_rt is a no-op for a store with no triggers",
+          "[state][param-designation]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(1, -3.0f);
+    REQUIRE_FALSE(store.has_trigger_params());
+    REQUIRE_FALSE(store.reset_triggers_rt());
+    REQUIRE_THAT(store.get_value(1), WithinAbs(-3.0, 0.0001));
+}
+
+TEST_CASE("reset_triggers_rt respects the duplicate-id latest-wins contract",
+          "[state][param-designation]") {
+    // A trigger registered under id 7, then SUPERSEDED by a non-trigger under
+    // the same id. id_to_index_ resolves 7 to the latest (non-trigger) slot, so
+    // get_value/set_value never touch the stale trigger slot. reset_triggers_rt
+    // must NOT clobber the live value via the dead trigger index.
+    StateStore store;
+    ParamInfo trigger = make_param_info(7, "Old Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    trigger.is_trigger = true;
+    store.add_parameter(trigger);
+    // Supersede id 7 with an ordinary parameter (latest registration wins).
+    store.add_parameter(make_param_info(7, "Now Ordinary", "dB", {-60.0f, 12.0f, -6.0f}));
+
+    store.set_value(7, 3.0f);  // lands in the latest (ordinary) slot
+    // The superseded trigger slot is dead, so no live trigger remains.
+    REQUIRE_FALSE(store.reset_triggers_rt());
+    // The live value is untouched — not stomped to the dead trigger's default.
+    REQUIRE_THAT(store.get_value(7), WithinAbs(3.0, 0.0001));
+
+    // Conversely, when the LATEST registration for an id is the trigger, it
+    // resets and the earlier non-trigger slot is irrelevant.
+    StateStore store2;
+    store2.add_parameter(make_param_info(9, "Old Ordinary", "", {0.0f, 1.0f, 0.5f}));
+    ParamInfo latest_trigger = make_param_info(9, "Reset", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    latest_trigger.designation = ParamDesignation::Reset;
+    store2.add_parameter(latest_trigger);
+    store2.set_value(9, 1.0f);
+    REQUIRE(store2.reset_triggers_rt());
+    REQUIRE_THAT(store2.get_value(9), WithinAbs(0.0, 0.0001));
+}

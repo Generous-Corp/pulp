@@ -303,6 +303,12 @@ void StateStore::add_parameter(const ParamInfo& info) {
     params_.push_back(info);
     values_.emplace_back(info.range.default_value);
     id_to_index_[info.id] = index;
+    // Cache trigger/momentary params so the audio-thread auto-reset after each
+    // block touches only them, allocation-free. A Reset designation implies a
+    // trigger (auto_resets()), so it is captured here too.
+    if (info.auto_resets()) {
+        trigger_indices_.push_back(index);
+    }
 }
 
 void StateStore::add_group(const ParamGroup& group) {
@@ -406,6 +412,25 @@ void StateStore::reset_all_to_defaults() {
     for (const auto& p : params_) {
         set_value(p.id, p.range.default_value);
     }
+}
+
+bool StateStore::reset_triggers_rt() {
+    bool any = false;
+    for (auto index : trigger_indices_) {
+        // Duplicate-ParamID contract: add_parameter keeps every registration in
+        // params_/values_ but id_to_index_ resolves an ID to its LATEST slot, so
+        // get_value/set_value only ever touch that slot. Skip a cached trigger
+        // index that a later same-ID registration has superseded — resetting a
+        // dead slot would be a hidden write to a value no reader sees.
+        const auto live = id_to_index_.find(params_[index].id);
+        if (live == id_to_index_.end() || live->second != index) continue;
+        // Write straight to the lock-free atomic: RT-safe, no allocation, no
+        // listener dispatch. The host/UI already observed the raised value
+        // during the block; this returns the control to its resting default.
+        values_[index].set(params_[index].range.default_value);
+        any = true;
+    }
+    return any;
 }
 
 const ParamInfo* StateStore::info(ParamID id) const {

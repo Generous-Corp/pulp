@@ -316,6 +316,23 @@ without invoking `Processor::process`. MIDI output stays empty so
 bypassed MIDI FX don't leak notes — same contract the VST3 and AU v3
 adapters honour.
 
+**Param designation (declared bypass) + trigger params.** The bypass
+parameter is found through the shared `pulp::state::is_bypass_param`
+contract, not a re-implemented name/range check. A Processor author can
+declare `ParamInfo::designation = ParamDesignation::Bypass` to mark a
+param as the bypass control *independently of its name* — the legacy
+boolean-`"Bypass"` name/range heuristic remains the fallback when no
+designation is declared, so existing plugins are unchanged. The adapter
+also calls `StateStore::reset_triggers_rt()` to auto-reset trigger /
+momentary params (`is_trigger`, or a `ParamDesignation::Reset`
+"reset/panic" control) back to their default. The call sits AFTER the
+bypass if/else (not inside the non-bypass branch), so it is a
+**single-exit invariant**: a trigger raised while bypassed still settles
+this block instead of firing late. It runs before the `out_events` scan,
+so the host records the settle. Input param events are applied to the
+store before the bypass check, so a host-raised trigger is observed-then-
+settled within the same block whether or not the plugin is bypassed.
+
 ### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via

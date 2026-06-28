@@ -1477,4 +1477,57 @@ TEST_CASE("maybe_synthesize_bypass injects a Bypass param only when warranted",
         REQUIRE(maybe_synthesize_bypass(store, q) == false);
         REQUIRE(store.param_count() == 1);
     }
+
+    SECTION("no-op when a param declares the Bypass designation under any name") {
+        // A declared Bypass designation suppresses synthesis even though the
+        // param is not named "Bypass" and is not in the legacy boolean shape —
+        // the shared is_bypass_param contract recognizes it.
+        pulp::state::StateStore store;
+        pulp::state::ParamInfo declared;
+        declared.id = 7;
+        declared.name = "Active";
+        declared.range = {0.0f, 1.0f, 1.0f};  // default ON, no step
+        declared.designation = pulp::state::ParamDesignation::Bypass;
+        store.add_parameter(declared);
+        HostQuirks q;
+        REQUIRE(maybe_synthesize_bypass(store, q) == false);
+        REQUIRE(store.param_count() == 1);
+    }
+}
+
+// The bypass-detection contract every format adapter (VST3 / AU v2 / AU v3 /
+// CLAP) now shares via pulp::state::is_bypass_param. Proving the contract here
+// proves all four adapters: each one resolves its bypass param through this
+// single function rather than a re-implemented name/range check.
+TEST_CASE("adapter bypass detection uses the shared designation-first contract",
+          "[format][host-quirks][bypass][param-designation]") {
+    using pulp::state::is_bypass_param;
+    using pulp::state::ParamDesignation;
+    using pulp::state::ParamInfo;
+
+    SECTION("a declared Bypass designation is detected without relying on name") {
+        ParamInfo p;
+        p.id = 1;
+        p.name = "Engine On";  // deliberately NOT "Bypass"
+        p.range = {0.0f, 1.0f, 1.0f};
+        p.designation = ParamDesignation::Bypass;
+        REQUIRE(is_bypass_param(p));
+    }
+
+    SECTION("a legacy name-only boolean Bypass is still detected") {
+        ParamInfo p;
+        p.id = 2;
+        p.name = "Bypass";
+        p.range = {0.0f, 1.0f, 0.0f, 1.0f};  // boolean shape, no designation
+        REQUIRE(p.designation == ParamDesignation::None);
+        REQUIRE(is_bypass_param(p));
+    }
+
+    SECTION("a non-bypass param is never detected") {
+        ParamInfo p;
+        p.id = 3;
+        p.name = "Gain";
+        p.range = {-60.0f, 12.0f, 0.0f};
+        REQUIRE_FALSE(is_bypass_param(p));
+    }
 }
