@@ -155,7 +155,7 @@ TEST_CASE("exec preserves embedded quotes and trailing backslashes on Windows",
           "[child_process][win][issue-493]") {
     auto powershell = find_on_path("powershell.exe");
     if (!powershell) {
-        SUCCEED("skipped: powershell.exe not found");
+        SKIP("powershell.exe not found");
         return;
     }
 

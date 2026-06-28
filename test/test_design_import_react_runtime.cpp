@@ -679,7 +679,7 @@ TEST_CASE("parse_react_native_export runtime bundle materializes with host React
     // skip without first resolving #1987.
 #if defined(__has_feature)
 #  if __has_feature(undefined_behavior_sanitizer)
-    SUCCEED("skipped under UBSan (pulp #1987 — pre-existing main-branch flake)");
+    SKIP("UBSan exposes pre-existing pulp #1987 flake");
     return;
 #  endif
 #endif

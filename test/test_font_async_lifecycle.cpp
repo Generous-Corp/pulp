@@ -157,8 +157,8 @@ TEST_CASE("register_font_url: detached worker survives allocation throw",
     constexpr std::uintmax_t kHuge = static_cast<std::uintmax_t>(10) << 40; // 10 TiB
     fs::resize_file(tmp, kHuge, ec);
     if (ec) {
-        SUCCEED("filesystem does not support sparse files — skipping throw exercise: "
-                + ec.message());
+        SKIP("filesystem does not support sparse files; throw exercise cannot run: "
+             + ec.message());
         return;
     }
 

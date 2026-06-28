@@ -374,7 +374,7 @@ TEST_CASE("StagingBufferPool separates pools by usage mask",
 #else  // !PULP_HAS_SKIA
 
 TEST_CASE("StagingBufferPool tests require Skia/Dawn", "[render][gpu][pool]") {
-    SUCCEED("Skipped: PULP_HAS_SKIA not defined");
+    SKIP("PULP_HAS_SKIA not defined; StagingBufferPool tests cannot run");
 }
 
 #endif  // PULP_HAS_SKIA

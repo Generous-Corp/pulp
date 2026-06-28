@@ -1093,7 +1093,7 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
           "[host][scanner][clap][integration][regression][issue-52]") {
     const fs::path clap_path = PULP_TEST_CLAP_PATH;
     if (!fs::exists(clap_path)) {
-        SUCCEED("PulpGain.clap not built — skipping integration");
+        SKIP("PulpGain.clap not built; CLAP integration cannot run");
         return;
     }
 
