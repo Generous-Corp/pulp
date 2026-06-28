@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05190"></a>
+## [0.519.0] - 2026-06-27
+
+- fix(midi): correct MPE glide refcount on steal and retrigger expression re-seed ([#5149](https://github.com/danielraffel/pulp/pull/5149))
+
 <a id="v05180"></a>
 ## [0.518.0] - 2026-06-27
 
@@ -5438,6 +5443,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.519.0]: https://github.com/danielraffel/pulp/releases/tag/v0.519.0
 [0.518.0]: https://github.com/danielraffel/pulp/releases/tag/v0.518.0
 [0.517.3]: https://github.com/danielraffel/pulp/releases/tag/v0.517.3
 [0.517.2]: https://github.com/danielraffel/pulp/releases/tag/v0.517.2
