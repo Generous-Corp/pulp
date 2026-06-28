@@ -39,3 +39,126 @@ if(TARGET pulp::runtime)
         add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
     endif()
 endif()
+
+# ── GPU NAM plugin (VST3, AU v2, CLAP, Standalone) ──────────────────────────
+# A Neural Amp Modeler player: loads an open-source .nam WaveNet capture and runs
+# it through the inline CPU oracle (default) or the opt-in GPU audio runtime
+# (GpuNamCloudNode on a GpuAudioTransport). Native GPU UI: input→output transfer
+# curve + output spectrum + gain/mix/engine controls. Requires the GPU compute
+# primitive (pulp::render) and the GPU audio runtime (pulp::gpu-audio).
+if(TARGET pulp::render AND TARGET pulp::gpu-audio)
+    set(GPU_NAM_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+
+    pulp_add_plugin(GpuNam
+        FORMATS           VST3 AU CLAP Standalone
+        SOURCES           gpu_nam_view.cpp
+        PLUGIN_NAME       "GpuNam"
+        BUNDLE_ID         "com.pulp.gpunam"
+        MANUFACTURER      "Pulp"
+        VERSION           "1.0.0"
+        CATEGORY          Effect
+        PLUGIN_CODE       "GNam"
+        MANUFACTURER_CODE "Pulp"
+    )
+
+    # The processor's create_view() + GPU engine pull in the render / gpu-audio /
+    # view / canvas / signal stack. Shipped plugin/standalone binaries find their
+    # default model via the executable-relative bundled Resources copy below — they
+    # deliberately do NOT bake the source-tree path (so they stay portable). The
+    # source-tree fallback define is set only on the dev tools (test + shot), which
+    # run from the build tree without a bundle.
+    if(TARGET GpuNam_Core)
+        target_include_directories(GpuNam_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+        target_link_libraries(GpuNam_Core PUBLIC
+            pulp::render pulp::gpu-audio pulp::signal pulp::view pulp::canvas pulp::runtime)
+    endif()
+
+    # Bundle the default model into each format's Resources so the plugin finds it
+    # at runtime next to the binary (the build-define is the source-tree fallback).
+    foreach(_gn_target GpuNam_CLAP GpuNam_VST3 GpuNam_AU GpuNam_Standalone)
+        if(TARGET ${_gn_target})
+            if(APPLE)
+                add_custom_command(TARGET ${_gn_target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "$<TARGET_BUNDLE_DIR:${_gn_target}>/Contents/Resources"
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${GPU_NAM_MODEL}"
+                        "$<TARGET_BUNDLE_DIR:${_gn_target}>/Contents/Resources/example.nam"
+                    COMMENT "Bundling example.nam into ${_gn_target}"
+                    VERBATIM)
+            else()
+                add_custom_command(TARGET ${_gn_target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${GPU_NAM_MODEL}"
+                        "$<TARGET_FILE_DIR:${_gn_target}>/example.nam"
+                    COMMENT "Copying example.nam next to ${_gn_target}"
+                    VERBATIM)
+            endif()
+        endif()
+    endforeach()
+
+    # Self-contained, relocatable GPU bundles (the @loader_path fix) — fail the
+    # build if any bundle bakes a build-tree dylib path.
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+    foreach(_gn_target GpuNam_CLAP GpuNam_VST3 GpuNam_AU GpuNam_Standalone)
+        if(TARGET ${_gn_target})
+            pulp_make_bundle_relocatable(${_gn_target})
+            pulp_validate_bundle_relocatable(${_gn_target})
+        endif()
+    endforeach()
+
+    # Headless editor screenshot. macOS-only dev tool (Skia raster capture).
+    if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
+        add_executable(gpu-nam-shot screenshot.cpp gpu_nam_view.cpp)
+        target_link_libraries(gpu-nam-shot PRIVATE
+            pulp::format pulp::audio pulp::render pulp::gpu-audio pulp::signal
+            pulp::view pulp::canvas pulp::runtime)
+        target_include_directories(gpu-nam-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(gpu-nam-shot PRIVATE
+            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}")
+    endif()
+
+    # Processor tests (CPU + GPU engine, live switch, load_model). Links
+    # gpu_nam_view.cpp so the processor's vtable (first non-inline virtual is
+    # create_view()) resolves at link time; the view is never CALLED headless.
+    if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+        add_executable(gpu-nam-plugin-test test_gpu_nam_plugin.cpp gpu_nam_view.cpp)
+        target_link_libraries(gpu-nam-plugin-test PRIVATE
+            pulp::format pulp::render pulp::gpu-audio pulp::signal
+            pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-plugin-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(gpu-nam-plugin-test PRIVATE
+            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}")
+        catch_discover_tests(gpu-nam-plugin-test)
+    endif()
+
+    # CLAP load smoke test — the plugin's shared object must dlopen cleanly.
+    if(PULP_HAS_CLAP AND APPLE)
+        add_test(NAME clap-dlopen-GpuNam
+            COMMAND bash -c "python3 -c \"import ctypes; ctypes.CDLL('${CMAKE_BINARY_DIR}/CLAP/GpuNam.clap/Contents/MacOS/GpuNam'); print('OK')\"")
+        set_tests_properties(clap-dlopen-GpuNam PROPERTIES LABELS "validation;clap" TIMEOUT 20)
+    endif()
+
+    # AU validation via auval. killall AudioComponentRegistrar forces a rescan of
+    # the freshly-copied bundle (stale-cache trap codified in the auv2 skill).
+    if(APPLE AND PULP_HAS_AUSDK)
+        add_test(NAME auval-GpuNam
+            COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/GpuNam.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/GpuNam.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aufx GNam Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc")
+        set_tests_properties(auval-GpuNam PROPERTIES
+            LABELS "validation;au"
+            TIMEOUT 60
+            ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
+    endif()
+
+    if(PULP_HAS_VST3)
+        find_program(PLUGINVAL pluginval)
+        if(PLUGINVAL)
+            add_test(NAME pluginval-GpuNam-VST3
+                COMMAND ${PLUGINVAL} --validate "${CMAKE_BINARY_DIR}/VST3/GpuNam.vst3" --strictness-level 5 --timeout-ms 15000)
+            set_tests_properties(pluginval-GpuNam-VST3 PROPERTIES
+                LABELS "validation;vst3"
+                TIMEOUT 40
+                ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
+        endif()
+    endif()
+endif()
