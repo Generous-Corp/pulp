@@ -14,6 +14,11 @@
 #include <vector>
 
 #ifdef __OBJC__
+// Per-binary-unique ObjC class names (renames PulpView when a shipped binary
+// defines PULP_VIEW_OBJC_SUFFIX); keeps the capture helpers in sync with the
+// PulpView @implementation in window_host_mac.mm.
+#include "pulp_mac_objc_names.h"
+
 @class NSBitmapImageRep;
 @class NSData;
 @class NSView;

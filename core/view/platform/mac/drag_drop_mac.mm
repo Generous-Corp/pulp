@@ -2,6 +2,12 @@
 
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
+
+// Per-binary-unique ObjC class names (renames PulpFileDragSource and the PulpView
+// the drag category attaches to when a shipped binary defines
+// PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
+#include "pulp_mac_objc_names.h"
+
 #include <unordered_map>
 
 // macOS native drag-drop delivery.
