@@ -185,7 +185,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
         REQUIRE(r.stdout_output.find("Precompiled React JSX runtime bundle") != std::string::npos);
-        REQUIRE(r.stdout_output.find("baked emits IR or C++ artifacts") != std::string::npos);
+        REQUIRE(r.stdout_output.find("baked emits IR, C++, or SwiftUI artifacts") != std::string::npos);
         REQUIRE(r.stdout_output.find("Built-in default is --mode live --emit js") != std::string::npos);
         REQUIRE(r.stdout_output.find("import_design.default_mode") != std::string::npos);
         REQUIRE(r.stdout_output.find("PULP_IMPORT_DESIGN_DEFAULT_EMIT") != std::string::npos);
