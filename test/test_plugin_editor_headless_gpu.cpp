@@ -232,7 +232,7 @@ TEST_CASE("plugin-gpu-host: editor view paints nonblank GPU frame (offscreen)",
           "[gpu][skia][plugin-gpu-host]") {
     auto f = make_offscreen_fixture(kW, kH);
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — offscreen GPU proof skipped.");
+        SKIP("Dawn/Graphite unavailable on this host; offscreen GPU proof cannot run.");
         return;
     }
 
@@ -262,7 +262,7 @@ TEST_CASE("plugin-gpu-host: editor view paints nonblank GPU frame (offscreen)",
     f.gpu->end_frame();
 
     if (!read) {
-        SUCCEED("GPU readback failed (no adapter) — nonblank proof skipped.");
+        SKIP("GPU readback failed on this host; nonblank proof cannot run.");
         return;
     }
     const uint32_t painted = count_non_background(pixels, pw, ph);
