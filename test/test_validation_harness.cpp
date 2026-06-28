@@ -350,16 +350,17 @@ TEST_CASE("ValidationHarness MIDI note-on queuing", "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 64});
     harness.prepare();
+    REQUIRE(last_processor != nullptr);
 
     harness.send_midi_note_on(0, 60, 100);
     harness.send_midi_note_on(0, 64, 80);
 
-    // Process to flush MIDI
-    harness.process_blocks(1);
+    auto output = harness.process_blocks(1);
 
-    // MIDI was consumed (no crash, no assertion failure)
-    // The processor counts note-ons internally
-    SUCCEED("MIDI events processed without error");
+    REQUIRE(output.size() == 128);
+    REQUIRE(last_processor->note_on_count_ == 2);
+    REQUIRE(last_processor->note_off_count_ == 0);
+    REQUIRE(last_processor->cc_count_ == 0);
 }
 
 TEST_CASE("ValidationHarness MIDI note-off and CC helpers reach process_buffer",
