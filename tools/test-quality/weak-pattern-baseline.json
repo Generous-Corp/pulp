@@ -1,14 +1,14 @@
 {
   "version": 1,
   "status": "report-only",
-  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-a11y-mapping-final.json",
+  "generated_by": "python3 tools/scripts/test_suite_quality_report.py --build-dir build --format json --output /tmp/pulp-winmidi-sysex-final.json",
   "comparison_scope": "unexempted weak-pattern hits",
   "counts": {
-    "succeed": 132,
+    "succeed": 131,
     "skip": 668
   },
   "classifications": {
-    "needs-review": 800
+    "needs-review": 799
   },
   "notes": [
     "Restored current-branch Phase 0 weak-test pattern baseline after the report tooling was replayed onto the smaller active branch stack.",

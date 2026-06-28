@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+
 #include <pulp/midi/device.hpp>
 
 TEST_CASE("MidiInput: sysex callback API exists for every backend",
@@ -17,8 +19,17 @@ TEST_CASE("MidiInput: sysex callback API exists for every backend",
     REQUIRE(sys != nullptr);
     auto in = sys->create_input();
     REQUIRE(in != nullptr);
-    in->set_sysex_callback([](const std::vector<uint8_t>&, double) {});
-    SUCCEED("set_sysex_callback compiles + accepts a real lambda");
+
+    std::atomic<int> sysex_calls{0};
+    in->set_sysex_callback(
+        [&](const std::vector<uint8_t>& bytes, double timestamp_sec) {
+            (void)bytes;
+            (void)timestamp_sec;
+            sysex_calls.fetch_add(1, std::memory_order_relaxed);
+        });
+
+    REQUIRE_FALSE(in->is_open());
+    REQUIRE(sysex_calls.load(std::memory_order_relaxed) == 0);
 }
 
 #ifdef _WIN32
