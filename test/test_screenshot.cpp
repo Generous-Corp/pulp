@@ -137,7 +137,7 @@ TEST_CASE("Screenshot render_to_rgba produces non-black pixels (Skia raster)",
     // must have a non-zero channel — proves the raster path actually painted.
     REQUIRE(any_nonzero);
 #else
-    SUCCEED("render_to_rgba unsupported without a Skia raster backend");
+    SKIP("render_to_rgba unsupported without a Skia raster backend");
 #endif
 }
 
@@ -162,7 +162,7 @@ TEST_CASE("Screenshot render_to_png handles high DPI scale factors",
         REQUIRE(png[1] == 'P');
     }
 #else
-    SUCCEED("non-Apple screenshot path is explicitly unsupported");
+    SKIP("non-Apple screenshot path is explicitly unsupported");
 #endif
 }
 
@@ -178,7 +178,7 @@ TEST_CASE("Screenshot render_to_file rejects an unwritable output path",
     REQUIRE_FALSE(render_to_file(root, 16, 16, bad.string(), 1.0f));
     REQUIRE_FALSE(std::filesystem::exists(bad));
 #else
-    SUCCEED("non-Apple render_to_file is a no-op");
+    SKIP("non-Apple render_to_file is a no-op");
 #endif
 }
 
@@ -221,7 +221,7 @@ TEST_CASE("Screenshot: backend dispatch — Skia and CoreGraphics both produce v
         REQUIRE(png[0] == 0x89);
     }
 #else
-    SUCCEED("non-Apple backend dispatch is provider-routed; covered elsewhere");
+    SKIP("non-Apple backend dispatch is provider-routed; covered elsewhere");
 #endif
 }
 
@@ -287,6 +287,6 @@ TEST_CASE("Screenshot can export a deterministic PNG sequence", "[view][screensh
 
     std::filesystem::remove_all(output_dir);
 #else
-    SUCCEED("Offline PNG-sequence exploration is currently macOS-first because screenshot capture is stubbed here");
+    SKIP("Offline PNG-sequence exploration is currently macOS-first because screenshot capture is stubbed here");
 #endif
 }
