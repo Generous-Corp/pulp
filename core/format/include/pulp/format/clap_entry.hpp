@@ -11,6 +11,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
@@ -26,6 +27,7 @@
 #include <cstring>
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 // Internal implementation — do not call directly
 namespace pulp::format::clap_generic {
@@ -197,21 +199,16 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
 
 inline bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* value) {
     if (!text) return false;
-    const char* p = text;
-    // Skip all leading whitespace, as strtod did (not just ' ').
-    while (*p != '\0' && std::isspace(static_cast<unsigned char>(*p))) ++p;
-    // strtod accepted a leading sign; from_chars accepts '-' but not '+', so
-    // strip one optional leading '+' to preserve that leniency.
-    if (*p == '+') ++p;
-    const char* end = text + std::strlen(text);
+    // Locale-independent parse via a C-locale strtod. std::from_chars' float
+    // overload is =deleted on some toolchains (see locale_independent_float.hpp),
+    // so we cannot use it for the value. strtod skips leading whitespace and
+    // accepts a leading '+'/'-', and trailing text (e.g. a unit suffix) is
+    // allowed — matching the historical strtod leniency this path documents.
+    // Reject when nothing was consumed ("%", "", "   ") or the magnitude was
+    // out of range ("1e999999") rather than writing a garbage 0.
     double parsed = 0.0;
-    // Locale-independent parse: std::from_chars always uses the C locale's
-    // decimal point, so a comma-decimal global locale cannot misparse "0.5".
-    // Trailing text (e.g. a unit suffix) is allowed, matching strtod.
-    auto result = std::from_chars(p, end, parsed);
-    // Require both: some characters consumed AND no error (e.g. out-of-range
-    // like "1e999999" advances ptr but sets ec — must reject, not write 0).
-    if (result.ptr == p || result.ec != std::errc{}) return false;
+    const auto result = detail::parse_double_c_locale(std::string_view(text), parsed);
+    if (result.consumed == 0 || result.range_error) return false;
     *value = parsed;
     return true;
 }
