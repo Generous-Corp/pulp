@@ -213,6 +213,26 @@ std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
     return result;
 }
 
+std::string WamProcessorBridge::parameters_json() const {
+    std::ostringstream ss;
+    ss << "[";
+    bool first = true;
+    for (const auto& p : get_parameter_info()) {
+        if (!first) ss << ",";
+        first = false;
+        ss << "{\"id\":\""; append_json_escaped(ss, p.id);
+        ss << "\",\"label\":\""; append_json_escaped(ss, p.label);
+        ss << "\",\"type\":\""; append_json_escaped(ss, p.type);
+        ss << "\",\"unit\":\""; append_json_escaped(ss, p.unit);
+        ss << "\",\"defaultValue\":" << p.default_value
+           << ",\"minValue\":" << p.min_value
+           << ",\"maxValue\":" << p.max_value
+           << ",\"discreteStep\":" << p.discrete_step << "}";
+    }
+    ss << "]";
+    return ss.str();
+}
+
 float WamProcessorBridge::get_parameter_value(const std::string& id) const {
     auto param_id = parse_param_id(id);
     if (!param_id) return 0.0f;

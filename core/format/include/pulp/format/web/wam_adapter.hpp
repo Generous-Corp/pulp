@@ -84,6 +84,9 @@ public:
 
     // Parameter access (WAMv2 uses string IDs)
     std::vector<WamParamInfo> get_parameter_info() const;
+    // Parameter metadata as a JSON array for generated web controls:
+    // [{id,label,type,unit,defaultValue,minValue,maxValue,discreteStep}, ...]
+    std::string parameters_json() const;
     float get_parameter_value(const std::string& id) const;
     void set_parameter_value(const std::string& id, float value);
 

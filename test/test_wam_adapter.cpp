@@ -62,6 +62,21 @@ TEST_CASE("WAM descriptor JSON escapes quotes and backslashes", "[wam]") {
     REQUIRE(json.find("Ev\"il") == std::string::npos); // no raw unescaped quote
 }
 
+TEST_CASE("WAM bridge exposes parameter metadata as JSON", "[wam]") {
+    WamProcessorBridge bridge(pulp::examples::create_pulp_gain);
+    REQUIRE(bridge.initialize(48000.0, 128));
+
+    const std::string json = bridge.parameters_json();
+    // PulpGain's three parameters, with id/label/unit/type fields.
+    REQUIRE(json.front() == '[');
+    REQUIRE(json.find("\"label\":\"Input Gain\"") != std::string::npos);
+    REQUIRE(json.find("\"label\":\"Output Gain\"") != std::string::npos);
+    REQUIRE(json.find("\"label\":\"Bypass\"") != std::string::npos);
+    REQUIRE(json.find("\"unit\":\"dB\"") != std::string::npos);
+    REQUIRE(json.find("\"type\":\"boolean\"") != std::string::npos); // Bypass
+    REQUIRE(json.find("\"minValue\":-60") != std::string::npos);
+}
+
 TEST_CASE("WAM bridge gain parameter and state round-trip", "[wam]") {
     WamProcessorBridge bridge(pulp::examples::create_pulp_gain);
     REQUIRE(bridge.initialize(48000.0, 128));

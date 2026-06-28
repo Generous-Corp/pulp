@@ -40,6 +40,7 @@ function moduleExports(M) {
     wam_get_param: M._wam_get_param,
     wam_midi: M._wam_midi,
     wam_descriptor: M._wam_descriptor,
+    wam_parameters: M._wam_parameters,
     wam_state_size: M._wam_state_size,
     wam_read_state: M._wam_read_state,
     wam_write_state: M._wam_write_state,
@@ -68,8 +69,10 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
-      // Hand the descriptor to the main thread (it has no DSP Module of its own).
+      // Hand the descriptor + parameter metadata to the main thread (it has no
+      // DSP Module of its own) so the host can build generated controls.
       this.port.postMessage({ type: "descriptor", json: wam.descriptorJson() });
+      this.port.postMessage({ type: "parameters", json: wam.parametersJson() });
     }).catch((e) => {
       this.port.postMessage({ type: "error", error: String((e && e.stack) || e) });
     });

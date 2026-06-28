@@ -77,6 +77,9 @@ export default class PulpWAM {
         try { this._descriptor = JSON.parse(msg.json); } catch { this._descriptor = {}; }
         this._resolveDescriptor?.(this._descriptor);
         break;
+      case "parameters":
+        try { this._parameters = JSON.parse(msg.json); } catch { this._parameters = []; }
+        break;
       case "error":
         // Surface a worklet-side failure rather than silently timing out.
         console.error("PulpWAM worklet error:", msg.error);
@@ -113,12 +116,48 @@ export default class PulpWAM {
   async getState() { return this._request("getState", {}); }
   async setState(data) { this._audioNode?.port.postMessage({ type: "setState", data }); }
 
+  // Parameter metadata reported by the worklet (id/label/type/unit/range).
+  get parameters() { return this._parameters || []; }
+  async getParameterInfo() { return this._parameters || []; }
+
   async createGui() {
-    // Minimal generated GUI from the descriptor. The full generated-controls
-    // component (bound to the param bridge) is the Phase 1B deliverable.
+    // Generated controls: one row per parameter, bound to the live param
+    // bridge. This is the baseline web editor a Pulp plugin gets when it has no
+    // authored web UI — equivalent to a host's auto-generated parameter view.
     const el = document.createElement("div");
-    el.style.cssText = "padding:16px;background:#1e1e2e;color:#cdd6f4;font-family:system-ui;border-radius:8px";
-    el.innerHTML = `<h3 style="margin:0 0 4px">${this.name}</h3><p style="margin:0;opacity:.7">WAMv2 · ${this.vendor}</p>`;
+    el.style.cssText = "padding:16px;background:#1e1e2e;color:#cdd6f4;font-family:system-ui;border-radius:8px;min-width:300px";
+    el.innerHTML = `<h3 style="margin:0 0 2px">${this.name}</h3>` +
+      `<p style="margin:0 0 12px;opacity:.6;font-size:12px">WAMv2 · ${this.vendor}</p>`;
+
+    for (const p of this.parameters) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:10px;margin:10px 0";
+      const label = document.createElement("label");
+      label.textContent = p.label;
+      label.style.cssText = "flex:0 0 92px;font-size:13px";
+      const readout = document.createElement("span");
+      readout.style.cssText = "flex:0 0 70px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;opacity:.85";
+
+      let input;
+      if (p.type === "boolean") {
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = p.defaultValue >= 0.5;
+        const sync = () => { this.setParameterValue(p.id, input.checked ? 1 : 0); readout.textContent = input.checked ? "on" : "off"; };
+        input.addEventListener("change", sync); sync();
+      } else {
+        input = document.createElement("input");
+        input.type = "range";
+        input.min = p.minValue; input.max = p.maxValue;
+        input.step = p.discreteStep > 0 ? p.discreteStep : (p.maxValue - p.minValue) / 1000;
+        input.value = p.defaultValue;
+        input.style.flex = "1";
+        const sync = () => { const v = parseFloat(input.value); this.setParameterValue(p.id, v); readout.textContent = v.toFixed(2) + (p.unit ? " " + p.unit : ""); };
+        input.addEventListener("input", sync); sync();
+      }
+      row.append(label, input, readout);
+      el.appendChild(row);
+    }
     return el;
   }
   destroyGui(el) { el?.parentNode?.removeChild(el); }

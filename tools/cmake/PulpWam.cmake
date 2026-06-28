@@ -79,7 +79,7 @@ target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 # The wam_* C symbols every plugin entry point exports. Keep in sync with the
 # entry points and core/format/src/wasm/wam-runtime.mjs.
 set(_PULP_WAM_EXPORTED_FUNCTIONS
-    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_descriptor','_wam_state_size','_wam_read_state','_wam_write_state']")
+    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 
 # pulp_add_wam_plugin(<Name>
 #     ENTRY    <entry.cpp>              # required: the wam_* C entry point

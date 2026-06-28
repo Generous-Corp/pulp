@@ -102,6 +102,7 @@ export function makeBridge(exports) {
     getParam(id) { const p = writeCStr(id); const v = exports.wam_get_param(p); exports.free(p); return v; },
     midi(status, d1, d2, offset) { exports.wam_midi(status, d1, d2, offset); },
     descriptorJson() { return readCStr(exports.wam_descriptor()); },
+    parametersJson() { return readCStr(exports.wam_parameters()); },
     readState() {
       const sz = exports.wam_state_size();
       const p = exports.malloc(sz);

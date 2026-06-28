@@ -67,6 +67,13 @@ const char* wam_descriptor() {
     return json.c_str();
 }
 
+__attribute__((used, visibility("default")))
+const char* wam_parameters() {
+    static std::string json;
+    json = g_bridge.parameters_json();
+    return json.c_str();
+}
+
 // ── State ABI (control thread) ───────────────────────────────────────────
 // Protocol: JS calls wam_state_size() to learn the byte count and snapshot the
 // state, allocates that many bytes on the wasm heap, then wam_read_state(ptr)
