@@ -251,6 +251,43 @@ public:
     virtual bool dense_tanh(const float* input, const float* weights, const float* bias,
                             float* output, uint32_t in_dim, uint32_t out_dim) = 0;
 
+    // ── Fused conv-stack inference (WaveNet-style neural amp) ───────────────
+    //
+    // A stack of gated, dilated, causal 1-D conv layers — the architecture
+    // behind neural-amp captures. The whole block's samples are computed in
+    // PARALLEL (the network is feedforward: output[t] depends on past inputs,
+    // not past outputs) and the entire forward pass runs as successive compute
+    // passes in ONE submit with device-resident activations — so the CPU<->GPU
+    // round-trip is paid ONCE per block, not per layer or per sample. That is
+    // the regime where GPU neural inference beats the CPU, and the win grows
+    // with model size (big captures the CPU can't run in real time stay smooth
+    // on the GPU). Per-sample/per-layer dispatch loses badly and is never used.
+    //
+    // Per-layer weight layout (row-major f32, concatenated for all layers, then
+    // the two global blocks): conv W [2C*C*K] + bias [2C], residual W [C*C] +
+    // bias [C], skip W [C*C] + bias [C]; then once: input W [C] + bias [C], head
+    // W [C] + bias [1]. `channels` = C, `kernel` = K, `dilations` has one entry
+    // per layer. Not real-time-safe (blocks on readback); run on the worker.
+
+    /// Build the conv-stack plan: upload weights, allocate the per-layer
+    /// device-resident activation buffers for `block_size` samples, and compile
+    /// the fused pass pipeline. Returns false on invalid args, if the buffers
+    /// exceed a device limit, or on GPU failure. Call once before
+    /// conv_stack_forward(block_size).
+    virtual bool prepare_conv_stack(uint32_t channels, uint32_t kernel,
+                                    const uint32_t* dilations, uint32_t num_layers,
+                                    const float* weights, uint32_t weights_len,
+                                    uint32_t block_size, float head_scale) = 0;
+
+    /// Run the fused forward for one mono block (`block_size` samples in/out):
+    /// input projection, the dilated gated conv layers, and the linear head, all
+    /// in one submit. Each call processes the block with zero left-context before
+    /// its first sample (the within-block causal history is exact), and
+    /// reproduces the CPU reference bit-for-bit for a from-zero block. Returns
+    /// false if the plan was not prepared for `block_size`.
+    virtual bool conv_stack_forward(const float* in_block, float* out_block,
+                                    uint32_t block_size) = 0;
+
     // ── Capabilities ─────────────────────────────────────────────────────
 
     /// Runtime GPU capability/limit report for the compute device. Queryable

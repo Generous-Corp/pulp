@@ -27,6 +27,7 @@ add_subdirectory(pulp-tone)
 add_subdirectory(pulp-effect)
 add_subdirectory(super-convolver)
 add_subdirectory(spectral-lab)
+add_subdirectory(gpu-nam)
 
 # PulpCompressor: sidechain compressor validating multi-bus
 add_subdirectory(pulp-compressor)

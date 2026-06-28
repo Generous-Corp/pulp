@@ -330,6 +330,111 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+// ── Fused conv-stack (WaveNet-style neural amp) shaders ─────────────────────
+// Activations are time-major [t*C + c]. One thread per time step t (the block's
+// samples compute in parallel — the network is feedforward). Channels are capped
+// at 64 so the per-thread gate scratch can be a fixed-size local array (WGSL has
+// no runtime-sized locals). All three passes run in one submit over resident
+// buffers; only the final mono block is read back.
+
+static constexpr const char* kConvStackInputShader = R"wgsl(
+struct P { C:u32, B:u32, in_off:u32, pad:u32 };
+@group(0) @binding(0) var<storage, read>       wts : array<f32>;
+@group(0) @binding(1) var<storage, read>       inp : array<f32>;   // B mono
+@group(0) @binding(2) var<storage, read_write> act : array<f32>;   // C*B
+@group(0) @binding(3) var<uniform>             p   : P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    let x = inp[t];
+    let wb = p.in_off + p.C;
+    for (var c = 0u; c < p.C; c = c + 1u) {
+        act[t * p.C + c] = wts[p.in_off + c] * x + wts[wb + c];
+    }
+}
+)wgsl";
+
+static constexpr const char* kConvStackLayerShader = R"wgsl(
+// One gated dilated causal conv layer: z = dilated_conv(in) [2C], gate =
+// tanh(z[:C])*sigmoid(z[C:]), out = in + residual(gate), skip += skip(gate).
+struct P { C:u32, K:u32, B:u32, dil:u32, woff:u32, p0:u32, p1:u32, p2:u32 };
+@group(0) @binding(0) var<storage, read>       wts  : array<f32>;
+@group(0) @binding(1) var<storage, read>       ina  : array<f32>;  // C*B
+@group(0) @binding(2) var<storage, read_write> outa : array<f32>;  // C*B
+@group(0) @binding(3) var<storage, read_write> skip : array<f32>;  // C*B (accumulate)
+@group(0) @binding(4) var<uniform>             p    : P;
+
+var<private> zbuf : array<f32, 128>;  // 2*Cmax
+var<private> gbuf : array<f32, 64>;   // Cmax
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    let C = p.C; let K = p.K;
+    let cw = p.woff;                    // conv W [2C*C*K]
+    let cb = cw + 2u * C * C * K;       // conv b [2C]
+    let rw = cb + 2u * C;              // residual W [C*C]
+    let rb = rw + C * C;               // residual b [C]
+    let sw = rb + C;                   // skip W [C*C]
+    let sb = sw + C * C;               // skip b [C]
+
+    let two_c = 2u * C;
+    for (var oc = 0u; oc < two_c; oc = oc + 1u) {
+        var acc = wts[cb + oc];
+        for (var k = 0u; k < K; k = k + 1u) {
+            let back = p.dil * (K - 1u - k);
+            if (t >= back) {
+                let base = (t - back) * C;
+                let wbase = cw + oc * C * K + k;
+                for (var ic = 0u; ic < C; ic = ic + 1u) {
+                    acc = acc + wts[wbase + ic * K] * ina[base + ic];
+                }
+            }
+        }
+        zbuf[oc] = acc;
+    }
+    for (var c = 0u; c < C; c = c + 1u) {
+        let tg = tanh(zbuf[c]);
+        let sg = 1.0 / (1.0 + exp(-zbuf[C + c]));
+        gbuf[c] = tg * sg;
+    }
+    let tc = t * C;
+    for (var oc = 0u; oc < C; oc = oc + 1u) {
+        var r = wts[rb + oc];
+        var s = wts[sb + oc];
+        let rrow = rw + oc * C;
+        let srow = sw + oc * C;
+        for (var ic = 0u; ic < C; ic = ic + 1u) {
+            r = r + wts[rrow + ic] * gbuf[ic];
+            s = s + wts[srow + ic] * gbuf[ic];
+        }
+        outa[tc + oc] = ina[tc + oc] + r;
+        skip[tc + oc] = skip[tc + oc] + s;
+    }
+}
+)wgsl";
+
+static constexpr const char* kConvStackHeadShader = R"wgsl(
+struct P { C:u32, B:u32, h_off:u32, p0:u32, scale:f32, p1:u32, p2:u32, p3:u32 };
+@group(0) @binding(0) var<storage, read>       wts  : array<f32>;
+@group(0) @binding(1) var<storage, read>       skip : array<f32>;  // C*B
+@group(0) @binding(2) var<storage, read_write> outp : array<f32>;  // B
+@group(0) @binding(3) var<uniform>             p    : P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let t = gid.x;
+    if (t >= p.B) { return; }
+    var y = wts[p.h_off + p.C];   // head bias
+    let tc = t * p.C;
+    for (var c = 0u; c < p.C; c = c + 1u) {
+        y = y + wts[p.h_off + c] * skip[tc + c];
+    }
+    outp[t] = y * p.scale;
+}
+)wgsl";
+
 static constexpr const char* kMatmulShader = R"wgsl(
 // Dense matmul C[M*N] = A[M*K] * B[K*N], all row-major. One thread per output
 // element. Foundational primitive for GPU neural inference (dense / LSTM gates).
@@ -529,6 +634,7 @@ public:
         batch_conv_plans_.clear();
         multi_conv_plans_.clear();
         spectral_stack_plans_.clear();
+        conv_stack_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
@@ -537,6 +643,9 @@ public:
         multi_ir_combine_pipeline_ = nullptr;
         spectral_advance_pipeline_ = nullptr;
         spectral_combine_pipeline_ = nullptr;
+        conv_in_pipeline_ = nullptr;
+        conv_layer_pipeline_ = nullptr;
+        conv_head_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
@@ -1339,6 +1448,118 @@ public:
         return true;
     }
 
+    bool prepare_conv_stack(uint32_t channels, uint32_t kernel,
+                            const uint32_t* dilations, uint32_t num_layers,
+                            const float* weights, uint32_t weights_len,
+                            uint32_t block_size, float head_scale) override {
+        if (!initialized_ || !dilations || !weights) return false;
+        const uint32_t C = channels, K = kernel, L = num_layers, B = block_size;
+        if (C == 0 || C > 64 || K == 0 || L == 0 || B == 0) return false;  // C<=64: fixed WGSL scratch
+        const uint64_t per_layer = 2ull * C * C * K + 2ull * C + (uint64_t)C * C + C + (uint64_t)C * C + C;
+        const uint64_t need = per_layer * L + (C + C) + (C + 1);
+        if (weights_len < need) return false;
+
+        ConvStackPlan plan;
+        plan.C = C; plan.K = K; plan.L = L; plan.B = B;
+        plan.head_scale = head_scale;
+        plan.per_layer = static_cast<uint32_t>(per_layer);
+
+        const uint32_t wbytes = static_cast<uint32_t>(need) * 4u;
+        const uint32_t act_bytes = C * B * 4u;
+        const uint32_t blk_bytes = B * 4u;
+        plan.weights = create_storage_buffer(wbytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.skip = create_storage_buffer(act_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.input = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.output = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        plan.readback = create_readback_buffer(blk_bytes);
+        if (!plan.weights || !plan.skip || !plan.input || !plan.output || !plan.readback)
+            return false;
+        for (uint32_t l = 0; l <= L; ++l) {
+            wgpu::Buffer a = create_storage_buffer(act_bytes, wgpu::BufferUsage::Storage);
+            if (!a) return false;
+            plan.act.push_back(std::move(a));
+        }
+        queue_.WriteBuffer(plan.weights, 0, weights, wbytes);
+
+        auto make_uniform = [&](uint32_t size) {
+            wgpu::BufferDescriptor ud{};
+            ud.size = size;
+            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            return device_.CreateBuffer(&ud);
+        };
+        const uint32_t in_off = static_cast<uint32_t>(per_layer) * L;
+        const uint32_t h_off = in_off + (C + C);
+
+        plan.input_u = make_uniform(16);
+        struct InU { uint32_t C, B, in_off, pad; } inu{C, B, in_off, 0};
+        queue_.WriteBuffer(plan.input_u, 0, &inu, sizeof(inu));
+        plan.input_bg = create_bind_group(conv_in_pipeline_,
+            {plan.weights, plan.input, plan.act[0], plan.input_u});
+        if (!plan.input_bg) return false;
+
+        for (uint32_t l = 0; l < L; ++l) {
+            wgpu::Buffer u = make_uniform(32);
+            struct LyU { uint32_t C, K, B, dil, woff, p0, p1, p2; }
+                lyu{C, K, B, dilations[l], static_cast<uint32_t>(per_layer) * l, 0, 0, 0};
+            queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
+            wgpu::BindGroup bg = create_bind_group(conv_layer_pipeline_,
+                {plan.weights, plan.act[l], plan.act[l + 1], plan.skip, u});
+            if (!bg) return false;
+            plan.layer_u.push_back(std::move(u));
+            plan.layer_bg.push_back(std::move(bg));
+        }
+
+        plan.head_u = make_uniform(32);
+        struct HdU { uint32_t C, B, h_off, p0; float scale; uint32_t p1, p2, p3; }
+            hdu{C, B, h_off, 0, head_scale, 0, 0, 0};
+        queue_.WriteBuffer(plan.head_u, 0, &hdu, sizeof(hdu));
+        plan.head_bg = create_bind_group(conv_head_pipeline_,
+            {plan.weights, plan.skip, plan.output, plan.head_u});
+        if (!plan.head_bg) return false;
+
+        cs_zero_.assign(static_cast<std::size_t>(C) * B, 0.0f);
+        conv_stack_plans_.insert_or_assign(B, std::move(plan));
+        return true;
+    }
+
+    bool conv_stack_forward(const float* in_block, float* out_block,
+                            uint32_t block_size) override {
+        if (!initialized_ || !in_block || !out_block) return false;
+        auto it = conv_stack_plans_.find(block_size);
+        if (it == conv_stack_plans_.end()) return false;
+        ConvStackPlan& plan = it->second;
+        const uint32_t B = plan.B;
+        const uint32_t blk_bytes = B * 4u;
+
+        queue_.WriteBuffer(plan.input, 0, in_block, blk_bytes);
+        queue_.WriteBuffer(plan.skip, 0, cs_zero_.data(),
+                           static_cast<uint32_t>(cs_zero_.size()) * 4u);
+
+        const uint32_t wg = (B + 255u) / 256u;
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        auto run = [&](const wgpu::ComputePipeline& pl, const wgpu::BindGroup& bg) {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(pl);
+            pass.SetBindGroup(0, bg);
+            pass.DispatchWorkgroups(wg);
+            pass.End();
+        };
+        run(conv_in_pipeline_, plan.input_bg);
+        for (uint32_t l = 0; l < plan.L; ++l) run(conv_layer_pipeline_, plan.layer_bg[l]);
+        run(conv_head_pipeline_, plan.head_bg);
+        encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        return read_back(plan.readback, out_block, blk_bytes);
+    }
+
     // ── Linear algebra ─────────────────────────────────────────────────────
 
     bool matmul(const float* a, const float* b, float* c,
@@ -1856,6 +2077,9 @@ private:
     wgpu::ComputePipeline multi_ir_combine_pipeline_;  // pan-combine reduce → stereo
     wgpu::ComputePipeline spectral_advance_pipeline_;  // per-bin phase advance + jitter
     wgpu::ComputePipeline spectral_combine_pipeline_;  // smear + weighted layer sum
+    wgpu::ComputePipeline conv_in_pipeline_;     // conv-stack input projection
+    wgpu::ComputePipeline conv_layer_pipeline_;  // conv-stack gated dilated layer
+    wgpu::ComputePipeline conv_head_pipeline_;   // conv-stack linear head
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
@@ -1970,6 +2194,21 @@ private:
     };
     std::unordered_map<uint32_t, SpectralStackPlan> spectral_stack_plans_;
 
+    struct ConvStackPlan {
+        uint32_t C = 0, K = 0, L = 0, B = 0, per_layer = 0;
+        float head_scale = 1.0f;
+        wgpu::Buffer weights;                 // all model weights, resident
+        std::vector<wgpu::Buffer> act;        // L+1 activation buffers (C*B)
+        wgpu::Buffer skip, input, output;     // skip accum (C*B), in/out blocks (B)
+        wgpu::Buffer readback;
+        wgpu::Buffer input_u, head_u;
+        std::vector<wgpu::Buffer> layer_u;
+        wgpu::BindGroup input_bg, head_bg;
+        std::vector<wgpu::BindGroup> layer_bg;
+    };
+    std::unordered_map<uint32_t, ConvStackPlan> conv_stack_plans_;
+    std::vector<float> cs_zero_;  // skip-buffer zeroing scratch
+
     // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
     // the render path is non-RT so a resize here is fine).
     std::vector<float> sp_scratch_;
@@ -2016,6 +2255,13 @@ private:
         spectral_combine_pipeline_ =
             create_pipeline("spectral_combine", kSpectralCombineShader);
         if (!spectral_combine_pipeline_) return false;
+
+        conv_in_pipeline_ = create_pipeline("conv_in", kConvStackInputShader);
+        if (!conv_in_pipeline_) return false;
+        conv_layer_pipeline_ = create_pipeline("conv_layer", kConvStackLayerShader);
+        if (!conv_layer_pipeline_) return false;
+        conv_head_pipeline_ = create_pipeline("conv_head", kConvStackHeadShader);
+        if (!conv_head_pipeline_) return false;
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;
