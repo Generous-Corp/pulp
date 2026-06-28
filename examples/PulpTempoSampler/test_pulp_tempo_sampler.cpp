@@ -1731,6 +1731,9 @@ TEST_CASE("MODE dropdown sets loop on/off and direction", "[tempo-sampler][loop-
     mode->set_selected(2);                           // Reverse -> loop on, dir Reverse
     CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
     CHECK(f.store.get_value(kLoopMode) == 1.0f);
+    mode->set_selected(3);                           // Ping-Pong -> loop on, dir Ping-Pong
+    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);
+    CHECK(f.store.get_value(kLoopMode) == 2.0f);
     mode->set_selected(0);                           // 1-Shot -> loop off
     CHECK(f.store.get_value(kTempoLoop) < 0.5f);
     // The dropdown reflects external param changes (e.g. preset load) too.

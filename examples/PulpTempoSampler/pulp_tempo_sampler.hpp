@@ -556,7 +556,7 @@ public:
         store.add_parameter({.id = kPlayToEnd, .name = "Play To End", .unit = "", .range = {0, 1, 1, 1}});
         // Loop direction (used only when kTempoLoop is on): 0 Forward, 1 Reverse,
         // 2 Ping-Pong. The MODE dropdown writes this alongside kTempoLoop.
-        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 1, 0, 1}});
+        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -1418,10 +1418,10 @@ public:
         // drives both params; region_for_note resolves playback_mode per note.
         {
             auto combo = std::make_unique<ComboBox>();
-            combo->set_items({"1-Shot", "Forward", "Reverse"});
+            combo->set_items({"1-Shot", "Forward", "Reverse", "Ping-Pong"});
             auto sel_for_state = [this]() -> int {
                 if (state().get_value(kTempoLoop) < 0.5f) return 0;  // one-shot
-                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 2);
+                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 3);
             };
             combo->set_selected_silent(sel_for_state());
             combo->on_change = [this](int idx) {
@@ -2010,10 +2010,11 @@ private:
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
         p.play_to_end = state().get_value(kPlayToEnd) >= 0.5f;
-        // 0 Forward, 1 Reverse (2 Ping-Pong arrives with the engine mode).
-        p.loop_mode = (static_cast<int>(state().get_value(kLoopMode)) == 1)
-                          ? audio::LoopPlaybackMode::Reverse
-                          : audio::LoopPlaybackMode::Forward;
+        switch (static_cast<int>(state().get_value(kLoopMode))) {
+            case 1:  p.loop_mode = audio::LoopPlaybackMode::Reverse; break;
+            case 2:  p.loop_mode = audio::LoopPlaybackMode::PingPong; break;
+            default: p.loop_mode = audio::LoopPlaybackMode::Forward; break;
+        }
         return p;
     }
 

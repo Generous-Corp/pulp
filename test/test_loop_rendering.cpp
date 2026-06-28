@@ -90,6 +90,29 @@ TEST_CASE("LoopRenderer renders forward and reverse loops",
     REQUIRE(output.channel(0)[4] == 3.0f);
 }
 
+TEST_CASE("LoopRenderer ping-pong reflects at the loop boundaries",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 8);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.rendered_frames == 8);
+    REQUIRE(result.wrapped);
+    // Forward to the top, reflect, back to the bottom, reflect: 0 1 2 3 2 1 0 1.
+    const float expected[8] = {0, 1, 2, 3, 2, 1, 0, 1};
+    for (std::size_t i = 0; i < 8; ++i)
+        REQUIRE(output.channel(0)[i] == expected[i]);
+}
+
 TEST_CASE("LoopRenderer set_playback_mode flips Forward<->OneShot in place",
           "[audio][loop][render]") {
     Buffer<float> source(1, 4);
