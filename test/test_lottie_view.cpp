@@ -26,8 +26,7 @@ const char* kLottieJson = R"({
 TEST_CASE("LottieView graceful behavior when Lottie is not compiled in",
           "[view][lottie]") {
     if (LottieView::supported()) {
-        SUCCEED("Lottie compiled in; covered by the playback test");
-        return;
+        SKIP("Lottie compiled in; disabled-path behavior is not active in this build");
     }
     LottieView v;
     REQUIRE_FALSE(v.valid());
@@ -38,8 +37,7 @@ TEST_CASE("LottieView graceful behavior when Lottie is not compiled in",
 TEST_CASE("LottieView parses and advances when Lottie is compiled in",
           "[view][lottie]") {
     if (!LottieView::supported()) {
-        SUCCEED("Lottie not compiled in (PULP_LOTTIE off)");
-        return;
+        SKIP("Lottie not compiled in (PULP_LOTTIE off)");
     }
 
     LottieView v;
@@ -84,8 +82,7 @@ TEST_CASE("LottieView parses and advances when Lottie is compiled in",
 TEST_CASE("LottieView resubscribes to the clock after pause/resume",
           "[view][lottie]") {
     if (!LottieView::supported()) {
-        SUCCEED("Lottie not compiled in (PULP_LOTTIE off)");
-        return;
+        SKIP("Lottie not compiled in (PULP_LOTTIE off)");
     }
     // Regression: when the FrameClock auto-removes the subscription (pause, or a
     // non-looping animation reaching its end), the view must be able to
