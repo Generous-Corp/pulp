@@ -73,7 +73,9 @@ fn configured_projects_base_dir(cwd: &Path) -> Result<Option<PathBuf>> {
     let Some(path) = crate::config::config_path() else {
         return Ok(None);
     };
-    let doc = crate::config::read(&path)?;
+    let Ok(doc) = crate::config::read(&path) else {
+        return Ok(None);
+    };
     let configured = crate::config::read_value(&doc, "create", "projects_dir");
     Ok(expand_configured_path(&configured, cwd, home.as_deref()))
 }
@@ -283,6 +285,28 @@ mod tests {
 
         let resolved = resolve_out_dir(&args, Some(&td.path().join("pulp")), &cwd).unwrap();
         assert_eq!(resolved, cwd.join("configured-projects").join("demo"));
+    }
+
+    #[test]
+    fn resolve_out_dir_ignores_unreadable_create_projects_config() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        let pulp_home = td.path().join("pulp-home");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&pulp_home).unwrap();
+        fs::write(pulp_home.join("config.toml"), "[create\nprojects_dir =").unwrap();
+        let _env = crate::test_support::EnvVarGuard::set_many(&[
+            ("PULP_PROJECTS_DIR", None),
+            ("PULP_HOME", Some(pulp_home.to_str().unwrap())),
+        ]);
+        let args = CreateArgs {
+            name: "Demo".to_owned(),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+
+        let resolved = resolve_out_dir(&args, Some(&root), td.path()).unwrap();
+        assert_eq!(resolved, td.path().join("demo"));
     }
 
     #[test]
