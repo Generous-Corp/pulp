@@ -14,8 +14,8 @@
 // change to extend the mode surface in lockstep with this contract test.
 //
 // The runtime exercise is Windows-only because IAudioClient is a
-// Windows-only COM interface; non-Windows hosts get a SUCCEED() stub so
-// CI stays green.
+// Windows-only COM interface. Non-Windows hosts run the cross-platform
+// DeviceConfig contract and skip Windows-only endpoint probes honestly.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/device.hpp>
@@ -79,8 +79,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_SHARED is implemented",
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -124,8 +123,6 @@ TEST_CASE("WASAPI mode coverage: share_mode selector exists; exclusive is a "
     CHECK(cfg.share_mode == ShareMode::exclusive);
     cfg.low_latency = true;
     CHECK(cfg.low_latency);
-    SUCCEED("DeviceConfig::share_mode opts into AUDCLNT_SHAREMODE_EXCLUSIVE; "
-            "DeviceConfig::low_latency opts into IAudioClient3 shared low-latency");
 }
 
 TEST_CASE("WASAPI mode coverage: shared low-latency open succeeds or honest-"
@@ -139,8 +136,7 @@ TEST_CASE("WASAPI mode coverage: shared low-latency open succeeds or honest-"
     // rate/buffer) or fully closed — never a half-initialised device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -170,8 +166,7 @@ TEST_CASE("WASAPI mode coverage: exclusive open succeeds or honest-fails "
     // fails (NOT is_open) — it never leaves a half-initialised device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -198,8 +193,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host");
     }
 
     // Open the device in (the only path Pulp supports) shared mode, then
@@ -241,8 +235,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
         reinterpret_cast<void**>(&enumerator));
     if (FAILED(hr)) {
         device->close();
-        SUCCEED("MMDeviceEnumerator unavailable; skipping exclusive probe");
-        return;
+        SKIP("MMDeviceEnumerator unavailable for exclusive probe");
     }
 
     IMMDevice* mm_device = nullptr;
@@ -250,8 +243,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
     if (FAILED(hr) || !mm_device) {
         enumerator->Release();
         device->close();
-        SUCCEED("no default endpoint for parallel probe; skipping");
-        return;
+        SKIP("no default endpoint for parallel exclusive probe");
     }
 
     IAudioClient* exclusive_client = nullptr;
@@ -259,25 +251,35 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
         __uuidof(IAudioClient), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(&exclusive_client));
 
-    if (SUCCEEDED(hr) && exclusive_client) {
-        WAVEFORMATEX* mix = nullptr;
-        if (SUCCEEDED(exclusive_client->GetMixFormat(&mix)) && mix) {
-            REFERENCE_TIME period = 100'000;  // 10ms
-            HRESULT excl_hr = exclusive_client->Initialize(
-                AUDCLNT_SHAREMODE_EXCLUSIVE,
-                0, period, period, mix, nullptr);
-
-            // Per MSDN, any HRESULT is a valid outcome here. The test
-            // succeeds simply by REACHING this point — Activate() on a
-            // second IAudioClient handle worked, which proves Pulp did
-            // not exclusively bind the endpoint. We pin the
-            // documented set of "expected outcomes" so a future MSDN
-            // contract change is at least visible at the call site.
-            (void)excl_hr;  // Initialize result is informational only.
-            CoTaskMemFree(mix);
-        }
-        exclusive_client->Release();
+    if (FAILED(hr) || !exclusive_client) {
+        mm_device->Release();
+        enumerator->Release();
+        device->close();
+        SKIP("IAudioClient activation unavailable for parallel exclusive probe");
     }
+
+    WAVEFORMATEX* mix = nullptr;
+    if (FAILED(exclusive_client->GetMixFormat(&mix)) || !mix) {
+        exclusive_client->Release();
+        mm_device->Release();
+        enumerator->Release();
+        device->close();
+        SKIP("IAudioClient mix format unavailable for parallel exclusive probe");
+    }
+
+    REFERENCE_TIME period = 100'000;  // 10ms
+    HRESULT excl_hr = exclusive_client->Initialize(
+        AUDCLNT_SHAREMODE_EXCLUSIVE,
+        0, period, period, mix, nullptr);
+
+    // Per MSDN, any HRESULT is a valid outcome here. The test succeeds by
+    // REACHING this point — Activate() on a second IAudioClient handle worked,
+    // which proves Pulp did not exclusively bind the endpoint. We pin the
+    // documented set of "expected outcomes" so a future MSDN contract change is
+    // at least visible at the call site.
+    (void)excl_hr;  // Initialize result is informational only.
+    CoTaskMemFree(mix);
+    exclusive_client->Release();
 
     mm_device->Release();
     enumerator->Release();
@@ -316,9 +318,6 @@ TEST_CASE("WASAPI share-mode coverage: DeviceConfig exposes share_mode "
                   "low_latency must default false so non-Windows backends and "
                   "existing callers are unaffected");
 
-    SUCCEED("DeviceConfig::share_mode defaults to shared and low_latency "
-            "defaults false on every platform; both are honored only by the "
-            "Windows WASAPI backend");
 }
 
 #endif
