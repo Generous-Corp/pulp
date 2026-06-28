@@ -17,11 +17,58 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
+
+#include <cstdlib>
 
 namespace {
 
 namespace fs = std::filesystem;
+
+class ScopedEnv {
+public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* value = std::getenv(name_.c_str()))
+            previous_ = std::string(value);
+    }
+
+    ~ScopedEnv() {
+#if !defined(_WIN32)
+        if (previous_)
+            ::setenv(name_.c_str(), previous_->c_str(), /*overwrite=*/1);
+        else
+            ::unsetenv(name_.c_str());
+#else
+        if (previous_)
+            _putenv_s(name_.c_str(), previous_->c_str());
+        else
+            _putenv_s(name_.c_str(), "");
+#endif
+    }
+
+    void set(const char* value) {
+#if !defined(_WIN32)
+        REQUIRE(::setenv(name_.c_str(), value, /*overwrite=*/1) == 0);
+#else
+        REQUIRE(_putenv_s(name_.c_str(), value) == 0);
+#endif
+    }
+
+    void unset() {
+#if !defined(_WIN32)
+        REQUIRE(::unsetenv(name_.c_str()) == 0);
+#else
+        REQUIRE(_putenv_s(name_.c_str(), "") == 0);
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
+};
 
 // Append one block of a per-channel, absolute-frame ramp to the rolling buffer.
 void append_block(pulp::audio::RollingAudioCaptureBuffer& rolling, int channels,
@@ -152,6 +199,31 @@ TEST_CASE("a rolling-capture-only headless run does not require a screenshot",
     cfg.headless = true;
     cfg.audio_capture_rolling_path = "out.wav";
     CHECK_FALSE(pulp::format::detail::standalone_headless_requires_screenshot(cfg));
+}
+#endif
+
+#if PULP_ENABLE_AUDIO_PROBES
+TEST_CASE("standalone environment arms rolling audio capture without a screenshot",
+          "[standalone][audio-capture-rolling]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv capture("PULP_AUDIO_CAPTURE_ROLLING");
+    ScopedEnv frames("PULP_AUDIO_CAPTURE_ROLLING_FRAMES");
+    headless.unset();
+    screenshot.unset();
+    capture.set("/tmp/pulp-rolling-env.wav");
+    frames.set("512");
+
+    auto config =
+        pulp::format::detail::standalone_config_from_environment(
+            pulp::format::StandaloneConfig{});
+
+    REQUIRE(config.audio_capture_rolling_path == "/tmp/pulp-rolling-env.wav");
+    REQUIRE(config.audio_capture_rolling_frames == 512);
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE_FALSE(pulp::format::detail::standalone_headless_requires_screenshot(config));
+    REQUIRE_FALSE(pulp::format::detail::standalone_probe_json_requested_but_disabled(config));
 }
 #endif
 

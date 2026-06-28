@@ -532,6 +532,17 @@ TEST_CASE("pulp run --audio-capture-rolling implies headless and forwards the pa
     auto eq_args = assemble_launch_args(eq);
     REQUIRE(std::find(eq_args.begin(), eq_args.end(), "--audio-capture-rolling-frames")
             == eq_args.end());
+
+    auto eq_frames = parse_run_options({"--audio-capture-rolling=/tmp/roll3.wav",
+                                        "--audio-capture-rolling-frames=2048"});
+    REQUIRE(eq_frames.error.empty());
+    REQUIRE(eq_frames.audio_capture_rolling_path == "/tmp/roll3.wav");
+    REQUIRE(eq_frames.audio_capture_rolling_frames == 2048);
+    auto eq_frame_args = assemble_launch_args(eq_frames);
+    REQUIRE(std::find(eq_frame_args.begin(), eq_frame_args.end(),
+                      "--audio-capture-rolling-frames") != eq_frame_args.end());
+    REQUIRE(std::find(eq_frame_args.begin(), eq_frame_args.end(), "2048")
+            != eq_frame_args.end());
 }
 
 TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mode contention",
@@ -540,8 +551,13 @@ TEST_CASE("pulp run rejects invalid audio-capture-rolling options and capture-mo
     REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling="}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames", "0",
                                      "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames=0",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames=abc",
+                                     "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());
     // --audio-capture-rolling-frames requires --audio-capture-rolling.
     REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames", "512"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-capture-rolling-frames=512"}).error.empty());
     // Only one capture mode per invocation.
     REQUIRE_FALSE(parse_run_options({"--audio-inspector",
                                      "--audio-capture-rolling", "/tmp/r.wav"}).error.empty());

@@ -8,6 +8,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #if defined(__unix__) || defined(__APPLE__)
@@ -22,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
@@ -3523,6 +3525,56 @@ TEST_CASE("SignalGraph dispatches plugin nodes through ProcessBuffers",
         REQUIRE_THAT(out_l[static_cast<std::size_t>(i)], WithinAbs(0.25f, 1e-6f));
         REQUIRE_THAT(out_r[static_cast<std::size_t>(i)], WithinAbs(0.75f, 1e-6f));
     }
+}
+
+TEST_CASE("PluginSlot default transport process forwards to ProcessBuffers",
+          "[host][slot][process-buffers][transport]") {
+    ProcessBufferAwareSlot slot;
+    REQUIRE_FALSE(slot.wants_transport());
+
+    std::array<float, 4> in_l{0.1f, 0.2f, 0.3f, 0.4f};
+    std::array<float, 4> in_r{0.5f, 0.6f, 0.7f, 0.8f};
+    std::array<float, 4> out_l{};
+    std::array<float, 4> out_r{};
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> input(in_ptrs, 2, in_l.size());
+    pulp::audio::BufferView<float> output(out_ptrs, 2, out_l.size());
+
+    pulp::format::ProcessBusBufferView<const float> input_bus{
+        {"main-in", 0, pulp::format::BusDirection::Input,
+         pulp::format::BusRole::Main, 2, false, true},
+        input,
+    };
+    pulp::format::ProcessBusBufferView<float> output_bus{
+        {"main-out", 0, pulp::format::BusDirection::Output,
+         pulp::format::BusRole::Main, 2, false, true},
+        output,
+    };
+    pulp::format::ProcessBuffers buffers{
+        pulp::format::ProcessBusBufferSet<const float>(
+            std::span<pulp::format::ProcessBusBufferView<const float>>(&input_bus, 1)),
+        pulp::format::ProcessBusBufferSet<float>(
+            std::span<pulp::format::ProcessBusBufferView<float>>(&output_bus, 1)),
+    };
+
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    ParameterEventQueue params;
+    pulp::format::ProcessContext transport;
+    transport.is_playing = true;
+    transport.tempo_bpm = 137.0;
+
+    PluginSlot& base_slot = slot;
+    base_slot.process(buffers, midi_in, midi_out, params,
+                      static_cast<int>(in_l.size()), transport);
+
+    REQUIRE(slot.process_buffer_calls == 1);
+    REQUIRE(slot.legacy_process_calls == 1);
+    REQUIRE(slot.saw_layout_ok);
+    REQUIRE(slot.saw_storage_ok);
+    REQUIRE_THAT(out_l[0], WithinAbs(in_l[0], 1e-6f));
+    REQUIRE_THAT(out_r[3], WithinAbs(in_r[3], 1e-6f));
 }
 
 namespace {
