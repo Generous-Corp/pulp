@@ -75,6 +75,7 @@ TEST_CASE("WAM bridge exposes parameter metadata as JSON", "[wam]") {
     REQUIRE(json.find("\"unit\":\"dB\"") != std::string::npos);
     REQUIRE(json.find("\"type\":\"boolean\"") != std::string::npos); // Bypass
     REQUIRE(json.find("\"minValue\":-60") != std::string::npos);
+    REQUIRE(json.find("\"step\":0.1") != std::string::npos);         // gain step
 }
 
 TEST_CASE("WAM bridge gain parameter and state round-trip", "[wam]") {

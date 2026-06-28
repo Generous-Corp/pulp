@@ -198,6 +198,7 @@ std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
         info.default_value = p.range.default_value;
         info.min_value = p.range.min;
         info.max_value = p.range.max;
+        info.step = p.range.step;
         info.discrete_step = (p.range.step >= 1.0f) ? static_cast<int>(p.range.step) : 0;
 
         // WAMv2 type classification
@@ -227,6 +228,7 @@ std::string WamProcessorBridge::parameters_json() const {
         ss << "\",\"defaultValue\":" << p.default_value
            << ",\"minValue\":" << p.min_value
            << ",\"maxValue\":" << p.max_value
+           << ",\"step\":" << p.step
            << ",\"discreteStep\":" << p.discrete_step << "}";
     }
     ss << "]";

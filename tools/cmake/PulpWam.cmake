@@ -76,8 +76,13 @@ add_library(pulp-wam-dsp OBJECT ${_PULP_WAM_CORE_SOURCES})
 target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
 target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 
-# The wam_* C symbols every plugin entry point exports. Keep in sync with the
-# entry points and core/format/src/wasm/wam-runtime.mjs.
+# The wam_* C symbols every plugin entry point exports.
+# THE wam_* ABI IS LISTED IN FOUR PLACES THAT MUST STAY IN SYNC:
+#   1. core/format/src/wasm/wam_entry.cpp        (the C definitions)
+#   2. this EXPORTED_FUNCTIONS list              (Emscripten export table)
+#   3. core/format/src/wasm/wam-runtime.mjs      (makeBridge methods)
+#   4. core/format/src/wasm/wam-processor.js     (moduleExports adapter)
+# Adding/removing a wam_* function means editing all four.
 set(_PULP_WAM_EXPORTED_FUNCTIONS
     "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 

@@ -64,7 +64,8 @@ struct WamParamInfo {
     float default_value;
     float min_value;
     float max_value;
-    int discrete_step;       // 0 for continuous
+    float step;              // raw parameter step (e.g. 0.1); 0 = continuous
+    int discrete_step;       // integer step for int/boolean params; 0 otherwise
     std::string unit;
 };
 

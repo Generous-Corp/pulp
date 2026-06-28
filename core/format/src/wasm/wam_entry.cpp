@@ -10,6 +10,10 @@
 // which is resolved at link time (exactly one definition per plugin
 // executable). This is also why the WAMv2 state ABI is now available to every
 // plugin uniformly, not just whichever entry point happened to implement it.
+//
+// The wam_* ABI defined below must stay in sync with three other lists (see
+// tools/cmake/PulpWam.cmake): the EXPORTED_FUNCTIONS allowlist, the makeBridge
+// methods in wam-runtime.mjs, and the moduleExports adapter in wam-processor.js.
 
 #include <pulp/format/web/wam_adapter.hpp>
 #include <cstdint>

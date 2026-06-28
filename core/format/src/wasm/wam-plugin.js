@@ -149,7 +149,9 @@ export default class PulpWAM {
         input = document.createElement("input");
         input.type = "range";
         input.min = p.minValue; input.max = p.maxValue;
-        input.step = p.discreteStep > 0 ? p.discreteStep : (p.maxValue - p.minValue) / 1000;
+        // Use the parameter's real step (e.g. 0.1) so the default lands exactly
+        // on a step boundary; fall back to a fine step for stepless params.
+        input.step = p.step > 0 ? p.step : (p.maxValue - p.minValue) / 1000;
         input.value = p.defaultValue;
         input.style.flex = "1";
         const sync = () => { const v = parseFloat(input.value); this.setParameterValue(p.id, v); readout.textContent = v.toFixed(2) + (p.unit ? " " + p.unit : ""); };
