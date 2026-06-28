@@ -3,6 +3,7 @@
 #include <pulp/native_components/native_core.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -224,6 +225,13 @@ void NativeCoreProcessor::process(audio::BufferView<float>& audio_output,
     view.abi_version = PULP_NATIVE_CORE_ABI_VERSION;
     const state::ParameterEventQueue* queue = param_events();
     if (queue != nullptr) {
+        // Native ABI: sample_offset is in [0, frame_count); ramp length is
+        // in [0, frame_count - offset]. Clamp both into range before the
+        // unsigned cast so a negative value can't wrap to ~4.29e9 and an
+        // out-of-range positive value can't hand the native core an
+        // out-of-block offset (OOB read/write risk in the core).
+        const auto frame_count = static_cast<int32_t>(io.frame_count);
+        const int32_t max_offset = frame_count > 0 ? frame_count - 1 : 0;
         uint32_t n = 0;
         for (const state::ParameterEvent& e : queue->events()) {
             if (n >= event_scratch_.size()) break;
@@ -231,9 +239,13 @@ void NativeCoreProcessor::process(audio::BufferView<float>& audio_output,
                 (e.param_id < paramid_to_hash_.size())
                     ? paramid_to_hash_[e.param_id]
                     : 0;
+            const int32_t offset =
+                std::clamp<int32_t>(e.sample_offset, 0, max_offset);
+            const int32_t ramp = std::clamp<int32_t>(
+                e.ramp_duration_sample_frames, 0, frame_count - offset);
             event_scratch_[n] = {hash, static_cast<double>(e.value),
-                                 static_cast<uint32_t>(e.sample_offset),
-                                 static_cast<uint32_t>(e.ramp_duration_sample_frames),
+                                 static_cast<uint32_t>(offset),
+                                 static_cast<uint32_t>(ramp),
                                  PULP_NATIVE_EVENT_AUTOMATION, 0};
             ++n;
         }
