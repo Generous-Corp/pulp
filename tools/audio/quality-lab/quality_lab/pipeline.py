@@ -11,7 +11,7 @@ import numpy as np
 
 from . import align, audio_io, generate, provenance
 from .detectors import hf_fizz, hnr, spectral_centroid, spectral_flux, transient_sharpness
-from .schema import QualityCase, build_report
+from .schema import QualityCase, build_report, detectors_for_verdict
 
 # Registry: detector tag -> detect fn. New detectors plug in here; the pipeline stays
 # detector-agnostic (the §14.4 boundary). onset_drift was prototyped and DEFERRED — a
@@ -144,9 +144,10 @@ def _execute(degradation, detectors, latency_ms, smear_ms, case):
     # A "clean" verdict is only trustworthy if the detectors saw enough onsets. Low
     # coverage reads UNCERTAIN, not CLEAN — a detector that measured nothing must never
     # masquerade as a pass.
-    if any(r.fired for r in results):
+    gated = detectors_for_verdict(results)  # experimental detectors are advisory-only
+    if any(r.fired for r in gated):
         verdict = "FIRED"
-    elif any(r.low_coverage for r in results):
+    elif any(r.low_coverage for r in gated):
         verdict = "UNCERTAIN"
     else:
         verdict = "CLEAN"
@@ -256,7 +257,7 @@ def run_real_engine(
                                    "matched_pairs": len(pairs)}}
     recipe = {"case": case.case_id, "family": case.family, "source": "real-engine",
               "engine": "stretchcli", "character": character, "ratio": ratio}
-    verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
+    verdict = "FIRED" if any(r.fired for r in detectors_for_verdict(results)) else "CLEAN"
     report = build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
     report["engine"] = eng_res
     return report
@@ -273,7 +274,7 @@ def run_real_audio(
     import os
 
     from . import engine
-    from .detectors import hf_fizz, spectral_centroid, spectral_flux
+    from .detectors import hf_fizz, hnr, spectral_centroid, spectral_flux
 
     if not engine.available():
         skip = engine.stretch("", "", ratio)  # carries the actionable not-found reason
@@ -296,6 +297,7 @@ def run_real_audio(
         spectral_centroid.detect(source, candidate, sr),
         hf_fizz.detect(source, candidate, sr),
         spectral_flux.detect(source, candidate, sr),
+        hnr.detect(source, candidate, sr),
     ]
     determinism = {"level_match": "rms", "alignment": "identity", "sample_rate": sr,
                    "reference_policy": "dry-input"}
@@ -303,8 +305,11 @@ def run_real_audio(
               "engine": "stretchcli", "character": character, "ratio": ratio}
     case = QualityCase(case_id=f"realaudio:{os.path.basename(input_wav)}", family="real-audio",
                        reference_policy="dry-input", alignment_policy="identity",
-                       detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux", "hnr"], params=recipe)
-    verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
+                       # Derive tags FROM the emitted results so they can never drift
+                       # apart (this runner builds its detector list by hand, unlike the
+                       # registry-driven run()/run_real_engine paths).
+                       detector_tags=[r.name for r in results], params=recipe)
+    verdict = "FIRED" if any(r.fired for r in detectors_for_verdict(results)) else "CLEAN"
     report = build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
     report["engine"] = eng_res
     return report

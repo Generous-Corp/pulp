@@ -201,6 +201,16 @@ compared to itself.
 | `quality_lab/pipeline.py` | pure stages: generate/load → level-match → align → detect → report |
 | `quality_lab/cli.py` | argument parsing + dispatch |
 
+## Maturity gate (shipping new detectors safely)
+
+Each detector has a `maturity`: `experimental` -> `beta` -> `stable`. An
+`experimental` detector runs and reports (under the report's `advisory` block, and
+flagged `participates_in_verdict: false`), but its `fired`/`low_coverage` are excluded
+from the `verdict` **and** from the `engine_baseline` regression gate. `beta`
+participates in the verdict but is held out of the baseline; `stable` participates
+everywhere. New detectors ship `experimental` and are promoted only once their
+validation clears a bar — so an unproven detector cannot introduce a false regression.
+
 ## Deferred detectors & roadmap (honest status)
 
 - **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing

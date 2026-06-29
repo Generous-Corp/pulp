@@ -324,5 +324,11 @@ harness or `ctest`.
   checkout that built stretchcli), then the package-relative repo build. Absent → a clean,
   actionable `skipped` (build command + env-path), never a failure. Build it with
   `cmake --build build --target stretchcli`.
+- **Maturity gate:** each detector has `maturity` (`experimental`/`beta`/`stable`). An
+  `experimental` detector runs and reports under the report's `advisory` block but its
+  `fired`/`low_coverage` are excluded from the `verdict` AND `engine_baseline` — route
+  every verdict/gate path through `schema.detectors_for_verdict` /
+  `detectors_for_engine_baseline`, never re-implement the filter. New detectors ship
+  `experimental`. (Plan: planning/2026-06-29-audio-quality-lab-postmvp-detectors-maturity-gate.md.)
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.

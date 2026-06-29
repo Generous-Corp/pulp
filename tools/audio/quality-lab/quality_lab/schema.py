@@ -13,7 +13,34 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
-SCHEMA_VERSION = 1
+# Bumped to 2 for the maturity gate: detector results carry `maturity` +
+# `participates_in_verdict` / `participates_in_engine_baseline`, and the report gains an
+# `advisory` namespace for non-gating output (experimental detectors, reviewers, …).
+SCHEMA_VERSION = 2
+
+# The maturity gate's participation policy — the SINGLE source of truth. Every verdict /
+# gate path routes through `detectors_for_verdict` / `detectors_for_engine_baseline` so no
+# call site can forget the rule.
+VERDICT_MATURITIES = frozenset({"beta", "stable"})       # experimental excluded
+ENGINE_BASELINE_MATURITIES = frozenset({"stable"})       # experimental + beta excluded
+
+
+def participates_in_verdict(result: "DetectorResult") -> bool:
+    return result.maturity in VERDICT_MATURITIES
+
+
+def participates_in_engine_baseline(result: "DetectorResult") -> bool:
+    return result.maturity in ENGINE_BASELINE_MATURITIES
+
+
+def detectors_for_verdict(results: "list[DetectorResult]") -> "list[DetectorResult]":
+    """The detectors whose fired/low_coverage may move the headline verdict."""
+    return [r for r in results if participates_in_verdict(r)]
+
+
+def detectors_for_engine_baseline(results: "list[DetectorResult]") -> "list[DetectorResult]":
+    """The detectors captured into / checked against the regression baseline."""
+    return [r for r in results if participates_in_engine_baseline(r)]
 
 
 @dataclass
@@ -73,6 +100,12 @@ class DetectorResult:
     worst_regions: list[WorstRegion] = field(default_factory=list)
     tolerance_class: str = ""
     notes: str = ""
+    # Confidence tier (the maturity gate). `experimental` detectors run and report but
+    # are advisory: their `fired`/`low_coverage` never move the verdict or the regression
+    # gate. `beta` participates in the verdict but is held out of `engine_baseline` by
+    # default. `stable` participates everywhere. New detectors ship `experimental` and are
+    # promoted only after their validation clears a bar. Existing detectors default stable.
+    maturity: str = "stable"
 
     # Below this fraction, a "clean" verdict is untrustworthy — the detector simply
     # didn't see enough (boundary skips, failed matches). Surfaced, never hidden.
@@ -101,6 +134,11 @@ class DetectorResult:
             "curve": [[round(t, 4), round(v, 6)] for t, v in self.curve],
             "worst_regions": [w.to_dict() for w in self.worst_regions],
             "notes": self.notes,
+            # Gate participation is explicit in the JSON — readers must never infer it
+            # from array position or from `fired`.
+            "maturity": self.maturity,
+            "participates_in_verdict": participates_in_verdict(self),
+            "participates_in_engine_baseline": participates_in_engine_baseline(self),
         }
 
 
@@ -114,16 +152,31 @@ def build_report(
     """Assemble the canonical report envelope (§7). JSON-serializable; the same shape
     every later layer (perceptual models, listening infra, LLM reviewer) extends.
 
-    Top-level `worst_regions` is each detector's own #1 region (already sorted within a
-    detector, in that detector's unit). We deliberately do NOT cross-sort by raw
-    severity — `ms` and `deficit_0to1` are not comparable numbers."""
-    top = [d.worst_regions[0].to_dict() for d in detectors if d.worst_regions and d.fired]
+    Top-level `worst_regions` is each VERDICT-PARTICIPATING detector's own #1 region
+    (already sorted within a detector, in that detector's unit). We deliberately do NOT
+    cross-sort by raw severity — `ms` and `deficit_0to1` are not comparable numbers — and
+    experimental (advisory) detectors are excluded so they can't surface a headline region.
+
+    `detectors` keeps ALL detectors (each carries explicit participation flags); the
+    `advisory` namespace holds non-gating output (experimental detectors now; reviewers and
+    perceptual models later) so a reader sees everything but the gate sees only what
+    participates."""
+    gated = detectors_for_verdict(detectors)
+    advisory_dets = [d for d in detectors if not participates_in_verdict(d)]
+    top = [d.worst_regions[0].to_dict() for d in gated if d.worst_regions and d.fired]
     return {
         "schema_version": SCHEMA_VERSION,
         "case": case.to_dict(),
         "verdict": verdict,
         "detectors": [d.to_dict() for d in detectors],
         "worst_regions": top,
+        # Reserved non-gating namespace. `detectors` = experimental/advisory detector
+        # results; `reviewers` (#5296) and `perceptual` (Layer B) are reserved shapes.
+        "advisory": {
+            "detectors": [d.to_dict() for d in advisory_dets],
+            "reviewers": [],
+            "perceptual": [],
+        },
         "determinism": determinism,
         "provenance": provenance,
     }

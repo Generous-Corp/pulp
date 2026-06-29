@@ -50,7 +50,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"[quality-lab] degradation={args.degradation} verdict={report['verdict']}")
     for d in report["detectors"]:
         flag = "FIRE" if d["fired"] else "ok"
-        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+        # Experimental detectors are advisory — flag them so a reader never reads their
+        # FIRE as part of the gate (the verdict already excludes them).
+        adv = "" if d.get("participates_in_verdict", True) else f"  (advisory:{d.get('maturity','?')})"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]{adv}")
     if report.get("listening", {}).get("regions"):
         print(f"  listening: {len(report['listening']['regions'])} region clip(s) in {args.out_dir}")
     return 0
@@ -71,7 +74,10 @@ def _cmd_engine(args: argparse.Namespace) -> int:
           f"character={args.character} verdict={report['verdict']}")
     for d in report["detectors"]:
         flag = "FIRE" if d["fired"] else "ok"
-        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+        # Experimental detectors are advisory — flag them so a reader never reads their
+        # FIRE as part of the gate (the verdict already excludes them).
+        adv = "" if d.get("participates_in_verdict", True) else f"  (advisory:{d.get('maturity','?')})"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]{adv}")
     if args.out:
         with open(args.out, "w") as f:
             f.write(json.dumps(report, indent=2))

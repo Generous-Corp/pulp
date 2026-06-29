@@ -128,6 +128,10 @@ commands need nothing extra).
   a "clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 - **Real-engine validation** — the detectors run against the actual product stretch
   engine, and a committed baseline flags when an engine change deviates from it.
+- **Maturity gate** — every detector carries a `maturity` (`experimental` / `beta` /
+  `stable`). An `experimental` detector runs and reports under the report's `advisory`
+  block, but its result **never moves the `verdict` or the regression gate** — so a
+  new, unproven detector can be tuned on real audio without risking a false regression.
 - **Provenance** — each report records the engine commit, recipe, and determinism context,
   so a render you liked maps back to how it was made.
 - **License fence** — heavier or copyleft tools (perceptual models, reference stretchers)
