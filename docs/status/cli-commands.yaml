@@ -201,6 +201,8 @@ commands:
         args:
           - name: --url
             required: true
+          - name: --download-url
+            required: false
           - name: --version
             required: false
           - name: --notes
@@ -1760,6 +1762,8 @@ commands:
           - name: --local
             kind: flag
             required: false
+      - name: available
+        summary: List SDK versions available on GitHub releases
       - name: status
         summary: Show cached and locally-built SDK versions
       - name: clean
@@ -1768,29 +1772,29 @@ commands:
 
   - name: dev
     status: usable
-    summary: Unified development loop — watch, rebuild, and optionally test, validate, or relaunch an app on every change.
+    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice.
     args:
       - name: --test
         kind: flag
-        description: Run tests after each successful build
+        description: Run tests after each successful build in delegated watch mode, or after the one Rust fallback build pass
       - name: --test-filter
         kind: option
         description: Run only tests matching PATTERN (implies --test)
       - name: --validate
         kind: flag
-        description: Run quick plugin dlopen validation after build
+        description: Run quick plugin dlopen validation after build in the delegated C++ dev loop; Rust fallback prints a validator-not-ported notice and continues without validation
       - name: --run
         kind: option
-        description: Launch a build-dir binary and relaunch it on rebuild
+        description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
       - name: --design
         kind: option
-        description: Build pulp-design-tool and launch it with the given JS script
+        description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once
       - name: --target
         kind: option
         description: Pass --target to cmake --build
       - name: --allow-unsupported-sdk
         kind: flag
-        description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
+        description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
       - name: passthrough
         kind: passthrough
         description: Arguments after `--` are forwarded to the launched binary

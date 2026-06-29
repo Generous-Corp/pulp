@@ -117,6 +117,7 @@ fn sdk_install_prints_stub_notice_and_exits_non_zero() {
         .arg("sdk")
         .arg("install")
         .env("PULP_HOME", home.path())
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
         .output()
         .expect("run");
     assert!(!out.status.success());
@@ -126,6 +127,66 @@ fn sdk_install_prints_stub_notice_and_exits_non_zero() {
         stderr.contains("not ported") || stderr.contains("Phase 6"),
         "stderr = {stderr}"
     );
+}
+
+#[test]
+fn sdk_install_flags_reach_fallthrough_stub() {
+    let home = tempdir().unwrap();
+    let out = pulp_rs()
+        .arg("sdk")
+        .arg("install")
+        .arg("--version")
+        .arg("1.2.3")
+        .env("PULP_HOME", home.path())
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .output()
+        .expect("run");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not ported") || stderr.contains("fallthrough unavailable"),
+        "stderr = {stderr}"
+    );
+    assert!(!stderr.contains("Unknown command"), "stderr = {stderr}");
+    assert!(!stderr.contains("unknown flag"), "stderr = {stderr}");
+}
+
+#[test]
+fn sdk_available_reaches_fallthrough_stub() {
+    let home = tempdir().unwrap();
+    let out = pulp_rs()
+        .arg("sdk")
+        .arg("available")
+        .env("PULP_HOME", home.path())
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .output()
+        .expect("run");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not ported") || stderr.contains("fallthrough unavailable"),
+        "stderr = {stderr}"
+    );
+    assert!(!stderr.contains("unknown subcommand"), "stderr = {stderr}");
+}
+
+#[test]
+fn sdk_delegated_nonzero_exit_code_is_preserved() {
+    let home = tempdir().unwrap();
+    let cpp = Command::cargo_bin("pulp")
+        .expect("pulp-rs binary")
+        .get_program()
+        .to_owned();
+    let out = pulp_rs()
+        .arg("sdk")
+        .arg("install")
+        .arg("--local")
+        .env("PULP_HOME", home.path())
+        .env("PULP_RS_CPP_BINARY", cpp)
+        .output()
+        .expect("run");
+
+    assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]

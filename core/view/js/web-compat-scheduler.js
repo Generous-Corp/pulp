@@ -345,7 +345,7 @@
                       "setTimeout", "clearTimeout",
                       "setInterval", "clearInterval",
                       "queueMicrotask", "performance",
-                      "MessageChannel", "MessagePort"];
+                      "MessageChannel", "MessagePort", "Animation"];
         for (var i = 0; i < mirror.length; i++) {
             var n = mirror[i];
             if (typeof globalThis[n] !== "undefined") w[n] = globalThis[n];

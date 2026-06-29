@@ -1,3 +1,5 @@
+// Per-binary-unique ObjC class names (see header).
+#include "pulp_mac_objc_names.h"
 // window_host_mac_geometry.mm — geometry, coordinate, and event-
 // translation helpers extracted from window_host_mac.mm.
 //
