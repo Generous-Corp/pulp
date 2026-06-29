@@ -59,11 +59,8 @@ static const Command commands[] = {
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
     {"project",  "Per-project SDK pin: pin, unpin, undo", cmd_project},
-    // Regression fix: #562 added `{"config", ..., cmd_config}` to this dispatch
-    // table, but the #563 merge dropped the line, leaving `pulp config`
-    // (and the update.mode / channel / check_interval_hours surface
-    // it guards) completely unreachable. Restore so the
-    // cmd_config.cpp fixes are actually observable behaviour.
+    // Keep the config command in the primary dispatcher so every key
+    // accepted by cmd_config.cpp is reachable from the installed CLI.
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
     {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},

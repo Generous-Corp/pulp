@@ -27,6 +27,22 @@ plugin (FFT/analysis stays tool-side).
 
 ## Install (opt-in)
 
+Managed install (recommended) — provisions an isolated venv under `~/.pulp/tools/`, no
+project or global changes:
+
+```bash
+pulp tool install audio-quality-lab
+pulp tool run audio-quality-lab -- run --case drum --degradation smear --out-dir out
+```
+
+This is the same `pulp tool` lane as `ffmpeg`/`uv`/importers (see
+`docs/reference/extending-pulp.md`); `pulp tool list` shows it. The lab is a machine-level
+developer/agent tool — never linked into the MIT core or shipped in a plugin. Unlike the
+binary-download tools, it pip-installs from **this source tree**, so it requires a Pulp
+source checkout (and network access for numpy/soundfile).
+
+Manual venv (equivalent; the lab is a standard Python package):
+
 ```bash
 cd tools/audio/quality-lab
 python3 -m venv .venv && . .venv/bin/activate
