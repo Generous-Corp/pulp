@@ -466,6 +466,23 @@ release that introduced the event) instead. Same trap applies to any
 future `CLAP_EVENT_*` additions — the CLAP header does not define
 them as macros. Use the guard shape in `core/format/src/clap_adapter.cpp`.
 
+### Param text parsing must be locale-independent — but not via `std::from_chars<float>`
+
+`params_text_to_value` and `params_value_to_text` must be immune to a
+comma-decimal global host locale (a DAW that called `setlocale`): a typed-in
+`"0.5"` must never parse as `0.0`, and a formatted value must never emit
+`"0,5"`. Use `std::to_chars` for formatting (always C-locale). For *parsing*,
+the obvious choice — `std::from_chars` — is a **trap for floats**: libc++
+leaves the floating-point `from_chars` overloads `=delete`d on some toolchains
+(notably the github-hosted `macos-15` sanitizer image), so
+`std::from_chars(first, last, a_double)` hard-fails the **Sanitizer Tests**
+build with "call to deleted function 'from_chars'" while the Mac Studio
+`macos` gate (which *has* the overload) stays green — the break hides on the
+advisory lane. Integer `from_chars` is fine everywhere. For the float value,
+parse through `pulp::format::detail::parse_double_c_locale`
+(`core/format/include/pulp/format/detail/locale_independent_float.hpp`), a
+C-locale `strtod` wrapper shared with the `.pulpset` parser.
+
 ### GUI layout must match across CLAP TUs
 
 Do not use `#ifdef PULP_CLAP_GUI` for CLAP GUI fields or extension
