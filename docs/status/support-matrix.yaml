@@ -54,7 +54,7 @@ formats:
     linux: experimental
   wam_v2:
     web: partial
-    notes: A Pulp Processor builds to a WAMv2 AudioWorklet plugin via pulp_add_wam_plugin (PulpGain/Pluck/Chorus). The PulpGain canary loads, renders audio, and shows generated parameter controls in Chrome; audio, dB-accurate gain, interleaved stereo, bypass, and param + state round-trip are proven by a Node runner and a native bridge test. Stereo, single-instance canary — not full WamEnv/WamGroup host conformance, and browser validation is a fixture, not yet a CI lane.
+    notes: A Pulp Processor builds to a WAMv2 AudioWorklet plugin via pulp_add_wam_plugin. Coverage spans an effect (PulpGain — loads, renders, generated controls in Chrome; dB-accurate gain, interleaved stereo, bypass), a richer effect (PulpChorus — input transformed), and an instrument (PulpPluck — MIDI note-on produces sound and decays after note-off). Verified by a deterministic Node feature runner plus native bridge tests (param/state round-trip, MIDI delivery). Stereo, single-instance canary — not full WamEnv/WamGroup host conformance, and browser validation is a fixture, not yet a CI lane.
   webclap:
     web: experimental
     notes: Adapter macro and CMake helper exist; no checked-in PulpGain_WCLAP target or Pulp browser-host wclap-host-js integration yet.
