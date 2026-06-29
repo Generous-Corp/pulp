@@ -45,6 +45,7 @@ generate / load → level-match → align → detect → report.json
 | `spectral_flux` | graininess / temporal instability (sustained material) |
 | `hnr` | added noise / roughness — tonal purity loss (sustained material) |
 | `stereo_width` | stereo-image collapse / phase damage (stereo material) |
+| `onset_drift` *(experimental)* | timing / groove drift (percussive material) |
 
 Each detector fires on its own artifact and stays quiet on the others and on an identity
 render. Detectors are validated **non-circularly** — not only against synthetic

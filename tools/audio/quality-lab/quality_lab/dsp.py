@@ -208,3 +208,20 @@ def interchannel_correlation(stereo: np.ndarray) -> float:
     b = s[:, 1] - s[:, 1].mean()
     d = np.sqrt(float(np.dot(a, a)) * float(np.dot(b, b))) + 1e-20
     return float(np.dot(a, b) / d)
+
+
+def theil_sen_slope(x: np.ndarray, y: np.ndarray) -> float:
+    """Robust slope = median of pairwise (y_j - y_i)/(x_j - x_i). Resistant to a few
+    bad onset matches, unlike OLS — used for the onset-drift trend."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    n = len(x)
+    if n < 2:
+        return 0.0
+    slopes = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = x[j] - x[i]
+            if dx != 0.0:
+                slopes.append((y[j] - y[i]) / dx)
+    return float(np.median(slopes)) if slopes else 0.0
