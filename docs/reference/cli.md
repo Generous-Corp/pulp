@@ -106,9 +106,19 @@ pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupp
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
+pulp build --format wam        # Build the WAMv2 (Emscripten) web plugin into build-wam/
+pulp build --format wclap      # Build the WebCLAP (wasi-sdk) module into build-wclap/
+pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+`--format wam|wclap` (short: `-f`) builds a **web plugin format** instead of the native plugins, using a separate toolchain and build directory so it never collides with the native `build/`:
+
+- `--format wam` configures with the Emscripten wrapper (`emcmake cmake`) into `build-wam/`. Requires `emcmake` on `PATH` — source your `emsdk_env.sh` first.
+- `--format wclap` configures plain `cmake` with the wasi-sdk toolchain (`tools/cmake/wasi-toolchain.cmake`) into `build-wclap/`, producing a CLAP-in-WebAssembly `.wasm`. Errors clearly if the toolchain file is not in the checkout.
+
+Web formats build to `.wasm`/`.js` and are not installed to native plug-in folders, so `--format` cannot be combined with `--install`, `--validate`, or `--watch`. See [web-plugin-support.md](web-plugin-support.md) for hosting the output.
 
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
