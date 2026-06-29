@@ -33,7 +33,7 @@ Pulp's web-compat layer was audited against **28 web specifications** — 16 W3C
 | 25 | [Web Crypto](https://www.w3.org/TR/WebCryptoAPI/) | — | ⚠️ Minimal | getRandomValues (not cryptographic) | SubtleCrypto |
 | 26 | [Structured Clone](https://html.spec.whatwg.org/multipage/structured-data.html) | Living | ✅ Complete | structuredClone (via JSON) | — |
 | 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, applyShader (SkSL), getGPUInfo | Full navigator.gpu pipeline |
-| 28 | [Font Loading](https://www.w3.org/TR/css-font-loading-3/) | L3 | ⚠️ Partial | loadFont(path) | FontFace constructor, document.fonts |
+| 28 | [Font Loading](https://www.w3.org/TR/css-font-loading-3/) | L3 | ⚠️ Partial | loadFont(path), registerFont(family, path) | FontFace constructor, document.fonts |
 **Legend:** ✅ Complete or nearly so — ⚠️ Partial, see details below — ❌ Not implemented
 
 ## How to Run Tests
@@ -479,7 +479,8 @@ Pulp uses **Dawn** (Google's WebGPU implementation) as its GPU backend. The Dawn
 | Feature | Status | Notes |
 |---------|--------|-------|
 | `loadFont(path)` | ✅ | Bridge function, checks file exists |
-| `FontFace` constructor | ❌ | Use `loadFont()` + `style.fontFamily` |
+| `registerFont(family, path)` | ✅ | Registers bundled `.ttf`/`.otf` files for `style.fontFamily` / canvas font resolution |
+| `FontFace` constructor | ❌ | Use `registerFont()` + `style.fontFamily` for bundled fonts |
 | `document.fonts.ready` | ❌ | Fonts load synchronously |
 
 ## Deliberately Out of Scope

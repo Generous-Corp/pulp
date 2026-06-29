@@ -114,6 +114,19 @@ lanes, and verify a runner is actually busy before blaming capacity.
 ## GitHub workflow gotchas
 
 - **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Two distinct guard layers exist and they catch different things: `test_codecov_components.py` / `test_codecov_config.py` (PR-gate) guard the **codecov.yml mapping** (a subsystem matching no component → invisible); `coverage-upload-watchdog.yml` (hourly, main) guards the **outcome** — "main had a *successful* Coverage run in the last N hours." The watchdog exists because the dashboard degrades silently when fresh complete uploads stop arriving, from causes the config gate can't see: coverage runs cancelled by `stale-run-reaper.yml` when a CI dispatch throttle makes them queue past the cutoff (the 2026-06-28 incident — 8 consecutive main Coverage runs cancelled), an `llvm-cov -object`-set regression (a `libpulp-*.a` drops out → a whole subsystem vanishes while `lines-valid` stays > 0, which `verify_cobertura_xml.py`'s `lines-valid > 0` check cannot catch), or Codecov's `after_n_builds` waiting forever on a missing per-OS leg. When triaging a coverage-surface complaint: first check `gh run list --workflow coverage.yml --branch main` for recent **successful** runs (cancelled ≠ uploaded); only then suspect codecov.yml. Note the config gate is **advisory** (not in branch protection), so a fleet-auto-merged PR can land config drift despite a red gate — the watchdog is the main-branch backstop.
+- **`web-plugins.yml` is the headless-browser web lane (advisory).** It builds
+  Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web plugin formats on a Linux
+  GitHub-hosted runner and runs every web validation, including the browser
+  fixtures in headless Chrome (`browser-actions/setup-chrome` +
+  `playwright-core`, which drives the system Chrome — no browser download). It is
+  deliberately NOT on the self-hosted VMs: a headless-Linux browser lane needs
+  emsdk + wasi-sdk + Chrome, all of which install cleanly on GitHub-hosted, so no
+  golden VM or QEMU work is warranted. The WAM build vendors choc by cloning the
+  pinned fork (PulpWam.cmake needs `PULP_WAM_CHOC_INCLUDE`; the WebCLAP build
+  FetchContents choc/clap itself). The browser drivers are
+  `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
+  locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
+  (set `CHROME_PATH` or pass `--browser`).
 - **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
   intent-trailer model — and it ships DORMANT.** It exists to kill the
   version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
@@ -139,8 +152,10 @@ lanes, and verify a runner is actually busy before blaming capacity.
   `add_test` / `pulp_add_test_suite` lands. Adding a test fails the
   `hotspot_size_guard` gate until you raise `max_loc` for `test/CMakeLists.txt`
   in the same change (compress the registration first, then bump by the small
-  remaining delta). This is expected, not a smell — unlike source hotspots, the
-  fix is to raise the ceiling, not to split the file.
+  remaining delta). Set `max_loc` to the exact current `wc -l test/CMakeLists.txt`
+  so the ceiling stays honest rather than accumulating headroom. This is
+  expected, not a smell — unlike source hotspots, the fix is to raise the
+  ceiling, not to split the file.
 - **Source hotspots (e.g. `core/view/src/design_cpp_codegen.cpp`) are frozen
   too — bump the ceiling for a *coherent* feature, split when it's accretion.**
   `hotspot_size_guard.json` also freezes large source files. When a single,

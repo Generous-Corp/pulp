@@ -33,8 +33,13 @@ def capture() -> dict[str, dict[str, float]]:
         report = pipeline.run_real_engine(ratio=ratio, character=char)
         if report.get("verdict") in ("SKIPPED", "ERROR"):
             raise RuntimeError(f"engine not available/failed: {report}")
+        # Only baseline-participating detectors enter the regression gate — experimental
+        # (and beta) detectors are advisory and must never fail it. The flag defaults True
+        # so pre-maturity-gate reports/baselines still load.
         out[f"ratio={ratio},character={char}"] = {
-            d["name"]: round(d["scalar"], 4) for d in report["detectors"]
+            d["name"]: round(d["scalar"], 4)
+            for d in report["detectors"]
+            if d.get("participates_in_engine_baseline", True)
         }
     return out
 

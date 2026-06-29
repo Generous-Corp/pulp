@@ -113,8 +113,14 @@ int cmd_validate(const std::vector<std::string>& args) {
         }
         if (json_output || !report_path.empty()) {
             std::ostringstream report;
+            const bool tgt_install_ready = (fail_count == 0) && !(strict && skip_count > 0);
             report << "{\n  \"version\": 1,\n  \"target\": \""
-                   << target_name << "\",\n  \"results\": [\n";
+                   << target_name << "\",\n";
+            report << "  \"summary\": {\"failed\": " << fail_count
+                   << ", \"skipped\": " << skip_count << "},\n";
+            report << "  \"install_ready\": " << (tgt_install_ready ? "true" : "false")
+                   << ",\n";
+            report << "  \"results\": [\n";
             for (size_t i = 0; i < results.size(); ++i) {
                 const auto& r = results[i];
                 report << "    {\"target\": \"" << r.target << "\", "
@@ -554,6 +560,16 @@ int cmd_validate(const std::vector<std::string>& args) {
         report << "  \"timestamp\": \"" << ts << "\",\n";
         if (!git_ref.empty())
             report << "  \"git_ref\": \"" << git_ref << "\",\n";
+        // Aggregate evidence + install/package readiness: a bundle is install-safe
+        // only when nothing failed (and, under --strict, nothing was skipped),
+        // matching `pulp build --install`'s "validation is the gate" policy.
+        const bool install_ready = (failed == 0) && !(strict && skipped > 0);
+        report << "  \"summary\": {\"total\": " << total
+               << ", \"passed\": " << passed
+               << ", \"failed\": " << failed
+               << ", \"skipped\": " << skipped
+               << ", \"skipped_missing_tool\": " << skipped_missing_tool << "},\n";
+        report << "  \"install_ready\": " << (install_ready ? "true" : "false") << ",\n";
         report << "  \"reports\": [\n";
         for (size_t i = 0; i < report_entries.size(); ++i) {
             report << report_entries[i];

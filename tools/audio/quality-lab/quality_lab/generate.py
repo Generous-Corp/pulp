@@ -185,3 +185,73 @@ def add_fizz(y: np.ndarray, sr: int, amount: float = 0.10, cutoff_hz: float = 80
     hp = noise - lp
     env = np.sqrt(np.mean(y * y) + 1e-20)
     return y + amount * env * hp
+
+
+def noisy(y: np.ndarray, sr: int, amount: float = 0.12, seed: int = 0) -> np.ndarray:
+    """Add broadband white noise scaled to the signal RMS — the canonical HNR defect
+    (tonal purity loss / roughness). Deterministic for a given seed."""
+    rng = np.random.default_rng(seed)
+    env = np.sqrt(np.mean(np.asarray(y, dtype=np.float64) ** 2) + 1e-20)
+    return np.asarray(y, dtype=np.float64) + amount * env * rng.standard_normal(len(y))
+
+
+def render_stereo_pad(
+    sr: int = 48000, dur_s: float = 2.5, seed: int = 0, f0: float = 220.0, width: float = 0.6
+) -> np.ndarray:
+    """A wide stereo pad: a shared mono tonal core (`render_tonal`) plus per-channel
+    decorrelated side content, so RMS(side)/RMS(mid) is non-trivial and the channels are
+    only partly correlated. Deterministic. Returns an (N, 2) L/R array."""
+    mono, _ = render_tonal(sr, dur_s, seed, f0)
+    rng = np.random.default_rng(seed + 1)
+    rms = np.sqrt(np.mean(mono ** 2) + 1e-20)
+    side = width * rms * rng.standard_normal(len(mono))
+    return np.stack([mono + 0.5 * side, mono - 0.5 * side], axis=1)
+
+
+def narrow_stereo(stereo: np.ndarray, amount: float = 0.8) -> np.ndarray:
+    """Collapse stereo width toward mono by attenuating the side signal by `amount`
+    (1.0 -> full mono). Returns an (N, 2) array."""
+    s = np.asarray(stereo, dtype=np.float64)
+    mid = 0.5 * (s[:, 0] + s[:, 1])
+    side = 0.5 * (s[:, 0] - s[:, 1]) * (1.0 - amount)
+    return np.stack([mid + side, mid - side], axis=1)
+
+
+def invert_phase_right(stereo: np.ndarray) -> np.ndarray:
+    """Flip the polarity of the right channel — an out-of-phase / mono-incompatibility
+    defect. Returns an (N, 2) array."""
+    s = np.asarray(stereo, dtype=np.float64).copy()
+    s[:, 1] = -s[:, 1]
+    return s
+
+
+def drift(reference, onsets, sr, lag_ms_start=0.0, lag_ms_end=0.0):
+    """Inject a per-onset TIMING drift and nothing else. Onset k is delayed by a lag
+    interpolated linearly from `lag_ms_start` to `lag_ms_end` across the onsets; each
+    inter-onset segment is shifted by its lag so the attack waveform stays verbatim (no
+    smear / brightness / level change — only the event time moves). Returns a candidate
+    the same length as `reference`. A uniform start==end is a pure latency (no groove
+    drift); start!=end is a ramp."""
+    y = np.asarray(reference, dtype=np.float64)
+    n = len(y)
+    out = np.zeros(n, dtype=np.float64)
+    os = sorted(float(o) for o in onsets)
+    N = len(os)
+    if N == 0:
+        return y.copy()
+    # Segment boundaries at the midpoints between consecutive onsets (quiet points for a
+    # drum break), so each segment carries exactly one transient.
+    bounds = [0]
+    for k in range(1, N):
+        bounds.append(int(round((os[k - 1] + os[k]) / 2.0 * sr)))
+    bounds.append(n)
+    for k in range(N):
+        frac = (k / (N - 1)) if N > 1 else 0.0
+        lag = int(round((lag_ms_start + (lag_ms_end - lag_ms_start) * frac) * sr / 1000.0))
+        s, e = bounds[k], bounds[k + 1]
+        seg = y[s:e]
+        ds, de = s + lag, s + lag + len(seg)
+        a, b = max(0, ds), min(n, de)
+        if b > a:
+            out[a:b] = seg[a - ds: a - ds + (b - a)]  # later segments win at any overlap
+    return out

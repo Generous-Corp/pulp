@@ -6,6 +6,9 @@ commands:
     status: usable
     summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`.
     args:
+      - name: --format
+        kind: option
+        description: "Build a web plugin format instead of the native one: `wam` (Emscripten → AudioWorklet, into `build-wam/`) or `wclap` (wasi-sdk → CLAP-in-WebAssembly, into `build-wclap/`). `-f <fmt>` is the short form. Cannot be combined with `--install`/`--validate`/`--watch`. `wam` needs `emcmake` on PATH (source emsdk_env.sh); `wclap` needs `tools/cmake/wasi-toolchain.cmake` in the checkout."
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."

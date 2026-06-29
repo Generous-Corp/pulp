@@ -200,3 +200,23 @@ the probe so it can never regress.
   fixed by a host↔store reconcile. See `au-param-host-store-clobber`.
 - **Audio-thread `AUEventListenerNotify`** stalling Logic's render thread on
   every param change. Tier-2; never call it from `ProcessBufferLists`.
+
+## Reaching typed processor state in a headless scene
+
+`HeadlessHost` hides the wrapped `Processor` behind the generic interface, so a
+scene can normally only observe the output buffers + the param store. When a bug
+lives in internal state the output doesn't directly expose — a gain-reduction
+meter, an event-count/ring, a voice-allocation table — use
+`HeadlessHost::processor_as<T>()` to recover the concrete pointer and assert that
+state after a scripted block:
+
+```cpp
+auto* comp = host.processor_as<MyCompressor>();
+REQUIRE(comp);                       // null if the dynamic type doesn't match
+run_scene(host, scene);
+REQUIRE(comp->gain_reduction_db() > 0.0f);   // internal state, not just output
+```
+
+`processor()` returns the base `Processor*`; `processor_as<T>()` is a checked
+`dynamic_cast` (null on mismatch). Lets a scene pin a regression at the source
+instead of inferring it from a downstream silence.

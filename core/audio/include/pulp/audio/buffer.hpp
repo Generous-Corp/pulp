@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -202,7 +203,13 @@ private:
                                             std::size_t num_samples) {
         if (num_channels != 0 &&
             num_samples > std::numeric_limits<std::size_t>::max() / num_channels) {
+#if defined(__cpp_exceptions) && __cpp_exceptions
             throw std::length_error("audio buffer dimensions overflow");
+#else
+            // No C++ exception runtime (e.g. wasi-sdk libc++ built without EH).
+            // An overflow here is a programming error, not a recoverable input.
+            std::abort();
+#endif
         }
         return num_channels * num_samples;
     }

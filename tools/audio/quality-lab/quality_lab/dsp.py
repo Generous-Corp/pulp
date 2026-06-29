@@ -133,3 +133,95 @@ def local_align(
     # lag relative to nominal cand_t: cand window start (c0+best) vs nominal (cc-pre)
     lag_samples = (c0 + best) - (cc - pre)
     return ref_seg, cand_seg, lag_samples
+
+
+# ── Harmonic-to-noise ratio (tonal purity) ───────────────────────────────
+
+def harmonic_to_noise_ratio_db(
+    y: np.ndarray, sr: int, fmin: float = 70.0, fmax: float = 500.0,
+    n_fft: int = 1024, hop: int = 512,
+) -> float:
+    """Mean autocorrelation-based harmonic-to-noise ratio (dB) over energetic frames.
+
+    Boersma's method (as in Praat): for each frame the normalized autocorrelation is
+    divided by the window's own autocorrelation (removing the window's lag bias), and
+    the peak r in the pitch-lag range estimates the harmonic fraction; HNR =
+    10*log10(r/(1-r)). Higher = cleaner/more tonal; added broadband noise or roughness
+    lowers it. A shorter frame keeps the pitch ~constant within the frame (so vibrato
+    doesn't depress the peak). Silent frames are skipped.
+    """
+    y = np.asarray(y, dtype=np.float64)
+    win = np.hanning(n_fft)
+    # The window's own autocorrelation — divided out so r reflects signal periodicity,
+    # not the window's lag decay.
+    win_ac = np.fft.irfft(np.abs(np.fft.rfft(win, 2 * n_fft)) ** 2)[:n_fft]
+    win_ac = win_ac / win_ac[0]
+    lag_min = max(1, int(sr / fmax))
+    lag_max = min(n_fft - 1, int(sr / fmin))
+    if lag_max <= lag_min:
+        return 0.0
+    n = max(0, (len(y) - n_fft) // hop + 1)
+    vals: list[float] = []
+    for i in range(n):
+        seg = y[i * hop : i * hop + n_fft] * win
+        ac = np.fft.irfft(np.abs(np.fft.rfft(seg, 2 * n_fft)) ** 2)[:n_fft]
+        if ac[0] <= 1e-12:
+            continue  # silent frame
+        ac = ac / ac[0]  # normalized; ac[0] == 1
+        lo, hi = lag_min, lag_max + 1
+        wac = win_ac[lo:hi]
+        deb = np.where(wac > 1e-3, ac[lo:hi] / np.where(wac > 1e-3, wac, 1.0), 0.0)
+        r = float(np.max(deb))
+        r = min(max(r, 1e-6), 1.0 - 1e-6)  # clamp away from the log singularities
+        vals.append(10.0 * np.log10(r / (1.0 - r)))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+# ── Stereo image ──────────────────────────────────────────────────────────
+
+def _as_stereo(x: np.ndarray) -> np.ndarray:
+    s = np.asarray(x, dtype=np.float64)
+    if s.ndim != 2 or s.shape[1] != 2:
+        raise ValueError("expected an (N, 2) stereo array")
+    return s
+
+
+def mid_side(stereo: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(N,2) L/R -> (mid, side) where mid=(L+R)/2, side=(L-R)/2."""
+    s = _as_stereo(stereo)
+    return 0.5 * (s[:, 0] + s[:, 1]), 0.5 * (s[:, 0] - s[:, 1])
+
+
+def stereo_width_ratio(stereo: np.ndarray) -> float:
+    """RMS(side) / RMS(mid): 0 = mono, larger = wider. Level-invariant."""
+    mid, side = mid_side(stereo)
+    m = np.sqrt(np.mean(mid ** 2) + 1e-20)
+    sd = np.sqrt(np.mean(side ** 2) + 1e-20)
+    return float(sd / m)
+
+
+def interchannel_correlation(stereo: np.ndarray) -> float:
+    """Pearson correlation of L and R in [-1, 1]. ~1 = mono-ish, <=0 = decorrelated, and
+    strongly negative = out-of-phase (a mono-compatibility / phase defect)."""
+    s = _as_stereo(stereo)
+    a = s[:, 0] - s[:, 0].mean()
+    b = s[:, 1] - s[:, 1].mean()
+    d = np.sqrt(float(np.dot(a, a)) * float(np.dot(b, b))) + 1e-20
+    return float(np.dot(a, b) / d)
+
+
+def theil_sen_slope(x: np.ndarray, y: np.ndarray) -> float:
+    """Robust slope = median of pairwise (y_j - y_i)/(x_j - x_i). Resistant to a few
+    bad onset matches, unlike OLS — used for the onset-drift trend."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    n = len(x)
+    if n < 2:
+        return 0.0
+    slopes = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = x[j] - x[i]
+            if dx != 0.0:
+                slopes.append((y[j] - y[i]) / dx)
+    return float(np.median(slopes)) if slopes else 0.0

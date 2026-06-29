@@ -8,6 +8,55 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05390"></a>
+## [0.539.0] - 2026-06-29
+
+- test(aax): SDK-gated runtime test for the AAX MIDI bridge ([#5340](https://github.com/danielraffel/pulp/pull/5340))
+- feat(quality-lab): autonomous tuning loop, first slice (experimental) ([#5339](https://github.com/danielraffel/pulp/pull/5339))
+- feat(quality-lab): advisory LLM/multimodal reviewer (experimental, never a gate) ([#5336](https://github.com/danielraffel/pulp/pull/5336))
+- feat(quality-lab): onset_drift detector (experimental) — timing/groove drift ([#5327](https://github.com/danielraffel/pulp/pull/5327))
+- fix(web): find Chrome via CHROME_PATH + Linux paths in the WebCLAP host validator ([#5334](https://github.com/danielraffel/pulp/pull/5334))
+- ci: add Web Plugins lane — headless-browser WAMv2 + WebCLAP validation (RD11) ([#5333](https://github.com/danielraffel/pulp/pull/5333))
+- feat(format): package WebCLAP modules into .wclap bundles ([#5329](https://github.com/danielraffel/pulp/pull/5329))
+- feat(format): emit a WAMv2 web-build report (UI strategy + binding targets) ([#5328](https://github.com/danielraffel/pulp/pull/5328))
+- feat(format): host a WebCLAP in the browser with a generated UI ([#5323](https://github.com/danielraffel/pulp/pull/5323))
+- feat(quality-lab): maturity gate — experimental detectors are advisory-only ([#5320](https://github.com/danielraffel/pulp/pull/5320))
+- test: assert FileChooser null callback behavior ([#5242](https://github.com/danielraffel/pulp/pull/5242))
+
+<a id="v05380"></a>
+## [0.538.0] - 2026-06-29
+
+- docs(ci-skill): note exact-LOC ceiling bump for test manifest growth ([#5230](https://github.com/danielraffel/pulp/pull/5230))
+- docs(cli-maintenance): note pulp validate --json install_ready/summary contract ([#5314](https://github.com/danielraffel/pulp/pull/5314))
+
+<a id="v05370"></a>
+## [0.537.0] - 2026-06-29
+
+- feat(cli): add `pulp build --format wam|wclap` for web plugin formats ([#5315](https://github.com/danielraffel/pulp/pull/5315))
+- docs: correct web-plugin status — WebCLAP is built + Node-hosted, not scaffolding ([#5312](https://github.com/danielraffel/pulp/pull/5312))
+
+<a id="v05360"></a>
+## [0.536.0] - 2026-06-29
+
+- docs(audio-headless-debug): note HeadlessHost::processor_as for typed state ([#5306](https://github.com/danielraffel/pulp/pull/5306))
+- feat(format): host a WebCLAP from pure JS — audio + parameter control ([#5310](https://github.com/danielraffel/pulp/pull/5310))
+
+<a id="v05350"></a>
+## [0.535.0] - 2026-06-29
+
+- docs(web): mark WebCLAP as a building, probe-validated canary ([#5308](https://github.com/danielraffel/pulp/pull/5308))
+
+<a id="v05343"></a>
+## [0.534.3] - 2026-06-29
+
+- fix(view): plugin grabs the DAW keyboard only for a focused TEXT field ([#5304](https://github.com/danielraffel/pulp/pull/5304))
+- docs: web-plugin-support reference + claims lint (Phase 0-WAM) ([#5303](https://github.com/danielraffel/pulp/pull/5303))
+- fix(mcp): gate audio render by project SDK ([#5135](https://github.com/danielraffel/pulp/pull/5135))
+- wam: Phase 2 — validate instrument (PulpPluck) + rich effect (PulpChorus) ([#5299](https://github.com/danielraffel/pulp/pull/5299))
+- docs(render): clarify KTX2 parser status ([#5146](https://github.com/danielraffel/pulp/pull/5146))
+- feat(quality-lab): add HNR + stereo-width detectors; file roadmap issues ([#5298](https://github.com/danielraffel/pulp/pull/5298))
+- docs(view): align font loading status ([#5102](https://github.com/danielraffel/pulp/pull/5102))
+
 <a id="v05342"></a>
 ## [0.534.2] - 2026-06-29
 
@@ -5618,6 +5667,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.539.0]: https://github.com/danielraffel/pulp/releases/tag/v0.539.0
+[0.538.0]: https://github.com/danielraffel/pulp/releases/tag/v0.538.0
+[0.537.0]: https://github.com/danielraffel/pulp/releases/tag/v0.537.0
+[0.536.0]: https://github.com/danielraffel/pulp/releases/tag/v0.536.0
+[0.535.0]: https://github.com/danielraffel/pulp/releases/tag/v0.535.0
+[0.534.3]: https://github.com/danielraffel/pulp/releases/tag/v0.534.3
 [0.534.2]: https://github.com/danielraffel/pulp/releases/tag/v0.534.2
 [0.534.1]: https://github.com/danielraffel/pulp/releases/tag/v0.534.1
 [0.534.0]: https://github.com/danielraffel/pulp/releases/tag/v0.534.0

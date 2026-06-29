@@ -44,15 +44,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         report = pipeline.run(args.degradation, case=case,
                               latency_ms=args.latency_ms, smear_ms=args.smear_ms)
+    if getattr(args, "review", False):
+        from . import reviewer
+        reviewer.attach(report)  # advisory only — never changes the verdict
     if args.out:
         with open(args.out, "w") as f:
             f.write(json.dumps(report, indent=2))
     print(f"[quality-lab] degradation={args.degradation} verdict={report['verdict']}")
     for d in report["detectors"]:
         flag = "FIRE" if d["fired"] else "ok"
-        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+        # Experimental detectors are advisory — flag them so a reader never reads their
+        # FIRE as part of the gate (the verdict already excludes them).
+        adv = "" if d.get("participates_in_verdict", True) else f"  (advisory:{d.get('maturity','?')})"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]{adv}")
     if report.get("listening", {}).get("regions"):
         print(f"  listening: {len(report['listening']['regions'])} region clip(s) in {args.out_dir}")
+    for rv in report.get("advisory", {}).get("reviewers", []):
+        if rv.get("status") == "ok":
+            arts = ", ".join(rv.get("suspected_artifacts", [])) or "(none named)"
+            print(f"  reviewer (advisory, not a gate): {arts} — conf={rv.get('confidence')}")
+        else:
+            print(f"  reviewer (advisory): {rv.get('status')} — {rv.get('reason','')}")
     return 0
 
 
@@ -71,7 +83,10 @@ def _cmd_engine(args: argparse.Namespace) -> int:
           f"character={args.character} verdict={report['verdict']}")
     for d in report["detectors"]:
         flag = "FIRE" if d["fired"] else "ok"
-        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]")
+        # Experimental detectors are advisory — flag them so a reader never reads their
+        # FIRE as part of the gate (the verdict already excludes them).
+        adv = "" if d.get("participates_in_verdict", True) else f"  (advisory:{d.get('maturity','?')})"
+        print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]{adv}")
     if args.out:
         with open(args.out, "w") as f:
             f.write(json.dumps(report, indent=2))
@@ -124,6 +139,23 @@ def _cmd_engine_baseline(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_loop(args: argparse.Namespace) -> int:
+    from . import loop
+    # Deterministic demo pass over the synthetic degradations (the loop's real candidates
+    # are engine/corpus renders; this proves the skeleton + proposal transaction).
+    cands = [loop.score_case(d, d) for d in ("identity", "smear", "dull", "fizz", "grainy")]
+    result = loop.run_iteration(cands)
+    print(f"[quality-lab loop] champion={result['champion']} (experimental — proposes, never decides)")
+    for r in result["ranked"]:
+        print(f"  {r['label']:10s} total_badness={r['total_badness']:.3f}")
+    if args.corpus_dir:
+        path = loop.propose_labels(args.corpus_dir, [
+            {"name": result["champion"], "proposed_expected_artifacts": "(none — clean champion)",
+             "evidence": "tuning-loop demo pass"}])
+        print(f"  wrote label proposals -> {path} (apply to MANIFEST.json by hand)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -138,12 +170,14 @@ def main(argv: list[str] | None = None) -> int:
     rn = sub.add_parser("run", help="run all detectors on a degradation; optionally export clips")
     rn.add_argument("--case", choices=["drum", "tonal"], default="drum",
                     help="which QualityCase family to run (drum=percussive, tonal=sustained pad)")
-    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy"], default="smear")
+    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy", "noisy"], default="smear")
     rn.add_argument("--out", default="", help="write report.json to this path")
     rn.add_argument("--out-dir", default="", dest="out_dir",
                     help="write reference/candidate WAVs + worst-region clip pairs here")
     rn.add_argument("--smear-ms", type=float, default=8.0, dest="smear_ms")
     rn.add_argument("--latency-ms", type=float, default=5.0, dest="latency_ms")
+    rn.add_argument("--review", action="store_true",
+                    help="run the opt-in advisory reviewer (PULP_QLAB_REVIEWER_CMD); never a gate")
     rn.set_defaults(func=_cmd_run)
 
     re = sub.add_parser("engine", help="validate the REAL Pulp stretch engine (stretchcli)")
@@ -173,6 +207,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="regression gate vs the real engine: --capture or --check")
     eb.add_argument("--capture", action="store_true", help="(re)write the committed baseline")
     eb.set_defaults(func=_cmd_engine_baseline)
+
+    lp = sub.add_parser("loop",
+                        help="experimental: one tuning-loop pass (rank candidates; proposes, never decides)")
+    lp.add_argument("--corpus-dir", default="", dest="corpus_dir",
+                    help="write label proposals to <dir>/LABEL_PROPOSALS.json (never MANIFEST.json)")
+    lp.set_defaults(func=_cmd_loop)
 
     args = p.parse_args(argv)
     return args.func(args)

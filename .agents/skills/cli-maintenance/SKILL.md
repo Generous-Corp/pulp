@@ -2033,3 +2033,13 @@ such limit, so it builds fine locally and only fails on the Windows release lane
 Fix: split into adjacent raw-string literals — `)JSON" R"JSON(` — which the
 compiler concatenates (output byte-identical). Keep each chunk well under 16 KB;
 when you add MCP tools, watch the literal size.
+
+## `pulp validate --json` carries machine-readable evidence
+
+The `--json` / `--report` output of `pulp validate` is a consumer contract, not
+just a log dump. Both the `--target` path and the format-walk path emit an
+aggregate `"summary"` (total/passed/failed/skipped) and an `"install_ready"`
+bool derived from the install policy (no failures, and under `--strict` no
+skips). CI and example harnesses key off these instead of scraping text — when
+you add a validator or change the gate, keep `install_ready` consistent with the
+command's exit code and update any consumer that reads the report.

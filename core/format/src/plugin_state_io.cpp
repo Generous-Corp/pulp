@@ -2,6 +2,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/memory/choc_Endianness.h>
 
@@ -134,14 +135,14 @@ std::optional<EnvelopeMigrationEntry> find_envelope_migration(uint32_t from_vers
 }
 
 std::optional<uint32_t> find_envelope_migration_target(uint32_t from_version) noexcept {
-    try {
+    PULP_TRY {
         std::lock_guard<std::mutex> lock(envelope_migrations_mutex());
         for (const auto& entry : envelope_migrations()) {
             if (entry.from_version == from_version) {
                 return entry.to_version;
             }
         }
-    } catch (...) {
+    } PULP_CATCH_ALL {
         return std::nullopt;
     }
     return std::nullopt;

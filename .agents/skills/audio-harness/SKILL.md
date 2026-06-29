@@ -311,7 +311,11 @@ harness or `ctest`.
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
 - Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
-  detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`), and
+  detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
+  tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
+  image-collapse/phase damage on `(N,2)` stereo arrays; and the EXPERIMENTAL `onset_drift`
+  — timing/groove drift via event-time residual after common-latency removal, advisory-only
+  until promoted), and
   writes a `report.json` with per-onset localization, coverage/confidence, and provenance.
 - Credibility: detectors are validated against an *independent* textbook phase vocoder
   (`reference_pv.py`) AND the real product engine, not just their own synthetic degradation.
@@ -322,5 +326,21 @@ harness or `ctest`.
   checkout that built stretchcli), then the package-relative repo build. Absent → a clean,
   actionable `skipped` (build command + env-path), never a failure. Build it with
   `cmake --build build --target stretchcli`.
+- **Maturity gate:** each detector has `maturity` (`experimental`/`beta`/`stable`). An
+  `experimental` detector runs and reports under the report's `advisory` block but its
+  `fired`/`low_coverage` are excluded from the `verdict` AND `engine_baseline` — route
+  every verdict/gate path through `schema.detectors_for_verdict` /
+  `detectors_for_engine_baseline`, never re-implement the filter. New detectors ship
+  `experimental`. (Plan: planning/2026-06-29-audio-quality-lab-postmvp-detectors-maturity-gate.md.)
+- **Advisory reviewer** (`reviewer.py`, opt-in `PULP_QLAB_REVIEWER_CMD` subprocess, `run
+  --review`): an LLM/multimodal model names artifacts in plain language under
+  `advisory.reviewers`. ADVISORY ONLY — never changes the verdict/gate; skip-when-absent;
+  no network by default. Validate with `reviewer.score_agreement` (precision/recall vs the
+  synthetic answer key) before trusting it.
+- **Tuning loop** (`loop.py`, `quality-lab loop`, EXPERIMENTAL): scores candidates with the
+  gate-participating detectors (experimental detectors excluded), ranks them, and writes
+  PROPOSAL-ONLY label updates to `corpus/LABEL_PROPOSALS.json` — never `MANIFEST.json`,
+  never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
+  regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.

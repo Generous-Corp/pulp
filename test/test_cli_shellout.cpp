@@ -2661,3 +2661,19 @@ TEST_CASE("pulp ci-host usage, help, and unknown-subcommand are deterministic",
     auto combined = bad.stdout_output + bad.stderr_output;
     REQUIRE(combined.find("unknown subcommand") != std::string::npos);
 }
+
+// Workstream D tail: `pulp validate --json` carries install/package readiness
+// and an aggregate summary, so example/CI consumers have structured evidence.
+// Hermetic — a missing bundle short-circuits before any real validator, but the
+// report (with the new fields) is still emitted on every host.
+TEST_CASE("pulp validate --json reports install_ready and a summary",
+          "[cli][shellout][validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-validate-evidence");
+    fs::remove_all(dir);
+    auto bundle = dir / "Nope.app";   // does not exist
+    auto r = run_pulp({"validate", "--target", "standalone", "--json", bundle.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.stdout_output.find("\"install_ready\":") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"summary\":") != std::string::npos);
+}

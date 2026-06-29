@@ -88,14 +88,20 @@ are opt-in and basic testing stays dependency-free.
 
 | Detector | Catches | Method | Material |
 |----------|---------|--------|----------|
-| `transient_sharpness` | percussion attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
+| `transient_sharpness` | percussion attack smear (“compressed” drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
 | `spectral_centroid` | brightness loss / dulling | long-term-average-spectrum centroid shift (global) | any |
 | `hf_fizz` | added metallic HF sizzle | added >8 kHz energy fraction vs reference (global) | any |
 | `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
+| `hnr` | added noise / roughness (tonal purity loss) | autocorrelation harmonic-to-noise-ratio drop, Boersma-debiased (global) | sustained/tonal |
+| `stereo_width` | stereo-image collapse / phase damage | width-ratio (RMS side/mid) drop + inter-channel correlation sign-flip | stereo |
+| `onset_drift` *(experimental)* | timing / groove drift | per-onset event-time residual after common-latency removal (sub-hop cross-correlation) | percussive |
 
 Each detector fires only on its own artifact and stays quiet on the others and on an
-identity render. Each reports **coverage** (how many onsets it actually measured); a
-"clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+identity render. `hnr` runs in the tonal and real-audio families (exercise it with
+`run --case tonal --degradation noisy`). `stereo_width` is **standalone** — it operates
+directly on `(N, 2)` stereo arrays rather than through the mono `run` pipeline (which
+downmixes), so call it on stereo reference/candidate when validating stereo-affecting DSP. Each reports **coverage** (how many onsets it actually measured); a
+`clean` verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 
 ### Case families
 
@@ -105,8 +111,8 @@ of detectors — so the same machinery serves more than drums:
 | Family | Stimulus | Alignment | Detectors |
 |--------|----------|-----------|-----------|
 | **percussive** | synthetic drum break | onset-map | transient, centroid, hf_fizz |
-| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux |
-| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux |
+| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux, hnr |
+| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux, hnr |
 
 ### Real engine validation + regression gate
 
@@ -125,7 +131,7 @@ the global spectral detectors compare the engine output's spectrum to the source
 ### Listenable clips + provenance
 
 `run --out-dir` writes the full reference/candidate WAVs plus a ref-vs-candidate clip pair
-around each worst region, so "attack softer at 0:02.6" is something you can play. It also
+around each worst region, so “attack softer at 0:02.6” is something you can play. It also
 drops a `<wav>.provenance.json` sidecar (engine commit, recipe, content hash) so a render
 you liked maps back to how it was made.
 
@@ -145,6 +151,18 @@ public CI):
 
 GPL tools stay developer-local. See `NOTICE.md` and the public licensing page for full
 attribution.
+
+### Advisory reviewer (opt-in, never a gate)
+
+A reviewer model can read the report (+ optional clips/spectrograms) and name what sounds
+wrong in plain language — catching novel/compound artifacts no detector encodes. It is
+**advisory only**: it never changes the `verdict` or any gate. Configure a developer-supplied
+subprocess provider via `PULP_QLAB_REVIEWER_CMD` (reads `{report, assets}` JSON on stdin,
+writes `{summary, suspected_artifacts[], confidence, notes}`); skip-when-absent by default,
+no network or audio leaves the machine unless your provider chooses to. Run with
+`run --review`; output lands under the report's `advisory.reviewers`. Validate a real
+reviewer with `reviewer.score_agreement` (precision/recall vs the synthetic answer key)
+before trusting it. Tracked: #5296.
 
 ### Corpus
 
@@ -190,17 +208,47 @@ compared to itself.
 | `quality_lab/engine.py` | adapter to the real stretch engine (`stretchcli`), skip-when-absent |
 | `quality_lab/engine_baseline.py` | real-engine regression gate |
 | `quality_lab/perceptual.py` | opt-in, license-fenced perceptual-model adapters |
+| `quality_lab/reviewer.py` | opt-in advisory LLM/multimodal reviewer (never a gate) |
+| `quality_lab/loop.py` | experimental tuning loop: rank candidates, Goodhart guard, label proposals |
 | `quality_lab/corpus.py` | versioned, license-guarded corpus |
 | `quality_lab/provenance.py` | re-derivable provenance + self-describing sidecars |
 | `quality_lab/regions.py` | worst-region clip extraction |
 | `quality_lab/pipeline.py` | pure stages: generate/load → level-match → align → detect → report |
 | `quality_lab/cli.py` | argument parsing + dispatch |
 
-## Deferred detectors (honest status)
+## Maturity gate (shipping new detectors safely)
 
-- **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing
-  measure can't reliably resolve a few-millisecond drift against a tonal hit's
-  quasi-periodic body. It needs a better timing method (or sustained-only scope) before it
-  can be trusted, so it is not shipped in the default detector set.
+Each detector has a `maturity`: `experimental` -> `beta` -> `stable`. An
+`experimental` detector runs and reports (under the report's `advisory` block, and
+flagged `participates_in_verdict: false`), but its `fired`/`low_coverage` are excluded
+from the `verdict` **and** from the `engine_baseline` regression gate. `beta`
+participates in the verdict but is held out of the baseline; `stable` participates
+everywhere. New detectors ship `experimental` and are promoted only once their
+validation clears a bar — so an unproven detector cannot introduce a false regression.
+
+## Deferred detectors & roadmap (honest status)
+
+- **onset_drift** (timing / groove drift) ships **experimental** (advisory — it cannot move
+  the verdict or the regression gate; see the maturity gate above). The deferred
+  body-correlation approach is replaced by an **event-time residual after common-latency
+  removal**: per onset, the candidate's fine event time is found by cross-correlating the
+  reference attack against the candidate around the *expected* time (sub-hop precision), the
+  median (uniform) latency is removed, and the headline is `max|residual|` in ms. Calibration
+  recovers an injected ramp to within ~0.3 ms (far under the 2.67 ms onset hop) for drifts
+  inside the ~12 ms search window; larger drifts drop to low-coverage UNCERTAIN rather than
+  guess. Promotion to `beta` needs the real-engine negative control + a false-positive sweep
+  across tempos/seeds. Tracked in [#5295](https://github.com/danielraffel/pulp/issues/5295).
+- **Advisory LLM/multimodal reviewer** ships **opt-in** (`reviewer.py`, `run --review`); see
+  “Advisory reviewer” above. Promotion past experimental needs real-audio answer-key
+  evidence beyond the synthetic corpus — [#5296](https://github.com/danielraffel/pulp/issues/5296).
+- **Autonomous tuning loop** ships its **experimental** first slice (`loop.py`,
+  `quality-lab loop`): deterministic candidate ranking, a normalized-Pareto **Goodhart
+  guard** (refuses a candidate that games one detector while regressing another; held-out
+  slice + NEEDS-EAR), and a **proposal-only** label transaction that writes
+  `corpus/LABEL_PROPOSALS.json` and never touches `MANIFEST.json`. It proposes; a human
+  decides. Wiring it to the real engine matrix + the full label lifecycle is the next slice —
+  [#5297](https://github.com/danielraffel/pulp/issues/5297).
+
+These carry the `post-mvp` + `audio-quality-lab` labels.
 
 See `NOTICE.md` for third-party attribution and the license fence.

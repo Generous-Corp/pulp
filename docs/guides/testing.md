@@ -131,6 +131,24 @@ TEST_CASE("MyPlugin processes audio") {
 }
 ```
 
+## Reusable Validation Assertions
+
+`<pulp/format/validation_assertions.hpp>` provides framework-agnostic checks for the recurring "did the DSP/state/MIDI actually behave" questions, so example tests don't re-implement them. Each helper returns a `CheckResult` (convertible to `bool`, with a diagnostic `message`) and pairs with any test framework:
+
+```cpp
+#include <pulp/format/validation_assertions.hpp>
+namespace v = pulp::format::validation;
+
+auto out = harness.process_buffer(input, 2, 512);
+REQUIRE(v::check_finite(out));         // no NaN / Inf
+REQUIRE(v::check_any_nonzero(out));    // the stage produced signal
+REQUIRE(v::check_peak_below(out, 1.0f));
+REQUIRE(v::check_state_round_trip(harness.host()));      // save/load/save is stable
+REQUIRE(v::check_param_round_trip(info->range, 6.0f));   // normalize↔denormalize idempotent
+```
+
+Available checks: `check_finite`, `check_any_nonzero`, `check_silent`, `check_peak_below`, `check_param_round_trip`, `check_state_round_trip`, `check_midi_events_equal`, `check_sysex_payload_equal`. The header ships with the SDK, so example projects that consume the installed Pulp headers can reuse it. Screenshot content-floor checks live separately in `pulp::view::ScreenshotContentStats::passes_content_floor()` so the format layer stays free of a view dependency.
+
 ## Golden-File Tests
 
 Golden-file tests render known input through a processor and compare the output against a reference file. If the output differs beyond a tolerance, the test fails.
