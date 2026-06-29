@@ -13,7 +13,7 @@ cannot drift into claiming a capability the repo does not have.
 | Lane | Toolchain | What it produces | Status |
 | --- | --- | --- | --- |
 | **WAMv2** (Web Audio Modules v2) | Emscripten (`emcc`) | An ES-module + AudioWorklet plugin | **partial** — working canary |
-| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — Node-hostable (audio + params proven); in-browser host next |
+| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — hosted in Node and in the browser (audio + parameter control proven) |
 
 The two tracks deliberately use different toolchains: WAMv2 *wants* Emscripten's
 AudioWorklet/JS glue, while WebCLAP wants wasi-sdk (Clang + WASI sysroot, no JS
@@ -49,7 +49,7 @@ instrument PulpPluck):
 - A CI-enforced browser lane — the browser proof is the reproducible fixture at
   `examples/web-demos/wasm-build/browser-test/`, not yet a Playwright CI job.
 
-## WebCLAP — Node-hostable (audio + parameter control proven)
+## WebCLAP — hosted in Node and in the browser (audio + parameter control proven)
 
 A `Processor` compiles to a **live WebCLAP module** that a pure-JS host drives
 through the full CLAP lifecycle, renders audio, and controls by parameter. Build
@@ -70,11 +70,18 @@ and a shared, host-imported memory.
 | `wclap_probe.mjs` | Module is live: `_initialize` runs; `clap_entry` resolves to a CLAP 1.2.2 entry with callable init/deinit/get_factory. |
 | `wclap_host_runner.mjs` | Full host: `create_plugin` → `init` → `activate` → `process`. Renders a stereo block (passthrough at unity) and, with an injected param-value event, drives a parameter (PulpGain `Input Gain +6 dB` → output rises exactly +6 dB). |
 
-The host callbacks (`clap_host_t`) are synthesized from JS via `WebAssembly.Function`
-(`core/format/src/wasm/wclap-host.mjs`), so **no compiled C++ host shim is
-needed**. `wclap-wasi.mjs` is the shared WASI shim. The runner needs
-`WebAssembly.Function`, so it runs under Node with
-`--experimental-wasm-type-reflection`.
+The host callbacks (`clap_host_t`) are synthesized from JS using tiny wasm
+*trampoline* modules (`core/format/src/wasm/wclap-host.mjs`), so **no compiled
+C++ host shim is needed** and there is **no dependency on `WebAssembly.Function`**
+— the host runs unchanged in Node and in the browser. `wclap-wasi.mjs` is the
+shared WASI shim.
+
+**In-browser host:** `examples/web-demos/wclap-build/browser-host/` hosts the same
+module on the browser main thread with a generated control per parameter. It is
+headless-validated against Chrome/Canary (`validate.mjs`): the plugin activates,
+renders audio at unity, and a UI control drives `Input Gain +6 dB` to lift the
+output ~+6 dB. The module imports a shared `WebAssembly.Memory`, so the page must
+be cross-origin isolated — `serve.mjs` sends the COOP/COEP headers.
 
 **Why the toolchain is what it is** (these are hard constraints, not choices):
 
@@ -90,13 +97,13 @@ needed**. `wclap-wasi.mjs` is the shared WASI shim. The runner needs
 
 **Not yet in scope:**
 
-- **In-browser hosting + UI.** Hosting is proven in Node; an AudioWorklet host
-  (shared `WebAssembly.Memory`, COOP/COEP, `WebAssembly.Function` in worklet
-  scope) plus a generated UI is the next slice. The Node host
-  (`wclap-host.mjs`) is structured so the browser host reuses its struct
-  marshalling.
+- **Real-time AudioWorklet streaming.** The browser host renders blocks on the
+  main thread and plays them via an `AudioBuffer`. Streaming live through an
+  `AudioWorklet` (host on a worker, the worklet draining a `SharedArrayBuffer`
+  ring) is a later refinement.
 - A native Wasmtime bridge, a `.wclap` bundle layout, and a CI lane that runs
-  the probe/runner (wasi-sdk + `WebAssembly.Function` are not yet on CI runners).
+  the probe/runner/browser-validate (wasi-sdk + a browser are not yet on CI
+  runners).
 
 ## Pinned upstream references
 

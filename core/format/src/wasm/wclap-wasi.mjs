@@ -36,7 +36,9 @@ export function makeWasiImports(getMemory, onText = null) {
       const len = view.getUint32(iovsPtr + i * 8 + 4, true);
       total += len;
       if (onText && (fd === 1 || fd === 2) && len > 0) {
-        chunks.push(new Uint8Array(getMemory().buffer, base, len));
+        // .slice() copies out of the (possibly shared) memory; TextDecoder
+        // rejects a SharedArrayBuffer-backed view in the browser.
+        chunks.push(new Uint8Array(getMemory().buffer, base, len).slice());
       }
     }
     // CRITICAL: report bytes written, or libc's write loop never terminates.

@@ -7,10 +7,10 @@
 //   2. with a +N dB input-gain parameter event (output RMS must rise).
 // The RMS rising in (2) is the proof that parameter control flows end to end.
 //
-// This is the WebCLAP analogue of wam_node_runner.mjs. It needs
-// `WebAssembly.Function`, so run with:
-//   node --experimental-wasm-type-reflection \
-//     core/format/src/wasm/wclap_host_runner.mjs <path-to.wasm> [--gain-db 6]
+// This is the WebCLAP analogue of wam_node_runner.mjs. The host vtable is
+// synthesized with trampoline modules (no WebAssembly.Function), so plain Node
+// works:
+//   node core/format/src/wasm/wclap_host_runner.mjs <path-to.wasm> [--gain-db 6]
 //
 // Exit 0 = PASS, non-zero = a specific failure (printed).
 import { readFileSync } from "node:fs";
