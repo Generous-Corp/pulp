@@ -32,6 +32,7 @@
 #include <pulp/view/musical_typing.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -57,7 +58,7 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.0.2";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.6.0";
 
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
@@ -122,6 +123,15 @@ enum TempoSamplerParams : state::ParamID {
     kTempoLoop    = 10,
     kRootNote     = 11, // MIDI note of slice 0 (slice idx = note - root)
     kOnsetSens    = 12, // 0..1 onset-detection sensitivity (higher = more slices)
+    kDirection    = 13, // read DIRECTION (Direction dropdown): 0 Forward, 1 Reverse.
+                        // Sets the play direction for a one-shot (LOOP = None).
+    kLoopMode     = 14, // loop SHAPE when looping (LOOP dropdown != None): 0 Forward,
+                        // 1 Reverse, 2 Ping-Pong. The LOOP dropdown (None / Forward /
+                        // Reverse / Ping-Pong) drives this + kTempoLoop (on/off).
+    kGate         = 16, // 1 = key-up releases the envelope (default); 0 = play
+                        // through (the slice plays to its end, ignoring note-off).
+    kFlexSpeed    = 17, // Logic Flex Speed: index into {1/4, 1/2, 1, 2, 4}x of the
+                        // tempo-synced playback speed. Default index 2 (1x).
 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
@@ -412,7 +422,15 @@ public:
     // The FrameTick poller defaults the fader/readout to the detected loop BPM
     // whenever a new loop is analyzed (generation bump), so R≈1 on load.
     view::Fader* tempo_fader = nullptr;
+    // Tap-to-type BPM field. Idle it shows the live "120.0 BPM" readout (the
+    // FrameTick rewrites it from effective_bpm while it is NOT focused); click it
+    // to edit — the value highlights (select_on_focus), type a number, Return
+    // commits via set_target_bpm and the fader thumb re-syncs on the next frame.
+    // It is the readout AND the editor, so a click focuses it natively (the host
+    // focuses whatever was clicked) — no separate hit target to plumb focus for.
+    view::TextEditor* tempo_edit_ = nullptr;
     view::ToggleButton* link_btn = nullptr;  // tempo LINK toggle (follow host vs manual)
+    view::View* detail_overlay_ = nullptr;   // Logic-style "Detail" page (Gate, Flex Speed, …)
     bool hosted_in_standalone_ = false;      // resolved on view-open
     std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
 
@@ -451,10 +469,16 @@ public:
 
 private:
     bool on_musical_key(const view::KeyEvent& e) {
+        // The on-screen musical-typing keyboard (and its ⌘K toggle) is a STANDALONE
+        // app feature only. In a plugin (AU/VST3/CLAP) the DAW owns the computer
+        // keyboard — ⌘K, Space, R, etc. must pass straight through to the host, so
+        // we never capture a key here. (The macOS host still routes Cmd chords via
+        // performKeyEquivalent:, which is why ⌘K reached here and opened our window
+        // inside Logic — this gate stops that.)
+        if (!hosted_in_standalone_) return false;
         // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the MusicalTypingKeyboard
         // window. Checked before the modifier-chord rejection below so the
-        // command-combo reaches here (the macOS host routes Cmd chords via
-        // performKeyEquivalent:).
+        // command-combo reaches here.
         const uint16_t toggle_mod = view::kModCmd | view::kModCtrl;
         if (e.key == view::KeyCode::k && (e.modifiers & toggle_mod) && e.is_down && !e.is_repeat) {
             toggle_keyboard();
@@ -481,14 +505,20 @@ public:
     static constexpr int kMaxVoices = 8;
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
-    static constexpr int kDefaultRootNote = 60;  // C3 in C-2..C8 labeling (see note_name)
+    static constexpr int kDefaultRootNote = 48;  // C2 in C-2..C8 labeling (see note_name) —
+                                                 // aligns with the DAW Musical Typing default octave
     static constexpr int kRootNoteMin = 0;       // C-2
     static constexpr int kRootNoteMax = 120;     // C8
 
     // Onset sensitivity s in [0,1] maps to a slice COUNT (the strongest cuts by
     // confidence are kept): s=0 -> 1 slice (whole sample), s=1 -> kMaxSlices.
     static constexpr int kMaxSlices = 32;
-    static constexpr float kDefaultOnsetSensitivity = 0.5f;  // ~16 slices by default
+    // Default to the WHOLE loop (1 slice): a dropped loop plays + LOOPs as a
+    // single 2-bar region that tiles the bar grid. Raising SENS chops it into
+    // slices for per-key triggering. (A multi-slice default made holding the root
+    // loop only slice 0 — a quarter of the loop — which read as "the loop ends
+    // early.")
+    static constexpr float kDefaultOnsetSensitivity = 0.0f;  // whole loop by default
 
     // MIDI note name in the user-requested C-2..C8 convention (C3 = 60). NOTE:
     // this deliberately differs from Pulp's MidiKeyboard, which labels 60 as C4
@@ -536,6 +566,23 @@ public:
                                        static_cast<float>(kDefaultRootNote), 1}});
         store.add_parameter({.id = kOnsetSens, .name = "Onset Sensitivity", .unit = "",
                              .range = {0, 1, kDefaultOnsetSensitivity, 0.01f}});
+        // Read direction (Direction dropdown): 0 Forward, 1 Reverse. Default Forward.
+        store.add_parameter({.id = kDirection, .name = "Direction", .unit = "", .range = {0, 1, 0, 1}});
+        // Loop shape when looping: 0 Forward, 1 Reverse, 2 Ping-Pong. The LOOP
+        // dropdown (None / Forward / Reverse / Ping-Pong) writes this + kTempoLoop.
+        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Gate: 1 = key-up releases the envelope (default), 0 = play through.
+        store.add_parameter({.id = kGate, .name = "Gate", .unit = "", .range = {0, 1, 1, 1}});
+        // Flex Speed: index into {1/4,1/2,1,2,4}x; default 1x (index 2).
+        store.add_parameter({.id = kFlexSpeed, .name = "Flex Speed", .unit = "", .range = {0, 4, 2, 1}});
+    }
+
+    // Logic Flex Speed factor: the loop plays this many times faster than the
+    // tempo-synced base (so a higher factor SHORTENS the stretched duration).
+    double flex_speed_factor() const noexcept {
+        static constexpr double kSpeeds[] = {0.25, 0.5, 1.0, 2.0, 4.0};
+        const int i = std::clamp(static_cast<int>(state().get_value(kFlexSpeed) + 0.5f), 0, 4);
+        return kSpeeds[i];
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -940,22 +987,44 @@ public:
     // The result always makes raw_frames·loop_bpm == N·60·sr, so published_frames =
     // round(N·60·sr / host) is an exact N beats at ANY host tempo. Pure + static so
     // it is unit-testable. `reference_bpm <= 0` ⇒ no host hint (use the analyzer).
+    // Derive the loop tempo assuming the loop is a whole number of BARS (4/4).
+    // A tempo sampler loops on the bar, so the loop MUST be an integer bar count —
+    // otherwise it can never tile a DAW's bar grid (a 2.5-bar loop shifts its
+    // downbeat half a bar every pass, however you stretch it). We pick the bar
+    // count whose implied tempo is closest (octave-aware) to the reference (the
+    // host/project tempo when known, else the analyzer's estimate); stretching
+    // that to the host then yields an exact whole-bar loop that always lines up.
     static double bar_exact_bpm(long frames, double sr, double reference_bpm,
                                 double analyzer_bpm) {
         if (analyzer_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return analyzer_bpm;
         const double dur = static_cast<double>(frames) / sr;
         if (dur <= 0.0) return analyzer_bpm;
-        const double base_beats = std::round(dur * analyzer_bpm / 60.0);
-        if (base_beats < 1.0) return analyzer_bpm;                // too short to be a loop
+        constexpr double kBeatsPerBar = 4.0;
+        // The analyzer's estimate of how many BARS the loop is. Candidates are
+        // whole-bar counts around it (floor/ceil) plus octave neighbours (x2/x0.5)
+        // to correct a doubled/halved detection. We force a WHOLE-BAR count — a
+        // tempo sampler loops on the bar, so a non-integer-bar loop (e.g. 2.5 bars)
+        // could never tile a DAW's bar grid. The host/reference tempo only resolves
+        // which octave/neighbour is closest; it never overrides the content's bar
+        // count with a far-off one (a real 3-bar loop stays 3 bars).
+        const double est_bars = dur * analyzer_bpm / 60.0 / kBeatsPerBar;
+        if (est_bars <= 0.0) return analyzer_bpm;
         const double ref = reference_bpm > 0.0 ? reference_bpm : analyzer_bpm;
-        const double mults[] = {0.25, 0.5, 1.0, 2.0, 4.0};        // octave neighbours
+        // Whole-bar candidates around the analyzer's estimate, plus octave
+        // neighbours (x2 / /2) to correct a doubled/halved detection. The eps pad
+        // keeps a genuine integer estimate (e.g. 2.999 bars) from spuriously also
+        // offering its neighbour, while a truly ambiguous estimate (e.g. 2.5 bars)
+        // DOES offer both 2 and 3 so the host/reference tempo can pick the nearer.
+        constexpr double kEps = 0.06;
+        const long lo = std::max<long>(1, static_cast<long>(std::floor(est_bars + kEps)));
+        const long hi = std::max<long>(1, static_cast<long>(std::ceil(est_bars - kEps)));
+        const long cands[] = {lo, hi, lo * 2, hi * 2,
+                              std::max<long>(1, lo / 2), std::max<long>(1, hi / 2)};
         double best = 0.0, best_d = 1e30;
-        for (double m : mults) {
-            const double beats = std::round(base_beats * m);
-            if (beats < 1.0) continue;
-            const double t = beats * 60.0 / dur;                  // tempo that tiles exactly
+        for (long bars : cands) {
+            const double t = static_cast<double>(bars) * kBeatsPerBar * 60.0 / dur;
             if (t < kTargetBpmMin || t > kTargetBpmMax) continue;
-            const double d = std::abs(std::log2(t / ref));        // octave-aware distance
+            const double d = std::abs(std::log2(t / ref));
             if (d < best_d) { best_d = d; best = t; }
         }
         return best > 0.0 ? best : analyzer_bpm;
@@ -1051,6 +1120,18 @@ public:
     /// independent of whether a sample is loaded.
     int slice_index_for_note_test(int note) const {
         return note - static_cast<int>(state().get_value(kRootNote));
+    }
+
+    /// Test-only: the [start,end) frame range region_for_note maps `note` to,
+    /// over the currently published (tempo-matched) sample, for the given playback
+    /// mode (0 Classic, 1 Slice, 2 One-Shot). Returns {0,0} when the note maps to
+    /// nothing (a Slice-mode key outside the slice range).
+    std::pair<std::uint64_t, std::uint64_t>
+    region_range_for_note_test(int note) const {
+        const auto sample = store_.read_published_view();
+        const auto r = region_for_note(note, sample);
+        if (!r) return {0, 0};
+        return {r->start_frame, r->end_frame};
     }
 
     /// Render synchronously (tests/headless). Real hosts use the worker.
@@ -1270,7 +1351,7 @@ public:
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 162, 322, 86, 16);
+            place(*fader, 162, 322, 62, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -1294,11 +1375,11 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(344, 324, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        label(316, 324, 44, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 396, 322, 80, 16);
+            place(*fader, 360, 322, 44, 16);
             fader->set_value(bpm_to_norm(effective_bpm()));
             // Dragging engages a manual target tempo — which auto-UNLINKS from the
             // host (set_target_bpm sets the override). The FrameTick re-syncs the
@@ -1309,21 +1390,49 @@ public:
             root->tempo_fader = fader.get();
             root->add_child(std::move(fader));
         }
-        // Live BPM readout (shows the tempo the loop is currently stretched to —
-        // the host tempo while linked, the manual target while unlinked).
+        // Tap-to-type BPM field. Idle it reads like the old teal readout
+        // ("120.0 BPM"); click it to dial an exact tempo — the value highlights,
+        // type, Return commits. Wide enough for the longest value ("400.0 BPM").
         {
-            auto live = std::make_unique<LiveText>();
-            live->font_family = mono;
-            live->color = teal;
-            live->text = [this] {
-                // One decimal so the loop's bar-snapped fractional tempo is visible
-                // (e.g. 103.4 when unlinked) — an integer readout hid it.
+            auto edit = std::make_unique<view::TextEditor>();
+            edit->numeric_only = true;          // digits + '.'; one decimal is enough
+            edit->select_on_focus = true;       // tap highlights the whole value
+            edit->max_length = 7;               // "400.0" plus a little slack
+            edit->set_font_size(11.0f);
+            // Teal text + a background that blends with the footer so it reads as a
+            // plain readout until focused; the select-all highlight + caret are the
+            // edit affordance. A small theme override recolors the editor's text and
+            // keeps selected glyphs legible (selected text is drawn in bg.primary).
+            view::Theme th;
+            th.colors["text.primary"]   = teal;     // idle + caret colour
+            th.colors["bg.primary"]     = bg900;    // selected-glyph colour (on the highlight)
+            th.colors["accent.primary"] = tealSoft; // selection highlight (soft teal)
+            edit->set_theme(th);
+            edit->set_background_color(bg900);
+            edit->set_border(Color::rgba8(0, 0, 0, 0), 0.0f);  // no chrome box
+            auto sync_text = [this](view::TextEditor* e) {
                 char buf[24];
                 std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
-                return std::string(buf);
+                e->set_text(buf);
             };
-            place(*live, 480, 320, 56, 18);
-            root->add_child(std::move(live));
+            sync_text(edit.get());
+            auto* ePtr = edit.get();
+            edit->on_return = [this, ePtr](const std::string& s) {
+                // Parse the leading number (ignores a trailing " BPM" if present),
+                // clamp to range, engage it as the manual target (auto-unlinks),
+                // then blur so the live readout + fader thumb resume next frame.
+                const double v = std::strtod(s.c_str(), nullptr);
+                if (v > 0.0) set_target_bpm(v);   // set_target_bpm clamps to [20,400]
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            edit->on_escape = [ePtr] {
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            place(*edit, 408, 320, 70, 20);
+            root->tempo_edit_ = ePtr;
+            root->add_child(std::move(edit));
         }
         // TEMPO LINK toggle: ON = follow the reference tempo (host transport in a
         // DAW; the loop's detected BPM in standalone) and re-stretch automatically
@@ -1342,7 +1451,7 @@ public:
             linkBtn->set_off_border_color(faint);
             linkBtn->set_on(tempo_linked());
             linkBtn->on_toggle = [this](bool on) { set_tempo_linked(on); };
-            place(*linkBtn, 542, 316, 64, 26);
+            place(*linkBtn, 482, 316, 42, 26);
             root->link_btn = linkBtn.get();
             root->add_child(std::move(linkBtn));
         }
@@ -1354,7 +1463,7 @@ public:
             live->font_family = mono;
             live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 252, 320, 84, 18);
+            place(*live, 230, 320, 84, 18);
             root->add_child(std::move(live));
         }
 
@@ -1374,34 +1483,156 @@ public:
                     rp->tempo_fader->set_value(bpm_to_norm(effective_bpm()));
                 if (rp->link_btn && rp->link_btn->is_on() != tempo_linked())
                     rp->link_btn->set_on(tempo_linked());
+                // Live-track the BPM field UNLESS the user is editing it (focused) —
+                // overwriting mid-type would fight their input. On blur (Return/Esc/
+                // outside-click) has_focus() drops and the readout resumes.
+                if (rp->tempo_edit_ && !rp->tempo_edit_->has_focus()) {
+                    char buf[24];
+                    std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
+                    if (rp->tempo_edit_->text() != buf) rp->tempo_edit_->set_text(buf);
+                }
             };
             place(*tick, 0, 0, 0, 0);
             root->add_child(std::move(tick));
         }
 
-        // LOOP toggle: enable/disable Forward looping for triggered slices
-        // (one-shot when off). Bound to kTempoLoop; region_for_note reads it per
-        // note (playback_mode = loop ? Forward : OneShot). Top-level for now;
-        // per-slice loop / reverse are a future UX.
+        // DIRECTION dropdown — Forward / Reverse (the read direction; sets which way
+        // a one-shot plays). Default Forward. Drives kDirection.
         {
-            auto loopBtn = std::make_unique<ToggleButton>();
-            loopBtn->set_label("LOOP");
-            loopBtn->set_font_size(10.0f);
-            loopBtn->set_corner_radius(6.0f);
-            loopBtn->set_on_background_color(teal);
-            loopBtn->set_on_text_color(bg900);
-            loopBtn->set_off_background_color(raised);
-            loopBtn->set_off_text_color(muted);
-            loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 614, 316, 84, 26);
-            root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
-            root->add_child(std::move(loopBtn));
+            auto dir = std::make_unique<ComboBox>();
+            dir->set_items({"Forward", "Reverse"});
+            dir->set_selected_silent(state().get_value(kDirection) >= 0.5f ? 1 : 0);
+            dir->on_change = [this](int idx) {
+                state().begin_gesture(kDirection);
+                state().set_value(kDirection, idx >= 1 ? 1.0f : 0.0f);
+                state().end_gesture(kDirection);
+            };
+            auto* dirPtr = dir.get();
+            label(528, 324, 22, 18, "DIR", faint, 10, 600, LabelAlign::left, true);
+            place(*dir, 552, 316, 68, 26);
+            root->listeners.push_back(state().add_listener(
+                [this, dirPtr](state::ParamID id, float v) {
+                    if (id == kDirection) dirPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(dir));
+        }
+
+        // LOOP dropdown — None / Forward / Reverse / Ping-Pong (replaces the loop
+        // button). None = play once; the others loop in that shape. Default None.
+        // Drives kTempoLoop (on/off) + kLoopMode (shape).
+        {
+            auto combo = std::make_unique<ComboBox>();
+            combo->set_items({"None", "Forward", "Reverse", "Ping-Pong"});
+            auto sel_for_state = [this]() -> int {
+                if (state().get_value(kTempoLoop) < 0.5f) return 0;  // None
+                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 3);
+            };
+            combo->set_selected_silent(sel_for_state());
+            combo->on_change = [this](int idx) {
+                if (idx <= 0) {
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 0.0f);
+                    state().end_gesture(kTempoLoop);
+                } else {
+                    state().begin_gesture(kLoopMode);
+                    state().set_value(kLoopMode, static_cast<float>(idx - 1));
+                    state().end_gesture(kLoopMode);
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 1.0f);
+                    state().end_gesture(kTempoLoop);
+                }
+            };
+            auto* loopPtr = combo.get();
+            label(624, 324, 28, 18, "LOOP", faint, 10, 600, LabelAlign::left, true);
+            place(*combo, 654, 316, 80, 26);
+            root->listeners.push_back(state().add_listener(
+                [this, loopPtr, sel_for_state](state::ParamID id, float) {
+                    if (id == kTempoLoop || id == kLoopMode) loopPtr->set_selected_silent(sel_for_state());
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(combo));
         }
 
         // The musical-typing keyboard is NOT inline anymore: the SDK primitive
         // pulp::view::MusicalTypingKeyboard is hosted in its OWN secondary GPU
         // window (⌘K / the "Keyboard" button → toggle_keyboard_window()), so it
         // never overlaps the waveform editor.
+
+        // ── Main / Detail page toggle (header) ──
+        // A single button that flips between the main slice page and the Detail
+        // page; its label tracks the page you'd switch TO (Logic-style two-page UI).
+        {
+            auto btn = std::make_unique<TextButton>("Detail");
+            SamplerEditorRoot* rp = root.get();
+            auto* btnPtr = btn.get();
+            btn->on_click = [rp, btnPtr, shown = std::make_shared<bool>(false)] {
+                *shown = !*shown;
+                if (rp->detail_overlay_) rp->detail_overlay_->set_visible(*shown);
+                btnPtr->set_label(*shown ? "Main" : "Detail");
+                rp->request_repaint();
+            };
+            place(*btn, 384, 14, 82, 28);
+            root->add_child(std::move(btn));
+        }
+
+        // ── Detail page (Logic "Q-Sampler Detail"-style) ──
+        // An opaque overlay over the body (y>=50, header stays visible) holding the
+        // envelope-adjacent controls. Hidden until the Detail page toggle selects it.
+        // Gate + Flex Speed live here now; trim / fades / envelopes land here next.
+        {
+            auto detail = std::make_unique<View>();
+            place(*detail, 0, 50, 760, 322);
+            detail->set_background_color(bg900);   // opaque: hides the body behind it
+            detail->set_visible(false);
+            auto dlabel = [&](float x, float y, float w, const char* t, Color col, float sz, int wt) {
+                auto l = std::make_unique<Label>(std::string(t));
+                place(*l, x, y, w, 18);
+                l->set_text_color(col); l->set_font_size(sz); l->set_font_weight(wt);
+                l->set_text_align(LabelAlign::left); detail->add_child(std::move(l));
+            };
+            dlabel(20, 16, 200, "DETAIL", textStr, 13, 600);
+
+            // GATE: key-up releases the envelope (on) vs play-through (off).
+            dlabel(40, 70, 70, "GATE", faint, 10, 600);
+            {
+                auto g = std::make_unique<ToggleButton>();
+                g->set_label("GATE"); g->set_font_size(10.0f); g->set_corner_radius(6.0f);
+                g->set_on_background_color(teal); g->set_on_text_color(bg900);
+                g->set_off_background_color(raised); g->set_off_text_color(muted);
+                g->set_off_border_color(faint);
+                place(*g, 130, 64, 70, 26);
+                root->bindings.push_back(bind_parameter(*g, state(), kGate));
+                detail->add_child(std::move(g));
+            }
+
+            // FLEX SPEED: 1/4..4x of the tempo-synced playback speed (Logic Flex Speed).
+            dlabel(40, 112, 90, "FLEX SPEED", faint, 10, 600);
+            {
+                auto fs = std::make_unique<ComboBox>();
+                fs->set_items({"1/4x", "1/2x", "1x", "2x", "4x"});
+                fs->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kFlexSpeed)), 0, 4));
+                fs->on_change = [this](int idx) {
+                    state().begin_gesture(kFlexSpeed);
+                    state().set_value(kFlexSpeed, static_cast<float>(std::clamp(idx, 0, 4)));
+                    state().end_gesture(kFlexSpeed);
+                    request_render(effective_bpm());   // re-stretch at the new speed
+                };
+                auto* fsPtr = fs.get();
+                place(*fs, 130, 106, 72, 26);
+                root->listeners.push_back(state().add_listener(
+                    [this, fsPtr](state::ParamID id, float v) {
+                        if (id == kFlexSpeed) fsPtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 4));
+                    },
+                    state::ListenerThread::Main));
+                detail->add_child(std::move(fs));
+            }
+
+            dlabel(40, 168, 520, "Trim, fades & envelopes — coming next", muted, 10, 400);
+
+            root->detail_overlay_ = detail.get();
+            root->add_child(std::move(detail));   // LAST = topmost over the body
+        }
 
         root->layout_children();
         return root;
@@ -1482,8 +1713,8 @@ public:
                     bool has = false;
                     for (auto& v : voices_)
                         if (v.active && v.note == n && !v.released) {
-                            v.region.playback_mode = audio::LoopPlaybackMode::Forward;
-                            v.renderer.set_playback_mode(audio::LoopPlaybackMode::Forward);
+                            v.region.playback_mode = params.loop_mode;
+                            v.renderer.set_playback_mode(params.loop_mode);
                             has = true;
                         }
                     // Re-trigger a finished one-shot ONLY into a free voice. Stealing
@@ -1497,10 +1728,13 @@ public:
                         trigger_note(n, held_velocity_[static_cast<size_t>(n)], published, params);
                 }
             } else {
+                // Loop turned off: switch held voices to the resolved no-loop mode
+                // (OneShot, or ReverseOnce when the direction is Reverse) so the
+                // current pass finishes and stops.
                 for (auto& v : voices_)
                     if (v.active) {
-                        v.region.playback_mode = audio::LoopPlaybackMode::OneShot;
-                        v.renderer.set_playback_mode(audio::LoopPlaybackMode::OneShot);
+                        v.region.playback_mode = params.loop_mode;
+                        v.renderer.set_playback_mode(params.loop_mode);
                     }
             }
             loop_prev_ = params.loop;
@@ -1589,6 +1823,7 @@ private:
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         bool loop = false;
+        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::OneShot;  // resolved loop/play mode
     };
 
     // Publish the most-recently-triggered active voice's slice + progress for
@@ -1737,25 +1972,27 @@ private:
             return best;
         };
 
-        std::vector<audio::OnsetMarker> cand;
-        for (const auto& m : onsets.markers)
-            if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
-                cand.push_back(m);
-        std::sort(cand.begin(), cand.end(),
-                  [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-
-        // Greedily accept the highest-confidence cuts (preserving the
-        // sensitivity->count mapping) that keep EVERY slice — including the first
-        // and last — at least kMinSlice long, snapping each to a zero-crossing.
+        // Onset slicing: greedily accept the highest-confidence cuts (preserving
+        // the sensitivity->count mapping) that keep EVERY slice — incl. first and
+        // last — at least kMinSlice long, each snapped to a zero-crossing so both
+        // shared edges declick.
         std::vector<long> cuts;
-        for (const auto& m : cand) {
-            if (static_cast<int>(cuts.size()) >= keep) break;
-            const long f = snap_zc(static_cast<long>(m.frame));
-            if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
-            bool ok = true;
-            for (long c : cuts)
-                if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
-            if (ok) cuts.push_back(f);
+        {
+            std::vector<audio::OnsetMarker> cand;
+            for (const auto& m : onsets.markers)
+                if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
+                    cand.push_back(m);
+            std::sort(cand.begin(), cand.end(),
+                      [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
+            for (const auto& m : cand) {
+                if (static_cast<int>(cuts.size()) >= keep) break;
+                const long f = snap_zc(static_cast<long>(m.frame));
+                if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
+                bool ok = true;
+                for (long c : cuts)
+                    if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
+                if (ok) cuts.push_back(f);
+            }
         }
         std::sort(cuts.begin(), cuts.end());
 
@@ -1783,6 +2020,8 @@ private:
 
         // Duration scales as loop_bpm / host_bpm (faster host => shorter loop).
         double R = (loop_bpm > 0.0 && host_bpm > 0.0) ? (loop_bpm / host_bpm) : 1.0;
+        // Flex Speed: playing N x faster shortens the stretched duration by N.
+        R /= flex_speed_factor();
         R = std::clamp(R, 1.0 / engine_.max_time_ratio(), engine_.max_time_ratio());
 
         const bool link = state().get_value(kTempoLink) >= 0.5f;
@@ -1936,6 +2175,19 @@ private:
         p.adsr.sustain = state().get_value(kTempoSustain) / 100.0f;
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
+        // Direction + Loop -> engine mode (PlunderTube model). LOOP = None plays
+        // once in the Direction (Forward => OneShot, Reverse => ReverseOnce); else
+        // the loop shape (kLoopMode: 0 Forward, 1 Reverse, 2 Ping-Pong) governs it.
+        if (!p.loop) {
+            const bool rev = state().get_value(kDirection) >= 0.5f;
+            p.loop_mode = rev ? audio::LoopPlaybackMode::ReverseOnce
+                              : audio::LoopPlaybackMode::OneShot;
+        } else {
+            const int lm = std::clamp(static_cast<int>(state().get_value(kLoopMode) + 0.5f), 0, 2);
+            p.loop_mode = (lm == 1) ? audio::LoopPlaybackMode::Reverse
+                        : (lm == 2) ? audio::LoopPlaybackMode::PingPong
+                                    : audio::LoopPlaybackMode::Forward;
+        }
         return p;
     }
 
@@ -1944,12 +2196,18 @@ private:
             std::fill_n(output.channel_ptr(ch), output.num_samples(), 0.0f);
     }
 
-    // Region for a note: a slice of the published (already tempo-matched) buffer.
-    std::optional<audio::LoopRegion> region_for_note(int note, const audio::PublishedSampleView& sample,
-                                                     bool loop) const noexcept {
+    // Region for a note within the published (already tempo-matched) buffer.
+    // This is a SLICE sampler: each key plays ONLY its slice
+    // ([slice k, slice k+1) of the published, tempo-matched buffer; idx = note -
+    // root). A note outside [root, root + num_slices) maps to nothing (silent) — it
+    // never falls back to the whole sample. The resolved engine_mode (OneShot /
+    // Forward / Reverse / Ping-Pong, from the LOOP dropdown) governs how it plays.
+    std::optional<audio::LoopRegion> region_for_note(
+        int note, const audio::PublishedSampleView& sample,
+        audio::LoopPlaybackMode engine_mode = audio::LoopPlaybackMode::OneShot) const noexcept {
         std::uint64_t start = 0, end = 0;
-        const int root = static_cast<int>(state().get_value(kRootNote));
         {
+            const int root = static_cast<int>(state().get_value(kRootNote));
             std::lock_guard<std::mutex> lock(slice_mutex_);
             if (slices_stretched_.size() >= 2) {
                 const int idx = note - root;
@@ -1959,17 +2217,12 @@ private:
                 }
             }
         }
-        // Each slice is mapped to its own chromatic note (idx = note - root). A
-        // note outside [root, root + num_slices) — or one with invalid stretched
-        // boundaries — maps to NO slice: play nothing. Never fall back to the
-        // whole sample (that mapped the entire sample across the keyboard, the
-        // Reaper/host MIDI bug).
         if (end <= start || end > sample.num_frames) return std::nullopt;
         audio::LoopRegion region;
         region.start_frame = start;
         region.end_frame = end;
         region.source_sample_rate = sample.sample_rate;
-        region.playback_mode = loop ? audio::LoopPlaybackMode::Forward : audio::LoopPlaybackMode::OneShot;
+        region.playback_mode = engine_mode;
         region.interpolation = audio::LoopInterpolationMode::Linear;
         region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
         return region;
@@ -2035,12 +2288,13 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.loop);
-        if (!region) return;  // note maps to no slice -> silent (don't play the whole sample)
+        const auto region = region_for_note(note, sample, params.loop_mode);
+        if (!region) return;  // note maps to no slice -> silent
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];
-        // Buffer is already at host tempo -> play at native rate (1.0).
+        // The buffer is already at host tempo, and slices aren't repitched, so a
+        // slice plays at its native rate (1.0); pitch-bend/mod apply per chunk.
         target->start(note, velocity, 1.0, host_sample_rate_, sample, *region, sample.num_frames);
         last_note_ = note;  // most-recently-triggered note drives the playhead
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = velocity;
@@ -2048,6 +2302,9 @@ private:
 
     void release_note(int note) {
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
+        // Gate off: key-up does NOT release — the slice plays through to its end
+        // (a looping voice keeps looping until LOOP is set to None).
+        if (state().get_value(kGate) < 0.5f) return;
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
         for (auto& voice : voices_)
             if (voice.active && voice.note == note && !voice.released) {

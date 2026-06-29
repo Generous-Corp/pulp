@@ -89,7 +89,13 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     // font, so truncation was wrong at any window size) and only ellipsizes as a
     // last resort once the font hits its floor.
     std::string display_text = selected_text();
-    const float avail = std::max(0.0f, b.width - 22.0f);  // 8px left pad + ~14px arrow
+    // Reserve the full chevron zone, not just an approximation: the arrow is drawn
+    // at ax = width-16 with arms spanning [ax-3, ax+3] = [width-19, width-13], so its
+    // left arm starts at width-19. Text begins at x=8; cap its right edge at width-22
+    // (a 3px gap before the arrow) → avail = (width-22) - 8 = width-30. The old
+    // width-22 reservation let a box-filling label (e.g. "Forward", "Ping-Pong")
+    // run to width-14 and overlap the chevron.
+    const float avail = std::max(0.0f, b.width - 30.0f);  // 8px left pad + arrow + gap
     const float font_size = fit_combo_label(
         display_text, avail, /*base=*/12.0f, /*min=*/9.0f,
         [&canvas](const std::string& s, float f) {

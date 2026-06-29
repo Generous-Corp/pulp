@@ -107,6 +107,19 @@ pytest tests/ -q
 The lab's pytest suite is intentionally **not** wired into the default `ctest` — the
 lab's dependencies are opt-in and basic testing stays dependency-free.
 
+The `engine` / `engine-baseline` commands validate the **real** Pulp stretch engine, so
+they need its `stretchcli` harness built once from a Pulp checkout:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
+cmake --build build --target stretchcli
+```
+
+The lab finds it via `PULP_STRETCHCLI`, or by walking up from the current directory for a
+`build/.../stretchcli` — so even a `pulp tool`-installed lab works when run from a checkout
+that built it. Without it, those commands `skip` with an actionable message (the other
+commands need nothing extra).
+
 ## How it stays trustworthy
 
 - **Coverage / confidence** — each detector reports how many onsets it actually measured;
