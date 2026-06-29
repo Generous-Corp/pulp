@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/param_attachment.hpp>
@@ -75,11 +76,18 @@ TEST_CASE("attach_toggle reflects boolean state", "[view][attachment]") {
     auto [toggle, binding] = attach_toggle(store, 4);
     REQUIRE(toggle->is_on());
 
+    // The seed must be snapped, not animated: the toggle paints the stored
+    // state on its first frame (a freshly opened editor / a headless screenshot
+    // never advances the animation clock). thumb_position() therefore reflects
+    // the on-state immediately rather than sitting at the off-start.
+    REQUIRE(toggle->thumb_position() == Catch::Approx(1.0f));
+
     StateStore store2;
     setup_store(store2);
     store2.set_value(4, 0.0f);
     auto [toggle2, binding2] = attach_toggle(store2, 4);
     REQUIRE_FALSE(toggle2->is_on());
+    REQUIRE(toggle2->thumb_position() == Catch::Approx(0.0f));
 }
 
 TEST_CASE("attach_combo creates combobox with items", "[view][attachment]") {

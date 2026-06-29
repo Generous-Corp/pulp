@@ -892,7 +892,13 @@ public:
         set_access_role(AccessRole::toggle); set_focusable(true);
     }
 
-    void set_on(bool v);
+    /// Set the on/off state. By default the thumb animates to the new position;
+    /// pass `animate = false` to snap immediately. Use the snapping form for the
+    /// initial seed from stored/preset state: there is nothing to animate from,
+    /// and a single headless paint (screenshot baseline) never advances the
+    /// animation clock, so an animated seed would render stuck in the off
+    /// position regardless of the logical state.
+    void set_on(bool v, bool animate = true);
     bool is_on() const { return on_; }
 
     void set_label(std::string text) { label_ = std::move(text); }

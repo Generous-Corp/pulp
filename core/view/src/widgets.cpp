@@ -376,11 +376,32 @@ void Fader::advance_animations(float dt) {
 
 // ── Toggle animation ────────────────────────────────────────────────────────
 
-void Toggle::set_on(bool v) {
-    if (on_ == v) return;
+void Toggle::set_on(bool v, bool animate) {
+    if (on_ == v) {
+        // Already in the requested logical state. A non-animated caller still
+        // wants the thumb to match exactly — reconcile it if a prior animation
+        // left it mid-flight (a re-seed or screenshot after an interactive
+        // toggle). The animated path keeps the old idempotent early-out.
+        if (!animate) {
+            const float want = v ? 1.0f : 0.0f;
+            if (thumb_position_.value() != want) {
+                thumb_position_.set(want);
+                request_repaint();
+            }
+        }
+        return;
+    }
     on_ = v;
-    float dur = resolve_dimension("motion.duration.normal", 0.15f);
-    thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);
+    if (animate) {
+        float dur = resolve_dimension("motion.duration.normal", 0.15f);
+        thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);
+    } else {
+        // Snap: the initial seed from stored/preset state has nothing to animate
+        // from, and a single headless paint never ticks the animation clock — an
+        // animated seed would render stuck in the off position regardless of the
+        // logical state.
+        thumb_position_.set(v ? 1.0f : 0.0f);
+    }
     // Programmatic toggle changes (preset apply, JS bridge setValue) must reach
     // the screen on their own; user-input toggles also repaint via the host
     // per-event path.
