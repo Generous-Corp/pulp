@@ -1,0 +1,115 @@
+name: Coverage upload watchdog
+# Outcome-based invariant: "main should have a SUCCESSFUL Coverage workflow
+# run within the last N hours." Codecov's dashboard silently degrades when
+# fresh complete uploads stop arriving — and there was no alarm for it (the
+# release pipeline has cadence/stuck/cli watchdogs; coverage had none). This
+# fires on the *symptom* (no recent successful coverage), regardless of cause:
+#   - coverage runs cancelled before upload (stale-run-reaper under a CI
+#     throttle — the 2026-06-28 incident: 8 consecutive main coverage runs
+#     cancelled, Codecov surface shrank, nothing screamed),
+#   - codecov.yml component/flag drift (a subsystem matching no component),
+#   - llvm-cov -object-set regressions (a libpulp-*.a dropping out, so whole
+#     subsystems vanish while lines-valid stays > 0 — the recurring class the
+#     verify_cobertura_xml `lines-valid > 0` check cannot catch),
+#   - Codecov `after_n_builds` waiting forever on a missing per-OS leg.
+#
+# Complements: verify_cobertura_xml.py (per-leg, lines-valid>0, pre-upload)
+# and test_codecov_components.py / test_codecov_config.py (config mapping,
+# PR-gate). This is the main-branch backstop that catches what slips past
+# both — same triad shape as the release watchdogs
+# (docs/guides/release-watchdog.md).
+#
+# Auto-closes when a fresh successful Coverage run lands on main.
+
+on:
+  schedule:
+    - cron: '17 * * * *'  # hourly; a healthy Coverage run takes ~1h
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: 'Hours since the last successful main Coverage run before flagging'
+        required: false
+        default: '4'
+      dry_run:
+        description: 'Log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: coverage-upload-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan main for a recent successful Coverage run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          MAX_AGE_HOURS: ${{ github.event.inputs.max_age_hours || '4' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          MARKER: '<!-- coverage-upload-watchdog -->'
+          TITLE: 'Coverage uploads stalled — main has no recent successful Coverage run'
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016  # printf format strings are intentionally
+          # single-quoted; values are passed as positional %s args below.
+
+          # Newest SUCCESSFUL Coverage run on main, and the newest run of any
+          # conclusion (to report what's actually happening — cancelled/failed).
+          runs_json="$(gh api -X GET \
+            "repos/${REPO}/actions/workflows/coverage.yml/runs" \
+            -f branch=main -f per_page=20 \
+            --jq '[.workflow_runs[] | {id, status, conclusion, created_at, updated_at, html_url}]')"
+
+          last_success_at="$(printf '%s' "$runs_json" \
+            | jq -r '[.[] | select(.conclusion=="success")] | sort_by(.updated_at) | last | .updated_at // empty')"
+          recent_summary="$(printf '%s' "$runs_json" \
+            | jq -r 'sort_by(.created_at) | reverse | .[0:6][] | "  - \(.created_at)  \(.status)/\(.conclusion // "-")  \(.html_url)"')"
+
+          now_epoch="$(date -u +%s)"
+          if [ -n "${last_success_at}" ]; then
+            succ_epoch="$(date -u -d "${last_success_at}" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${last_success_at}" +%s)"
+            age_h=$(( (now_epoch - succ_epoch) / 3600 ))
+          else
+            age_h=99999  # no success at all in the window
+          fi
+          echo "Last successful main Coverage: ${last_success_at:-<none in last 20 runs>} (age ~${age_h}h, threshold ${MAX_AGE_HOURS}h)"
+
+          # Find an existing open watchdog issue by marker.
+          issue_num="$(gh api -X GET "repos/${REPO}/issues" \
+            -f state=open -f labels=coverage,ci -f per_page=50 \
+            --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .number // empty" || true)"
+
+          if [ "${age_h}" -ge "${MAX_AGE_HOURS}" ]; then
+            body="$(printf '%s\n\n**main has had no successful Coverage run in ~%sh** (threshold %sh). Codecov receives no fresh complete upload, so the dashboard total lines/files silently degrades.\n\nLast successful run: %s\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. CI dispatch throttle, so runs queue past the stale-run-reaper cutoff and get cancelled before upload.\n2. codecov.yml component/flag drift (run tools/scripts/test_codecov_components.py).\n3. llvm-cov object-set regression (a libpulp library dropped, so a whole subsystem vanishes while lines-valid stays above 0).\n4. Codecov after_n_builds waiting on a missing per-OS leg.\n\nAuto-closes when a fresh successful Coverage run lands on main.' \
+              "${MARKER}" "${age_h}" "${MAX_AGE_HOURS}" "${last_success_at:-<none>}" "${recent_summary}")"
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "::warning::[dry-run] would open/update coverage-upload watchdog issue"
+              echo "${body}"
+            elif [ -n "${issue_num}" ]; then
+              echo "Updating existing issue #${issue_num}"
+              gh api -X PATCH "repos/${REPO}/issues/${issue_num}" -f body="${body}" >/dev/null
+              gh api -X POST "repos/${REPO}/issues/${issue_num}/comments" -f body="Still stalled at $(date -u +%FT%TZ) — last success ~${age_h}h ago." >/dev/null
+            else
+              echo "Opening new coverage-upload watchdog issue"
+              gh api -X POST "repos/${REPO}/issues" \
+                -f title="${TITLE}" -f body="${body}" \
+                -f 'labels[]=coverage' -f 'labels[]=ci' -f 'labels[]=P1-important' >/dev/null
+            fi
+            echo "::error::Coverage uploads stalled: no successful main Coverage run in ~${age_h}h (threshold ${MAX_AGE_HOURS}h)."
+          else
+            echo "Coverage uploads healthy (last success ~${age_h}h ago)."
+            if [ -n "${issue_num}" ] && [ "${DRY_RUN}" != "true" ]; then
+              echo "Recovered — closing issue #${issue_num}"
+              gh api -X POST "repos/${REPO}/issues/${issue_num}/comments" \
+                -f body="Recovered: a successful Coverage run landed on main (${last_success_at}). Auto-closing." >/dev/null
+              gh api -X PATCH "repos/${REPO}/issues/${issue_num}" -f state=closed >/dev/null
+            fi
+          fi
