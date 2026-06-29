@@ -43,6 +43,25 @@ Pulp Processor (C++ → WASM via Emscripten)
 - `core/format/include/pulp/format/web/wam_adapter.hpp` — C++ bridge
 - `core/format/src/wasm/wam_adapter.cpp` — implementation
 - `core/format/src/wasm/wam-plugin.js` — experimental WAMv2 JS runtime scaffold
+- `core/format/src/wasm/wam_build_report.mjs` — web-build report generator
+
+**Web-build report — what happens to a plugin's UI on the web:** `pulp_add_wam_plugin`
+emits a `<Name>.web-build.json` next to the module (post-build) documenting the
+UI strategy of the web build, so the "what happened to my editor / my imported
+design" question is answered at build time rather than discovered in the browser:
+
+- **Generated controls.** A headless WAM build has no view layer, so the web host
+  renders generated controls. The report lists the **parameter binding targets**
+  (`id`, `label`, range) the generated controls are built from. A design-import
+  UI binds a knob/slider to a parameter by `id`, and the generated control for
+  that `id` is the same target — so a binding to parameter `id` N routes to the
+  generated control for parameter `id` N. The report makes that contract explicit
+  and testable (`wam_build_report.test.mjs`).
+- **Native-editor fallback.** Declare `NATIVE_EDITOR` on `pulp_add_wam_plugin`
+  for a plugin whose native build has a `Processor::create_view()` editor; the
+  report then records that the native editor cannot run in a headless web build
+  and is replaced by generated controls. (A WAM build is headless, so this is a
+  developer declaration — the build has no view to introspect.)
 
 **Upstream references:**
 - [WAMv2 API](https://github.com/webaudiomodules/api) — interface definitions
