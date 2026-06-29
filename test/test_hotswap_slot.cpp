@@ -33,7 +33,8 @@ public:
                 .input_buses = {{"In", 2}}, .output_buses = {{"Out", 2}}};
     }
     void define_parameters(state::StateStore&) override {}
-    void prepare(const format::PrepareContext&) override {}
+    void prepare(const format::PrepareContext& ctx) override { last_rate_ = ctx.sample_rate; }
+    double last_prepared_rate() const { return last_rate_; }
     void process(audio::BufferView<float>& out,
                  const audio::BufferView<const float>& in,
                  midi::MidiBuffer&, midi::MidiBuffer&,
@@ -52,6 +53,7 @@ private:
     bool alive_ = true;
     float k_;
     std::atomic<int>* live_;
+    double last_rate_ = 0.0;
 };
 
 // Render one block of constant 1.0 through the slot and return out[0][0].
@@ -89,6 +91,23 @@ TEST_CASE("HotSwapSlot passes through with no active processor",
     REQUIRE_FALSE(slot.has_active());
     REQUIRE(render_one(slot) == 1.0f);              // input passed through unchanged
     REQUIRE(slot.contention_blocks() >= 1);
+}
+
+TEST_CASE("HotSwapSlot reprepare_active re-prepares the live processor",
+          "[hot-reload][slot]") {
+    auto p = std::make_unique<ScaleProc>(2.0f);
+    ScaleProc* raw = p.get();                        // owned by the slot; valid until swapped out
+    ProcessorHotSwapSlot slot(std::move(p));
+    REQUIRE(raw->last_prepared_rate() == 0.0);       // not prepared yet
+
+    format::PrepareContext ctx;
+    ctx.sample_rate = 96000.0;
+    slot.reprepare_active(ctx);                      // e.g. a host sample-rate change
+    REQUIRE(raw->last_prepared_rate() == 96000.0);   // the live DSP saw the new rate
+
+    ProcessorHotSwapSlot empty;
+    empty.reprepare_active(ctx);                     // no-op, must not crash
+    REQUIRE_FALSE(empty.has_active());
 }
 
 // The P0-A proof: an audio thread loops process() while a control thread swaps

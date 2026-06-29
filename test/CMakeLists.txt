@@ -1234,6 +1234,28 @@ if(NOT WIN32)
     target_link_libraries(pulp-test-reload-controller PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+# DSP hot reload — DAW-integration shell, end to end (Phase 1b). The shell is a
+# Processor (format adapters wrap it) that loads its DSP from a logic library and
+# hot-swaps it via a background watcher. A "unity" (1x) fixture is the initial
+# logic so a swap to the 2x "compatible" fixture is observable in the output.
+add_library(pulp-reload-logic-unity MODULE fixtures/reload_logic_unity.cpp)
+set_target_properties(pulp-reload-logic-unity PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(pulp-reload-logic-unity PRIVATE pulp::format)
+pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
+add_dependencies(pulp-test-reloadable-shell
+    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reloadable-shell PRIVATE
+    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reloadable-shell PRIVATE ${CMAKE_DL_LIBS})
+endif()
+find_package(Threads REQUIRED)
+target_link_libraries(pulp-test-reloadable-shell PRIVATE Threads::Threads)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 

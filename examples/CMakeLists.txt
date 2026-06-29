@@ -32,6 +32,10 @@ add_subdirectory(pulp-compressor)
 # Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
 add_subdirectory(bendr)
 
+# Hot-Reload Demo: a reloadable shell plugin whose DSP lives in a separate
+# .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).
+add_subdirectory(hot-reload-demo)
+
 # UI Preview and Ink & Signal examples exercise the rendering pipeline and
 # design-system imports. These depend on the design-import authoring cluster,
 # so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF) builds.

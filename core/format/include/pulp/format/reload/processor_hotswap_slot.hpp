@@ -69,6 +69,17 @@ public:
         return old;
     }
 
+    /// Control-thread re-prepare of the live processor (e.g. a host sample-rate
+    /// change). Takes the writer lock — the same one swap() uses — so it cannot
+    /// race a reader inside process(). No-op when no processor is installed. Call
+    /// only while audio is stopped, like prepare(): the writer lock guarantees
+    /// mutual exclusion with process(), not that prepare() (which may allocate)
+    /// is realtime.
+    void reprepare_active(const PrepareContext& ctx) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        if (active_) active_->prepare(ctx);
+    }
+
     /// True when a processor is installed. Control-thread/diagnostic use.
     bool has_active() const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
