@@ -75,7 +75,12 @@ TEST_CASE("SuperConvolver impulse response matches the IR", "[golden][superconvo
     float peak = 0.0f;
     for (std::size_t i = 0; i < out.size(); ++i)
         if (std::abs(out[i]) > peak) { peak = std::abs(out[i]); lag = i; }
-    REQUIRE(peak > 0.9f);  // the IR's unit onset survived
+    // The IR is unit-energy normalized (so Mix is a sane dry/wet balance), so the
+    // onset no longer sits at 1.0 — assert the output peak matches the IR's own
+    // (normalized) peak, i.e. the onset survived at the reference level.
+    float ir_peak = 0.0f;
+    for (float v : ir) ir_peak = std::max(ir_peak, std::abs(v));
+    REQUIRE(peak > 0.5f * ir_peak);
 
     // Validate the *shape* matches the IR via normalized cross-correlation and
     // relative RMS error — the robust golden for a convolution path, immune to
@@ -242,7 +247,11 @@ TEST_CASE("SuperConvolver convolves correctly under variable host blocks",
     std::size_t lag = 0; float peak = 0.0f;
     for (std::size_t i = 0; i < out_all.size(); ++i)
         if (std::abs(out_all[i]) > peak) { peak = std::abs(out_all[i]); lag = i; }
-    REQUIRE(peak > 0.9f);   // NOT dry-passed: a real convolved onset survived
+    // NOT dry-passed: a real convolved onset survived at the IR's (unit-energy
+    // normalized) peak level.
+    float ir_peak = 0.0f;
+    for (float v : ir) ir_peak = std::max(ir_peak, std::abs(v));
+    REQUIRE(peak > 0.5f * ir_peak);
 
     double sxy = 0, sxx = 0, syy = 0;
     for (std::size_t i = 0; i < len && lag + i < out_all.size(); ++i) {
@@ -354,7 +363,11 @@ TEST_CASE("SuperConvolver GPU engine convolves through the GPU transport",
     std::size_t lag = 0; float peak = 0.0f;
     for (std::size_t i = 0; i < out_all.size(); ++i)
         if (std::abs(out_all[i]) > peak) { peak = std::abs(out_all[i]); lag = i; }
-    REQUIRE(peak > 0.5f);  // a real convolved onset survived (not a miss/silence)
+    // A real convolved onset survived (not a miss/silence), at the IR's
+    // unit-energy-normalized peak level.
+    float ir_peak = 0.0f;
+    for (float v : ir) ir_peak = std::max(ir_peak, std::abs(v));
+    REQUIRE(peak > 0.5f * ir_peak);
 
     double sxy = 0, sxx = 0, syy = 0;
     std::size_t scored = 0;
@@ -829,4 +842,56 @@ TEST_CASE("SuperConvolver clamps Rooms to the GPU limit instead of reverting to 
     REQUIRE(r > 1);                     // genuinely multi-room
     REQUIRE(r <= 256);                  // clamped to a feasible count (not the raw request)
     proc.release();
+}
+
+// Concurrent live Engine/Rooms/Size churn while the audio thread renders. This
+// is the regression guard for the use-after-free where the worker freed a GPU
+// stack the audio thread still held in fill_wet_gpu (crash on a live switch,
+// reliably hit at high sample rates where an over-budget GPU block lingers in
+// fill_wet_gpu across worker rebuilds). The hazard pointer (gpu_in_use_) must
+// keep every retired stack alive until the audio thread releases it. Meaningful
+// on a host with a GPU device; degrades to a CPU-only smoke without one. Run
+// under ASan/TSan for a definitive verdict.
+TEST_CASE("SuperConvolver survives concurrent Engine/Rooms churn while rendering",
+          "[superconvolver][rt-safety]") {
+    constexpr double SR = 96000.0;   // high SR: widens the old UAF window
+    constexpr std::size_t BLOCK = 128;
+    pulp::format::HeadlessHost host(create_super_convolver);
+    host.state().set_value(kSize, 1.5f);
+    host.state().set_value(kMix, 100.0f);
+    host.state().set_value(kEngine, 1.0f);   // start on GPU
+    host.state().set_value(kRooms, 16.0f);
+    host.prepare(SR, static_cast<int>(BLOCK));
+
+    std::atomic<bool> stop{false};
+    // Churn thread: hammer the controls the worker rebuilds on, mirroring a user
+    // flipping Engine / sweeping Rooms+Size live.
+    std::thread churn([&] {
+        int i = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            host.state().set_value(kEngine, (i & 1) ? 1.0f : 0.0f);
+            host.state().set_value(kRooms, static_cast<float>(2 + (i % 48)));
+            host.state().set_value(kSize, 0.2f + 0.05f * static_cast<float>(i % 20));
+            ++i;
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+    });
+
+    std::vector<float> in_l(BLOCK, 0.0f), in_r(BLOCK, 0.0f);
+    std::vector<float> out_l(BLOCK, 0.0f), out_r(BLOCK, 0.0f);
+    for (int b = 0; b < 6000; ++b) {
+        // A little signal so the convolver actually does work each block.
+        for (std::size_t i = 0; i < BLOCK; ++i)
+            in_l[i] = in_r[i] = (b == 0 && i == 0) ? 1.0f : 0.001f;
+        const float* ins[2] = {in_l.data(), in_r.data()};
+        float* outs[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> in_view(ins, 2, BLOCK);
+        pulp::audio::BufferView<float> out_view(outs, 2, BLOCK);
+        host.process(out_view, in_view);
+        for (std::size_t i = 0; i < BLOCK; ++i)
+            REQUIRE(std::isfinite(out_l[i]));   // no NaN/garbage from a freed stack
+    }
+    stop.store(true, std::memory_order_relaxed);
+    churn.join();
+    SUCCEED("rendered 6000 blocks under concurrent Engine/Rooms/Size churn without UAF");
 }

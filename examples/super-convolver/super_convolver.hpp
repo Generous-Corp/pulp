@@ -28,9 +28,13 @@
 // thread never builds or frees a GPU stack: a background worker builds the
 // requested stack off-thread and publishes it through an atomic pointer
 // (gpu_active_) that the audio thread loads each block — non-null routes the GPU
-// path, null routes the CPU path. The previously-active stack is retired and
-// freed one rebuild later, so the audio thread is never holding a stack as it is
-// freed. Reported latency is FIXED for the prepared lifetime (kInternalBlock
+// path, null routes the CPU path. A retired stack is freed only once the audio
+// thread is provably no longer using it: the audio thread publishes the transport
+// it is about to use in a hazard pointer (gpu_in_use_) for the span of each block,
+// and the worker defers freeing any retired stack whose transport matches. This
+// is what makes a live Engine/Rooms switch safe even when an audio block runs
+// long (e.g. an over-budget GPU block at a high sample rate). Reported latency is
+// FIXED for the prepared lifetime (kInternalBlock
 // plus the GPU transport's delay when a device exists) so the host's PDC stays
 // correct and dry/wet stay phase-aligned under either engine. See
 // gpu_engine_active().
@@ -50,6 +54,7 @@
 #include <memory>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <complex>
@@ -94,6 +99,18 @@ inline std::vector<float> make_reverb_ir(std::size_t length, std::uint32_t seed 
         ir[i] = white * std::exp(-decay * static_cast<float>(i));
     }
     ir[0] = 1.0f;  // direct onset
+    // Normalize to UNIT ENERGY so a fully-wet convolution sits at roughly the dry
+    // signal's loudness — otherwise the wet is the sum of `length` (tens of
+    // thousands of) scaled taps and swamps the dry, making the Mix knob useless
+    // (anything above ~1% reads as fully wet). With sum(ir^2)=1 the output RMS for
+    // broadband input ≈ the input RMS, so Mix becomes a perceptually sensible
+    // dry/wet balance.
+    double energy = 0.0;
+    for (float v : ir) energy += static_cast<double>(v) * v;
+    if (energy > 0.0) {
+        const float g = static_cast<float>(1.0 / std::sqrt(energy));
+        for (float& v : ir) v *= g;
+    }
     return ir;
 }
 
@@ -256,7 +273,8 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
+        retired_stacks_.clear();
+        gpu_in_use_.store(nullptr, std::memory_order_release);
 
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
@@ -339,7 +357,8 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
+        retired_stacks_.clear();
+        gpu_in_use_.store(nullptr, std::memory_order_release);
         for (auto& c : conv_) c.reset();
     }
 
@@ -393,12 +412,27 @@ public:
         // re-block the host stream into fixed kInternalBlock chunks; only the
         // convolution itself (CPU PartitionedConvolver vs GPU transport) differs.
         // A non-null gpu_active_ (acquire) routes the GPU path; null routes CPU.
-        gpu_audio::GpuAudioTransport* tp =
-            gpu_active_.load(std::memory_order_acquire);
+        // Publish the transport we're about to use as a hazard pointer, so the
+        // worker can't free its stack out from under this block. The retry closes
+        // the load/publish gap: after the loop gpu_in_use_ == the gpu_active_ we
+        // use, so a concurrent retire+free on the worker is guaranteed to observe
+        // the hazard and defer the free. Bounded — the worker swaps gpu_active_ at
+        // most once per poll (~5 ms), far less often than a block.
+        gpu_audio::GpuAudioTransport* tp = gpu_active_.load(std::memory_order_acquire);
+        do {
+            gpu_in_use_.store(tp, std::memory_order_release);
+            gpu_audio::GpuAudioTransport* again = gpu_active_.load(std::memory_order_acquire);
+            if (again == tp) break;
+            tp = again;
+        } while (true);
+
         if (tp)
             fill_wet_gpu(tp, input, n);
         else
             fill_wet_cpu(input, n);
+
+        // Release the hazard: the worker may now reclaim the stack we used.
+        gpu_in_use_.store(nullptr, std::memory_order_release);
 
         // Emit n samples per channel: wet from the primed output FIFO, dry
         // delayed by the active engine's total latency so they stay aligned.
@@ -593,17 +627,38 @@ private:
     // to retired_stack_) and freed on the NEXT rebuild — never freed while the
     // audio thread might still be loading its pointer. On build failure the GPU
     // path is published as null so the audio thread routes the CPU engine.
+    // Worker-thread only. Free retired GPU stacks the audio thread is provably no
+    // longer using (its hazard pointer doesn't match), so a stack is never freed
+    // while fill_wet_gpu still holds its transport. Stacks still in use stay queued
+    // and are reclaimed on a later call once the audio thread releases the hazard.
+    // Each freed stack's destructor joins the transport's worker thread, so we free
+    // OUTSIDE stack_mutex_ to keep the UI accessors (which take it) from stalling.
+    void reclaim_retired() {
+        gpu_audio::GpuAudioTransport* in_use = gpu_in_use_.load(std::memory_order_acquire);
+        std::vector<std::unique_ptr<GpuStack>> to_free;
+        {
+            std::lock_guard<std::mutex> lock(stack_mutex_);
+            for (auto& s : retired_stacks_) {
+                if (s && (in_use == nullptr || s->transport.get() != in_use))
+                    to_free.push_back(std::move(s));
+            }
+            retired_stacks_.erase(
+                std::remove(retired_stacks_.begin(), retired_stacks_.end(), nullptr),
+                retired_stacks_.end());
+        }
+        to_free.clear();  // GpuStack destructors run here, outside the lock
+    }
+
     void rebuild_gpu_stack(int rooms, float size) {
-        // The audio thread has had many blocks since the last rebuild to drop the
-        // previously-retired pointer; freeing it now is safe.
-        retired_stack_.reset();
         // Stop the audio thread from using the current stack before retiring it.
         gpu_active_.store(nullptr, std::memory_order_release);
         gpu_engine_active_.store(false, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(stack_mutex_);
-            retired_stack_ = std::move(current_stack_);
+            if (current_stack_) retired_stacks_.push_back(std::move(current_stack_));
         }
+        // Free retired stacks the audio thread is provably no longer using.
+        reclaim_retired();
 
         auto fresh = build_gpu_stack(rooms, size);
         gpu_built_rooms_ = rooms > 1 ? rooms : 1;
@@ -720,6 +775,10 @@ private:
                 service_gpu_stack(want_engine, want_rooms, want_size);
 
             for (auto& sw : swapper_) sw.drain_old();
+            // Free any retired stack the audio thread has since released (a stack
+            // retired during a slow in-flight block is reclaimed here once the
+            // hazard clears, without waiting for the next rebuild).
+            if (!retired_stacks_.empty()) reclaim_retired();
             std::this_thread::sleep_for(5ms);
         }
         // Final drain so nothing leaks once the audio thread has stopped.
@@ -778,15 +837,24 @@ private:
     std::array<signal::ConvolverIrSwapper, kChannels> swapper_{};
 
     // Optional GPU engine (default OFF), switchable live. The worker owns
-    // current_stack_ (the built stack) and retired_stack_ (a previous stack
-    // pending free, reclaimed one rebuild later). The audio thread routes the GPU
-    // path solely through gpu_active_ (an atomic pointer into current_stack_'s
-    // transport, or null for the CPU path). stack_mutex_ guards current_stack_ for
-    // the UI accessors vs the worker — the audio thread NEVER takes it. gpu_wet_
-    // is the per-channel B-sized scratch the transport writes each stereo block.
+    // current_stack_ (the built stack) and retired_stacks_ (previous stacks pending
+    // free). The audio thread routes the GPU path solely through gpu_active_ (an
+    // atomic pointer into current_stack_'s transport, or null for the CPU path).
+    // stack_mutex_ guards current_stack_ for the UI accessors vs the worker — the
+    // audio thread NEVER takes it. gpu_wet_ is the per-channel B-sized scratch the
+    // transport writes each stereo block.
+    //
+    // Reclamation is hazard-pointer protected: a retired stack is freed only once
+    // the audio thread is provably no longer using it. The audio thread publishes
+    // the transport it is about to use in gpu_in_use_ for the duration of a block;
+    // the worker defers freeing any retired stack whose transport matches. Freeing
+    // "one rebuild later" alone is unsafe — it counts worker polls, not audio
+    // blocks, so a slow audio block (e.g. an over-budget GPU block at 96 kHz) can
+    // still hold a transport the worker would otherwise free, a use-after-free.
     std::unique_ptr<GpuStack> current_stack_;
-    std::unique_ptr<GpuStack> retired_stack_;
+    std::vector<std::unique_ptr<GpuStack>> retired_stacks_;
     std::atomic<gpu_audio::GpuAudioTransport*> gpu_active_{nullptr};
+    std::atomic<gpu_audio::GpuAudioTransport*> gpu_in_use_{nullptr};  // audio-thread hazard ptr
     mutable std::mutex stack_mutex_;
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::atomic<bool> gpu_engine_active_{false};   // mirrors (gpu_active_ != null)
