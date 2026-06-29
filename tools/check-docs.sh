@@ -241,6 +241,11 @@ if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
     if ! python3 "$ROOT/tools/scripts/widgets_doc_check.py"; then
         error "docs/reference/widgets.md is out of sync with core/view primitives"
     fi
+
+    echo "Checking web-plugin docs match the tree..."
+    if ! python3 "$ROOT/tools/scripts/check_web_plugin_docs.py" --root "$ROOT"; then
+        error "web-plugin docs reference paths/helpers that do not exist"
+    fi
 fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""

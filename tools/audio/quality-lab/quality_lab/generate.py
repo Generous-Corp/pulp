@@ -185,3 +185,41 @@ def add_fizz(y: np.ndarray, sr: int, amount: float = 0.10, cutoff_hz: float = 80
     hp = noise - lp
     env = np.sqrt(np.mean(y * y) + 1e-20)
     return y + amount * env * hp
+
+
+def noisy(y: np.ndarray, sr: int, amount: float = 0.12, seed: int = 0) -> np.ndarray:
+    """Add broadband white noise scaled to the signal RMS — the canonical HNR defect
+    (tonal purity loss / roughness). Deterministic for a given seed."""
+    rng = np.random.default_rng(seed)
+    env = np.sqrt(np.mean(np.asarray(y, dtype=np.float64) ** 2) + 1e-20)
+    return np.asarray(y, dtype=np.float64) + amount * env * rng.standard_normal(len(y))
+
+
+def render_stereo_pad(
+    sr: int = 48000, dur_s: float = 2.5, seed: int = 0, f0: float = 220.0, width: float = 0.6
+) -> np.ndarray:
+    """A wide stereo pad: a shared mono tonal core (`render_tonal`) plus per-channel
+    decorrelated side content, so RMS(side)/RMS(mid) is non-trivial and the channels are
+    only partly correlated. Deterministic. Returns an (N, 2) L/R array."""
+    mono, _ = render_tonal(sr, dur_s, seed, f0)
+    rng = np.random.default_rng(seed + 1)
+    rms = np.sqrt(np.mean(mono ** 2) + 1e-20)
+    side = width * rms * rng.standard_normal(len(mono))
+    return np.stack([mono + 0.5 * side, mono - 0.5 * side], axis=1)
+
+
+def narrow_stereo(stereo: np.ndarray, amount: float = 0.8) -> np.ndarray:
+    """Collapse stereo width toward mono by attenuating the side signal by `amount`
+    (1.0 -> full mono). Returns an (N, 2) array."""
+    s = np.asarray(stereo, dtype=np.float64)
+    mid = 0.5 * (s[:, 0] + s[:, 1])
+    side = 0.5 * (s[:, 0] - s[:, 1]) * (1.0 - amount)
+    return np.stack([mid + side, mid - side], axis=1)
+
+
+def invert_phase_right(stereo: np.ndarray) -> np.ndarray:
+    """Flip the polarity of the right channel — an out-of-phase / mono-incompatibility
+    defect. Returns an (N, 2) array."""
+    s = np.asarray(stereo, dtype=np.float64).copy()
+    s[:, 1] = -s[:, 1]
+    return s

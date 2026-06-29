@@ -353,6 +353,11 @@ docs:
     kind: reference
     summary: All current capabilities organized by area with status
 
+  - slug: web-plugin-support
+    path: reference/web-plugin-support.md
+    kind: reference
+    summary: WAMv2 and WebCLAP web-plugin support — verified Processor features, toolchains, pinned upstream refs
+
   - slug: claim-audit-baseline
     path: reference/claim-audit-baseline.md
     kind: reference

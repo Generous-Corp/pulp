@@ -43,6 +43,8 @@ generate / load → level-match → align → detect → report.json
 | `spectral_centroid` | brightness loss / dulling |
 | `hf_fizz` | added metallic high-frequency sizzle |
 | `spectral_flux` | graininess / temporal instability (sustained material) |
+| `hnr` | added noise / roughness — tonal purity loss (sustained material) |
+| `stereo_width` | stereo-image collapse / phase damage (stereo material) |
 
 Each detector fires on its own artifact and stays quiet on the others and on an identity
 render. Detectors are validated **non-circularly** — not only against synthetic

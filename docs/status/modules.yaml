@@ -73,8 +73,9 @@ modules:
       Atlas systems: ImageAtlas, GradientAtlas, GlyphAtlas, PathAtlas, BufferPool.
       GPU graph renderers: GpuGraphRenderer (1D), GpuHeatMapRenderer (2D), GpuBarRenderer.
       WebGPU compute pipeline for PMREM, PBR materials, and batch processing.
-      DRACO mesh decoder (native C++, optional). KTX2 texture decoder with platform
-      format detection (ASTC/BC7/ETC2). Binary transfer optimization.
+      DRACO mesh decoder (native C++, optional). KTX2 header parser and native-gap
+      classifier; Basis Universal payload transcoding remains deferred. Binary
+      transfer optimization.
     status: usable
     dependencies: [runtime, canvas]
     docs: reference/rendering.md#render

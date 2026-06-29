@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05343"></a>
+## [0.534.3] - 2026-06-29
+
+- fix(view): plugin grabs the DAW keyboard only for a focused TEXT field ([#5304](https://github.com/danielraffel/pulp/pull/5304))
+- docs: web-plugin-support reference + claims lint (Phase 0-WAM) ([#5303](https://github.com/danielraffel/pulp/pull/5303))
+- fix(mcp): gate audio render by project SDK ([#5135](https://github.com/danielraffel/pulp/pull/5135))
+- wam: Phase 2 — validate instrument (PulpPluck) + rich effect (PulpChorus) ([#5299](https://github.com/danielraffel/pulp/pull/5299))
+- docs(render): clarify KTX2 parser status ([#5146](https://github.com/danielraffel/pulp/pull/5146))
+- feat(quality-lab): add HNR + stereo-width detectors; file roadmap issues ([#5298](https://github.com/danielraffel/pulp/pull/5298))
+- docs(view): align font loading status ([#5102](https://github.com/danielraffel/pulp/pull/5102))
+
 <a id="v05342"></a>
 ## [0.534.2] - 2026-06-29
 
@@ -5618,6 +5629,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.534.3]: https://github.com/danielraffel/pulp/releases/tag/v0.534.3
 [0.534.2]: https://github.com/danielraffel/pulp/releases/tag/v0.534.2
 [0.534.1]: https://github.com/danielraffel/pulp/releases/tag/v0.534.1
 [0.534.0]: https://github.com/danielraffel/pulp/releases/tag/v0.534.0
