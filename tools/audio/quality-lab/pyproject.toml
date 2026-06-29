@@ -1,0 +1,33 @@
+# Audio Quality Lab — installable package metadata.
+#
+# This lets the lab install as a managed Pulp tool:
+#   pulp tool install audio-quality-lab
+# which pip-installs THIS directory (source) into a dedicated venv under
+# ~/.pulp/tools/, then exposes `python -m quality_lab.cli` via a run wrapper.
+# The deps mirror requirements.txt and are permissive-only — the lab is an
+# opt-in developer/agent/CI tool and is never linked into the MIT core.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quality-lab"
+version = "0.1.0"
+description = "Pulp Audio Quality Lab — offline reference-vs-candidate audio artifact detection"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.21",
+    "soundfile>=0.11",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["quality_lab*"]
+
+[tool.setuptools.package-data]
+"quality_lab" = ["baselines/*.json"]

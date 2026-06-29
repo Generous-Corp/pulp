@@ -51,7 +51,7 @@ private:
                                 double position,
                                 double step,
                                 bool& wrapped) const noexcept;
-    double advance_position(double position, double step, bool& wrapped) const noexcept;
+    double advance_position(double position, double step, bool& wrapped) noexcept;
     float fade_gain() noexcept;
     double effective_step() const noexcept;
 
@@ -65,6 +65,7 @@ private:
     std::uint64_t stop_fade_position_ = 0;
     bool active_ = false;
     bool stopping_ = false;
+    int pingpong_dir_ = 1;  // PingPong only: +1 forward, -1 backward; flips at boundaries
 };
 
 }  // namespace pulp::audio

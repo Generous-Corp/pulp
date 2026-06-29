@@ -8,10 +8,17 @@ current browser-host limits.
 
 The Pulp Browser Host is currently a local tool in `tools/browser-host/`. The
 repo does not yet publish a canonical repo-owned Pages deployment for it, so
-browser-host examples should be treated as local-run instructions for now. The
-host is also not yet an end-to-end validated WAM/WebCLAP runtime; use it as a
-browser-host scaffold until the AudioWorklet and WebCLAP host-library paths are
-wired and tested.
+browser-host examples should be treated as local-run instructions for now.
+
+**WAMv2** now loads end-to-end: the `PulpGain` canary built with
+`pulp_add_wam_plugin` loads into a browser `AudioWorkletNode`, renders audio,
+and exposes generated parameter controls in Chrome. This is proven by a
+headless, deterministic `OfflineAudioContext` fixture
+(`examples/web-demos/wasm-build/browser-test/`) and a Node runner — it is not
+yet wired into a CI lane, and it targets a stereo, single-instance canary rather
+than full WAM-host (`WamEnv`/`WamGroup`) conformance. **WebCLAP** remains a
+scaffold (adapter macro + CMake helper) with no checked-in target or browser
+host-library integration yet.
 
 ## Two Paths to the Browser
 
@@ -97,16 +104,26 @@ source emsdk_env.sh
 
 # Configure and build the checked-in web demo lane
 cd examples/web-demos/wasm-build
-emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+    -DPULP_WAM_CHOC_INCLUDE=<dir containing choc/>   # if not auto-located
 cmake --build build
 ```
 
-The output is a `.js` + `.wasm` pair for the checked-in demo plugins. Those
-files expose the C entry points used by `WamProcessorBridge`; wrapping them as a
-host-compatible WAM ES module and running them through the browser host is still
-experimental and not runtime-validated. The root `tools/cmake/PulpWasm.cmake`
-helper is available for projects that include it explicitly, but the root Pulp
-build does not currently create WAM targets from `-DPULP_WASM=ON` alone.
+WAM plugins are declared with `pulp_add_wam_plugin` (`tools/cmake/PulpWam.cmake`)
+— each plugin is a one-line factory; the shared `wam_*` C ABI lives in
+`core/format/src/wasm/wam_entry.cpp`. A target emits a `.js` + `.wasm` pair (or a
+BASE64-embedded ES-module factory with `SINGLE_FILE`, required for the
+AudioWorklet). See `reference/cmake.md#pulp_add_wam_plugin`.
+
+Validate without a browser using the deterministic Node runner
+(`examples/web-demos/wasm-build/wam_node_runner.mjs`), and in a browser with the
+`OfflineAudioContext` fixture under `examples/web-demos/wasm-build/browser-test/`
+(see its README). The runtime JS — the AudioWorklet processor, the main-thread
+`WebAudioModule`, and the shared heap bridge — lives in
+`core/format/src/wasm/` (`wam-processor.js`, `wam-plugin.js`, `wam-runtime.mjs`).
+
+`tools/cmake/PulpWasm.cmake` remains a separate app/standalone WASM helper; it is
+not the WAM plugin path.
 
 ### Option 2: WebCLAP (WASI SDK)
 

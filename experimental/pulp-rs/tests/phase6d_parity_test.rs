@@ -45,6 +45,10 @@ fn run_in(dir: &Path, args: &[&str]) -> std::process::Output {
         .expect("binary")
         .current_dir(dir)
         .args(args)
+        // These tests pin the Rust-native/stub surface. They should
+        // not change result based on whether this checkout also has a
+        // discoverable `pulp-cpp` binary.
+        .env(pulp_rs::fallthrough::DISABLE_ENV, "1")
         .env_remove("NO_COLOR")
         .output()
         .expect("run")

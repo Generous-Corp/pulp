@@ -63,7 +63,8 @@ enum Command {
     /// Delegate to `shipyard pr`.
     Pr(PrArgs),
 
-    /// Manage the Pulp SDK cache (`status`, `clean`).
+    /// Manage the Pulp SDK cache (`status`, `clean`, delegated install/listing).
+    #[command(disable_help_flag = true)]
     Sdk(SdkArgs),
 
     /// Configure + build via `cmake`; watch/validate branches
@@ -267,11 +268,9 @@ struct PrArgs {
 
 #[derive(clap::Args, Debug)]
 struct SdkArgs {
-    /// Subcommand: `status`, `clean`, `install`, or empty for help.
-    subcommand: Option<String>,
-    /// Emit JSON output instead of human text where supported.
-    #[arg(long)]
-    json: bool,
+    /// SDK subcommand and flags. `install` / `available` delegate to `pulp-cpp`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -499,12 +498,26 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(cmd::pr::run(&parsed, root.as_deref(), &mut out))
         }
         Command::Sdk(args) => {
-            let slice: Vec<String> = args.subcommand.clone().into_iter().collect();
-            let sub = cmd::sdk::parse_sub(&slice).map_err(|_| {
-                eprintln!("pulp-rs sdk: unknown subcommand");
-                ExitCode::from(2)
+            let parsed = cmd::sdk::parse_args(&args.tail).map_err(|e| match e {
+                CliError::UnknownSubcommand => {
+                    eprintln!("pulp-rs sdk: unknown subcommand");
+                    ExitCode::from(2)
+                }
+                CliError::BadUsage(msg) => {
+                    eprintln!("{msg}");
+                    ExitCode::from(2)
+                }
+                other => {
+                    eprintln!("pulp-rs sdk: {other}");
+                    ExitCode::from(2)
+                }
             })?;
-            cmd::sdk::run(sub, args.json, &mut out).map_err(|e| map_err(&e))
+            map_exit(cmd::sdk::run_with_tail_exit(
+                parsed.sub,
+                parsed.json,
+                &args.tail,
+                &mut out,
+            ))
         }
         Command::Build(args) => {
             let parsed = cmd::orchestrate::parse_build_args(&args.tail);

@@ -21,6 +21,7 @@
 // introduced) inline with the bump report.
 
 #include "cmd_project_internal.hpp"
+#include "shell_redirect.hpp"
 #include "migration_index.hpp"
 #include "projects_registry.hpp"
 

@@ -5,6 +5,7 @@
 // helpers that `do_bump`, `do_undo`, and `do_unpin` all depend on.
 
 #include "cmd_project_internal.hpp"
+#include "shell_redirect.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -72,22 +73,6 @@ BumpOptions parse_bump_options(const std::vector<std::string>& args,
         return opts;
     }
     return opts;
-}
-
-const char* stderr_to_null() {
-#if defined(_WIN32)
-    return " 2>NUL";
-#else
-    return " 2>/dev/null";
-#endif
-}
-
-const char* output_to_null() {
-#if defined(_WIN32)
-    return " >NUL 2>&1";
-#else
-    return " >/dev/null 2>&1";
-#endif
 }
 
 // ── Help text ───────────────────────────────────────────────────────────────
