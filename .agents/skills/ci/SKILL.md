@@ -113,6 +113,25 @@ lanes, and verify a runner is actually busy before blaming capacity.
 
 ## GitHub workflow gotchas
 
+- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
+  intent-trailer model — and it ships DORMANT.** It exists to kill the
+  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
+  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
+  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
+  version files, and this workflow assigns the exact number after merge from
+  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
+  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
+  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
+  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
+  Two things must be verified before the **phase-2** flip (a separate, reviewed
+  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
+  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
+  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
+  squash-merge into main's commit message. The workflow has a recursion guard
+  (skips its own `chore: bump versions` commit) and a `concurrency` group so
+  near-simultaneous merges bump the version line one at a time. The
+  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
+  like a PR-side bump.
 - **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
   test.** `hotspot_size_guard.json` freezes its LOC, but it is a *test
   registration manifest* that legitimately grows whenever a new

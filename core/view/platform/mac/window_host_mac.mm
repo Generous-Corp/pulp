@@ -1,3 +1,5 @@
+// Per-binary-unique ObjC class names (see header).
+#include "pulp_mac_objc_names.h"
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>

@@ -330,15 +330,14 @@ struct ScopedAuV3HostWriting {
     // (Obj-C method file scope).
     pulp::format::maybe_synthesize_bypass(_bridge.store, _bridge.host_quirks);
 
-    // Auto-detect a plugin-declared Bypass parameter so the host's
+    // Auto-detect the plugin's Bypass parameter so the host's
     // `shouldBypassEffect` AUValue and the plugin's automatable parameter stay
-    // in lockstep. Match the same heuristic VST3 uses for `kIsBypass`:
-    // name == "Bypass", boolean range 0..1 with step >= 1. When found, the
-    // AUv3 surface mirrors it.
+    // in lockstep. Uses the shared `is_bypass_param` contract: a declared
+    // `Bypass` designation wins, otherwise the legacy name/range heuristic
+    // (name == "Bypass", boolean range 0..1 with step >= 1) applies. When
+    // found, the AUv3 surface mirrors it.
     for (const auto& p : _bridge.store.all_params()) {
-        if (p.name == "Bypass" &&
-            p.range.min == 0.0f && p.range.max == 1.0f &&
-            p.range.step >= 1.0f) {
+        if (pulp::state::is_bypass_param(p)) {
             _bridge.bypass_param_id = p.id;
             break;
         }
@@ -994,6 +993,12 @@ struct ScopedAuV3HostWriting {
                                 frameCount * sizeof(float));
                 }
             }
+            // Trigger reset is a single-exit invariant: settle Reset/trigger
+            // params even on the bypass short-circuit so a panic/reset raised
+            // while bypassed clears this block. The parameter tree's
+            // implementorValueProvider reads the store live, so the host
+            // reflects the settled value on its next poll.
+            bridge->store.reset_triggers_rt();
             return noErr;
         }
 
@@ -1129,6 +1134,11 @@ struct ScopedAuV3HostWriting {
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
             bridge->processor->process(process_buffers, midi_in, midi_out, ctx);
         }
+
+        // Return trigger / momentary params (panic, reset, tap) to their
+        // default now that the Processor has observed this block, so the
+        // host's parameter tree reads the control settled back on its own.
+        bridge->store.reset_triggers_rt();
 
         // Drain RT-safe pending flags the processor may have set during
         // process() and publish them via KVO. AUAudioUnit exposes `latency`

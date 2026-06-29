@@ -8,6 +8,10 @@
 
 #import <Cocoa/Cocoa.h>
 
+// Per-binary-unique ObjC class names (renames PulpView and friends when a
+// shipped binary defines PULP_VIEW_OBJC_SUFFIX). Must precede the @interface.
+#include "pulp_mac_objc_names.h"
+
 // Shared private interface for the macOS host's NSView implementation.
 // Method bodies stay split across focused .mm files to keep the main host
 // implementation below the hotspot-size ceiling.

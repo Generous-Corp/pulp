@@ -68,6 +68,12 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
                // Allowed: prompt | auto | off. Default: prompt.
                key == "bump_projects";
     }
+    if (section == "upgrade") {
+        // breaking_notes: when on (default), `pulp project bump` shows a
+        // proactive banner if the hop crosses a breaking migration note,
+        // pointing at `pulp upgrade --notes --json`. Allowed: true | false.
+        return key == "breaking_notes";
+    }
     if (section == "import_design") {
         return key == "default_mode" || key == "default_emit";
     }
@@ -122,6 +128,10 @@ std::string validate_value(const std::string& section,
         if (value == "on" || value == "off") return {};
         return "claude.send_user_file must be one of: on, off";
     }
+    if (section == "upgrade" && key == "breaking_notes") {
+        if (value == "true" || value == "false") return {};
+        return "upgrade.breaking_notes must be one of: true, false";
+    }
     return {};
 }
 
@@ -144,6 +154,10 @@ int usage() {
     std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
     std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";
     std::cout << "                                CLI flags override these; env overrides below.\n";
+    std::cout << "\nSupported keys (upgrade section):\n";
+    std::cout << "  upgrade.breaking_notes        true | false                  (default: true)\n";
+    std::cout << "                                show the breaking-change banner on a project bump\n";
+    std::cout << "                                that crosses one (also: PULP_NO_BREAKING_NOTES=1)\n";
     std::cout << "\nSupported keys (claude section):\n";
     std::cout << "  claude.send_user_file         on | off                      (default: on)\n";
     std::cout << "                                When on, the Claude Code plugin surfaces generated\n";
@@ -301,6 +315,7 @@ int cmd_config(const std::vector<std::string>& args) {
         show("import_design", "default_mode", "live");
         show("import_design", "default_emit", "js");
         show("claude", "send_user_file", "on");
+        show("upgrade", "breaking_notes", "true");
         return 0;
     }
 

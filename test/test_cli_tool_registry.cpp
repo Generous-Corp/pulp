@@ -375,6 +375,135 @@ TEST_CASE("tool registry parses optional project-importer fields",
     REQUIRE(plain.health_check.empty());
 }
 
+TEST_CASE("tool registry parses in-tree python source_dir + module fields",
+          "[cli][tool-registry]") {
+    TempDir tmp;
+    // An IN-TREE python tool installs from a repo-relative source dir rather
+    // than a PyPI release, and runs a specific `-m` module from its wrapper.
+    write_file(tmp.path / "source.json", R"({
+  "schema_version": 1,
+  "tools": {
+    "in-tree-tool": {
+      "display_name": "In-Tree Tool",
+      "category": "python_tool",
+      "install_method": "python_pip",
+      "source_dir": "tools/audio/quality-lab",
+      "module": "quality_lab.cli",
+      "pinned_version": "0.1.0",
+      "requires_tools": ["uv"]
+    },
+    "pypi-tool": {
+      "display_name": "PyPI Tool",
+      "category": "python_tool",
+      "install_method": "python_pip",
+      "pip_package": "somepkg",
+      "pinned_version": "1.2.3"
+    }
+  }
+})");
+    auto loaded = load_tool_registry(tmp.path / "source.json");
+    REQUIRE(loaded.error.empty());
+
+    const auto& src = loaded.registry.tools.at("in-tree-tool");
+    REQUIRE(src.source_dir == "tools/audio/quality-lab");
+    REQUIRE(src.module == "quality_lab.cli");
+    REQUIRE(src.pip_package.empty());            // source install needs no PyPI name
+    REQUIRE(src.requires_tools == std::vector<std::string>{"uv"});
+
+    // A classic PyPI tool leaves source_dir/module empty (defaults).
+    const auto& pypi = loaded.registry.tools.at("pypi-tool");
+    REQUIRE(pypi.source_dir.empty());
+    REQUIRE(pypi.module.empty());
+    REQUIRE(pypi.pip_package == "somepkg");
+}
+
+TEST_CASE("shipped registry registers audio-quality-lab as an in-tree python tool",
+          "[cli][tool-registry]") {
+    // Guard the real registry entry so a rename/typo in source_dir or module
+    // (which would break `pulp tool install audio-quality-lab`) fails a test.
+    auto reg_path = find_tool_registry_path();
+    if (reg_path.empty() || !fs::exists(reg_path)) {
+        SUCCEED("tool-registry.json not locatable in this build layout");
+        return;
+    }
+    auto loaded = load_tool_registry(reg_path);
+    REQUIRE(loaded.error.empty());
+    auto it = loaded.registry.tools.find("audio-quality-lab");
+    REQUIRE(it != loaded.registry.tools.end());
+    REQUIRE(it->second.install_method == "python_pip");
+    REQUIRE(it->second.source_dir == "tools/audio/quality-lab");
+    REQUIRE(it->second.module == "quality_lab.cli");
+}
+
+TEST_CASE("python install spec + run module resolve in-tree vs PyPI tools",
+          "[cli][tool-registry]") {
+    // The pip-install target and the `python -m <module>` the wrapper runs are
+    // the core of the install branch; exercise the resolution directly.
+    SECTION("in-tree tool installs from <repo_root>/<source_dir>") {
+        ToolDescriptor t;
+        t.source_dir = "tools/audio/quality-lab";
+        t.module = "quality_lab.cli";
+        t.pip_package = "";            // source install carries no PyPI name
+        t.pinned_version = "0.1.0";
+        REQUIRE(python_pip_install_spec(t, fs::path("/repo")) ==
+                (fs::path("/repo") / "tools/audio/quality-lab").string());
+        REQUIRE(python_run_module(t) == "quality_lab.cli");
+    }
+    SECTION("classic PyPI tool installs <pip_package>==<version>, runs that module") {
+        ToolDescriptor t;
+        t.pip_package = "pydub";
+        t.pinned_version = "0.25.1";
+        REQUIRE(python_pip_install_spec(t, fs::path("/repo")) == "pydub==0.25.1");
+        REQUIRE(python_run_module(t) == "pydub");  // module defaults to pip_package
+    }
+    SECTION("module overrides pip_package for the run wrapper (yt-dlp -> yt_dlp)") {
+        ToolDescriptor t;
+        t.pip_package = "yt-dlp";
+        t.module = "yt_dlp";
+        t.pinned_version = "2025.3.31";
+        REQUIRE(python_pip_install_spec(t, fs::path("/repo")) == "yt-dlp==2025.3.31");
+        REQUIRE(python_run_module(t) == "yt_dlp");
+    }
+}
+
+TEST_CASE("python install fails cleanly when an in-tree source_dir is absent",
+          "[cli][tool-registry]") {
+    // A user with only the `pulp` binary (no source checkout) must get a clear
+    // message, not a raw pip failure or a half-made venv. Point a source_dir
+    // tool at a registry whose repo root has no such directory.
+    TempDir tmp;
+    // repo_root_from_registry() = <dir of registry>/../.. , so a registry at
+    // tmp/tools/packages/ gives repo_root = tmp. The source_dir below resolves
+    // under tmp and is intentionally absent.
+    fs::create_directories(tmp.path / "tools" / "packages");
+    auto reg_path = tmp.path / "tools" / "packages" / "tool-registry.json";
+    write_file(reg_path, R"({
+  "schema_version": 1,
+  "tools": {
+    "uv": { "display_name": "uv", "category": "runtime", "install_method": "binary_download" },
+    "ghost-tool": {
+      "display_name": "Ghost Tool",
+      "category": "python_tool",
+      "install_method": "python_pip",
+      "source_dir": "tools/audio/does-not-exist",
+      "module": "ghost.cli",
+      "pinned_version": "0.1.0",
+      "requires_tools": ["uv"]
+    }
+  }
+})");
+    auto loaded = load_tool_registry(reg_path);
+    REQUIRE(loaded.error.empty());
+    const auto& ghost = loaded.registry.tools.at("ghost-tool");
+
+    // The guard runs before any uv/venv work, so this returns a clean error
+    // (not a raw pip failure) without needing uv on the test machine.
+    auto result = install_python_tool(ghost, loaded.registry, reg_path, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("does-not-exist") != std::string::npos);
+    REQUIRE(result.error.find("source checkout") != std::string::npos);
+}
+
 TEST_CASE("tool registry accepts empty and partial descriptor shapes",
           "[cli][tool-registry][issue-643]") {
     TempDir tmp;
@@ -634,7 +763,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     py.install_method = "python_pip";
     py.pip_package = "py_tool";
     py.pinned_version = "1.0.0";
-    auto no_uv = install_python_tool(py, missing_uv, /*force=*/false);
+    auto no_uv = install_python_tool(py, missing_uv, fs::path{}, /*force=*/false);
     REQUIRE_FALSE(no_uv.ok);
     REQUIRE(no_uv.error == "UV not found in tool registry");
 
@@ -652,7 +781,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
 #endif
     touch_file(wrapper);
 
-    auto existing_py = install_python_tool(py, with_uv, /*force=*/false);
+    auto existing_py = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE(existing_py.ok);
     REQUIRE(existing_py.binary_path == wrapper);
     REQUIRE(existing_py.installed_version == py.pinned_version);
@@ -667,7 +796,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     {
         ScopedEnv path{"PATH", tmp.path / "empty-path"};
         ScopedOutput output;
-        auto uv_bootstrap_failed = install_python_tool(py, uv_unavailable, /*force=*/false);
+        auto uv_bootstrap_failed = install_python_tool(py, uv_unavailable, fs::path{}, /*force=*/false);
         REQUIRE_FALSE(uv_bootstrap_failed.ok);
         REQUIRE(output.out.str().find("Installing UV") != std::string::npos);
         REQUIRE(uv_bootstrap_failed.error.find("Failed to install UV: UV is not available for ") ==
@@ -675,7 +804,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     }
 
     fs::remove(wrapper);
-    auto missing_wrapper = install_python_tool(py, with_uv, /*force=*/false);
+    auto missing_wrapper = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE_FALSE(missing_wrapper.ok);
     REQUIRE(missing_wrapper.binary_path == wrapper);
     REQUIRE(missing_wrapper.installed_version == py.pinned_version);

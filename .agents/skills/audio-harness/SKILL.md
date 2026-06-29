@@ -296,15 +296,31 @@ work is open-ended (e.g. additional analysis verbs), not a tracked backlog.
 
 This skill covers presence / level / THD / response. For **reference-vs-candidate
 perceptual artifact** detection — "did this DSP change make it sound *worse*?"
-(transient smear, seam clicks) — there is a separate **opt-in** developer/CI tool,
-`tools/audio/quality-lab/` (Python, numpy + soundfile). It is additive: it does NOT
-change anything here and is never required to run the basic harness or `ctest`.
+(transient smear, dulling, metallic fizz, graininess) — there is a separate **opt-in**
+developer/CI tool, `tools/audio/quality-lab/` (Python, numpy + soundfile). It is
+additive: it does NOT change anything here and is never required to run the basic
+harness or `ctest`.
 
-- Run: `cd tools/audio/quality-lab && python -m quality_lab.cli run-p0a --mode bad`.
-- The P0a slice aligns a candidate to a reference (onset-map + local cross-correlation),
-  runs a transient-sharpness detector, and writes a `report.json` with per-onset
-  localization, coverage/confidence, and provenance.
-- Credibility: the detector is validated against an *independent* textbook phase
-  vocoder (`reference_pv.py`), not just its own synthetic degradation.
+- **Install (managed):** `pulp tool install audio-quality-lab` — provisions an isolated
+  venv under `~/.pulp/tools/` (the same `pulp tool` lane as `ffmpeg`/`uv`/importers;
+  `pulp tool list` shows it). Then `pulp tool run audio-quality-lab -- <args>`. A plain
+  `cd tools/audio/quality-lab && pip install -r requirements.txt` venv works identically.
+- **Subcommands** (after `python -m quality_lab.cli` or `pulp tool run audio-quality-lab --`):
+  `run --case {drum,tonal} --degradation <kind>` (synthetic case + listenable clips),
+  `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
+  on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
+  `corpus list|add` (versioned, license-guarded corpus).
+- Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
+  detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`), and
+  writes a `report.json` with per-onset localization, coverage/confidence, and provenance.
+- Credibility: detectors are validated against an *independent* textbook phase vocoder
+  (`reference_pv.py`) AND the real product engine, not just their own synthetic degradation.
+- **`engine`/`engine-baseline` need a built `stretchcli`.** `engine.resolve()` finds it via,
+  in order: the `PULP_STRETCHCLI` env-path, a `build/examples/offline-stretch/stretchcli`
+  found by **walking up from the current directory** (so the engine path works even when the
+  lab is `pulp tool install`-ed into a managed venv, as long as you run it from a Pulp
+  checkout that built stretchcli), then the package-relative repo build. Absent → a clean,
+  actionable `skipped` (build command + env-path), never a failure. Build it with
+  `cmake --build build --target stretchcli`.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.

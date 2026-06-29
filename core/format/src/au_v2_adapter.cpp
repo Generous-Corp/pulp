@@ -95,8 +95,9 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
             // ProcessBufferLists can honor it with a pass-through.
             maybe_synthesize_bypass(store_, host_quirks_);
             for (const auto& p : store_.all_params()) {
-                if (p.name == "Bypass" && p.range.step >= 1.0f &&
-                    p.range.min == 0.0f && p.range.max == 1.0f) {
+                // Declared designation wins; falls back to the legacy
+                // name/range heuristic for params that declare none.
+                if (state::is_bypass_param(p)) {
                     bypass_param_id_ = p.id;
                     break;
                 }
@@ -564,6 +565,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         // dropped with the block.
         while (midi_in_queue_.try_pop()) {}
         while (sysex_in_queue_.try_pop()) {}
+        // Trigger reset is a single-exit invariant: settle Reset/trigger params
+        // even on the bypass short-circuit, so a panic/reset raised while
+        // bypassed clears this block instead of firing on the next active one.
+        // GetParameter reads the store directly, so the host sees it settled.
+        store_.reset_triggers_rt();
         return noErr;
     }
 
@@ -647,6 +653,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in, midi_out, ctx);
     }
+
+    // Return trigger / momentary params (panic, reset, tap) to their default
+    // now that the Processor has observed this block. GetParameter reads the
+    // store directly, so the host sees the control settle back automatically.
+    store_.reset_triggers_rt();
 
     // Deliver any MIDI the Processor emitted this block to the host via the
     // installed kAudioUnitProperty_MIDIOutputCallback. Outside the ScopedNoAlloc

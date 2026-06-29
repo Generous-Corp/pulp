@@ -201,6 +201,8 @@ commands:
         args:
           - name: --url
             required: true
+          - name: --download-url
+            required: false
           - name: --version
             required: false
           - name: --notes
@@ -1686,6 +1688,8 @@ commands:
           - name: --local
             kind: flag
             required: false
+      - name: available
+        summary: List SDK versions available on GitHub releases
       - name: status
         summary: Show cached and locally-built SDK versions
       - name: clean

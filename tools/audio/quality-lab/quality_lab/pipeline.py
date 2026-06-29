@@ -225,8 +225,8 @@ def run_real_engine(
     from . import engine
 
     if not engine.available():
-        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
-                "reason": "stretchcli not built"}
+        skip = engine.stretch("", "", ratio)  # carries the actionable not-found reason
+        return {"verdict": "SKIPPED", "engine": skip, "reason": skip["reason"]}
 
     sr = int(case.params["sr"])
     with tempfile.TemporaryDirectory() as d:
@@ -273,8 +273,8 @@ def run_real_audio(
     from .detectors import hf_fizz, spectral_centroid, spectral_flux
 
     if not engine.available():
-        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
-                "reason": "stretchcli not built"}
+        skip = engine.stretch("", "", ratio)  # carries the actionable not-found reason
+        return {"verdict": "SKIPPED", "engine": skip, "reason": skip["reason"]}
     if not os.path.exists(input_wav):
         return {"verdict": "ERROR", "reason": f"input not found: {input_wav}"}
 
