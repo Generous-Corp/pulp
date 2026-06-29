@@ -8,16 +8,22 @@
 #       -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build
 #
-# Output: build/PulpGain.wasm — a WebCLAP module exporting clap_entry +
-# malloc/free/cabi_realloc + a growable function table + shared memory.
+# Output:
+#   build/PulpGain.wasm        — the bare WebCLAP module (exports clap_entry +
+#                                malloc/free/cabi_realloc + a growable function
+#                                table + shared memory). Used by the probe/host.
+#   build/PulpGain.wclap/      — the distributable bundle (module.wasm + any
+#                                resources), per free-audio/web-clap. Emitted as
+#                                a post-build step by pulp_add_wclap when node is
+#                                available.
+#   build/PulpGain.wclap.tar.gz — the web-distribution archive of the bundle.
 #
 # Validate the module is live (instantiate, run _initialize, resolve clap_entry):
-#   node ../../../core/format/src/wasm/wclap_probe.mjs build/PulpGain.wasm
+#   node ../../../core/format/src/wasm/wclap_probe.mjs build/PulpGain.wclap/module.wasm
 #
-# Host it for real — full CLAP lifecycle + audio + parameter control (needs
-# WebAssembly.Function, hence the Node flag):
-#   node --experimental-wasm-type-reflection \
-#     ../../../core/format/src/wasm/wclap_host_runner.mjs build/PulpGain.wasm --gain-db 6
+# Host it for real — full CLAP lifecycle + audio + parameter control (plain node;
+# the host vtable uses trampolines, no WebAssembly.Function):
+#   node ../../../core/format/src/wasm/wclap_host_runner.mjs build/PulpGain.wasm --gain-db 6
 #
 # The WebCLAP build logic (portable DSP/adapter source set, link flags, the
 # clap_entry/allocator export contract) lives in tools/cmake/PulpWclap.cmake —
