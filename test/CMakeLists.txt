@@ -1218,6 +1218,22 @@ if(NOT WIN32)
     target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+# DSP hot reload — watch->reload dev loop (Phase 1). Reuses the compatible /
+# incompatible logic fixtures (above); the test copies them to a watched temp
+# path and drives ReloadController::poll().
+pulp_add_test_suite(pulp-test-reload-controller LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-controller
+    pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reload-controller PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    # Watch a path inside the build tree, NOT /tmp: macOS dyld kills a process
+    # that dlopens an unsigned .dylib from a world-writable temp dir.
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-controller PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
