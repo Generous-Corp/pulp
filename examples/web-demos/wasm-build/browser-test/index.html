@@ -1,0 +1,46 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Pulp WAM Browser Test</title>
+<style>body{font-family:system-ui;background:#11111b;color:#cdd6f4;padding:24px}
+#status{font-size:18px;margin:12px 0} .ok{color:#a6e3a1}.fail{color:#f38ba8}
+pre{background:#1e1e2e;padding:12px;border-radius:8px;white-space:pre-wrap}</style></head>
+<body>
+<h2>Pulp WAMv2 — browser load + render test</h2>
+<div id="status">running…</div>
+<div id="gui"></div>
+<pre id="log"></pre>
+<script type="module">
+import PulpWAM from "./wam-plugin.js";
+const log=(m)=>{document.getElementById("log").textContent+=m+"\n";console.log(m);};
+const setStatus=(m,ok)=>{const s=document.getElementById("status");s.textContent=m;s.className=ok?"ok":"fail";};
+const result={steps:[],pass:false}; window.__result=result;
+const step=(name,cond,detail="")=>{result.steps.push({name,pass:!!cond,detail});log((cond?"ok   ":"FAIL ")+name+(detail?" — "+detail:""));};
+(async()=>{ try{
+  const SR=48000, BLOCKS=64, LEN=128*BLOCKS;
+  const ctx=new OfflineAudioContext(2,LEN,SR);
+  log("OfflineAudioContext "+SR+"Hz "+LEN+" frames");
+  const wam=await PulpWAM.createInstance(ctx,null,{dsp:"./wam-dsp.js",processor:"./wam-processor.js"});
+  step("plugin instantiated",!!wam.audioNode);
+
+  const src=ctx.createConstantSource(); src.offset.value=0.5;
+  src.connect(wam.audioNode); wam.audioNode.connect(ctx.destination); src.start();
+  const buf=await ctx.startRendering();
+
+  // Audio may be silent in the first blocks (async DSP init); inspect the tail.
+  const L=buf.getChannelData(0), R=buf.getChannelData(1);
+  const tailStart=Math.floor(LEN*0.5);
+  let peakL=0,peakR=0,finite=true,nan=false;
+  for(let i=tailStart;i<LEN;i++){const a=L[i],b=R[i];
+    if(!Number.isFinite(a)||!Number.isFinite(b)){finite=false;if(Number.isNaN(a)||Number.isNaN(b))nan=true;}
+    peakL=Math.max(peakL,Math.abs(a));peakR=Math.max(peakR,Math.abs(b));}
+  step("render produced full buffer",buf.length===LEN);
+  step("output finite (no NaN/Inf)",finite,nan?"NaN":"");
+  step("output non-silent",peakL>0.01,"peakL="+peakL.toFixed(4));
+  step("unity passthrough ~0.5",Math.abs(peakL-0.5)<0.05,"peakL="+peakL.toFixed(4)+" peakR="+peakR.toFixed(4));
+  step("descriptor reported",wam.descriptor&&wam.descriptor.name==="PulpGain",JSON.stringify(wam.descriptor));
+
+  const gui=await wam.createGui(); document.getElementById("gui").appendChild(gui);
+  step("gui element rendered",!!gui&&!!gui.querySelector("h3"));
+
+  result.pass=result.steps.every(s=>s.pass);
+  setStatus(result.pass?"ALL BROWSER CHECKS PASSED ✓":"SOME CHECKS FAILED ✗",result.pass);
+ }catch(e){ result.error=String(e&&e.stack||e); step("uncaught exception",false,String(e)); setStatus("ERROR: "+e,false);} })();
+</script></body></html>
