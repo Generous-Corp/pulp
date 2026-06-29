@@ -63,6 +63,12 @@ public:
         View::on_focus_changed(gained);
         if (!gained) ++lost_count;
     }
+    // The editor grabs the DAW keyboard ONLY for a focused TEXT field. Defaults
+    // true so the existing contract tests model a type-in; flip to false to model
+    // a focused NON-text widget (a ComboBox dropdown, a focusable container) that
+    // must NOT steal the host keyboard.
+    bool accepts_text_input() const override { return text_input; }
+    bool text_input = true;
     int lost_count = 0;
 };
 
@@ -168,6 +174,69 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while
             REQUIRE(window.firstResponder == host_field);
         }
 
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+// A focused NON-text widget (a ComboBox dropdown, a focusable container/root)
+// must NOT make the editor grab the DAW keyboard — only a real text type-in
+// does. Regression: clicking the sampler's Direction/Loop dropdown focused a
+// focusable ComboBox, which left the editor first responder and swallowed every
+// later key, so Logic transport (Space/R) AND Musical Typing (QWERTY → notes)
+// died until the user clicked away. Pins acceptsFirstResponder/syncKeyFocus to
+// `accepts_text_input()`, not mere focusability.
+TEST_CASE("PluginViewHost (mac CPU) — a focused non-text widget does NOT steal "
+          "the DAW keyboard",
+          "[plugin-view-host][key-focus][mac][cpu][non-text-focus]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — non-text-focus contract test skipped.");
+            return;
+        }
+
+        FocusRecordingView root;
+        PluginViewHost::Options opts;
+        opts.size = {800u, 600u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        PulpTestHostField* host_field =
+            [[PulpTestHostField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+        [window.contentView addSubview:host_field];
+        REQUIRE([window makeFirstResponder:host_field]);
+
+        // Model clicking a focusable NON-text widget (e.g. the Direction dropdown):
+        // it claims the focus slot, but accepts_text_input() is false.
+        root.text_input = false;
+        root.claim_input_focus();
+        [pulp_view syncKeyFocus];
+        // The editor must NOT take the keyboard — the host keeps it (transport keys
+        // + Musical Typing keep working).
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == host_field);
+
+        // Flipping the same focused widget to a text field DOES grab — proving the
+        // gate is the text-input capability, not the focus slot alone.
+        root.text_input = true;
+        [pulp_view syncKeyFocus];
+        REQUIRE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == pulp_view);
+
+        root.release_input_focus();
+        [pulp_view syncKeyFocus];
         host->detach();
         host.reset();
         [window close];

@@ -303,6 +303,20 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root) {
     return nullptr;
 }
 
+// Whether to grab the DAW keyboard: ONLY while a focused widget under this root
+// actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
+// widget — a ComboBox dropdown, a focusable container/root — must NOT make the
+// plugin steal the keyboard, or the host loses transport keys (Space/R) AND its
+// Musical Typing (e.g. clicking the Direction/Loop dropdown left the editor first
+// responder, swallowing every later key so QWERTY notes stopped reaching Logic).
+// This matches acceptsFirstResponder's own contract ("ONLY while a pulp text field
+// is focused") — the focusable check alone was too broad. (pulp: AU hosted-view
+// key routing.)
+static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
+    auto* fv = pulp_focus_under_root(root);
+    return fv != nullptr && fv->accepts_text_input();
+}
+
 bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
@@ -548,12 +562,12 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // working while the plugin editor is open — a plugin must not hijack the DAW
     // keyboard. (The standalone uses a different window host that drives its own
     // QWERTY musical typing; this path is DAW-only.)
-    return pulp_focus_under_root(self.rootView) != nullptr;
+    return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
     if (!win) return;
-    const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
+    const bool wants = pulp_text_input_focused_under_root(self.rootView);
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
     } else if (!wants && win.firstResponder == self) {
@@ -1206,12 +1220,12 @@ private:
     // DAW-only path: take the keyboard ONLY while a pulp text field is focused, so
     // the host keeps transport keys (Space/R) + Musical Typing. See
     // PulpPluginView::acceptsFirstResponder.
-    return pulp_focus_under_root(self.rootView) != nullptr;
+    return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
     if (!win) return;
-    const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
+    const bool wants = pulp_text_input_focused_under_root(self.rootView);
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
     } else if (!wants && win.firstResponder == self) {
