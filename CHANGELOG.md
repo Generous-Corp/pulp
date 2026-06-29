@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05341"></a>
+## [0.534.1] - 2026-06-29
+
+- test/upgrade banner shellout ([#5289](https://github.com/danielraffel/pulp/pull/5289))
+- ci: scrub stale Windows runner registration ([#5074](https://github.com/danielraffel/pulp/pull/5074))
+- fix/macos render objc namespacing ([#5264](https://github.com/danielraffel/pulp/pull/5264))
+
 <a id="v05340"></a>
 ## [0.534.0] - 2026-06-29
 
@@ -5606,6 +5613,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.534.1]: https://github.com/danielraffel/pulp/releases/tag/v0.534.1
 [0.534.0]: https://github.com/danielraffel/pulp/releases/tag/v0.534.0
 [0.533.1]: https://github.com/danielraffel/pulp/releases/tag/v0.533.1
 [0.533.0]: https://github.com/danielraffel/pulp/releases/tag/v0.533.0
