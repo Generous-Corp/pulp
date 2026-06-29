@@ -1806,6 +1806,12 @@ Gotchas:
   fall-through to `pulp-cpp sdk install` (see `pulp-rs/src/cmd/sdk.rs`);
   the C++ `cmd_sdk` is a different code path with its own per-version
   `~/.pulp/sdk/<version>/` layout. #1814 fix lives only in `cmd_cache`.
+- **Rust SDK fallthrough must capture the whole subcommand tail.**
+  `pulp sdk install --version X.Y.Z`, `pulp sdk install --local`, and
+  `pulp sdk available` are C++ SDK branches today. The Rust front end
+  must not let clap reject those flags/tokens before `cmd/sdk.rs` can
+  delegate to `pulp-cpp`; keep `SdkArgs` as a trailing-var-arg capture
+  and add parser tests for any new delegated SDK subcommand.
 - **Checkout-backed SDK builds force dev probes off.** `ensure_checkout_sdk`
   configures local SDK builds with `-DPULP_ENABLE_AUDIO_PROBES=OFF` so
   `pulp sdk install --local` and checkout-backed standalone resolution do not
