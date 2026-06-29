@@ -63,6 +63,31 @@ downloading anything. `pulp upgrade --notes --json` emits the same data
 as a stable-shape JSON document for agent consumption (the `/upgrade`
 slash command is the primary consumer).
 
+### Agent pre-flight on an SDK pin change (inherit breaks before you hit them)
+
+When you (an agent) are about to work in a project whose pinned Pulp SDK
+version has moved — or you are the one moving it — run this FIRST, before
+editing or building code against the new pin:
+
+```bash
+pulp upgrade --notes --json --from <OLD> --to <NEW>
+```
+
+The top-level `has_breaking` (bool) and `breaking_count` (int) are the signal
+to branch on without parsing every entry:
+
+- `has_breaking: false` → nothing to inherit; proceed normally.
+- `has_breaking: true` → read each `breaking: true` entry's `body` and adapt
+  the code (renamed CMake macros, changed APIs, moved config) BEFORE building,
+  instead of waiting to hit the break as a compile error.
+
+`pulp project bump` already prints these notes after a pin change and, when the
+hop crosses a breaking note, shows a banner pointing here. The banner is on by
+default; a user can silence it with `pulp config set upgrade.breaking_notes
+false` or `PULP_NO_BREAKING_NOTES=1`. The JSON `has_breaking` / `breaking_count`
+fields are always present regardless of that setting — only `breaking = true`
+notes raise them, so a normal feature release is silent (low-noise by design).
+
 Use `pulp project pin` only after deciding a consumer project should
 move its SDK pin. It operates on the active project or the registry
 (`--all`); it does not upgrade the global CLI and it refuses to treat

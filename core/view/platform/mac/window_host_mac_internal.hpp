@@ -27,6 +27,11 @@ struct WindowOptions;
 
 #import <Cocoa/Cocoa.h>
 
+// Per-binary-unique ObjC class names (renames PulpView when a shipped binary
+// defines PULP_VIEW_OBJC_SUFFIX); keeps geometry helpers in sync with the
+// PulpView @implementation in window_host_mac.mm.
+#include "pulp_mac_objc_names.h"
+
 namespace pulp::view::mac_geometry {
 
 // ── Window lifecycle / configuration ─────────────────────────────────

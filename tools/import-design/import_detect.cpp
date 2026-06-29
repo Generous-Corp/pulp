@@ -542,12 +542,10 @@ NewFormatReport build_new_format_report(const ImportsManifest& manifest,
     r.candidate_source = closest.source;
     r.based_on_source = closest.source;
     r.based_on_format_version = closest.format_version;
-    // Placeholder candidate version. Caller hand-edits before
-    // committing to compat.json.
     if (!closest.format_version.empty())
         r.candidate_format_version = closest.format_version + "+next";
     else
-        r.candidate_format_version = "TODO-set-version";
+        r.candidate_format_version.clear();
 
     // Diff tailwind tokens against the closest format's any-of list.
     std::set<std::string> known;
