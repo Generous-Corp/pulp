@@ -38,21 +38,33 @@ set(CMAKE_LINKER "${WASI_SDK_PREFIX}/bin/wasm-ld")
 # Sysroot
 set(CMAKE_SYSROOT "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 
-# Target triple — wasm32-wasi with threads support
+# Target triple — wasm32-wasi with threads support. The threaded sysroot is the
+# only one whose libc++ tolerates the pthread primitives Pulp's runtime pulls in;
+# its libc++abi ships WITHOUT an exception runtime, which is why -fno-exceptions
+# below is mandatory, not a size optimization.
 set(WASI_TARGET "wasm32-wasi-threads")
 set(CMAKE_C_COMPILER_TARGET "${WASI_TARGET}")
 set(CMAKE_CXX_COMPILER_TARGET "${WASI_TARGET}")
 
-# Compile flags
-set(CMAKE_C_FLAGS_INIT "-fno-exceptions")
-set(CMAKE_CXX_FLAGS_INIT "-fno-exceptions -fno-rtti")
+# Compile flags.
+# - -fno-exceptions / -fno-rtti: the threaded sysroot has no EH/RTTI runtime.
+# - -pthread: matches the threaded target's TLS / atomics ABI.
+# - _WASI_EMULATED_SIGNAL: the runtime references signal symbols the bare
+#   wasi-libc omits; the emulation shim (linked below) provides them.
+set(CMAKE_C_FLAGS_INIT "-fno-exceptions -pthread -D_WASI_EMULATED_SIGNAL")
+set(CMAKE_CXX_FLAGS_INIT "-fno-exceptions -fno-rtti -pthread -D_WASI_EMULATED_SIGNAL")
 
-# WebAssembly-specific flags for WCLAP
-# - Export function table (required by WebCLAP hosts)
-# - Shared memory for threading support
-# - Reactor mode (no main(), entry via clap_entry)
+# WebAssembly-specific link flags for a WebCLAP module:
+# - reactor mode: no _start; the host drives the module through clap_entry.
+# - export/growable function table: WebCLAP hosts call plugin callbacks through it.
+# - shared + imported + exported memory with a fixed max: the threaded target
+#   requires a shared memory, and WebCLAP hosts supply it as an import.
+# - wasi-emulated-signal: provides the omitted signal symbols.
 set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "-Wl,--export-table -Wl,--growable-table -mexec-model=reactor"
+    "-mexec-model=reactor -lwasi-emulated-signal \
+     -Wl,--export-table -Wl,--growable-table \
+     -Wl,--shared-memory -Wl,--import-memory -Wl,--export-memory \
+     -Wl,--max-memory=1073741824"
 )
 
 # Don't try to run test executables
