@@ -16,6 +16,7 @@
 #include "../examples/pulp-gain/pulp_gain.hpp"
 
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,39 @@ float rms(const std::vector<float>& v, int count) {
     double s = 0.0;
     for (int i = 0; i < count; ++i) s += static_cast<double>(v[i]) * v[i];
     return static_cast<float>(std::sqrt(s / count));
+}
+
+// Minimal instrument that proves MIDI reaches the processor through the bridge:
+// it outputs 1.0 once any MIDI event has been delivered, 0.0 before.
+class MidiProbe : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return pulp::format::PluginDescriptor{
+            .name = "MidiProbe",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+            .accepts_midi = true,
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        total_midi += static_cast<int>(midi_in.size());
+        const float v = total_midi > 0 ? 1.0f : 0.0f;
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            auto ch = out.channel(c);
+            for (std::size_t i = 0; i < out.num_samples(); ++i) ch[i] = v;
+        }
+    }
+    int total_midi = 0;
+};
+std::unique_ptr<pulp::format::Processor> make_midi_probe() {
+    return std::make_unique<MidiProbe>();
 }
 } // namespace
 
@@ -119,4 +153,22 @@ TEST_CASE("WAM bridge gain parameter and state round-trip", "[wam]") {
     bridge.set_parameter_value("1", -12.0f);
     REQUIRE(bridge.set_state(saved.data(), saved.size()));
     REQUIRE(bridge.get_parameter_value("1") == Catch::Approx(7.0f).margin(1e-3f));
+}
+
+TEST_CASE("WAM bridge delivers scheduled MIDI to the processor", "[wam]") {
+    WamProcessorBridge bridge(make_midi_probe);
+    REQUIRE(bridge.initialize(48000.0, 128));
+
+    constexpr int CH = 2, FR = 128, N = CH * FR;
+    std::vector<float> in(N, 0.0f), out(N, -1.0f);
+
+    // No MIDI yet -> the probe outputs silence.
+    bridge.process(in.data(), out.data(), CH, FR);
+    REQUIRE(out[0] == Catch::Approx(0.0f).margin(1e-6f));
+
+    // Schedule a note-on; the bridge must route it into the processor's midi_in,
+    // which the probe reflects by driving its output high.
+    bridge.schedule_midi(0x90, 60, 100, 0);
+    bridge.process(in.data(), out.data(), CH, FR);
+    REQUIRE(out[0] == Catch::Approx(1.0f).margin(1e-6f));
 }
