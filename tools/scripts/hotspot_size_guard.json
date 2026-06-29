@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6215,
+      "max_loc":     6237,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
