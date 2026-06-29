@@ -125,8 +125,11 @@ target_compile_definitions(pulp-wclap-dsp PUBLIC PULP_WCLAP=1 PULP_WASM=1)
 # Emits <Name>.wasm exporting clap_entry + malloc/free/cabi_realloc + a growable
 # function table + shared memory (the WebCLAP host contract). The reactor model,
 # memory, and table link flags come from wasi-toolchain.cmake.
+# Locate node once for the optional post-build bundling step.
+find_program(_PULP_WCLAP_NODE node)
+
 function(pulp_add_wclap NAME)
-    cmake_parse_arguments(ARG "" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(ARG "" "ENTRY;RESOURCES" "SOURCES;INCLUDES" ${ARGN})
     if(NOT ARG_ENTRY)
         message(FATAL_ERROR "pulp_add_wclap(${NAME}): ENTRY <entry.cpp> is required.")
     endif()
@@ -145,4 +148,28 @@ function(pulp_add_wclap NAME)
         OUTPUT_NAME "${NAME}"
         SUFFIX ".wasm"
         LINK_FLAGS "-Wl,--export=clap_entry -Wl,--no-entry")
+
+    # Emit the distributable WebCLAP bundle (<Name>.wclap/ with module.wasm +
+    # resources, per free-audio/web-clap) as a post-build step. The bare .wasm
+    # stays for the probe/host; the bundle is what a WebCLAP host or web
+    # distribution consumes. Requires node (the packager is JS); skipped with a
+    # status message otherwise so the wasm build never hard-fails on its absence.
+    if(_PULP_WCLAP_NODE)
+        set(_pack_args
+            "${_PULP_WCLAP_NODE}"
+            "${_PULP_WCLAP_ROOT}/core/format/src/wasm/pack-wclap.mjs"
+            --wasm "$<TARGET_FILE:${NAME}-wclap>"
+            --name "${NAME}"
+            --out "${CMAKE_CURRENT_BINARY_DIR}"
+            --tar)
+        if(ARG_RESOURCES)
+            list(APPEND _pack_args --resources "${ARG_RESOURCES}")
+        endif()
+        add_custom_command(TARGET ${NAME}-wclap POST_BUILD
+            COMMAND ${_pack_args}
+            COMMENT "Packaging ${NAME}.wclap bundle"
+            VERBATIM)
+    else()
+        message(STATUS "PulpWclap: node not found — skipping ${NAME}.wclap bundle (bare .wasm only).")
+    endif()
 endfunction()
