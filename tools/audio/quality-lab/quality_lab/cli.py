@@ -44,6 +44,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         report = pipeline.run(args.degradation, case=case,
                               latency_ms=args.latency_ms, smear_ms=args.smear_ms)
+    if getattr(args, "review", False):
+        from . import reviewer
+        reviewer.attach(report)  # advisory only — never changes the verdict
     if args.out:
         with open(args.out, "w") as f:
             f.write(json.dumps(report, indent=2))
@@ -56,6 +59,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"  {d['name']:20s} {d['scalar']:.3f} {d['unit']:20s} [{flag}]{adv}")
     if report.get("listening", {}).get("regions"):
         print(f"  listening: {len(report['listening']['regions'])} region clip(s) in {args.out_dir}")
+    for rv in report.get("advisory", {}).get("reviewers", []):
+        if rv.get("status") == "ok":
+            arts = ", ".join(rv.get("suspected_artifacts", [])) or "(none named)"
+            print(f"  reviewer (advisory, not a gate): {arts} — conf={rv.get('confidence')}")
+        else:
+            print(f"  reviewer (advisory): {rv.get('status')} — {rv.get('reason','')}")
     return 0
 
 
@@ -150,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="write reference/candidate WAVs + worst-region clip pairs here")
     rn.add_argument("--smear-ms", type=float, default=8.0, dest="smear_ms")
     rn.add_argument("--latency-ms", type=float, default=5.0, dest="latency_ms")
+    rn.add_argument("--review", action="store_true",
+                    help="run the opt-in advisory reviewer (PULP_QLAB_REVIEWER_CMD); never a gate")
     rn.set_defaults(func=_cmd_run)
 
     re = sub.add_parser("engine", help="validate the REAL Pulp stretch engine (stretchcli)")

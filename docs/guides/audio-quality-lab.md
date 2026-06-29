@@ -135,6 +135,9 @@ commands need nothing extra).
   new, unproven detector can be tuned on real audio without risking a false regression.
 - **Provenance** — each report records the engine commit, recipe, and determinism context,
   so a render you liked maps back to how it was made.
+- **Advisory reviewer (opt-in)** — a developer-supplied model (`PULP_QLAB_REVIEWER_CMD`, run
+  with `run --review`) can add a plain-language "what sounds wrong" under the report's
+  `advisory` block. It is **never a gate** — it cannot change the verdict.
 - **License fence** — heavier or copyleft tools (perceptual models, reference stretchers)
   are reached only via an explicit env-path and never bundled; the committed corpus stays
   permissively licensed.
