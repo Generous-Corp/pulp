@@ -23,7 +23,7 @@ WUSER="${TARTCI_WIN_SSH_USER:-admin}"
 REPO="${PULP_RUNNER_REPO:-danielraffel/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,Windows,ARM64,pulp-build-windows}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
-RUNNER_VERSION="${PULP_RUNNER_VERSION:-2.334.0}"
+RUNNER_VERSION="${PULP_RUNNER_VERSION:-2.335.1}"
 WORKROOT="${TARTCI_WIN_WORK:-${TMPDIR:-/tmp}/tartci-win}"
 LOOP=0; POLL="${PULP_VM_POLL:-20}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o IdentitiesOnly=yes -o BatchMode=yes)
@@ -105,13 +105,23 @@ run_one(){ # $1=iteration index
   local enc_install enc_run
   enc_install="$(printf '%s' '$ProgressPreference="SilentlyContinue"
 $dir="C:\actions-runner"
-if (-not (Test-Path "$dir\bin\Runner.Listener.exe")) {
+$runnerVersion="'"$RUNNER_VERSION"'"
+$listener="$dir\bin\Runner.Listener.exe"
+$currentVersion=""
+if (Test-Path $listener) {
+  try { $currentVersion = ((& $listener --version 2>$null | Select-Object -First 1).Trim()) } catch { $currentVersion = "" }
+}
+if ($currentVersion -ne $runnerVersion) {
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $dir
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $url="https://github.com/actions/runner/releases/download/v'"$RUNNER_VERSION"'/actions-runner-win-arm64-'"$RUNNER_VERSION"'.zip"
+  $url="https://github.com/actions/runner/releases/download/v$runnerVersion/actions-runner-win-arm64-$runnerVersion.zip"
   Invoke-WebRequest -Uri $url -OutFile "$dir\r.zip"
   Expand-Archive -Path "$dir\r.zip" -DestinationPath $dir -Force
   Remove-Item "$dir\r.zip"
 }
+# Goldens may carry stale runner registration files from an older proof. JIT
+# configs are single-use; leave only the runner binaries before each fresh boot.
+Remove-Item -Force -ErrorAction SilentlyContinue "$dir\.runner","$dir\.credentials","$dir\.credentials_rsaparams","$dir\.env","$dir\.path","$dir\jit.cfg"
 # Integrity gate: the agent binary must exist after install. The download is
 # over authenticated HTTPS and Expand-Archive rejects a corrupt/truncated zip,
 # but this catches a partial extract loudly rather than failing opaquely at run.

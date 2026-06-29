@@ -275,6 +275,9 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
             "category": tool.category,
             "description": tool.description,
             "install_method": tool.install_method,
+            "pip_package": tool.pip_package,
+            "source_dir": tool.source_dir,
+            "module": tool.module,
             "install_scope": tool.install_scope,
             "distribution_lane": tool.distribution_lane,
             "package_format": tool.package_format,
@@ -308,6 +311,12 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
         writeln!(out, "{}\n", tool.description).map_err(io)?;
     }
     writeln!(out, "Install method: {}", tool.install_method).map_err(io)?;
+    if !tool.source_dir.is_empty() {
+        writeln!(out, "Source dir: {}", tool.source_dir).map_err(io)?;
+    }
+    if !tool.module.is_empty() {
+        writeln!(out, "Run module: {}", tool.module).map_err(io)?;
+    }
     if !tool.install_scope.is_empty() {
         writeln!(out, "Install scope: {}", tool.install_scope).map_err(io)?;
     }

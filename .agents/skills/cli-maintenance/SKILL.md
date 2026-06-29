@@ -391,6 +391,26 @@ contract: `--run` executes the resolved tool path with no forwarded arguments
 and returns its exit code. For `npm_package` tools, that path is the
 `run.{sh,bat}` wrapper smoke check.
 
+### `pulp tool install <in-tree python tool>` — `source_dir` install
+
+A Python tool that lives **inside this repo** (not on PyPI) registers as a
+normal `python_pip` entry but adds two descriptor fields:
+
+- `source_dir` — repo-relative package dir (with a `pyproject.toml`), e.g.
+  `tools/audio/quality-lab`. When set, `install_python_tool` pip-installs that
+  directory (resolved via `repo_root_from_registry(find_tool_registry_path())`)
+  instead of `<pip_package>==<version>`. This mirrors the repo-local
+  `npm_package` precedent.
+- `module` — the `python -m <module>` the run wrapper invokes (e.g.
+  `quality_lab.cli`); defaults to `pip_package` for classic PyPI tools.
+
+The managed venv still lands under `$PULP_HOME/tools/python-envs/<id>/`, so
+`locate_tool` / `uninstall_tool` need no change. The tool's `pyproject.toml`
+owns its dependency list (mirror `requirements.txt`). Per the parity rule
+above, both new fields are also declared in `experimental/pulp-rs/src/tool_registry.rs`
+(serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
+tool info`/`list` round-trip them. First user: `audio-quality-lab`.
+
 ### Package suggestion and analyzer metadata commands
 
 Package search/suggestion code (`tools/cli/package_commands_search.cpp`) is a
@@ -739,15 +759,19 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
-## `pulp project pin / unpin / bump` shell helpers
+## CLI Git/CMake shell helpers
 
-`tools/cli/cmd_project.cpp` shells out to `git` / `cmake` from unit-tested
-helper paths, including Windows CI. Keep output redirection platform-aware:
-POSIX uses `/dev/null`, but Windows `cmd.exe` needs `NUL`. Do not add raw
-`2>/dev/null` or `>/dev/null 2>&1` in this file; route new call sites through
-the local null-redirection helpers instead. Otherwise Windows Namespace can
-misreport clean/dirty git state or fail origin-main probes even though the
-same tests pass on macOS/Linux.
+`tools/cli/cmd_project_common.cpp` and `tools/cli/cmd_misc.cpp` shell out to
+`git` / `cmake` from unit-tested helper paths, including Windows CI. Keep
+output redirection platform-aware: POSIX uses `/dev/null`, but Windows
+`cmd.exe` needs `NUL`. Do not add raw `2>/dev/null` or `>/dev/null 2>&1` in
+these files; route new call sites through the shared `stderr_to_null()` or
+`output_to_null()` helpers in `tools/cli/shell_redirect.*` instead. Otherwise
+Windows can leak "The system cannot find the path specified." into stderr,
+misreport clean/dirty git state, or fail origin-main probes even though the
+same tests pass on macOS/Linux. The `pulp status quotes source checkout paths
+before reading Git metadata` test covers the stderr contract locally; Windows
+CI is the platform proof for the null-device behavior.
 
 ### pin / unpin / floating SDK mode
 
@@ -1786,6 +1810,12 @@ Gotchas:
   fall-through to `pulp-cpp sdk install` (see `pulp-rs/src/cmd/sdk.rs`);
   the C++ `cmd_sdk` is a different code path with its own per-version
   `~/.pulp/sdk/<version>/` layout. #1814 fix lives only in `cmd_cache`.
+- **Rust SDK fallthrough must capture the whole subcommand tail.**
+  `pulp sdk install --version X.Y.Z`, `pulp sdk install --local`, and
+  `pulp sdk available` are C++ SDK branches today. The Rust front end
+  must not let clap reject those flags/tokens before `cmd/sdk.rs` can
+  delegate to `pulp-cpp`; keep `SdkArgs` as a trailing-var-arg capture
+  and add parser tests for any new delegated SDK subcommand.
 - **Checkout-backed SDK builds force dev probes off.** `ensure_checkout_sdk`
   configures local SDK builds with `-DPULP_ENABLE_AUDIO_PROBES=OFF` so
   `pulp sdk install --local` and checkout-backed standalone resolution do not

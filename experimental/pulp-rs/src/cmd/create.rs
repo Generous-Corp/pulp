@@ -12,8 +12,9 @@
 //! |   `--debug`)                                    |             |
 //! | Name derivation (class / lower / namespace /    | Ported      |
 //! |   plugin-code / mfr-code / bundle id)           |             |
-//! | Output directory resolution (`--output` / in-   | Ported      |
-//! |   tree `examples/<name>` / standalone)          |             |
+//! | Output directory resolution (`--output` /        | Ported      |
+//! |   `PULP_PROJECTS_DIR` / `[create].projects_dir`  |             |
+//! |   / in-tree `examples/<name>` / standalone)      |             |
 //! | Template expansion (`{{VAR}}` substitution)     | Ported      |
 //! | Format-gated template file skip (`CLAP`/`VST3`/ | Ported      |
 //! |   `LV2`/`AU`/`AAX`)                             |             |
@@ -47,11 +48,15 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use rand::RngCore;
 
 use crate::error::{CliError, Result};
+
+mod create_output;
+
+use create_output::resolve_out_dir;
 
 /// Parsed argument surface for `pulp-rs create`.
 #[derive(Debug, Clone)]
@@ -375,88 +380,6 @@ pub fn default_formats(kind: &str) -> String {
 }
 
 // ── Scaffolding ──────────────────────────────────────────────────────
-
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            _ => out.push(component.as_os_str()),
-        }
-    }
-    out
-}
-
-fn path_is_within(path: &Path, root: &Path) -> bool {
-    lexical_normalize(path).starts_with(lexical_normalize(root))
-}
-
-/// Resolve an output directory given the parsed args + project root
-/// (when in-tree).
-///
-/// # Errors
-///
-/// [`CliError::BadUsage`] when in-tree mode is used outside a checkout
-/// or when the output path collides with an existing directory or violates
-/// create's standalone/in-tree containment policy.
-pub fn resolve_out_dir(args: &CreateArgs, root: Option<&Path>, cwd: &Path) -> Result<PathBuf> {
-    let lower = to_lower_name(&args.name);
-    let out_dir = if let Some(o) = args.output.as_deref() {
-        if o.is_absolute() {
-            o.to_path_buf()
-        } else {
-            cwd.join(o)
-        }
-    } else if args.in_tree {
-        let Some(root) = root else {
-            return Err(CliError::BadUsage(
-                "Error: --in-tree/--example can only be used from inside the Pulp repo".to_owned(),
-            ));
-        };
-        root.join("examples").join(&lower)
-    } else {
-        // Standalone default: alongside the Pulp repo root when known,
-        // otherwise cwd. Matches C++ `resolve_create_projects_base_dir`
-        // collapsed to the common case.
-        let base = root
-            .and_then(Path::parent)
-            .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
-        base.join(&lower)
-    };
-
-    if args.in_tree {
-        let Some(root) = root else {
-            return Err(CliError::BadUsage(
-                "Error: --in-tree/--example can only be used from inside the Pulp repo".to_owned(),
-            ));
-        };
-        let examples_root = root.join("examples");
-        if !path_is_within(&out_dir, &examples_root) {
-            return Err(CliError::BadUsage(format!(
-                "Error: --in-tree projects must live under {}",
-                examples_root.display()
-            )));
-        }
-    } else if let Some(root) = root {
-        if path_is_within(&out_dir, root) {
-            return Err(CliError::BadUsage(format!(
-                "Error: standalone product projects must live outside the Pulp repo\n  Use --in-tree to scaffold under examples/, or choose --output outside\n  {}",
-                root.display()
-            )));
-        }
-    }
-
-    if out_dir.exists() {
-        return Err(CliError::BadUsage(format!(
-            "Error: {} already exists",
-            out_dir.display()
-        )));
-    }
-    Ok(out_dir)
-}
 
 /// Emit the project into `out_dir`.
 ///
@@ -879,11 +802,7 @@ mod tests {
             "project({{CLASS_NAME}})\n",
         )
         .unwrap();
-        fs::write(
-            templates.join("test.cpp.template"),
-            "t={{LOWER_NAME}}\n",
-        )
-        .unwrap();
+        fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
     }
 
     #[test]
@@ -1043,65 +962,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_out_dir_rejects_in_tree_without_root() {
-        let td = tempfile::tempdir().unwrap();
-        let args = CreateArgs {
-            name: "demo".to_owned(),
-            in_tree: true,
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        let err = resolve_out_dir(&args, None, td.path()).unwrap_err();
-        assert!(err.to_string().contains("--in-tree"));
-    }
-
-    #[test]
-    fn resolve_out_dir_rejects_existing_dir() {
-        let td = tempfile::tempdir().unwrap();
-        let existing = td.path().join("parent").join("demo");
-        fs::create_dir_all(&existing).unwrap();
-        let args = CreateArgs {
-            name: "demo".to_owned(),
-            output: Some(existing),
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        let err = resolve_out_dir(&args, None, td.path()).unwrap_err();
-        assert!(err.to_string().contains("already exists"));
-    }
-
-    #[test]
-    fn resolve_out_dir_rejects_standalone_inside_checkout() {
-        let td = tempfile::tempdir().unwrap();
-        let root = td.path().join("pulp");
-        fs::create_dir_all(&root).unwrap();
-        let args = CreateArgs {
-            name: "Inside".to_owned(),
-            output: Some(root.join("build/generated")),
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
-        assert!(err.to_string().contains("standalone product projects"));
-    }
-
-    #[test]
-    fn resolve_out_dir_rejects_in_tree_output_outside_examples() {
-        let td = tempfile::tempdir().unwrap();
-        let root = td.path().join("pulp");
-        fs::create_dir_all(root.join("examples")).unwrap();
-        let args = CreateArgs {
-            name: "Outside".to_owned(),
-            output: Some(td.path().join("outside")),
-            in_tree: true,
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
-        assert!(err.to_string().contains("--in-tree projects must live under"));
-    }
-
-    #[test]
     fn run_errors_when_name_missing() {
         let td = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
@@ -1222,7 +1082,10 @@ mod tests {
             "--targets".to_owned(),
             "android,ios".to_owned(),
         ]);
-        assert_eq!(p.output.as_deref().map(Path::to_str), Some(Some("/tmp/out")));
+        assert_eq!(
+            p.output.as_deref().map(Path::to_str),
+            Some(Some("/tmp/out"))
+        );
         assert_eq!(p.targets, vec!["android", "ios"]);
     }
 
@@ -1245,11 +1108,7 @@ mod tests {
 
     #[test]
     fn parse_args_first_non_flag_wins_as_name() {
-        let p = parse_args(&[
-            "first".to_owned(),
-            "second".to_owned(),
-            "third".to_owned(),
-        ]);
+        let p = parse_args(&["first".to_owned(), "second".to_owned(), "third".to_owned()]);
         assert_eq!(p.name, "first");
     }
 
@@ -1347,34 +1206,5 @@ mod tests {
         let stdout = String::from_utf8(buf).unwrap();
         assert!(stdout.contains("--pin/--debug only takes effect in the full create path"));
         assert!(stdout.contains("ignored by the native --ci scaffold path"));
-    }
-
-    #[test]
-    fn resolve_out_dir_uses_explicit_output_when_absolute() {
-        let td = tempfile::tempdir().unwrap();
-        let abs = td.path().join("nested/out");
-        let args = CreateArgs {
-            name: "Foo".to_owned(),
-            output: Some(abs.clone()),
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        // Absolute --output wins regardless of root/cwd.
-        let cwd = std::env::temp_dir();
-        let resolved = resolve_out_dir(&args, None, &cwd).unwrap();
-        assert_eq!(resolved, abs);
-    }
-
-    #[test]
-    fn resolve_out_dir_resolves_relative_output_against_cwd() {
-        let td = tempfile::tempdir().unwrap();
-        let args = CreateArgs {
-            name: "Foo".to_owned(),
-            output: Some(PathBuf::from("relout")),
-            ci_mode: true,
-            ..CreateArgs::default()
-        };
-        let resolved = resolve_out_dir(&args, None, td.path()).unwrap();
-        assert_eq!(resolved, td.path().join("relout"));
     }
 }

@@ -142,6 +142,28 @@ int compare_semver(const SemverTriple& a, const SemverTriple& b);
 // Used by the downgrade gate. Safe on non-ok inputs (returns false).
 bool is_downgrade(const std::string& from, const std::string& to);
 
+// ── Breaking-change banner decision ──────────────────────────────────────────
+//
+// The post-bump report prints a "⚠ N breaking change(s)" banner when the
+// version hop crosses one or more `breaking = true` migration notes. The
+// banner is ON by default and suppressed when EITHER:
+//   - the env var `PULP_NO_BREAKING_NOTES` carries a TRUTHY value
+//     ("1" / "true" / "on" / "yes"), so `=0` / empty does not silence it; OR
+//   - the user config `upgrade.breaking_notes` is an OFF value
+//     ("false" / "0" / "off" / "no").
+//
+// These pure predicates encode that precedence so it can be unit-tested
+// without env/config IO. `env_value` mirrors `std::getenv` semantics: pass
+// nullptr when the variable is unset (treated as "not suppressed").
+bool breaking_banner_suppressed(const char* env_value,
+                                const std::string& config_value);
+
+// True iff the banner should be shown: at least one breaking note in the hop
+// AND not suppressed by env or config.
+bool should_show_breaking_banner(std::size_t breaking_count,
+                                 const char* env_value,
+                                 const std::string& config_value);
+
 // ── Undo batch ──────────────────────────────────────────────────────────────
 //
 // Every successful `pulp project bump` writes an undo file at

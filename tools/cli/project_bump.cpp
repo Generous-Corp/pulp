@@ -205,6 +205,26 @@ bool is_downgrade(const std::string& from, const std::string& to) {
     return compare_semver(b, a) < 0;
 }
 
+bool breaking_banner_suppressed(const char* env_value,
+                                const std::string& config_value) {
+    // Suppress only on a TRUTHY env value, so PULP_NO_BREAKING_NOTES=0 (or
+    // empty / unset) does not silently disable the banner — matches the
+    // documented `=1` usage.
+    const std::string env_v = env_value ? env_value : "";
+    const bool env_off =
+        (env_v == "1" || env_v == "true" || env_v == "on" || env_v == "yes");
+    const bool cfg_off = (config_value == "false" || config_value == "0" ||
+                          config_value == "off" || config_value == "no");
+    return env_off || cfg_off;
+}
+
+bool should_show_breaking_banner(std::size_t breaking_count,
+                                 const char* env_value,
+                                 const std::string& config_value) {
+    if (breaking_count == 0) return false;
+    return !breaking_banner_suppressed(env_value, config_value);
+}
+
 // Find a pin literal between start and end in `src` looking for the
 // first token after `anchor` matching a pin-ish shape. Returns
 // (start, end) substring range covering the literal, or (0,0) on

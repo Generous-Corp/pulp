@@ -42,6 +42,7 @@ add_executable(pulp-cli
     cli_common.cpp
     cli_delegate.cpp
     shell_quote.cpp
+    shell_redirect.cpp
     cli_sdk.cpp
     cli_doctor_helpers.cpp
     cmd_build.cpp

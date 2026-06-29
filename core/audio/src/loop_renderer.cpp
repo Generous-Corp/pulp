@@ -36,9 +36,11 @@ bool LoopRenderer::set_region(const LoopRegion& region,
 }
 
 void LoopRenderer::reset() noexcept {
-    position_ = region_.playback_mode == LoopPlaybackMode::Reverse
+    position_ = (region_.playback_mode == LoopPlaybackMode::Reverse ||
+                 region_.playback_mode == LoopPlaybackMode::ReverseOnce)
                     ? static_cast<double>(region_.end_frame - 1)
                     : static_cast<double>(region_.start_frame);
+    pingpong_dir_ = 1;  // PingPong starts moving forward from start_frame
     start_fade_position_ = 0;
     stop_fade_position_ = 0;
     active_ = false;
@@ -46,9 +48,11 @@ void LoopRenderer::reset() noexcept {
 }
 
 void LoopRenderer::start() noexcept {
-    position_ = region_.playback_mode == LoopPlaybackMode::Reverse
+    position_ = (region_.playback_mode == LoopPlaybackMode::Reverse ||
+                 region_.playback_mode == LoopPlaybackMode::ReverseOnce)
                     ? static_cast<double>(region_.end_frame - 1)
                     : static_cast<double>(region_.start_frame);
+    pingpong_dir_ = 1;  // PingPong starts moving forward from start_frame
     start_fade_position_ = 0;
     stop_fade_position_ = 0;
     active_ = true;
@@ -71,9 +75,13 @@ void LoopRenderer::set_playback_rate(double rate) noexcept {
 }
 
 double LoopRenderer::effective_step() const noexcept {
-    if (region_.playback_mode == LoopPlaybackMode::Reverse &&
+    if ((region_.playback_mode == LoopPlaybackMode::Reverse ||
+         region_.playback_mode == LoopPlaybackMode::ReverseOnce) &&
         playback_rate_ > 0.0) {
         return -playback_rate_;
+    }
+    if (region_.playback_mode == LoopPlaybackMode::PingPong) {
+        return playback_rate_ * static_cast<double>(pingpong_dir_);
     }
     return playback_rate_;
 }
@@ -109,7 +117,11 @@ float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
                                           double step,
                                           bool& wrapped) const noexcept {
     if (region_.playback_mode == LoopPlaybackMode::OneShot ||
+        region_.playback_mode == LoopPlaybackMode::ReverseOnce ||
+        region_.playback_mode == LoopPlaybackMode::PingPong ||
         region_.crossfade_frames == 0) {
+        // PingPong reflects at the boundaries (advance_position), so the signal is
+        // already continuous across the turn-arounds — no wrap-crossfade needed.
         return LoopReader::read_validated(source, region_, output_channel, position);
     }
 
@@ -165,9 +177,33 @@ float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
     return LoopReader::read_validated(source, region_, output_channel, normalized);
 }
 
-double LoopRenderer::advance_position(double position, double step, bool& wrapped) const noexcept {
+double LoopRenderer::advance_position(double position, double step, bool& wrapped) noexcept {
     const auto next = position + step;
-    if (region_.playback_mode == LoopPlaybackMode::OneShot) return next;
+    // OneShot and ReverseOnce play once and stop — no wrap.
+    if (region_.playback_mode == LoopPlaybackMode::OneShot ||
+        region_.playback_mode == LoopPlaybackMode::ReverseOnce)
+        return next;
+
+    if (region_.playback_mode == LoopPlaybackMode::PingPong) {
+        // Reflect at the loop boundaries and flip direction. Playable range is
+        // [start, last] with last = end - 1 (end is exclusive). Reflect any
+        // overshoot back into range so the position stays valid every frame.
+        const auto start = static_cast<double>(region_.start_frame);
+        const auto last = static_cast<double>(region_.end_frame) - 1.0;
+        if (last <= start) return start;  // degenerate 1-frame region
+        double reflected = next;
+        if (reflected > last) {
+            reflected = last - (reflected - last);  // bounce off the top
+            pingpong_dir_ = -1;
+            wrapped = true;
+        } else if (reflected < start) {
+            reflected = start + (start - reflected);  // bounce off the bottom
+            pingpong_dir_ = 1;
+            wrapped = true;
+        }
+        // A step larger than the loop could overshoot the far side too; clamp.
+        return std::clamp(reflected, start, last);
+    }
 
     if (step >= 0.0 && next >= static_cast<double>(region_.end_frame)) wrapped = true;
     if (step < 0.0 && next < static_cast<double>(region_.start_frame)) wrapped = true;
@@ -187,7 +223,7 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
     const auto valid_source =
         source.num_channels() > 0 &&
         validate_loop_region(region_, static_cast<std::uint64_t>(source.num_samples())).ok;
-    const auto step = effective_step();
+    auto step = effective_step();  // PingPong re-reads this after each reflection (dir flips)
 
     for (std::uint64_t i = 0; i < output_frames; ++i) {
         const bool should_advance = active_ && valid_source;
@@ -216,7 +252,10 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
 
         if (should_advance) {
             position_ = advance_position(position_, step, sample_wrapped);
-            if (region_.playback_mode == LoopPlaybackMode::OneShot &&
+            if (region_.playback_mode == LoopPlaybackMode::PingPong)
+                step = effective_step();  // direction may have flipped at a boundary
+            if ((region_.playback_mode == LoopPlaybackMode::OneShot ||
+                 region_.playback_mode == LoopPlaybackMode::ReverseOnce) &&
                 (position_ < static_cast<double>(region_.start_frame) ||
                  position_ >= static_cast<double>(region_.end_frame))) {
                 active_ = false;

@@ -5,6 +5,7 @@
 
 #include "cli_common.hpp"
 #include "sdk_cache_paths.hpp"
+#include "shell_redirect.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -239,9 +240,9 @@ int cmd_status(const std::vector<std::string>& args) {
     }
 
     auto branch = exec_output("git -C " + shell_quote(root.string()) +
-                              " branch --show-current 2>/dev/null");
+                              " branch --show-current" + stderr_to_null());
     auto commit = exec_output("git -C " + shell_quote(root.string()) +
-                              " log --oneline -1 2>/dev/null");
+                              " log --oneline -1" + stderr_to_null());
     if (!branch.empty()) std::cout << "Branch: " << branch << "\n";
     if (!commit.empty()) std::cout << "Commit: " << commit << "\n";
 

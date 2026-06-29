@@ -300,8 +300,17 @@ StateStore::~StateStore() {
 
 void StateStore::add_parameter(const ParamInfo& info) {
     auto index = params_.size();
-    params_.push_back(info);
-    values_.emplace_back(info.range.default_value);
+    // Clamp the declared default into [min, max] so the stored default is
+    // consistent with set_value()/reset_to_default() (both clamp). Without this,
+    // a parameter declared with an out-of-range default would serialize an
+    // out-of-range value that deserialize() then clamps — a silent state
+    // round-trip failure. Clamping the ParamInfo too keeps get_default()/info()
+    // reporting the same effective default that the store actually holds.
+    ParamInfo clamped = info;
+    clamped.range.default_value =
+        std::clamp(info.range.default_value, info.range.min, info.range.max);
+    params_.push_back(clamped);
+    values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
     // Cache trigger/momentary params so the audio-thread auto-reset after each
     // block touches only them, allocation-free. A Reset designation implies a

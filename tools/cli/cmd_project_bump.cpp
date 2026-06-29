@@ -21,10 +21,12 @@
 // introduced) inline with the bump report.
 
 #include "cmd_project_internal.hpp"
+#include "shell_redirect.hpp"
 #include "migration_index.hpp"
 #include "projects_registry.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <string>
@@ -410,6 +412,35 @@ void print_migration_notes(const pb::UndoBatch& batch) {
               << color::bold() << "Migration notes " << from
               << " -> " << batch.target_version << color::reset() << "\n\n";
     std::cout << mig::render_notes_text(entries, from, batch.target_version);
+
+    // Proactive breaking-change signal. When the hop crosses one or more
+    // `breaking = true` notes, surface a distinct banner that points agents (and
+    // humans) at the machine-readable view BEFORE they edit code against the new
+    // pin — so breaking-change knowledge is inherited, not stumbled onto. Only
+    // breaking notes trigger this, keeping it low-noise. On by default; silence
+    // with `pulp config set upgrade.breaking_notes false` or PULP_NO_BREAKING_NOTES=1.
+    std::size_t breaking = 0;
+    for (const auto* e : entries) if (e->breaking) ++breaking;
+    if (breaking == 0) return;
+    // Suppression precedence (env-truthy OR config-off) lives in the pure,
+    // unit-tested predicate so the banner's behavior is exercised without
+    // env/config IO.
+    const char* env = std::getenv("PULP_NO_BREAKING_NOTES");
+    const std::string cfg = read_user_config_value("upgrade", "breaking_notes");
+    if (pb::breaking_banner_suppressed(env, cfg)) return;
+    std::cout << "\n"
+              << color::yellow() << color::bold()
+              << "⚠ " << breaking << " breaking change"
+              << (breaking == 1 ? "" : "s") << " in this hop"
+              << color::reset() << "\n"
+              << "  Before editing code against the new pin, review the breaking "
+                 "notes above.\n"
+              << "  Agents: `pulp upgrade --notes --json --from " << from
+              << " --to " << batch.target_version
+              << "` exposes has_breaking / breaking_count to act on first.\n"
+              << color::dim()
+              << "  (silence: pulp config set upgrade.breaking_notes false)"
+              << color::reset() << "\n";
 }
 
 }  // namespace

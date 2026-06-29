@@ -27,11 +27,43 @@ requires_engine = pytest.mark.skipif(
 def test_engine_adapter_skips_cleanly_when_absent(monkeypatch):
     """Absence is graceful (mirrors the perceptual adapter): skipped, with a reason."""
     monkeypatch.setenv(engine.STRETCHCLI_ENV, "/nonexistent/stretchcli-xyz")
-    # Even with a bogus env-path, resolve() may still find the build-path binary; only
+    # Even with a bogus env-path, resolve() may still find a build-path binary; only
     # assert the *contract* of stretch() when no binary exists at all.
     if engine.resolve() is None:
         r = engine.stretch("a.wav", "b.wav", 2.0)
         assert r["status"] == "skipped" and "stretchcli" in r["reason"]
+        # The skip reason is actionable: names both the build command and the env-path.
+        assert "cmake --build" in r["reason"] and engine.STRETCHCLI_ENV in r["reason"]
+
+
+def _fake_stretchcli(root):
+    binary = root / "build" / "examples" / "offline-stretch" / "stretchcli"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text("#!/bin/sh\n")
+    return binary
+
+
+def test_resolve_walks_up_from_cwd_to_find_built_stretchcli(tmp_path, monkeypatch):
+    """A pip-installed lab (its __file__ in a managed venv) still finds a stretchcli
+    built in a Pulp checkout when run from inside that checkout — resolve() walks up
+    from the current directory, not just from the package location."""
+    monkeypatch.delenv(engine.STRETCHCLI_ENV, raising=False)
+    binary = _fake_stretchcli(tmp_path)
+    nested = tmp_path / "tools" / "audio" / "quality-lab"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    resolved = engine.resolve()
+    assert resolved is not None and os.path.samefile(resolved, str(binary))
+
+
+def test_env_path_takes_priority_over_cwd_walk(tmp_path, monkeypatch):
+    """An explicit PULP_STRETCHCLI override wins over a cwd-discovered build."""
+    _fake_stretchcli(tmp_path)  # a cwd-walk candidate also exists
+    env_binary = tmp_path / "custom-stretchcli"
+    env_binary.write_text("#!/bin/sh\n")
+    monkeypatch.setenv(engine.STRETCHCLI_ENV, str(env_binary))
+    monkeypatch.chdir(tmp_path)
+    assert os.path.samefile(engine.resolve(), str(env_binary))
 
 
 @requires_engine
