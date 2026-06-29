@@ -1427,6 +1427,7 @@ pulp sdk                                      # Show help
 pulp sdk install                              # Download and cache the pinned SDK from GitHub releases
 pulp sdk install --version 0.2.0              # Install a specific version
 pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
+pulp sdk available                            # List SDK versions available on GitHub releases
 pulp sdk status                               # Show cached and locally-built SDK versions
 pulp sdk clean                                # Remove all cached SDK versions
 ```
