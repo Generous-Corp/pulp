@@ -12,6 +12,11 @@
 #include <pulp/runtime/log.hpp>
 #import <Cocoa/Cocoa.h>
 
+// Per-binary-unique ObjC class names (renames PulpWindowAccessibilityElement
+// when a shipped binary defines PULP_VIEW_OBJC_SUFFIX). Must precede the first
+// reference to the class.
+#include "pulp_mac_objc_names.h"
+
 namespace pulp::view {
 
 // Map Pulp AccessRole to NSAccessibilityRole
@@ -40,13 +45,18 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
 } // namespace pulp::view
 
 // ── NSAccessibilityElement wrapper for each accessible View ─────────────────
+//
+// This is the standalone window host's accessibility element. The plug-in
+// editor host (plugin_view_host_mac.mm) defines its own PulpAccessibilityElement
+// with a different shape; the two intentionally carry distinct class names so a
+// binary that links both never registers the same ObjC class twice.
 
-@interface PulpAccessibilityElement : NSAccessibilityElement
+@interface PulpWindowAccessibilityElement : NSAccessibilityElement
 @property (nonatomic, assign) pulp::view::View* view;
 @property (nonatomic, unsafe_unretained) NSView* hostView;
 @end
 
-@implementation PulpAccessibilityElement
+@implementation PulpWindowAccessibilityElement
 
 - (NSAccessibilityRole)accessibilityRole {
     if (!_view) return NSAccessibilityUnknownRole;
@@ -146,14 +156,15 @@ namespace pulp::view {
 
 // Build accessibility elements for an NSView hosting a Pulp view tree.
 // Call this after layout changes to refresh the accessibility tree.
-// Returns an array of PulpAccessibilityElement* suitable for -accessibilityChildren.
+// Returns an array of PulpWindowAccessibilityElement* suitable for
+// -accessibilityChildren.
 NSArray* build_accessibility_elements(View& root, NSView* host) {
     std::vector<View*> accessible;
     collect_accessible(root, accessible);
 
     NSMutableArray* elements = [NSMutableArray arrayWithCapacity:accessible.size()];
     for (auto* v : accessible) {
-        PulpAccessibilityElement* el = [[PulpAccessibilityElement alloc] init];
+        PulpWindowAccessibilityElement* el = [[PulpWindowAccessibilityElement alloc] init];
         el.view = v;
         el.hostView = host;
         [elements addObject:el];

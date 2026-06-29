@@ -37,7 +37,11 @@ struct ToolDescriptor {
     std::string license;
     std::string install_method;  // "binary_download", "python_pip"
     std::map<std::string, BinarySource> binary_sources;
-    std::string pip_package;     // for python_pip
+    std::string pip_package;     // for python_pip (PyPI name); empty when installing from source_dir
+    std::string source_dir;      // repo-relative dir of an IN-TREE python_pip package
+                                 // (e.g. tools/audio/quality-lab) — when set, install
+                                 // pip-installs that directory instead of a PyPI release
+    std::string module;          // `python -m <module>` for the run wrapper; defaults to pip_package
     std::string npm_package_root; // repo-relative package root for npm_package
     std::string npm_default_script; // default script for npm_package wrapper
     std::string pinned_version;
@@ -147,7 +151,17 @@ ToolLocateResult locate_tool(const ToolDescriptor& tool);
 ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force = false);
 ToolInstallResult install_python_tool(const ToolDescriptor& tool,
                                        const ToolRegistry& registry,
+                                       const fs::path& registry_path,
                                        bool force = false);
+
+// The pip-install spec for a python_pip tool. An in-tree tool (`source_dir`
+// set) installs from `<repo_root>/<source_dir>`; a PyPI tool installs
+// "<pip_package>==<pinned_version>". Pure; exposed for testing.
+std::string python_pip_install_spec(const ToolDescriptor& tool,
+                                    const fs::path& repo_root);
+// The module the run wrapper invokes (`python -m <module>`): `module` when set,
+// else `pip_package`. Pure; exposed for testing.
+std::string python_run_module(const ToolDescriptor& tool);
 ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
                                    const fs::path& registry_path,
                                    bool force = false,

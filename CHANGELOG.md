@@ -8,6 +8,53 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05321"></a>
+## [0.532.1] - 2026-06-29
+
+- fix(cli): preserve sdk subcommand fallthrough ([#5034](https://github.com/danielraffel/pulp/pull/5034))
+- feat(tool): install the Audio Quality Lab via `pulp tool install` ([#5253](https://github.com/danielraffel/pulp/pull/5253))
+
+<a id="v05320"></a>
+## [0.532.0] - 2026-06-28
+
+- docs(import): refresh SwiftUI fallback wording ([#5249](https://github.com/danielraffel/pulp/pull/5249))
+- feat/upgrade breaking change agent signal ([#5221](https://github.com/danielraffel/pulp/pull/5221))
+- docs(cli): refresh config dispatcher comment ([#5248](https://github.com/danielraffel/pulp/pull/5248))
+- feat(ci): merge-time intent-trailer version bump (dormant phase 1) ([#5241](https://github.com/danielraffel/pulp/pull/5241))
+- fix(state): clamp parameter default to range at registration ([#5257](https://github.com/danielraffel/pulp/pull/5257))
+
+<a id="v05311"></a>
+## [0.531.1] - 2026-06-28
+
+- docs(cli): list package commands in top-level help ([#5255](https://github.com/danielraffel/pulp/pull/5255))
+- fix(import): avoid fake import-detect version placeholder ([#5256](https://github.com/danielraffel/pulp/pull/5256))
+- chore(cli): clarify import emit unresolved guidance ([#5251](https://github.com/danielraffel/pulp/pull/5251))
+- fix/macos objc class namespacing ([#5220](https://github.com/danielraffel/pulp/pull/5220))
+- docs(view): align conic gradient status ([#5233](https://github.com/danielraffel/pulp/pull/5233))
+- feat(ship): support appcast download URL override ([#5105](https://github.com/danielraffel/pulp/pull/5105))
+
+<a id="v05310"></a>
+## [0.531.0] - 2026-06-28
+
+- docs(cli): list operator commands in rust help ([#5247](https://github.com/danielraffel/pulp/pull/5247))
+- docs(view): refresh CSS compat narrative counts ([#5246](https://github.com/danielraffel/pulp/pull/5246))
+- feature/param designation ([#5243](https://github.com/danielraffel/pulp/pull/5243))
+- docs(host): remove stale automation smoothing TODO ([#5240](https://github.com/danielraffel/pulp/pull/5240))
+
+<a id="v05300"></a>
+## [0.530.0] - 2026-06-28
+
+- docs(import): clarify generated static control values ([#5238](https://github.com/danielraffel/pulp/pull/5238))
+- feat(format): AU v2 channel-config negotiation and MIDI output ([#5236](https://github.com/danielraffel/pulp/pull/5236))
+- test: remove corrupt Canvas2D bridge stubs ([#5237](https://github.com/danielraffel/pulp/pull/5237))
+- test(cli): escape audio assert fixture paths ([#5213](https://github.com/danielraffel/pulp/pull/5213))
+- fix(view): skip redundant hot reloads ([#5216](https://github.com/danielraffel/pulp/pull/5216))
+- docs(view): clarify CSS background status ([#5231](https://github.com/danielraffel/pulp/pull/5231))
+- docs(cli): clarify focus-mode monitor scope ([#5225](https://github.com/danielraffel/pulp/pull/5225))
+- docs(view): clarify loadFont bridge comment ([#5212](https://github.com/danielraffel/pulp/pull/5212))
+- feat(view): embed Element.animate web-compat shim ([#5153](https://github.com/danielraffel/pulp/pull/5153))
+- test(cli): normalize config shellout newlines ([#5215](https://github.com/danielraffel/pulp/pull/5215))
+
 <a id="v05290"></a>
 ## [0.529.0] - 2026-06-28
 
@@ -5540,6 +5587,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.532.1]: https://github.com/danielraffel/pulp/releases/tag/v0.532.1
+[0.532.0]: https://github.com/danielraffel/pulp/releases/tag/v0.532.0
+[0.531.1]: https://github.com/danielraffel/pulp/releases/tag/v0.531.1
+[0.531.0]: https://github.com/danielraffel/pulp/releases/tag/v0.531.0
+[0.530.0]: https://github.com/danielraffel/pulp/releases/tag/v0.530.0
 [0.529.0]: https://github.com/danielraffel/pulp/releases/tag/v0.529.0
 [0.528.2]: https://github.com/danielraffel/pulp/releases/tag/v0.528.2
 [0.528.1]: https://github.com/danielraffel/pulp/releases/tag/v0.528.1

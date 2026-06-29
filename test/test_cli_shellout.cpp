@@ -1195,9 +1195,27 @@ TEST_CASE("pulp help output lists the top-level subcommands",
     // from the dispatch table, this fails loudly.
     for (const char* cmd : {"build", "test", "run", "validate", "ship",
                             "version", "doctor", "create", "clean",
-                            "docs", "status", "inspect"}) {
+                            "docs", "status", "inspect", "audit", "add",
+                            "remove", "list", "search", "update", "suggest",
+                            "target", "tool", "help"}) {
         INFO("help output missing subcommand: " << cmd);
         REQUIRE(r.stdout_output.find(cmd) != std::string::npos);
+    }
+
+    for (const char* row : {
+             "  audit          License and clean-room audit",
+             "  add            Add a component to the project",
+             "  remove         Remove a previously added package",
+             "  list           Show installed packages",
+             "  search         Search the package registry",
+             "  update         Check for and apply package updates",
+             "  suggest        Context-aware package recommendations",
+             "  target         Manage project platform targets",
+             "  tool           Manage third-party developer tools",
+             "  help           Show this help",
+         }) {
+        INFO("help output missing package/tool row: " << row);
+        REQUIRE(r.stdout_output.find(row) != std::string::npos);
     }
 }
 

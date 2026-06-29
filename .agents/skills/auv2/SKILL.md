@@ -474,8 +474,23 @@ This adapter synthesizes the host-quirks bypass parameter and short-circuits the
 process path when bypass is active.
 At init (clap_init / PulpAUEffect ctor) it calls
 `pulp::format::maybe_synthesize_bypass(store, host_quirks)` then detects the
-"Bypass" param (shared boolean-range heuristic: name=="Bypass", step>=1,
-0..1) into a cached `bypass_param_id`. In the audio callback (clap_process /
+bypass param via the shared `pulp::state::is_bypass_param` contract into a
+cached `bypass_param_id_`. **Param designation:** a Processor can declare
+`ParamInfo::designation = ParamDesignation::Bypass` to mark the bypass control
+*regardless of its name*; the legacy boolean-range heuristic (name=="Bypass",
+step>=1, 0..1) remains the fallback for params that declare none, so existing
+plugins are unchanged. `maybe_synthesize_bypass` uses the same contract, so a
+declared-bypass param also suppresses synthesis. **Trigger params:** the
+adapter calls `store_.reset_triggers_rt()` to auto-reset trigger /
+momentary params (`ParamInfo::is_trigger`, or a `ParamDesignation::Reset`
+"reset/panic" control) back to their default as a **single-exit
+invariant** — both after `processor_->process` on the normal path AND
+before the bypass short-circuit's `return noErr`, so a panic/reset raised
+while bypassed clears this block instead of the next active one. AU v2
+`GetParameter`/`SetParameter` read/write the store directly (single source
+of truth), so the host sees the settled value on its next read — there is
+no separate cached AU value to go stale. In the audio callback
+(clap_process /
 ProcessBufferLists) it short-circuits to a **null-guarded pass-through**
 (copy main input → output, zero any output channel without a matching input)
 and skips the Processor when the param value is >= 0.5 — mirroring the VST3

@@ -90,6 +90,16 @@ pub struct ToolDescriptor {
     /// For `python_pip` tools: pip distribution name.
     #[serde(default)]
     pub pip_package: String,
+    /// Repo-relative dir of an in-tree `python_pip` package (e.g.
+    /// `tools/audio/quality-lab`). When set, install pip-installs that
+    /// directory rather than a PyPI release. Install is delegated to
+    /// `pulp-cpp`; carried here for forward-compat parity (serde already
+    /// ignores unknown keys, so this is data-model alignment, not a parse fix).
+    #[serde(default)]
+    pub source_dir: String,
+    /// `python -m <module>` for the run wrapper; defaults to `pip_package`.
+    #[serde(default)]
+    pub module: String,
     /// Repo-relative package root for `npm_package` tools.
     #[serde(default)]
     pub npm_package_root: String,

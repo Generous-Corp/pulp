@@ -374,7 +374,7 @@ public:
     // Source values are clamped to [0,1] then mapped linearly to
     // [range_lo, range_hi] in the plugin's plain parameter domain.
     //
-    // smoothing_ms applies a per-source linear slew before mixing (TODO).
+    // smoothing_ms applies a per-source linear slew before mix/clamp.
     // MixMode::Replace is the default; a second Replace edge targeting the
     // same (dest, param) is rejected. MixMode::Add sums multiple edges,
     // then clamps to the param's range.
