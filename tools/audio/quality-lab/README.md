@@ -92,9 +92,14 @@ are opt-in and basic testing stays dependency-free.
 | `spectral_centroid` | brightness loss / dulling | long-term-average-spectrum centroid shift (global) | any |
 | `hf_fizz` | added metallic HF sizzle | added >8 kHz energy fraction vs reference (global) | any |
 | `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
+| `hnr` | added noise / roughness (tonal purity loss) | autocorrelation harmonic-to-noise-ratio drop, Boersma-debiased (global) | sustained/tonal |
+| `stereo_width` | stereo-image collapse / phase damage | width-ratio (RMS side/mid) drop + inter-channel correlation sign-flip | stereo |
 
 Each detector fires only on its own artifact and stays quiet on the others and on an
-identity render. Each reports **coverage** (how many onsets it actually measured); a
+identity render. `hnr` runs in the tonal and real-audio families (exercise it with
+`run --case tonal --degradation noisy`). `stereo_width` is **standalone** — it operates
+directly on `(N, 2)` stereo arrays rather than through the mono `run` pipeline (which
+downmixes), so call it on stereo reference/candidate when validating stereo-affecting DSP. Each reports **coverage** (how many onsets it actually measured); a
 "clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 
 ### Case families
@@ -105,8 +110,8 @@ of detectors — so the same machinery serves more than drums:
 | Family | Stimulus | Alignment | Detectors |
 |--------|----------|-----------|-----------|
 | **percussive** | synthetic drum break | onset-map | transient, centroid, hf_fizz |
-| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux |
-| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux |
+| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux, hnr |
+| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux, hnr |
 
 ### Real engine validation + regression gate
 
@@ -196,11 +201,18 @@ compared to itself.
 | `quality_lab/pipeline.py` | pure stages: generate/load → level-match → align → detect → report |
 | `quality_lab/cli.py` | argument parsing + dispatch |
 
-## Deferred detectors (honest status)
+## Deferred detectors & roadmap (honest status)
 
 - **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing
   measure can't reliably resolve a few-millisecond drift against a tonal hit's
-  quasi-periodic body. It needs a better timing method (or sustained-only scope) before it
-  can be trusted, so it is not shipped in the default detector set.
+  quasi-periodic body. It needs a better timing method (or percussive-only scope) before it
+  can be trusted, so it is not shipped in the default detector set. Tracked in
+  [#5295](https://github.com/danielraffel/pulp/issues/5295).
+- **Advisory LLM/multimodal reviewer** (a model that reads the report + clips and explains
+  what sounds wrong; advisory only, never a gate) — [#5296](https://github.com/danielraffel/pulp/issues/5296).
+- **Autonomous tuning loop** (generate → score → surface regressions → pick up human label
+  edits next pass) — [#5297](https://github.com/danielraffel/pulp/issues/5297).
+
+These carry the `post-mvp` + `audio-quality-lab` labels.
 
 See `NOTICE.md` for third-party attribution and the license fence.

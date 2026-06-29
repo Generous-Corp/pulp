@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     rn = sub.add_parser("run", help="run all detectors on a degradation; optionally export clips")
     rn.add_argument("--case", choices=["drum", "tonal"], default="drum",
                     help="which QualityCase family to run (drum=percussive, tonal=sustained pad)")
-    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy"], default="smear")
+    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy", "noisy"], default="smear")
     rn.add_argument("--out", default="", help="write report.json to this path")
     rn.add_argument("--out-dir", default="", dest="out_dir",
                     help="write reference/candidate WAVs + worst-region clip pairs here")
