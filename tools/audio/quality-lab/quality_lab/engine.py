@@ -19,18 +19,46 @@ from typing import Any
 STRETCHCLI_ENV = "PULP_STRETCHCLI"
 
 
+_STRETCHCLI_REL = os.path.join("build", "examples", "offline-stretch", "stretchcli")
+
+
 def _repo_root() -> str:
     # quality_lab/engine.py -> quality-lab -> audio -> tools -> <repo root>
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "..", "..", "..", ".."))
 
 
+def _find_upwards(start: str, rel: str) -> str | None:
+    """Walk up from `start` looking for the relative path `rel`."""
+    cur = os.path.abspath(start)
+    while True:
+        cand = os.path.join(cur, rel)
+        if os.path.exists(cand):
+            return cand
+        parent = os.path.dirname(cur)
+        if parent == cur:  # reached the filesystem root
+            return None
+        cur = parent
+
+
 def resolve() -> str | None:
-    """Locate stretchcli: explicit env-path first, then the conventional build path."""
+    """Locate stretchcli, in priority order:
+
+    1. the ``PULP_STRETCHCLI`` env-path (explicit override),
+    2. a ``build/.../stretchcli`` found by walking up from the current directory
+       — this is what makes the engine path work when the lab is *pip-installed*
+       as a ``pulp tool`` (its ``__file__`` lives in a managed venv's
+       site-packages, not the source tree) but the user runs ``engine`` from a
+       Pulp checkout where they built stretchcli,
+    3. the package-relative repo build dir (plain source-tree checkout).
+    """
     env = os.environ.get(STRETCHCLI_ENV, "").strip()
     if env and os.path.exists(env):
         return env
-    cand = os.path.join(_repo_root(), "build", "examples", "offline-stretch", "stretchcli")
+    cwd_hit = _find_upwards(os.getcwd(), _STRETCHCLI_REL)
+    if cwd_hit:
+        return cwd_hit
+    cand = os.path.join(_repo_root(), _STRETCHCLI_REL)
     return cand if os.path.exists(cand) else None
 
 
@@ -51,7 +79,9 @@ def stretch(
     binary = resolve()
     if binary is None:
         return {"engine": "stretchcli", "status": "skipped",
-                "reason": f"stretchcli not found (build it or set {STRETCHCLI_ENV})"}
+                "reason": ("stretchcli not found — build it from a Pulp checkout "
+                           "(cmake --build build --target stretchcli) or set "
+                           f"{STRETCHCLI_ENV}=/path/to/stretchcli")}
     cmd = [binary, in_wav, out_wav, "--ratio", str(ratio), "--character", character]
     if quality is not None:
         cmd += ["--quality", str(quality)]

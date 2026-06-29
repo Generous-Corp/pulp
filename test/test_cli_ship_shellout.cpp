@@ -1,11 +1,11 @@
 // Shell-out CLI behaviour tests for `pulp ship`.
 //
-// Per CLAUDE.md the #295 lesson (silent empty Ed25519 signature) came
-// from the CLI ship path never being exercised end-to-end. This file
-// shells to the built binary for the non-destructive ship branches
-// that are safe to run in CI without real signing material.
+// The silent-empty-signature regression came from the CLI ship path not
+// being exercised end-to-end. This file shells to the built binary for
+// the non-destructive ship branches that are safe to run in CI without
+// real signing material.
 //
-// Issue #901: every test in this file goes through `cmd_ship`, which
+// Every test in this file goes through `cmd_ship`, which
 // resolves signing config via CLI flag → env var → `~/.pulp/config.toml`
 // (`tools/cli/cmd_ship.cpp:20-30`). On developer machines with
 // `signing.android.keystore`, `signing.apple.identity`, or related
@@ -157,9 +157,9 @@ void write_ship_config(const fs::path& home, std::string_view text) {
     config << text;
 }
 
-// Issue #901: isolate every shell-out from the developer's `~/.pulp/config.toml`
-// and from any ship-related env vars they may have exported. `cmd_ship.cpp`
-// reads `signing.android.*`, `signing.apple.*`, `PULP_SIGN_IDENTITY`,
+// Isolate every shell-out from the developer's `~/.pulp/config.toml` and from
+// any ship-related env vars they may have exported. `cmd_ship.cpp` reads
+// `signing.android.*`, `signing.apple.*`, `PULP_SIGN_IDENTITY`,
 // `PULP_APPLE_ID`, `PULP_TEAM_ID`, `ANDROID_STORE_PASS`, `ANDROID_KEY_PASS`
 // — any of these will silently flip a test onto a different code path
 // and break the asserted error wording.
@@ -478,6 +478,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "check", "--target"}, "--target requires a value"},
         {{"ship", "check", "--bogus"}, "unknown argument"},
         {{"ship", "appcast", "--url"}, "--url requires a value"},
+        {{"ship", "appcast", "--download-url"}, "--download-url requires a value"},
         {{"ship", "appcast", "--output"}, "--output requires a value"},
         {{"ship", "appcast", "--bogus"}, "unknown argument"},
     };
@@ -547,7 +548,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("android-validation", true);
     // PULP_HOME / ANDROID_STORE_PASS / ANDROID_KEY_PASS isolation now
-    // lives on the fixture (#901) — no need to scope them locally.
+    // lives on the fixture; no need to scope them locally.
 
     auto sign = run_pulp_in(root, {"ship", "sign", "--target", "android"});
     REQUIRE_FALSE(sign.timed_out);
@@ -668,6 +669,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto first = run_pulp_in(root,
         {"ship", "appcast",
          "--url", artifact.string(),
+         "--download-url", "https://example.com/FakeShipPlugin-3.0.0.pkg",
          "--version", "3.0.0",
          "--notes", "local artifact",
          "--title", "Local Feed",
@@ -685,8 +687,35 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(contains(first_xml, "<p>local artifact</p>"));
     REQUIRE(contains(first_xml, "<sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"));
     REQUIRE(contains(first_xml, "length=\"7\""));
-    REQUIRE(contains(first_xml, artifact.string()));
+    REQUIRE(contains(first_xml, "https://example.com/FakeShipPlugin-3.0.0.pkg"));
+    REQUIRE_FALSE(contains(first_xml, artifact.string()));
     REQUIRE_FALSE(contains(first_xml, "sparkle:edSignature"));
+
+    constexpr const char* kZeroSeedB64 =
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    auto signed_item = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", artifact.string(),
+         "--download-url", "https://example.com/FakeShipPlugin-3.0.1.pkg",
+         "--version", "3.0.1",
+         "--sign-key", kZeroSeedB64,
+         "--output", feed.string()});
+    REQUIRE_FALSE(signed_item.timed_out);
+    REQUIRE(signed_item.exit_code == 0);
+    REQUIRE(contains(signed_item.stdout_output, "(2 items)"));
+
+    auto signed_xml = read_text_file(feed);
+    auto signed_start = signed_xml.find("Version 3.0.1");
+    REQUIRE(signed_start != std::string::npos);
+    auto signed_end = signed_xml.find("</item>", signed_start);
+    REQUIRE(signed_end != std::string::npos);
+    auto signed_block = signed_xml.substr(signed_start,
+                                          signed_end - signed_start);
+    REQUIRE(contains(signed_block, "https://example.com/FakeShipPlugin-3.0.1.pkg"));
+    REQUIRE(contains(signed_block, "length=\"7\""));
+    REQUIRE(contains(signed_block, "sparkle:edSignature=\""));
+    REQUIRE_FALSE(contains(signed_block, "sparkle:edSignature=\"\""));
+    REQUIRE_FALSE(contains(signed_block, artifact.string()));
 
     auto second = run_pulp_in(root,
         {"ship", "appcast",
@@ -696,14 +725,17 @@ TEST_CASE_METHOD(ShipShelloutFixture,
          "--output", feed.string()});
     REQUIRE_FALSE(second.timed_out);
     REQUIRE(second.exit_code == 0);
-    REQUIRE(contains(second.stdout_output, "(2 items)"));
+    REQUIRE(contains(second.stdout_output, "(3 items)"));
 
     auto second_xml = read_text_file(feed);
     REQUIRE(contains(second_xml, "Version 3.1.0"));
+    REQUIRE(contains(second_xml, "Version 3.0.1"));
     REQUIRE(contains(second_xml, "Version 3.0.0"));
     REQUIRE(second_xml.find("Version 3.1.0") < second_xml.find("Version 3.0.0"));
     REQUIRE(contains(second_xml, "https://example.com/FakeShipPlugin-3.1.0.pkg"));
-    REQUIRE(contains(second_xml, artifact.string()));
+    REQUIRE(contains(second_xml, "https://example.com/FakeShipPlugin-3.0.1.pkg"));
+    REQUIRE(contains(second_xml, "https://example.com/FakeShipPlugin-3.0.0.pkg"));
+    REQUIRE_FALSE(contains(second_xml, artifact.string()));
     REQUIRE(contains(second_xml, "length=\"0\""));
 
     fs::remove_all(root);
@@ -1448,7 +1480,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif  // __APPLE__
 
-// ── Linux packaging CLI routing (#3327 / L8a) ────────────────────────────
+// ── Linux packaging CLI routing ──────────────────────────────────────────
 // Regression guard: `pulp ship package` on Linux must invoke the first-party
 // .deb/.tar.gz packagers (ship/platform/linux/package_linux.cpp), NOT fall
 // through to the macOS `pkgbuild` path — which produced nothing usable

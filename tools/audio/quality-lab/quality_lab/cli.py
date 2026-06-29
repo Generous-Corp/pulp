@@ -62,8 +62,7 @@ def _cmd_engine(args: argparse.Namespace) -> int:
     else:
         report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
     if report["verdict"] == "SKIPPED":
-        print(f"[quality-lab engine] SKIPPED — {report['reason']} "
-              f"(build: cmake --build build --target stretchcli)")
+        print(f"[quality-lab engine] SKIPPED — {report['reason']}")
         return 0
     if report["verdict"] == "ERROR":
         print(f"[quality-lab engine] ERROR — {report['engine'].get('reason')}")
@@ -105,8 +104,9 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
 def _cmd_engine_baseline(args: argparse.Namespace) -> int:
     from . import engine, engine_baseline
     if not engine.available():
-        print("[quality-lab engine-baseline] SKIPPED — stretchcli not built "
-              "(cmake --build build --target stretchcli)")
+        print("[quality-lab engine-baseline] SKIPPED — stretchcli not found "
+              "(cmake --build build --target stretchcli, or set "
+              "PULP_STRETCHCLI=/path/to/stretchcli)")
         return 0
     if args.capture:
         path = engine_baseline.write_baseline(engine_baseline.capture())
@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     rn = sub.add_parser("run", help="run all detectors on a degradation; optionally export clips")
     rn.add_argument("--case", choices=["drum", "tonal"], default="drum",
                     help="which QualityCase family to run (drum=percussive, tonal=sustained pad)")
-    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy"], default="smear")
+    rn.add_argument("--degradation", choices=["identity", "smear", "dull", "fizz", "grainy", "noisy"], default="smear")
     rn.add_argument("--out", default="", help="write report.json to this path")
     rn.add_argument("--out-dir", default="", dest="out_dir",
                     help="write reference/candidate WAVs + worst-region clip pairs here")

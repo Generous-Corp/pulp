@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from . import align, audio_io, generate, provenance
-from .detectors import hf_fizz, spectral_centroid, spectral_flux, transient_sharpness
+from .detectors import hf_fizz, hnr, spectral_centroid, spectral_flux, transient_sharpness
 from .schema import QualityCase, build_report
 
 # Registry: detector tag -> detect fn. New detectors plug in here; the pipeline stays
@@ -22,6 +22,7 @@ _DETECTORS = {
     "spectral_centroid": spectral_centroid.detect,
     "hf_fizz": hf_fizz.detect,
     "spectral_flux": spectral_flux.detect,
+    "hnr": hnr.detect,
 }
 
 # Time-stretch family (percussive): the P0a drum break + transient/spectral detectors.
@@ -42,7 +43,7 @@ TONAL_CASE = QualityCase(
     family="tonal",
     reference_policy="frozen-reference",
     alignment_policy="identity",
-    detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux"],
+    detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux", "hnr"],
     params={"sr": 48000, "dur_s": 2.5, "seed": 0},
 )
 
@@ -68,6 +69,8 @@ def _apply_degradation(degradation, reference, onsets, sr, smear_ms):
         return generate.add_fizz(reference, sr), []
     if degradation == "grainy":
         return generate.grainy(reference, sr), []
+    if degradation == "noisy":
+        return generate.noisy(reference, sr), []
     return reference.copy(), []  # identity
 
 
@@ -225,8 +228,8 @@ def run_real_engine(
     from . import engine
 
     if not engine.available():
-        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
-                "reason": "stretchcli not built"}
+        skip = engine.stretch("", "", ratio)  # carries the actionable not-found reason
+        return {"verdict": "SKIPPED", "engine": skip, "reason": skip["reason"]}
 
     sr = int(case.params["sr"])
     with tempfile.TemporaryDirectory() as d:
@@ -273,8 +276,8 @@ def run_real_audio(
     from .detectors import hf_fizz, spectral_centroid, spectral_flux
 
     if not engine.available():
-        return {"verdict": "SKIPPED", "engine": engine.stretch("", "", ratio),
-                "reason": "stretchcli not built"}
+        skip = engine.stretch("", "", ratio)  # carries the actionable not-found reason
+        return {"verdict": "SKIPPED", "engine": skip, "reason": skip["reason"]}
     if not os.path.exists(input_wav):
         return {"verdict": "ERROR", "reason": f"input not found: {input_wav}"}
 
@@ -300,7 +303,7 @@ def run_real_audio(
               "engine": "stretchcli", "character": character, "ratio": ratio}
     case = QualityCase(case_id=f"realaudio:{os.path.basename(input_wav)}", family="real-audio",
                        reference_policy="dry-input", alignment_policy="identity",
-                       detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux"], params=recipe)
+                       detector_tags=["spectral_centroid", "hf_fizz", "spectral_flux", "hnr"], params=recipe)
     verdict = "FIRED" if any(r.fired for r in results) else "CLEAN"
     report = build_report(case, results, provenance.build(recipe, determinism), determinism, verdict)
     report["engine"] = eng_res

@@ -37,8 +37,8 @@ runtime-validated there.
 | CLAP | Yes |
 | AAX | Optional on macOS/Windows |
 | Standalone | Yes |
-| WAMv2 (Browser) | Experimental generated-output lane; browser-host runtime not validated yet |
-| WebCLAP (WASM) | Experimental helper path; no checked-in PulpGain WCLAP target yet |
+| WAMv2 (Browser) | Experimental; the PulpGain canary loads, renders audio, and shows generated controls in Chrome (fixture + Node runner) |
+| WebCLAP (WASM) | Experimental; checked-in PulpGain WebCLAP builds and is Node-hosted through the full CLAP lifecycle (audio + parameter control); not yet in-browser-hosted |
 
 ## Supported Platforms
 

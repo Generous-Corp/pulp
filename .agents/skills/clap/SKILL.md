@@ -316,6 +316,23 @@ without invoking `Processor::process`. MIDI output stays empty so
 bypassed MIDI FX don't leak notes — same contract the VST3 and AU v3
 adapters honour.
 
+**Param designation (declared bypass) + trigger params.** The bypass
+parameter is found through the shared `pulp::state::is_bypass_param`
+contract, not a re-implemented name/range check. A Processor author can
+declare `ParamInfo::designation = ParamDesignation::Bypass` to mark a
+param as the bypass control *independently of its name* — the legacy
+boolean-`"Bypass"` name/range heuristic remains the fallback when no
+designation is declared, so existing plugins are unchanged. The adapter
+also calls `StateStore::reset_triggers_rt()` to auto-reset trigger /
+momentary params (`is_trigger`, or a `ParamDesignation::Reset`
+"reset/panic" control) back to their default. The call sits AFTER the
+bypass if/else (not inside the non-bypass branch), so it is a
+**single-exit invariant**: a trigger raised while bypassed still settles
+this block instead of firing late. It runs before the `out_events` scan,
+so the host records the settle. Input param events are applied to the
+store before the bypass check, so a host-raised trigger is observed-then-
+settled within the same block whether or not the plugin is bypassed.
+
 ### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via
@@ -448,6 +465,23 @@ and `#ifdef` on an enum always evaluates false. Use
 release that introduced the event) instead. Same trap applies to any
 future `CLAP_EVENT_*` additions — the CLAP header does not define
 them as macros. Use the guard shape in `core/format/src/clap_adapter.cpp`.
+
+### Param text parsing must be locale-independent — but not via `std::from_chars<float>`
+
+`params_text_to_value` and `params_value_to_text` must be immune to a
+comma-decimal global host locale (a DAW that called `setlocale`): a typed-in
+`"0.5"` must never parse as `0.0`, and a formatted value must never emit
+`"0,5"`. Use `std::to_chars` for formatting (always C-locale). For *parsing*,
+the obvious choice — `std::from_chars` — is a **trap for floats**: libc++
+leaves the floating-point `from_chars` overloads `=delete`d on some toolchains
+(notably the github-hosted `macos-15` sanitizer image), so
+`std::from_chars(first, last, a_double)` hard-fails the **Sanitizer Tests**
+build with "call to deleted function 'from_chars'" while the Mac Studio
+`macos` gate (which *has* the overload) stays green — the break hides on the
+advisory lane. Integer `from_chars` is fine everywhere. For the float value,
+parse through `pulp::format::detail::parse_double_c_locale`
+(`core/format/include/pulp/format/detail/locale_independent_float.hpp`), a
+C-locale `strtod` wrapper shared with the `.pulpset` parser.
 
 ### GUI layout must match across CLAP TUs
 

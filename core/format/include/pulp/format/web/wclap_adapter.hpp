@@ -60,8 +60,11 @@ extern "C" void* cabi_realloc(void* ptr, size_t old_size,
 //     -mexported-symbols=clap_entry,malloc,free \
 //     -o MyPlugin.wasm wclap_entry.cpp ...
 
-#define PULP_WCLAP_PLUGIN(id, name, vendor, version, factory_fn) \
-    PULP_CLAP_PLUGIN(id, name, vendor, version, factory_fn)      \
+// id/name/vendor/version come from the Processor's descriptor() (see
+// PULP_CLAP_PLUGIN); the WCLAP macro only needs the factory plus the WebCLAP
+// memory-allocation exports the host sandbox requires.
+#define PULP_WCLAP_PLUGIN(factory_fn) \
+    PULP_CLAP_PLUGIN(factory_fn)      \
                                                                    \
     /* WebCLAP memory allocation exports */                        \
     extern "C" {                                                   \

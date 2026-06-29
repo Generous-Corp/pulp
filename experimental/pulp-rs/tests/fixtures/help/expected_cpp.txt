@@ -33,6 +33,10 @@ Commands:
   project        Per-project SDK pin: pin, unpin, undo
   config         Read or write ~/.pulp/config.toml settings
   coverage       Local coverage tooling (diff-cover gate mirror)
+  macos          Per-PR macOS-runner retargeting (local/namespace/github-hosted)
+  ci-host        Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)
+  overflow       Configure macOS-runner overflow routing (status/enable/disable/threshold)
+  tweaks         Inspect the pulp-tweaks.json sidecar (diff against a design)
 
   ci-local       Local-first CI across configured hosts
   harness        Catalog-driven coverage harness (compat.json verifier)

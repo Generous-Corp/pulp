@@ -370,6 +370,10 @@ add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
 
+# WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).
+add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp)
+target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
+catch_discover_tests(pulp-test-wam-adapter)
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -514,7 +518,6 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-
 if(TARGET pulp::inspect)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
@@ -524,21 +527,18 @@ if(TARGET pulp::inspect)
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
-
 # `pulp loop` shell-out tests. Shares test_cli_shellout_helpers.hpp
 # with the parent CLI shell-out target and the scan/projects sibling.
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-loop)
 catch_discover_tests(pulp-test-cli-shellout-loop)
-
 # `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
 # shell-out helpers with the sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-scan-projects)
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
-
 # `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
 # handling, and native fallback. Shares the helper header with the
 # sibling shell-out targets.
@@ -931,7 +931,7 @@ configure_file(
     @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -1149,8 +1149,9 @@ pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 # suite runs on every platform via the virtual-endpoint half.
 pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
 
-# AsyncStream tests
+# AsyncStream + portable-exceptions macro tests
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-exceptions LIBRARIES pulp::runtime)
 
 # Network Stream tests
 pulp_add_test_suite(pulp-test-network-stream
@@ -1159,7 +1160,6 @@ pulp_add_test_suite(pulp-test-network-stream
 
 # MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
-
 pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime)
 
 pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc)
@@ -1169,6 +1169,9 @@ pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 # Validation harness tests
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
+# Reusable validation assertion helpers (validation_assertions.hpp)
+pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
@@ -1177,6 +1180,9 @@ pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::f
 
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
+
+# AAX MIDI/SysEx packet reassembly + fragmentation (SDK-free pure logic)
+pulp_add_test_suite(pulp-test-aax-midi LIBRARIES pulp::format)
 
 # Appcast/auto-update tests
 pulp_add_test_suite(pulp-test-appcast LIBRARIES pulp::ship)
@@ -4698,11 +4704,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D compatibility cheap-wiring surface.
-# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
-# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
-# dedicated-command routing — five partial → supported
-# compat.json entries.
+# Widget bridge — recovered Canvas2D/CSS compatibility regressions.
+# The canonical Wave 2 Canvas2D cheap-wiring surface is in
+# pulp-test-widget-bridge-wave2-cheap below; this older split keeps
+# recovered CSS cases and later Canvas2D bridge regressions.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga

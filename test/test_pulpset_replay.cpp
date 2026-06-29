@@ -7,6 +7,7 @@
 
 #include <pulp/format/pulpset.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 
 #include <clocale>
 #include <cmath>
@@ -233,4 +234,53 @@ TEST_CASE("Pulpset write->read round-trips a fractional value under any locale",
     REQUIRE(round.events.size() == 2);
     REQUIRE(round.events.front().value == Catch::Approx(0.5f));
     REQUIRE(round.events.front().sample == 12000);
+}
+
+// Direct contract test for the shared C-locale float parser that backs both the
+// `.pulpset` value field and CLAP `params_text_to_value`. This is the portable
+// replacement for `std::from_chars`'s =deleted float overload;
+// unlike the comma-locale cases above it needs no special locale installed, so
+// it always runs and locks the consume/range semantics the callers depend on.
+TEST_CASE("parse_double_c_locale: locale-independent, full-consume aware",
+          "[pulpset][format][locale][issue-5218]") {
+    using pulp::format::detail::parse_double_c_locale;
+    double v = -1.0;
+
+    SECTION("plain decimal, fully consumed") {
+        auto r = parse_double_c_locale("0.5", v);
+        REQUIRE(r.consumed == 3);
+        REQUIRE_FALSE(r.range_error);
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("negative and signed values") {
+        REQUIRE(parse_double_c_locale("-3.25", v).consumed == 5);
+        REQUIRE(v == Catch::Approx(-3.25));
+        REQUIRE(parse_double_c_locale("+0.5", v).consumed == 4);  // strtod accepts '+'
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("leading whitespace is skipped (consumed counts it)") {
+        auto r = parse_double_c_locale("  0.5", v);
+        REQUIRE(r.consumed == 5);
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("trailing text => partial consume (CLAP unit-suffix path)") {
+        auto r = parse_double_c_locale("0.5 dB", v);
+        REQUIRE(r.consumed == 3);  // caller decides whether trailing text is OK
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("comma decimal is NOT a decimal point under the C locale") {
+        auto r = parse_double_c_locale("0,5", v);
+        REQUIRE(r.consumed == 1);  // only "0" — full-consume callers reject this
+        REQUIRE_FALSE(r.range_error);
+    }
+    SECTION("non-numeric and empty => nothing consumed") {
+        REQUIRE(parse_double_c_locale("%", v).consumed == 0);
+        REQUIRE(parse_double_c_locale("", v).consumed == 0);
+        REQUIRE(parse_double_c_locale("   ", v).consumed == 0);
+    }
+    SECTION("out-of-range magnitude is flagged, not silently zeroed") {
+        auto r = parse_double_c_locale("1e999999", v);
+        REQUIRE(r.consumed > 0);
+        REQUIRE(r.range_error);
+    }
 }

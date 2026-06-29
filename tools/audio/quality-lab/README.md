@@ -27,6 +27,22 @@ plugin (FFT/analysis stays tool-side).
 
 ## Install (opt-in)
 
+Managed install (recommended) — provisions an isolated venv under `~/.pulp/tools/`, no
+project or global changes:
+
+```bash
+pulp tool install audio-quality-lab
+pulp tool run audio-quality-lab -- run --case drum --degradation smear --out-dir out
+```
+
+This is the same `pulp tool` lane as `ffmpeg`/`uv`/importers (see
+`docs/reference/extending-pulp.md`); `pulp tool list` shows it. The lab is a machine-level
+developer/agent tool — never linked into the MIT core or shipped in a plugin. Unlike the
+binary-download tools, it pip-installs from **this source tree**, so it requires a Pulp
+source checkout (and network access for numpy/soundfile).
+
+Manual venv (equivalent; the lab is a standard Python package):
+
 ```bash
 cd tools/audio/quality-lab
 python3 -m venv .venv && . .venv/bin/activate
@@ -76,9 +92,14 @@ are opt-in and basic testing stays dependency-free.
 | `spectral_centroid` | brightness loss / dulling | long-term-average-spectrum centroid shift (global) | any |
 | `hf_fizz` | added metallic HF sizzle | added >8 kHz energy fraction vs reference (global) | any |
 | `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
+| `hnr` | added noise / roughness (tonal purity loss) | autocorrelation harmonic-to-noise-ratio drop, Boersma-debiased (global) | sustained/tonal |
+| `stereo_width` | stereo-image collapse / phase damage | width-ratio (RMS side/mid) drop + inter-channel correlation sign-flip | stereo |
 
 Each detector fires only on its own artifact and stays quiet on the others and on an
-identity render. Each reports **coverage** (how many onsets it actually measured); a
+identity render. `hnr` runs in the tonal and real-audio families (exercise it with
+`run --case tonal --degradation noisy`). `stereo_width` is **standalone** — it operates
+directly on `(N, 2)` stereo arrays rather than through the mono `run` pipeline (which
+downmixes), so call it on stereo reference/candidate when validating stereo-affecting DSP. Each reports **coverage** (how many onsets it actually measured); a
 "clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 
 ### Case families
@@ -89,8 +110,8 @@ of detectors — so the same machinery serves more than drums:
 | Family | Stimulus | Alignment | Detectors |
 |--------|----------|-----------|-----------|
 | **percussive** | synthetic drum break | onset-map | transient, centroid, hf_fizz |
-| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux |
-| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux |
+| **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux, hnr |
+| **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux, hnr |
 
 ### Real engine validation + regression gate
 
@@ -180,11 +201,18 @@ compared to itself.
 | `quality_lab/pipeline.py` | pure stages: generate/load → level-match → align → detect → report |
 | `quality_lab/cli.py` | argument parsing + dispatch |
 
-## Deferred detectors (honest status)
+## Deferred detectors & roadmap (honest status)
 
 - **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing
   measure can't reliably resolve a few-millisecond drift against a tonal hit's
-  quasi-periodic body. It needs a better timing method (or sustained-only scope) before it
-  can be trusted, so it is not shipped in the default detector set.
+  quasi-periodic body. It needs a better timing method (or percussive-only scope) before it
+  can be trusted, so it is not shipped in the default detector set. Tracked in
+  [#5295](https://github.com/danielraffel/pulp/issues/5295).
+- **Advisory LLM/multimodal reviewer** (a model that reads the report + clips and explains
+  what sounds wrong; advisory only, never a gate) — [#5296](https://github.com/danielraffel/pulp/issues/5296).
+- **Autonomous tuning loop** (generate → score → surface regressions → pick up human label
+  edits next pass) — [#5297](https://github.com/danielraffel/pulp/issues/5297).
+
+These carry the `post-mvp` + `audio-quality-lab` labels.
 
 See `NOTICE.md` for third-party attribution and the license fence.

@@ -12,6 +12,27 @@ from the offline **Audio Doctor** (`pulp audio validate ...`), which analyses
 an already-rendered WAV file offline. Use the Inspector to watch a live host;
 use the Doctor to assert on a captured render in CI.
 
+## Audio Inspector vs Audio Scope vs Spectrum Analyzer
+
+Three related but distinct things share similar vocabulary; pick by the
+question you're asking:
+
+| Tool | What it is | Scope of signal | Frequency domain? |
+|---|---|---|---|
+| **Audio Inspector** | A floating **developer** window in the standalone host (this guide). | Pulp's *own* running plugin/standalone, at the output-boundary probe. | No — time-domain levels/counters/waveform only. |
+| **Audio Scope** | A **mode of the Audio Inspector** (see "Signal mode vs Scope mode" below), not a separate tool. | Same probe as the Inspector. | No — triggered, measurable time-domain trace. |
+| **Spectrum Analyzer** | A **shippable FX example plugin** (clean-room, MIT, in its own repo: [pulp-spectrum-analyzer](https://github.com/danielraffel/pulp-spectrum-analyzer)) with a GPU spectrogram and a cross-instance before/after spectral **diff**. | *Any* signal in a host chain, including third-party plugins — not limited to Pulp's own plugins. | Yes — FFT-based spectrum, computed off the audio callback. |
+
+The Audio Inspector is deliberately a time-domain developer diagnostic and does
+**not** do frequency-domain analysis; the Spectrum Analyzer example is the
+frequency-domain, end-user-facing counterpart. They are different deployments
+answering different questions: the Inspector debugs *your* Pulp plugin while you
+build it; the Spectrum Analyzer is an insert you ship that can compare *any*
+chain. The Spectrum Analyzer is an independent clean-room implementation built on
+Pulp SDK primitives (FFT, lock-free `TripleBuffer`/`SpscQueue` publication, the
+`SpectrumView`/`SpectrogramView` widgets); see Pulp's licensing and attribution
+notes at <https://www.generouscorp.com/pulp/licensing.html>.
+
 ## When to use it
 
 Use the Audio Inspector when the question is about a running host, not an

@@ -106,9 +106,19 @@ pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupp
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
+pulp build --format wam        # Build the WAMv2 (Emscripten) web plugin into build-wam/
+pulp build --format wclap      # Build the WebCLAP (wasi-sdk) module into build-wclap/
+pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+`--format wam|wclap` (short: `-f`) builds a **web plugin format** instead of the native plugins, using a separate toolchain and build directory so it never collides with the native `build/`:
+
+- `--format wam` configures with the Emscripten wrapper (`emcmake cmake`) into `build-wam/`. Requires `emcmake` on `PATH` — source your `emsdk_env.sh` first.
+- `--format wclap` configures plain `cmake` with the wasi-sdk toolchain (`tools/cmake/wasi-toolchain.cmake`) into `build-wclap/`, producing a CLAP-in-WebAssembly `.wasm`. Errors clearly if the toolchain file is not in the checkout.
+
+Web formats build to `.wasm`/`.js` and are not installed to native plug-in folders, so `--format` cannot be combined with `--install`, `--validate`, or `--watch`. See [web-plugin-support.md](web-plugin-support.md) for hosting the output.
 
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
@@ -885,6 +895,7 @@ pulp ship notarize --dry-run                       # print resolved argv, no sub
 pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
 pulp ship appcast --url https://example.com/MyApp-1.0.pkg --version 1.0.0
+pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key <base64-key>
 pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
@@ -914,7 +925,7 @@ identity, not here.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
-`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
+`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
@@ -1318,6 +1329,9 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
+| `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
+| `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--format {w3c\|css-variables\|tailwind\|json-tailwind\|css-tailwind}` | Token export format. `w3c` (DTCG JSON) is the default; `css-variables` emits CSS custom properties (`.dark` modes → `@media (prefers-color-scheme: dark)`); the `tailwind` variants require `--from designmd`. Unknown values exit 2. |
 
 With `--emit ir-json`, relative asset references from a `--url` import resolve
@@ -1426,6 +1440,7 @@ pulp sdk                                      # Show help
 pulp sdk install                              # Download and cache the pinned SDK from GitHub releases
 pulp sdk install --version 0.2.0              # Install a specific version
 pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
+pulp sdk available                            # List SDK versions available on GitHub releases
 pulp sdk status                               # Show cached and locally-built SDK versions
 pulp sdk clean                                # Remove all cached SDK versions
 ```
@@ -1599,7 +1614,7 @@ Subcommands:
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
 
-**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + TODO list) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
+**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
 
 ### identity
 

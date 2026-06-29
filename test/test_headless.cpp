@@ -172,6 +172,24 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
     REQUIRE(host.state().param_count() == 1);
 }
 
+TEST_CASE("HeadlessHost exposes the wrapped processor for typed introspection",
+          "[headless]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(host.valid());
+    // processor() returns the live instance (the one the factory produced).
+    REQUIRE(host.processor() != nullptr);
+    REQUIRE(host.processor() == last_processor);
+    // processor_as<T>() yields the typed pointer when the dynamic type matches,
+    // and nullptr otherwise — letting tests reach custom state (e.g. a meter).
+    REQUIRE(host.processor_as<TestGainProcessor>() != nullptr);
+    REQUIRE(host.processor_as<TestGainProcessor>() == last_processor);
+    struct Unrelated { virtual ~Unrelated() = default; };  // complete, polymorphic
+    REQUIRE(host.processor_as<Unrelated>() == nullptr);     // cross-cast misses
+
+    const auto& const_host = host;
+    REQUIRE(const_host.processor() == host.processor());
+}
+
 TEST_CASE("format registry stores and replaces the processor factory",
           "[format][registry]") {
     const auto previous = pulp::format::registered_factory();
