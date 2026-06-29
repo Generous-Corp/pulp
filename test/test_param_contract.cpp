@@ -1,8 +1,8 @@
 // Phase 0 — parameter-contract equivalence check for DSP hot reload.
-// See core/format/include/pulp/format/reload/scratch_store_contract.hpp.
+// See core/format/include/pulp/format/reload/param_contract.hpp.
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/format/reload/scratch_store_contract.hpp>
+#include <pulp/format/reload/param_contract.hpp>
 #include <pulp/state/store.hpp>
 
 using namespace pulp;
