@@ -19,6 +19,7 @@
 /// This sits on top of `HeadlessHost`; no audio device, no UI — CI-friendly.
 
 #include <pulp/format/headless.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
@@ -32,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::format {
@@ -85,10 +87,24 @@ struct Pulpset {
             // cleanly rather than silently replaying 0.5 as 0.0.
             auto parse_full = [](std::string_view tok, auto& out) {
                 if (tok.empty()) return false;
-                const char* first = tok.data();
-                const char* last = first + tok.size();
-                auto r = std::from_chars(first, last, out);
-                return r.ec == std::errc{} && r.ptr == last;
+                using T = std::remove_reference_t<decltype(out)>;
+                if constexpr (std::is_floating_point_v<T>) {
+                    // std::from_chars' float overload is =deleted on some
+                    // toolchains (see locale_independent_float.hpp),
+                    // so parse the fractional value via a C-locale strtod and
+                    // require the whole token to be consumed — the same
+                    // "0,5"/"0.5foo" rejection the integer path gives.
+                    double parsed = 0.0;
+                    const auto r = detail::parse_double_c_locale(tok, parsed);
+                    if (r.consumed != tok.size() || r.range_error) return false;
+                    out = static_cast<T>(parsed);
+                    return true;
+                } else {
+                    const char* first = tok.data();
+                    const char* last = first + tok.size();
+                    auto r = std::from_chars(first, last, out);
+                    return r.ec == std::errc{} && r.ptr == last;
+                }
             };
 
             PulpsetEvent e;
