@@ -88,7 +88,7 @@ are opt-in and basic testing stays dependency-free.
 
 | Detector | Catches | Method | Material |
 |----------|---------|--------|----------|
-| `transient_sharpness` | percussion attack smear ("compressed" drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
+| `transient_sharpness` | percussion attack smear (“compressed” drums) | per-onset high-band attack-rise deficit, locally aligned | percussive |
 | `spectral_centroid` | brightness loss / dulling | long-term-average-spectrum centroid shift (global) | any |
 | `hf_fizz` | added metallic HF sizzle | added >8 kHz energy fraction vs reference (global) | any |
 | `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
@@ -101,7 +101,7 @@ identity render. `hnr` runs in the tonal and real-audio families (exercise it wi
 `run --case tonal --degradation noisy`). `stereo_width` is **standalone** — it operates
 directly on `(N, 2)` stereo arrays rather than through the mono `run` pipeline (which
 downmixes), so call it on stereo reference/candidate when validating stereo-affecting DSP. Each reports **coverage** (how many onsets it actually measured); a
-"clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
+`clean` verdict with low coverage reads `UNCERTAIN`, never a silent pass.
 
 ### Case families
 
@@ -131,7 +131,7 @@ the global spectral detectors compare the engine output's spectrum to the source
 ### Listenable clips + provenance
 
 `run --out-dir` writes the full reference/candidate WAVs plus a ref-vs-candidate clip pair
-around each worst region, so "attack softer at 0:02.6" is something you can play. It also
+around each worst region, so “attack softer at 0:02.6” is something you can play. It also
 drops a `<wav>.provenance.json` sidecar (engine commit, recipe, content hash) so a render
 you liked maps back to how it was made.
 
@@ -239,7 +239,7 @@ validation clears a bar — so an unproven detector cannot introduce a false reg
   guess. Promotion to `beta` needs the real-engine negative control + a false-positive sweep
   across tempos/seeds. Tracked in [#5295](https://github.com/danielraffel/pulp/issues/5295).
 - **Advisory LLM/multimodal reviewer** ships **opt-in** (`reviewer.py`, `run --review`); see
-  "Advisory reviewer" above. Promotion past experimental needs real-audio answer-key
+  “Advisory reviewer” above. Promotion past experimental needs real-audio answer-key
   evidence beyond the synthetic corpus — [#5296](https://github.com/danielraffel/pulp/issues/5296).
 - **Autonomous tuning loop** ships its **experimental** first slice (`loop.py`,
   `quality-lab loop`): deterministic candidate ranking, a normalized-Pareto **Goodhart
