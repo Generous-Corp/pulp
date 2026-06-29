@@ -43,7 +43,7 @@ summary = "CLI config file moved from ~/.pulp/config to ~/.pulp/config.toml"
 | Field        | Type    | Required | Notes |
 |--------------|---------|----------|-------|
 | `version`    | string  | yes      | Semver `"M.N.P"`, no leading `v`. |
-| `breaking`   | bool    | no       | Defaults to `false`. Tags the note as a breaking change in CLI output and `--notes --json`. |
+| `breaking`   | bool    | no       | Defaults to `false`. Tags the note as a breaking change in CLI output and `--notes --json`, drives the top-level `has_breaking` / `breaking_count` agent signal, and triggers the proactive banner on a `pulp project bump` that crosses it. See "Agent consumption" below. |
 | `applies_if` | string  | no       | Boolean expression over `cli_version_from` / `cli_version_to`. Empty / absent = always applies. |
 | `summary`    | string  | no       | One-line human-readable summary. |
 
@@ -94,11 +94,40 @@ this version.
    `${CMAKE_BINARY_DIR}/generated/migration_index.cpp` — it is NOT
    checked in.
 
+## Agent consumption (inherit breaking changes before stumbling on them)
+
+`pulp upgrade --notes --json` is the agent-facing view. Alongside the per-entry
+`breaking` flag, the top-level object carries a one-glance signal so tooling can
+branch without parsing every entry:
+
+```json
+{ "from": "0.26.0", "to": "0.30.0",
+  "has_breaking": true, "breaking_count": 2,
+  "entries": [ { "version": "...", "breaking": true, "summary": "...", "body": "..." } ] }
+```
+
+The intended flow, when a project's pinned SDK version moves from X to Y: run
+`pulp upgrade --notes --json --from X --to Y` *first*, and if `has_breaking` is
+true, read the breaking entries' bodies and adapt the code before building — so
+the break is inherited up front, not discovered as a compile error later.
+
+`pulp project bump` already prints the applicable notes after a pin change, and
+when the hop crosses a breaking note it adds a short banner pointing at this
+JSON. That banner is **on by default**; silence it with
+`pulp config set upgrade.breaking_notes false` or `PULP_NO_BREAKING_NOTES=1`.
+The JSON `has_breaking` / `breaking_count` fields are ALWAYS present regardless of
+that setting — the setting only gates the human-facing banner, never the data.
+
+Low-noise by design: only `breaking = true` notes drive the banner and the
+`breaking_count`, so an ordinary feature release produces no agent prompt.
+
 ## Non-goals
 
 - Not every PR deserves a migration note. Only write one when a
   reasonable pro developer needs to change code, config, or habits.
 - Notes are advisory text only. The CLI never modifies user files
   based on them. Code changes require explicit user action.
+- The agent signal is breaking-only on purpose; do not set `breaking = true`
+  for non-breaking notes just to raise visibility.
 
 Issue: #548 (parent #499).

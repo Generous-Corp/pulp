@@ -370,10 +370,19 @@ std::string render_notes_text(const std::vector<const MigrationEntry*>& entries,
 std::string render_notes_json(const std::vector<const MigrationEntry*>& entries,
                               const std::string& from,
                               const std::string& to) {
+    // Top-level breaking summary so tooling and agents can branch on a single
+    // boolean / count without parsing every entry — the signal to "inherit"
+    // breaking-change knowledge for a pin hop before touching code.
+    std::size_t breaking_count = 0;
+    for (const auto* e : entries)
+        if (e->breaking) ++breaking_count;
+
     std::ostringstream os;
     os << "{\n";
     os << "  \"from\": \"" << escape_json(from) << "\",\n";
     os << "  \"to\": \""   << escape_json(to)   << "\",\n";
+    os << "  \"has_breaking\": " << (breaking_count > 0 ? "true" : "false") << ",\n";
+    os << "  \"breaking_count\": " << breaking_count << ",\n";
     os << "  \"entries\": [";
     bool first = true;
     for (const auto* e : entries) {
