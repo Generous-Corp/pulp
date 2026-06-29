@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05370"></a>
+## [0.537.0] - 2026-06-29
+
+- feat(cli): add `pulp build --format wam|wclap` for web plugin formats ([#5315](https://github.com/danielraffel/pulp/pull/5315))
+- docs: correct web-plugin status — WebCLAP is built + Node-hosted, not scaffolding ([#5312](https://github.com/danielraffel/pulp/pull/5312))
+
 <a id="v05360"></a>
 ## [0.536.0] - 2026-06-29
 
@@ -5640,6 +5646,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.537.0]: https://github.com/danielraffel/pulp/releases/tag/v0.537.0
 [0.536.0]: https://github.com/danielraffel/pulp/releases/tag/v0.536.0
 [0.535.0]: https://github.com/danielraffel/pulp/releases/tag/v0.535.0
 [0.534.3]: https://github.com/danielraffel/pulp/releases/tag/v0.534.3
