@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file scratch_store_contract.hpp
+/// @file param_contract.hpp
 /// Parameter-contract equivalence check for DSP hot reload (v2 plan §4.5 / Phase 0).
 ///
 /// A reload builds the candidate logic's parameters into a *scratch* StateStore,
@@ -100,6 +100,11 @@ inline bool param_contracts_match(const state::StateStore& live,
 /// defines, so a hot-swap preserves the current sound. Returns the number of
 /// values carried. Caller should gate this on param_contracts_match(); it is
 /// safe to call regardless (it simply skips IDs the candidate lacks).
+///
+/// NOTE: this is the ALTERNATE state-continuity model, for hosts that give each
+/// processor its OWN StateStore. The canonical standalone-shell path
+/// (reload_transaction.hpp) instead binds the new processor directly to the
+/// single live store and does not call this — see that file's header.
 inline std::size_t carry_state(const state::StateStore& live, state::StateStore& candidate) {
     std::size_t carried = 0;
     for (const auto& l : live.all_params()) {

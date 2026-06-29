@@ -1179,7 +1179,7 @@ pulp_add_test_suite(pulp-test-build-fingerprint LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
 
 # DSP hot reload — parameter-contract equivalence checker (Phase 0)
-pulp_add_test_suite(pulp-test-scratch-store-contract LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-param-contract LIBRARIES pulp::format)
 
 # DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
 # MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
@@ -1192,6 +1192,30 @@ target_compile_definitions(pulp-test-reload-library PRIVATE
     RELOAD_PROBE_PATH="$<TARGET_FILE:pulp-reload-probe>")
 if(NOT WIN32)
     target_link_libraries(pulp-test-reload-library PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — verify-before-commit transaction, end to end (Phase 1). Two
+# logic-library fixtures (compatible / incompatible parameter contract) are
+# built as MODULEs and dlopen'd by the transaction; the test asserts the
+# fingerprint + contract gates, the live swap, and parameter-state continuity.
+add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp)
+add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
+add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
+foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
+                           pulp-reload-logic-throwing)
+    set_target_properties(${_pulp_reload_logic} PROPERTIES
+        PREFIX "" POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(${_pulp_reload_logic} PRIVATE pulp::format)
+endforeach()
+pulp_add_test_suite(pulp-test-reload-transaction LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-transaction
+    pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing)
+target_compile_definitions(pulp-test-reload-transaction PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
