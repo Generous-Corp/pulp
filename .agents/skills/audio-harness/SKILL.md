@@ -337,5 +337,10 @@ harness or `ctest`.
   `advisory.reviewers`. ADVISORY ONLY — never changes the verdict/gate; skip-when-absent;
   no network by default. Validate with `reviewer.score_agreement` (precision/recall vs the
   synthetic answer key) before trusting it.
+- **Tuning loop** (`loop.py`, `quality-lab loop`, EXPERIMENTAL): scores candidates with the
+  gate-participating detectors (experimental detectors excluded), ranks them, and writes
+  PROPOSAL-ONLY label updates to `corpus/LABEL_PROPOSALS.json` — never `MANIFEST.json`,
+  never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
+  regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.

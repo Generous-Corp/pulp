@@ -142,6 +142,15 @@ commands need nothing extra).
   are reached only via an explicit env-path and never bundled; the committed corpus stays
   permissively licensed.
 
+## Autonomous tuning (experimental)
+
+`quality-lab loop` runs one tuning pass: it scores candidates with the gate-participating
+detectors, ranks them, and can write **label proposals** to `corpus/LABEL_PROPOSALS.json`.
+It is deliberately **proposal-only** — it never edits the corpus `MANIFEST.json` and never
+auto-promotes. A **Goodhart guard** refuses any candidate that improves one detector while
+regressing another (normalized Pareto across a working + held-out slice), and low-confidence
+wins are held `NEEDS-EAR` for a human listen. The loop proposes; you decide.
+
 ## Relationship to the existing audio harness
 
 This builds on, and does not replace, the offline audio-observability harness in

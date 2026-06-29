@@ -139,6 +139,23 @@ def _cmd_engine_baseline(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_loop(args: argparse.Namespace) -> int:
+    from . import loop
+    # Deterministic demo pass over the synthetic degradations (the loop's real candidates
+    # are engine/corpus renders; this proves the skeleton + proposal transaction).
+    cands = [loop.score_case(d, d) for d in ("identity", "smear", "dull", "fizz", "grainy")]
+    result = loop.run_iteration(cands)
+    print(f"[quality-lab loop] champion={result['champion']} (experimental — proposes, never decides)")
+    for r in result["ranked"]:
+        print(f"  {r['label']:10s} total_badness={r['total_badness']:.3f}")
+    if args.corpus_dir:
+        path = loop.propose_labels(args.corpus_dir, [
+            {"name": result["champion"], "proposed_expected_artifacts": "(none — clean champion)",
+             "evidence": "tuning-loop demo pass"}])
+        print(f"  wrote label proposals -> {path} (apply to MANIFEST.json by hand)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -190,6 +207,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="regression gate vs the real engine: --capture or --check")
     eb.add_argument("--capture", action="store_true", help="(re)write the committed baseline")
     eb.set_defaults(func=_cmd_engine_baseline)
+
+    lp = sub.add_parser("loop",
+                        help="experimental: one tuning-loop pass (rank candidates; proposes, never decides)")
+    lp.add_argument("--corpus-dir", default="", dest="corpus_dir",
+                    help="write label proposals to <dir>/LABEL_PROPOSALS.json (never MANIFEST.json)")
+    lp.set_defaults(func=_cmd_loop)
 
     args = p.parse_args(argv)
     return args.func(args)

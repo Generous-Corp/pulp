@@ -209,6 +209,7 @@ compared to itself.
 | `quality_lab/engine_baseline.py` | real-engine regression gate |
 | `quality_lab/perceptual.py` | opt-in, license-fenced perceptual-model adapters |
 | `quality_lab/reviewer.py` | opt-in advisory LLM/multimodal reviewer (never a gate) |
+| `quality_lab/loop.py` | experimental tuning loop: rank candidates, Goodhart guard, label proposals |
 | `quality_lab/corpus.py` | versioned, license-guarded corpus |
 | `quality_lab/provenance.py` | re-derivable provenance + self-describing sidecars |
 | `quality_lab/regions.py` | worst-region clip extraction |
@@ -240,8 +241,13 @@ validation clears a bar — so an unproven detector cannot introduce a false reg
 - **Advisory LLM/multimodal reviewer** ships **opt-in** (`reviewer.py`, `run --review`); see
   "Advisory reviewer" above. Promotion past experimental needs real-audio answer-key
   evidence beyond the synthetic corpus — [#5296](https://github.com/danielraffel/pulp/issues/5296).
-- **Autonomous tuning loop** (generate → score → surface regressions → pick up human label
-  edits next pass) — [#5297](https://github.com/danielraffel/pulp/issues/5297).
+- **Autonomous tuning loop** ships its **experimental** first slice (`loop.py`,
+  `quality-lab loop`): deterministic candidate ranking, a normalized-Pareto **Goodhart
+  guard** (refuses a candidate that games one detector while regressing another; held-out
+  slice + NEEDS-EAR), and a **proposal-only** label transaction that writes
+  `corpus/LABEL_PROPOSALS.json` and never touches `MANIFEST.json`. It proposes; a human
+  decides. Wiring it to the real engine matrix + the full label lifecycle is the next slice —
+  [#5297](https://github.com/danielraffel/pulp/issues/5297).
 
 These carry the `post-mvp` + `audio-quality-lab` labels.
 
