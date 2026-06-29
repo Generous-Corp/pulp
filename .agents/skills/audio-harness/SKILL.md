@@ -315,5 +315,12 @@ harness or `ctest`.
   writes a `report.json` with per-onset localization, coverage/confidence, and provenance.
 - Credibility: detectors are validated against an *independent* textbook phase vocoder
   (`reference_pv.py`) AND the real product engine, not just their own synthetic degradation.
+- **`engine`/`engine-baseline` need a built `stretchcli`.** `engine.resolve()` finds it via,
+  in order: the `PULP_STRETCHCLI` env-path, a `build/examples/offline-stretch/stretchcli`
+  found by **walking up from the current directory** (so the engine path works even when the
+  lab is `pulp tool install`-ed into a managed venv, as long as you run it from a Pulp
+  checkout that built stretchcli), then the package-relative repo build. Absent → a clean,
+  actionable `skipped` (build command + env-path), never a failure. Build it with
+  `cmake --build build --target stretchcli`.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.
