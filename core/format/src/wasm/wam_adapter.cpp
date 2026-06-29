@@ -14,9 +14,54 @@
 #include <pulp/runtime/log.hpp>
 #include <sstream>
 #include <cstring>
+#include <cstdio>
 #include <algorithm>
+#include <charconv>
+#include <optional>
 
 namespace pulp::format::wam {
+
+namespace {
+
+// Non-throwing parse of a WAM string parameter id (e.g. "3") to a ParamID.
+// WAM ids arrive from untrusted host/JS input and are decoded on the audio
+// render thread, so this must never throw: under -fno-exceptions a thrown
+// std::stoi would abort the AudioWorklet. Returns nullopt on malformed input.
+std::optional<state::ParamID> parse_param_id(const std::string& id) {
+    if (id.empty()) return std::nullopt;
+    unsigned long long value = 0;
+    const char* begin = id.data();
+    const char* end = begin + id.size();
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end) return std::nullopt;
+    return static_cast<state::ParamID>(value);
+}
+
+// Append a JSON-escaped copy of `s` to `ss`. A PluginDescriptor name/vendor can
+// contain a quote or backslash, which would otherwise produce invalid JSON.
+void append_json_escaped(std::ostringstream& ss, const std::string& s) {
+    for (char c : s) {
+        switch (c) {
+            case '"':  ss << "\\\""; break;
+            case '\\': ss << "\\\\"; break;
+            case '\b': ss << "\\b"; break;
+            case '\f': ss << "\\f"; break;
+            case '\n': ss << "\\n"; break;
+            case '\r': ss << "\\r"; break;
+            case '\t': ss << "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[7];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    ss << buf;
+                } else {
+                    ss << c;
+                }
+        }
+    }
+}
+
+} // namespace
 
 // ── WamDescriptorData ───────────────────────────────────────────────────
 
@@ -37,10 +82,10 @@ WamDescriptorData WamDescriptorData::from_processor(const PluginDescriptor& desc
 std::string WamDescriptorData::to_json() const {
     std::ostringstream ss;
     ss << "{";
-    ss << "\"name\":\"" << name << "\",";
-    ss << "\"vendor\":\"" << vendor << "\",";
-    ss << "\"version\":\"" << version << "\",";
-    ss << "\"apiVersion\":\"" << api_version << "\",";
+    ss << "\"name\":\""; append_json_escaped(ss, name); ss << "\",";
+    ss << "\"vendor\":\""; append_json_escaped(ss, vendor); ss << "\",";
+    ss << "\"version\":\""; append_json_escaped(ss, version); ss << "\",";
+    ss << "\"apiVersion\":\""; append_json_escaped(ss, api_version); ss << "\",";
     ss << "\"isInstrument\":" << (is_instrument ? "true" : "false") << ",";
     ss << "\"hasAudioInput\":" << (has_audio_input ? "true" : "false") << ",";
     ss << "\"hasAudioOutput\":" << (has_audio_output ? "true" : "false") << ",";
@@ -104,6 +149,13 @@ void WamProcessorBridge::process(const float* input, float* output,
 
     int ch = (std::min)(num_channels, num_channels_);
 
+    // Bound the frame count to the planar buffers allocated in initialize().
+    // Web Audio's render quantum is fixed at 128 today, but the host passes
+    // num_frames explicitly: a larger value would overrun input_ptrs_/
+    // output_ptrs_ (each sized to block_size_). Clamp rather than corrupt.
+    if (num_frames > block_size_) num_frames = block_size_;
+    if (num_frames <= 0) return;
+
     // De-interleave: Web Audio [L0,R0,L1,R1,...] → planar [L0,L1,...][R0,R1,...]
     for (int f = 0; f < num_frames; ++f) {
         for (int c = 0; c < ch; ++c) {
@@ -146,6 +198,7 @@ std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
         info.default_value = p.range.default_value;
         info.min_value = p.range.min;
         info.max_value = p.range.max;
+        info.step = p.range.step;
         info.discrete_step = (p.range.step >= 1.0f) ? static_cast<int>(p.range.step) : 0;
 
         // WAMv2 type classification
@@ -161,14 +214,37 @@ std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
     return result;
 }
 
+std::string WamProcessorBridge::parameters_json() const {
+    std::ostringstream ss;
+    ss << "[";
+    bool first = true;
+    for (const auto& p : get_parameter_info()) {
+        if (!first) ss << ",";
+        first = false;
+        ss << "{\"id\":\""; append_json_escaped(ss, p.id);
+        ss << "\",\"label\":\""; append_json_escaped(ss, p.label);
+        ss << "\",\"type\":\""; append_json_escaped(ss, p.type);
+        ss << "\",\"unit\":\""; append_json_escaped(ss, p.unit);
+        ss << "\",\"defaultValue\":" << p.default_value
+           << ",\"minValue\":" << p.min_value
+           << ",\"maxValue\":" << p.max_value
+           << ",\"step\":" << p.step
+           << ",\"discreteStep\":" << p.discrete_step << "}";
+    }
+    ss << "]";
+    return ss.str();
+}
+
 float WamProcessorBridge::get_parameter_value(const std::string& id) const {
-    auto param_id = static_cast<state::ParamID>(std::stoi(id));
-    return store_.get_value(param_id);
+    auto param_id = parse_param_id(id);
+    if (!param_id) return 0.0f;
+    return store_.get_value(*param_id);
 }
 
 void WamProcessorBridge::set_parameter_value(const std::string& id, float value) {
-    auto param_id = static_cast<state::ParamID>(std::stoi(id));
-    store_.set_value(param_id, value);
+    auto param_id = parse_param_id(id);
+    if (!param_id) return;
+    store_.set_value(*param_id, value);
 }
 
 void WamProcessorBridge::schedule_midi(uint8_t status, uint8_t data1,
