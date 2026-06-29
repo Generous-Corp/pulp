@@ -98,11 +98,9 @@ public:
                                     int count) override;
     void clear_stroke_gradient() override;
 
-    // Canvas2D ctx.createPattern. CG has no first-class pattern shader
-    // (CGPattern requires a custom CGPatternRef + tiling closure dance), so
-    // degrade silently to the active fill / stroke colour. Same shape as the
-    // conic-gradient fallback: the call records the intent, but visually the
-    // canvas continues with the previous solid paint.
+    // Canvas2D ctx.createPattern. CG fill patterns use a CGPatternRef +
+    // tiling callback; stroke patterns remain a graceful fallback to the
+    // active stroke colour.
     void set_fill_pattern(const std::string& image_src,
                           PatternTileMode tile_x,
                           PatternTileMode tile_y) override;

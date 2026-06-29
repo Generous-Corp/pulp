@@ -49,13 +49,42 @@ render. Detectors are validated **non-circularly** — not only against syntheti
 degradations but against the output of an independent textbook phase vocoder and against
 the real Pulp stretch engine.
 
-## Install + run (opt-in)
+## Install (opt-in)
+
+The lab is a [machine-level developer/agent tool](../reference/extending-pulp.md) — it
+never links into the MIT core or a shipped plugin. The simplest install is the managed
+`pulp tool` lane, which provisions an isolated Python environment under `~/.pulp/tools/`
+(no project changes, no global pip), then installs the lab into it:
+
+```bash
+pulp tool install audio-quality-lab     # creates a managed venv; pulls numpy + soundfile
+pulp tool run audio-quality-lab -- run --case drum --degradation smear --out-dir out
+pulp tool path audio-quality-lab        # print the venv wrapper path
+```
+
+`pulp tool install` is the same lane used for `ffmpeg`, `uv`, and the framework
+importers (see [Extending Pulp](../reference/extending-pulp.md)); `pulp tool list`
+shows it alongside the others. One difference from the binary-download tools: the lab
+ships **in** the Pulp source tree rather than as an upstream release, so installing it
+requires a Pulp **source checkout** (it pip-installs `tools/audio/quality-lab/`, and the
+install needs network access to fetch numpy/soundfile). If you only have the `pulp`
+binary, clone the repo first.
+
+Prefer a plain checkout instead? The lab is a standard Python package, so the manual
+venv path works too:
 
 ```bash
 cd tools/audio/quality-lab
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt          # numpy + soundfile (permissive); pytest to test
+```
 
+## Run
+
+Whether you installed via `pulp tool` (`pulp tool run audio-quality-lab -- <args>`) or a
+manual venv (`python -m quality_lab.cli <args>`), the subcommands are the same:
+
+```bash
 # run all detectors on a synthetic case and export listenable clips
 python -m quality_lab.cli run --case drum  --degradation smear --out-dir out
 python -m quality_lab.cli run --case tonal --degradation grainy

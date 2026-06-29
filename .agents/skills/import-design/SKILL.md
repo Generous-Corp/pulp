@@ -2562,6 +2562,9 @@ source/version/token field JSON-escaped when touching
 `pulp-test-cli-import-detect`.
 
 Hand-edit the resulting JSON into a new entry under `compat.json[imports/<source>/detected-formats]`. The `notes` field is mandatory — describe the upstream change in one line.
+If no known source/version is close enough to detect, `candidate-source` and
+`candidate-format-version` are emitted as empty strings; fill both manually
+instead of treating them as detector evidence.
 
 ### Adding a fixture
 

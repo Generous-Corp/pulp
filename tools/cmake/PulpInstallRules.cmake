@@ -347,6 +347,32 @@ install(FILES
     DESTINATION src/pulp/format
 )
 
+# macOS view/window/accessibility Objective-C cluster. _pulp_apply_view_mac_objc_suffix()
+# (PulpUtils.cmake) compiles a per-binary copy of these into each shipped plug-in /
+# app so two Pulp binaries in one host don't register colliding ObjC class names.
+# It probes `src/pulp/view/platform/mac` in an installed SDK, so ship the cluster
+# there — otherwise an installed-SDK consumer silently falls back to pulp-view-core's
+# shared fixed-name copies and the cross-plug-in class collision returns. The
+# private headers (pulp_mac_objc_names.h + the window_host_mac split headers) ship
+# alongside because the .mm include them by relative path.
+if(APPLE)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/pulp_mac_objc_names.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_capture.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_geometry.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_text_input.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_capture.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_internal.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_view.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
+        DESTINATION src/pulp/view/platform/mac
+    )
+endif()
+
 if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
     install(IMPORTED_RUNTIME_ARTIFACTS webgpu
         DESTINATION ${CMAKE_INSTALL_LIBDIR}

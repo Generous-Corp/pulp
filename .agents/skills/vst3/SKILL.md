@@ -156,9 +156,31 @@ Parameters flow both ways:
   primitives. UI code that edits params via `Binding` automatically
   gets gestures.
 
-`kIsBypass` is auto-set on any parameter named `"Bypass"` whose range
-is `[0,1]` with `step >= 1` — Steinberg requires exactly one bypass
-parameter per plugin for the host bypass control to work.
+`kIsBypass` is set on whichever parameter the shared
+`pulp::state::is_bypass_param` contract identifies: a Processor that
+declares `ParamInfo::designation = ParamDesignation::Bypass` marks its
+bypass control *by intent, independent of name*; otherwise the legacy
+heuristic (a parameter named `"Bypass"` with range `[0,1]`, `step >= 1`)
+applies as the fallback so existing plugins are unchanged. Steinberg
+requires exactly one bypass parameter per plugin for the host bypass
+control to work, so declare at most one. **A declared `Bypass` param is
+FORCED to a two-state toggle** (`stepCount = 1`) regardless of its
+`ParamRange`: the designation is interpreted as off<0.5 / on>=0.5, and
+`process()` short-circuits on that same threshold, so a continuous range
+must not leak to the host as a knob. (The legacy name/range heuristic
+only matches a boolean range, so it is a no-op for it.)
+
+**Trigger / momentary params.** The adapter calls
+`StateStore::reset_triggers_rt()` as a **single-exit invariant of the
+audio callback** to auto-reset trigger params (`ParamInfo::is_trigger`,
+or a `ParamDesignation::Reset` "reset/panic" control) back to their
+default. It runs on BOTH paths: in the normal path before the
+output-parameter-change scan (so the host records the auto-reset as
+automation), AND right before the bypass short-circuit's
+`return kResultOk` — otherwise a panic/reset raised while bypassed would
+fire late on the next non-bypassed block. Incoming host param changes are
+applied at the top of `process()`, before either exit, so a trigger
+raised this block is always observed-then-settled within it.
 
 ### Bypass routing — cached ParamID + render short-circuit
 

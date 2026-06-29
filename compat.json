@@ -51,7 +51,7 @@
       "imports": 5
     },
     "changelog": {
-      "2026-05-07_W4css": "pulp Wave 4 css extensive \u2014 DIVERGE sweep. Drove the css surface from 128 PASS / 49 DIVERGE (60.4%) to 177 PASS / 0 DIVERGE (83.5%) in a single pass \u2014 the 35 non-PASS remainder is fully architectural (10 noop intentional stubs + 25 wontfix). Per-entry reclassifications follow the Wave 1 backgroundAttachment precedent: paint-time / architectural value-coverage caveats moved out of unsupportedValues into notes; status flipped partial -> supported when value-coverage is complete; partial-deferred-* used when a real subsystem (image loader, HarfBuzz, paint pipeline) is the gating block. Border family (5) arch-solid-only-pen; border-radius (2) arch-skia-rrect-single-radius; background family (5) arch-deferred-image-loader / arch-skia-no-conic-gradient / arch-single-bg; mask family (2) arch-paint-deferred; layout-length (2) arch-yoga-no-intrinsic-sizing + arch-no-calc-eval + single-level-cascade for em/rem; outline family (4) arch-numeric-only + arch-no-cascade-color + arch-paint-px-only; overflow (3) arch-scroll-via-scrollview + arch-axis-tied-overflow; display (1) arch-flex-only; enum cleanups (8) cursor / pointerEvents / textDecoration / userSelect / visibility / whiteSpace / fontStyle label trimming + arch caveats. Drift count: 7 -> 0 on css. css count holds at 212."
+      "2026-05-07_W4css": "pulp Wave 4 css extensive \u2014 DIVERGE sweep. Drove the css surface from 128 PASS / 49 DIVERGE (60.4%) to 177 PASS / 0 DIVERGE (83.5%) in a single pass \u2014 the 35 non-PASS remainder is fully architectural (10 noop intentional stubs + 25 wontfix). Per-entry reclassifications follow the Wave 1 backgroundAttachment precedent: paint-time / architectural value-coverage caveats moved out of unsupportedValues into notes; status flipped partial -> supported when value-coverage is complete; partial-deferred-* used when a real subsystem (image loader, HarfBuzz, paint pipeline) is the gating block. Border family (5) arch-solid-only-pen; border-radius (2) arch-skia-rrect-single-radius; background family (5) arch-deferred-image-loader / historical conic deferral later superseded by sweep-gradient support / arch-single-bg; mask family (2) arch-paint-deferred; layout-length (2) arch-yoga-no-intrinsic-sizing + arch-no-calc-eval + single-level-cascade for em/rem; outline family (4) arch-numeric-only + arch-no-cascade-color + arch-paint-px-only; overflow (3) arch-scroll-via-scrollview + arch-axis-tied-overflow; display (1) arch-flex-only; enum cleanups (8) cursor / pointerEvents / textDecoration / userSelect / visibility / whiteSpace / fontStyle label trimming + arch caveats. Drift count: 7 -> 0 on css. css count holds at 212."
     }
   },
   "css": {
@@ -635,13 +635,16 @@
       "mapsTo": "if 'gradient' in value -> setBackgroundGradient; else parseCSSColor -> setBackground",
       "supportedValues": [
         "color",
-        "linear-gradient(...)"
+        "linear-gradient(...)",
+        "radial-gradient(...)",
+        "conic-gradient(...)"
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
       ],
-      "notes": "Background shorthand supports only color OR a gradient. Wave 1 architectural reclassification \u2014 url() / image / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader and viewport-relative paint not in Pulp's pipeline); color + linear-gradient round-trip end-to-end. Wave 4 css extensive \u2014 url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). conic-gradient is arch-skia-no-conic-gradient (Skia's SkGradientShader doesn't natively support conical sweeps; angle-sweep emulation would require offscreen rasterization and is an explicit non-goal at this surface). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "Background shorthand supports only color OR a single gradient. url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). linear-gradient, radial-gradient, and conic-gradient now parse through setBackgroundGradient; View::paint dispatches them to canvas linear/radial/sweep gradient paint (Skia sweep; CoreGraphics software-rasterized conic image). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern).",
       "issue": ""
     },
     "css/backgroundAttachment": {
@@ -702,13 +705,15 @@
       "mapsTo": "same path as background",
       "supportedValues": [
         "linear-gradient(...)",
-        "radial-gradient(...) (parsed)"
+        "radial-gradient(...)",
+        "conic-gradient(...)"
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
       ],
-      "notes": "url() image backgrounds not implemented. Wave 1 architectural reclassification \u2014 url() / image-set() / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader not in Pulp's pipeline); linear-gradient + radial-gradient round-trip end-to-end. Wave 4 css extensive \u2014 url() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim). conic-gradient is arch-skia-no-conic-gradient. multiple is arch-single-bg. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. multiple backgrounds remain arch-single-bg.",
       "issue": ""
     },
     "css/backgroundOrigin": {
