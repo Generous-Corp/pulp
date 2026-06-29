@@ -113,6 +113,19 @@ lanes, and verify a runner is actually busy before blaming capacity.
 
 ## GitHub workflow gotchas
 
+- **`web-plugins.yml` is the headless-browser web lane (advisory).** It builds
+  Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web plugin formats on a Linux
+  GitHub-hosted runner and runs every web validation, including the browser
+  fixtures in headless Chrome (`browser-actions/setup-chrome` +
+  `playwright-core`, which drives the system Chrome — no browser download). It is
+  deliberately NOT on the self-hosted VMs: a headless-Linux browser lane needs
+  emsdk + wasi-sdk + Chrome, all of which install cleanly on GitHub-hosted, so no
+  golden VM or QEMU work is warranted. The WAM build vendors choc by cloning the
+  pinned fork (PulpWam.cmake needs `PULP_WAM_CHOC_INCLUDE`; the WebCLAP build
+  FetchContents choc/clap itself). The browser drivers are
+  `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
+  locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
+  (set `CHROME_PATH` or pass `--browser`).
 - **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
   intent-trailer model — and it ships DORMANT.** It exists to kill the
   version-bump merge treadmill (PRs editing `CMakeLists` VERSION /

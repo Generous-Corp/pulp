@@ -46,8 +46,7 @@ instrument PulpPluck):
 - More than stereo, or more than one instance per AudioWorkletNode.
 - Broader MIDI than note/CC (pitch bend, aftertouch, program change, sysex,
   MPE).
-- A CI-enforced browser lane — the browser proof is the reproducible fixture at
-  `examples/web-demos/wasm-build/browser-test/`, not yet a Playwright CI job.
+- Broader-than-stereo / multi-instance hosting and full WAM-host conformance.
 
 ## WebCLAP — hosted in Node and in the browser (audio + parameter control proven)
 
@@ -101,9 +100,18 @@ be cross-origin isolated — `serve.mjs` sends the COOP/COEP headers.
   main thread and plays them via an `AudioBuffer`. Streaming live through an
   `AudioWorklet` (host on a worker, the worklet draining a `SharedArrayBuffer`
   ring) is a later refinement.
-- A native Wasmtime bridge, a `.wclap` bundle layout, and a CI lane that runs
-  the probe/runner/browser-validate (wasi-sdk + a browser are not yet on CI
-  runners).
+- A native Wasmtime bridge (hosting a WebCLAP outside the browser/Node).
+
+## Continuous validation
+
+The `Web Plugins` CI lane (`.github/workflows/web-plugins.yml`) builds both web
+formats on a Linux runner (emsdk + wasi-sdk + Chrome) and runs every validation
+on each web-touching PR: the WAMv2 Node feature runner + web-build report + the
+browser fixture (`examples/web-demos/wasm-build/browser-test/`), and the WebCLAP
+probe + Node host runner + packaging test + the in-browser host
+(`examples/web-demos/wclap-build/browser-host/`). The browser fixtures run in
+headless Chrome via `playwright-core`; their screenshots upload as an artifact.
+So the browser proofs are CI-enforced, not by-hand.
 
 ## Pinned upstream references
 
