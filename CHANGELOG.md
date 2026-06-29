@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05400"></a>
+## [0.540.0] - 2026-06-29
+
+- feat(reload): scratch-store contract check + dlopen leak-policy handle (Phase 0) ([#5345](https://github.com/danielraffel/pulp/pull/5345))
+- docs(quality-lab): restructure guide + fix quote-escaping in the rendered HTML ([#5344](https://github.com/danielraffel/pulp/pull/5344))
+
 <a id="v05390"></a>
 ## [0.539.0] - 2026-06-29
 
@@ -5667,6 +5673,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.540.0]: https://github.com/danielraffel/pulp/releases/tag/v0.540.0
 [0.539.0]: https://github.com/danielraffel/pulp/releases/tag/v0.539.0
 [0.538.0]: https://github.com/danielraffel/pulp/releases/tag/v0.538.0
 [0.537.0]: https://github.com/danielraffel/pulp/releases/tag/v0.537.0
