@@ -24,6 +24,10 @@
 #import <Foundation/Foundation.h>
 #if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
+// Per-binary-unique ObjC class names (renames PulpTextAccessibilityElement when
+// a shipped macOS binary defines PULP_VIEW_OBJC_SUFFIX). macOS (AppKit) only;
+// iOS keeps the base names. Must precede the first reference to the class.
+#include "pulp_mac_objc_names.h"
 #else
 #import <UIKit/UIKit.h>
 #endif

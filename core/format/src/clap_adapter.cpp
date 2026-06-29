@@ -75,8 +75,9 @@ bool clap_init(const clap_plugin_t* plugin) {
     // when the quirk is off.
     maybe_synthesize_bypass(self->store, self->host_quirks);
     for (const auto& p : self->store.all_params()) {
-        if (p.name == "Bypass" && p.range.step >= 1.0f &&
-            p.range.min == 0.0f && p.range.max == 1.0f) {
+        // Declared designation wins; falls back to the legacy name/range
+        // heuristic for params that declare none (see is_bypass_param).
+        if (state::is_bypass_param(p)) {
             self->bypass_param_id = p.id;
             break;
         }
@@ -824,6 +825,11 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         self->processor->process(process_buffers, midi_in, midi_out, ctx);
     }
+
+    // Return trigger / momentary params (panic, reset, tap) to their default
+    // now that the Processor has observed this block. Done before the
+    // output-event scan below so the host records the auto-reset as automation.
+    self->store.reset_triggers_rt();
 
     // Emit output parameter events for any values the plugin changed,
     // so the host can record automation
