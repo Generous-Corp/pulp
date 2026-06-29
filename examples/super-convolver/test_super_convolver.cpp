@@ -5,12 +5,17 @@
 #include <pulp/state/store.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/audio/audio_file.hpp>
 
 #include "super_convolver.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <limits>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -894,4 +899,266 @@ TEST_CASE("SuperConvolver survives concurrent Engine/Rooms churn while rendering
     stop.store(true, std::memory_order_relaxed);
     churn.join();
     SUCCEED("rendered 6000 blocks under concurrent Engine/Rooms/Size churn without UAF");
+}
+
+// Load IR: a loaded audio file becomes the BASE impulse response. Write a known
+// mono Float32 WAV at the session sample rate (so no resampling), load it via
+// set_ir_path before prepare, render an impulse fully wet, and confirm the
+// convolution reproduces the loaded-then-unit-energy-normalized IR. Also proves
+// the path round-trips through serialize/deserialize_plugin_state.
+TEST_CASE("SuperConvolver loads an IR file as the base impulse response",
+          "[golden][superconvolver][loadir]") {
+    constexpr std::size_t BLOCK = 512;
+    constexpr double SR = 48000.0;
+    const std::size_t len = 2400;   // 0.05 s at 48 kHz
+
+    // A known mono IR: decaying noise with a unit onset, within [-1, 1].
+    std::vector<float> file_ir(len, 0.0f);
+    std::uint32_t s = 0xABCDEF01u;
+    for (std::size_t i = 0; i < len; ++i) {
+        s = s * 1664525u + 1013904223u;
+        const float white = static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
+        file_ir[i] = white * std::exp(-4.0f * static_cast<float>(i) / static_cast<float>(len));
+    }
+    file_ir[0] = 1.0f;
+
+    pulp::audio::AudioFileData data;
+    data.sample_rate = static_cast<std::uint32_t>(SR);
+    data.channels = {file_ir};
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "sc_loadir_test.wav").string();
+    REQUIRE(pulp::audio::write_wav_file(path, data, pulp::audio::WavBitDepth::Float32));
+
+    // Expected base = the file, unit-energy normalized (the loader's recipe).
+    std::vector<float> expected = file_ir;
+    double e = 0.0;
+    for (float v : expected) e += static_cast<double>(v) * v;
+    const float g = static_cast<float>(1.0 / std::sqrt(e));
+    for (float& v : expected) v *= g;
+
+    SuperConvolverProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, 0.05f);
+    store.set_value(kMix, 100.0f);   // fully wet → output == convolution
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);  // CPU path (deterministic, no GPU device needed)
+    proc.set_ir_path(path);          // before prepare → loaded synchronously at prepare
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    REQUIRE(proc.ir_path() == path);
+
+    // serialize/deserialize round-trip: a fresh processor restores the path.
+    const auto blob = proc.serialize_plugin_state();
+    SuperConvolverProcessor proc2;
+    pulp::state::StateStore store2;
+    proc2.set_state_store(&store2);
+    proc2.define_parameters(store2);
+    REQUIRE(proc2.deserialize_plugin_state(blob));
+    REQUIRE(proc2.ir_path() == path);
+
+    // Render an impulse and confirm the convolution is the loaded IR.
+    DirectDriver d(proc, BLOCK, SR);
+    std::vector<float> impulse(BLOCK, 0.0f);
+    impulse[0] = 1.0f;
+    std::vector<float> out;
+    const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 4;
+    for (int b = 0; b < nblocks; ++b) {
+        const auto o = d.block_io(b == 0 ? impulse : std::vector<float>{}, 0);
+        out.insert(out.end(), o.begin(), o.end());
+    }
+    const double corr = corr_to_ir(out, expected, len);
+    INFO("loaded-IR corr=" << corr);
+    REQUIRE(corr > 0.9999);   // the live convolution IS the loaded, normalized IR
+
+    // It is genuinely the LOADED IR, not the synthetic one for this Size.
+    const auto synth = make_reverb_ir(static_cast<std::size_t>(0.05f * SR));
+    REQUIRE(corr_to_ir(out, synth, len) < 0.5);
+
+    proc.release();
+    std::filesystem::remove(path);
+}
+
+// Bad / missing IR path: the processor must fall back to the built-in synthetic
+// IR (and never crash or drop audio). The reported path still reflects what was
+// requested, but the audio is the synthetic reverb at the current Size.
+TEST_CASE("SuperConvolver falls back to the synthetic IR for an unreadable path",
+          "[golden][superconvolver][loadir]") {
+    constexpr std::size_t BLOCK = 512;
+    constexpr double SR = 48000.0;
+    constexpr float SIZE = 0.05f;
+    const std::size_t len = static_cast<std::size_t>(SIZE * SR);
+    const std::string bad = "/no/such/dir/definitely_missing_ir.wav";
+
+    SuperConvolverProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, SIZE);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    proc.set_ir_path(bad);
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    REQUIRE(proc.ir_path() == bad);   // the (bad) request is still remembered
+
+    DirectDriver d(proc, BLOCK, SR);
+    std::vector<float> impulse(BLOCK, 0.0f);
+    impulse[0] = 1.0f;
+    std::vector<float> out;
+    const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 4;
+    for (int b = 0; b < nblocks; ++b) {
+        const auto o = d.block_io(b == 0 ? impulse : std::vector<float>{}, 0);
+        out.insert(out.end(), o.begin(), o.end());
+    }
+    const std::vector<float> synth = make_reverb_ir(len);
+    const double corr = corr_to_ir(out, synth, len);
+    INFO("fallback corr=" << corr);
+    REQUIRE(corr > 0.9999);   // audio is the synthetic IR — fell back cleanly
+    proc.release();
+}
+
+// The serialized state blob carries a version header, and the loader still reads
+// a legacy raw-path blob (the pre-versioning format) for backward compatibility.
+TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths",
+          "[superconvolver][loadir]") {
+    const std::string path = "/some/where/room.wav";
+
+    SuperConvolverProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    proc.set_ir_path(path);
+
+    // Versioned blob: "SCv1" magic + version byte + the path.
+    const auto blob = proc.serialize_plugin_state();
+    REQUIRE(blob.size() == 5 + path.size());
+    REQUIRE(blob[0] == 'S');
+    REQUIRE(blob[1] == 'C');
+    REQUIRE(blob[2] == 'v');
+    REQUIRE(blob[3] == '1');
+    REQUIRE(blob[4] == 1);
+
+    // A fresh processor restores the path from the versioned blob.
+    SuperConvolverProcessor proc2;
+    pulp::state::StateStore store2;
+    proc2.set_state_store(&store2);
+    proc2.define_parameters(store2);
+    REQUIRE(proc2.deserialize_plugin_state(blob));
+    REQUIRE(proc2.ir_path() == path);
+
+    // A LEGACY raw-path blob (no header — what pre-versioning builds wrote) must
+    // still restore correctly.
+    std::vector<std::uint8_t> legacy(path.begin(), path.end());
+    SuperConvolverProcessor proc3;
+    pulp::state::StateStore store3;
+    proc3.set_state_store(&store3);
+    proc3.define_parameters(store3);
+    REQUIRE(proc3.deserialize_plugin_state(legacy));
+    REQUIRE(proc3.ir_path() == path);
+
+    // An empty blob clears back to the synthetic IR (empty path).
+    SuperConvolverProcessor proc4;
+    pulp::state::StateStore store4;
+    proc4.set_state_store(&store4);
+    proc4.define_parameters(store4);
+    REQUIRE(proc4.deserialize_plugin_state(std::span<const std::uint8_t>{}));
+    REQUIRE(proc4.ir_path().empty());
+}
+
+// load_ir_path() forces a reload even when the chosen path equals the current
+// one (the user re-picking the same file), whereas set_ir_path() dedups. The
+// generation counter is the worker's rebuild trigger, so it must advance.
+TEST_CASE("SuperConvolver load_ir_path forces a reload on the same path",
+          "[superconvolver][loadir]") {
+    const std::string path = "/some/where/room.wav";
+
+    SuperConvolverProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+
+    proc.set_ir_path(path);
+    const std::uint32_t gen_after_set = proc.ir_path_generation();
+
+    // set_ir_path with the same path dedups — generation does NOT advance.
+    proc.set_ir_path(path);
+    REQUIRE(proc.ir_path_generation() == gen_after_set);
+
+    // load_ir_path with the same path forces a reload — generation advances.
+    proc.load_ir_path(path);
+    REQUIRE(proc.ir_path_generation() > gen_after_set);
+    REQUIRE(proc.ir_path() == path);
+}
+
+// A file whose samples are non-finite (NaN/Inf) must be rejected by the loader
+// (not normalized into NaN and published) — the processor falls back to the
+// synthetic IR. Guards the "+Inf energy passes `> 0`" data-corruption path.
+TEST_CASE("SuperConvolver rejects a non-finite IR file and falls back",
+          "[golden][superconvolver][loadir]") {
+    constexpr std::size_t BLOCK = 512;
+    constexpr double SR = 48000.0;
+    constexpr float SIZE = 0.05f;
+    const std::size_t len = static_cast<std::size_t>(SIZE * SR);
+
+    // A file with an infinity in it: writes valid WAV bytes, but the decoded
+    // samples are non-finite, so the loader must reject it.
+    std::vector<float> bad_ir(len, 0.1f);
+    bad_ir[10] = std::numeric_limits<float>::infinity();
+    pulp::audio::AudioFileData data;
+    data.sample_rate = static_cast<std::uint32_t>(SR);
+    data.channels = {bad_ir};
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "sc_nonfinite_ir.wav").string();
+    REQUIRE(pulp::audio::write_wav_file(path, data, pulp::audio::WavBitDepth::Float32));
+
+    SuperConvolverProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kSize, SIZE);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kGain, 0.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    proc.set_ir_path(path);
+
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    DirectDriver d(proc, BLOCK, SR);
+    std::vector<float> impulse(BLOCK, 0.0f);
+    impulse[0] = 1.0f;
+    std::vector<float> out;
+    const int nblocks = static_cast<int>((len + BLOCK) / BLOCK) + 4;
+    for (int b = 0; b < nblocks; ++b) {
+        const auto o = d.block_io(b == 0 ? impulse : std::vector<float>{}, 0);
+        out.insert(out.end(), o.begin(), o.end());
+    }
+    // Output must be finite (no NaN leaked) and match the synthetic fallback.
+    for (float v : out) REQUIRE(std::isfinite(v));
+    const std::vector<float> synth = make_reverb_ir(len);
+    REQUIRE(corr_to_ir(out, synth, len) > 0.9999);
+    proc.release();
+    std::filesystem::remove(path);
 }
