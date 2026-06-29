@@ -17,7 +17,7 @@ platforms:
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: experimental
-    notes: WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via pulp_add_wam_plugin — the PulpGain canary loads, renders audio, and exposes generated parameter controls in Chrome (verified via an OfflineAudioContext fixture and a Node runner). WebCLAP remains adapter/CMake scaffolding. Browser validation is fixture-based, not yet a CI lane.
+    notes: WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via pulp_add_wam_plugin — the PulpGain canary loads, renders audio, and exposes generated parameter controls in Chrome (verified via an OfflineAudioContext fixture and a Node runner). WebCLAP builds a Pulp Processor to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk); the PulpGain WebCLAP is hosted in Node through the full CLAP lifecycle with audio and parameter control proven, but is not yet hosted in-browser. Browser validation is fixture-based, not yet a CI lane.
 
 formats:
   vst3:
@@ -57,7 +57,7 @@ formats:
     notes: A Pulp Processor builds to a WAMv2 AudioWorklet plugin via pulp_add_wam_plugin. Coverage spans an effect (PulpGain — loads, renders, generated controls in Chrome; dB-accurate gain, interleaved stereo, bypass), a richer effect (PulpChorus — input transformed), and an instrument (PulpPluck — MIDI note-on produces sound and decays after note-off). Verified by a deterministic Node feature runner plus native bridge tests (param/state round-trip, MIDI delivery). Stereo, single-instance canary — not full WamEnv/WamGroup host conformance, and browser validation is a fixture, not yet a CI lane.
   webclap:
     web: experimental
-    notes: Adapter macro and CMake helper exist; no checked-in PulpGain_WCLAP target or Pulp browser-host wclap-host-js integration yet.
+    notes: A Pulp Processor builds to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk, wasm32-wasi-threads, -fno-exceptions). The checked-in PulpGain WebCLAP (examples/web-demos/wclap-build) exports the WebCLAP host contract (clap_entry, malloc/free/cabi_realloc, growable table, shared imported memory). wclap_probe.mjs verifies the module is live; wclap_host_runner.mjs drives the full CLAP lifecycle from pure JS — create_plugin, init, activate, process — rendering audio and controlling parameters (Input Gain +6 dB raises output exactly +6 dB), with host callbacks synthesized via WebAssembly.Function (no C++ host shim). Not yet in-browser-hosted (AudioWorklet), no .wclap bundle layout, and no CI lane (needs wasi-sdk + WebAssembly.Function on runners).
   aax:
     macos: experimental
     windows: experimental

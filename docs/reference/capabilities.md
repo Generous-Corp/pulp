@@ -113,7 +113,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2/WebCLAP scaffolding, Emscripten pipeline; browser-host runtime not validated |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) canary loads + renders in Chrome; WebCLAP (wasi-sdk) builds + is Node-hosted with audio + parameter control; in-browser WebCLAP host pending |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
