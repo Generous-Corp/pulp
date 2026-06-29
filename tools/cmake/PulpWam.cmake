@@ -97,7 +97,7 @@ set(_PULP_WAM_EXPORTED_FUNCTIONS
 # as BASE64 with synchronous compilation, which is required to run inside an
 # AudioWorkletGlobalScope (no fetch / no async compile there).
 function(pulp_add_wam_plugin NAME)
-    cmake_parse_arguments(ARG "SINGLE_FILE" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(ARG "SINGLE_FILE;NATIVE_EDITOR" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
     if(NOT ARG_ENTRY)
         message(FATAL_ERROR "pulp_add_wam_plugin(${NAME}): ENTRY <entry.cpp> is required.")
     endif()
@@ -140,4 +140,31 @@ function(pulp_add_wam_plugin NAME)
         OUTPUT_NAME "${NAME}"
         SUFFIX ".js"
         LINK_FLAGS "${_link_str}")
+
+    # Emit a web-build report (<Name>.web-build.json) documenting what the web
+    # build does with this plugin's UI: the generated-controls strategy, the
+    # parameter binding targets a design-import UI maps to by id, and — when
+    # NATIVE_EDITOR is declared — that the plugin's native editor is replaced by
+    # generated controls in the headless web build. Needs the separate .wasm, so
+    # it is skipped for SINGLE_FILE (worklet) targets, and skipped (with a status
+    # message) when node is unavailable.
+    if(NOT ARG_SINGLE_FILE)
+        find_program(_PULP_WAM_NODE node)
+        if(_PULP_WAM_NODE)
+            set(_report_args
+                "${_PULP_WAM_NODE}"
+                "${_PULP_WAM_ROOT}/core/format/src/wasm/wam_build_report.mjs"
+                --wasm "$<TARGET_FILE_DIR:${NAME}-wam>/${NAME}.wasm"
+                --out "${CMAKE_CURRENT_BINARY_DIR}/${NAME}.web-build.json")
+            if(ARG_NATIVE_EDITOR)
+                list(APPEND _report_args --native-editor)
+            endif()
+            add_custom_command(TARGET ${NAME}-wam POST_BUILD
+                COMMAND ${_report_args}
+                COMMENT "Writing ${NAME}.web-build.json"
+                VERBATIM)
+        else()
+            message(STATUS "PulpWam: node not found — skipping ${NAME}.web-build.json report.")
+        endif()
+    endif()
 endfunction()
