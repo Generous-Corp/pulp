@@ -27,6 +27,7 @@ DOCS = [
 # Build helpers that must be defined where the docs say (helper -> file).
 REQUIRED_HELPERS = {
     "pulp_add_wam_plugin": "tools/cmake/PulpWam.cmake",
+    "pulp_add_wclap": "tools/cmake/PulpWclap.cmake",
 }
 
 # A backtick span looks like a repo path if it contains a slash and a known

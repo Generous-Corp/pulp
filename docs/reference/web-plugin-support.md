@@ -13,7 +13,7 @@ cannot drift into claiming a capability the repo does not have.
 | Lane | Toolchain | What it produces | Status |
 | --- | --- | --- | --- |
 | **WAMv2** (Web Audio Modules v2) | Emscripten (`emcc`) | An ES-module + AudioWorklet plugin | **partial** — working canary |
-| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — scaffold |
+| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — building canary (not browser-hosted yet) |
 
 The two tracks deliberately use different toolchains: WAMv2 *wants* Emscripten's
 AudioWorklet/JS glue, while WebCLAP wants wasi-sdk (Clang + WASI sysroot, no JS
@@ -49,13 +49,42 @@ instrument PulpPluck):
 - A CI-enforced browser lane — the browser proof is the reproducible fixture at
   `examples/web-demos/wasm-build/browser-test/`, not yet a Playwright CI job.
 
-## WebCLAP — scaffold (not buildable yet)
+## WebCLAP — building canary (not browser-hosted yet)
 
-`tools/cmake/PulpWclap.cmake` + `core/format/include/pulp/format/web/wclap_adapter.hpp`
-are an experimental scaffold. There is no checked-in `.wclap` target yet. A WCLAP
-build requires the **threaded** wasi target (`wasm32-wasi-threads`) because the
-state store transitively needs `std::thread`, plus a portable event backend and
-an exceptions decision. Status and the build plan: the planning submodule.
+A `Processor` now compiles to a **live WebCLAP module**. Build one with
+`pulp_add_wclap` (`tools/cmake/PulpWclap.cmake`) configured with the wasi-sdk
+toolchain (`tools/cmake/wasi-toolchain.cmake`); the entry point uses
+`PULP_WCLAP_PLUGIN` from `core/format/include/pulp/format/web/wclap_adapter.hpp`.
+The checked-in example is `examples/web-demos/wclap-build/` (PulpGain →
+`PulpGain.wasm`).
+
+The output `.wasm` exports the WebCLAP host contract: the standard CLAP
+`clap_entry` global, `malloc`/`free`/`cabi_realloc`, a growable function table,
+and a shared, host-imported memory. `core/format/src/wasm/wclap_probe.mjs`
+instantiates the module, runs its reactor initializer, and verifies `clap_entry`
+resolves to a real CLAP 1.2.2 entry struct with callable init / deinit /
+get_factory.
+
+**Why the toolchain is what it is** (these are hard constraints, not choices):
+
+- The **threaded** wasi target (`wasm32-wasi-threads`) is required — the state
+  store transitively needs `std::thread`.
+- Its libc++abi ships **without an exception runtime**, so the WebCLAP source
+  set builds with `-fno-exceptions`. The portable `PULP_TRY` / `PULP_CATCH_ALL`
+  macros in `core/runtime/include/pulp/runtime/exceptions.hpp` keep the one
+  defensive try/catch compiling in both modes, and the JSON/filesystem-bound
+  native PresetManager is replaced by the headless
+  `core/state/src/wasm/preset_manager_wasm.cpp` (a browser sandbox has no preset
+  filesystem).
+
+**Not yet in scope for the WebCLAP canary:**
+
+- **Browser/DAW hosting.** The module is contract-correct and proven live, but
+  nothing yet drives it through a real WebCLAP host (AudioWorklet host JS, or a
+  native Wasmtime bridge). No audio has been rendered through a CLAP host — that
+  is the next step.
+- A `.wclap` bundle layout, a host-side UI, and a CI lane that runs the probe
+  (wasi-sdk is not yet installed on CI runners).
 
 ## Pinned upstream references
 
