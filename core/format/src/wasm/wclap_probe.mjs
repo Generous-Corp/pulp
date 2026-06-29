@@ -7,12 +7,13 @@
 //
 // This is the WebCLAP analogue of core/format/src/wasm/wam_node_runner.mjs: it
 // proves the module is a live, contract-correct WebCLAP without needing a full
-// CLAP host. A browser/native WebCLAP host additionally drives the factory and
-// audio ports — that is Phase 4 host work, not this gate.
+// CLAP host. Driving the factory, parameters, and audio is the host harness's
+// job — see wclap_host_runner.mjs.
 //
 // Usage:  node wclap_probe.mjs <path-to.wasm>
 // Exit:   0 = PASS, non-zero = fail (prints the reason).
 import { readFileSync } from "node:fs";
+import { createWclapMemory, makeWasiImports } from "./wclap-wasi.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -23,35 +24,13 @@ if (!wasmPath) {
 const buf = readFileSync(wasmPath);
 const module = await WebAssembly.compile(buf);
 
-// The module imports `env.memory` as a shared, growable memory. Max must match
-// the link's --max-memory (1 GiB / 64 KiB = 16384 pages).
-const memory = new WebAssembly.Memory({ initial: 512, maximum: 16384, shared: true });
-
-const wasiStub = new Proxy(
-  {
-    proc_exit: (code) => { throw new Error(`proc_exit(${code})`); },
-    fd_write: () => 0,
-    fd_close: () => 0,
-    fd_seek: () => 0,
-    fd_prestat_get: () => 8,        // WASI EBADF — no preopens
-    fd_prestat_dir_name: () => 8,
-    environ_get: () => 0,
-    environ_sizes_get: (cPtr, sPtr) => {
-      const dv = new DataView(memory.buffer);
-      dv.setUint32(cPtr, 0, true);
-      dv.setUint32(sPtr, 0, true);
-      return 0;
-    },
-    clock_time_get: () => 0,
-    path_readlink: () => 8,
-    sched_yield: () => 0,
-  },
-  { get: (t, p) => (p in t ? t[p] : (() => 0)) }
-);
-
+// Shared, growable memory sized to the link's --max-memory, plus the shared WASI
+// shim (whose fd_write is implemented correctly — a 0-returning stub that omits
+// *nwritten makes any logging path spin forever).
+const memory = createWclapMemory();
 const instance = await WebAssembly.instantiate(module, {
   env: { memory },
-  wasi_snapshot_preview1: wasiStub,
+  wasi_snapshot_preview1: makeWasiImports(() => memory),
 });
 
 const ex = instance.exports;

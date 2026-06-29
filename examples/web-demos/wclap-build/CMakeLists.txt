@@ -14,6 +14,11 @@
 # Validate the module is live (instantiate, run _initialize, resolve clap_entry):
 #   node ../../../core/format/src/wasm/wclap_probe.mjs build/PulpGain.wasm
 #
+# Host it for real — full CLAP lifecycle + audio + parameter control (needs
+# WebAssembly.Function, hence the Node flag):
+#   node --experimental-wasm-type-reflection \
+#     ../../../core/format/src/wasm/wclap_host_runner.mjs build/PulpGain.wasm --gain-db 6
+#
 # The WebCLAP build logic (portable DSP/adapter source set, link flags, the
 # clap_entry/allocator export contract) lives in tools/cmake/PulpWclap.cmake —
 # this file only declares which plugins to build. See that helper and

@@ -13,7 +13,7 @@ cannot drift into claiming a capability the repo does not have.
 | Lane | Toolchain | What it produces | Status |
 | --- | --- | --- | --- |
 | **WAMv2** (Web Audio Modules v2) | Emscripten (`emcc`) | An ES-module + AudioWorklet plugin | **partial** — working canary |
-| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — building canary (not browser-hosted yet) |
+| **WebCLAP** (`.wclap`) | wasi-sdk (`wasm32-wasi-threads`) | A CLAP compiled to WebAssembly | **experimental** — Node-hostable (audio + params proven); in-browser host next |
 
 The two tracks deliberately use different toolchains: WAMv2 *wants* Emscripten's
 AudioWorklet/JS glue, while WebCLAP wants wasi-sdk (Clang + WASI sysroot, no JS
@@ -49,21 +49,32 @@ instrument PulpPluck):
 - A CI-enforced browser lane — the browser proof is the reproducible fixture at
   `examples/web-demos/wasm-build/browser-test/`, not yet a Playwright CI job.
 
-## WebCLAP — building canary (not browser-hosted yet)
+## WebCLAP — Node-hostable (audio + parameter control proven)
 
-A `Processor` now compiles to a **live WebCLAP module**. Build one with
-`pulp_add_wclap` (`tools/cmake/PulpWclap.cmake`) configured with the wasi-sdk
-toolchain (`tools/cmake/wasi-toolchain.cmake`); the entry point uses
+A `Processor` compiles to a **live WebCLAP module** that a pure-JS host drives
+through the full CLAP lifecycle, renders audio, and controls by parameter. Build
+one with `pulp_add_wclap` (`tools/cmake/PulpWclap.cmake`) configured with the
+wasi-sdk toolchain (`tools/cmake/wasi-toolchain.cmake`); the entry point uses
 `PULP_WCLAP_PLUGIN` from `core/format/include/pulp/format/web/wclap_adapter.hpp`.
 The checked-in example is `examples/web-demos/wclap-build/` (PulpGain →
 `PulpGain.wasm`).
 
 The output `.wasm` exports the WebCLAP host contract: the standard CLAP
 `clap_entry` global, `malloc`/`free`/`cabi_realloc`, a growable function table,
-and a shared, host-imported memory. `core/format/src/wasm/wclap_probe.mjs`
-instantiates the module, runs its reactor initializer, and verifies `clap_entry`
-resolves to a real CLAP 1.2.2 entry struct with callable init / deinit /
-get_factory.
+and a shared, host-imported memory.
+
+**Two host-side tools** (both in `core/format/src/wasm/`):
+
+| Tool | Proves |
+| --- | --- |
+| `wclap_probe.mjs` | Module is live: `_initialize` runs; `clap_entry` resolves to a CLAP 1.2.2 entry with callable init/deinit/get_factory. |
+| `wclap_host_runner.mjs` | Full host: `create_plugin` → `init` → `activate` → `process`. Renders a stereo block (passthrough at unity) and, with an injected param-value event, drives a parameter (PulpGain `Input Gain +6 dB` → output rises exactly +6 dB). |
+
+The host callbacks (`clap_host_t`) are synthesized from JS via `WebAssembly.Function`
+(`core/format/src/wasm/wclap-host.mjs`), so **no compiled C++ host shim is
+needed**. `wclap-wasi.mjs` is the shared WASI shim. The runner needs
+`WebAssembly.Function`, so it runs under Node with
+`--experimental-wasm-type-reflection`.
 
 **Why the toolchain is what it is** (these are hard constraints, not choices):
 
@@ -77,14 +88,15 @@ get_factory.
   `core/state/src/wasm/preset_manager_wasm.cpp` (a browser sandbox has no preset
   filesystem).
 
-**Not yet in scope for the WebCLAP canary:**
+**Not yet in scope:**
 
-- **Browser/DAW hosting.** The module is contract-correct and proven live, but
-  nothing yet drives it through a real WebCLAP host (AudioWorklet host JS, or a
-  native Wasmtime bridge). No audio has been rendered through a CLAP host — that
-  is the next step.
-- A `.wclap` bundle layout, a host-side UI, and a CI lane that runs the probe
-  (wasi-sdk is not yet installed on CI runners).
+- **In-browser hosting + UI.** Hosting is proven in Node; an AudioWorklet host
+  (shared `WebAssembly.Memory`, COOP/COEP, `WebAssembly.Function` in worklet
+  scope) plus a generated UI is the next slice. The Node host
+  (`wclap-host.mjs`) is structured so the browser host reuses its struct
+  marshalling.
+- A native Wasmtime bridge, a `.wclap` bundle layout, and a CI lane that runs
+  the probe/runner (wasi-sdk + `WebAssembly.Function` are not yet on CI runners).
 
 ## Pinned upstream references
 
