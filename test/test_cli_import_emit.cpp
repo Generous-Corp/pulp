@@ -184,6 +184,30 @@ TEST_CASE("import emit rejects an unknown provenance", "[cli][import][emit]") {
     REQUIRE(m.parse_error.find("provenance") != std::string::npos);
 }
 
+TEST_CASE("import emit summary points at migration status instead of assumed TODO markers",
+          "[cli][import][emit]") {
+    auto m = ie::parse_manifest(mock_manifest());
+    REQUIRE(m.ok);
+    REQUIRE(ie::format_unresolved_summary(m) ==
+            "1 item(s) to migrate (see migration_status.json)");
+    REQUIRE(ie::format_parity_review_step(m) ==
+            "Review migration_status.json for the unresolved DSP/UI parity work.");
+    REQUIRE(ie::format_unresolved_summary(m).find("TODO(import)") ==
+            std::string::npos);
+    REQUIRE(ie::format_parity_review_step(m).find("TODO(import)") ==
+            std::string::npos);
+
+    auto no_status = ie::parse_manifest(
+        R"({"schema":"pulp.import.emission_manifest.v0",)"
+        R"("files":[{"path":"a","provenance":"generated","content":"x"}],)"
+        R"("unresolved":["migrate DSP"]})");
+    REQUIRE(no_status.ok);
+    REQUIRE(ie::format_unresolved_summary(no_status) ==
+            "1 item(s) to migrate (no migration_status.json emitted)");
+    REQUIRE(ie::format_parity_review_step(no_status) ==
+            "Review the importer-reported unresolved DSP/UI parity work.");
+}
+
 // ── Write plan ──
 
 TEST_CASE("import emit write-plan resolves dests under the output dir",

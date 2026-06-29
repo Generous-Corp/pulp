@@ -13,8 +13,8 @@
 //
 // See `docs/reference/imports/index.md` for the recognized
 // (source, format-version, parser-version) matrix and the fingerprint
-// vocabulary. The schema is locked at `compat-schema-version: "0.2"`
-// (#1031) — version bumps go through #1027's compat-sync hook.
+// vocabulary. The compat-schema-version is read from compat.json; schema
+// and version bumps go through the compat-sync hook.
 
 #pragma once
 
@@ -100,8 +100,7 @@ struct DetectionResult {
 
 // Parse compat.json text → ImportsManifest. Returns std::nullopt on
 // malformed JSON or missing `imports` section. Tolerates extra
-// top-level keys so #1027's broader sections coexist with #1031's
-// imports section.
+// top-level keys so broader compat sections can coexist with imports.
 std::optional<ImportsManifest> parse_compat_json(const std::string& text);
 
 // Walk parents of `start_dir` (including `start_dir` itself) until a
@@ -163,9 +162,9 @@ struct NewFormatReport {
 
 // Build a NewFormatReport by diffing `snap` against the closest match
 // in `manifest`. Suggests a candidate format-version derived from the
-// closest match (e.g. "2025.04" → "2025.04+"). The candidate version
-// is intentionally a placeholder — caller is expected to replace it
-// with the real release date or upstream version string.
+// closest match (e.g. "2025.04" -> "2025.04+next"). If there is no
+// closest match, source/version stay empty so the caller does not infer
+// a real compat entry from guessed data.
 NewFormatReport build_new_format_report(const ImportsManifest& manifest,
                                         const InputSnapshot& snap,
                                         const DetectionResult& closest);

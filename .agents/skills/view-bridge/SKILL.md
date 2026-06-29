@@ -210,6 +210,16 @@ before `process()` via `set_param_events(...)`. Treat that pointer like
 the MIDI/MPE sidecars: it is valid only during the current process call
 and must not be captured by editor/view code.
 
+**Trigger / momentary params and the shared StateStore.** An editor that
+raises a *trigger* parameter (`ParamInfo::is_trigger`, or a
+`ParamDesignation::Reset` "reset/panic" control) on the shared store is
+writing a one-shot: the adapter's render path calls
+`StateStore::reset_triggers_rt()` after each `Processor::process` block,
+which returns the parameter to its default. Editor/view code therefore
+must not assume a trigger it set stays raised across frames — it is
+observed for one block and then auto-settles. Read it back from the
+store if you need to reflect the resting state in the UI.
+
 ## Secondary views
 
 ```cpp

@@ -36,6 +36,7 @@ namespace SpeakerArr = Steinberg::Vst::SpeakerArr;
 
 constexpr pulp::state::ParamID kGainParamId = 1;
 constexpr pulp::state::ParamID kBypassParamId = 2;
+constexpr pulp::state::ParamID kResetParamId = 3;
 
 class ScopedEnv {
 public:
@@ -166,6 +167,15 @@ struct TestVst3Config {
     // diversion predicate.
     bool add_colliding_param = false;
     pulp::state::ParamID colliding_param_id = 0;
+    // When set, declare a Bypass-DESIGNATED parameter with a non-boolean
+    // (continuous) range and a name that is NOT "Bypass" — exercises the
+    // designation-first path: the adapter must tag kIsBypass and FORCE a
+    // two-state stepCount regardless of the continuous range.
+    bool add_designated_continuous_bypass = false;
+    // When set, declare a Reset-designated (momentary trigger) parameter so a
+    // test can raise it and assert the adapter auto-resets it after the block,
+    // even when the block is bypassed.
+    bool add_reset_trigger_param = false;
 };
 
 class TestVst3Processor : public pulp::format::Processor {
@@ -203,6 +213,22 @@ public:
                 .name = "Collider",
                 .range = {0.0f, 1.0f, 0.0f, 0.01f},
             });
+        }
+        if (config_.add_designated_continuous_bypass) {
+            pulp::state::ParamInfo info;
+            info.id = kBypassParamId;
+            info.name = "Engine Active";  // deliberately not "Bypass"
+            info.range = {0.0f, 4.0f, 0.0f, 0.25f};  // continuous, non-boolean
+            info.designation = pulp::state::ParamDesignation::Bypass;
+            store.add_parameter(info);
+        }
+        if (config_.add_reset_trigger_param) {
+            pulp::state::ParamInfo info;
+            info.id = kResetParamId;
+            info.name = "Panic";
+            info.range = {0.0f, 1.0f, 0.0f, 1.0f};  // default 0
+            info.designation = pulp::state::ParamDesignation::Reset;
+            store.add_parameter(info);
         }
     }
 
@@ -664,6 +690,93 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
 
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(test_processor->release_count == 1);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 declared-Bypass designation emits a toggle kIsBypass even on a "
+          "continuous range",
+          "[vst3][param-designation][bypass]") {
+    TestVst3Config config;
+    config.add_designated_continuous_bypass = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // Gain (index 0) + the designated continuous bypass (index 1).
+    REQUIRE(processor.getParameterCount() == 2);
+
+    ParameterInfo bypass{};
+    REQUIRE(processor.getParameterInfo(1, bypass) == Steinberg::kResultOk);
+    REQUIRE(bypass.id == kBypassParamId);
+    // Detected by designation, not by name ("Engine Active"):
+    REQUIRE((bypass.flags & ParameterInfo::kIsBypass) != 0);
+    // The continuous range ({0,4,step 0.25}) must NOT leak through as a
+    // continuous control — kIsBypass is forced to a two-state toggle.
+    REQUIRE(bypass.stepCount == 1);
+    REQUIRE((bypass.flags & ParameterInfo::kCanAutomate) != 0);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 trigger param raised on a bypassed block still auto-resets",
+          "[vst3][param-designation][rt-safety]") {
+    TestVst3Config config;
+    config.add_bypass_param = true;       // boolean Bypass at kBypassParamId
+    config.add_reset_trigger_param = true; // Reset trigger at kResetParamId
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = main_outputs;
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+
+    // Engage bypass AND raise the Reset trigger before the block. The adapter
+    // short-circuits to pass-through (Processor::process is NOT called), but the
+    // trigger must still settle on this block — otherwise a panic raised while
+    // bypassed would fire late on the next non-bypassed block.
+    test_processor->state().set_value(kBypassParamId, 1.0f);
+    test_processor->state().set_value(kResetParamId, 1.0f);
+    REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
+                 WithinAbs(1.0f, 1e-6f));
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    // After the bypassed block, the trigger has auto-reset to its default.
+    REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
+                 WithinAbs(0.0f, 1e-6f));
+    // Bypass itself is a normal latch — it stays engaged.
+    REQUIRE_THAT(test_processor->state().get_value(kBypassParamId),
+                 WithinAbs(1.0f, 1e-6f));
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
