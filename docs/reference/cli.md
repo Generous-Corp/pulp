@@ -1319,6 +1319,9 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
+| `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
+| `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--format {w3c\|css-variables\|tailwind\|json-tailwind\|css-tailwind}` | Token export format. `w3c` (DTCG JSON) is the default; `css-variables` emits CSS custom properties (`.dark` modes → `@media (prefers-color-scheme: dark)`); the `tailwind` variants require `--from designmd`. Unknown values exit 2. |
 
 With `--emit ir-json`, relative asset references from a `--url` import resolve
