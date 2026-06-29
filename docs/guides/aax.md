@@ -72,6 +72,48 @@ $env:PULP_AAX_VALIDATOR_DIR="$env:USERPROFILE\SDKs\avid\aax-validator\current"
 `PULP_AAX_VALIDATOR_DIR` should point at the extracted validator root containing
 `CommandLineTools/`.
 
+### Worked example — watch the extra nested folder
+
+The Avid downloads unzip to a *versioned* directory, so it is easy to end up one
+level too deep. `current/` must **be** the root, not contain a wrapper folder.
+
+Concretely, with the latest releases (`AAX SDK 2.9.0` and
+`DigiShell and AAX Validator 24.6 Arm (Mac)`) the archives expand to:
+
+```text
+aax-sdk-2-9-0/                                   ← SDK root (has Interfaces/, Libs/)
+aax-validator-dsh-2024-6-0-…-mac-arm64/          ← validator root (has CommandLineTools/, Frameworks/)
+```
+
+Make `current/` point at those roots directly — move the contents up, or use a
+versioned dir plus a `current` symlink:
+
+```bash
+mkdir -p ~/SDKs/avid/aax-sdk ~/SDKs/avid/aax-validator
+
+# Option A — move the unpacked root into place as `current`
+mv ~/Downloads/aax-sdk-2-9-0                       ~/SDKs/avid/aax-sdk/current
+mv ~/Downloads/aax-validator-dsh-2024-6-0-*-arm64  ~/SDKs/avid/aax-validator/current
+
+# Option B — keep the version and symlink (lets you swap versions later)
+mv ~/Downloads/aax-sdk-2-9-0 ~/SDKs/avid/aax-sdk/2.9.0
+ln -s 2.9.0 ~/SDKs/avid/aax-sdk/current
+```
+
+Verify the layout — both of these must exist (not one folder deeper):
+
+```bash
+ls ~/SDKs/avid/aax-sdk/current/Interfaces/AAX.h          # SDK root OK
+ls ~/SDKs/avid/aax-validator/current/CommandLineTools    # validator root OK
+```
+
+`pulp doctor` confirms discovery once the paths are right:
+
+```text
+✓ AAX SDK (optional) — /Users/you/SDKs/avid/aax-sdk/current
+✓ AAX validator (optional) — /Users/you/SDKs/avid/aax-validator/current
+```
+
 ## Build Workflow
 
 Keep AAX off by default. Enable it only when you actually want to build `.aaxplugin`
