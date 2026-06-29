@@ -20,9 +20,14 @@ function arg(flag, dflt) {
 }
 const CANDIDATES = [
   arg("--browser", null),
+  process.env.PLAYWRIGHT_CHROMIUM_PATH,
+  process.env.CHROME_PATH,
   "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
 ].filter(Boolean);
 const screenshot = arg("--screenshot", null);
 const headed = process.argv.includes("--headed");
