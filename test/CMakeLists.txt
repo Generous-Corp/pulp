@@ -1172,6 +1172,28 @@ pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 # Reusable validation assertion helpers (validation_assertions.hpp)
 pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
 
+# DSP hot reload — build-fingerprint gate (Phase 0)
+pulp_add_test_suite(pulp-test-build-fingerprint LIBRARIES pulp::format)
+
+# DSP hot reload — RT-safe processor hot-swap slot (Phase 0)
+pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
+
+# DSP hot reload — parameter-contract equivalence checker (Phase 0)
+pulp_add_test_suite(pulp-test-scratch-store-contract LIBRARIES pulp::format)
+
+# DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
+# MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
+add_library(pulp-reload-probe MODULE fixtures/reload_probe.cpp)
+set_target_properties(pulp-reload-probe PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+pulp_add_test_suite(pulp-test-reload-library LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-library pulp-reload-probe)
+target_compile_definitions(pulp-test-reload-library PRIVATE
+    RELOAD_PROBE_PATH="$<TARGET_FILE:pulp-reload-probe>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-library PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
