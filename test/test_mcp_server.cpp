@@ -2137,6 +2137,11 @@ TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
     REQUIRE(min_sdk_for_tool("a_tool_that_does_not_exist") == "0.0.0");
 }
 
+TEST_CASE("min_sdk_for_tool reports explicit floors for listed tools",
+          "[mcp][compat]") {
+    REQUIRE(min_sdk_for_tool("pulp_audio_render") == "0.513.0");
+}
+
 TEST_CASE("pulp_compat reports versions and tool min_sdk map",
           "[mcp][compat][issue-2070]") {
     // Run from a project root so resolve_project_sdk_version() finds
@@ -2157,6 +2162,28 @@ TEST_CASE("pulp_compat reports versions and tool min_sdk map",
     // depend on the field existing so they can iterate it without a
     // null check.
     require_contains(response, R"JSON("tool_min_sdk":)JSON");
+    require_contains(response, R"JSON("pulp_audio_render":"0.513.0")JSON");
+}
+
+TEST_CASE("pulp_audio_render is gated for older pinned project SDKs",
+          "[mcp][compat][audio]") {
+    TempDir scratch;
+    const auto project = scratch.path / "old-project";
+    std::filesystem::create_directories(project / "core");
+    std::ofstream(project / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n"
+        << "project(OldPulpProject VERSION 0.512.0)\n";
+
+    ScopedCurrentPath cwd(project);
+    auto response = handle_request(tool_call(
+        "72", "pulp_audio_render",
+        R"JSON({"plugin":"Demo.clap","duration_frames":64})JSON"));
+    require_contains(response, R"JSON("id":72)JSON");
+    require_contains(response, R"JSON("isError":true)JSON");
+    require_contains(response, R"JSON("tool":"pulp_audio_render")JSON");
+    require_contains(response, R"JSON("required_sdk":"0.513.0")JSON");
+    require_contains(response, R"JSON("project_sdk":"0.512.0")JSON");
+    require_contains(response, "pulp project bump");
 }
 
 TEST_CASE("pulp_compat handles missing project root by emitting null",
