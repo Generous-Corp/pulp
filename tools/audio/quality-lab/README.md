@@ -94,6 +94,7 @@ are opt-in and basic testing stays dependency-free.
 | `spectral_flux` | graininess / temporal instability | mean energy-normalized spectral-flux increase (global) | sustained |
 | `hnr` | added noise / roughness (tonal purity loss) | autocorrelation harmonic-to-noise-ratio drop, Boersma-debiased (global) | sustained/tonal |
 | `stereo_width` | stereo-image collapse / phase damage | width-ratio (RMS side/mid) drop + inter-channel correlation sign-flip | stereo |
+| `onset_drift` *(experimental)* | timing / groove drift | per-onset event-time residual after common-latency removal (sub-hop cross-correlation) | percussive |
 
 Each detector fires only on its own artifact and stays quiet on the others and on an
 identity render. `hnr` runs in the tonal and real-audio families (exercise it with
@@ -213,11 +214,16 @@ validation clears a bar — so an unproven detector cannot introduce a false reg
 
 ## Deferred detectors & roadmap (honest status)
 
-- **onset_drift** (timing drift) was prototyped and deferred: a body-correlation timing
-  measure can't reliably resolve a few-millisecond drift against a tonal hit's
-  quasi-periodic body. It needs a better timing method (or percussive-only scope) before it
-  can be trusted, so it is not shipped in the default detector set. Tracked in
-  [#5295](https://github.com/danielraffel/pulp/issues/5295).
+- **onset_drift** (timing / groove drift) ships **experimental** (advisory — it cannot move
+  the verdict or the regression gate; see the maturity gate above). The deferred
+  body-correlation approach is replaced by an **event-time residual after common-latency
+  removal**: per onset, the candidate's fine event time is found by cross-correlating the
+  reference attack against the candidate around the *expected* time (sub-hop precision), the
+  median (uniform) latency is removed, and the headline is `max|residual|` in ms. Calibration
+  recovers an injected ramp to within ~0.3 ms (far under the 2.67 ms onset hop) for drifts
+  inside the ~12 ms search window; larger drifts drop to low-coverage UNCERTAIN rather than
+  guess. Promotion to `beta` needs the real-engine negative control + a false-positive sweep
+  across tempos/seeds. Tracked in [#5295](https://github.com/danielraffel/pulp/issues/5295).
 - **Advisory LLM/multimodal reviewer** (a model that reads the report + clips and explains
   what sounds wrong; advisory only, never a gate) — [#5296](https://github.com/danielraffel/pulp/issues/5296).
 - **Autonomous tuning loop** (generate → score → surface regressions → pick up human label

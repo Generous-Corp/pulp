@@ -223,3 +223,35 @@ def invert_phase_right(stereo: np.ndarray) -> np.ndarray:
     s = np.asarray(stereo, dtype=np.float64).copy()
     s[:, 1] = -s[:, 1]
     return s
+
+
+def drift(reference, onsets, sr, lag_ms_start=0.0, lag_ms_end=0.0):
+    """Inject a per-onset TIMING drift and nothing else. Onset k is delayed by a lag
+    interpolated linearly from `lag_ms_start` to `lag_ms_end` across the onsets; each
+    inter-onset segment is shifted by its lag so the attack waveform stays verbatim (no
+    smear / brightness / level change — only the event time moves). Returns a candidate
+    the same length as `reference`. A uniform start==end is a pure latency (no groove
+    drift); start!=end is a ramp."""
+    y = np.asarray(reference, dtype=np.float64)
+    n = len(y)
+    out = np.zeros(n, dtype=np.float64)
+    os = sorted(float(o) for o in onsets)
+    N = len(os)
+    if N == 0:
+        return y.copy()
+    # Segment boundaries at the midpoints between consecutive onsets (quiet points for a
+    # drum break), so each segment carries exactly one transient.
+    bounds = [0]
+    for k in range(1, N):
+        bounds.append(int(round((os[k - 1] + os[k]) / 2.0 * sr)))
+    bounds.append(n)
+    for k in range(N):
+        frac = (k / (N - 1)) if N > 1 else 0.0
+        lag = int(round((lag_ms_start + (lag_ms_end - lag_ms_start) * frac) * sr / 1000.0))
+        s, e = bounds[k], bounds[k + 1]
+        seg = y[s:e]
+        ds, de = s + lag, s + lag + len(seg)
+        a, b = max(0, ds), min(n, de)
+        if b > a:
+            out[a:b] = seg[a - ds: a - ds + (b - a)]  # later segments win at any overlap
+    return out

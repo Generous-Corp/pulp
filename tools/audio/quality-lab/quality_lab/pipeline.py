@@ -10,19 +10,21 @@ from typing import Any
 import numpy as np
 
 from . import align, audio_io, generate, provenance
-from .detectors import hf_fizz, hnr, spectral_centroid, spectral_flux, transient_sharpness
+from .detectors import (hf_fizz, hnr, onset_drift, spectral_centroid,
+                        spectral_flux, transient_sharpness)
 from .schema import QualityCase, build_report, detectors_for_verdict
 
 # Registry: detector tag -> detect fn. New detectors plug in here; the pipeline stays
-# detector-agnostic (the §14.4 boundary). onset_drift was prototyped and DEFERRED — a
-# body-correlation timing measure cannot resolve a few-ms drift against a tonal kick's
-# periodic body (it cannot tell identity from a 7 ms drift). See the README.
+# detector-agnostic (the §14.4 boundary). `onset_drift` ships EXPERIMENTAL (advisory via
+# the maturity gate): the deferred body-correlation approach is replaced by an event-time
+# residual after common-latency removal (percussive-only). See the README.
 _DETECTORS = {
     "transient_sharpness": transient_sharpness.detect,
     "spectral_centroid": spectral_centroid.detect,
     "hf_fizz": hf_fizz.detect,
     "spectral_flux": spectral_flux.detect,
     "hnr": hnr.detect,
+    "onset_drift": onset_drift.detect,
 }
 
 # Time-stretch family (percussive): the P0a drum break + transient/spectral detectors.
@@ -31,7 +33,7 @@ P0A_CASE = QualityCase(
     family="time-stretch",
     reference_policy="frozen-reference",
     alignment_policy="onset-map",
-    detector_tags=["transient_sharpness", "spectral_centroid", "hf_fizz"],
+    detector_tags=["transient_sharpness", "spectral_centroid", "hf_fizz", "onset_drift"],
     params={"ratio": 1.5, "sr": 48000, "bpm": 120.0, "seed": 0},
 )
 

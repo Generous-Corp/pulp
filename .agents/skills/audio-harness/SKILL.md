@@ -313,7 +313,9 @@ harness or `ctest`.
 - Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
   detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
   tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
-  image-collapse/phase damage, called directly on `(N,2)` stereo arrays), and
+  image-collapse/phase damage on `(N,2)` stereo arrays; and the EXPERIMENTAL `onset_drift`
+  — timing/groove drift via event-time residual after common-latency removal, advisory-only
+  until promoted), and
   writes a `report.json` with per-onset localization, coverage/confidence, and provenance.
 - Credibility: detectors are validated against an *independent* textbook phase vocoder
   (`reference_pv.py`) AND the real product engine, not just their own synthetic degradation.

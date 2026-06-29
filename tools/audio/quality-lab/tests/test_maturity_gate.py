@@ -97,8 +97,14 @@ def test_engine_baseline_capture_excludes_non_stable():
 
 # ── back-compat ───────────────────────────────────────────────────────────
 
-def test_existing_detectors_default_stable_and_participate():
+def test_detector_participation_matches_maturity():
     r = pipeline.run("smear", case=pipeline.P0A_CASE)
     for d in r["detectors"]:
-        assert d["maturity"] == "stable"
-        assert d["participates_in_verdict"] is True
+        # the invariant: a detector participates in the verdict iff it is beta/stable
+        assert d["participates_in_verdict"] is (d["maturity"] in ("beta", "stable"))
+    by = {d["name"]: d for d in r["detectors"]}
+    # the original spectral/transient detectors default stable; onset_drift is experimental
+    for name in ("transient_sharpness", "spectral_centroid", "hf_fizz"):
+        assert by[name]["maturity"] == "stable"
+    assert by["onset_drift"]["maturity"] == "experimental"
+    assert by["onset_drift"]["participates_in_verdict"] is False
