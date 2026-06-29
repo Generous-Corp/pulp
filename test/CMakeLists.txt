@@ -1181,6 +1181,27 @@ pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::f
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 
+# AAX MIDI bridge — SDK-gated runtime test. test_aax_midi.cpp covers the
+# reassembly/fragmentation SDK-free; this drives the thin SDK glue
+# (decode_midi_node / encode_midi_node in aax_midi_node.cpp) through the real
+# Avid AAX SDK types (AAX_IMIDINode / AAX_CMidiStream / AAX_CMidiPacket), so it
+# only builds when the developer-supplied SDK is configured (PULP_ENABLE_AAX=ON
+# + a valid PULP_AAX_SDK_DIR). The adapter source is compiled directly into the
+# test because aax_midi_node.cpp is otherwise only built per-plugin.
+if(PULP_HAS_AAX)
+    # Ensure the AAX SDK interface/library targets exist even when no AAX plugin
+    # (i.e. no example) is part of this configure. The helper is idempotent.
+    pulp_ensure_aax_sdk_targets()
+    pulp_add_test_suite(pulp-test-aax-midi-node
+        SOURCES test_aax_midi_node.cpp
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
+        LIBRARIES pulp::format pulp-aax-sdk-interface
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_compile_options(pulp-test-aax-midi-node PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
+endif()
+
 # AAX MIDI/SysEx packet reassembly + fragmentation (SDK-free pure logic)
 pulp_add_test_suite(pulp-test-aax-midi LIBRARIES pulp::format)
 
