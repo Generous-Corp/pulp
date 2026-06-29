@@ -181,6 +181,17 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
+# PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
+# option. ON must produce a clear configure warning rather than silently doing
+# nothing or implying Swift is globally enabled.
+if(UNIX)
+    add_test(NAME cmake-swift-option-reserved
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_swift_option_reserved.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-swift-option-reserved PROPERTIES
+        LABELS "cmake;swift;config;slow"
+        TIMEOUT 600)
+endif()
 # retry_git_clone unit test: a partial clone target is
 # scrubbed between retries so attempt 2+ re-runs the fetch. Same UNIX block runs
 # the ensure_signing_ready.sh doctor test (PATH-shims security/xcrun, hermetic).
@@ -359,6 +370,10 @@ add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
 
+# WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).
+add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp)
+target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
+catch_discover_tests(pulp-test-wam-adapter)
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -503,7 +518,6 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-
 if(TARGET pulp::inspect)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
@@ -513,21 +527,18 @@ if(TARGET pulp::inspect)
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
-
 # `pulp loop` shell-out tests. Shares test_cli_shellout_helpers.hpp
 # with the parent CLI shell-out target and the scan/projects sibling.
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-loop)
 catch_discover_tests(pulp-test-cli-shellout-loop)
-
 # `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
 # shell-out helpers with the sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-scan-projects)
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
-
 # `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
 # handling, and native fallback. Shares the helper header with the
 # sibling shell-out targets.
@@ -920,7 +931,7 @@ configure_file(
     @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -4687,11 +4698,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D compatibility cheap-wiring surface.
-# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
-# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
-# dedicated-command routing — five partial → supported
-# compat.json entries.
+# Widget bridge — recovered Canvas2D/CSS compatibility regressions.
+# The canonical Wave 2 Canvas2D cheap-wiring surface is in
+# pulp-test-widget-bridge-wave2-cheap below; this older split keeps
+# recovered CSS cases and later Canvas2D bridge regressions.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga

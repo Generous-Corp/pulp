@@ -1,6 +1,6 @@
 # Pulp Web Demos
 
-Pulp audio plugins compiled to WebAssembly and running in the browser.
+Pulp audio plugin experiments compiled to WebAssembly for browser-host work.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ cd examples/web-demos/wasm-build
 emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
-# 2. Copy outputs to browser host
+# 2. Copy outputs for browser-host inspection
 cp build/Pulp*.{js,wasm} ../../tools/browser-host/plugins/
 
 # 3. Serve and open
@@ -18,6 +18,9 @@ cd ../../tools/browser-host
 python3 -m http.server 8080
 # Open http://localhost:8080
 ```
+
+This serves the generated assets through the local browser-host scaffold. It
+does not yet prove end-to-end plugin audio execution in the browser.
 
 ## What's Here
 
@@ -47,17 +50,19 @@ source emsdk_env.sh
 # Download from https://github.com/WebAssembly/wasi-sdk/releases
 export WASI_SDK_PREFIX=/opt/wasi-sdk
 
-# Build a project that includes tools/cmake/PulpWclap.cmake and calls
-# pulp_add_wclap(...). The checked-in web demos currently ship WAMv2
-# Emscripten targets, not a ready-made WebCLAP target.
-cmake -S ../.. -B build-wclap \
-  -DCMAKE_TOOLCHAIN_FILE=../../tools/cmake/wasi-toolchain.cmake \
-  -DPULP_BUILD_WCLAP=ON
+# Build your plugin project after it includes tools/cmake/PulpWclap.cmake
+# and calls pulp_add_wclap(...). The checked-in web demos currently ship
+# WAMv2 Emscripten targets, not a ready-made WebCLAP target, and there is
+# no root PULP_BUILD_WCLAP toggle.
+cmake -S <your-plugin-project> -B build-wclap \
+  -DCMAKE_TOOLCHAIN_FILE=<pulp-root>/tools/cmake/wasi-toolchain.cmake
 ```
 
 ## How It Works
 
-Each plugin is compiled to WebAssembly using Emscripten. The WASM module exports C functions that the browser host calls from an `AudioWorkletProcessor`:
+Each plugin is compiled to WebAssembly using Emscripten. The WASM module exports
+C functions intended for an `AudioWorkletProcessor`; the checked-in browser host
+does not yet complete this end-to-end AudioWorklet wiring.
 
 ```
 Browser (JS)                    WASM Module (C++)
@@ -109,7 +114,7 @@ The same Pulp Processor runs as:
 | VST3 | macOS, Windows, Linux | CMake (native) |
 | AU v2 | macOS | CMake (native) |
 | CLAP | macOS, Windows, Linux | CMake (native) |
-| **WAMv2** | **Browser** | **Emscripten** |
+| **WAMv2** | **Browser** | **Emscripten; browser-host runtime scaffold** |
 | **WebCLAP** | **Native + Browser** | **WASI SDK helper; no checked-in demo target yet** |
 
 ## Acknowledgments

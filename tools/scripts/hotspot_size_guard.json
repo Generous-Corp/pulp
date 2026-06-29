@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6116,
-      "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 6126,
+      "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
@@ -127,8 +127,8 @@
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1236,
-      "note": "CLI common cleanup candidate"
+      "max_loc": 1138,
+      "note": "CLI common cleanup candidate; lowered after delegate extraction"
     },
     {
       "path": "tools/cli/kit_commands.cpp",

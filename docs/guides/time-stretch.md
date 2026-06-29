@@ -43,7 +43,7 @@ eng.process(in_ptrs, in_frames, out_ptrs, out_frames, o);
 |------|------|--------|
 | `clean` | Peak-locked phase vocoder + material-adaptive FFT. Natural; time ≠ pitch. Best for tonal/melodic/sustained. **Default.** | Live |
 | `varispeed` | Pitch + time **linked** (pure resample) + speed-scaled tape-head EQ. Tape character, *no* stretch artifacts; pitch follows tempo. | Live |
-| `phase_vocoder` | Reserved for clean + verbatim transient relocation. Renders as `clean` until seam handling passes the quality gate. | Reserved (→ clean) |
+| `phase_vocoder` | Reserved character mode. Renders through the `clean` spectral path today; use `relocate_transients` for opt-in tempo-only transient grafting. | Reserved (→ clean) |
 | `granular` | Reserved for grain/stutter texture. | Reserved (→ clean) |
 
 `clean` and `varispeed` are the two production voicings today; `phase_vocoder` and
@@ -83,7 +83,7 @@ eng.prepare(sample_rate, channels, sizing);
 | `formant_semitones` | `0` | Used with `shift_independently` |
 | `repitch_linked` | `false` | `true` = pure resample (vinyl), pitch tied to time |
 | `route_noise_stn` | `false` | Route noise/residual through the STN `NoiseMorpher` (experimental; off by default because it can dull transients) |
-| `relocate_transients` | `false` | Verbatim transient graft (reserved; no-op until seam-clean) |
+| `relocate_transients` | `false` | Verbatim transient graft on the tempo-only spectral path (`pitch_semitones == 0`, `quality >= 1`); opt-in attack restoration |
 | `quality` | `2` | `0` draft preview … `2` best |
 
 ## Presets — ship your own tweaks

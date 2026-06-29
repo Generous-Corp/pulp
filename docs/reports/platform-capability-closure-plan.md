@@ -426,13 +426,18 @@ Pulp has platform audio systems and devices, but no high-level device manager
 that owns setup persistence, callback fanout, audio/MIDI routing, restart policy,
 level metering, xrun reporting, or UI-facing selector state.
 
-Blocking issue:
-- `core/audio/platform/linux/jack_device.cpp` writes
-  `DeviceInfo::default_sample_rate` and `DeviceInfo::is_default`, but the public
-  `DeviceInfo` defines `sample_rates`, `is_default_input`, and
-  `is_default_output`. The Linux+JACK build path is broken whenever the optional
-  JACK backend is compiled. Fix this before broader device-manager work and add
-  a JACK-enabled build lane or smoke test.
+Resolved baseline note:
+- The earlier JACK build break is fixed: the Linux build compiles
+  `core/audio/platform/linux/jack_device.cpp` when libjack is available,
+  `create_audio_system()` selects `JackSystem` when a running server is
+  reachable, and `test/test_jack_device.cpp` compiles against the current
+  `DeviceInfo::sample_rates`, `is_default_input`, and `is_default_output`
+  fields. Runtime smoke still depends on a reachable JACK server and skips
+  cleanly otherwise.
+
+Remaining issues:
+- Add a JACK-enabled CI build lane or dedicated smoke host with a dummy JACK
+  server so the server-backed open/start/stop path is exercised regularly.
 
 Recommended work:
 - Add `AudioDeviceManager` above `AudioSystem`.

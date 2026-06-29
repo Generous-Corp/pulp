@@ -30,6 +30,12 @@
 namespace pulp::format::clap_adapter {
 
 static constexpr int kMaxChannels = 8;
+// Upper bound on output buses routed to the Processor in one block. Index 0 is
+// the main output; indices 1..kMaxOutputBuses-1 are secondary (aux) outputs for
+// multi-out instruments (drum machines, multitimbral, stem renderers). Host
+// output buses beyond this cap are zero-filled, never routed — same safe
+// fallback as before, just with a higher ceiling than one.
+static constexpr int kMaxOutputBuses = 8;
 static constexpr state::ModulationSourceId kClapHostModulationSourceId = 1;
 
 // CLAP plugin instance — wraps a Pulp Processor
@@ -71,6 +77,18 @@ struct PulpClapPlugin {
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
+    // Per-bus channel-pointer storage for secondary (aux) output buses, indexed
+    // [aux_bus_minus_1][channel]: row i backs the BufferView for the host output
+    // bus at index i+1 (the main bus at index 0 uses output_ptrs above). Pre-
+    // allocated so the multi-out routing path allocates nothing on the audio
+    // thread.
+    float* aux_output_ptrs[kMaxOutputBuses - 1][kMaxChannels] = {};
+    // Descriptor-declared channel count per secondary output bus, cached in
+    // clap_activate() (off the audio thread) so the process path can report a
+    // bus's declared layout without calling descriptor() on the audio thread.
+    // declared_aux_channels[i] is the declared channel count for the host
+    // output bus at index i+1; 0 when the descriptor declares no such bus.
+    int declared_aux_channels[kMaxOutputBuses - 1] = {};
     // Second input bus routed to Processor::set_sidechain(). Up to
     // kMaxChannels. Additional input buses beyond index 1 are currently
     // ignored; the Processor API is single-sidechain today.

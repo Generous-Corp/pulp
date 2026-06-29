@@ -8,6 +8,218 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05342"></a>
+## [0.534.2] - 2026-06-29
+
+- fix/macos auv3 objc namespacing ([#5290](https://github.com/danielraffel/pulp/pull/5290))
+
+<a id="v05341"></a>
+## [0.534.1] - 2026-06-29
+
+- test/upgrade banner shellout ([#5289](https://github.com/danielraffel/pulp/pull/5289))
+- ci: scrub stale Windows runner registration ([#5074](https://github.com/danielraffel/pulp/pull/5074))
+- fix/macos render objc namespacing ([#5264](https://github.com/danielraffel/pulp/pull/5264))
+
+<a id="v05340"></a>
+## [0.534.0] - 2026-06-29
+
+- feat(sampler): tap the TEMPO number to type an exact BPM (v1.6.0) ([#5279](https://github.com/danielraffel/pulp/pull/5279))
+- fix(cli): honor create output defaults ([#5198](https://github.com/danielraffel/pulp/pull/5198))
+
+<a id="v05331"></a>
+## [0.533.1] - 2026-06-29
+
+- fix(cli): silence status git probes on Windows ([#5214](https://github.com/danielraffel/pulp/pull/5214))
+- fix(format): parse CLAP/.pulpset floats without std::from_chars<float> ([#5232](https://github.com/danielraffel/pulp/pull/5232))
+
+<a id="v05330"></a>
+## [0.533.0] - 2026-06-29
+
+- feat: first-class WAMv2 browser canary (PulpGain loads + renders + generated controls) ([#5266](https://github.com/danielraffel/pulp/pull/5266))
+- fix(quality-lab): make the real-engine path work for a pulp tool-installed lab ([#5277](https://github.com/danielraffel/pulp/pull/5277))
+- fix(import): reject unknown style selector values ([#5250](https://github.com/danielraffel/pulp/pull/5250))
+
+<a id="v05321"></a>
+## [0.532.1] - 2026-06-29
+
+- fix(cli): preserve sdk subcommand fallthrough ([#5034](https://github.com/danielraffel/pulp/pull/5034))
+- feat(tool): install the Audio Quality Lab via `pulp tool install` ([#5253](https://github.com/danielraffel/pulp/pull/5253))
+
+<a id="v05320"></a>
+## [0.532.0] - 2026-06-28
+
+- docs(import): refresh SwiftUI fallback wording ([#5249](https://github.com/danielraffel/pulp/pull/5249))
+- feat/upgrade breaking change agent signal ([#5221](https://github.com/danielraffel/pulp/pull/5221))
+- docs(cli): refresh config dispatcher comment ([#5248](https://github.com/danielraffel/pulp/pull/5248))
+- feat(ci): merge-time intent-trailer version bump (dormant phase 1) ([#5241](https://github.com/danielraffel/pulp/pull/5241))
+- fix(state): clamp parameter default to range at registration ([#5257](https://github.com/danielraffel/pulp/pull/5257))
+
+<a id="v05311"></a>
+## [0.531.1] - 2026-06-28
+
+- docs(cli): list package commands in top-level help ([#5255](https://github.com/danielraffel/pulp/pull/5255))
+- fix(import): avoid fake import-detect version placeholder ([#5256](https://github.com/danielraffel/pulp/pull/5256))
+- chore(cli): clarify import emit unresolved guidance ([#5251](https://github.com/danielraffel/pulp/pull/5251))
+- fix/macos objc class namespacing ([#5220](https://github.com/danielraffel/pulp/pull/5220))
+- docs(view): align conic gradient status ([#5233](https://github.com/danielraffel/pulp/pull/5233))
+- feat(ship): support appcast download URL override ([#5105](https://github.com/danielraffel/pulp/pull/5105))
+
+<a id="v05310"></a>
+## [0.531.0] - 2026-06-28
+
+- docs(cli): list operator commands in rust help ([#5247](https://github.com/danielraffel/pulp/pull/5247))
+- docs(view): refresh CSS compat narrative counts ([#5246](https://github.com/danielraffel/pulp/pull/5246))
+- feature/param designation ([#5243](https://github.com/danielraffel/pulp/pull/5243))
+- docs(host): remove stale automation smoothing TODO ([#5240](https://github.com/danielraffel/pulp/pull/5240))
+
+<a id="v05300"></a>
+## [0.530.0] - 2026-06-28
+
+- docs(import): clarify generated static control values ([#5238](https://github.com/danielraffel/pulp/pull/5238))
+- feat(format): AU v2 channel-config negotiation and MIDI output ([#5236](https://github.com/danielraffel/pulp/pull/5236))
+- test: remove corrupt Canvas2D bridge stubs ([#5237](https://github.com/danielraffel/pulp/pull/5237))
+- test(cli): escape audio assert fixture paths ([#5213](https://github.com/danielraffel/pulp/pull/5213))
+- fix(view): skip redundant hot reloads ([#5216](https://github.com/danielraffel/pulp/pull/5216))
+- docs(view): clarify CSS background status ([#5231](https://github.com/danielraffel/pulp/pull/5231))
+- docs(cli): clarify focus-mode monitor scope ([#5225](https://github.com/danielraffel/pulp/pull/5225))
+- docs(view): clarify loadFont bridge comment ([#5212](https://github.com/danielraffel/pulp/pull/5212))
+- feat(view): embed Element.animate web-compat shim ([#5153](https://github.com/danielraffel/pulp/pull/5153))
+- test(cli): normalize config shellout newlines ([#5215](https://github.com/danielraffel/pulp/pull/5215))
+
+<a id="v05290"></a>
+## [0.529.0] - 2026-06-28
+
+- feat(format): MIDI sub-block split iterator for sample-accurate event handling ([#5235](https://github.com/danielraffel/pulp/pull/5235))
+- docs(cli): clarify dev watch fallback ([#5227](https://github.com/danielraffel/pulp/pull/5227))
+- fix(sampler): bar-exact loop tempo with host-prior octave resolution ([#5143](https://github.com/danielraffel/pulp/pull/5143))
+
+<a id="v05282"></a>
+## [0.528.2] - 2026-06-28
+
+- docs(cli): align coverage diff guidance ([#5095](https://github.com/danielraffel/pulp/pull/5095))
+- chore(cli): align loop focus marker contract ([#5073](https://github.com/danielraffel/pulp/pull/5073))
+- chore(cmake): clarify plugin MIDI option contract ([#5092](https://github.com/danielraffel/pulp/pull/5092))
+- build(cmake): warn on reserved Swift option ([#5150](https://github.com/danielraffel/pulp/pull/5150))
+- docs(platform): clarify file dialog backend status ([#5147](https://github.com/danielraffel/pulp/pull/5147))
+- docs(events): clarify IAP scaffold scope ([#5133](https://github.com/danielraffel/pulp/pull/5133))
+- docs(midi): clarify Web MIDI scaffold status ([#5116](https://github.com/danielraffel/pulp/pull/5116))
+- docs(cmake): expose app icon helper in status manifest ([#5110](https://github.com/danielraffel/pulp/pull/5110))
+- docs(web): clarify WAM and WCLAP helper status ([#5104](https://github.com/danielraffel/pulp/pull/5104))
+- docs(cli): clean docs command source comment ([#5076](https://github.com/danielraffel/pulp/pull/5076))
+- docs: align token export format guidance ([#5148](https://github.com/danielraffel/pulp/pull/5148))
+- test(harness): sync compat aggregate parts ([#5084](https://github.com/danielraffel/pulp/pull/5084))
+- docs(examples): align offline stretch defaults ([#5117](https://github.com/danielraffel/pulp/pull/5117))
+- docs(events): clarify Windows notification scaffold ([#5130](https://github.com/danielraffel/pulp/pull/5130))
+- docs(motion): clarify record out fixture hint ([#5145](https://github.com/danielraffel/pulp/pull/5145))
+- ci: keep workflow_dispatch builds example-free ([#5184](https://github.com/danielraffel/pulp/pull/5184))
+- test(format): make rolling WAV env test portable ([#5186](https://github.com/danielraffel/pulp/pull/5186))
+- fix(cli): align scan inventory docs ([#5192](https://github.com/danielraffel/pulp/pull/5192))
+- test(cli): make Rust parity tests hermetic ([#5200](https://github.com/danielraffel/pulp/pull/5200))
+- docs(view): align accessibility status evidence ([#5209](https://github.com/danielraffel/pulp/pull/5209))
+- test(canvas): add Linux font golden baselines ([#5210](https://github.com/danielraffel/pulp/pull/5210))
+
+<a id="v05281"></a>
+## [0.528.1] - 2026-06-28
+
+- fix(cli): find delegated helpers in multi-config builds ([#5211](https://github.com/danielraffel/pulp/pull/5211))
+- docs(canvas): align drawImage status with Skia path ([#5096](https://github.com/danielraffel/pulp/pull/5096))
+- docs(examples): document ui-preview benchmark mode ([#5118](https://github.com/danielraffel/pulp/pull/5118))
+- docs(view): align ImageView decode status ([#5119](https://github.com/danielraffel/pulp/pull/5119))
+- docs(ci): align desktop automation examples ([#5120](https://github.com/danielraffel/pulp/pull/5120))
+- docs(import): align import-design source status ([#5129](https://github.com/danielraffel/pulp/pull/5129))
+- docs(ship): align capabilities packaging status ([#5139](https://github.com/danielraffel/pulp/pull/5139))
+- docs(windows): correct WASAPI capture status ([#5140](https://github.com/danielraffel/pulp/pull/5140))
+- docs(claude): clarify plugin guide examples ([#5141](https://github.com/danielraffel/pulp/pull/5141))
+- docs(format): align ProcessBuffers multi-bus status ([#5194](https://github.com/danielraffel/pulp/pull/5194))
+- docs(view): correct table widget status ([#5203](https://github.com/danielraffel/pulp/pull/5203))
+- docs(audio): align JACK status ([#5207](https://github.com/danielraffel/pulp/pull/5207))
+- docs(aax): clarify create scaffold gating ([#5208](https://github.com/danielraffel/pulp/pull/5208))
+
+<a id="v05280"></a>
+## [0.528.0] - 2026-06-28
+
+- feat(format): route secondary output buses to the Processor in CLAP and VST3 ([#5191](https://github.com/danielraffel/pulp/pull/5191))
+
+<a id="v05270"></a>
+## [0.527.0] - 2026-06-28
+
+- fix(format): marshal VST3 restartComponent off the audio thread ([#5190](https://github.com/danielraffel/pulp/pull/5190))
+
+<a id="v05260"></a>
+## [0.526.0] - 2026-06-28
+
+- fix(format): make CLAP and .pulpset param text conversion locale-independent ([#5181](https://github.com/danielraffel/pulp/pull/5181))
+- fix(view): guard GPU hosted-view drag category behind PULP_HAS_SKIA ([#5185](https://github.com/danielraffel/pulp/pull/5185))
+- docs(view): align modulation matrix status ([#5187](https://github.com/danielraffel/pulp/pull/5187))
+- docs(format): align AU v2 parameter sync guide ([#5069](https://github.com/danielraffel/pulp/pull/5069))
+
+<a id="v05240"></a>
+## [0.524.0] - 2026-06-28
+
+- feat(format): VST3 per-note expression (MPE) via INoteExpressionController ([#5170](https://github.com/danielraffel/pulp/pull/5170))
+
+<a id="v05230"></a>
+## [0.523.0] - 2026-06-27
+
+- fix(host): serialize control-thread SignalGraph node-field access against prepare ([#5167](https://github.com/danielraffel/pulp/pull/5167))
+
+<a id="v05220"></a>
+## [0.522.0] - 2026-06-28
+
+- feat(designmd): track DESIGN.md format spec 0.3.0 in the importer ([#5136](https://github.com/danielraffel/pulp/pull/5136))
+
+<a id="v05211"></a>
+## [0.521.1] - 2026-06-27
+
+- fix(rt): coalesce live main-listener notifications and clamp native-core event offsets ([#5161](https://github.com/danielraffel/pulp/pull/5161))
+
+<a id="v05210"></a>
+## [0.521.0] - 2026-06-27
+
+- feat(format): deliver MIDI controllers to VST3 instruments via IMidiMapping ([#5155](https://github.com/danielraffel/pulp/pull/5155))
+
+<a id="v05200"></a>
+## [0.520.0] - 2026-06-28
+
+- feature/au render rt safety ([#5152](https://github.com/danielraffel/pulp/pull/5152))
+
+<a id="v05190"></a>
+## [0.519.0] - 2026-06-27
+
+- fix(midi): correct MPE glide refcount on steal and retrigger expression re-seed ([#5149](https://github.com/danielraffel/pulp/pull/5149))
+
+<a id="v05180"></a>
+## [0.518.0] - 2026-06-27
+
+- fix(host): pin live snapshot in SignalGraph control-thread readers ([#5142](https://github.com/danielraffel/pulp/pull/5142))
+
+<a id="v05173"></a>
+## [0.517.3] - 2026-06-27
+
+- fix(sampler): unlinked tempo follows the sample + fractional BPM readout ([#5132](https://github.com/danielraffel/pulp/pull/5132))
+- fix(mcp): pulp_audio_render temp-dir leak + opaque-error hardening ([#5134](https://github.com/danielraffel/pulp/pull/5134))
+- docs(quality-lab): clean public-facing copy, attribute perceptual models ([#5131](https://github.com/danielraffel/pulp/pull/5131))
+- feat(mcp): pulp_audio_render MCP tool + refresh /audio-harness ([#5122](https://github.com/danielraffel/pulp/pull/5122))
+
+<a id="v05172"></a>
+## [0.517.2] - 2026-06-27
+
+- fix(view,sampler): file drag-drop in hosted plugins + bar-exact loop tempo ([#5113](https://github.com/danielraffel/pulp/pull/5113))
+
+<a id="v05171"></a>
+## [0.517.1] - 2026-06-27
+
+- fix(view,sampler): hosted Musical Typing, tempo persistence, DAW-tempo LINK ([#5108](https://github.com/danielraffel/pulp/pull/5108))
+- feat(quality-lab): real-engine regression gate ([#5075](https://github.com/danielraffel/pulp/pull/5075))
+- fix(ci): gate diff uses three-dot (merge-base) so behind-branch files aren't flagged ([#5106](https://github.com/danielraffel/pulp/pull/5106))
+
+<a id="v05170"></a>
+## [0.517.0] - 2026-06-27
+
+- feature/bypass dry latency ([#5094](https://github.com/danielraffel/pulp/pull/5094))
+- feat(quality-lab): real-audio input path (reference-free dry-input) ([#5091](https://github.com/danielraffel/pulp/pull/5091))
+- fix(view): map ; and ' so Musical Typing reaches all 18 keys ([#5089](https://github.com/danielraffel/pulp/pull/5089))
+
 <a id="v05160"></a>
 ## [0.516.0] - 2026-06-27
 
@@ -5406,6 +5618,34 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.534.2]: https://github.com/danielraffel/pulp/releases/tag/v0.534.2
+[0.534.1]: https://github.com/danielraffel/pulp/releases/tag/v0.534.1
+[0.534.0]: https://github.com/danielraffel/pulp/releases/tag/v0.534.0
+[0.533.1]: https://github.com/danielraffel/pulp/releases/tag/v0.533.1
+[0.533.0]: https://github.com/danielraffel/pulp/releases/tag/v0.533.0
+[0.532.1]: https://github.com/danielraffel/pulp/releases/tag/v0.532.1
+[0.532.0]: https://github.com/danielraffel/pulp/releases/tag/v0.532.0
+[0.531.1]: https://github.com/danielraffel/pulp/releases/tag/v0.531.1
+[0.531.0]: https://github.com/danielraffel/pulp/releases/tag/v0.531.0
+[0.530.0]: https://github.com/danielraffel/pulp/releases/tag/v0.530.0
+[0.529.0]: https://github.com/danielraffel/pulp/releases/tag/v0.529.0
+[0.528.2]: https://github.com/danielraffel/pulp/releases/tag/v0.528.2
+[0.528.1]: https://github.com/danielraffel/pulp/releases/tag/v0.528.1
+[0.528.0]: https://github.com/danielraffel/pulp/releases/tag/v0.528.0
+[0.527.0]: https://github.com/danielraffel/pulp/releases/tag/v0.527.0
+[0.526.0]: https://github.com/danielraffel/pulp/releases/tag/v0.526.0
+[0.524.0]: https://github.com/danielraffel/pulp/releases/tag/v0.524.0
+[0.523.0]: https://github.com/danielraffel/pulp/releases/tag/v0.523.0
+[0.522.0]: https://github.com/danielraffel/pulp/releases/tag/v0.522.0
+[0.521.1]: https://github.com/danielraffel/pulp/releases/tag/v0.521.1
+[0.521.0]: https://github.com/danielraffel/pulp/releases/tag/v0.521.0
+[0.520.0]: https://github.com/danielraffel/pulp/releases/tag/v0.520.0
+[0.519.0]: https://github.com/danielraffel/pulp/releases/tag/v0.519.0
+[0.518.0]: https://github.com/danielraffel/pulp/releases/tag/v0.518.0
+[0.517.3]: https://github.com/danielraffel/pulp/releases/tag/v0.517.3
+[0.517.2]: https://github.com/danielraffel/pulp/releases/tag/v0.517.2
+[0.517.1]: https://github.com/danielraffel/pulp/releases/tag/v0.517.1
+[0.517.0]: https://github.com/danielraffel/pulp/releases/tag/v0.517.0
 [0.516.0]: https://github.com/danielraffel/pulp/releases/tag/v0.516.0
 [0.515.0]: https://github.com/danielraffel/pulp/releases/tag/v0.515.0
 [0.514.0]: https://github.com/danielraffel/pulp/releases/tag/v0.514.0

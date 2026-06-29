@@ -2,11 +2,12 @@
 // HTMLCanvasElement + CanvasRenderingContext2D
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// CanvasGradient is returned by createLinearGradient / createRadialGradient
-// and can be assigned to ctx.fillStyle / ctx.strokeStyle. Stops accumulate
-// via addColorStop and flush to the bridge when the gradient is active.
+// CanvasGradient is returned by createLinearGradient / createRadialGradient /
+// createConicGradient and can be assigned to ctx.fillStyle / ctx.strokeStyle.
+// Stops accumulate via addColorStop and flush to the bridge when the gradient
+// is active.
 function CanvasGradient(kind, params) {
-    this._kind = kind;             // "linear" | "radial"
+    this._kind = kind;             // "linear" | "radial" | "conic"
     this._params = params || {};
     this._stops = [];              // [{ offset, color }, ...]
 }
@@ -22,8 +23,9 @@ CanvasGradient.prototype.addColorStop = function(offset, color) {
 // drawImage normalises it. Flushed to the bridge via canvasSetFillPattern
 // when assigned to ctx.fillStyle. The Skia backend renders the real
 // tiled pattern via SkShader::MakeImage with SkTileMode::{kRepeat,kDecal};
-// the CG backend degrades to flat fill (CG has no first-class pattern
-// shader without CGPattern dance).
+// the CG backend renders fill patterns through CGPattern callbacks. Stroke
+// patterns can still fall back to the active stroke colour on backends
+// without stroke-pattern support.
 function CanvasPattern(src, tileX, tileY) {
     this._kind = "pattern";
     this._src = String(src || "");
@@ -184,8 +186,8 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         }
     }
     // ctx.createConicGradient routes through SkGradientShader::MakeSweep on
-    // Skia; CG degrades to the first-stop colour. Same flush shape as
-    // linear/radial.
+    // Skia; CoreGraphics software-rasterizes a cached conic image. Same
+    // flush shape as linear/radial.
     if (fs && fs._kind === "conic" && typeof canvasSetConicGradient === "function") {
         var pc = fs._params, sc = fs._stops;
         var ac = [this._id, pc.cx, pc.cy, pc.startAngle];
@@ -195,8 +197,8 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         return;
     }
     // ctx.createPattern uses real tiled paint via SkShader::MakeImage with
-    // SkTileMode per axis on Skia. CG degrades to the active solid colour
-    // because it has no native pattern shader path here.
+    // SkTileMode per axis on Skia. CG fills use a CGPattern tile callback;
+    // stroke patterns remain backend-dependent and can fall back to colour.
     // We reuse `_activeFillKind = "gradient"` as the "non-color" sentinel
     // so canvasClearGradient resets correctly when the next fillStyle
     // assignment is a plain string.
@@ -1132,8 +1134,8 @@ CanvasRenderingContext2D.prototype.createRadialGradient = function(x0, y0, r0, x
 CanvasRenderingContext2D.prototype.createConicGradient = function(startAngle, cx, cy) {
     // Build a conic CanvasGradient. Spec signature:
     // createConicGradient(startAngle, x, y) where startAngle is in radians.
-    // Skia renders the sweep via SkGradientShader::MakeSweep; CG degrades to
-    // the first stop's flat colour. The gradient is flushed via
+    // Skia renders the sweep via SkGradientShader::MakeSweep; CoreGraphics
+    // software-rasterizes the sweep at paint time. The gradient is flushed via
     // canvasSetConicGradient when assigned to ctx.fillStyle.
     return new CanvasGradient("conic", {
         cx: +cx || 0,

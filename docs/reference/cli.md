@@ -83,7 +83,8 @@ Default formats are platform-gated:
 
 On macOS and Windows, AAX is optional. `pulp create` only scaffolds `aax_entry.cpp`
 and includes the AAX target when an AAX SDK is already configured via
-`PULP_AAX_SDK_DIR`. Linux and Ubuntu do not support AAX.
+`PULP_AAX_SDK_DIR` or auto-discovered in a standard user-local SDK path. Linux
+and Ubuntu do not support AAX.
 
 ### build
 
@@ -884,6 +885,7 @@ pulp ship notarize --dry-run                       # print resolved argv, no sub
 pulp ship release --pkg --identity "..." --installer-identity "..."
 pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
 pulp ship appcast --url https://example.com/MyApp-1.0.pkg --version 1.0.0
+pulp ship appcast --url artifacts/MyApp-1.0.pkg --download-url https://example.com/MyApp-1.0.pkg --sign-key <base64-key>
 pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 ```
 
@@ -913,7 +915,7 @@ identity, not here.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
-`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
+`appcast` writes `artifacts/appcast.xml` by default, or the path passed with `--output`. It appends the newest item to an existing feed when one parses, defaults `--version` to `0.1.0`, accepts optional `--notes`, `--title`, and `--min-os`, and records a local artifact's file size when `--url` points at a readable path. `--download-url` overrides the enclosure URL written to the feed, so a local artifact can be signed while Sparkle downloads from the public URL. The file served from `--download-url` must be byte-identical to the local artifact passed as `--url`, because the feed length and Ed25519 signature are computed from the local bytes. `--sign-key` computes a Sparkle Ed25519 signature only for local artifact paths; remote URLs fail closed instead of emitting an unsigned feed that looks signed.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 
@@ -1271,7 +1273,7 @@ file error.
 
 ### import-design
 
-**Status**: experimental
+**Status**: partial
 
 Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
 React JSX, or Google DESIGN.md source files into generated Pulp UI code.
@@ -1317,6 +1319,9 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
+| `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
+| `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--format {w3c\|css-variables\|tailwind\|json-tailwind\|css-tailwind}` | Token export format. `w3c` (DTCG JSON) is the default; `css-variables` emits CSS custom properties (`.dark` modes → `@media (prefers-color-scheme: dark)`); the `tailwind` variants require `--from designmd`. Unknown values exit 2. |
 
 With `--emit ir-json`, relative asset references from a `--url` import resolve
@@ -1425,6 +1430,7 @@ pulp sdk                                      # Show help
 pulp sdk install                              # Download and cache the pinned SDK from GitHub releases
 pulp sdk install --version 0.2.0              # Install a specific version
 pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
+pulp sdk available                            # List SDK versions available on GitHub releases
 pulp sdk status                               # Show cached and locally-built SDK versions
 pulp sdk clean                                # Remove all cached SDK versions
 ```
@@ -1436,6 +1442,15 @@ Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 **Status**: usable
 
 Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
+
+The live watch/relaunch loop is implemented by the C++ delegate (`pulp-cpp`).
+Normal installed/source builds ship the Rust `pulp` front end with that sibling
+delegate, so `pulp dev` forwards to the full watch loop when `pulp-cpp` is
+available. If the delegate is unavailable or fallthrough is disabled, the Rust
+fallback runs one configure/build pass, optionally runs tests, optionally
+launches once, and prints a watch-loop stub notice instead of watching for
+changes. The `--validate` and `--allow-unsupported-sdk` dev-loop behavior is
+therefore part of the delegated C++ path.
 
 ```bash
 pulp dev                                      # Watch and rebuild
@@ -1453,13 +1468,13 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--test`, `-t` | Run tests after each successful build |
+| `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
-| `--validate` | Run quick plugin dlopen validation after build |
-| `--run TARGET` | Launch TARGET from the build dir; relaunch on rebuild |
-| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT |
+| `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
-| `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
 | `-- args...` | Arguments passed to the launched app |
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
@@ -1468,7 +1483,7 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" marker. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling can read the advisory focus marker when it needs platform-specific behavior; `pulp loop` itself does not rewrite the build graph.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
@@ -1504,25 +1519,25 @@ See [docs/guides/focus-mode.md](../guides/focus-mode.md) for the full playbook (
 
 **Status**: usable
 
-Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in that was found. Mirrors what `pulp::host::PluginScanner` does at runtime. Useful for sanity-checking your local plug-in installation or for narrowing down which plug-in to feed to `pulp host`.
+Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle that was found. The installed Rust `pulp scan` path is a filesystem inventory: it does not dlopen plug-ins or query factories, so names are filename-derived and vendor / version / unique-id metadata is not surfaced. The C++ delegate (`pulp-cpp scan`) still owns the rich `pulp::host::PluginScanner` metadata path.
 
 ```bash
-pulp scan                           # Scan every supported format the build includes
+pulp scan                           # Filesystem inventory for every supported format
 pulp scan --format clap             # Scan only CLAP
 pulp scan --format vst3             # Only VST3
 pulp scan --format au               # Only AU v2
 pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
-pulp scan --no-load                 # Filesystem-only walk escape hatch
+pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
 Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary. Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
+On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
-`pulp scan --help` is short-circuited — it does NOT dlopen any plug-in, so it remains safe even when one of the installed plug-ins would crash the rich path.
+`pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
 
 ### host
 
@@ -1589,7 +1604,7 @@ Subcommands:
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
 
-**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + TODO list) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
+**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
 
 ### identity
 

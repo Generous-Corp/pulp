@@ -183,8 +183,14 @@ public:
                     v = steal_voice();
                     // Stealing ends the stolen note's lifetime; decrement
                     // the glide refcount so later note-ons on its channel
-                    // aren't misclassified as legato.
-                    if (v && v->active()) {
+                    // aren't misclassified as legato. Only a still-HELD
+                    // voice (active && !releasing) still owns its channel
+                    // refcount here — a releasing voice already had its
+                    // NoteOff processed (refcount decremented in the
+                    // NoteOff case), so decrementing again would
+                    // double-count and zero the count the just-placed
+                    // note bumped.
+                    if (v && v->active() && !v->releasing()) {
                         MpeNoteState released{};
                         released.channel = v->channel();
                         released.note = v->note_number();
@@ -196,6 +202,13 @@ public:
                     v->reset();
                     v->on_note_on(e.state);
                     age_[static_cast<std::size_t>(v - voices_.data())] = ++age_counter_;
+                } else {
+                    // No voice could be placed (zero polyphony). Balance
+                    // the unconditional observe_note_on() increment above
+                    // so the channel doesn't read glide-held forever, and
+                    // report no glide since nothing actually sounds.
+                    glide_detector_.observe_note_off(e.state);
+                    last_was_glide_ = false;
                 }
                 break;
             }

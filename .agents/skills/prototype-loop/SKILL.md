@@ -1,6 +1,6 @@
 ---
 name: prototype-loop
-description: Leveraged-prototype dev loop (`pulp loop`) — single-platform iteration with AOT analyzer, ar-swap, and PR-state monitor. Use when porting an existing UI/bundle to Pulp, doing visual/behavioral parity work, or batching upstream framework gap fixes.
+description: Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. Use when porting an existing UI/bundle to Pulp, doing visual/behavioral parity work, or batching upstream framework gap fixes.
 requires:
   tools:
     - gh
@@ -101,7 +101,7 @@ Until that helper lands, do the ar-swap by hand:
 1. Build the patched object file in the other worktree.
 2. `nm -gU` the object — make sure exported symbols match what your consumer's compile expects.
 3. `ar -r <pinned-sdk>/lib/libpulp-view.a <patched.o>` — splice.
-4. Visually validate via `pulp-screenshot` or `pulp loop`'s screencap.
+4. Visually validate via `pulp-screenshot` or another explicit capture path.
 5. **DELETE the local archive after validation.** Otherwise you'll forget it's spliced and ship a binary that doesn't match the upstream pin.
 
 ## Step 5 — Monitor upstream PR state flips
@@ -133,7 +133,7 @@ If you fixed something locally to keep iteration moving and the upstream issue i
 
 ## Switching modes
 
-- **Enter:** `pulp loop --platform=macos` → all subsequent rebuilds are single-platform.
+- **Enter:** `pulp loop --platform=macos` → persists the focus marker and runs the normal project watch/rebuild loop.
 - **Exit:** `pulp loop --off` → restores cross-platform mode.
 - **Land:** `shipyard pr` (or `pulp pr`) → still runs full cross-platform validation before merge regardless of focus state.
 

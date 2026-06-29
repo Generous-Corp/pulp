@@ -108,10 +108,14 @@ pub struct ScanArgs {
 
 /// Parse a flag slice into a [`ScanArgs`].
 ///
-/// Supports the same surface as the C++ CLI:
+/// Supports the same user-facing surface as the C++ CLI:
+/// Keep this accepted flag list in sync with `ScanArgs` help text in
+/// `main.rs`.
 ///
 /// - `--format <f>` / `-f <f>` — restrict to one format.
-/// - Unknown tokens are ignored (matches C++ leniency).
+/// - `--no-load` — accepted for compatibility; Rust is already
+///   filesystem-only.
+/// - Unknown flags are rejected; non-flag positionals are ignored.
 ///
 /// # Errors
 ///
@@ -123,7 +127,12 @@ pub fn parse_args(args: &[String]) -> Result<ScanArgs> {
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
-        if (a == "--format" || a == "-f") && i + 1 < args.len() {
+        if a == "--format" || a == "-f" {
+            if i + 1 >= args.len() || args[i + 1].starts_with('-') {
+                return Err(CliError::BadUsage(format!(
+                    "pulp scan: {a} requires a value"
+                )));
+            }
             let v = &args[i + 1];
             let f = Format::parse(v).ok_or_else(|| {
                 CliError::BadUsage(format!(
@@ -133,6 +142,14 @@ pub fn parse_args(args: &[String]) -> Result<ScanArgs> {
             out.format = Some(f);
             i += 2;
             continue;
+        }
+        if a == "--no-load" {
+            // Compatibility no-op: Rust scan is already filesystem-only.
+            i += 1;
+            continue;
+        }
+        if a.starts_with('-') {
+            return Err(CliError::BadUsage(format!("pulp scan: unknown flag: {a}")));
         }
         i += 1;
     }
@@ -393,8 +410,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_accepts_no_load_compat_flag() {
+        let a = vec![
+            "--no-load".to_owned(),
+            "--format".to_owned(),
+            "clap".to_owned(),
+        ];
+        let parsed = parse_args(&a).unwrap();
+        assert_eq!(parsed.format, Some(Format::Clap));
+    }
+
+    #[test]
+    fn parse_args_rejects_missing_format_value() {
+        let a = vec!["--format".to_owned()];
+        let err = parse_args(&a).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
     fn parse_args_rejects_unknown_format() {
         let a = vec!["--format".to_owned(), "foo".to_owned()];
+        let err = parse_args(&a).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown_flag() {
+        let a = vec!["--definitely-not-a-scan-flag".to_owned()];
         let err = parse_args(&a).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }

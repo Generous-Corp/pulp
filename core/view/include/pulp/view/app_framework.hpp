@@ -90,10 +90,11 @@ private:
 
 // ── MenuBar ──────────────────────────────────────────────────────────────
 
-/// Cross-platform menu bar abstraction.
+/// Cross-platform menu bar descriptor.
 ///
-/// On macOS, creates a native NSMenu. On Windows, a native HMENU.
-/// On Linux, renders a custom menu bar widget.
+/// MenuBar owns menu titles, items, actions, shortcuts, enabled state, and
+/// submenu metadata. Hosts that need a platform menu should consume `menus()`
+/// and install their own backend.
 ///
 /// @code
 /// MenuBar menu;
@@ -129,9 +130,6 @@ public:
     /// Build menus automatically from a KeyMapping's command categories.
     void set_key_mapping(const KeyMapping& keys);
 
-    /// Install as the native menu bar (macOS: NSMenu, Windows: HMENU).
-    void install_native();
-
     /// Get all menus for custom rendering (Linux, embedded).
     const std::vector<Menu>& menus() const { return menus_; }
 
@@ -142,14 +140,11 @@ private:
 // ── NativeToolbar ────────────────────────────────────────────────────────
 
 /// Native-toolbar descriptor — a lightweight config struct for host-level
-/// toolbars (macOS NSToolbar, Windows/Linux custom native). Separate from
+/// toolbars. Separate from
 /// pulp::view::Toolbar (core/view/include/pulp/view/toolbar.hpp), which is
-/// a full View subclass with custom paint/hit-testing. Previously both
-/// types were named `Toolbar` in the same namespace — an ODR violation
-/// that UBSan caught on macos-arm64 (test #460 BUS, issue #411).
+/// a full View subclass with custom paint/hit-testing.
 ///
-/// On macOS, `install_native()` builds an NSToolbar from these items.
-/// On Windows/Linux the view-layer pulp::view::Toolbar is used instead.
+/// Native toolbar installation is host/platform work outside this descriptor.
 class NativeToolbar {
 public:
     struct Item {
@@ -162,9 +157,6 @@ public:
 
     void add_item(Item item);
     void add_separator();
-
-    /// Install as native toolbar (macOS: NSToolbar on the window).
-    void install_native(void* native_window);
 
     const std::vector<Item>& items() const { return items_; }
 

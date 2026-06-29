@@ -7,6 +7,8 @@
 #if defined(__APPLE__)
 
 #include <AudioUnitSDK/AUMIDIEffectBase.h>
+#include <AudioToolbox/AudioUnitProperties.h>  // AUMIDIOutputCallbackStruct
+#include <CoreMIDI/MIDIServices.h>  // MIDIPacketList builders for MIDI output
 #include <mach/mach_time.h>
 
 #include <pulp/format/processor.hpp>
@@ -18,6 +20,7 @@
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -160,6 +163,208 @@ inline Float64 tail_samples_to_seconds(int tail_samples,
     return static_cast<Float64>(tail_samples) / sample_rate;
 }
 
+/// Maximum number of `AUChannelInfo` pairs `build_channel_info` can produce.
+/// Pulp's flexible channel contract allows mono / stereo per main bus
+/// (`validate_channel_layout` constrains every count to {1, 2}), so the worst
+/// case is two pairs (mono and stereo). Sized as a small constant so callers can
+/// back the array with fixed storage and avoid heap allocation.
+inline constexpr std::size_t kMaxChannelInfoPairs = 2;
+
+/// Derive the AU `kAudioUnitProperty_SupportedNumChannels` table from a Pulp
+/// `PluginDescriptor`. Surfaces which (input, output) channel-count pairs the
+/// plugin handles so hosts and auval can negotiate a layout instead of guessing.
+///
+/// Reports the channel counts the descriptor ACTUALLY declares (clamped into the
+/// supported `{1, 2}` flex range per `validate_channel_layout`), so asymmetric
+/// configs are not hidden from the host:
+///   * Instrument / generator with NO input bus (0 input channels): report
+///     `inChannels = 0` paired with each supported output width up to the
+///     declared maximum — `{0,1}` for a mono synth, `{0,1}` and `{0,2}` for a
+///     stereo synth.
+///   * Symmetric effect (declared input width == output width): report the
+///     matching `in == out` flex ladder up to that width — `{1,1}` for mono,
+///     `{1,1}` and `{2,2}` for stereo. Mono-down flex stays available so a host
+///     can run a stereo plugin on a mono track.
+///   * Asymmetric effect (declared input width != output width, e.g. a
+///     mono-in / stereo-out widener): report the single exact declared pair,
+///     e.g. `{1,2}`. Hiding it behind a matched ladder would mis-report the
+///     plugin's real capability.
+///
+/// Writes at most `kMaxChannelInfoPairs` entries into `out` and returns the
+/// count. `out` must point to storage for at least `kMaxChannelInfoPairs`
+/// entries. Pure / allocation-free so the AU `SupportedNumChannels` override can
+/// fill caller-owned storage.
+inline UInt32 build_channel_info(const PluginDescriptor& desc,
+                                 AUChannelInfo* out) noexcept {
+    // Clamp the declared widths into the supported {1, 2} flex range; a declared
+    // width of 0 means "no bus" (instrument input) and stays 0.
+    auto clamp_width = [](int n) -> int {
+        if (n <= 0) return 0;
+        return n >= 2 ? 2 : 1;
+    };
+    const int in_w = clamp_width(desc.default_input_channels());
+    const int out_w = clamp_width(desc.default_output_channels());
+
+    UInt32 count = 0;
+    if (in_w == 0) {
+        // No input bus (instrument / generator): 0 in, each output width up to
+        // the declared maximum.
+        for (int w = 1; w <= out_w && count < kMaxChannelInfoPairs; ++w) {
+            out[count].inChannels = 0;
+            out[count].outChannels = static_cast<SInt16>(w);
+            ++count;
+        }
+    } else if (in_w == out_w) {
+        // Symmetric effect: matching in==out pairs up to the declared width.
+        for (int w = 1; w <= in_w && count < kMaxChannelInfoPairs; ++w) {
+            out[count].inChannels = static_cast<SInt16>(w);
+            out[count].outChannels = static_cast<SInt16>(w);
+            ++count;
+        }
+    } else {
+        // Asymmetric effect: report the exact declared pair (e.g. {1,2}).
+        out[count].inChannels = static_cast<SInt16>(in_w);
+        out[count].outChannels = static_cast<SInt16>(out_w);
+        ++count;
+    }
+    return count;
+}
+
+/// RT-safe builder for the `MIDIPacketList` an AU v2 plugin hands the host via
+/// `kAudioUnitProperty_MIDIOutputCallback`. Backed by a fixed-size byte buffer
+/// so building the list never allocates on the audio thread — the same
+/// pre-reserved-storage discipline the MIDI input queues use.
+///
+/// Short channel-voice / system messages (1–3 bytes) and the Processor's output
+/// SysEx are merged into a single ascending-`sample_offset` order before being
+/// appended via the CoreMIDI packet-list builders (which write into the caller's
+/// buffer). CoreMIDI packet lists are expected time-ordered, so the merge
+/// guarantees a SysEx at offset 0 is delivered before a note at offset 64 even
+/// though they live in separate sidecars. Each packet carries the Processor's
+/// per-event `sample_offset`, clamped to the current block, as its timestamp —
+/// the offset semantics `kAudioUnitProperty_MIDIOutputCallback` documents.
+struct MidiOutputPacketBuilder {
+    // Bound the per-block output by the same event budget the MIDI input path
+    // reserves, so a dense arp/generator block is delivered in full rather than
+    // silently truncated. Short messages are at most 3 wire bytes; the CoreMIDI
+    // packet header + per-packet overhead is small, so a budget of
+    // (events * ~16 bytes) comfortably covers the worst case. SysEx shares the
+    // same buffer and yields to the byte bound. Events past the buffer bound are
+    // dropped (counted in `dropped`) rather than overflowing.
+    static constexpr std::size_t kMaxOutputEvents = 2048;  // == kMaxEventsPerBlock
+    static constexpr std::size_t kBufferBytes = kMaxOutputEvents * 16;
+    alignas(MIDIPacketList) std::array<std::uint8_t, kBufferBytes> storage{};
+
+    // Number of events dropped on the most recent build() because the packet
+    // buffer or the merge index filled. 0 in steady state; a diagnostic the
+    // adapter / tests can read to detect a too-dense block.
+    std::size_t dropped = 0;
+
+    /// Build a `MIDIPacketList` from `midi_out` into the internal buffer.
+    /// `frame_count` is the current block size; per-event offsets are clamped to
+    /// `[0, frame_count - 1]` so a stray out-of-block offset (mirroring the
+    /// AU v3 input-side defensive clamp) never lands a packet past the block.
+    /// Returns the packet list (pointing into `storage`) when at least one packet
+    /// was written, or nullptr when there is nothing to send. The returned
+    /// pointer is valid until the next `build` call or destruction.
+    /// Allocation-free.
+    const MIDIPacketList* build(const midi::MidiBuffer& midi_out,
+                                std::uint32_t frame_count) noexcept {
+        dropped = 0;
+
+        // Build a merge index over both sources (short events + sysex) so we can
+        // emit in ascending sample_offset order. Each source is referenced by a
+        // tagged index; the index array is fixed-capacity (no allocation).
+        struct Ref {
+            std::int32_t offset;
+            std::uint32_t order;  // stable tiebreak: preserves per-source order
+            std::uint32_t index;  // index within its source
+            bool is_sysex;
+        };
+        std::array<Ref, kMaxOutputEvents> refs;
+        std::size_t n_refs = 0;
+        std::uint32_t order = 0;
+
+        const auto clamp_offset = [&](std::int32_t off) -> std::int32_t {
+            if (off < 0) return 0;
+            if (frame_count > 0 &&
+                off > static_cast<std::int32_t>(frame_count) - 1) {
+                return static_cast<std::int32_t>(frame_count) - 1;
+            }
+            return off;
+        };
+
+        std::uint32_t ev_index = 0;
+        for (const auto& e : midi_out) {
+            const std::uint32_t len = e.message.length();
+            if (len != 0 && len <= 3) {  // short messages only
+                if (n_refs < refs.size()) {
+                    refs[n_refs++] = Ref{clamp_offset(e.sample_offset),
+                                         order++, ev_index, false};
+                } else {
+                    ++dropped;
+                }
+            }
+            ++ev_index;
+        }
+        const auto& sysex = midi_out.sysex();
+        for (std::uint32_t i = 0; i < sysex.size(); ++i) {
+            if (sysex[i].data.empty()) continue;
+            if (n_refs < refs.size()) {
+                refs[n_refs++] = Ref{clamp_offset(sysex[i].sample_offset),
+                                     order++, i, true};
+            } else {
+                ++dropped;
+            }
+        }
+
+        // Stable sort by offset (insertion sort — small n, no allocation, and
+        // stable so same-offset events keep per-source emission order).
+        for (std::size_t i = 1; i < n_refs; ++i) {
+            Ref key = refs[i];
+            std::size_t j = i;
+            while (j > 0 && (refs[j - 1].offset > key.offset ||
+                             (refs[j - 1].offset == key.offset &&
+                              refs[j - 1].order > key.order))) {
+                refs[j] = refs[j - 1];
+                --j;
+            }
+            refs[j] = key;
+        }
+
+        auto* list = reinterpret_cast<MIDIPacketList*>(storage.data());
+        MIDIPacket* cur = MIDIPacketListInit(list);
+        bool wrote = false;
+
+        for (std::size_t i = 0; i < n_refs; ++i) {
+            const Ref& r = refs[i];
+            const auto ts = static_cast<MIDITimeStamp>(r.offset);
+            MIDIPacket* next = nullptr;
+            if (r.is_sysex) {
+                const auto& sx = sysex[r.index];
+                next = MIDIPacketListAdd(list, kBufferBytes, cur, ts,
+                                         sx.data.size(), sx.data.data());
+            } else {
+                // Random-access the short event by its buffer index.
+                const midi::MidiEvent& e = midi_out[r.index];
+                const std::uint32_t len = e.message.length();
+                std::uint8_t bytes[3] = {0, 0, 0};
+                const auto* d = e.data();
+                for (std::uint32_t b = 0; b < len; ++b) bytes[b] = d[b];
+                next = MIDIPacketListAdd(list, kBufferBytes, cur, ts, len, bytes);
+            }
+            if (next == nullptr) {  // buffer full — drop the rest
+                dropped += (n_refs - i);
+                break;
+            }
+            cur = next;
+            wrote = true;
+        }
+
+        return wrote ? list : nullptr;
+    }
+};
+
 class PulpAUEffect : public ausdk::AUMIDIEffectBase {
 public:
     explicit PulpAUEffect(AudioComponentInstance ci);
@@ -191,6 +396,16 @@ public:
                              bool& outWritable) override;
     OSStatus GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                          AudioUnitElement inElement, void* outData) override;
+    OSStatus SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                         AudioUnitElement inElement, const void* inData,
+                         UInt32 inDataSize) override;
+
+    /// Surface the plugin's supported (input, output) channel-count pairs so the
+    /// host (and auval) can negotiate a layout. Derived from the descriptor via
+    /// `build_channel_info`. Returns the pair count; fills a per-instance static
+    /// table when `outInfo` is non-null. 0 from the base class meant "property
+    /// unsupported", which left every channel-config query unanswered.
+    UInt32 SupportedNumChannels(const AUChannelInfo** outInfo) override;
 
     OSStatus Initialize() override;
     void Cleanup() override;
@@ -236,6 +451,11 @@ protected:
     OSStatus HandleSysEx(const UInt8* inData, UInt32 inLength) override;
 
 private:
+    /// True when the wrapped Processor's descriptor declares `produces_midi`.
+    /// Gates the MIDI-output property surface so plain audio effects never
+    /// advertise a MIDI output the host would try to wire up.
+    bool plugin_produces_midi() const noexcept;
+
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
 
@@ -250,6 +470,17 @@ private:
     // empty: host parameter changes still reach the Processor through `store_`
     // exactly as before.
     state::ParameterEventQueue param_events_;
+
+    // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
+    // and given reserved, realtime-capacity-limited storage in Initialize() so
+    // the drain loop's add()/add_sysex_copy() never grows a vector on the audio
+    // thread. Reset with clear()+clear_sysex() each block. Capacities match the
+    // VST3 adapter so behaviour is uniform across formats.
+    static constexpr std::size_t kMaxEventsPerBlock = 2048;
+    static constexpr std::size_t kMaxSysexPerBlock = 64;
+    static constexpr std::size_t kMaxSysexPayloadBytes = 512;
+    midi::MidiBuffer midi_in_;
+    midi::MidiBuffer midi_out_;
 
     // Host accommodations, resolved once in the constructor via the
     // runtime policy.
@@ -282,6 +513,34 @@ private:
         uint16_t length = 0;
     };
     runtime::SpscQueue<SysexChunk, 32> sysex_in_queue_;
+
+    // MIDI OUTPUT path. A plugin that declares `produces_midi` (aumf MIDI effect
+    // or an instrument routed back to MIDI) emits events into midi_out_ during
+    // process(). AU v2 delivers them through kAudioUnitProperty_MIDIOutputCallback:
+    // the host writes a callback (SetProperty) and reads the output name list
+    // (kAudioUnitProperty_MIDIOutputCallbackInfo). The render path packs midi_out_
+    // into a MIDIPacketList and calls the host callback.
+    //
+    // The (callback fn, userData) pair is written on the main thread (SetProperty)
+    // and read on the render thread, so it MUST be published atomically — a
+    // non-atomic two-pointer struct could tear and pair a fresh callback with a
+    // stale userData. We double-buffer two immutable pairs and publish the active
+    // one through an atomic pointer: SetProperty writes the inactive slot then
+    // releases it; the render thread does a single acquire-load. The render reader
+    // never dereferences a half-written pair.
+    struct MidiOutputCallbackPair {
+        AUMIDIOutputCallback callback = nullptr;
+        void* user_data = nullptr;
+    };
+    std::array<MidiOutputCallbackPair, 2> midi_output_callback_slots_{};
+    std::atomic<std::uint8_t> midi_output_callback_write_slot_{0};
+    std::atomic<const MidiOutputCallbackPair*> midi_output_callback_{nullptr};
+    // Pre-reserved packet-list storage so the render-path build never allocates.
+    MidiOutputPacketBuilder midi_out_packet_builder_;
+
+    // Per-instance channel-config table filled by SupportedNumChannels. Member
+    // (not call-local) so the pointer handed to the host outlives the call.
+    std::array<AUChannelInfo, kMaxChannelInfoPairs> channel_info_{};
 };
 
 } // namespace pulp::format::au

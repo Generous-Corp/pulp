@@ -113,6 +113,25 @@ lanes, and verify a runner is actually busy before blaming capacity.
 
 ## GitHub workflow gotchas
 
+- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
+  intent-trailer model — and it ships DORMANT.** It exists to kill the
+  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
+  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
+  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
+  version files, and this workflow assigns the exact number after merge from
+  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
+  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
+  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
+  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
+  Two things must be verified before the **phase-2** flip (a separate, reviewed
+  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
+  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
+  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
+  squash-merge into main's commit message. The workflow has a recursion guard
+  (skips its own `chore: bump versions` commit) and a `concurrency` group so
+  near-simultaneous merges bump the version line one at a time. The
+  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
+  like a PR-side bump.
 - **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
   test.** `hotspot_size_guard.json` freezes its LOC, but it is a *test
   registration manifest* that legitimately grows whenever a new
@@ -609,10 +628,12 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   workflow only needs the PulpEffect AU/VST3/CLAP bundles, not GPU examples
   such as `pulp-design-tool`.
 - **Build-and-Test workflow_dispatch is Shipyard PR validation.** Preserve
-  `-DPULP_ENABLE_GPU=OFF` on the workflow_dispatch configure path in
-  `.github/workflows/build.yml`: the local self-hosted macOS runner may not
-  have the pinned Skia archive, while pull_request validation already disables
-  example bundles and release workflows own GPU/SDK coverage.
+  `-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF` on the
+  workflow_dispatch configure path in `.github/workflows/build.yml`: the local
+  self-hosted macOS runner may not have the pinned Skia archive, and no-GPU
+  dispatches must not link example bundles that require the GPU plugin view
+  host. Pull-request validation also disables example bundles, while nightly /
+  release workflows own full example/product and GPU coverage.
   When adding optional shell arguments in `build.yml` (for example macOS-only
   `-G Ninja`), use bash arrays and expand them as `"${args[@]}"`; scalar
   `$args` trips actionlint/shellcheck word-splitting checks.
@@ -2388,6 +2409,10 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 `tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
 When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`
 and lower that ceiling to the new exact LOC in the same PR that moves code out.
+`tools/cli/cli_common.cpp` follows the same ratchet rule: when shared helper
+logic moves into a focused translation unit such as `cli_delegate.cpp`, lower
+the `cli_common.cpp` ceiling in `hotspot_size_guard.json` in that same PR so the
+extraction cannot quietly regrow.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 

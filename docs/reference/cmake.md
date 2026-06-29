@@ -16,6 +16,7 @@ pulp_add_plugin(<target>
     MANUFACTURER    <string>
     VERSION         <string>
     CATEGORY        <Effect|Instrument|MidiEffect>
+    ACCEPTS_MIDI
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
     AAX_PRODUCT_CODE <4-char>
@@ -40,6 +41,7 @@ pulp_add_plugin(<target>
 | `MANUFACTURER` | No | `"Unknown"` | Manufacturer name |
 | `VERSION` | No | `"1.0.0"` | Plugin version string |
 | `CATEGORY` | No | `"Effect"` | Plugin category: `Effect`, `Instrument`, or `MidiEffect` |
+| `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `PLUGIN_CODE` | AU/AUv3 only | -- | 4-character AU plugin code |
 | `MANUFACTURER_CODE` | AU/AUv3/AAX only | -- | 4-character manufacturer code used by AU, AUv3, and AAX |
 | `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |
@@ -331,3 +333,46 @@ target_link_libraries(MyPlugin_Core PRIVATE MyGain_Core)
   system libraries the Rust `std` archive needs (`Threads::Threads`,
   `${CMAKE_DL_LIBS}`, `m`); macOS resolves these through `libSystem`
   automatically.
+
+## pulp_add_wam_plugin
+
+Build a Pulp `Processor` into a [WAMv2](https://www.webaudiomodules.com)
+(Web Audio Modules v2) WebAssembly AudioWorklet plugin. **Experimental** —
+targets a stereo, single-instance canary, not full WAM-host conformance.
+
+Requires the Emscripten toolchain (configure with `emcmake cmake ...`); under
+any other toolchain the helper is a no-op, so it never breaks native builds.
+
+```cmake
+include(${PULP_ROOT}/tools/cmake/PulpWam.cmake)
+
+pulp_add_wam_plugin(PulpGain
+    ENTRY    pulp_gain_wasm.cpp                 # required: the wam_* factory TU
+    INCLUDES ${PULP_ROOT}/examples/pulp-gain    # plugin headers
+    # SOURCES extra_dsp.cpp                      # optional: extra DSP sources
+    # SINGLE_FILE                                # optional: BASE64-embed for AudioWorklet
+)
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|---|---|---|
+| `ENTRY` | Yes | The plugin's factory translation unit. It defines `std::unique_ptr<pulp::format::Processor> pulp_wam_make_processor()`; the shared `wam_*` C ABI lives in `core/format/src/wasm/wam_entry.cpp`. |
+| `SOURCES` | No | Additional plugin DSP source files. |
+| `INCLUDES` | No | Additional include directories (plugin headers). |
+| `SINGLE_FILE` | No | Emit a BASE64-embedded ES-module factory for the AudioWorklet (sync compile, no fetch in worklet scope). Without it, a separate `.wasm` is emitted for the Node runner and export inspection. |
+
+### Created targets
+
+- `${NAME}-wam` — emits `${NAME}.js` (+ `${NAME}.wasm` unless `SINGLE_FILE`).
+
+### Notes
+
+- The helper compiles the headless DSP subset once into a shared `pulp-wam-dsp`
+  object library and owns the `wam_*` `EXPORTED_FUNCTIONS` table and Emscripten
+  link flags. It does **not** link the desktop `pulp::format` / `pulp::state`
+  libraries, which publicly pull `pulp::view`/GPU and crypto/HTTP — none of which
+  belongs in a headless browser DSP module.
+- `choc` headers are located via `-DPULP_WAM_CHOC_INCLUDE=<dir containing choc/>`
+  (or a populated sibling build tree).

@@ -86,6 +86,9 @@ set(PULP_JS_PRELUDES
     # + _applyProperty prototype method are in scope when the IIFE
     # walks the property list and installs reflection.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
+    # Browser-shaped Element.animate() shim. Loaded after Element,
+    # event helpers, and style reflection; resolves rAF lazily at play time.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-animation.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
     # CSS selector engine. Loaded AFTER the parent so document + Element
     # are in scope when underscore-prefixed selector helpers are

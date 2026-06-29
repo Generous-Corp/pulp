@@ -83,7 +83,7 @@ static int print_ship_help() {
     std::cout << "             [--entitlements <plist>] [creds]\n";
     std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
-    std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
+    std::cout << "             --url <artifact-or-url> [--download-url https://...] --version 1.0.0\n";
     std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
     std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
@@ -1391,7 +1391,7 @@ int cmd_ship(const std::vector<std::string>& args) {
 
     // ── appcast ─────────────────────────────────────────────────────────────
     if (sub == "appcast") {
-        std::string version, notes, url, output_path, title, sign_key, min_os;
+        std::string version, notes, url, download_url, output_path, title, sign_key, min_os;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--version") {
                 if (!take_ship_value(args, i, sub, args[i], version)) return 2;
@@ -1399,6 +1399,8 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], notes)) return 2;
             } else if (args[i] == "--url") {
                 if (!take_ship_value(args, i, sub, args[i], url)) return 2;
+            } else if (args[i] == "--download-url") {
+                if (!take_ship_value(args, i, sub, args[i], download_url)) return 2;
             } else if (args[i] == "--output") {
                 if (!take_ship_value(args, i, sub, args[i], output_path)) return 2;
             } else if (args[i] == "--title") {
@@ -1414,7 +1416,9 @@ int cmd_ship(const std::vector<std::string>& args) {
 
         if (version.empty()) version = "0.1.0";
         if (url.empty()) {
-            std::cerr << "Usage: pulp ship appcast --url https://example.com/Plugin-1.0.pkg --version 1.0.0\n";
+            std::cerr << "Usage: pulp ship appcast --url <artifact-or-url> "
+                         "[--download-url https://example.com/Plugin-1.0.pkg] "
+                         "--version 1.0.0\n";
             return 1;
         }
         if (output_path.empty()) output_path = (root / "artifacts" / "appcast.xml").string();
@@ -1437,19 +1441,18 @@ int cmd_ship(const std::vector<std::string>& args) {
         item.version = version;
         item.title = "Version " + version;
         item.description = notes.empty() ? "" : "<p>" + notes + "</p>";
-        item.download_url = url;
+        item.download_url = download_url.empty() ? url : download_url;
         if (!min_os.empty()) item.minimum_os = min_os;
 
         auto url_as_path = fs::path(url);
         if (fs::exists(url_as_path)) {
             item.file_size = fs::file_size(url_as_path);
             if (!sign_key.empty()) {
-                // Hard-fail on missing/failed signing (#295 P0). Writing
+                // Hard-fail on missing/failed signing. Writing
                 // an empty edSignature into the appcast looked like a
                 // successful sign but produced unsigned XML that Sparkle
                 // rejects silently — worse than no signing at all.
-                // Ed25519 is wired through pulp::runtime::ed25519_sign
-                // since macOS plan item 7.3 (vendored TweetNaCl).
+                // Ed25519 is wired through pulp::runtime::ed25519_sign.
                 auto sig = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
                 if (!sig || sig->empty()) {
                     std::cerr << "Error: --sign-key Ed25519 signing failed. Refusing "
@@ -1465,7 +1468,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         } else if (!sign_key.empty()) {
             std::cerr << "Error: --sign-key requires a local file path to compute the signature.\n";
             std::cerr << "  The remote URL cannot be signed. Download the file first, then pass\n";
-            std::cerr << "  the local path as --url and set --download-url for the enclosure URL.\n";
+            std::cerr << "  the local path as --url and set --download-url to the public enclosure URL.\n";
             return 1;
         }
 

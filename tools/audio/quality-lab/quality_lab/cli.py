@@ -62,8 +62,7 @@ def _cmd_engine(args: argparse.Namespace) -> int:
     else:
         report = pipeline.run_real_engine(ratio=args.ratio, character=args.character)
     if report["verdict"] == "SKIPPED":
-        print(f"[quality-lab engine] SKIPPED — {report['reason']} "
-              f"(build: cmake --build build --target stretchcli)")
+        print(f"[quality-lab engine] SKIPPED — {report['reason']}")
         return 0
     if report["verdict"] == "ERROR":
         print(f"[quality-lab engine] ERROR — {report['engine'].get('reason')}")
@@ -100,6 +99,29 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             print(f"  {s['name']:24s} {s['material_class']:11s} {s['license']:12s} "
                   f"{s['kind']:9s} — {s['expected_artifacts']}")
     return 0
+
+
+def _cmd_engine_baseline(args: argparse.Namespace) -> int:
+    from . import engine, engine_baseline
+    if not engine.available():
+        print("[quality-lab engine-baseline] SKIPPED — stretchcli not found "
+              "(cmake --build build --target stretchcli, or set "
+              "PULP_STRETCHCLI=/path/to/stretchcli)")
+        return 0
+    if args.capture:
+        path = engine_baseline.write_baseline(engine_baseline.capture())
+        print(f"[quality-lab engine-baseline] captured baseline -> {path}")
+        return 0
+    deviations = engine_baseline.check()
+    if not deviations:
+        print("[quality-lab engine-baseline] OK — engine matches committed baseline")
+        return 0
+    print(f"[quality-lab engine-baseline] REGRESSION — {len(deviations)} deviation(s):")
+    for d in deviations:
+        tag = " (WORSE)" if d.get("worse") else ""
+        print(f"  {d['case']} {d['detector']}: {d.get('baseline')} -> {d.get('current')} "
+              f"(delta {d.get('delta')}){tag}")
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--expect", required=True, help="one-line: what should sound wrong")
     ca.add_argument("--family", default="tonal")
     cp.set_defaults(func=_cmd_corpus)
+
+    eb = sub.add_parser("engine-baseline",
+                        help="regression gate vs the real engine: --capture or --check")
+    eb.add_argument("--capture", action="store_true", help="(re)write the committed baseline")
+    eb.set_defaults(func=_cmd_engine_baseline)
 
     args = p.parse_args(argv)
     return args.func(args)

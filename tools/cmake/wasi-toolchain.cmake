@@ -3,8 +3,7 @@
 #
 # Usage:
 #   cmake -S . -B build-wclap \
-#     -DCMAKE_TOOLCHAIN_FILE=tools/cmake/wasi-toolchain.cmake \
-#     -DPULP_BUILD_WCLAP=ON
+#     -DCMAKE_TOOLCHAIN_FILE=tools/cmake/wasi-toolchain.cmake
 #
 # Prerequisites:
 #   - wasi-sdk installed (default: /opt/wasi-sdk)

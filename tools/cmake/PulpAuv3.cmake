@@ -110,6 +110,17 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
         "-framework Cocoa"
     )
     target_include_directories(${fw_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # Per-binary-unique macOS view/window/accessibility ObjC class names. macOS
+    # AU v3 plug-ins can be loaded in-process (unlike the extension-isolated iOS
+    # shape), so two Pulp AU v3 frameworks in one host would otherwise register
+    # the same fixed view ObjC class names and shadow each other — same hazard
+    # the VST3 / CLAP / AU / Standalone targets already guard against. This
+    # framework is the binary that links Pulp::view and registers those classes,
+    # so the suffix applies here. The helper is a no-op on iOS, so the
+    # extension-isolated iOS AU v3 shape stays untouched.
+    _pulp_apply_view_mac_objc_suffix(${fw_target})
+
     _pulp_apply_macho_exports(${fw_target} "${fw_target}"
         "_OBJC_CLASS_$_PulpAUMacViewController"
         "_OBJC_METACLASS_$_PulpAUMacViewController"

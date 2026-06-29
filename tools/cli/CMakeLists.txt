@@ -7,7 +7,7 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
-# ── Migration index codegen (#548) ──────────────────────────────────────────
+# ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML
 # frontmatter, and emit a C++ source file holding the embedded
@@ -40,7 +40,9 @@ add_custom_command(
 add_executable(pulp-cli
     pulp_cli.cpp
     cli_common.cpp
+    cli_delegate.cpp
     shell_quote.cpp
+    shell_redirect.cpp
     cli_sdk.cpp
     cli_doctor_helpers.cpp
     cmd_build.cpp
@@ -120,7 +122,7 @@ set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 
-# Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1962).
+# Keep `libskia.a` before fontconfig on Linux+GNU ld.
 #
 # `libskia.a` (pulled in by `pulp::canvas`'s PUBLIC `skia::skia` dep)
 # contains `SkFontMgr_New_FontConfig` which references `FcInit*`,
@@ -151,7 +153,7 @@ target_include_directories(pulp-cli PRIVATE
 # Without this the installed CLI crashes immediately on launch with
 # "Library not loaded: @rpath/libwgpu_native.dylib — no LC_RPATH's
 # found" because the wgpu-native prebuilt sets @rpath but nothing
-# adds an LC_RPATH entry to pulp-cli (#74).
+# adds an LC_RPATH entry to pulp-cli.
 if(APPLE)
     set_target_properties(pulp-cli PROPERTIES
         INSTALL_RPATH "@executable_path/../lib"
@@ -236,11 +238,11 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
-    # Issue #743: `pulp doctor --validators` always renders the
+    # `pulp doctor --validators` always renders the
     # "Validators" header and exits 0/1 (never 2 = unknown flag).
     # Per-tool verdicts depend on host install state, so the regex only
     # asserts the section banner. Exit-code-not-2 protection lives in
-    # test_cli_shellout.cpp ([cli][shellout][doctor][issue-743]).
+    # test_cli_shellout.cpp under the doctor shellout coverage.
     add_test(NAME cli-doctor-validators
         COMMAND pulp-cli doctor --validators
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -389,12 +391,10 @@ if(PULP_BUILD_TESTS)
 
     # Exercise the new `pulp coverage` dispatch (cmd_coverage.cpp).
     # `pulp coverage` with no args prints the usage banner and exits 0;
-    # `pulp coverage bogus` prints the unknown-subcommand error and exits
-    # 1. Together these cover every branch in cmd_coverage's dispatch
-    # except `pulp coverage diff`, which would shell out to
-    # tools/scripts/local_diff_cover.sh — that is exercised separately by
-    # tools/scripts/test_local_diff_cover.py and (in CI) by the Coverage
-    # workflow itself, so the slow shell-out doesn't run in ctest.
+    # `pulp coverage --help` proves the help alias; `pulp coverage bogus`
+    # prints the unknown-subcommand error and exits 1; and
+    # `pulp coverage diff` runs with PULP_SKIP_DIFF_COVER=1 so the test
+    # covers the CLI->script handoff without paying the coverage build cost.
     add_test(NAME cli-coverage-help
         COMMAND pulp-cli coverage
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -496,7 +496,7 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "PULP_UPDATE_CHECK_DISABLED=1;PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-json"
         PASS_REGULAR_EXPRESSION "\"projects\":")
 
-    # `pulp doctor --caches` (#744): on a fresh empty cache root the
+    # `pulp doctor --caches`: on a fresh empty cache root the
     # command should exit 0 and report "no entries". Using a brand-new
     # tempdir as the cache root via the documented env-var override
     # means the test never touches the developer's real

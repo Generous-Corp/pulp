@@ -1474,7 +1474,7 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
     // Unsupported leaf widget: keep the footprint with a clear rectangle.
     if (ctx.opts.include_comments)
         emit_line(out, depth, s, "// " + std::string(native_widget_kind_name(kind))
-                                      + " not supported in B1 (see B3)");
+                                      + " has no SwiftUI exporter; rendered as Color.clear");
     emit_line(out, depth, s, "Color.clear");
     emit_modifiers(out, ctx, node, depth);
 }

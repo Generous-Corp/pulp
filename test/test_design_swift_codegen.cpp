@@ -950,13 +950,10 @@ TEST_CASE("generated SwiftUI with a grid + bundled/remote images type-checks (B5
     require_generated_swift_compiles(ir, "b5-grid-assets");
 }
 
-TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and compiles",
+TEST_CASE("generate_pulp_swift handles degraded SwiftUI branches and compiles",
           "[view][import][swiftui][swiftc]") {
-    // Exercise + compile-gate the degradation paths: an unsupported leaf widget
-    // (a bare image leaf → Color.clear; assets are B5), an unsupported widget
-    // that has children (lowered as a container), a dark-only color / dark-only
-    // dimension+string (no light base), a non-hex color token (skipped), and an
-    // unbound control (no label/name → visible placeholder, not a silent bind).
+    // Exercise + compile-gate degradation paths: unsupported leaf/container
+    // image handling, dark-only/non-hex tokens, and an unbound control placeholder.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.tokens.colors["overlayOnly.dark"] = "#0a0b0c";          // dark-only color
@@ -985,6 +982,8 @@ TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and com
     const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
     INFO(view);
     REQUIRE(contains(view, "Color.clear"));                    // bare image leaf (assets are B5)
+    REQUIRE(contains(view, "image_view has no SwiftUI exporter; rendered as Color.clear"));
+    REQUIRE_FALSE(contains(view, "not supported in B1"));
     REQUIRE(contains(view, "PulpMeter(parameter: p)"));        // B3: meter now binds
     REQUIRE(contains(view, "⚠︎ unbound"));                     // unbound control placeholder
     const auto theme = generate_pulp_swift(ir, ir.asset_manifest).theme_source;

@@ -2,13 +2,12 @@
 //
 // This translation unit owns:
 //   * The shared `IapClient::instance()` accessor.
-//   * A `StubBackend` used when no platform backend is wired into the build
+//   * A `StubBackend` used when no host backend is installed
 //     so callers never crash on `instance().purchase(...)`.
 //
-// Platform backends register themselves through `install_iap_backend()`
-// from their own translation units (mac/ios/win/linux). They are linked
-// conditionally by the events CMakeLists.txt so a build on an OS without
-// a backend simply falls through to the stub.
+// Host or test backends register themselves through `install_iap_backend()`.
+// Pulp intentionally does not link a production StoreKit / Microsoft Store /
+// Play Billing backend, so the built-in path falls through to the stub.
 //
 // The stub deliberately keeps state machinery minimal — it doesn't
 // queue products or pretend to grant entitlements. Callers see
@@ -75,8 +74,7 @@ std::unique_ptr<IapClient>& instance_slot() {
 
 // Backends register themselves by calling this from a translation-unit
 // initializer (or a test installs a mock). Last writer wins so a host
-// application can override the default platform backend with a test
-// double.
+// application can override the default stub with a test double.
 void install_iap_backend(std::unique_ptr<IapClient> backend) {
     std::lock_guard lock(instance_mutex());
     instance_slot() = std::move(backend);

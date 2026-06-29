@@ -56,7 +56,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
 
-`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`.
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`. `pulp audio render` is also exposed as the `pulp_audio_render` MCP tool (`tools/mcp/mcp_tools.cpp` handler + `pulp_mcp.cpp` tools_list/dispatch + `test/test_mcp_server.cpp` membership/required-arg coverage + the `docs/guides/claude-code-plugin.md` tool table); it takes a single `param`/`midi` token (the hand-rolled MCP JSON has no array extractor), returns the metrics JSON, and defaults `--out` to a temp WAV. When adding a render flag worth exposing, mirror it there too.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
@@ -391,6 +391,26 @@ contract: `--run` executes the resolved tool path with no forwarded arguments
 and returns its exit code. For `npm_package` tools, that path is the
 `run.{sh,bat}` wrapper smoke check.
 
+### `pulp tool install <in-tree python tool>` — `source_dir` install
+
+A Python tool that lives **inside this repo** (not on PyPI) registers as a
+normal `python_pip` entry but adds two descriptor fields:
+
+- `source_dir` — repo-relative package dir (with a `pyproject.toml`), e.g.
+  `tools/audio/quality-lab`. When set, `install_python_tool` pip-installs that
+  directory (resolved via `repo_root_from_registry(find_tool_registry_path())`)
+  instead of `<pip_package>==<version>`. This mirrors the repo-local
+  `npm_package` precedent.
+- `module` — the `python -m <module>` the run wrapper invokes (e.g.
+  `quality_lab.cli`); defaults to `pip_package` for classic PyPI tools.
+
+The managed venv still lands under `$PULP_HOME/tools/python-envs/<id>/`, so
+`locate_tool` / `uninstall_tool` need no change. The tool's `pyproject.toml`
+owns its dependency list (mirror `requirements.txt`). Per the parity rule
+above, both new fields are also declared in `experimental/pulp-rs/src/tool_registry.rs`
+(serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
+tool info`/`list` round-trip them. First user: `audio-quality-lab`.
+
 ### Package suggestion and analyzer metadata commands
 
 Package search/suggestion code (`tools/cli/package_commands_search.cpp`) is a
@@ -424,8 +444,20 @@ sibling build tree first, honor `PULP_BUILD_DIR` when present, and keep
 `test/test_cli_shellout.cpp` subprocess-output `INFO(...)` diagnostics so
 future failures show the delegated binary's stderr.
 
+On multi-config generators (MSVC / Visual Studio), the helper executable lives
+under the configuration directory, e.g.
+`build-windows/tools/import-design/Release/pulp-import-design.exe`, while the
+delegated relative path remains `tools/import-design/pulp-import-design`.
+Candidate lookup must therefore check both the direct single-config path and
+`Release` / `RelWithDebInfo` / `Debug` / `MinSizeRel` subdirectories, preferring
+the config inferred from the running `pulp-cpp` path when it is itself under
+`tools/cli/<config>/`. Add or keep a focused `delegate_to_build_binary` test
+that asserts the missing-helper diagnostic includes a `Release` candidate; a
+macOS/Linux single-config build will otherwise miss this Windows-only failure
+mode.
+
 **Cwd independence (2026-05-14):** `delegate_to_build_binary` in
-`tools/cli/cli_common.cpp` MUST NOT require `cwd` to be inside a Pulp
+`tools/cli/cli_delegate.cpp` MUST NOT require `cwd` to be inside a Pulp
 project to find a delegate. Sibling helpers live next to the CLI binary
 itself, so the argv[0]-relative resolution path is authoritative and
 project-root is a fallback. The original `require_project_root()` gate
@@ -727,15 +759,19 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
-## `pulp project pin / unpin / bump` shell helpers
+## CLI Git/CMake shell helpers
 
-`tools/cli/cmd_project.cpp` shells out to `git` / `cmake` from unit-tested
-helper paths, including Windows CI. Keep output redirection platform-aware:
-POSIX uses `/dev/null`, but Windows `cmd.exe` needs `NUL`. Do not add raw
-`2>/dev/null` or `>/dev/null 2>&1` in this file; route new call sites through
-the local null-redirection helpers instead. Otherwise Windows Namespace can
-misreport clean/dirty git state or fail origin-main probes even though the
-same tests pass on macOS/Linux.
+`tools/cli/cmd_project_common.cpp` and `tools/cli/cmd_misc.cpp` shell out to
+`git` / `cmake` from unit-tested helper paths, including Windows CI. Keep
+output redirection platform-aware: POSIX uses `/dev/null`, but Windows
+`cmd.exe` needs `NUL`. Do not add raw `2>/dev/null` or `>/dev/null 2>&1` in
+these files; route new call sites through the shared `stderr_to_null()` or
+`output_to_null()` helpers in `tools/cli/shell_redirect.*` instead. Otherwise
+Windows can leak "The system cannot find the path specified." into stderr,
+misreport clean/dirty git state, or fail origin-main probes even though the
+same tests pass on macOS/Linux. The `pulp status quotes source checkout paths
+before reading Git metadata` test covers the stderr contract locally; Windows
+CI is the platform proof for the null-device behavior.
 
 ### pin / unpin / floating SDK mode
 
@@ -1183,14 +1219,14 @@ options struct per iteration.
 
 #### `pulp scan --no-load`
 
-Filesystem-only enumeration mode. The default `pulp scan` opens each
-discovered bundle via `dlopen` to read entry-point metadata; one
-malformed plugin throwing in static-init aborts the whole scan
-(`libc++abi: terminating`). `--no-load` lists bundles by path/format
-without dlopen — the safe escape hatch when a host plugin crashes
-the scanner. `pulp scan --help` short-circuits before plugin
-enumeration so users can discover the flag even when the underlying
-scan path is broken.
+Filesystem-only enumeration mode. Installed Rust `pulp scan` is
+already filesystem-only and filename-derived; it accepts `--no-load`
+for C++ surface parity. The sibling `pulp-cpp scan` rich path opens
+bundles where needed to read entry-point metadata, so `pulp-cpp scan
+--no-load` is the safe escape hatch when a malformed plug-in crashes
+the scanner. `pulp scan --help` is handled by the Rust CLI help path;
+`pulp-cpp scan --help` likewise returns before rich scanning so users
+can discover the flag while diagnosing a broken plug-in.
 
 #### Cross-binary `pulp project bump` ↔ `undo` parity
 
@@ -1774,6 +1810,12 @@ Gotchas:
   fall-through to `pulp-cpp sdk install` (see `pulp-rs/src/cmd/sdk.rs`);
   the C++ `cmd_sdk` is a different code path with its own per-version
   `~/.pulp/sdk/<version>/` layout. #1814 fix lives only in `cmd_cache`.
+- **Rust SDK fallthrough must capture the whole subcommand tail.**
+  `pulp sdk install --version X.Y.Z`, `pulp sdk install --local`, and
+  `pulp sdk available` are C++ SDK branches today. The Rust front end
+  must not let clap reject those flags/tokens before `cmd/sdk.rs` can
+  delegate to `pulp-cpp`; keep `SdkArgs` as a trailing-var-arg capture
+  and add parser tests for any new delegated SDK subcommand.
 - **Checkout-backed SDK builds force dev probes off.** `ensure_checkout_sdk`
   configures local SDK builds with `-DPULP_ENABLE_AUDIO_PROBES=OFF` so
   `pulp sdk install --local` and checkout-backed standalone resolution do not

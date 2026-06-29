@@ -20,7 +20,7 @@
 
 use std::path::PathBuf;
 
-use pulp_rs::cmd::scan::{run_with_roots, Format, Roots, ScanArgs};
+use pulp_rs::cmd::scan::{parse_args, run_with_roots, Format, Roots, ScanArgs};
 
 fn fixture_roots(name: &str) -> Roots {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -87,6 +87,16 @@ fn scan_with_format_filter_only_emits_that_bucket() {
 }
 
 #[test]
+fn scan_no_load_is_rust_compat_noop() {
+    let roots = fixture_roots("mixed_formats");
+    let normal = render(&ScanArgs::default(), &roots);
+    let args = vec!["--no-load".to_owned()];
+    let parsed = parse_args(&args).expect("--no-load parses");
+    let no_load = render(&parsed, &roots);
+    assert_eq!(normal, no_load);
+}
+
+#[test]
 fn scan_empty_tree_prints_no_plugins_found() {
     let roots = fixture_roots("empty");
     let out = render(&ScanArgs::default(), &roots);
@@ -116,6 +126,33 @@ fn scan_cli_unknown_format_exits_two() {
     assert!(
         stderr.contains("unknown --format 'notafmt'"),
         "expected bad-usage message, got: {stderr}"
+    );
+}
+
+#[test]
+fn scan_help_lists_scan_flags_without_internal_tail_note() {
+    let output = assert_cmd::Command::cargo_bin("pulp")
+        .expect("binary")
+        .args(["scan", "--help"])
+        .output()
+        .expect("run");
+    assert!(output.status.success(), "scan help should exit 0");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert!(
+        stdout.contains("--format <clap|vst3|au|auv3|lv2>"),
+        "scan help should list --format; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--no-load"),
+        "scan help should list --no-load; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pulp-cpp scan"),
+        "scan help should point to the rich C++ scan path; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("cmd::scan::parse_args") && !stdout.contains("without fighting clap"),
+        "scan help should not leak parser implementation details; got:\n{stdout}"
     );
 }
 

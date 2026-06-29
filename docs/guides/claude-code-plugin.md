@@ -54,6 +54,9 @@ Then restart Claude Code or run `/reload-plugins` to activate.
 
 ### Slash Commands
 
+The plugin loads commands from `.claude/commands`; this table lists common
+examples rather than the full source-tree inventory.
+
 | Command | Description |
 |---------|-------------|
 | `/build` | Build the project (configure + compile) |
@@ -70,7 +73,9 @@ Then restart Claude Code or run `/reload-plugins` to activate.
 
 ### Skills
 
-Skills activate automatically based on context. You don't need to invoke them explicitly — just describe what you want.
+The plugin loads skills from `.agents/skills`. Skills activate automatically
+based on context, and the table below lists common examples rather than the full
+source-tree inventory.
 
 | Skill | Activates when you... |
 |-------|-----------------------|
@@ -99,7 +104,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
-| Audio model / WAV-first excerpt-find / live probe/scope JSON | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope` |
+| Audio model / WAV-first excerpt-find / live probe/scope JSON / offline render | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_render` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
@@ -115,6 +120,13 @@ measurements instead of scalar probe counters. Live target mode may open the
 standalone audio device; `input_wav` mode is speakerless/offline and can also
 write a PNG trace artifact for review. Both modes return `pulp.audio.scope.v1`
 structured JSON.
+
+Use `pulp_audio_render` to render an explicit plugin bundle offline (no DAW, no
+audio device) through `pulp audio render` and get the audio-analysis metrics
+JSON back — a test signal plus optional single `param`/`midi` automation through
+`PluginSlot`. It is the offline-source counterpart to the live probe/scope tools:
+reach for it when you have a plugin bundle and want deterministic
+render-then-measure without standing up a host.
 
 The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 

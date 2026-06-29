@@ -20,7 +20,8 @@ setting reproduces that mix, so re-serialization would NOT be
 byte-stable. Instead this tool slices the raw text at the top-level
 key boundaries: every part holds the exact bytes of its key block,
 and the aggregate is rebuilt by concatenating those bytes with the
-original ``{\\n`` prefix, ``,\\n`` separators, and ``\\n}`` suffix.
+original ``{\\n`` prefix, ``,\\n`` separators, and final wrapper
+(``\\n}`` or ``\\n}\\n``).
 
 Layout produced::
 
@@ -106,14 +107,19 @@ def slice_aggregate(raw: str) -> dict[str, str]:
           "kN": <vN>\\n
         }
 
-    so block_i is the substring ``  "ki": <vi>`` with no surrounding
-    separators. Returns ``{key: block_text}``.
+    optionally followed by one final newline. Each block_i is the
+    substring ``  "ki": <vi>`` with no surrounding separators.
+    Returns ``{key: block_text}``.
     """
     if not raw.startswith("{\n"):
         raise ValueError("compat.json does not start with '{\\n' — "
                           "structure assumption broken, refusing to slice")
-    if not raw.endswith("\n}"):
-        raise ValueError("compat.json does not end with '\\n}' — "
+    if raw.endswith("\n}\n"):
+        final_block_end = -3
+    elif raw.endswith("\n}"):
+        final_block_end = -2
+    else:
+        raise ValueError("compat.json does not end with '\\n}' or '\\n}\\n' — "
                           "structure assumption broken, refusing to slice")
 
     # Find the byte offset where each top-level key block begins.
@@ -153,18 +159,21 @@ def slice_aggregate(raw: str) -> dict[str, str]:
                 )
             blocks[key] = raw[start:nxt - 2]
         else:
-            blocks[key] = raw[start:-2]  # trim trailing '\n}'
+            blocks[key] = raw[start:final_block_end]  # trim trailing wrapper
     return blocks
 
 
-def assemble_aggregate(blocks: dict[str, str]) -> str:
+def assemble_aggregate(
+    blocks: dict[str, str], *, trailing_newline: bool = False,
+) -> str:
     """Inverse of :func:`slice_aggregate` — concatenate verbatim blocks
     back into the byte-identical aggregate text."""
     missing = [k for k in ALL_KEYS_ORDER if k not in blocks]
     if missing:
         raise ValueError(f"missing key block(s): {missing}")
     body = ",\n".join(blocks[k] for k in ALL_KEYS_ORDER)
-    return "{\n" + body + "\n}"
+    suffix = "\n}\n" if trailing_newline else "\n}"
+    return "{\n" + body + suffix
 
 
 def part_text_for(keys: list[str], blocks: dict[str, str]) -> str:
@@ -231,7 +240,9 @@ def cmd_split(root: Path) -> int:
     )
 
     # Verify the round-trip immediately.
-    rebuilt = _aggregate_from_parts(parts_dir)
+    rebuilt = _aggregate_from_parts(
+        parts_dir, trailing_newline=raw.endswith("\n}\n"),
+    )
     if rebuilt != raw:
         print("compat_aggregate: split produced a non-byte-identical "
               "round-trip — aborting (compat/ left in place for "
@@ -242,7 +253,9 @@ def cmd_split(root: Path) -> int:
     return 0
 
 
-def _aggregate_from_parts(parts_dir: Path) -> str:
+def _aggregate_from_parts(
+    parts_dir: Path, *, trailing_newline: bool = False,
+) -> str:
     """Read compat/ parts and reassemble the aggregate text."""
     blocks: dict[str, str] = {}
     for key in SURFACE_KEYS:
@@ -258,7 +271,7 @@ def _aggregate_from_parts(parts_dir: Path) -> str:
     blocks.update(blocks_from_part(
         meta.read_text(encoding="utf-8"), META_KEYS,
     ))
-    return assemble_aggregate(blocks)
+    return assemble_aggregate(blocks, trailing_newline=trailing_newline)
 
 
 def cmd_build(root: Path) -> int:
@@ -268,8 +281,16 @@ def cmd_build(root: Path) -> int:
         print(f"compat_aggregate: no parts dir at {parts_dir} — run "
               "`split` first.", file=sys.stderr)
         return 1
-    rebuilt = _aggregate_from_parts(parts_dir)
-    (root / "compat.json").write_text(rebuilt, encoding="utf-8")
+    aggregate = root / "compat.json"
+    # When creating a fresh aggregate, follow the repo's current style and
+    # write a final newline. Existing aggregates keep their current suffix.
+    trailing_newline = True
+    if aggregate.exists():
+        trailing_newline = aggregate.read_text(encoding="utf-8").endswith("\n}\n")
+    rebuilt = _aggregate_from_parts(
+        parts_dir, trailing_newline=trailing_newline,
+    )
+    aggregate.write_text(rebuilt, encoding="utf-8")
     print(f"compat_aggregate: regenerated compat.json from {parts_dir}.")
     return 0
 
@@ -292,7 +313,9 @@ def cmd_check(root: Path) -> int:
 
     current = aggregate.read_text(encoding="utf-8")
     try:
-        rebuilt = _aggregate_from_parts(parts_dir)
+        rebuilt = _aggregate_from_parts(
+            parts_dir, trailing_newline=current.endswith("\n}\n"),
+        )
     except (ValueError, FileNotFoundError) as exc:
         print(f"compat_aggregate: cannot rebuild from parts: {exc}",
               file=sys.stderr)

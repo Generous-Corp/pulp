@@ -13,6 +13,7 @@ functions:
       - MANUFACTURER
       - VERSION
       - CATEGORY
+      - ACCEPTS_MIDI
       - PLUGIN_CODE
       - MANUFACTURER_CODE
       - AAX_PRODUCT_CODE
@@ -46,6 +47,22 @@ functions:
       - BUNDLE_ID
       - VERSION
     docs: reference/cmake.md#pulp_add_app
+
+  - name: pulp_app_icon
+    status: usable
+    summary: Attach app icon assets to a standalone application or generated app bundle target.
+    required:
+      - target
+    optional:
+      - SOURCE
+      - MACOS
+      - WINDOWS
+      - IOS
+      - ANDROID
+      - LINUX
+      - DEBUG_ICON
+      - RELEASE_ICON
+    docs: reference/cmake.md#pulp_app_icon
 
   - name: pulp_use_kit_ui
     status: experimental
@@ -135,3 +152,16 @@ functions:
       - ${NAME}
       - ${NAME}-cargo-build
     docs: reference/cmake.md#pulp_add_cargo_staticlib
+
+  - name: pulp_add_wam_plugin
+    status: experimental
+    summary: Build a Pulp Processor to a WAMv2 (Web Audio Modules v2) WebAssembly AudioWorklet plugin. Requires the Emscripten toolchain (configure with emcmake); a no-op under any other toolchain. Compiles the headless DSP subset once into a shared object library and owns the wam_* export table and link flags.
+    required:
+      - ENTRY
+    optional:
+      - SOURCES
+      - INCLUDES
+      - SINGLE_FILE
+    creates:
+      - ${NAME}-wam
+    docs: reference/cmake.md#pulp_add_wam_plugin

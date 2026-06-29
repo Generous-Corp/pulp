@@ -380,6 +380,18 @@ canvasScale(id, sx, sy)          // Scale drawing
 canvasRotate(id, radians)        // Rotate drawing
 ```
 
+### Images
+
+```js
+canvasDrawImage(id, src, dx, dy, dw, dh)                 // Draw file-backed image
+canvasDrawImage(id, src, dx, dy, dw, dh, sx, sy, sw, sh) // Draw source sub-rect
+canvasSetImageSmoothing(id, enabled, quality)            // Sticky image sampling state
+```
+
+On Skia-backed canvases, file-backed images decode and render through the
+active canvas. Missing files, unsupported image formats, data URIs, and
+non-Skia backends render the labeled placeholder fallback.
+
 ## Theme
 
 ```js
@@ -410,7 +422,9 @@ measureText(text, fontSize)       // Returns { width, ascent, descent, lineHeigh
 ```js
 // Context menus
 registerContextMenu(id, callbackName) // Register right-click handler: callbackName(x, y)
-showContextMenu(itemsJSON, x, y)      // Show native popup menu, returns selected id or -1
+showContextMenu(itemsJSON, x, y)      // Request platform popup menu; returns selected id only
+                                      // when the backend reports one, otherwise -1.
+                                      // Current in-tree backends do not report selection.
                                       // itemsJSON: '[{"id":1,"label":"Cut"},{"separator":true}]'
 
 // Keyboard shortcuts

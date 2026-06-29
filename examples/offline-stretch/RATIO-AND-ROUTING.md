@@ -35,13 +35,14 @@ avoid the cascade's second PV pass and remains a future optimization.
 
 ## Component routing matrix (STN)
 
-`route_noise_stn` (default on, fixed at `prepare()`) sets the engine's
-`noise_morphing`, which runs STN (sines/transients/noise) decomposition:
+`route_noise_stn` is off by default. Opt in before prepare/sizing
+(`stretchcli --stn`) to set the engine's `noise_morphing`, which runs STN
+(sines/transients/noise) decomposition:
 
 | Component | Pitch | Time | Formant | Transient | Recombine |
 |---|---|---|---|---|---|
 | Tonal (sines) | PV phase-propagation | yes | envelope (SpectralEnvelopeShifter) | no | phase-locked |
-| Transient | reset (Röbel) | reposition | no | phase reset; verbatim relocation is gated | sharp |
+| Transient | reset (Röbel) | reposition | no | phase reset; optional verbatim relocation on tempo-only renders | sharp |
 | Noise / residual | morph | morph (NoiseMorpher) | optional | no | morph, no phase prop |
 
 The tonal/transient/noise split + recombination lives inside the engine

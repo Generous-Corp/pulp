@@ -3120,18 +3120,18 @@ TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
     REQUIRE(result.source.find("std::make_unique<pulp::view::View>()") != std::string::npos);
 
     REQUIRE(result.source.find("->set_label(\"Drive\");") != std::string::npos);
-    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.7f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.7f);") != std::string::npos);
     REQUIRE(result.source.find("->set_default_value(0.4f);") != std::string::npos);
     REQUIRE(result.source.find("->set_label(\"Mix\");") != std::string::npos);
-    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.25f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.25f);") != std::string::npos);
     REQUIRE(result.source.find("->set_thumb_shape(pulp::view::Fader::ThumbShape::rectangle);") != std::string::npos);
     REQUIRE(result.source.find("->set_thumb_size(17.0f, 5.0f);") != std::string::npos);
     REQUIRE(result.source.find("->set_thumb_corner_radius(1.0f);") != std::string::npos);
     REQUIRE(result.source.find("->set_label(\"Trim\");") != std::string::npos);
-    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.55f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.55f);") != std::string::npos);
     REQUIRE(result.source.find("->set_thumb_shape(pulp::view::Fader::ThumbShape::circle);") != std::string::npos);
     REQUIRE(result.source.find("->set_thumb_size(12.0f, 12.0f);") != std::string::npos);
-    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.62f, 0.62f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* imported static meter level */ 0.62f, 0.62f);") != std::string::npos);
     REQUIRE(result.source.find("->set_orientation(pulp::view::Meter::Orientation::horizontal);") != std::string::npos);
     REQUIRE(result.source.find("->set_x(0.3f);") != std::string::npos);
     REQUIRE(result.source.find("->set_y(0.8f);") != std::string::npos);
@@ -3229,7 +3229,7 @@ TEST_CASE("Chainer route overlay can lower one knob to typed C++ with binding si
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Knob>()") == 1);
     REQUIRE(result.source.find("->set_anchor_id(\"pr_2c\");") != std::string::npos);
     REQUIRE(result.source.find("->set_label(\"freq\");") != std::string::npos);
-    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.35f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.35f);") != std::string::npos);
     REQUIRE(result.source.find("->set_default_value(0.35f);") != std::string::npos);
     REQUIRE(result.source.find("->set_widget_schema(") != std::string::npos);
     REQUIRE(result.source.find("->set_show_label(false);") != std::string::npos);
@@ -4007,8 +4007,8 @@ TEST_CASE("Chainer route overlay can lower meter bars to typed C++ with meter in
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Meter>()") == 2);
     REQUIRE(result.source.find("->set_anchor_id(\"pr_6v\")") != std::string::npos);
     REQUIRE(result.source.find("->set_anchor_id(\"pr_6z\")") != std::string::npos);
-    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.72f, 0.72f);") != std::string::npos);
-    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.65f, 0.65f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* imported static meter level */ 0.72f, 0.72f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* imported static meter level */ 0.65f, 0.65f);") != std::string::npos);
     REQUIRE(result.header.find("bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx)") != std::string::npos);
     REQUIRE(count_occurrences(result.source, "ctx.bind_meter(") == 2);
 
@@ -7292,8 +7292,8 @@ TEST_CASE("baked C++ exporter emits ownable C++ source artifacts",
     REQUIRE(result.source.find("assets::kLogo") != std::string::npos);
     REQUIRE(result.source.find("// auto-extracted: structural name \"Header\"") != std::string::npos);
     REQUIRE(result.source.find("std::unique_ptr<pulp::view::View> build_header()") != std::string::npos);
-    REQUIRE(result.source.find("/* TODO: bind to param */") != std::string::npos);
-    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.2f);") != std::string::npos);
+    REQUIRE(result.source.find("/* imported static param value */") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.2f);") != std::string::npos);
     REQUIRE(result.source.find("->set_default_value(0.75f);") != std::string::npos);
     REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>()") != std::string::npos);
     REQUIRE(result.source.find("build_native_view_tree") == std::string::npos);
