@@ -152,6 +152,18 @@ public CI):
 GPL tools stay developer-local. See `NOTICE.md` and the public licensing page for full
 attribution.
 
+### Advisory reviewer (opt-in, never a gate)
+
+A reviewer model can read the report (+ optional clips/spectrograms) and name what sounds
+wrong in plain language — catching novel/compound artifacts no detector encodes. It is
+**advisory only**: it never changes the `verdict` or any gate. Configure a developer-supplied
+subprocess provider via `PULP_QLAB_REVIEWER_CMD` (reads `{report, assets}` JSON on stdin,
+writes `{summary, suspected_artifacts[], confidence, notes}`); skip-when-absent by default,
+no network or audio leaves the machine unless your provider chooses to. Run with
+`run --review`; output lands under the report's `advisory.reviewers`. Validate a real
+reviewer with `reviewer.score_agreement` (precision/recall vs the synthetic answer key)
+before trusting it. Tracked: #5296.
+
 ### Corpus
 
 A versioned corpus (`corpus/MANIFEST.json`) of sources by material class, license, and
@@ -196,6 +208,7 @@ compared to itself.
 | `quality_lab/engine.py` | adapter to the real stretch engine (`stretchcli`), skip-when-absent |
 | `quality_lab/engine_baseline.py` | real-engine regression gate |
 | `quality_lab/perceptual.py` | opt-in, license-fenced perceptual-model adapters |
+| `quality_lab/reviewer.py` | opt-in advisory LLM/multimodal reviewer (never a gate) |
 | `quality_lab/corpus.py` | versioned, license-guarded corpus |
 | `quality_lab/provenance.py` | re-derivable provenance + self-describing sidecars |
 | `quality_lab/regions.py` | worst-region clip extraction |
@@ -224,8 +237,9 @@ validation clears a bar — so an unproven detector cannot introduce a false reg
   inside the ~12 ms search window; larger drifts drop to low-coverage UNCERTAIN rather than
   guess. Promotion to `beta` needs the real-engine negative control + a false-positive sweep
   across tempos/seeds. Tracked in [#5295](https://github.com/danielraffel/pulp/issues/5295).
-- **Advisory LLM/multimodal reviewer** (a model that reads the report + clips and explains
-  what sounds wrong; advisory only, never a gate) — [#5296](https://github.com/danielraffel/pulp/issues/5296).
+- **Advisory LLM/multimodal reviewer** ships **opt-in** (`reviewer.py`, `run --review`); see
+  "Advisory reviewer" above. Promotion past experimental needs real-audio answer-key
+  evidence beyond the synthetic corpus — [#5296](https://github.com/danielraffel/pulp/issues/5296).
 - **Autonomous tuning loop** (generate → score → surface regressions → pick up human label
   edits next pass) — [#5297](https://github.com/danielraffel/pulp/issues/5297).
 
