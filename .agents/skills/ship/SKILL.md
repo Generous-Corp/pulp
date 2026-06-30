@@ -552,18 +552,38 @@ Run `security find-identity -v -p codesigning` (macOS) to find your identity, th
 pulp config set signing.apple.identity "Developer ID Application: ..."
 ```
 
-### `codesign` fails with `errSecInternalComponent`
+### `codesign` fails with `errSecInternalComponent` (or pops a GUI password dialog)
 
-The identity is present and the keychain is unlocked, but `codesign` cannot use
-the private key non-interactively until the partition list is authorized once.
-The user runs (it needs the login password):
+In a fresh agent / SSH / CI session this almost always means the **dedicated
+signing keychain is locked and not on the search list**, so `codesign -s <hash>`
+falls through to the (locked) login-keychain copy of the same Developer ID cert.
+The GUI dialog that appears is asking for the **dedicated keychain's** password (a
+stored secret, `PULP_SIGN_KEYCHAIN_PW`), **not** the user's login password — so a
+user typing their login password is correctly rejected. The non-interactive fix is
+to unlock the dedicated keychain from the secret and restrict the search list to
+ONLY it (so codesign can't reach the login keychain), then restore:
+```bash
+set -a; source ~/.config/pulp/secrets/keychain.env; set +a   # PULP_SIGN_KEYCHAIN, PULP_SIGN_KEYCHAIN_PW, …
+security list-keychains -d user -s "$PULP_SIGN_KEYCHAIN"      # ONLY the dedicated keychain
+security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN"
+# … sign / package …
+security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db" "$PULP_SIGN_KEYCHAIN"  # restore
+```
+`tools/scripts/build_combined_installer.sh` now does this itself (unlock +
+search-list restrict + restore-on-EXIT, guarded on `PULP_SIGN_KEYCHAIN*`), so
+`pulp ship package` / a plugin's `package.sh` sign prompt-free out of the box.
+`pulp ship doctor` separately authorizes the key for codesign via
+`set-key-partition-list` (login-keychain variant below, run once, needs the login
+password):
 ```bash
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
   -k "<login-password>" ~/Library/Keychains/login.keychain-db
 ```
-Full local sign+notarize recipe (inner-out dylib signing, the `*.cstemp`
-leftover, `pkgbuild`, notarytool, stapler) in *macOS manual sign + notarize from
-a worktree* above.
+(zsh trap: `${PIPESTATUS[0]}` is empty in zsh — it's `pipestatus`, 1-indexed — so a
+codesign exit reads blank when it actually succeeded; verify with `codesign
+--verify --strict` or run the check under `bash -c`.) Full local sign+notarize
+recipe (inner-out dylib signing, the `*.cstemp` leftover, `pkgbuild`, notarytool,
+stapler) in *macOS manual sign + notarize from a worktree* above.
 
 ### "Android SDK not found"
 
