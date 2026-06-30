@@ -116,13 +116,49 @@ cmake --build build --target my-plugin-logic
 # a host with the plugin loaded hot-swaps the DSP — no reload, no dropout
 ```
 
-## Worked example
+## Hot-reloading the UI too (thin logic)
 
-`examples/hot-reload-demo/` is a complete reloadable plugin: a tremolo logic
-(`logic_tremolo.cpp`) + the shell (CLAP / VST3 / Standalone) + `rebuild_logic.sh`.
-Load the CLAP in REAPER, play audio, flip `kWaveform` from `Sine` to `Square`,
-run `rebuild_logic.sh`, and the tremolo morphs live and click-free. See that
-example's `README.md` for the step-by-step.
+A reload can swap the **editor** as well as the DSP: `ReloadableShell::create_view()`
+forwards to the active logic, so a logic that overrides `create_view()` brings its
+own UI, and `set_on_reloaded()` lets a host rebuild the editor after each swap (the
+UI follows the DSP).
+
+But a logic that builds UI links `pulp::view`, and the host already has it — static
+-linking would put **two copies** of `pulp::view` in the process (duplicate ObjC
+classes, unsafe). So build UI-bearing logic **thin**:
+
+```cmake
+pulp_add_reload_logic(my-logic SOURCES my_dsp.cpp RESOLVE_FROM_HOST)  # no SDK archives
+# every host that loads it must export its SDK symbols:
+pulp_reload_host(MyPlugin_Standalone)   # and _CLAP / _VST3, the capture tool, etc.
+```
+
+`RESOLVE_FROM_HOST` links no SDK archives and resolves `pulp::*` from the host at
+`dlopen` (one SDK copy in the process); `pulp_reload_host()` exports the host's
+symbols so that resolution succeeds. (DSP-only logic doesn't pull `pulp::view`, so
+the default static model is fine there — use thin whenever the logic builds UI.)
+
+> **Thin reload is validated for *executable* hosts** (standalone apps, tools).
+> A DAW loads a VST3/CLAP *bundle* with `RTLD_LOCAL`, so the bundle's exported
+> symbols are not in the scope the thin logic binds against at `dlopen` — in-DAW
+> UI hot-reload via thin logic is unproven (likely needs the bundle to publish
+> SDK symbols into the loader's global scope; platform- and host-dependent). For
+> in-DAW hot-reload today, use the **DSP-only static** model
+> (`examples/hot-reload-demo`, REAPER-validated); UI hot-reload is a standalone
+> capability until the in-bundle symbol path is proven.
+
+## Worked examples
+
+- **`examples/hot-reload-demo/`** — a DSP-only reloadable plugin: a tremolo logic
+  + the shell (CLAP / VST3 / Standalone) + `rebuild_logic.sh`. Load the CLAP in
+  REAPER, play audio, flip `kWaveform` from `Sine` to `Square`, run
+  `rebuild_logic.sh`, and the tremolo morphs live and click-free.
+- **`examples/hot-reload-morph/`** — one reload swaps **both** the DSP *and* the
+  editor (blue "WARM" sine tremolo ↔ red "HARSH" square chop) via thin logic +
+  `create_view` forwarding. A headless capture tool renders each version's editor
+  (PNG) and DSP (WAV) through a real swap as proof.
+
+See each example's `README.md` for the step-by-step.
 
 ## Format & platform coverage
 
