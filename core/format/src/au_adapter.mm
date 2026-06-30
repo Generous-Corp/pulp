@@ -105,6 +105,13 @@ struct AUBridge {
     state::ParamID bypass_param_id = 0;
     std::atomic<bool> bypass_flag{false};
 
+    // Offline-render state. A host doing a faster-than-real-time bounce sets
+    // AUAudioUnit.renderingOffline = YES before rendering; we capture it here so
+    // the render block can pass ProcessMode::Offline to the processor (e.g. so a
+    // GPU engine drives its work synchronously instead of dropping it). Written
+    // from the host's setRenderingOffline:, read on the render thread.
+    std::atomic<bool> rendering_offline{false};
+
     // Pre-allocated — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
@@ -554,6 +561,15 @@ static thread_local bool g_au_v3_host_writing = false;
                               std::memory_order_release);
 }
 
+// AUAudioUnit.renderingOffline — the host sets this true before a
+// faster-than-real-time (offline) render such as a bounce, false otherwise.
+// Capture it into a bridge-local atomic the render block reads so the processor
+// gets ProcessMode::Offline; call super so the base class state stays correct.
+- (void)setRenderingOffline:(BOOL)flag {
+    [super setRenderingOffline:flag];
+    _bridge.rendering_offline.store(flag ? true : false, std::memory_order_release);
+}
+
 // ── Render resources ───────────────────────────────────────────────────────
 
 - (BOOL)allocateRenderResourcesAndReturnError:(NSError **)outError {
@@ -887,8 +903,14 @@ static thread_local bool g_au_v3_host_writing = false;
         pulp::format::ProcessContext ctx;
         ctx.sample_rate = bridge->sample_rate;
         ctx.num_samples = static_cast<int>(frameCount);
-        ctx.process_mode = pulp::format::ProcessMode::Realtime;
-        ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
+        // The host sets AUAudioUnit.renderingOffline for a faster-than-real-time
+        // bounce; surface it so the processor can drive offline-only paths (e.g.
+        // a GPU engine running synchronously) instead of dropping work to misses.
+        const bool offline = bridge->rendering_offline.load(std::memory_order_acquire);
+        ctx.process_mode = offline ? pulp::format::ProcessMode::Offline
+                                   : pulp::format::ProcessMode::Realtime;
+        ctx.render_speed_hint = offline ? pulp::format::RenderSpeedHint::FasterThanRealtime
+                                        : pulp::format::RenderSpeedHint::Realtime;
 
         // Populate transport fields from the host blocks the AUv3 host
         // installed via the KVO-able properties on AUAudioUnit. The blocks may

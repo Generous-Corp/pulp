@@ -122,6 +122,41 @@ TEST_CASE("GpuAudioTransport miss policy fills dry on starvation", "[gpu_audio][
     REQUIRE(t.stats().miss_blocks == 2);
 }
 
+TEST_CASE("GpuAudioTransport process_offline drives the node synchronously", "[gpu_audio][transport]") {
+    // Offline render (e.g. a faster-than-real-time bounce): NO worker thread and
+    // we NEVER call pump() manually — process_offline() must pump the node inline
+    // so every block is captured. This is exactly the case where the realtime
+    // process() path starves and misses (see the miss-policy test above); here the
+    // miss policy is Silence so any drop would show up as a zero, yet none occur.
+    // Latency stays identical to process() (the primed output ring).
+    constexpr uint32_t CH = 2, BS = 64, L = 2, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::Silence, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));   // run_worker_thread defaults to false
+    REQUIRE(t.latency_samples() == L * BS);
+
+    Block in(CH, BS), out(CH, BS);
+    std::vector<float> first_sample;
+    constexpr int NBLK = 10;
+    for (int k = 0; k < NBLK; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process_offline(iv, ov, BS);   // synchronous: no worker, no manual pump
+        first_sample.push_back(out.storage[0][0]);
+    }
+
+    // Same latency-delayed gain output as the worker-paced realtime case, but with
+    // ZERO misses — proving the node ran for every block under offline drive.
+    for (int k = 0; k < NBLK; ++k) {
+        const float expected = (k >= static_cast<int>(L)) ? 2.0f * static_cast<float>(k - L + 1) : 0.0f;
+        REQUIRE(first_sample[k] == expected);
+    }
+    REQUIRE(t.stats().miss_blocks == 0);
+    REQUIRE(t.stats().produced_blocks == NBLK);
+}
+
 TEST_CASE("GpuAudioTransport drops input on a full ring (no block)", "[gpu_audio][transport]") {
     constexpr uint32_t CH = 1, BS = 32, RING = 4;
     GainNode node(CH, BS, 1.0f, MissPolicy::Silence, 2);

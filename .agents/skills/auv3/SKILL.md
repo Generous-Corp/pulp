@@ -900,6 +900,24 @@ MIDI FX don't leak notes. Diagnostic: read `pulpBypassParameterId`
 on `PulpAudioUnit` (also exposed from the shared `au_audio_unit.h`
 header) to confirm which ParamID got picked up.
 
+### Offline-render routing — `renderingOffline` → `ProcessMode::Offline`
+
+A host doing a faster-than-real-time bounce sets `AUAudioUnit.renderingOffline =
+YES` before rendering and back to `NO` afterward. The adapter mirrors the bypass
+pattern: `setRenderingOffline:` calls `super` and stores the flag in a bridge-local
+atomic (`rendering_offline`), and the render block reads it (acquire) to set
+`ctx.process_mode = Offline` / `render_speed_hint = FasterThanRealtime`. This lets a
+processor switch to an offline-only code path — e.g. an async GPU engine that, in
+realtime, hands the audio thread a worker-produced result and **drops to silence on
+a miss**; an offline render runs faster than the wall-clock worker, so without this
+hook every block misses and the wet (reverb/delay tail) is dropped from the bounce.
+The processor's offline path should drive that work **synchronously** (blocking
+readback is fine offline — no RT deadline). Trust model is the same as bypass: the
+host is expected to clear `renderingOffline` when returning to live playback; a host
+that leaves it set would keep the processor on the (blocking) offline path during
+realtime. VST3 already surfaces this via `ProcessSetup.processMode == kOffline`;
+AU v2 and CLAP do not surface offline intent (documented limitation).
+
 ### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via

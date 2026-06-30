@@ -500,9 +500,16 @@ public:
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
-                 const format::ProcessContext&) override {
+                 const format::ProcessContext& ctx) override {
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
+
+        // Offline / faster-than-real-time render (e.g. a Logic bounce): the GPU
+        // engine's async, wall-clock-paced worker can't keep up with a render that
+        // runs faster than real time, so the GPU path must be driven synchronously
+        // to capture its actual output instead of dropping it. The CPU path is
+        // already synchronous/inline, so it is unaffected.
+        const bool offline = ctx.is_offline();
 
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
@@ -535,7 +542,7 @@ public:
         } while (true);
 
         if (tp)
-            fill_wet_gpu(tp, input, n);
+            fill_wet_gpu(tp, input, n, offline);
         else
             fill_wet_cpu(input, n);
 
@@ -638,7 +645,8 @@ private:
     // PassthroughDry policy fills the block). Both channels advance in lockstep
     // (the same n is appended every call), so in_len_[0] gates the drain.
     void fill_wet_gpu(gpu_audio::GpuAudioTransport* tp,
-                      const audio::BufferView<const float>& input, std::size_t n) {
+                      const audio::BufferView<const float>& input, std::size_t n,
+                      bool offline = false) {
         const std::size_t in_ch = input.num_channels();
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             if (ch < in_ch)
@@ -653,7 +661,13 @@ private:
             float* out_ptrs[kChannels] = {gpu_wet_[0].data(), gpu_wet_[1].data()};
             audio::BufferView<const float> iv(in_ptrs, kChannels, kInternalBlock);
             audio::BufferView<float> ov(out_ptrs, kChannels, kInternalBlock);
-            tp->process(iv, ov, static_cast<uint32_t>(kInternalBlock));
+            // Offline render drives the GPU node synchronously (blocking readback
+            // is fine — no RT deadline) so the bounce captures the real GPU reverb;
+            // realtime stays on the async, lock-free path.
+            if (offline)
+                tp->process_offline(iv, ov, static_cast<uint32_t>(kInternalBlock));
+            else
+                tp->process(iv, ov, static_cast<uint32_t>(kInternalBlock));
             for (std::size_t ch = 0; ch < kChannels; ++ch) {
                 std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
                              (in_len_[ch] - kInternalBlock) * sizeof(float));

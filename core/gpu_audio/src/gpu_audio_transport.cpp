@@ -81,9 +81,16 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
 
 void GpuAudioTransport::worker_loop() noexcept {
     while (worker_running_.load(std::memory_order_acquire)) {
-        pump();
+        // Yield while an offline (synchronous) render owns the node — process_offline
+        // pumps inline. The mutex serializes node access for the brief window where
+        // the flag flips after this check.
+        if (!synchronous_.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lock(pump_mutex_);
+            pump();
+        }
         std::this_thread::sleep_for(poll_interval_);
     }
+    std::lock_guard<std::mutex> lock(pump_mutex_);
     pump();  // final drain of any input left at stop
 }
 
@@ -104,6 +111,11 @@ void GpuAudioTransport::release() noexcept {
 
 void GpuAudioTransport::process(const audio::BufferView<const float>& input,
                                 audio::BufferView<float>& output, uint32_t n) noexcept {
+    // Realtime path: ensure the background worker is driving pump() (clears any
+    // synchronous/offline mode left by a prior offline bounce). Relaxed store of
+    // an atomic bool — RT-safe, no lock.
+    synchronous_.store(false, std::memory_order_release);
+
     // Cheap RT-path validation: shape must match what the node was prepared
     // for, and the views must actually hold n frames / channels_ channels.
     // Anything off → silence (never read/write past a view).
@@ -129,6 +141,55 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
     if (output_ring_.read(output, n)) return;
 
     // Miss: the worker has not produced this block in time. Apply the policy.
+    miss_blocks_.fetch_add(1, std::memory_order_relaxed);
+    switch (miss_policy_) {
+        case MissPolicy::Silence:
+            output.clear();
+            break;
+        case MissPolicy::PassthroughDry:
+            for (uint32_t c = 0; c < channels_; ++c) {
+                const float* src = input.channel_ptr(c);
+                float* dst = output.channel_ptr(c);
+                for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
+            }
+            break;
+        case MissPolicy::CpuFallback:
+            node_->process_cpu_fallback(input, output, n);
+            break;
+    }
+}
+
+void GpuAudioTransport::process_offline(const audio::BufferView<const float>& input,
+                                        audio::BufferView<float>& output, uint32_t n) noexcept {
+    // Same shape validation as the RT path.
+    if (!prepared_ || n != block_size_ ||
+        input.num_channels() < channels_ || output.num_channels() < channels_ ||
+        input.num_samples() < n || output.num_samples() < n) {
+        output.clear();
+        return;
+    }
+
+    // Take ownership of pumping: tell the worker to yield, then serialize node
+    // access against any pump it is already inside. No real-time deadline here.
+    synchronous_.store(true, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(pump_mutex_);
+
+    // Write this block, then pump SYNCHRONOUSLY so the node actually produces it
+    // now (instead of the async worker maybe-producing it later). The output ring
+    // was primed with `latency_blocks` of silence at prepare(), so the read below
+    // still returns the latency-delayed output — identical latency to process(),
+    // which keeps host PDC aligned between realtime and offline renders.
+    if (input_ring_.free_frames() >= n) {
+        input_ring_.write(input, n);
+    } else {
+        input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
+    }
+    pump();  // drains all ready input → node → output ring (blocking GPU readback)
+
+    if (output_ring_.read(output, n)) return;
+
+    // Should not happen after a synchronous pump (the block was just produced),
+    // but honor the miss policy as a backstop rather than emit a stale read.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
     switch (miss_policy_) {
         case MissPolicy::Silence:
