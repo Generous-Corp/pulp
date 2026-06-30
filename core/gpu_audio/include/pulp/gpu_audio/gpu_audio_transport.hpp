@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <chrono>
 #include <cstdint>
 #include <thread>
@@ -75,6 +76,20 @@ public:
     void process(const audio::BufferView<const float>& input,
                  audio::BufferView<float>& output, uint32_t n) noexcept;
 
+    /// Offline / faster-than-real-time render path. NOT real-time-safe — it
+    /// drives the node SYNCHRONOUSLY on the calling thread (blocking GPU readback
+    /// is fine here: an offline bounce has no real-time deadline) so the actual
+    /// node output is captured instead of the async misses that an offline render
+    /// would otherwise hit (the host calls process faster than the wall-clock-paced
+    /// worker can keep up). Preserves the SAME fixed latency as process() (the
+    /// primed output ring), so a host that compensates for `latency_samples()`
+    /// stays sample-aligned between realtime playback and an offline bounce. While
+    /// this is in use the background worker yields (a shared mutex serializes node
+    /// access); switch back to process() to resume async realtime operation. `n`
+    /// must equal block_size.
+    void process_offline(const audio::BufferView<const float>& input,
+                         audio::BufferView<float>& output, uint32_t n) noexcept;
+
     /// Non-RT worker step: drain ready input blocks, run the node, fill output.
     /// Processes at most `max_blocks` blocks (0 == as many as are ready).
     void pump(uint32_t max_blocks = 0) noexcept;
@@ -117,6 +132,15 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_running_{false};
     std::chrono::microseconds poll_interval_{200};
+
+    // Synchronous (offline) drive. When `synchronous_` is set, the background
+    // worker yields and process_offline() pumps the node inline under
+    // `pump_mutex_`; the realtime process() clears the flag so the worker
+    // resumes. `pump_mutex_` only ever contends between the offline path and the
+    // worker (both off the audio thread) — process() never takes it, so the
+    // realtime path stays lock-free.
+    std::atomic<bool> synchronous_{false};
+    std::mutex pump_mutex_;
 };
 
 } // namespace pulp::gpu_audio
