@@ -214,43 +214,29 @@ private:
                               "or pass one); running as passthrough");
             return;
         }
-        ReloadLibrary lib(logic_path_);
-        if (!lib.valid()) {
-            // Passthrough with NO parameters. A logic that defines parameters
-            // cannot be adopted by a later hot-reload (its contract won't match
-            // the empty one the host cached) — that needs a full plugin reload.
-            // A parameter-less logic will still hot-swap in via the watcher.
-            runtime::log_warn("[reload-shell] initial logic load failed: {} — passthrough; "
+        // Same fail-closed gate sequence the reload transaction uses (single
+        // source of truth — gate_logic_image). On rejection we degrade to
+        // passthrough; note a logic that defines parameters can't be adopted by a
+        // later hot-reload (its contract won't match the empty one the host
+        // cached) — that needs a full plugin reload. A parameter-less logic still
+        // hot-swaps in via the watcher.
+        auto gated = gate_logic_image(logic_path_, current_build_fingerprint());
+        if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) {
+            runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
                               "a logic with parameters needs a full plugin reload to take effect",
-                              lib.error());
+                              rejected->detail);
             return;
         }
-        auto abi_fn = lib.symbol<ReloadAbiVersionFn>(kAbiVersionSymbol);
-        auto fp_fn = lib.symbol<ReloadFingerprintFn>(kFingerprintSymbol);
-        auto create_fn = lib.symbol<ReloadCreateFn>(kCreateSymbol);
-        if (!abi_fn || !fp_fn || !create_fn) {
-            runtime::log_warn("[reload-shell] initial logic missing reload symbols — passthrough");
-            return;
-        }
-        if (abi_fn() != kReloadAbiVersion) {
-            runtime::log_warn("[reload-shell] initial logic reload-ABI mismatch — passthrough");
-            return;
-        }
-        BuildFingerprint logic_fp{};
-        fp_fn(&logic_fp);
-        if (!fingerprints_match(current_build_fingerprint(), logic_fp)) {
-            runtime::log_warn("[reload-shell] initial logic build-fingerprint mismatch — passthrough");
-            return;
-        }
-        std::unique_ptr<Processor> p(create_fn());
+        GatedImage& image = std::get<GatedImage>(gated);
+        std::unique_ptr<Processor> p(image.create());
         if (!p) {
             runtime::log_warn("[reload-shell] initial logic create returned null — passthrough");
             return;
         }
         descriptor_ = p->descriptor();
-        initial_latency_ = p->latency_samples();   // freeze the host-cached latency
+        initial_latency_ = p->latency_samples();        // freeze the host-cached latency
         initial_ = std::move(p);
-        initial_images_.push_back(std::move(lib));  // keep the code mapped
+        initial_images_.push_back(std::move(image.lib)); // keep the code mapped
         runtime::log_info("[reload-shell] loaded initial logic: {}", logic_path_);
     }
 

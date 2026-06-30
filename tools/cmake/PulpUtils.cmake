@@ -941,6 +941,13 @@ function(pulp_add_reload_logic target)
         # is a single copy of the SDK in the process (no duplicate ObjC classes /
         # statics). Enumerate the SDK targets' interface include dirs without
         # linking their archives.
+        #
+        # Intentionally an explicit dual-prefix list, NOT the in-tree
+        # PULP_SDK_TARGETS (PulpInstallRules.cmake): this helper must also work for
+        # downstream find_package(Pulp) consumers, who get imported `Pulp::*`
+        # targets and no PULP_SDK_TARGETS. Each entry is if(TARGET)-guarded, so a
+        # missing module is skipped silently — when a NEW SDK module's headers are
+        # needed by thin logic, add it here.
         foreach(_rl_dep Pulp::format pulp::format Pulp::view pulp::view Pulp::canvas pulp::canvas
                         Pulp::state pulp::state Pulp::audio pulp::audio Pulp::midi pulp::midi
                         Pulp::runtime pulp::runtime Pulp::platform pulp::platform

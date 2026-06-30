@@ -34,6 +34,7 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace pulp::format::reload {
@@ -55,6 +56,66 @@ struct ReloadOutcome {
     bool ok() const { return status == Status::Swapped; }
     explicit operator bool() const { return ok(); }
 };
+
+/// A logic image that passed the pre-construction gates (reload-ABI version +
+/// build fingerprint) with its factory resolved. The caller adopts @p lib (and
+/// must retain it for as long as anything it constructs lives — see the leak
+/// policy) and calls @p create to instantiate the logic Processor.
+struct GatedImage {
+    ReloadLibrary lib;
+    ReloadCreateFn create = nullptr;
+};
+
+/// Load @p library_path and run the pre-construction gates — reload-ABI version,
+/// then build fingerprint — and resolve the create symbol. The SINGLE source of
+/// truth for that gate ordering, shared by reload_processor_from_library() and
+/// ReloadableShell's initial load so they can never disagree about what
+/// "compatible" means. Returns the GatedImage on success (caller retains lib +
+/// calls create), or a fail-closed ReloadOutcome on rejection (the image backed
+/// no C++ object, so it is set CloseOnDestroy and unloaded rather than leaked).
+inline std::variant<GatedImage, ReloadOutcome>
+gate_logic_image(const std::string& library_path, const BuildFingerprint& host_fingerprint) {
+    auto reject_quiescible = [](ReloadLibrary& lib, ReloadOutcome::Status status,
+                                std::string detail, std::vector<std::string> issues = {}) {
+        lib.set_leak_policy(LeakPolicy::CloseOnDestroy);
+        return ReloadOutcome{status, std::move(detail), std::move(issues)};
+    };
+
+    // 1. Load the image. A failed load has no handle to retain or close.
+    ReloadLibrary lib(library_path);
+    if (!lib.valid()) return ReloadOutcome{ReloadOutcome::Status::RejectedLoadFailed, lib.error()};
+
+    // 2. Reload-ABI-version gate — coarsest compatibility check, first.
+    auto abi_version_fn = lib.symbol<ReloadAbiVersionFn>(kAbiVersionSymbol);
+    if (!abi_version_fn)
+        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
+                                 "missing reload-ABI-version symbol");
+    if (const int v = abi_version_fn(); v != kReloadAbiVersion)
+        return reject_quiescible(lib, ReloadOutcome::Status::RejectedAbiVersion,
+                                 "reload ABI version " + std::to_string(v) +
+                                     " != host " + std::to_string(kReloadAbiVersion));
+
+    // 3. Build-fingerprint gate — refuse a C++-ABI-incompatible image before
+    //    constructing anything across the seam.
+    auto fingerprint_fn = lib.symbol<ReloadFingerprintFn>(kFingerprintSymbol);
+    if (!fingerprint_fn)
+        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
+                                 "missing fingerprint symbol");
+    BuildFingerprint logic_fingerprint{};
+    fingerprint_fn(&logic_fingerprint);
+    if (!fingerprints_match(host_fingerprint, logic_fingerprint))
+        return reject_quiescible(lib, ReloadOutcome::Status::RejectedFingerprint,
+                                 "build fingerprint mismatch",
+                                 fingerprint_diff(host_fingerprint, logic_fingerprint));
+
+    // 4. Resolve the factory.
+    auto create_fn = lib.symbol<ReloadCreateFn>(kCreateSymbol);
+    if (!create_fn)
+        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
+                                 "missing create symbol");
+
+    return GatedImage{std::move(lib), create_fn};
+}
 
 /// Attempt to hot-reload @p slot from the logic library at @p library_path.
 /// Stateless core — see ReloadSession for the owning convenience wrapper.
@@ -78,61 +139,17 @@ inline ReloadOutcome reload_processor_from_library(
     const PrepareContext& prepare_ctx,
     std::vector<ReloadLibrary>& retained_images) {
 
-    // Reject-before-construction: the image backed no C++ object, so it is
-    // quiescible — unload it immediately rather than leaking it for the process
-    // lifetime (failed reloads are common in a live dev session).
-    auto reject_quiescible = [](ReloadLibrary& lib, ReloadOutcome::Status status,
-                                std::string detail,
-                                std::vector<std::string> issues = {}) {
-        lib.set_leak_policy(LeakPolicy::CloseOnDestroy);
-        return ReloadOutcome{status, std::move(detail), std::move(issues)};
-    };
-
-    // 1. Load the image. A failed load has no handle to retain or close.
-    ReloadLibrary lib(library_path);
-    if (!lib.valid()) {
-        return {ReloadOutcome::Status::RejectedLoadFailed, lib.error()};
-    }
-
-    // 2. Reload-ABI-version gate — coarsest compatibility check, first.
-    auto abi_version_fn = lib.symbol<ReloadAbiVersionFn>(kAbiVersionSymbol);
-    if (!abi_version_fn) {
-        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
-                                 "missing reload-ABI-version symbol");
-    }
-    if (const int v = abi_version_fn(); v != kReloadAbiVersion) {
-        return reject_quiescible(lib, ReloadOutcome::Status::RejectedAbiVersion,
-                                 "reload ABI version " + std::to_string(v) +
-                                     " != host " + std::to_string(kReloadAbiVersion));
-    }
-
-    // 3. Build-fingerprint gate — refuse a C++-ABI-incompatible image before
-    //    constructing anything across the seam.
-    auto fingerprint_fn = lib.symbol<ReloadFingerprintFn>(kFingerprintSymbol);
-    if (!fingerprint_fn) {
-        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
-                                 "missing fingerprint symbol");
-    }
-    BuildFingerprint logic_fingerprint{};
-    fingerprint_fn(&logic_fingerprint);
-    if (!fingerprints_match(host_fingerprint, logic_fingerprint)) {
-        return reject_quiescible(
-            lib, ReloadOutcome::Status::RejectedFingerprint, "build fingerprint mismatch",
-            fingerprint_diff(host_fingerprint, logic_fingerprint));
-    }
-
-    // 4. Resolve the factory.
-    auto create_fn = lib.symbol<ReloadCreateFn>(kCreateSymbol);
-    if (!create_fn) {
-        return reject_quiescible(lib, ReloadOutcome::Status::RejectedNoEntryPoints,
-                                 "missing create symbol");
-    }
+    // 1-4. Load + gate (ABI version, fingerprint) + resolve the factory — the
+    //       shared, fail-closed gate sequence (see gate_logic_image).
+    auto gated = gate_logic_image(library_path, host_fingerprint);
+    if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) return std::move(*rejected);
+    GatedImage& image = std::get<GatedImage>(gated);
+    const ReloadCreateFn create_fn = image.create;
 
     // We are about to instantiate from this image — retain it for the process
-    // lifetime (its code may back a live, or transiently-constructed, Processor;
-    // see reload_library.hpp's leak policy). The function pointers resolved above
-    // stay valid: the image remains loaded via retained_images.
-    retained_images.push_back(std::move(lib));
+    // lifetime (its code backs the constructed Processor; see reload_library.hpp's
+    // leak policy). create_fn stays valid: the image remains loaded.
+    retained_images.push_back(std::move(image.lib));
 
     // 5. Construct + gate + commit. Wrapped so a throwing candidate (ctor,
     //    define_parameters, prepare) yields a graceful Rejected outcome instead
