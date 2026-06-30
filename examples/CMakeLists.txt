@@ -36,6 +36,10 @@ add_subdirectory(bendr)
 # .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).
 add_subdirectory(hot-reload-demo)
 
+# Hot-Reload Morph: one reload swaps BOTH the DSP and the editor (sine/blue
+# "WARM" <-> square/red "HARSH") — the create_view-forwarding showcase.
+add_subdirectory(hot-reload-morph)
+
 # UI Preview and Ink & Signal examples exercise the rendering pipeline and
 # design-system imports. These depend on the design-import authoring cluster,
 # so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF) builds.

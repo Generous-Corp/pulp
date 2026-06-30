@@ -47,9 +47,11 @@
 #include <pulp/format/reload/reload_transaction.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/view.hpp>  // complete View for create_view() forwarding
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -84,6 +86,22 @@ public:
     // ── Processor interface ──────────────────────────────────────────────
 
     PluginDescriptor descriptor() const override { return descriptor_; }
+
+    // Forward the editor to the ACTIVE logic, so a hot-reload swaps the UI as well
+    // as the DSP. A host that keeps the editor across reloads should rebuild it on
+    // each swap (see set_on_reloaded) — or the logic should return a self-contained
+    // view; see ProcessorHotSwapSlot::create_active_view() for the lifetime note.
+    std::unique_ptr<view::View> create_view() override {
+        return slot_.with_active([](Processor& p) { return p.create_view(); });
+    }
+
+    /// Register a callback fired (on the CONTROL/watcher thread) after each
+    /// successful hot-swap — e.g. a standalone host rebuilds its window's editor
+    /// from create_view(). The callback must marshal any UI work to the UI thread.
+    void set_on_reloaded(std::function<void()> cb) {
+        std::lock_guard<std::mutex> g(controller_mutex_);
+        on_reloaded_ = std::move(cb);
+    }
 
     // The host caches latency once (for plugin-delay compensation), so it is part
     // of the frozen contract: report the initial logic's latency, and a reload
@@ -155,10 +173,16 @@ public:
     /// Force a reload now (e.g. a "reload" UI command), bypassing the mtime
     /// gate. Runs on the CALLING thread — must not be the audio thread.
     ReloadOutcome reload_now() {
-        std::lock_guard<std::mutex> g(controller_mutex_);
-        if (!controller_) return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
-        auto outcome = controller_->reload_now();
-        record(outcome);
+        ReloadOutcome outcome;
+        std::function<void()> on_reloaded;
+        {
+            std::lock_guard<std::mutex> g(controller_mutex_);
+            if (!controller_) return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
+            outcome = controller_->reload_now();
+            record(outcome);
+            if (outcome.ok()) on_reloaded = on_reloaded_snapshot();
+        }
+        if (on_reloaded) on_reloaded();   // fire AFTER releasing the lock (re-entrant-safe)
         return outcome;
     }
 
@@ -252,12 +276,17 @@ private:
 
     void watcher_loop() {
         while (running_.load(std::memory_order_relaxed)) {
+            std::function<void()> on_reloaded;
             {
                 std::lock_guard<std::mutex> g(controller_mutex_);
                 if (controller_) {
-                    if (auto outcome = controller_->poll()) record(*outcome);
+                    if (auto outcome = controller_->poll()) {
+                        record(*outcome);
+                        if (outcome->ok()) on_reloaded = on_reloaded_snapshot();
+                    }
                 }
             }
+            if (on_reloaded) on_reloaded();   // fire outside the lock (re-entrant-safe)
             // Free a processor whose crossfade has finished (RT-safe reclaim:
             // the audio thread only marks the fade done; we free it here).
             slot_.reclaim();
@@ -278,6 +307,11 @@ private:
         }
     }
 
+    // Snapshot the on-reloaded callback (caller holds controller_mutex_). The
+    // caller fires it AFTER releasing the lock, so a callback that re-enters the
+    // shell (reload_now / create_view) can't self-deadlock on controller_mutex_.
+    std::function<void()> on_reloaded_snapshot() const { return on_reloaded_; }
+
     std::string logic_path_;
     PluginDescriptor descriptor_;
     int initial_latency_ = 0;                     // host-cached latency of the initial logic
@@ -295,6 +329,7 @@ private:
     std::atomic<std::uint64_t> reload_attempts_{0};
     std::atomic<std::uint64_t> successful_reloads_{0};
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
+    std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)
 };
 
 } // namespace pulp::format::reload

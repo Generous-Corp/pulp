@@ -47,8 +47,16 @@ functions:
     optional:
       - OUTPUT_NAME
       - PUBLISH_DIR
+      - RESOLVE_FROM_HOST
     creates:
       - ${target}
+    docs: guides/dsp-hot-reload.md
+
+  - name: pulp_reload_host
+    status: usable
+    summary: Export a host target's SDK symbols so thin (RESOLVE_FROM_HOST) reload logic can resolve pulp::* at dlopen. No-op on Windows.
+    required:
+      - target
     docs: guides/dsp-hot-reload.md
 
   - name: pulp_add_app

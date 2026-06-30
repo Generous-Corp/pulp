@@ -896,14 +896,30 @@ endfunction()
 #   pulp_add_reload_logic(<target>
 #       SOURCES <src>...                # the DSP translation unit(s)
 #       [OUTPUT_NAME <name>]            # built file stem (default: target name)
-#       [PUBLISH_DIR <dir>])            # if set, POST_BUILD copies the built
+#       [PUBLISH_DIR <dir>]             # if set, POST_BUILD copies the built
 #                                       # module here (dir created if needed) —
 #                                       # the path a ReloadableShell watches.
+#       [RESOLVE_FROM_HOST])            # thin mode: don't static-link the SDK;
+#                                       # resolve pulp::* symbols from the HOST at
+#                                       # dlopen (see below).
 #
 # The module gets no "lib" prefix and a platform-stable suffix (.dylib/.so/.dll)
-# so the watched path is predictable. Links pulp::format for the Processor ABI.
+# so the watched path is predictable.
+#
+# Linking model — two choices:
+#  • DEFAULT (static): links pulp::format into the module. Simple; fine for
+#    DSP-only logic. The SDK ends up duplicated in the process (host copy + logic
+#    copy); harmless for format (POD/RT code, identical builds gated by the
+#    fingerprint), but a logic that pulls ObjC-heavy libs (e.g. pulp::view for a
+#    custom create_view()) would duplicate those classes — noisy and unsafe.
+#  • RESOLVE_FROM_HOST (thin): links NO SDK archives; adds the SDK headers and,
+#    on macOS, `-undefined dynamic_lookup` so pulp::* references resolve from the
+#    HOST at dlopen — ONE copy of the SDK in the process. Use this whenever the
+#    logic builds UI (links pulp::view). The host that loads it MUST export its
+#    symbols: call pulp_reload_host(<host_target>). (Linux resolves undefined
+#    shared-object symbols at load by default; Windows needs the static model.)
 function(pulp_add_reload_logic target)
-    cmake_parse_arguments(RL "" "OUTPUT_NAME;PUBLISH_DIR" "SOURCES" ${ARGN})
+    cmake_parse_arguments(RL "RESOLVE_FROM_HOST" "OUTPUT_NAME;PUBLISH_DIR" "SOURCES" ${ARGN})
     if(NOT RL_SOURCES)
         message(FATAL_ERROR "pulp_add_reload_logic(${target}): SOURCES is required")
     endif()
@@ -920,7 +936,32 @@ function(pulp_add_reload_logic target)
 
     add_library(${target} MODULE ${RL_SOURCES})
     _pulp_pick_target(_RL_FORMAT_TARGET Pulp::format pulp::format)
-    target_link_libraries(${target} PRIVATE ${_RL_FORMAT_TARGET})
+    if(RL_RESOLVE_FROM_HOST AND NOT WIN32)
+        # Thin: SDK headers only; resolve pulp::* from the host at dlopen so there
+        # is a single copy of the SDK in the process (no duplicate ObjC classes /
+        # statics). Enumerate the SDK targets' interface include dirs without
+        # linking their archives.
+        foreach(_rl_dep Pulp::format pulp::format Pulp::view pulp::view Pulp::canvas pulp::canvas
+                        Pulp::state pulp::state Pulp::audio pulp::audio Pulp::midi pulp::midi
+                        Pulp::runtime pulp::runtime Pulp::platform pulp::platform
+                        Pulp::events pulp::events Pulp::signal pulp::signal)
+            if(TARGET ${_rl_dep})
+                target_include_directories(${target} PRIVATE
+                    $<TARGET_PROPERTY:${_rl_dep},INTERFACE_INCLUDE_DIRECTORIES>)
+            endif()
+        endforeach()
+        if(APPLE)
+            target_link_options(${target} PRIVATE -undefined dynamic_lookup)
+        endif()
+        # Linux: a MODULE may keep undefined symbols, resolved from the host at
+        # dlopen — no extra flag needed.
+    else()
+        if(RL_RESOLVE_FROM_HOST AND WIN32)
+            message(WARNING "pulp_add_reload_logic(${target}): RESOLVE_FROM_HOST is "
+                            "unsupported on Windows; using the static link model.")
+        endif()
+        target_link_libraries(${target} PRIVATE ${_RL_FORMAT_TARGET})
+    endif()
     set_target_properties(${target} PROPERTIES
         PREFIX "" OUTPUT_NAME "${RL_OUTPUT_NAME}" SUFFIX "${_rl_suffix}"
         POSITION_INDEPENDENT_CODE ON)
@@ -936,6 +977,23 @@ function(pulp_add_reload_logic target)
                     "$<TARGET_FILE:${target}>"
                     "${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}"
             COMMENT "Publishing reload logic to ${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}")
+    endif()
+endfunction()
+
+# ── pulp_reload_host — export a host's SDK symbols for thin reload logic ───
+#
+# A logic library built with pulp_add_reload_logic(... RESOLVE_FROM_HOST) leaves
+# its pulp::* references undefined, to be resolved from whatever HOST dlopen's it
+# (the standalone app, the plugin bundle, a capture tool). For that to work the
+# host must publish its (statically-linked) SDK symbols in its dynamic symbol
+# table. Call this on each host target that loads thin logic. No-op on Windows.
+function(pulp_reload_host target)
+    if(WIN32)
+        return()
+    elseif(APPLE)
+        target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+    else()  # Linux / other ELF
+        target_link_options(${target} PRIVATE -rdynamic)
     endif()
 endfunction()
 

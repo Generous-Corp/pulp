@@ -176,6 +176,35 @@ public:
         return active_ != nullptr;
     }
 
+    /// Invoke @p fn with the ACTIVE processor under the shared lock, returning
+    /// its result (or a default-constructed result when no processor is
+    /// installed). Control / UI thread only — fn may allocate (e.g. build a
+    /// view); it runs concurrently with the audio thread's process() (also a
+    /// shared reader) and only blocks a swap, which is rare. Kept as a template
+    /// so the slot needs no dependency on whatever fn touches (e.g. pulp::view);
+    /// the caller instantiates it where those types are complete.
+    ///
+    /// Lifetime note for view-building callers: the processor passed to fn is the
+    /// one live RIGHT NOW. If it is later hot-swapped out and destroyed, a view
+    /// that captured it would dangle — so a caller that keeps the editor across
+    /// reloads must REBUILD on each swap (see ReloadableShell::set_on_reloaded),
+    /// or have the logic return a self-contained view.
+    ///
+    /// Concurrency contract: fn runs concurrently with the audio thread's
+    /// process() on the SAME processor (both shared readers). fn must therefore
+    /// only READ — a create_view() that races a member process() mutates would
+    /// be a data race. (Building a self-contained view that touches no mutable
+    /// DSP state is fine.) Note too that while fn holds the shared lock, a swap
+    /// waiting on the writer lock makes the audio thread's try-lock fail → one or
+    /// more passthrough blocks for fn's duration; keep fn off the hot path's
+    /// critical timing (editor open / post-swap rebuild, not per-block).
+    template <class Fn>
+    auto with_active(Fn&& fn) const -> decltype(fn(std::declval<Processor&>())) {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        if (active_) return fn(*active_);
+        return decltype(fn(std::declval<Processor&>())){};
+    }
+
     /// True while a crossfade is in progress (a fade-out is rendering).
     bool crossfade_active() const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
