@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05440"></a>
+## [0.544.0] - 2026-06-29
+
+- feat(reload): click-free crossfade on hot-swap + lock-free reclaim ([#5363](https://github.com/danielraffel/pulp/pull/5363))
+- feat(reload): DAW-integration hot-reload shell + live REAPER demo (Phase 1b) ([#5358](https://github.com/danielraffel/pulp/pull/5358))
+
 <a id="v05430"></a>
 ## [0.543.0] - 2026-06-29
 
@@ -5689,6 +5695,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.544.0]: https://github.com/danielraffel/pulp/releases/tag/v0.544.0
 [0.543.0]: https://github.com/danielraffel/pulp/releases/tag/v0.543.0
 [0.542.0]: https://github.com/danielraffel/pulp/releases/tag/v0.542.0
 [0.541.0]: https://github.com/danielraffel/pulp/releases/tag/v0.541.0
