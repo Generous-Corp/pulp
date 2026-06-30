@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05470"></a>
+## [0.547.0] - 2026-06-30
+
+- fix/inventory rust motion identity ([#5342](https://github.com/danielraffel/pulp/pull/5342))
+
 <a id="v05460"></a>
 ## [0.546.0] - 2026-06-30
 
@@ -5709,6 +5714,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.547.0]: https://github.com/danielraffel/pulp/releases/tag/v0.547.0
 [0.546.0]: https://github.com/danielraffel/pulp/releases/tag/v0.546.0
 [0.545.0]: https://github.com/danielraffel/pulp/releases/tag/v0.545.0
 [0.544.0]: https://github.com/danielraffel/pulp/releases/tag/v0.544.0
