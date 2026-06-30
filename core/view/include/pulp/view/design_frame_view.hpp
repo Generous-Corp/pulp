@@ -127,6 +127,20 @@ struct DesignFrameElement {
     /// import. Lets a tool (the inspector's Wiring lens) map a live control back
     /// to its design node — to flag "not wired up" and fetch that exact frame.
     std::string source_node_id;
+
+    // ── host-parameter binding (foreign-host embed) ──────────────────────
+    /// Optional host-parameter binding id for this control. When non-empty, a
+    /// foreign-host binder (e.g. the embed shim's string-key↔host bridge) maps
+    /// this element to the host parameter named by this key: it forwards the
+    /// element's on_element_changed / gesture begin+end to the host, and routes
+    /// host→UI pushes back by matching the key. Vendor-neutral — just an opaque
+    /// id the consumer resolves against its own parameter system (a host param
+    /// id, a CLAP param key, an AU parameter address, etc.); Pulp does not
+    /// interpret it. A hand-built
+    /// (non-imported) view sets this per control to declare its binding; an
+    /// imported view may leave it empty and let the binder fall back to
+    /// source_node_id. Empty = this element is not bound to a host parameter.
+    std::string param_key;
 };
 
 // ── Custom-control factory registry ──────────────────────────────────────────
@@ -261,6 +275,26 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].source_node_id
                                                                   : kEmpty;
+    }
+    // The host-parameter binding key of element `i` (DesignFrameElement::param_key),
+    // or empty when the element declares no binding. A foreign-host binder reads
+    // this to wire the element to a host parameter; see element_for_param_key for
+    // the host→UI reverse lookup.
+    const std::string& element_param_key(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].param_key
+                                                                  : kEmpty;
+    }
+    // Index of the first active-frame element whose param_key == `key`, or -1 if
+    // none (a NULL/empty key never matches). The host→UI direction of the bind:
+    // on automation/preset recall the binder looks up the element for a key and
+    // pushes the value with set_element_value (silently, no echo). Linear scan —
+    // the element count is a panel's worth of controls, not a hot path.
+    int element_for_param_key(const std::string& key) const {
+        if (key.empty()) return -1;
+        for (int i = 0; i < static_cast<int>(elements_.size()); ++i)
+            if (elements_[i].param_key == key) return i;
+        return -1;
     }
     // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
     // hit_element only tests momentary elements whose view_group is -1 or equals

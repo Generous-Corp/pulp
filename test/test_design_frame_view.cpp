@@ -149,6 +149,76 @@ TEST_CASE("DesignFrameView renders + the needle rotates at a non-panel aspect",
 }
 
 namespace {
+// A knob carrying a host-parameter binding key — the surface a foreign-host
+// (the embed shim) binder reads to wire a hand-built native view to host params.
+DesignFrameElement make_keyed_knob(float cx, float cy, std::string key) {
+    DesignFrameElement k = make_knob();
+    k.cx = cx; k.cy = cy;
+    k.param_key = std::move(key);
+    return k;
+}
+}  // namespace
+
+TEST_CASE("DesignFrameView surfaces per-element param_key + reverse lookup",
+          "[view][design-import][frame][param-key]") {
+    // Two value-bearing knobs declaring host bindings; the second is off-panel
+    // (cx=200) so it never wins a hit-test — used only for lookup/push.
+    DesignFrameView v(make_design_svg(),
+                      {make_keyed_knob(50, 50, "gain"),
+                       make_keyed_knob(200, 50, "cutoff")});
+    REQUIRE(v.element_count() == 2);
+
+    CHECK(v.element_param_key(0) == "gain");
+    CHECK(v.element_param_key(1) == "cutoff");
+    CHECK(v.element_param_key(99).empty());        // out of range -> empty, no UB
+    CHECK(v.element_param_key(-1).empty());
+
+    CHECK(v.element_for_param_key("gain") == 0);
+    CHECK(v.element_for_param_key("cutoff") == 1);
+    CHECK(v.element_for_param_key("missing") == -1);
+    CHECK(v.element_for_param_key("") == -1);      // empty key never matches
+}
+
+TEST_CASE("DesignFrameView param_key drives a string-keyed host bridge both ways",
+          "[view][design-import][frame][param-key]") {
+    DesignFrameView v(make_design_svg(),
+                      {make_keyed_knob(50, 50, "gain"),
+                       make_keyed_knob(200, 50, "cutoff")});
+    v.set_bounds({0, 0, 80, 80});  // view == panel, 1:1 mapping
+
+    // Stand in for the embed shim: forward USER changes/gestures by the element's
+    // param_key (UI -> host), exactly as the string-key bridge does.
+    std::vector<std::pair<std::string, float>> host_writes;
+    std::vector<std::string> gestures;
+    v.on_element_changed = [&](int idx, float val) {
+        host_writes.emplace_back(v.element_param_key(idx), val);
+    };
+    v.on_gesture_begin = [&](int idx) { gestures.push_back("begin:" + v.element_param_key(idx)); };
+    v.on_gesture_end   = [&](int idx) { gestures.push_back("end:" + v.element_param_key(idx)); };
+
+    // UI -> host: drag the "gain" knob up. The binder sees the change keyed by
+    // "gain", bracketed by gesture begin/end (so a host can group an undo step).
+    v.on_mouse_down({40, 40});     // -> SVG (50,50): the gain knob
+    v.on_mouse_drag({40, 10});     // drag up
+    v.on_mouse_up({40, 10});
+    REQUIRE_FALSE(host_writes.empty());
+    for (const auto& [key, val] : host_writes) CHECK(key == "gain");  // never "cutoff"
+    CHECK(host_writes.back().second > 0.6f);
+    REQUIRE(gestures.size() == 2);
+    CHECK(gestures.front() == "begin:gain");
+    CHECK(gestures.back() == "end:gain");
+
+    // host -> UI: automation/preset recall pushes "cutoff" via the reverse lookup.
+    // set_element_value is silent — it must NOT echo back into the host bridge.
+    host_writes.clear();
+    const int idx = v.element_for_param_key("cutoff");
+    REQUIRE(idx == 1);
+    v.set_element_value(idx, 0.25f);
+    CHECK(v.element_value(idx) == Catch::Approx(0.25f));
+    CHECK(host_writes.empty());     // no feedback loop
+}
+
+namespace {
 // A text_field (search) overlay element inside the 80x80 panel at (10,10).
 DesignFrameElement make_search() {
     DesignFrameElement s;
