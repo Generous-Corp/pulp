@@ -28,12 +28,27 @@
 // thread never builds or frees a GPU stack: a background worker builds the
 // requested stack off-thread and publishes it through an atomic pointer
 // (gpu_active_) that the audio thread loads each block — non-null routes the GPU
-// path, null routes the CPU path. The previously-active stack is retired and
-// freed one rebuild later, so the audio thread is never holding a stack as it is
-// freed. Reported latency is FIXED for the prepared lifetime (kInternalBlock
+// path, null routes the CPU path. A retired stack is freed only once the audio
+// thread is provably no longer using it: the audio thread publishes the transport
+// it is about to use in a hazard pointer (gpu_in_use_) for the span of each block,
+// and the worker defers freeing any retired stack whose transport matches. This
+// is what makes a live Engine/Rooms switch safe even when an audio block runs
+// long (e.g. an over-budget GPU block at a high sample rate). Reported latency is
+// FIXED for the prepared lifetime (kInternalBlock
 // plus the GPU transport's delay when a device exists) so the host's PDC stays
 // correct and dry/wet stay phase-aligned under either engine. See
 // gpu_engine_active().
+//
+// The convolution IR has two sources. By default it is the built-in synthetic
+// reverb (make_reverb_ir). When the user loads an audio file (set_ir_path —
+// WAV/AIFF/FLAC) that file becomes the BASE IR: it is summed to mono, resampled
+// to the session sample rate, and unit-energy normalized off the audio thread.
+// The Rooms control then generates N DECORRELATED VARIANTS of that one base IR
+// (room 0 is the base verbatim; rooms 1..N-1 are per-room phase-scrambled,
+// pre-delayed copies), so a single real space becomes a lush N-room cloud;
+// Rooms=1 is the pure loaded IR. An unreadable/missing path falls back to the
+// synthetic IR so the plugin always produces audio. The IR path persists through
+// serialize_plugin_state(), so a host restores it with the project and presets.
 //
 // The native GPU front-end (live IR waveform + frequency display + controls,
 // rendered through canvas/Skia/Dawn) is in super_convolver_ui.hpp.
@@ -41,8 +56,10 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/resampler.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/audio/format_registry.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -50,12 +67,15 @@
 #include <memory>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
@@ -94,6 +114,18 @@ inline std::vector<float> make_reverb_ir(std::size_t length, std::uint32_t seed 
         ir[i] = white * std::exp(-decay * static_cast<float>(i));
     }
     ir[0] = 1.0f;  // direct onset
+    // Normalize to UNIT ENERGY so a fully-wet convolution sits at roughly the dry
+    // signal's loudness — otherwise the wet is the sum of `length` (tens of
+    // thousands of) scaled taps and swamps the dry, making the Mix knob useless
+    // (anything above ~1% reads as fully wet). With sum(ir^2)=1 the output RMS for
+    // broadband input ≈ the input RMS, so Mix becomes a perceptually sensible
+    // dry/wet balance.
+    double energy = 0.0;
+    for (float v : ir) energy += static_cast<double>(v) * v;
+    if (energy > 0.0) {
+        const float g = static_cast<float>(1.0 / std::sqrt(energy));
+        for (float& v : ir) v *= g;
+    }
     return ir;
 }
 
@@ -108,6 +140,17 @@ public:
     // re-block FIFO adds this much latency, reported for host PDC.
     static constexpr std::size_t kInternalBlock = 512;
 
+    // Hard cap on a loaded IR's length (at the session rate). A multi-minute
+    // file would otherwise drive an unbounded decode + resample + GPU FFT; we
+    // truncate to this so the worst case stays bounded. 10 s is far longer than
+    // any plausible convolution reverb tail.
+    static constexpr double kMaxIrSeconds = 10.0;
+
+    // Versioned plugin-state blob header: magic "SCv1" + 1-byte version.
+    static constexpr char kStateMagic[4] = {'S', 'C', 'v', '1'};
+    static constexpr std::uint8_t kStateVersion = 1;
+    static constexpr std::size_t kStateHeaderSize = 5;
+
     ~SuperConvolverProcessor() override { stop_worker(); }
 
     format::PluginDescriptor descriptor() const override {
@@ -115,7 +158,7 @@ public:
             .name = "SuperConvolver",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.superconvolver",
-            .version = "1.0.5",
+            .version = "1.1.0",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
@@ -256,7 +299,8 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
+        retired_stacks_.clear();
+        gpu_in_use_.store(nullptr, std::memory_order_release);
 
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
@@ -287,7 +331,7 @@ public:
         gpu_extra_ = 0;
         device_available_ = false;
         {
-            auto stack = build_gpu_stack(init_rooms, init_size);
+            auto stack = build_gpu_stack(init_rooms, worker_base_ir_);
             if (stack) {
                 device_available_ = true;
                 gpu_extra_ = static_cast<std::size_t>(stack->transport->latency_samples());
@@ -296,7 +340,7 @@ public:
             }
         }
         gpu_built_rooms_ = init_rooms > 1 ? init_rooms : 1;
-        gpu_built_size_ = init_size;
+        gpu_base_dirty_ = false;
 
         // Total latency is FIXED for the prepared lifetime: the re-block FIFO
         // (kInternalBlock) plus, whenever a GPU device exists, the transport's
@@ -339,7 +383,8 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
+        retired_stacks_.clear();
+        gpu_in_use_.store(nullptr, std::memory_order_release);
         for (auto& c : conv_) c.reset();
     }
 
@@ -353,6 +398,88 @@ public:
     /// Monotonic counter bumped each time the displayed IR changes, so the UI
     /// can skip re-pulling the snapshot when nothing changed.
     std::uint32_t ir_generation() const { return ir_generation_.load(std::memory_order_relaxed); }
+
+    /// Set the convolution IR source file (WAV/AIFF/FLAC). An empty path clears
+    /// back to the built-in synthetic reverb IR. Main/UI thread only.
+    ///
+    /// The file is read, summed to mono, resampled to the session sample rate,
+    /// and unit-energy normalized ENTIRELY off the audio thread by the background
+    /// worker; the audio thread only ever receives the finished IR through the
+    /// existing lock-free swap (CPU) / atomic GPU-stack publish. Setting the path
+    /// is the trigger — the worker picks up the change on its next poll and
+    /// rebuilds both engines. Persisted via serialize_plugin_state().
+    void set_ir_path(std::string path) {
+        {
+            std::lock_guard<std::mutex> lock(ir_path_mutex_);
+            if (path == active_ir_path_) return;
+            active_ir_path_ = std::move(path);
+        }
+        ir_path_gen_.fetch_add(1, std::memory_order_release);
+    }
+
+    /// Force a (re)load of `path` even when it equals the current path — the
+    /// user re-picking the same file from the button (e.g. it changed on disk,
+    /// or was missing and has since appeared). Always bumps the generation so
+    /// the worker rebuilds. Main/UI thread only. Use this for explicit user
+    /// "Load IR" actions; set_ir_path() (dedup) is for state restore.
+    void load_ir_path(std::string path) {
+        {
+            std::lock_guard<std::mutex> lock(ir_path_mutex_);
+            active_ir_path_ = std::move(path);
+        }
+        ir_path_gen_.fetch_add(1, std::memory_order_release);
+    }
+
+    /// The current IR source path ("" when using the built-in synthetic IR).
+    /// UI/main-thread only (takes a mutex).
+    std::string ir_path() const {
+        std::lock_guard<std::mutex> lock(ir_path_mutex_);
+        return active_ir_path_;
+    }
+
+    /// Monotonic counter advanced each time the IR source is (re)selected. The
+    /// background worker rebuilds when it moves; exposed for tests / tooling.
+    std::uint32_t ir_path_generation() const {
+        return ir_path_gen_.load(std::memory_order_acquire);
+    }
+
+    /// Persist the IR file path alongside StateStore so a host restores the
+    /// loaded impulse response with the project / preset. The path is opaque
+    /// non-parameter state, exactly what serialize_plugin_state() is for.
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        // Versioned blob: 4-byte magic + 1-byte version + UTF-8 path bytes. The
+        // header lets future SuperConvolver state evolve while still reading the
+        // legacy raw-path format written before versioning existed.
+        const std::string path = ir_path();
+        std::vector<uint8_t> out;
+        out.reserve(kStateHeaderSize + path.size());
+        out.insert(out.end(), kStateMagic, kStateMagic + 4);
+        out.push_back(kStateVersion);
+        out.insert(out.end(), path.begin(), path.end());
+        return out;
+    }
+
+    /// Restore the IR file path. Reads the versioned blob (magic + version +
+    /// path); a blob without the magic is treated as a legacy raw-path blob; an
+    /// empty/short blob means "no loaded IR". Setting the path re-triggers the
+    /// off-thread load. Always returns true (no fatal parse — unknown bytes just
+    /// become the path, same fail-safe as a missing file).
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        std::string path;
+        if (data.size() >= kStateHeaderSize &&
+            std::equal(kStateMagic, kStateMagic + 4,
+                       reinterpret_cast<const char*>(data.data()))) {
+            // Versioned: payload after the header is the path (any version ≥ 1,
+            // which currently only ever appends a path — forward-tolerant).
+            path.assign(reinterpret_cast<const char*>(data.data()) + kStateHeaderSize,
+                        data.size() - kStateHeaderSize);
+        } else if (!data.empty()) {
+            // Legacy raw-path blob (pre-versioning).
+            path.assign(reinterpret_cast<const char*>(data.data()), data.size());
+        }
+        set_ir_path(std::move(path));
+        return true;
+    }
 
     /// Lock-free latest wet-output spectrum for the UI (UI is sole reader).
     SpectrumBus& spectrum_bus() { return spectrum_bus_; }
@@ -393,12 +520,27 @@ public:
         // re-block the host stream into fixed kInternalBlock chunks; only the
         // convolution itself (CPU PartitionedConvolver vs GPU transport) differs.
         // A non-null gpu_active_ (acquire) routes the GPU path; null routes CPU.
-        gpu_audio::GpuAudioTransport* tp =
-            gpu_active_.load(std::memory_order_acquire);
+        // Publish the transport we're about to use as a hazard pointer, so the
+        // worker can't free its stack out from under this block. The retry closes
+        // the load/publish gap: after the loop gpu_in_use_ == the gpu_active_ we
+        // use, so a concurrent retire+free on the worker is guaranteed to observe
+        // the hazard and defer the free. Bounded — the worker swaps gpu_active_ at
+        // most once per poll (~5 ms), far less often than a block.
+        gpu_audio::GpuAudioTransport* tp = gpu_active_.load(std::memory_order_acquire);
+        do {
+            gpu_in_use_.store(tp, std::memory_order_release);
+            gpu_audio::GpuAudioTransport* again = gpu_active_.load(std::memory_order_acquire);
+            if (again == tp) break;
+            tp = again;
+        } while (true);
+
         if (tp)
             fill_wet_gpu(tp, input, n);
         else
             fill_wet_cpu(input, n);
+
+        // Release the hazard: the worker may now reclaim the stack we used.
+        gpu_in_use_.store(nullptr, std::memory_order_release);
 
         // Emit n samples per channel: wet from the primed output FIFO, dry
         // delayed by the active engine's total latency so they stay aligned.
@@ -532,10 +674,10 @@ private:
     // (fill_wet_gpu) is identical. Non-RT: allocates, builds FFT plans, spawns the
     // transport worker thread. MUST be called from the worker / prepare, never the
     // audio thread.
-    std::unique_ptr<GpuStack> build_gpu_stack(int rooms, float size) {
+    std::unique_ptr<GpuStack> build_gpu_stack(int rooms, const std::vector<float>& base_ir) {
         auto stack = std::make_unique<GpuStack>();
         stack->rooms = 1;  // single-IR default; the multi branch sets the real count
-        const std::size_t len = ir_length_for(size);
+        const std::size_t len = base_ir.empty() ? 1u : base_ir.size();
         gpu_audio::GpuAudioNode* node = nullptr;
 
         if (rooms > 1) {
@@ -555,9 +697,10 @@ private:
             while (try_rooms > 1) {
                 std::vector<std::vector<float>> irs;
                 irs.reserve(static_cast<std::size_t>(try_rooms));
+                // Room 0 is the base IR verbatim; rooms 1..N-1 are deterministic
+                // decorrelated variants of it (see make_room_variant).
                 for (int k = 0; k < try_rooms; ++k)
-                    irs.push_back(make_reverb_ir(
-                        len, 0x51C04711u + static_cast<std::uint32_t>(k) * 2654435761u));
+                    irs.push_back(make_room_variant(base_ir, k));
                 auto m = std::make_unique<gpu_audio::GpuMultiConvolver>(
                     static_cast<uint32_t>(kInternalBlock),
                     static_cast<uint32_t>(sample_rate_), std::move(irs));
@@ -571,7 +714,7 @@ private:
             }
         }
         if (!node) {
-            auto ir = make_reverb_ir(len);
+            std::vector<float> ir = base_ir.empty() ? std::vector<float>{0.0f} : base_ir;
             stack->single = std::make_unique<gpu_audio::GpuConvolver>(
                 static_cast<uint32_t>(kChannels), static_cast<uint32_t>(kInternalBlock),
                 static_cast<uint32_t>(sample_rate_), std::move(ir));
@@ -593,21 +736,41 @@ private:
     // to retired_stack_) and freed on the NEXT rebuild — never freed while the
     // audio thread might still be loading its pointer. On build failure the GPU
     // path is published as null so the audio thread routes the CPU engine.
-    void rebuild_gpu_stack(int rooms, float size) {
-        // The audio thread has had many blocks since the last rebuild to drop the
-        // previously-retired pointer; freeing it now is safe.
-        retired_stack_.reset();
+    // Worker-thread only. Free retired GPU stacks the audio thread is provably no
+    // longer using (its hazard pointer doesn't match), so a stack is never freed
+    // while fill_wet_gpu still holds its transport. Stacks still in use stay queued
+    // and are reclaimed on a later call once the audio thread releases the hazard.
+    // Each freed stack's destructor joins the transport's worker thread, so we free
+    // OUTSIDE stack_mutex_ to keep the UI accessors (which take it) from stalling.
+    void reclaim_retired() {
+        gpu_audio::GpuAudioTransport* in_use = gpu_in_use_.load(std::memory_order_acquire);
+        std::vector<std::unique_ptr<GpuStack>> to_free;
+        {
+            std::lock_guard<std::mutex> lock(stack_mutex_);
+            for (auto& s : retired_stacks_) {
+                if (s && (in_use == nullptr || s->transport.get() != in_use))
+                    to_free.push_back(std::move(s));
+            }
+            retired_stacks_.erase(
+                std::remove(retired_stacks_.begin(), retired_stacks_.end(), nullptr),
+                retired_stacks_.end());
+        }
+        to_free.clear();  // GpuStack destructors run here, outside the lock
+    }
+
+    void rebuild_gpu_stack(int rooms, const std::vector<float>& base_ir) {
         // Stop the audio thread from using the current stack before retiring it.
         gpu_active_.store(nullptr, std::memory_order_release);
         gpu_engine_active_.store(false, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(stack_mutex_);
-            retired_stack_ = std::move(current_stack_);
+            if (current_stack_) retired_stacks_.push_back(std::move(current_stack_));
         }
+        // Free retired stacks the audio thread is provably no longer using.
+        reclaim_retired();
 
-        auto fresh = build_gpu_stack(rooms, size);
+        auto fresh = build_gpu_stack(rooms, base_ir);
         gpu_built_rooms_ = rooms > 1 ? rooms : 1;
-        gpu_built_size_ = size;
         if (!fresh) {
             runtime::log_info(
                 "SuperConvolver: GPU stack rebuild failed (rooms={}); "
@@ -667,13 +830,200 @@ private:
         return len < 1 ? 1 : len;
     }
 
-    // prepare-time: build the IR and load it into both channels synchronously.
+    // prepare-time: build the base IR (loaded file or synthetic) and load it into
+    // both CPU channels synchronously. Caches it in worker_base_ir_ so the
+    // prepare-time GPU pre-build and the worker share one base.
     void rebuild_ir_inline(float seconds) {
-        auto ir = make_reverb_ir(ir_length_for(seconds));
-        for (auto& c : conv_) c.load_ir(ir.data(), ir.size(), kInternalBlock);
-        publish_display_ir(ir);
-        worker_built_size_ = seconds;
+        worker_base_ir_ = build_base_ir(seconds);
+        for (auto& c : conv_)
+            c.load_ir(worker_base_ir_.data(), worker_base_ir_.size(), kInternalBlock);
+        publish_display_ir(worker_base_ir_);
+        worker_base_size_ = seconds;
+        worker_base_gen_ = ir_path_gen_.load(std::memory_order_acquire);
         requested_size_.store(seconds, std::memory_order_relaxed);
+    }
+
+    // True when the base IR must be rebuilt: the loaded-file generation changed,
+    // or (synthetic fallback only) the Size knob moved. Worker-thread only.
+    bool base_needs_rebuild(std::uint32_t want_gen, float want_size) const {
+        if (want_gen != worker_base_gen_) return true;
+        if (!worker_has_file_ && want_size > 0.0f && want_size != worker_base_size_)
+            return true;
+        return false;
+    }
+
+    // Produce the base IR for the current source. With a readable IR path set the
+    // base is the loaded file (summed to mono, resampled to the session SR,
+    // unit-energy normalized); otherwise it is the synthetic reverb at `seconds`.
+    // Sets worker_has_file_. Worker / prepare thread only (file IO + alloc).
+    std::vector<float> build_base_ir(float seconds) {
+        const std::string path = ir_path();
+        if (!path.empty()) {
+            // Any exception during decode/resample (e.g. bad_alloc on a huge or
+            // corrupt file) must never escape onto the worker or prepare thread —
+            // fall back to the synthetic IR rather than drop audio or crash.
+            std::optional<std::vector<float>> loaded;
+            try {
+                loaded = load_ir_file(path);
+            } catch (...) {
+                loaded = std::nullopt;
+            }
+            if (loaded && !loaded->empty()) {
+                worker_has_file_ = true;
+                return std::move(*loaded);
+            }
+            runtime::log_warn(
+                "SuperConvolver: IR file '{}' is unreadable, too large, or empty; "
+                "falling back to the built-in synthetic IR.", path);
+        }
+        worker_has_file_ = false;
+        return make_reverb_ir(ir_length_for(seconds));
+    }
+
+    // Read an IR audio file → mono → resampled to the session SR → unit-energy
+    // normalized. Returns nullopt on any failure so the caller falls back to the
+    // synthetic IR. Worker / prepare thread only.
+    std::optional<std::vector<float>> load_ir_file(const std::string& path) const {
+        // Preflight on metadata (no decode): reject a pathologically large file
+        // before read() pulls the whole thing into memory. We cap to kMaxIrSeconds
+        // at the file's own rate so the post-resample IR also stays within the cap.
+        const double session_sr = sample_rate_ > 0.0 ? sample_rate_ : 48000.0;
+        if (auto info = audio::FormatRegistry::instance().read_info(path)) {
+            if (info->num_frames == 0) return std::nullopt;
+            const double info_sr =
+                info->sample_rate > 0 ? static_cast<double>(info->sample_rate) : session_sr;
+            const double dur = static_cast<double>(info->num_frames) / info_sr;
+            // Allow generous headroom for a file we will truncate anyway; only
+            // refuse the truly absurd (≥ 5 min) so a fat-finger never OOMs.
+            if (dur > 300.0) return std::nullopt;
+        }
+
+        const auto data = audio::FormatRegistry::instance().read(path);
+        if (!data || data->channels.empty() || data->num_frames() == 0)
+            return std::nullopt;
+        const double file_sr =
+            data->sample_rate > 0 ? static_cast<double>(data->sample_rate) : session_sr;
+
+        // Truncate at the source rate so the resampled result fits kMaxIrSeconds.
+        std::size_t frames = static_cast<std::size_t>(data->num_frames());
+        const std::size_t max_file_frames =
+            static_cast<std::size_t>(kMaxIrSeconds * file_sr);
+        if (frames > max_file_frames) frames = max_file_frames;
+        const std::uint32_t ch = data->num_channels();
+
+        // Sum to mono (v1 is mono; true-stereo IR is a future extension).
+        std::vector<float> mono(frames, 0.0f);
+        for (std::uint32_t c = 0; c < ch; ++c) {
+            const auto& src = data->channels[c];
+            const std::size_t m = std::min<std::size_t>(frames, src.size());
+            for (std::size_t i = 0; i < m; ++i) mono[i] += src[i];
+        }
+        if (ch > 1) {
+            const float inv = 1.0f / static_cast<float>(ch);
+            for (float& v : mono) v *= inv;
+        }
+
+        // Resample from the file's sample rate to the session rate so the IR
+        // length and tone are correct regardless of the file's recording rate.
+        std::vector<float> ir;
+        if (std::abs(file_sr - session_sr) > 1e-3 && file_sr > 0.0) {
+            signal::Resampler rs;
+            rs.prepare(file_sr, session_sr, 1, frames);
+            // Pad with one filter span of zeros so the resampler can flush its
+            // group-delay tail and the full IR is captured.
+            const std::size_t pad = rs.taps_per_phase();
+            std::vector<float> padded = std::move(mono);
+            padded.resize(frames + pad, 0.0f);
+            const std::size_t cap = rs.max_output_for(padded.size());
+            ir.assign(cap, 0.0f);
+            const std::size_t produced =
+                rs.process_block_mono(padded.data(), padded.size(), ir.data(), cap);
+            ir.resize(produced);
+
+            // Drop the resampler's leading group delay so the IR onset (and thus
+            // the dry/wet alignment) is not shifted by an artificial silence.
+            // Group delay is (taps_per_phase-1)/2 at the INPUT rate; convert to
+            // output samples by the resample ratio.
+            const double ratio = session_sr / file_sr;
+            const std::size_t gd_out = static_cast<std::size_t>(
+                (static_cast<double>(rs.taps_per_phase()) - 1.0) * 0.5 * ratio);
+            if (gd_out > 0 && gd_out < ir.size())
+                ir.erase(ir.begin(), ir.begin() + static_cast<std::ptrdiff_t>(gd_out));
+        } else {
+            ir = std::move(mono);
+        }
+        if (ir.empty()) return std::nullopt;
+
+        // Final clamp at the session rate (defensive: resampler margin + any
+        // rounding can nudge the length just past the cap).
+        const std::size_t max_session_frames =
+            static_cast<std::size_t>(kMaxIrSeconds * session_sr);
+        if (ir.size() > max_session_frames) ir.resize(max_session_frames);
+
+        // Unit-energy normalize (same contract as make_reverb_ir) so Mix stays a
+        // sane dry/wet balance regardless of the loaded file's level. Reject a
+        // non-finite or silent file: +Inf energy passes `> 0`, so an explicit
+        // isfinite gate is required or Inf*0 would publish NaN to the audio thread.
+        double energy = 0.0;
+        for (float v : ir) energy += static_cast<double>(v) * v;
+        if (!std::isfinite(energy) || energy <= 0.0) return std::nullopt;
+        const float g = static_cast<float>(1.0 / std::sqrt(energy));
+        for (float& v : ir) v *= g;
+        return ir;
+    }
+
+    // A deterministic decorrelated room variant of the base IR. Room 0 returns
+    // the base verbatim (so Rooms=1 is the pure loaded IR). Rooms 1..N-1 get a
+    // per-room pre-delay (1..5 ms, distinct) plus a cascade of Schroeder all-pass
+    // sections with seeded random delays/gains: the all-pass cascade leaves the
+    // magnitude response (the loaded space's tone + decay) intact while scrambling
+    // phase, so N rooms read as N distinct positions in the same real space, and
+    // the pre-delay spreads their onsets. Output keeps the base length and is
+    // unit-energy normalized. Seeded by the room index → reproducible (golden).
+    std::vector<float> make_room_variant(const std::vector<float>& base, int room) const {
+        if (room <= 0 || base.empty()) return base;
+        const std::size_t n = base.size();
+        std::uint32_t s = 0x51C04711u + static_cast<std::uint32_t>(room) * 2654435761u;
+        auto rnd01 = [&]() {
+            s = s * 1664525u + 1013904223u;
+            return static_cast<float>(s >> 8) / 16777216.0f;  // [0,1)
+        };
+
+        // Per-room pre-delay, 1..5 ms — bounded to a fraction of the IR length so
+        // a very short loaded IR can't be pushed entirely past its own tail (which
+        // would yield a zero-energy variant and silently attenuate the base in the
+        // GPU multi-convolver's 1/sqrt(N) panning).
+        std::size_t pre = static_cast<std::size_t>(
+            (1.0f + 4.0f * rnd01()) * 0.001f * static_cast<float>(sample_rate_));
+        if (pre > n / 4) pre = n / 4;
+        std::vector<float> cur(n, 0.0f);
+        for (std::size_t i = 0; i + pre < n; ++i) cur[i + pre] = base[i];
+
+        // Schroeder all-pass cascade: y[i] = -g*x[i] + x[i-M] + g*y[i-M].
+        constexpr int kSections = 3;
+        std::vector<float> y(n, 0.0f);
+        for (int sec = 0; sec < kSections; ++sec) {
+            const std::size_t M = 32u + static_cast<std::size_t>(rnd01() * 400.0f);
+            const float g = 0.4f + 0.3f * rnd01();
+            std::fill(y.begin(), y.end(), 0.0f);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float xM = (i >= M) ? cur[i - M] : 0.0f;
+                const float yM = (i >= M) ? y[i - M] : 0.0f;
+                y[i] = -g * cur[i] + xM + g * yM;
+            }
+            cur.swap(y);
+        }
+
+        // Re-normalize to unit energy (the all-pass + pre-delay are near energy-
+        // preserving, but truncation to the base length can shave a little). If
+        // the variant came out silent or non-finite (degenerate short IR), fall
+        // back to the base so the room never reads as a zero-energy slot.
+        double energy = 0.0;
+        for (float v : cur) energy += static_cast<double>(v) * v;
+        if (!std::isfinite(energy) || energy <= 0.0) return base;
+        const float gain = static_cast<float>(1.0 / std::sqrt(energy));
+        for (float& v : cur) v *= gain;
+        return cur;
     }
 
     void publish_display_ir(const std::vector<float>& ir) {
@@ -705,21 +1055,33 @@ private:
             const float want_size = requested_size_.load(std::memory_order_relaxed);
             const int want_engine = requested_engine_.load(std::memory_order_relaxed);
             const int want_rooms = requested_rooms_.load(std::memory_order_relaxed);
+            const std::uint32_t want_gen = ir_path_gen_.load(std::memory_order_acquire);
 
-            // CPU IR rebuild on Size change (always — CPU is the fallback engine).
-            if (want_size != worker_built_size_ && want_size > 0.0f) {
-                auto ir = make_reverb_ir(ir_length_for(want_size));
+            // Rebuild the base IR whenever its source changed: a new file loaded
+            // (path generation moved), or — for the synthetic fallback only — the
+            // Size knob moved. The loaded file IS the base (it keeps its own
+            // length); Size only governs the synthetic IR. Re-stage the CPU IR and
+            // flag the GPU stack for a rebuild against the new base. All file IO,
+            // resampling, and allocation happens here, never on the audio thread.
+            if (base_needs_rebuild(want_gen, want_size)) {
+                worker_base_ir_ = build_base_ir(want_size);
+                worker_base_gen_ = want_gen;
+                worker_base_size_ = want_size;
                 for (auto& sw : swapper_)
-                    sw.stage_ir(ir.data(), ir.size(), kInternalBlock);
-                publish_display_ir(ir);
-                worker_built_size_ = want_size;
+                    sw.stage_ir(worker_base_ir_.data(), worker_base_ir_.size(), kInternalBlock);
+                publish_display_ir(worker_base_ir_);
+                gpu_base_dirty_ = true;
             }
 
             // GPU stack management (only meaningful when a device exists).
             if (device_available_)
-                service_gpu_stack(want_engine, want_rooms, want_size);
+                service_gpu_stack(want_engine, want_rooms);
 
             for (auto& sw : swapper_) sw.drain_old();
+            // Free any retired stack the audio thread has since released (a stack
+            // retired during a slow in-flight block is reclaimed here once the
+            // hazard clears, without waiting for the next rebuild).
+            if (!retired_stacks_.empty()) reclaim_retired();
             std::this_thread::sleep_for(5ms);
         }
         // Final drain so nothing leaks once the audio thread has stopped.
@@ -730,13 +1092,14 @@ private:
     // Engine/Rooms/Size: rebuild on a Rooms/Size change, republish the pre-built
     // stack on a CPU->GPU toggle (instant), and unpublish on a GPU->CPU toggle
     // while KEEPING the stack built so the next switch back is instant too.
-    void service_gpu_stack(int want_engine, int want_rooms, float want_size) {
+    void service_gpu_stack(int want_engine, int want_rooms) {
         const int rooms = want_rooms > 1 ? want_rooms : 1;
         if (want_engine == 1) {
             const bool config_changed =
-                !current_stack_ || gpu_built_rooms_ != rooms || gpu_built_size_ != want_size;
+                !current_stack_ || gpu_built_rooms_ != rooms || gpu_base_dirty_;
             if (config_changed) {
-                rebuild_gpu_stack(rooms, want_size);
+                rebuild_gpu_stack(rooms, worker_base_ir_);
+                gpu_base_dirty_ = false;
             } else if (gpu_active_.load(std::memory_order_relaxed) == nullptr) {
                 // Stack already built for this config (after a GPU->CPU toggle) —
                 // just republish for an instant switch.
@@ -778,15 +1141,24 @@ private:
     std::array<signal::ConvolverIrSwapper, kChannels> swapper_{};
 
     // Optional GPU engine (default OFF), switchable live. The worker owns
-    // current_stack_ (the built stack) and retired_stack_ (a previous stack
-    // pending free, reclaimed one rebuild later). The audio thread routes the GPU
-    // path solely through gpu_active_ (an atomic pointer into current_stack_'s
-    // transport, or null for the CPU path). stack_mutex_ guards current_stack_ for
-    // the UI accessors vs the worker — the audio thread NEVER takes it. gpu_wet_
-    // is the per-channel B-sized scratch the transport writes each stereo block.
+    // current_stack_ (the built stack) and retired_stacks_ (previous stacks pending
+    // free). The audio thread routes the GPU path solely through gpu_active_ (an
+    // atomic pointer into current_stack_'s transport, or null for the CPU path).
+    // stack_mutex_ guards current_stack_ for the UI accessors vs the worker — the
+    // audio thread NEVER takes it. gpu_wet_ is the per-channel B-sized scratch the
+    // transport writes each stereo block.
+    //
+    // Reclamation is hazard-pointer protected: a retired stack is freed only once
+    // the audio thread is provably no longer using it. The audio thread publishes
+    // the transport it is about to use in gpu_in_use_ for the duration of a block;
+    // the worker defers freeing any retired stack whose transport matches. Freeing
+    // "one rebuild later" alone is unsafe — it counts worker polls, not audio
+    // blocks, so a slow audio block (e.g. an over-budget GPU block at 96 kHz) can
+    // still hold a transport the worker would otherwise free, a use-after-free.
     std::unique_ptr<GpuStack> current_stack_;
-    std::unique_ptr<GpuStack> retired_stack_;
+    std::vector<std::unique_ptr<GpuStack>> retired_stacks_;
     std::atomic<gpu_audio::GpuAudioTransport*> gpu_active_{nullptr};
+    std::atomic<gpu_audio::GpuAudioTransport*> gpu_in_use_{nullptr};  // audio-thread hazard ptr
     mutable std::mutex stack_mutex_;
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::atomic<bool> gpu_engine_active_{false};   // mirrors (gpu_active_ != null)
@@ -800,9 +1172,23 @@ private:
     std::atomic<float> requested_size_{-1.0f};
     std::atomic<int> requested_engine_{0};          // 0 = CPU, 1 = GPU
     std::atomic<int> requested_rooms_{1};
-    float worker_built_size_ = -1.0f;  // worker-thread-local (CPU IR)
     int gpu_built_rooms_ = 0;          // worker-thread-local (current_stack_ config)
-    float gpu_built_size_ = -1.0f;     // worker-thread-local (current_stack_ config)
+
+    // IR source. The path is opaque, persisted state (set on the UI/main thread,
+    // read on the worker / prepare); ir_path_gen_ is the lock-free trigger the
+    // worker polls so a new path rebuilds the base IR off the audio thread. The
+    // worker_base_* fields are worker-thread-local: the current base IR plus the
+    // (generation, size, has-file) tuple that produced it, so the worker only
+    // rebuilds when the source actually changed. gpu_base_dirty_ flags that the
+    // GPU stack must rebuild against a freshly produced base IR.
+    mutable std::mutex ir_path_mutex_;
+    std::string active_ir_path_;
+    std::atomic<std::uint32_t> ir_path_gen_{0};
+    std::vector<float> worker_base_ir_;             // worker/prepare-thread-local
+    std::uint32_t worker_base_gen_ = 0;
+    float worker_base_size_ = -1.0f;
+    bool worker_has_file_ = false;
+    bool gpu_base_dirty_ = false;
 
     // UI display snapshot (UI + worker thread only; never audio thread).
     mutable std::mutex ir_display_mutex_;

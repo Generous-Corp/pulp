@@ -563,6 +563,34 @@ validated SHA — that lives in Shipyard (tracked upstream as Shipyard issue
    SHA — corroborate branch state with `git ls-remote` / a real `git fetch`
    before concluding the branch moved or was reset.
 
+### Gotcha: a long-lived integration branch drifts from main's whole-tree gates
+
+The hotspot-size guard (`tools/scripts/hotspot_size_guard.json` frozen ceilings)
+and the codecov-config gates (`codecov.yml` flags/components mirroring the live
+`core/*` tree) are **whole-tree, not diff-scoped** — they assert a property of the
+entire checkout, so they fail on *any* push to a branch whose tree violates them,
+regardless of what that push changed. A long-lived `develop/*` integration branch
+accumulates this kind of drift relative to `main`:
+
+- `main` may *lower* a frozen hotspot ceiling (e.g. after a comment-hygiene
+  cleanup) while the integration branch has legitimately *grown* the same file
+  (new test targets), so the merged tree exceeds the ceiling.
+- The integration branch may *add a whole subsystem* (`core/<new>/`) and its
+  upload flag without registering the matching `codecov.yml` component, so the
+  flag/component-alignment and "every first-party file maps to a component" tests
+  fail.
+
+Either way the integration branch **cannot pass its own pre-push/CI gates**, and
+the failure surfaces on the first unrelated PR that tries to land on it (looks
+like the PR's fault; it is not). Fix by reconciling the gate config to the
+branch's real state **in the landing PR**: raise the hotspot ceiling to the file's
+current LOC, and add the missing codecov flag+component (`paths: core/<new>/**`).
+Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
+are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
+config you didn't author trips skill-sync/version-bump (config maps to the `ci`
+skill; examples/config-only diffs still need a `Version-Bump: skip` trailer under
+a `feat:`/`fix:` title) — expect to add those trailers too.
+
 ### Shipyard pin and behaviour notes
 
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.

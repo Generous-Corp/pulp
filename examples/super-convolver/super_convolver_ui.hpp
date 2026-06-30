@@ -5,10 +5,13 @@
 //
 // Three live panels stacked vertically: a hero impulse-response waveform that
 // redraws from the processor's current IR snapshot (so it visibly morphs as the
-// Size knob rebuilds the reverb tail), a log-frequency spectrum of the wet
-// output, and a control strip with vertical sliders for Mix / Size / Gain plus
-// a Bypass toggle. The IR panel is tinted column-by-column by the live spectrum
-// — a cheap per-frame cross-feed that leans on the GPU host's smooth repaint.
+// Size knob rebuilds the reverb tail or a loaded file replaces it), a
+// log-frequency spectrum of the wet output, and a control strip with vertical
+// sliders for Mix / Size / Gain plus a Bypass toggle. A "Load IR" button in the
+// header opens the native file picker to import a WAV/AIFF/FLAC impulse response
+// (the loaded base IR; Rooms then decorrelates it) and shows the current source
+// name. The IR panel is tinted column-by-column by the live spectrum — a cheap
+// per-frame cross-feed that leans on the GPU host's smooth repaint.
 //
 // Layout is fully proportional to the view bounds so it scales with the host
 // window and never clips. Pointer input drives parameters through proper host
@@ -20,6 +23,7 @@
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/file_chooser.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -133,6 +137,7 @@ public:
         canvas.fill_text("Convolution reverb · GPU-rendered UI · " + audio_status,
                          20 * s, 50 * s);
 
+        paint_load_ir(canvas);
         read_spectrum();
         paint_ir(canvas);
         paint_spectrum(canvas);
@@ -205,6 +210,10 @@ private:
         const float m = 20 * s, top = 64 * s;
         const float avail = H - top - m;
 
+        // Load-IR button, top-right of the header.
+        const float btn_w = 104 * s, btn_h = 26 * s;
+        load_ir_btn_ = {W - m - btn_w, 14 * s, btn_w, btn_h};
+
         // Hero IR waveform (largest), then spectrum, then the control strip.
         const float ir_h   = avail * 0.42f;
         const float spec_h = avail * 0.26f;
@@ -256,6 +265,50 @@ private:
         return spec_display_[static_cast<size_t>(idx)];
     }
 
+    // ── Load-IR button + current source name (header) ──
+    static std::string basename_of(const std::string& path) {
+        const auto slash = path.find_last_of("/\\");
+        return slash == std::string::npos ? path : path.substr(slash + 1);
+    }
+
+    void paint_load_ir(cv::Canvas& canvas) {
+        const float s = scale();
+        const auto& b = load_ir_btn_;
+        canvas.set_fill_color(pal_.elevated);
+        canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 6 * s);
+        canvas.set_stroke_color(pal_.border);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(b.x, b.y, b.width, b.height, 6 * s);
+        canvas.set_fill_color(pal_.accent);
+        canvas.set_font("Inter", 12.0f * s);
+        canvas.fill_text("⤓ Load IR", b.x + 14 * s, b.y + b.height * 0.66f);
+
+    }
+
+    // The current IR source name (drawn in the IR panel header, where there's
+    // dedicated space — keeps it clear of the long engine-status subtitle).
+    std::string ir_source_name() const {
+        const std::string path = proc_.ir_path();
+        return path.empty() ? "built-in synthetic" : basename_of(path);
+    }
+
+    // Open the native file picker and set the chosen file as the IR source. The
+    // dialog is synchronous on macOS (modal on the UI thread), so capturing the
+    // processor by reference in the callback is safe.
+    void open_ir_chooser() {
+        vw::FileChooser chooser;
+        chooser.set_title("Load impulse response")
+               .add_extension_filter("Impulse response (WAV/AIFF/FLAC)",
+                                      "wav;aiff;aif;flac");
+        auto& proc = proc_;
+        chooser.open([&proc](std::vector<std::string> paths) {
+            // load_ir_path (not set_ir_path) forces a reload even when the user
+            // re-picks the same file — e.g. it changed on disk, or a previously
+            // missing path has since appeared.
+            if (!paths.empty()) proc.load_ir_path(paths.front());
+        });
+    }
+
     // ── IR waveform (hero) ──
     void paint_ir(cv::Canvas& canvas) {
         const float s = scale();
@@ -265,6 +318,17 @@ private:
         canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 11.0f * s);
         canvas.fill_text("impulse response", r.x + 10 * s, r.y + 16 * s);
+
+        // Current IR source, right side of the panel header.
+        {
+            const float lx = r.x + r.width * 0.45f;
+            canvas.save();
+            canvas.clip_rect(lx, r.y, r.width * 0.55f - 10 * s, 22 * s);
+            canvas.set_fill_color(pal_.text_dim);
+            canvas.set_font("Inter", 11.0f * s);
+            canvas.fill_text("source: " + ir_source_name(), lx, r.y + 16 * s);
+            canvas.restore();
+        }
 
         canvas.save();
         canvas.clip_rect(r.x, r.y, r.width, r.height);
@@ -283,6 +347,15 @@ private:
         const std::size_t n = ir.size();
         if (n == 0) { canvas.restore(); return; }
 
+        // Display peak-normalization: scale the drawn waveform to the panel by its
+        // OWN max-abs sample so it always fills the panel regardless of the IR's
+        // absolute level. This is purely visual — independent of the audio-path
+        // unit-energy normalization (peak ~0.12, which would draw tiny) and of an
+        // arbitrary loaded file's unpredictable level. Audio is unaffected.
+        float ir_peak = 0.0f;
+        for (float v : ir) ir_peak = std::max(ir_peak, std::abs(v));
+        const float disp_gain = ir_peak > 1e-6f ? 1.0f / ir_peak : 1.0f;
+
         // Peak-pick the (possibly thousands-long) IR into one column per pixel,
         // mirrored about the center axis, tinted by the live spectrum energy at
         // the matching position.
@@ -298,7 +371,7 @@ private:
             for (std::size_t i = start; i < end; ++i)
                 peak = std::max(peak, std::abs(ir[i]));
             const float frac = static_cast<float>(c) / static_cast<float>(cols);
-            const float amp = std::clamp(peak, 0.0f, 1.0f) * halfH * 0.94f;
+            const float amp = std::clamp(peak * disp_gain, 0.0f, 1.0f) * halfH * 0.94f;
             const float x = x0 + frac * xspan;
             const float t = spectrum_energy_at(frac);  // 0..1 cold→hot tint
             canvas.set_stroke_color(lerp_color(pal_.ir_cold, pal_.ir_hot, t));
@@ -408,6 +481,10 @@ private:
         if (layout_dirty_) layout();
         pointer_down_ = true;
 
+        if (in_rect(p, load_ir_btn_)) {
+            open_ir_chooser();
+            return;
+        }
         if (in_rect(p, bypass_)) {
             toggle_param(kBypass);
             return;
@@ -477,7 +554,7 @@ private:
     pulp::state::ParameterEdit edit_;
     ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
-    vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{};
+    vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{}, load_ir_btn_{};
     std::array<Slider, 4> sliders_{{
         {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
         {kSize,  "Size",   0.05f, 4.0f,  2, "s"},

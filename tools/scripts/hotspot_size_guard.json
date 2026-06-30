@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6116,
-      "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 6150,
+      "note": "shared test registration hotspot; reconciled to the GPU-audio test-target baseline on develop/gpu-audio-runtime (was 6116 from a main-side comment-hygiene cleanup that the develop merge did not reconcile)"
     },
     {
       "path": "test/test_design_import_codegen.cpp",

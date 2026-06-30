@@ -198,6 +198,10 @@ flags:
     paths:
       - core/format/
     carryforward: true
+  gpu_audio:
+    paths:
+      - core/gpu_audio/
+    carryforward: true
   graph:
     paths:
       - core/graph/
@@ -372,6 +376,9 @@ component_management:
     - component_id: format
       name: format
       paths: ["core/format/**"]
+    - component_id: gpu_audio
+      name: gpu_audio
+      paths: ["core/gpu_audio/**"]
     - component_id: graph
       name: graph
       paths: ["core/graph/**"]
