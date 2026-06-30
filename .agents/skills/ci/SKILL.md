@@ -559,6 +559,40 @@ diagnostics, experimental branches, existing Shipyard-managed PRs, or when
 `shipyard pr` itself is being debugged. Do not use them as the primary ship
 path.
 
+### A ship must survive the session dying — arm GitHub auto-merge as a backstop
+
+`shipyard pr` performs merge-on-green **inside the CLI/worker process**. If
+that process dies before the merge — the cmux app relaunching under resource
+starvation, or this Claude session running out of quota — the validated PR is
+**stranded unmerged** and its ship-state record **orphans**. This is a recurring
+real failure (521 orphaned records were reaped across the CI Macs on
+2026-06-30). The merge must not depend on any interactive session staying alive.
+
+**Standing policy — after creating/validating a pulp PR, arm GitHub-native
+auto-merge as a server-side backstop:**
+
+```bash
+ghapp pr merge <PR> --auto --merge      # merge commit, NOT --squash
+```
+
+GitHub then merges the moment required checks (`macos` + `Enforce version &
+skill sync`) go green, regardless of whether `shipyard pr`, cmux, or this
+session survive. Use `--merge` (merge commit), never `--squash`: a squash folds
+the `chore: bump versions` commit into the PR-title commit, which trips the
+auto-release watchdog into a false "merged without bump." It is safe alongside
+`shipyard pr` — whichever merges first wins; the other no-ops on already-merged.
+(The Shipyard repo has no branch protection, so GitHub auto-merge is
+unavailable there; the host-side queue janitor below covers it.)
+
+**Host-side backstop (both repos + orphan reaping):** a launchd queue-tick on
+each CI Mac (`tartci` `scripts/shipyard_queue_tick.sh`) periodically drives
+in-flight ship-state to completion via shipyard's own fail-closed `auto-merge`
+and reaps records whose PR GitHub reports merged/closed — independent of any
+session. Reap a stale local pile by hand with `shipyard ship-state list` →
+`shipyard ship-state discard <pr>` for each merged/closed PR (never discard an
+OPEN one). Full design: pulp
+`planning/2026-06-30-ship-queue-resilience-design.md`.
+
 ### Stale-SHA merge race — DO NOT push onto a PR that's being shipped
 
 **The failure mode (observed 2026-05-29):** Shipyard's `can_merge()`
