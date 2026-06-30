@@ -569,9 +569,11 @@ security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN"
 # … sign / package …
 security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db" "$PULP_SIGN_KEYCHAIN"  # restore
 ```
-`tools/scripts/build_combined_installer.sh` now does this itself (unlock +
-search-list restrict + restore-on-EXIT, guarded on `PULP_SIGN_KEYCHAIN*`), so
-`pulp ship package` / a plugin's `package.sh` sign prompt-free out of the box.
+`tools/scripts/build_combined_installer.sh` runs `ensure_signing_ready.sh` (the
+same `pulp ship doctor` preflight, single source of truth) before signing, so
+`pulp ship package` / a plugin's `package.sh` sign prompt-free out of the box —
+no manual `pulp ship doctor` needed first, and the fresh-machine case (keychain
+or `.p12` not yet imported) is covered too.
 `pulp ship doctor` separately authorizes the key for codesign via
 `set-key-partition-list` (login-keychain variant below, run once, needs the login
 password):

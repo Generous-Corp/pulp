@@ -56,23 +56,21 @@ done
 STAGE="$(mktemp -d)"; mkdir -p "$OUT" "$STAGE/comp"
 source ~/.config/pulp/secrets/keychain.env 2>/dev/null || true
 
-# Non-interactive signing: a fresh agent / SSH / CI session has the dedicated
-# signing keychain LOCKED and not on the search list, so `codesign -s <hash>`
-# falls through to the (locked) login keychain and pops a GUI password dialog —
-# which an unattended sign can't answer, and which asks for the *dedicated*
-# keychain's password (a stored secret), not the user's login password. Unlock
-# the dedicated keychain from the secret and restrict the search list to ONLY it
-# for the duration so codesign can never reach the login keychain; restore a
-# clean search list on exit. `pulp ship doctor` already authorizes the key for
-# codesign via set-key-partition-list; this closes the unlock/search-list gap.
-if [[ -n "${PULP_SIGN_KEYCHAIN:-}" && -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]]; then
-  _login_kc="$HOME/Library/Keychains/login.keychain-db"
-  _restore_keychains() { security list-keychains -d user -s "$_login_kc" "$PULP_SIGN_KEYCHAIN" >/dev/null 2>&1 || true; }
-  trap _restore_keychains EXIT
-  security list-keychains -d user -s "$PULP_SIGN_KEYCHAIN" >/dev/null 2>&1 || true
-  security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN" >/dev/null 2>&1 \
-    && echo "[installer] dedicated signing keychain unlocked (non-interactive)" \
-    || echo "[installer] WARN: could not unlock $PULP_SIGN_KEYCHAIN — signing may prompt" >&2
+# Non-interactive signing preflight — reuse the codified `pulp ship doctor` setup
+# (ensure_signing_ready.sh, the SAME script `pulp ship sign` runs) so a fresh
+# agent / SSH / CI session gets the dedicated signing keychain created, unlocked,
+# its inactivity auto-lock disabled, added to the search list, and authorized for
+# codesign via set-key-partition-list — all from the stored secret. Without it,
+# `codesign -s <hash>` falls through to the LOCKED login keychain and pops a GUI
+# password dialog an unattended sign can't answer; worse, that dialog asks for the
+# *dedicated* keychain's stored password, not the user's login password, so a
+# login password is rejected. Single source of truth — no inline keychain juggling
+# here, and it covers the fresh-machine case (keychain/.p12 not yet imported) too.
+_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -x "$_self_dir/ensure_signing_ready.sh" ]]; then
+  "$_self_dir/ensure_signing_ready.sh" >/dev/null 2>&1 \
+    && echo "[installer] signing keychain ready (pulp ship doctor preflight)" \
+    || echo "[installer] WARN: ensure_signing_ready.sh returned non-zero — signing may prompt; run 'pulp ship doctor'" >&2
 fi
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
