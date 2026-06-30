@@ -39,16 +39,22 @@ public:
 
         httplib::Client client(origin);
         client.set_follow_location(true);
-        if (request.connect_timeout.count() > 0) {
-            client.set_connection_timeout(
-                std::chrono::duration_cast<std::chrono::milliseconds>(request.connect_timeout));
-        }
-        if (request.request_timeout.count() > 0) {
-            const auto read = std::chrono::duration_cast<std::chrono::milliseconds>(
-                request.request_timeout);
-            client.set_read_timeout(read);
-            client.set_write_timeout(read);
-        }
+        // Always bound every request. The SDK may pass a zero/unset timeout, in
+        // which case cpp-httplib would fall back to its multi-minute defaults — and
+        // a hung connect would then block the control thread that joins the
+        // background re-validation worker (editor close / plugin unload), freezing
+        // the host. Honor any explicit timeout the SDK sets; otherwise clamp to a
+        // sane ceiling so join_revalidate() is always bounded.
+        constexpr auto kDefaultTimeout = std::chrono::milliseconds(10000);
+        const auto connect = request.connect_timeout.count() > 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(request.connect_timeout)
+            : kDefaultTimeout;
+        const auto read = request.request_timeout.count() > 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(request.request_timeout)
+            : kDefaultTimeout;
+        client.set_connection_timeout(connect);
+        client.set_read_timeout(read);
+        client.set_write_timeout(read);
 
         httplib::Headers headers;
         std::string content_type = "application/octet-stream";

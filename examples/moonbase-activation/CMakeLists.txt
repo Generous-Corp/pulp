@@ -49,6 +49,46 @@ else()
 endif()
 FetchContent_MakeAvailable(moonbase_cpp)
 
+# ── Loadable plugin bundles + standalone app ────────────────────────────────
+# CLAP and Standalone need no external SDK and always build. VST3 / AU build
+# only when their developer-supplied SDKs are present (same convention as the
+# rest of the repo) so a fresh checkout still gets a loadable plugin + app.
+set(_moonbase_formats CLAP Standalone)
+if(EXISTS "${CMAKE_SOURCE_DIR}/external/vst3sdk/CMakeLists.txt")
+    list(APPEND _moonbase_formats VST3)
+endif()
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/external/AudioUnitSDK/CMakeLists.txt")
+    list(APPEND _moonbase_formats AU)
+endif()
+message(STATUS "Moonbase: building formats ${_moonbase_formats}")
+
+pulp_add_plugin(MoonbaseActivation
+    FORMATS           ${_moonbase_formats}
+    PLUGIN_NAME       "Moonbase Activation"
+    BUNDLE_ID         "com.generouscorp.moonbase-activation"
+    MANUFACTURER      "GenerousCorp"
+    VERSION           "1.0.0"
+    CATEGORY          Effect
+    PLUGIN_CODE       "MbAc"
+    MANUFACTURER_CODE "Genr")
+
+# The processor (and its editor) needs the Moonbase SDK + the Pulp HTTP transport
+# on every format target the plugin macro generated.
+foreach(_fmt VST3 CLAP AU Standalone)
+    if(TARGET MoonbaseActivation_${_fmt})
+        target_link_libraries(MoonbaseActivation_${_fmt}
+            PRIVATE moonbase::licensing pulp-cpp-httplib)
+        target_include_directories(MoonbaseActivation_${_fmt}
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
+endforeach()
+
+# ── Headless screenshot generator (docs imagery; no window, no audio) ────────
+add_executable(moonbase-activation-screenshots capture_screens.cpp)
+target_link_libraries(moonbase-activation-screenshots
+    PRIVATE pulp::format pulp::view moonbase::licensing pulp-cpp-httplib)
+target_include_directories(moonbase-activation-screenshots PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # ── Tests (the validation proof) ────────────────────────────────────────────
 if(PULP_BUILD_TESTS)
     add_executable(pulp-moonbase-activation-test test_moonbase_activation.cpp)

@@ -1,6 +1,6 @@
 ---
 name: moonbase
-description: Optional Moonbase license-activation integration for Pulp — the load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, the audio-thread gating rule, and the native (no-WebView) activation UI convention.
+description: Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots.
 requires:
   scripts: []
   tools: []
@@ -105,6 +105,56 @@ storage, and revalidation and publishes only the `std::atomic<bool> licensed`.
 - **Theme tokens, not a Moonbase palette.** Build the panel from
   `pulp::view::Theme` tokens so it inherits the host plugin's look. Moonbase
   supplies licensing behavior, not the editor's visual identity.
+- **Two surfaces, one layout.** `build_activation_view()` is a STATIC panel for a
+  `const` controller (tests + the headless screenshot tool); `ActivationPanel` is
+  the INTERACTIVE editor whose button drives the controller and which rebuilds on
+  screen change. Both share the `detail::lay_out_panel` helpers, so the rich
+  license-details rendering (name/email/product/type/expiry/seats) stays in one
+  place.
+
+## Editor wiring (and the one reentrancy trap)
+
+The live editor drives the controller from the view's **frame clock**
+(`view.frame_clock()->subscribe([](float dt){...})`): each tick calls
+`controller.pump()` (applies background revalidation), `poll_once()` ~1 s while in
+`BrowserWait`, and `ActivationPanel::refresh_if_changed()` to rebuild when the
+screen advances. Return `false` from the subscriber once the editor closes to
+auto-unsubscribe.
+
+> **Never rebuild the view tree from inside a child's event handler.** The action
+> button's `on_click` must NOT call `rebuild()` — that destroys the very button
+> whose click is still being dispatched (a use-after-free → SIGSEGV). Instead the
+> handler only invokes the controller action + `request_repaint()`; the screen
+> changed, so the next frame tick's `refresh_if_changed()` rebuilds safely once
+> the event has unwound. This is why the action is deferred, not immediate.
+
+## Non-blocking startup (start_async / pump)
+
+`start_async()` applies any stored license SYNCHRONOUSLY (the editor opens
+unlocked with no network wait) and re-validates online on a ONE-SHOT background
+thread. The worker only writes a mutex-guarded result slot + an atomic ready flag;
+`screen_`/`license_` are touched solely on the UI thread (`start_async`/`pump`),
+so there is no data race on UI state and the audio thread still only reads
+`licensed()`. The controller joins the worker in its destructor. This is the
+HALO-style "synchronous-local-then-async-online" pattern — do not turn it into a
+continuous background poller (that reintroduces the UI-state race).
+
+## Click-free gate
+
+Gate audio through a `pulp::signal::SmoothedValue<float>` (12 ms ramp set in
+`prepare()`), not a hard mute: `gate_.set_target(licensed ? 1 : 0)` then multiply
+each frame by `gate_.next()`. Before `prepare()` the ramp is one sample (an
+instant switch), so a unit test that never prepares still sees hard gating.
+
+## Loadable formats + screenshots
+
+`pulp_add_plugin(MoonbaseActivation FORMATS CLAP Standalone ...)` builds a real
+loadable plugin + app; VST3/AU are appended when their developer-supplied SDKs
+are present. Each format target must also link `moonbase::licensing` +
+`pulp-cpp-httplib` (loop over `MoonbaseActivation_<FMT>`). The
+`moonbase-activation-screenshots` tool renders each screen headlessly via
+`render_to_file(..., ScreenshotBackend::skia)` — faithful text needs Skia in the
+build.
 
 ## Controller scope
 
@@ -124,10 +174,18 @@ as-is.
   `DEPENDENCIES.md=yes NOTICE.md=yes licensing.md=yes`.
 - Transport test: assert the `moonbase-pulp` token actually appears on the wire
   (method/URL/headers/body round-trip against a local server).
-- Gating test: with `licensed=false`, `process()` clears the buffer; flipped to
-  true, audio passes (headless).
-- UI proof: render the activation screens through the Pulp view tree (Skia GPU
-  preferred, CPU raster fallback); assert no WebView node on the default path.
+- Gating test: with `licensed=false`, `process()` fades to silence; flipped to
+  true, audio fades back to pass-through (assert the ramp is monotonic + settles,
+  not just the steady state).
+- Interactive test: `simulate_click` the action button → controller advances
+  (e.g. Welcome → BrowserWait) → `refresh_if_changed()` rebuilds; assert no
+  WebView node after interaction.
+- Async test: `start_async()` with a stored license sets `licensed()` + the
+  Details screen immediately; `pump()` in a loop never drops the license.
+- UI proof: render the activation screens through the Pulp view tree (Skia);
+  assert no WebView node on the default path.
+- Loadable build: `MoonbaseActivation_CLAP` / `_Standalone` link and produce
+  bundles; the screenshot tool writes faithful PNGs.
 - No live network in CI — live activation stays a manual local check.
 
 ## Pointers

@@ -21,6 +21,7 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -253,6 +254,158 @@ TEST_CASE("controller routes the activation state machine", "[moonbase][controll
     controller.set_preview_state(MoonbaseActivationController::Screen::Trial, trial);
     CHECK(controller.screen() == MoonbaseActivationController::Screen::Trial);
     CHECK(controller.licensed().load());
+}
+
+TEST_CASE("license gate fades click-free when prepared", "[moonbase][gating]")
+{
+    MoonbaseActivationPlugin plugin;
+    pulp::format::PrepareContext pctx;
+    pctx.sample_rate = 48000.0;       // 12 ms fade ≈ 576 samples
+    pctx.max_buffer_size = 2048;
+    plugin.prepare(pctx);
+
+    constexpr std::size_t frames = 2048;
+    std::vector<float> in_l(frames, 1.0f), in_r(frames, 1.0f);
+    std::vector<float> out_l(frames, 0.0f), out_r(frames, 0.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in(in_ptrs, 2, frames);
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    pulp::format::ProcessContext ctx{};
+
+    // Activate, then render one block: the gate ramps 0 → 1 (no instantaneous
+    // jump), starting near silence and settling at unity pass-through.
+    moonbase::license license;
+    plugin.controller().set_preview_state(MoonbaseActivationController::Screen::Details, license);
+    {
+        pulp::audio::BufferView<float> out(out_ptrs, 2, frames);
+        plugin.process(out, in, midi_in, midi_out, ctx);
+    }
+    CHECK(out_l[0] < 0.05f);            // fade-in starts near silence (no click to full)
+    CHECK(out_l[frames - 1] == 1.0f);  // settled at unity
+    bool monotonic_up = true, no_jump = true;
+    for (std::size_t s = 1; s < frames; ++s) {
+        if (out_l[s] < out_l[s - 1]) monotonic_up = false;
+        if (out_l[s] - out_l[s - 1] > 0.02f) no_jump = false;   // each step is tiny
+    }
+    CHECK(monotonic_up);
+    CHECK(no_jump);
+
+    // Deactivate → the gate fades back DOWN to silence, again without a jump.
+    plugin.controller().deactivate();
+    std::fill(out_l.begin(), out_l.end(), 0.0f);
+    {
+        pulp::audio::BufferView<float> out(out_ptrs, 2, frames);
+        plugin.process(out, in, midi_in, midi_out, ctx);
+    }
+    CHECK(out_l[0] > 0.95f);            // fade-out starts from unity
+    CHECK(out_l[frames - 1] == 0.0f);  // settled at silence
+    bool monotonic_down = true;
+    for (std::size_t s = 1; s < frames; ++s)
+        if (out_l[s] > out_l[s - 1]) monotonic_down = false;
+    CHECK(monotonic_down);
+}
+
+TEST_CASE("interactive panel action drives the controller", "[moonbase][view][interactive]")
+{
+    auto config = test_config();
+    auto transport = std::make_shared<CapturingTransport>();
+    auto licensing = make_test_licensing(config, transport);
+    MoonbaseActivationController controller(config, licensing);
+    controller.set_preview_state(MoonbaseActivationController::Screen::Welcome);
+
+    ActivationPanel panel(controller, pulp::view::Theme::dark(), 420.0f, 320.0f);
+    REQUIRE(panel.displayed_screen() == MoonbaseActivationController::Screen::Welcome);
+
+    // Click the primary action ("Activate"): the button sits at the bottom-left
+    // of the panel (see lay_out_panel). This must call begin_online_activation,
+    // hit the (fake) API once, and advance to BrowserWait — then the panel
+    // rebuilds itself for the new screen.
+    panel.simulate_click({142.0f, 320.0f - 64.0f + 20.0f});
+    CHECK(transport->request_count == 1);
+    CHECK(controller.screen() == MoonbaseActivationController::Screen::BrowserWait);
+
+    // The action defers its rebuild to the frame tick (rebuilding mid-click would
+    // free the button being dispatched). Drive that tick explicitly here.
+    CHECK(panel.refresh_if_changed());
+    CHECK(panel.displayed_screen() == MoonbaseActivationController::Screen::BrowserWait);
+    CHECK_FALSE(panel.refresh_if_changed());   // idempotent once caught up
+
+    // No WebView/overlay node appears even after interaction.
+    CHECK_FALSE(any_native_overlay(panel));
+}
+
+TEST_CASE("details screen surfaces the full license fields", "[moonbase][view][details]")
+{
+    auto config = test_config();
+    auto transport = std::make_shared<CapturingTransport>();
+    auto licensing = make_test_licensing(config, transport);
+    MoonbaseActivationController controller(config, licensing);
+
+    moonbase::license lic;
+    lic.method = moonbase::activation_method::online;
+    lic.issued_to.name = "Ada Lovelace";
+    lic.issued_to.email = "ada@example.com";
+    lic.licensed_product.name = "Moonbase Activation Demo";
+    lic.seat_count = 5;
+    lic.seats_used = 2;
+    controller.set_preview_state(MoonbaseActivationController::Screen::Details, lic);
+
+    const std::string details = detail::details_for(controller);
+    CHECK(contains(details, "Ada Lovelace"));
+    CHECK(contains(details, "ada@example.com"));
+    CHECK(contains(details, "Moonbase Activation Demo"));
+    CHECK(contains(details, "Online"));
+    CHECK(contains(details, "2 / 5"));
+}
+
+TEST_CASE("start_async applies the local license immediately, then pumps safely",
+          "[moonbase][controller][async]")
+{
+    auto config = test_config();
+    auto transport = std::make_shared<CapturingTransport>();
+    auto store = std::make_shared<moonbase::memory_license_store>();
+
+    // Seed a previously-validated license so start_async has something local.
+    moonbase::license stored;
+    stored.token = "stored.jwt.token";
+    stored.issued_to.name = "Grace Hopper";
+    store->store_local_license(stored);
+
+    auto fingerprints =
+        std::make_shared<moonbase::static_fingerprint_provider>("Test Device", "device-123");
+    auto licensing = std::make_shared<moonbase::licensing>(
+        make_options(config), store, fingerprints, transport);
+    MoonbaseActivationController controller(config, licensing);
+
+    // Synchronous local apply: the editor is unlocked the instant start returns,
+    // with NO wait on the network.
+    controller.start_async();
+    CHECK(controller.licensed().load());
+    CHECK(controller.screen() == MoonbaseActivationController::Screen::Details);
+
+    // While the worker holds the SDK, SDK-touching UI actions are refused so the
+    // worker has exclusive access (no concurrent licensing_/store use). A
+    // deactivate during the window is a no-op — the license stays put.
+    CHECK(controller.revalidating());
+    controller.deactivate();
+    CHECK(controller.licensed().load());
+    CHECK(controller.screen() == MoonbaseActivationController::Screen::Details);
+
+    // The background online re-validation eventually completes; pump() applies it
+    // on the (here, test) thread and re-opens actions. A failed online check
+    // (fake key) keeps the local license under grace — licensed must never drop.
+    for (int i = 0; i < 500; ++i) {
+        controller.pump();
+        if (!controller.revalidating()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK_FALSE(controller.revalidating());
+    CHECK(controller.licensed().load());
+
+    // Actions work again once the worker has joined.
+    controller.deactivate();
+    CHECK_FALSE(controller.licensed().load());
 }
 
 TEST_CASE("native panel renders in the view tree with no overlay", "[moonbase][view]")

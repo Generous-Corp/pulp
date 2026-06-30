@@ -141,13 +141,20 @@ named constant.
 
 ## Reference implementation
 
-`examples/moonbase-activation/` is a minimal Pulp plugin that demonstrates the
-whole path: a headless activation controller, a Pulp-native activation UI (no
-WebView — it opens the system browser and polls), the audio-thread gating above,
-and the HTTP transport over `cpp-httplib`. The UI is built from Pulp's
+`examples/moonbase-activation/` is a complete, loadable Pulp plugin (CLAP/VST3/AU)
+plus a standalone app that demonstrates the whole path: a headless activation
+controller, an **interactive** Pulp-native activation editor (no WebView — its
+button drives the controller, online activation opens the system browser, and the
+editor polls + applies background revalidation from its frame tick), a rich
+license-details screen (name, email, product, activation type, expiry, seats), a
+**click-free fade** gate, non-blocking `start_async()` startup, a per-user license
+store, and the HTTP transport over `cpp-httplib`. The UI is built from Pulp's
 `pulp::view::Theme` tokens, so it inherits your plugin's look rather than a
 Moonbase-branded palette — Moonbase supplies licensing behavior, not your
-editor's visual identity.
+editor's visual identity. Its activation UX is a clean-room reimplementation of
+Moonbase's own MIT JUCE reference designs (no JUCE, no copied code; see the
+example README's acknowledgements). Screenshots and a headless screenshot
+generator live under `examples/moonbase-activation/docs/`.
 
 ## Notes
 

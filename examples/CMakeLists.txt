@@ -178,9 +178,12 @@ if(NOT ANDROID AND NOT IOS)
     add_subdirectory(ara-pitch-tracker)
 endif()
 
-# Moonbase licensing: optional copy-protection reference plugin. Off by default
-# (fetches the third-party Moonbase SDK and needs OpenSSL at configure time).
-# Enable with -DPULP_BUILD_MOONBASE_EXAMPLE=ON. See docs/guides/copyright-protection.md.
+# Moonbase licensing: optional copy-protection reference. Builds a loadable
+# plugin (CLAP + Standalone always; VST3/AU when their SDKs are present) with an
+# interactive activation editor, plus tests and a headless screenshot tool. Off
+# by default (fetches the third-party Moonbase SDK and needs OpenSSL at configure
+# time). Enable with -DPULP_BUILD_MOONBASE_EXAMPLE=ON. See
+# docs/guides/copyright-protection.md.
 option(PULP_BUILD_MOONBASE_EXAMPLE
        "Build the optional Moonbase licensing example" OFF)
 if(PULP_BUILD_MOONBASE_EXAMPLE)
