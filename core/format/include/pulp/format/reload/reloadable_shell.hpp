@@ -55,13 +55,21 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>   // _getpid
+#else
+#include <unistd.h>    // getpid
+#endif
 
 namespace pulp::format::reload {
 
@@ -201,6 +209,41 @@ private:
         return {};
     }
 
+    // Copy the watched logic to a private, uniquely-named sibling and return that
+    // path; the initial image is loaded from it so the live mapping never sits on
+    // the developer-overwritten watched path (see load_initial). Unique per
+    // process (pid) and per instance (a monotonic counter) so two plugin
+    // instances — even in separate host processes — never stage onto each other's
+    // live mapping. Staged beside the original (dlopen-safe: a world-writable temp
+    // dir trips macOS dyld's unsigned-dylib kill). Best-effort: on any copy
+    // failure, fall back to the original path (the corruption only bites when the
+    // watched file is overwritten while the initial image is still live).
+    static std::string stage_initial(const std::string& logic_path) {
+        namespace fs = std::filesystem;
+        static std::atomic<std::uint64_t> counter{0};
+        const long pid =
+#if defined(_WIN32)
+            static_cast<long>(::_getpid());
+#else
+            static_cast<long>(::getpid());
+#endif
+        std::error_code ec;
+        const fs::path src(logic_path);
+        const fs::path staged =
+            src.parent_path() /
+            (src.stem().string() + ".initial." + std::to_string(pid) + "." +
+             std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) +
+             src.extension().string());
+        fs::copy_file(src, staged, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            runtime::log_warn("[reload-shell] could not stage initial logic ({}); "
+                              "loading in place — a rebuild that overwrites it while "
+                              "live may corrupt the image on Linux", ec.message());
+            return logic_path;
+        }
+        return staged.string();
+    }
+
     // Load the initial logic image so descriptor()/define_parameters() reflect
     // the DSP's real contract. Gated like a reload (ABI version + fingerprint)
     // so a stale/incompatible bundled library degrades to passthrough instead of
@@ -214,13 +257,30 @@ private:
                               "or pass one); running as passthrough");
             return;
         }
+        // Load the initial image from a PRIVATE staged copy, never the watched
+        // path directly. The watched path is the developer's build output, which a
+        // rebuild overwrites — often in place (truncate + rewrite of the same
+        // inode, as a `cp`/install step or `std::filesystem::copy_file` does, vs a
+        // temp-file-then-rename that yields a fresh inode). dlopen keeps the file
+        // mapped; on Linux an in-place overwrite of a mapped image bleeds the new
+        // bytes into the still-live mapping (MAP_PRIVATE pages not yet
+        // copy-on-written), corrupting the initial Processor's code and vtable.
+        // That goes unnoticed until the initial Processor is rendered as the
+        // fading-out side of the first hot-swap's crossfade — then a virtual call
+        // jumps through an unrelocated vtable and crashes. Staging puts the live
+        // mapping on a path no rebuild touches, so the watched path can be
+        // overwritten freely. (The reload path already stages every version; see
+        // ReloadController. macOS tolerates the in-place overwrite, so this only
+        // bites on Linux.)
+        const std::string load_path = stage_initial(logic_path_);
+
         // Same fail-closed gate sequence the reload transaction uses (single
         // source of truth — gate_logic_image). On rejection we degrade to
         // passthrough; note a logic that defines parameters can't be adopted by a
         // later hot-reload (its contract won't match the empty one the host
         // cached) — that needs a full plugin reload. A parameter-less logic still
         // hot-swaps in via the watcher.
-        auto gated = gate_logic_image(logic_path_, current_build_fingerprint());
+        auto gated = gate_logic_image(load_path, current_build_fingerprint());
         if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) {
             runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
                               "a logic with parameters needs a full plugin reload to take effect",

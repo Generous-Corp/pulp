@@ -18,11 +18,22 @@
 /// mtime) triggers another attempt. The first poll() establishes the baseline
 /// without reloading (the shell already loaded the initial logic).
 ///
-/// CRITICAL — load each version from a UNIQUE path: dlopen/LoadLibrary cache by
-/// path, so re-opening the watched path after the developer overwrites it
-/// returns the STALE in-memory image, not the new bytes. The controller
-/// therefore stages each detected version to a fresh, uniquely-named copy in
-/// `stage_dir` and reloads THAT, guaranteeing the loader reads the new file.
+/// CRITICAL — load each version from a UNIQUE path, for TWO independent reasons
+/// (do not "simplify" the staging away on the strength of only one):
+///   1. dlopen/LoadLibrary cache by path, so re-opening the watched path after
+///      the developer overwrites it returns the STALE in-memory image, not the
+///      new bytes.
+///   2. A live mapping must never sit on the watched path: a rebuild overwrites
+///      that file, often IN PLACE (truncate + rewrite of the same inode). On
+///      Linux an in-place overwrite of a still-mapped image bleeds the new bytes
+///      into the live mapping and corrupts the Processor running from it (its
+///      code/vtable) — a crash that surfaces when that processor is the
+///      fading-out side of the next crossfade. (macOS tolerates the overwrite,
+///      so this only bites on Linux.) ReloadableShell::load_initial stages the
+///      INITIAL image for the same reason.
+/// The controller therefore stages each detected version to a fresh,
+/// uniquely-named copy in `stage_dir` and reloads THAT, guaranteeing the loader
+/// reads the new file AND that the watched path never carries a live mapping.
 /// `stage_dir` must be a dlopen-safe location (NOT a world-writable temp dir on
 /// macOS, where dyld kills a process that loads an unsigned dylib from /tmp);
 /// it defaults to the watched file's own directory.

@@ -120,6 +120,15 @@ TEST_CASE("ReloadableShell background watcher swaps on an mtime change", "[reloa
     shell.prepare(ctx);
     REQUIRE(render_one(shell) == 0.5f);         // unity
 
+    // Let the watcher establish its baseline against the unity logic before we
+    // drop the new build in. The watcher's first poll (which records the baseline
+    // mtime without reloading) starts the moment prepare() launches it; if this
+    // install raced ahead of that first poll, the watcher would capture the NEW
+    // mtime as its baseline and never observe a change. A few poll intervals of
+    // settle makes the baseline deterministic. (In a real dev loop the recompile
+    // lands seconds after load, so this race is test-only.)
+    std::this_thread::sleep_for(ReloadableShell::kPollInterval * 3);
+
     // Developer recompiles: drop a 2x build at the watched path. The background
     // watcher (poll ~150ms) must pick it up and swap with no further calls.
     install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/1);
