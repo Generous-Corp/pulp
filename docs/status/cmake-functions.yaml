@@ -39,6 +39,18 @@ functions:
       - pulp-install-${target}
     docs: reference/cmake.md#pulp_add_plugin
 
+  - name: pulp_add_reload_logic
+    status: usable
+    summary: Build a hot-reloadable DSP "logic" MODULE (PULP_RELOAD_LOGIC) and optionally publish it to the path a ReloadableShell watches.
+    required:
+      - SOURCES
+    optional:
+      - OUTPUT_NAME
+      - PUBLISH_DIR
+    creates:
+      - ${target}
+    docs: guides/dsp-hot-reload.md
+
   - name: pulp_add_app
     status: partial
     summary: Create a standalone application target with basic metadata.

@@ -885,6 +885,60 @@ function(pulp_add_plugin target)
     message(STATUS "Pulp plugin: ${target} (formats: ${_built_formats_display})")
 endfunction()
 
+# ── pulp_add_reload_logic — a hot-reloadable DSP "logic" library ──────────
+#
+# Builds the DSP half of a hot-reloadable plugin: a MODULE shared library that
+# exports the reload ABI (PULP_RELOAD_LOGIC) and is dlopen'd + hot-swapped by a
+# pulp::format::reload::ReloadableShell while the host keeps the plugin alive.
+# Keep this target's sources separate from the shell plugin so the DSP can be
+# recompiled without rebuilding what the host has loaded.
+#
+#   pulp_add_reload_logic(<target>
+#       SOURCES <src>...                # the DSP translation unit(s)
+#       [OUTPUT_NAME <name>]            # built file stem (default: target name)
+#       [PUBLISH_DIR <dir>])            # if set, POST_BUILD copies the built
+#                                       # module here (dir created if needed) —
+#                                       # the path a ReloadableShell watches.
+#
+# The module gets no "lib" prefix and a platform-stable suffix (.dylib/.so/.dll)
+# so the watched path is predictable. Links pulp::format for the Processor ABI.
+function(pulp_add_reload_logic target)
+    cmake_parse_arguments(RL "" "OUTPUT_NAME;PUBLISH_DIR" "SOURCES" ${ARGN})
+    if(NOT RL_SOURCES)
+        message(FATAL_ERROR "pulp_add_reload_logic(${target}): SOURCES is required")
+    endif()
+    if(NOT RL_OUTPUT_NAME)
+        set(RL_OUTPUT_NAME "${target}")
+    endif()
+    if(APPLE)
+        set(_rl_suffix ".dylib")
+    elseif(WIN32)
+        set(_rl_suffix ".dll")
+    else()
+        set(_rl_suffix ".so")
+    endif()
+
+    add_library(${target} MODULE ${RL_SOURCES})
+    _pulp_pick_target(_RL_FORMAT_TARGET Pulp::format pulp::format)
+    target_link_libraries(${target} PRIVATE ${_RL_FORMAT_TARGET})
+    set_target_properties(${target} PROPERTIES
+        PREFIX "" OUTPUT_NAME "${RL_OUTPUT_NAME}" SUFFIX "${_rl_suffix}"
+        POSITION_INDEPENDENT_CODE ON)
+
+    if(RL_PUBLISH_DIR)
+        # Publish the freshly-built module to the watched path so the shell finds
+        # its DSP the moment the host loads it. NB: a literal $ENV{HOME} in
+        # PUBLISH_DIR is the CONFIGURING user's home (captured now); a plugin
+        # loaded by a different user should set PULP_RELOAD_LOGIC_PATH instead.
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${RL_PUBLISH_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:${target}>"
+                    "${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}"
+            COMMENT "Publishing reload logic to ${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}")
+    endif()
+endfunction()
+
 # ── Internal: VST3 target ────────────────────────────────────────────────
 
 # Per-format / AUv3 / app target helpers
