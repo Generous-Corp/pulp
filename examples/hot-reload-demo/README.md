@@ -56,9 +56,11 @@ the shell watches). The shell mirrors the logic's parameter contract (`Depth`,
 4. Within ~150 ms the tremolo morphs to a hard square chop. **The plugin was
    never reloaded** and audio never stopped.
 
-> The DSP swap is currently a hard cut at a block boundary, so a fast change can
-> click. Click-free crossfading on swap is the next hardening step
-> (`pulp::format::reload` blending).
+> The swap is **click-free**: the slot runs the old and new DSP in parallel for
+> a short window (~12 ms) and mixes old→new along a smoothstep ramp, so neither
+> the swap instant nor the fade end produces a discontinuity. The retired DSP is
+> freed on the control thread, never on the audio thread (see
+> `ProcessorHotSwapSlot`'s crossfade + `reclaim()`).
 
 ## Or without a DAW
 

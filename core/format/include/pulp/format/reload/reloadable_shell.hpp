@@ -48,6 +48,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -67,6 +68,9 @@ public:
     /// Poll interval for the watcher thread. Small enough to feel instant in a
     /// dev loop, large enough not to spin.
     static constexpr std::chrono::milliseconds kPollInterval{150};
+
+    /// Crossfade length applied on each hot-swap so the DSP change is click-free.
+    static constexpr double kCrossfadeMs = 12.0;
 
     /// @param logic_path path to the logic shared library. Empty → resolve from
     /// the `PULP_RELOAD_LOGIC_PATH` environment variable.
@@ -102,7 +106,7 @@ public:
         if (initial_) {
             initial_->set_state_store(&state());
             initial_->prepare(context);
-            slot_.swap(std::move(initial_));   // install the starting DSP
+            (void)slot_.swap(std::move(initial_));   // install the starting DSP (first install never fades)
             initial_.reset();
         } else {
             // Re-prepare (e.g. a sample-rate change): the DSP already in the slot
@@ -112,6 +116,17 @@ public:
             // this can't race the audio thread.
             slot_.reprepare_active(context);
         }
+        // Enable a short click-free crossfade on hot-swap: allocate the
+        // parallel-render scratch here (off the audio thread), sized to the
+        // worst-case block, and set the fade length from the sample rate.
+        const double sr = prepare_ctx_.sample_rate > 0 ? prepare_ctx_.sample_rate : 48000.0;
+        const std::size_t max_ch = static_cast<std::size_t>(
+            std::max({context.input_channels, context.output_channels, 2}));
+        const std::size_t max_frames =
+            static_cast<std::size_t>(std::max(context.max_buffer_size, 1));
+        slot_.prepare_crossfade(max_frames, max_ch);
+        slot_.set_crossfade_samples(static_cast<std::size_t>(kCrossfadeMs * 0.001 * sr));
+
         // (Re)build the session + controller against the live store. Constructed
         // here (not in the ctor) because they need the host-provided store,
         // prepare context, and the running slot.
@@ -243,6 +258,9 @@ private:
                     if (auto outcome = controller_->poll()) record(*outcome);
                 }
             }
+            // Free a processor whose crossfade has finished (RT-safe reclaim:
+            // the audio thread only marks the fade done; we free it here).
+            slot_.reclaim();
             // Sleep in small slices so stop_watcher() is responsive.
             for (int i = 0; i < 10 && running_.load(std::memory_order_relaxed); ++i)
                 std::this_thread::sleep_for(kPollInterval / 10);

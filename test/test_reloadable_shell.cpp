@@ -44,6 +44,15 @@ float render_one(format::Processor& shell, float /*unused*/ = 0) {
     return out.channel(0)[0];
 }
 
+// The shell crossfades on swap (~12 ms), so the post-swap output ramps rather
+// than jumping. Render well past the fade so the steady-state DSP value is what
+// we assert. Returns the last sample after draining.
+float render_steady(format::Processor& shell) {
+    float last = 0.0f;
+    for (int i = 0; i < 64; ++i) last = render_one(shell);   // 64*64 = 4096 frames >> fade
+    return last;
+}
+
 // Copy `src` over `watched` with a strictly-increasing mtime so the change is
 // observable regardless of filesystem timestamp resolution.
 void install(const fs::path& src, const fs::path& watched, int tick) {
@@ -79,7 +88,7 @@ TEST_CASE("ReloadableShell hot-swaps DSP through the Processor path", "[reload][
     install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/1);
     auto good = shell.reload_now();
     REQUIRE(good.ok());
-    REQUIRE(render_one(shell) == 1.0f);
+    REQUIRE(render_steady(shell) == 1.0f);      // drain the crossfade → 2x * 0.5
     REQUIRE(store.get_value(1) == 0.5f);
     // >= 1, not == 1: the background watcher may also have detected the same
     // mtime change and swapped before reload_now() forced its swap. Either way
@@ -121,7 +130,7 @@ TEST_CASE("ReloadableShell background watcher swaps on an mtime change", "[reloa
         if (shell.successful_reloads() >= 1) swapped = true;
     }
     REQUIRE(swapped);
-    REQUIRE(render_one(shell) == 1.0f);          // 2x * 0.5
+    REQUIRE(render_steady(shell) == 1.0f);       // drain the crossfade → 2x * 0.5
     REQUIRE(shell.last_status() == ReloadOutcome::Status::Swapped);
 
     shell.release();
