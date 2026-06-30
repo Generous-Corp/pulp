@@ -86,7 +86,10 @@ attach_toggle(state::StateStore& store, state::ParamID id) {
         toggle->set_id(info->name);
     }
 
-    toggle->set_on(binding.get_normalized() > 0.5f);
+    // Snap (don't animate) the initial seed: the editor must paint the stored
+    // state on the first frame — a freshly opened plugin, or a single headless
+    // screenshot, never advances the animation clock.
+    toggle->set_on(binding.get_normalized() > 0.5f, /*animate=*/false);
 
     auto param_id = id;
     toggle->on_toggle = [&store, param_id](bool on) {

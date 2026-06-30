@@ -332,5 +332,15 @@ harness or `ctest`.
   every verdict/gate path through `schema.detectors_for_verdict` /
   `detectors_for_engine_baseline`, never re-implement the filter. New detectors ship
   `experimental`. (Plan: planning/2026-06-29-audio-quality-lab-postmvp-detectors-maturity-gate.md.)
+- **Advisory reviewer** (`reviewer.py`, opt-in `PULP_QLAB_REVIEWER_CMD` subprocess, `run
+  --review`): an LLM/multimodal model names artifacts in plain language under
+  `advisory.reviewers`. ADVISORY ONLY — never changes the verdict/gate; skip-when-absent;
+  no network by default. Validate with `reviewer.score_agreement` (precision/recall vs the
+  synthetic answer key) before trusting it.
+- **Tuning loop** (`loop.py`, `quality-lab loop`, EXPERIMENTAL): scores candidates with the
+  gate-participating detectors (experimental detectors excluded), ranks them, and writes
+  PROPOSAL-ONLY label updates to `corpus/LABEL_PROPOSALS.json` — never `MANIFEST.json`,
+  never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
+  regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.

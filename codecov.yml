@@ -143,6 +143,8 @@ ignore:
   - "**/scanner_clap.cpp"
   - "**/au_v2_adapter.cpp"
   - "**/au_v2_instrument.cpp"
+  - "**/reload_probe.cpp"
+  - "**/aax_midi_node.cpp"
   - "**/cmd_projects.cpp"
   - "**/cmd_ci_host.cpp"
   - "**/canvas.hpp"

@@ -8,6 +8,55 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05450"></a>
+## [0.545.0] - 2026-06-30
+
+- feat(reload): live UI+DSP morph — shell create_view forwarding + thin logic ([#5377](https://github.com/danielraffel/pulp/pull/5377))
+- feat(reload): pulp_add_reload_logic helper + DSP hot-reload guide ([#5369](https://github.com/danielraffel/pulp/pull/5369))
+
+<a id="v05440"></a>
+## [0.544.0] - 2026-06-29
+
+- feat(reload): click-free crossfade on hot-swap + lock-free reclaim ([#5363](https://github.com/danielraffel/pulp/pull/5363))
+- feat(reload): DAW-integration hot-reload shell + live REAPER demo (Phase 1b) ([#5358](https://github.com/danielraffel/pulp/pull/5358))
+
+<a id="v05430"></a>
+## [0.543.0] - 2026-06-29
+
+- fix(view): snap Toggle thumb on initial seed so it paints the real state ([#5355](https://github.com/danielraffel/pulp/pull/5355))
+
+<a id="v05420"></a>
+## [0.542.0] - 2026-06-29
+
+- feat(reload): file-watch ReloadController for the standalone dev loop (Phase 1) ([#5347](https://github.com/danielraffel/pulp/pull/5347))
+
+<a id="v05410"></a>
+## [0.541.0] - 2026-06-29
+
+- feat(reload): verify-before-commit hot-reload transaction + ABI (Phase 1) ([#5346](https://github.com/danielraffel/pulp/pull/5346))
+- ci: add coverage-upload watchdog so Codecov starvation screams ([#5288](https://github.com/danielraffel/pulp/pull/5288))
+
+<a id="v05400"></a>
+## [0.540.0] - 2026-06-29
+
+- feat(reload): scratch-store contract check + dlopen leak-policy handle (Phase 0) ([#5345](https://github.com/danielraffel/pulp/pull/5345))
+- docs(quality-lab): restructure guide + fix quote-escaping in the rendered HTML ([#5344](https://github.com/danielraffel/pulp/pull/5344))
+
+<a id="v05390"></a>
+## [0.539.0] - 2026-06-29
+
+- test(aax): SDK-gated runtime test for the AAX MIDI bridge ([#5340](https://github.com/danielraffel/pulp/pull/5340))
+- feat(quality-lab): autonomous tuning loop, first slice (experimental) ([#5339](https://github.com/danielraffel/pulp/pull/5339))
+- feat(quality-lab): advisory LLM/multimodal reviewer (experimental, never a gate) ([#5336](https://github.com/danielraffel/pulp/pull/5336))
+- feat(quality-lab): onset_drift detector (experimental) — timing/groove drift ([#5327](https://github.com/danielraffel/pulp/pull/5327))
+- fix(web): find Chrome via CHROME_PATH + Linux paths in the WebCLAP host validator ([#5334](https://github.com/danielraffel/pulp/pull/5334))
+- ci: add Web Plugins lane — headless-browser WAMv2 + WebCLAP validation (RD11) ([#5333](https://github.com/danielraffel/pulp/pull/5333))
+- feat(format): package WebCLAP modules into .wclap bundles ([#5329](https://github.com/danielraffel/pulp/pull/5329))
+- feat(format): emit a WAMv2 web-build report (UI strategy + binding targets) ([#5328](https://github.com/danielraffel/pulp/pull/5328))
+- feat(format): host a WebCLAP in the browser with a generated UI ([#5323](https://github.com/danielraffel/pulp/pull/5323))
+- feat(quality-lab): maturity gate — experimental detectors are advisory-only ([#5320](https://github.com/danielraffel/pulp/pull/5320))
+- test: assert FileChooser null callback behavior ([#5242](https://github.com/danielraffel/pulp/pull/5242))
+
 <a id="v05380"></a>
 ## [0.538.0] - 2026-06-29
 
@@ -5652,6 +5701,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.545.0]: https://github.com/danielraffel/pulp/releases/tag/v0.545.0
+[0.544.0]: https://github.com/danielraffel/pulp/releases/tag/v0.544.0
+[0.543.0]: https://github.com/danielraffel/pulp/releases/tag/v0.543.0
+[0.542.0]: https://github.com/danielraffel/pulp/releases/tag/v0.542.0
+[0.541.0]: https://github.com/danielraffel/pulp/releases/tag/v0.541.0
+[0.540.0]: https://github.com/danielraffel/pulp/releases/tag/v0.540.0
+[0.539.0]: https://github.com/danielraffel/pulp/releases/tag/v0.539.0
 [0.538.0]: https://github.com/danielraffel/pulp/releases/tag/v0.538.0
 [0.537.0]: https://github.com/danielraffel/pulp/releases/tag/v0.537.0
 [0.536.0]: https://github.com/danielraffel/pulp/releases/tag/v0.536.0

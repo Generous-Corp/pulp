@@ -4,12 +4,14 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/motion_preferences.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 using namespace pulp::view;
@@ -1140,6 +1142,58 @@ TEST_CASE("Toggle state", "[view][widget]") {
 
     toggle.set_on(true);
     REQUIRE(toggle.is_on());
+}
+
+TEST_CASE("Toggle set_on(animate=false) snaps the thumb immediately", "[view][widget]") {
+    // The default animated form leaves the thumb at its start position until the
+    // animation clock advances — so a single headless paint (no clock) would
+    // render the thumb stuck off even though the logical state is on.
+    //
+    // animate_to() collapses to an immediate jump under MotionPolicy::Off /
+    // Reduced (and a CI host with reduce-motion enabled would report Off), so
+    // pin Full while asserting the animated branch hasn't arrived yet, then
+    // revert to OS detection.
+    auto& motion = MotionPreferences::instance();
+    motion.set_override(MotionPolicy::Full);
+    Toggle animated;
+    animated.set_on(true);                       // animate (default)
+    REQUIRE(animated.is_on());
+    REQUIRE(animated.thumb_position() < 1.0f);   // not yet arrived (no clock tick)
+    motion.set_override(std::nullopt);
+
+    // The snapping form is for the initial seed: there is nothing to animate
+    // from, so the thumb must reflect the state on the very first frame. set()
+    // ignores motion policy, so this branch is deterministic regardless of host.
+    Toggle snapped;
+    snapped.set_on(true, /*animate=*/false);
+    REQUIRE(snapped.is_on());
+    REQUIRE(snapped.thumb_position() == Catch::Approx(1.0f));
+
+    // Snapping back off is equally immediate.
+    snapped.set_on(false, /*animate=*/false);
+    REQUIRE_FALSE(snapped.is_on());
+    REQUIRE(snapped.thumb_position() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("Toggle set_on(animate=false) reconciles a mid-flight thumb", "[view][widget]") {
+    // A non-animated set_on must force the thumb to match the logical state even
+    // when the logical state is already correct — e.g. a re-seed / screenshot
+    // taken while an earlier interactive animation is still mid-flight. Pin Full
+    // so the first set_on actually animates (Off would snap it immediately).
+    auto& motion = MotionPreferences::instance();
+    motion.set_override(MotionPolicy::Full);
+
+    Toggle toggle;
+    toggle.set_on(true);                       // animate on; thumb starts climbing from 0
+    REQUIRE(toggle.is_on());
+    REQUIRE(toggle.thumb_position() < 1.0f);   // mid-flight (no clock advanced it)
+
+    // Same logical state (on), but ask to snap: the thumb must jump to 1.0
+    // rather than stay stuck mid-flight.
+    toggle.set_on(true, /*animate=*/false);
+    REQUIRE(toggle.thumb_position() == Catch::Approx(1.0f));
+
+    motion.set_override(std::nullopt);
 }
 
 TEST_CASE("Toggle renders switch", "[view][widget]") {

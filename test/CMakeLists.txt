@@ -1172,6 +1172,90 @@ pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 # Reusable validation assertion helpers (validation_assertions.hpp)
 pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
 
+# DSP hot reload — build-fingerprint gate (Phase 0)
+pulp_add_test_suite(pulp-test-build-fingerprint LIBRARIES pulp::format)
+
+# DSP hot reload — RT-safe processor hot-swap slot (Phase 0)
+pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
+
+# DSP hot reload — parameter-contract equivalence checker (Phase 0)
+pulp_add_test_suite(pulp-test-param-contract LIBRARIES pulp::format)
+
+# DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
+# MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
+add_library(pulp-reload-probe MODULE fixtures/reload_probe.cpp)
+set_target_properties(pulp-reload-probe PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+pulp_add_test_suite(pulp-test-reload-library LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-library pulp-reload-probe)
+target_compile_definitions(pulp-test-reload-library PRIVATE
+    RELOAD_PROBE_PATH="$<TARGET_FILE:pulp-reload-probe>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-library PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — verify-before-commit transaction, end to end (Phase 1). Two
+# logic-library fixtures (compatible / incompatible parameter contract) are
+# built as MODULEs and dlopen'd by the transaction; the test asserts the
+# fingerprint + contract gates, the live swap, and parameter-state continuity.
+add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp)
+add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
+add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
+foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
+                           pulp-reload-logic-throwing)
+    set_target_properties(${_pulp_reload_logic} PROPERTIES
+        PREFIX "" POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(${_pulp_reload_logic} PRIVATE pulp::format)
+endforeach()
+pulp_add_test_suite(pulp-test-reload-transaction LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-transaction
+    pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing)
+target_compile_definitions(pulp-test-reload-transaction PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — watch->reload dev loop (Phase 1). Reuses the compatible /
+# incompatible logic fixtures (above); the test copies them to a watched temp
+# path and drives ReloadController::poll().
+pulp_add_test_suite(pulp-test-reload-controller LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-controller
+    pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reload-controller PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    # Watch a path inside the build tree, NOT /tmp: macOS dyld kills a process
+    # that dlopens an unsigned .dylib from a world-writable temp dir.
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-controller PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — DAW-integration shell, end to end (Phase 1b). The shell is a
+# Processor (format adapters wrap it) that loads its DSP from a logic library and
+# hot-swaps it via a background watcher. A "unity" (1x) fixture is the initial
+# logic so a swap to the 2x "compatible" fixture is observable in the output.
+add_library(pulp-reload-logic-unity MODULE fixtures/reload_logic_unity.cpp)
+set_target_properties(pulp-reload-logic-unity PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(pulp-reload-logic-unity PRIVATE pulp::format)
+pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
+add_dependencies(pulp-test-reloadable-shell
+    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reloadable-shell PRIVATE
+    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reloadable-shell PRIVATE ${CMAKE_DL_LIBS})
+endif()
+find_package(Threads REQUIRED)
+target_link_libraries(pulp-test-reloadable-shell PRIVATE Threads::Threads)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
@@ -1180,6 +1264,27 @@ pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::f
 
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
+
+# AAX MIDI bridge — SDK-gated runtime test. test_aax_midi.cpp covers the
+# reassembly/fragmentation SDK-free; this drives the thin SDK glue
+# (decode_midi_node / encode_midi_node in aax_midi_node.cpp) through the real
+# Avid AAX SDK types (AAX_IMIDINode / AAX_CMidiStream / AAX_CMidiPacket), so it
+# only builds when the developer-supplied SDK is configured (PULP_ENABLE_AAX=ON
+# + a valid PULP_AAX_SDK_DIR). The adapter source is compiled directly into the
+# test because aax_midi_node.cpp is otherwise only built per-plugin.
+if(PULP_HAS_AAX)
+    # Ensure the AAX SDK interface/library targets exist even when no AAX plugin
+    # (i.e. no example) is part of this configure. The helper is idempotent.
+    pulp_ensure_aax_sdk_targets()
+    pulp_add_test_suite(pulp-test-aax-midi-node
+        SOURCES test_aax_midi_node.cpp
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
+        LIBRARIES pulp::format pulp-aax-sdk-interface
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_compile_options(pulp-test-aax-midi-node PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
+endif()
 
 # AAX MIDI/SysEx packet reassembly + fragmentation (SDK-free pure logic)
 pulp_add_test_suite(pulp-test-aax-midi LIBRARIES pulp::format)
