@@ -554,6 +554,17 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     }
     INFO("decay-IR diff/ref energy=" << diff_e / (ref_e + 1e-30));
     REQUIRE(diff_e > ref_e * 1e-4);
+
+    // A bad / missing IR path fails gracefully: no crash, the IR is simply not
+    // applied, so the output matches the no-IR path. (Guards the worker/prepare
+    // exception firewall around the decode.)
+    const auto bad = run_stream_cpu_ir(SR, IB, sig, "/nonexistent/pulp/no_such_ir.wav");
+    REQUIRE(bad.size() == no_ir.size());
+    double max_bad = 0.0;
+    for (std::size_t i = IB; i < no_ir.size(); ++i)
+        max_bad = std::max(max_bad, std::abs(static_cast<double>(bad[i]) - no_ir[i]));
+    INFO("bad-IR-path max_abs_diff=" << max_bad);
+    REQUIRE(max_bad < 1e-3);
 }
 
 TEST_CASE("GPU NAM load_model rebuilds without NaNs", "[nam]") {

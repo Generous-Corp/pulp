@@ -670,6 +670,13 @@ private:
     // Apply the cabinet IR (if loaded) in place over one internal block. RT-safe:
     // the convolver is preallocated; nullptr = no IR = pass-through. In-place is
     // safe — the convolver reads the whole input block before writing output.
+    //
+    // A live IR change swaps the whole IrEngine, so the new convolver starts with
+    // zeroed overlap → one internal block (~11 ms) of discontinuity on the swap.
+    // That is audible only on a manual IR load (rare, user-initiated). Making it
+    // click-free means persistent per-channel convolvers fed via
+    // signal::ConvolverIrSwapper (staged off-thread, swapped in place preserving
+    // the overlap history), as SuperConvolver does — a follow-up RT slice.
     void apply_ir(std::size_t ch, float* buf) {
         IrEngine* ir = ir_active_.load(std::memory_order_acquire);
         if (ir) ir->conv[ch].process(buf, buf, kInternalBlock);
@@ -848,8 +855,22 @@ private:
     // rebuild later). Worker / prepare thread only. On failure, leaves the
     // current IR untouched.
     void build_and_publish_ir(const std::string& path) {
-        auto ir = audio::read_impulse_response(
-            path, sample_rate_, {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
+        // read_impulse_response decodes the whole file + allocates FFT/resampler
+        // state — any exception (bad_alloc on a huge/corrupt file, decoder throw)
+        // must never escape onto the worker thread (→ std::terminate) or out of
+        // prepare(). Keep the current IR on failure.
+        std::optional<std::vector<float>> ir;
+        try {
+            ir = audio::read_impulse_response(
+                path, sample_rate_, {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
+        } catch (const std::exception& e) {
+            runtime::log_error("GPU NAM: load_ir('{}') threw ({}); keeping current IR.",
+                               path, e.what());
+            return;
+        } catch (...) {
+            runtime::log_error("GPU NAM: load_ir('{}') threw; keeping current IR.", path);
+            return;
+        }
         if (!ir || ir->empty()) {
             runtime::log_error("GPU NAM: load_ir('{}') failed; keeping current IR.", path);
             return;

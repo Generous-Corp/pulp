@@ -123,12 +123,17 @@ inline std::optional<std::vector<float>> read_impulse_response(
         if (ir.size() > max_session_frames) ir.resize(max_session_frames);
     }
 
+    // Reject non-finite content regardless of the normalize flag — a NaN/Inf
+    // sample would otherwise spread through the convolver's FFT. Zero energy is
+    // only fatal when normalizing (division by zero); an all-zero IR is a valid,
+    // if pointless, silence when normalization is off.
+    double energy = 0.0;
+    for (float v : ir) {
+        if (!std::isfinite(v)) return std::nullopt;
+        energy += static_cast<double>(v) * v;
+    }
     if (opts.normalize_unit_energy) {
-        // +Inf energy passes `> 0`, so an explicit isfinite gate is required or
-        // Inf*0 would publish NaN downstream.
-        double energy = 0.0;
-        for (float v : ir) energy += static_cast<double>(v) * v;
-        if (!std::isfinite(energy) || energy <= 0.0) return std::nullopt;
+        if (energy <= 0.0) return std::nullopt;
         const float g = static_cast<float>(1.0 / std::sqrt(energy));
         for (float& v : ir) v *= g;
     }
