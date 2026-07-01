@@ -155,6 +155,29 @@ tools/scripts/host_vitals.sh --json     # machine-readable
 
 ## GitHub workflow gotchas
 
+- **Every `on: schedule` workflow must carry the fork guard.** When someone forks
+  the repo, GitHub copies all workflows and runs the scheduled ones on the fork's
+  default branch — then emails the fork owner whenever one *fails*, which our
+  monitors reliably do on a fork (they probe this repo's state or use secrets the
+  fork lacks). So each entry job (a job with no `needs:` — dependents cascade-skip)
+  of a scheduled workflow gets:
+
+  ```yaml
+  jobs:
+    check:
+      if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+  ```
+
+  compose it with an existing condition as
+  `if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (<existing>)`.
+  It only suppresses the **schedule** event on forks — `push` / `pull_request` /
+  `workflow_dispatch` are untouched, so PRs to this repo (which run in this repo's
+  context) and manual dispatches behave exactly as before. A workflow that
+  *should* run on forks' schedules opts out with a top-of-file
+  `# fork-guard-exempt: <reason>` comment. This is **enforced**:
+  `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
+  pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
+  guard fails the PR. Add the guard when you add the workflow.
 - **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Two distinct guard layers exist and they catch different things: `test_codecov_components.py` / `test_codecov_config.py` (PR-gate) guard the **codecov.yml mapping** (a subsystem matching no component → invisible); `coverage-upload-watchdog.yml` (hourly, main) guards the **outcome** — "main had a *successful* Coverage run in the last N hours." The watchdog exists because the dashboard degrades silently when fresh complete uploads stop arriving, from causes the config gate can't see: coverage runs cancelled by `stale-run-reaper.yml` when a CI dispatch throttle makes them queue past the cutoff (the 2026-06-28 incident — 8 consecutive main Coverage runs cancelled), an `llvm-cov -object`-set regression (a `libpulp-*.a` drops out → a whole subsystem vanishes while `lines-valid` stays > 0, which `verify_cobertura_xml.py`'s `lines-valid > 0` check cannot catch), or Codecov's `after_n_builds` waiting forever on a missing per-OS leg. When triaging a coverage-surface complaint: first check `gh run list --workflow coverage.yml --branch main` for recent **successful** runs (cancelled ≠ uploaded); only then suspect codecov.yml. Note the config gate is **advisory** (not in branch protection), so a fleet-auto-merged PR can land config drift despite a red gate — the watchdog is the main-branch backstop.
 - **`web-plugins.yml` is the headless-browser web lane (advisory).** It builds
   Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web plugin formats on a Linux

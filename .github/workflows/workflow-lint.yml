@@ -85,6 +85,18 @@ jobs:
           print(f"structural parse OK across {sum(1 for _ in pathlib.Path('.github/workflows').rglob('*.y*ml'))} files")
           PY
 
+      - name: Scheduled-workflow fork guard
+        # Every `on: schedule` workflow's entry jobs must carry the fork guard
+        # (`github.event_name != 'schedule' || github.repository == '<repo>'`) so
+        # a fork's copy doesn't cron-run our monitors and email the fork owner on
+        # every failure. The check also runs in gates.sh and the pre-push hook.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/scripts/test_scheduled_workflow_fork_guard_check.py
+          python3 tools/scripts/scheduled_workflow_fork_guard_check.py
+
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:
         #

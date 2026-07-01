@@ -25,6 +25,7 @@ concurrency:
 jobs:
   dry-run:
     name: Release dry-run (darwin-arm64, no publish)
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5

@@ -53,6 +53,7 @@ permissions:
 
 jobs:
   diff:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Diff checked-in ruleset against live GitHub ruleset
 

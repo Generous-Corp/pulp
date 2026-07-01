@@ -27,6 +27,7 @@ permissions:
 jobs:
   freshness:
     name: Check package freshness
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -59,7 +60,7 @@ jobs:
   # Tier 2: Full build validation (monthly or on-demand)
   build-validation:
     name: Build validation (${{ matrix.package }}) — ${{ matrix.os }}
-    if: inputs.tier == '2'
+    if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (inputs.tier == '2')
     strategy:
       fail-fast: false
       matrix:

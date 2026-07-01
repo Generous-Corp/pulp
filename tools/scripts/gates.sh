@@ -69,6 +69,7 @@ CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
+FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -235,6 +236,17 @@ if [ -f "$IMPORT_PROV" ] && [ -n "${PULP_IMPORT_PROVENANCE_DIRS:-}" ]; then
     echo "▸ import-provenance check" >&2
     # shellcheck disable=SC2086
     if ! "$PYTHON" "$IMPORT_PROV" $PULP_IMPORT_PROVENANCE_DIRS; then
+        fail=1
+    fi
+fi
+
+# ── 11. scheduled-workflow fork guard ──────────────────────────────────────
+# Every `on: schedule` workflow's entry jobs must carry the fork guard so a
+# fork's copy doesn't cron-run our monitors and email the fork owner on failure.
+if [ -f "$FORK_GUARD" ]; then
+    echo "" >&2
+    echo "▸ scheduled-workflow fork-guard check" >&2
+    if ! "$PYTHON" "$FORK_GUARD"; then
         fail=1
     fi
 fi

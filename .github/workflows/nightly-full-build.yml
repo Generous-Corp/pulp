@@ -38,6 +38,7 @@ concurrency:
 jobs:
   full-build:
     name: Full build (examples + all tests)
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: macos-15
 
     outputs:

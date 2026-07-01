@@ -50,6 +50,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Check bumps-vs-tags invariant
 
