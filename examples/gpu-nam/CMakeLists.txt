@@ -13,8 +13,9 @@ option(GPU_NAM_WITH_A2      "GPU NAM: build WaveNet A2 architecture" ON)
 option(GPU_NAM_WITH_CONVNET "GPU NAM: build ConvNet architecture" ON)
 option(GPU_NAM_WITH_LSTM    "GPU NAM: build LSTM architecture" ON)
 option(GPU_NAM_WITH_LINEAR  "GPU NAM: build Linear architecture" ON)
+option(GPU_NAM_WITH_KERAS   "GPU NAM: build RTNeural/Keras (.json) GRU/LSTM engine" ON)
 set(_gpu_nam_arch_defs "")
-foreach(_gn_arch WAVENET A2 CONVNET LSTM LINEAR)
+foreach(_gn_arch WAVENET A2 CONVNET LSTM LINEAR KERAS)
     if(NOT GPU_NAM_WITH_${_gn_arch})
         list(APPEND _gpu_nam_arch_defs "GPU_NAM_WITH_${_gn_arch}=0")
     endif()
@@ -103,6 +104,16 @@ if(TARGET pulp::runtime)
             target_link_libraries(gpu-nam-linear-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-linear-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             add_test(NAME gpu-nam-linear-test COMMAND gpu-nam-linear-test)
+        endif()
+
+        # RTNeural/Keras (.json) GRU + LSTM + Dense engine. A separate KerasRuntime
+        # from the .nam NamRuntime (different file format + recurrent-only weight
+        # layout); recurrent, so CPU-only. Needs only choc::json (pulp::runtime).
+        if(GPU_NAM_WITH_KERAS)
+            add_executable(gpu-nam-keras-test test_keras_runtime.cpp)
+            target_link_libraries(gpu-nam-keras-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-keras-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-keras-test COMMAND gpu-nam-keras-test)
         endif()
 
         # Grace-period engine retirement (audio-thread-safe live swaps; no GPU).
