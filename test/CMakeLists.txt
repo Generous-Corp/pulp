@@ -1446,6 +1446,14 @@ if(APPLE AND NOT PULP_IOS)
         PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-text-accessibility-macos)
 endif()
+# macOS hover delivery for a hosted PluginViewHost (tracking area +
+# host-window acceptsMouseMovedEvents).
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-plugin-view-hover-macos test_plugin_view_host_hover_macos.mm)
+    target_link_libraries(pulp-test-plugin-view-hover-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-plugin-view-hover-macos)
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.

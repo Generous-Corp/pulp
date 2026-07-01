@@ -772,11 +772,23 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
-    // Accept dragged files/text so the editor's drop targets work when hosted in a
-    // DAW (the NSDraggingDestination behavior lives in drag_drop_mac.mm). Without
-    // this, drag-drop worked only in the standalone PulpView.
-    if (self.window)
+    if (self.window) {
+        // Accept dragged files/text so the editor's drop targets work when hosted
+        // in a DAW (the NSDraggingDestination behavior lives in drag_drop_mac.mm).
+        // Without this, drag-drop worked only in the standalone PulpView.
         [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // The hover tracking area installed in -updateTrackingAreas carries
+        // NSTrackingMouseMoved, but a tracking area only fans -mouseMoved: out to
+        // its owner when the window itself accepts mouse-moved events, and NSWindow
+        // defaults that flag to NO. This window is owned by the foreign host (a DAW,
+        // or a JUCE/iPlug2 embed), not by Pulp, so nothing sets the flag for us and
+        // -mouseMoved: never arrives — CSS :hover / on_hover_enter / on_hover_leave
+        // stay dead in a hosted editor even though the same tree hovers correctly in
+        // the standalone window. Opt the host window into mouse-moved delivery so the
+        // shared -mouseMoved: -> simulate_hover path reaches the view tree, matching
+        // what the standalone window host does (window_host_mac.mm).
+        self.window.acceptsMouseMovedEvents = YES;
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -1415,10 +1427,17 @@ private:
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
-    // Accept dragged files/text when hosted in a DAW (drop dispatch lives in
-    // drag_drop_mac.mm) — same as the CPU host above and the standalone PulpView.
-    if (self.window)
+    if (self.window) {
+        // Accept dragged files/text when hosted in a DAW (drop dispatch lives in
+        // drag_drop_mac.mm) — same as the CPU host above and the standalone PulpView.
         [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // Opt the host-owned window into mouse-moved delivery so the hover tracking
+        // area's -mouseMoved: -> simulate_hover path fires in a hosted editor. See
+        // the identical note in PulpPluginView above: a tracking area only receives
+        // -mouseMoved: when the window accepts those events, and a foreign host's
+        // window defaults the flag to NO.
+        self.window.acceptsMouseMovedEvents = YES;
+    }
 }
 
 - (void)viewDidChangeBackingProperties {
