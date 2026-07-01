@@ -745,6 +745,25 @@ attempt for 24h to fail silently with zero jobs dispatched.
 
 Full design: [docs/guides/release-watchdog.md](docs/guides/release-watchdog.md).
 
+### Local macOS signing & notarization credentials
+
+On a configured dev machine the Developer ID signing and Apple notarization
+credentials live in **`~/.config/pulp/secrets/`** — `notary.env` (App Store
+Connect API-key trio `PULP_NOTARY_KEY_PATH` / `_KEY_ID` / `_ISSUER_ID`), the
+`AuthKey_*.p8`, `keychain.env` (signing-keychain password + cert hashes +
+`PULP_SIGN_P12_PW`), and `pulp-signing.p12` (Developer ID Application +
+Installer). `pulp ship notarize` reads `notary.env` automatically; by hand:
+`set -a; . ~/.config/pulp/secrets/notary.env; set +a` then
+`xcrun notarytool submit <pkg> --key "$PULP_NOTARY_KEY_PATH" --key-id
+"$PULP_NOTARY_KEY_ID" --issuer "$PULP_NOTARY_ISSUER_ID" --wait` and
+`xcrun stapler staple <pkg>`.
+
+**Check that directory before ever concluding "no signing/notarization
+credentials."** These are machine-local (never committed); a fresh checkout
+won't have them, but a set-up machine does. The full recipe — keychain
+partition-list gotchas, inner-out bundle signing, multi-format PKG install
+locations — lives in the [`ship`](.agents/skills/ship/SKILL.md) skill.
+
 ### Status Vocabulary
 
 Use only these values for `status:` fields in manifests:

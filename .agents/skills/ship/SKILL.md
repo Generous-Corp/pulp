@@ -243,6 +243,15 @@ pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/
 
 #### Notarization credentials (`pulp ship notarize`)
 
+**FIRST, on a set-up dev machine: check `~/.config/pulp/secrets/`.** It holds
+`notary.env` (the ASC API-key trio), the `AuthKey_*.p8`, `keychain.env`, and
+`pulp-signing.p12` — everything needed to sign AND notarize. Source it and go:
+`set -a; . ~/.config/pulp/secrets/notary.env; set +a` → `xcrun notarytool
+submit … --wait` → `xcrun stapler staple`. Do NOT conclude "no credentials"
+without looking there — these are machine-local and absent from fresh
+checkouts, but present on a configured machine. (Mirrored in the CLAUDE.md
+"Local macOS signing & notarization credentials" note.)
+
 Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 
 1. **App Store Connect API key** — preferred. `xcrun notarytool submit
