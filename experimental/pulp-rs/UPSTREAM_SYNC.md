@@ -2,13 +2,33 @@
 
 **Purpose:** keep this Rust port in sync with the Pulp C++ CLI as new features land on `main`. Each time a phase completes, we bump `last_synced_sha` to the `origin/main` tip at that moment, so the next phase can diff against it and catch features that need porting.
 
+## Primary drift guard is automated (read this first)
+
+The authoritative, CI-enforced parity guard is now the CLI inventory + parity
+tooling, not this manual anchor:
+
+- `tools/scripts/cli_sync_check.py` — CLI commands match `docs/status/cli-commands.yaml`.
+- `tools/scripts/check_cli_mcp_parity.py` — CLI ↔ MCP surface parity (wired into
+  `.github/workflows/version-skill-check.yml` and `hooks/scripts/cli-plugin-sync.sh`).
+- `tools/scripts/cli_command_inventory.py` — enumerates the command surface.
+
+Run `python3 tools/scripts/cli_sync_check.py` for the live verdict. When it is
+green, the port is in sync and there is nothing to port. This file is a
+secondary, human-readable backstop for reviewing behavioral drift in the watched
+sources below; it is not wired to any automated check.
+
 ## Current anchor
 
 ```
-last_synced_sha = 7fbd7db1f45974796e3349562e0c86251fffc4fe
-last_synced_date = 2026-04-24
-last_synced_phase = Phase 6f / pulp#740 — upgrade + project-bump safety-rail port (Slices A+B+C+D shipped via PR #742; Slice E here)
+last_synced_sha = 39d4dddc10a50bf7b845bbb84fd3307d14b2533e
+last_synced_date = 2026-06-30
+last_synced_phase = Phase 6e complete; sync verified green via cli_sync_check.py (CLI commands 51/51 match). Frontier = Phase 7: exec-`pulp-cpp` wrapper for the Ported-partial subcommands (build --watch, cache fetch, sdk install, upgrade install, doctor variants, pr --native).
 ```
+
+> The previous anchor (`7fbd7db1…`, 2026-04-24) pointed at a commit on the
+> retired `explore/rust-cli-prototype` branch that never reached `origin/main`,
+> so `git diff <anchor>..origin/main` was silently unusable. Always record a
+> `last_synced_sha` that is reachable from `origin/main`.
 
 ## Watched files
 
