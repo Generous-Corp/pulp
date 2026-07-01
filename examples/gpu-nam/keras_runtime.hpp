@@ -336,12 +336,46 @@ inline std::vector<std::vector<float>> to_mat(const choc::value::ValueView& a) {
 
 }  // namespace detail
 
-// Load an RTNeural/Keras .json model (GRU + Dense layers). Returns false + sets
-// error on any unsupported layer or malformed shape.
+// Upper bound on any single layer width — rejects a crafted `shape` that would
+// otherwise drive an enormous allocation. Amp models are tens of units wide.
+inline constexpr int kMaxKerasWidth = 1 << 16;
+
+namespace detail {
+
+// A weight matrix is well-formed iff it has exactly `rows` rows and every row has
+// at least `cols` columns (extra columns, from a padded export, are ignored; too
+// few would let load() read out of bounds).
+inline bool mat_shape(const std::vector<std::vector<float>>& m, int rows, int cols) {
+    if (static_cast<int>(m.size()) != rows) return false;
+    for (const auto& r : m)
+        if (static_cast<int>(r.size()) < cols) return false;
+    return true;
+}
+
+}  // namespace detail
+
+// Load an RTNeural/Keras .json model (a stack of GRU / LSTM / Dense / activation
+// layers). Returns false + sets `error` on any unsupported layer, malformed
+// shape, or ragged weight array; on failure `out` is left in a safe, inert state
+// (a subsequent process_sample() is a pass-through, never an out-of-bounds read).
 inline bool load_keras_model(const std::string& path, KerasModel& out, std::string* error) {
-    auto fail = [&](const std::string& m) { if (error) *error = m; return false; };
+    // Reset to a safe, inert state up front so any early return — or a caller that
+    // ignores the false return and calls process_sample() anyway — cannot touch a
+    // half-built layer chain or an unsized buffer.
     out.layers_.clear();
+    out.in_size_ = 1;
+    out.out_size_ = 1;
+    out.buf_a_.assign(1, 0.0f);
+    out.buf_b_.assign(1, 0.0f);
     out.ok_ = false;
+    auto fail = [&](const std::string& m) {
+        out.layers_.clear();
+        out.buf_a_.assign(1, 0.0f);
+        out.buf_b_.assign(1, 0.0f);
+        out.ok_ = false;
+        if (error) *error = m;
+        return false;
+    };
 
     std::ifstream f(path, std::ios::binary);
     if (!f) return fail("could not open file: " + path);
@@ -361,18 +395,22 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
 
     const int in_size = root.hasObjectMember("in_shape") ? detail::shape_last(root["in_shape"]) : 1;
     if (in_size <= 0) return fail("Keras: invalid 'in_shape'");
-    out.in_size_ = in_size;
+    // The runtime is scalar (process_sample takes one float): a single input
+    // channel per step. Multi-input models are rejected, not silently truncated.
+    if (in_size != 1) return fail("Keras: only single-input models are supported");
 
     const choc::value::ValueView layers = root["layers"];
     int cur_in = in_size;
     int max_width = in_size;
     for (uint32_t li = 0; li < layers.size(); ++li) {
+        const std::string ix = std::to_string(li);
         const choc::value::ValueView L = layers[li];
         if (!L.isObject() || !L.hasObjectMember("type"))
-            return fail("Keras: layer " + std::to_string(li) + " missing 'type'");
+            return fail("Keras: layer " + ix + " missing 'type'");
         const std::string type = std::string(L["type"].getString());
         const int out_size = L.hasObjectMember("shape") ? detail::shape_last(L["shape"]) : -1;
-        if (out_size <= 0) return fail("Keras: layer " + std::to_string(li) + " invalid 'shape'");
+        if (out_size <= 0) return fail("Keras: layer " + ix + " invalid 'shape'");
+        if (out_size > kMaxKerasWidth) return fail("Keras: layer " + ix + " width too large");
         const std::string act = L.hasObjectMember("activation") && L["activation"].isString()
                                     ? std::string(L["activation"].getString()) : std::string();
         const choc::value::ValueView w = L.hasObjectMember("weights") ? L["weights"] : choc::value::ValueView();
@@ -382,37 +420,65 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
         auto strict_act = [&](std::string* err_out) -> Activation {
             const Activation a = parse_activation(act);
             if (!act.empty() && a == Activation::None && act != "linear")
-                *err_out = "Keras: layer " + std::to_string(li) + " unsupported activation '" + act + "'";
+                *err_out = "Keras: layer " + ix + " unsupported activation '" + act + "'";
             return a;
         };
+        // The GRU/LSTM cell activation is fixed to tanh (the recurrent-activation
+        // convention these exports use); a different value would silently mis-render.
+        auto recurrent_act_ok = [&]() { return act.empty() || act == "tanh"; };
 
         if (type == "gru") {
             if (!w.isArray() || w.size() < 3)
-                return fail("Keras: GRU layer " + std::to_string(li) + " needs 3 weight sets");
+                return fail("Keras: GRU layer " + ix + " needs 3 weight sets");
+            if (!recurrent_act_ok())
+                return fail("Keras: GRU layer " + ix + " unsupported activation '" + act + "'");
+            const auto kernel = detail::to_mat(w[0]), recurrent = detail::to_mat(w[1]),
+                       bias = detail::to_mat(w[2]);
+            if (!detail::mat_shape(kernel, cur_in, 3 * out_size)
+                || !detail::mat_shape(recurrent, out_size, 3 * out_size)
+                || !detail::mat_shape(bias, 2, 3 * out_size))
+                return fail("Keras: GRU layer " + ix + " weight shape mismatch");
             auto g = std::make_unique<KerasGru>(cur_in, out_size);
-            g->load(detail::to_mat(w[0]), detail::to_mat(w[1]), detail::to_mat(w[2]));
+            g->load(kernel, recurrent, bias);
             out.layers_.push_back(std::move(g));
         } else if (type == "lstm") {
             if (!w.isArray() || w.size() < 3)
-                return fail("Keras: LSTM layer " + std::to_string(li) + " needs 3 weight sets");
+                return fail("Keras: LSTM layer " + ix + " needs 3 weight sets");
+            if (!recurrent_act_ok())
+                return fail("Keras: LSTM layer " + ix + " unsupported activation '" + act + "'");
+            const auto kernel = detail::to_mat(w[0]), recurrent = detail::to_mat(w[1]);
+            const auto bias = detail::to_vec(w[2]);
+            if (!detail::mat_shape(kernel, cur_in, 4 * out_size)
+                || !detail::mat_shape(recurrent, out_size, 4 * out_size)
+                || static_cast<int>(bias.size()) < 4 * out_size)
+                return fail("Keras: LSTM layer " + ix + " weight shape mismatch");
             auto l = std::make_unique<KerasLstm>(cur_in, out_size);
-            l->load(detail::to_mat(w[0]), detail::to_mat(w[1]), detail::to_vec(w[2]));
+            l->load(kernel, recurrent, bias);
             out.layers_.push_back(std::move(l));
         } else if (type == "activation") {
             if (out_size != cur_in)
-                return fail("Keras: activation layer " + std::to_string(li) + " changes width");
+                return fail("Keras: activation layer " + ix + " changes width");
             std::string aerr;
             const Activation a = strict_act(&aerr);
             if (!aerr.empty()) return fail(aerr);
             out.layers_.push_back(std::make_unique<KerasActivation>(cur_in, a));
         } else if (type == "dense" || type == "time-distributed-dense") {
             if (!w.isArray() || w.size() < 1)
-                return fail("Keras: Dense layer " + std::to_string(li) + " needs weights");
+                return fail("Keras: Dense layer " + ix + " needs weights");
             std::string aerr;
             const Activation a = strict_act(&aerr);
             if (!aerr.empty()) return fail(aerr);
+            const auto kernel = detail::to_mat(w[0]);
+            if (!detail::mat_shape(kernel, cur_in, out_size))
+                return fail("Keras: Dense layer " + ix + " kernel shape mismatch");
+            std::vector<float> bias;
+            if (w.size() >= 2) {
+                bias = detail::to_vec(w[1]);
+                if (static_cast<int>(bias.size()) < out_size)
+                    return fail("Keras: Dense layer " + ix + " bias too short");
+            }
             auto d = std::make_unique<KerasDense>(cur_in, out_size, a);
-            d->load(detail::to_mat(w[0]), w.size() >= 2 ? detail::to_vec(w[1]) : std::vector<float>{});
+            d->load(kernel, bias);
             out.layers_.push_back(std::move(d));
         } else {
             return fail("Keras: unsupported layer type '" + type + "'");
@@ -422,6 +488,10 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
     }
 
     if (out.layers_.empty()) return fail("Keras: no layers");
+    // The scalar API returns one output per step, so the final layer must be
+    // width 1; a wider tail would be silently truncated.
+    if (cur_in != 1) return fail("Keras: model output must be a single channel");
+    out.in_size_ = in_size;
     out.out_size_ = cur_in;
     out.buf_a_.assign(static_cast<std::size_t>(max_width), 0.0f);
     out.buf_b_.assign(static_cast<std::size_t>(max_width), 0.0f);

@@ -171,3 +171,54 @@ TEST_CASE("Keras loader rejects malformed models", "[keras][reject]") {
             R"({"in_shape":[null,0],"layers":[{"type":"dense","shape":[null,1],"weights":[[[1.0]],[0.0]]}]})",
             "invalid 'in_shape'");
 }
+
+TEST_CASE("Keras loader rejects hostile weight shapes", "[keras][reject]") {
+    auto rejects = [](const std::string& name, const std::string& json,
+                      const std::string& needle) {
+        const std::string path = write_temp(name, json);
+        KerasModel m;
+        std::string err;
+        const bool ok = load_keras_model(path, m, &err);
+        std::filesystem::remove(path);
+        CHECK_FALSE(ok);
+        CHECK_THAT(err, ContainsSubstring(needle));
+        // The failed load must leave an inert model: process_sample is a safe
+        // pass-through, never an out-of-bounds read into a half-built chain.
+        CHECK_THAT(m.process_sample(0.5f), WithinAbs(0.5f, 1e-6));
+    };
+
+    // GRU with a ragged kernel row (1 col where 3*out=3 are needed).
+    rejects("keras_gru_ragged.json",
+            R"({"in_shape":[null,null,1],"layers":[{"type":"gru","shape":[null,null,1],)"
+            R"("weights":[[[0.1]],[[0.2]],[[0.0],[0.0]]]}]})",
+            "weight shape mismatch");
+    // LSTM with a short bias vector (1 where 4*out=4 are needed).
+    rejects("keras_lstm_ragged.json",
+            R"({"in_shape":[null,null,1],"layers":[{"type":"lstm","shape":[null,null,1],)"
+            R"("weights":[[[0.1]],[[0.2]],[0.0]]}]})",
+            "weight shape mismatch");
+    // Dense with a bias too short for its output width.
+    rejects("keras_dense_bias.json",
+            R"({"in_shape":[null,1],"layers":[{"type":"dense","shape":[null,2],)"
+            R"("weights":[[[1.0,1.0]],[1.0]]}]})",
+            "bias too short");
+    // Multi-input model (the scalar API only supports one input channel).
+    rejects("keras_multi_in.json",
+            R"({"in_shape":[null,2],"layers":[{"type":"dense","shape":[null,1],)"
+            R"("weights":[[[1.0],[1.0]],[0.0]]}]})",
+            "single-input");
+    // A wide final layer would be silently truncated to one channel.
+    rejects("keras_wide_tail.json",
+            R"({"in_shape":[null,1],"layers":[{"type":"dense","shape":[null,2],)"
+            R"("weights":[[[1.0,1.0]],[0.0,0.0]]}]})",
+            "single channel");
+    // A recurrent layer with a non-tanh activation (the cell hard-codes tanh).
+    rejects("keras_gru_relu.json",
+            R"({"in_shape":[null,null,1],"layers":[{"type":"gru","activation":"relu","shape":[null,null,1],)"
+            R"("weights":[[[0.5,-0.3,0.8]],[[0.1,0.2,-0.4]],[[0.0,0.1,-0.1],[0.2,0.0,0.05]]]}]})",
+            "unsupported activation");
+    // An absurd layer width is rejected before it drives a huge allocation.
+    rejects("keras_huge.json",
+            R"({"in_shape":[null,1],"layers":[{"type":"dense","shape":[null,99999999],"weights":[[[1.0]],[0.0]]}]})",
+            "width too large");
+}
