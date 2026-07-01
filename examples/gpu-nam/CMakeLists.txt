@@ -143,6 +143,20 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
             GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
         catch_discover_tests(gpu-nam-plugin-test)
+
+        # Editor tests: faithful UI renders non-blank + composited (Skia), and
+        # pointer input (toggles, knob drag) drives real parameters.
+        if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
+            add_executable(gpu-nam-ui-test test_gpu_nam_ui.cpp gpu_nam_view.cpp)
+            target_link_libraries(gpu-nam-ui-test PRIVATE
+                pulp::format pulp::render pulp::gpu-audio pulp::signal
+                pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-ui-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-ui-test PRIVATE
+                GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+                GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
+            catch_discover_tests(gpu-nam-ui-test)
+        endif()
     endif()
 
     # CLAP load smoke test — the plugin's shared object must dlopen cleanly.
