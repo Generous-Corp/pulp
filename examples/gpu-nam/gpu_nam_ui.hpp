@@ -388,6 +388,9 @@ private:
         vw::FileChooser chooser;
         chooser.set_title("Load NAM model")
                .add_extension_filter("NAM capture (.nam)", "nam");
+        // Default to the installed sample models so the user lands on them.
+        if (const std::string dir = gpu_nam_content_subdir("Models"); !dir.empty())
+            chooser.set_initial_directory(dir);
         auto& proc = proc_;
         chooser.open([&proc](std::vector<std::string> paths) {
             if (!paths.empty()) proc.load_model(paths.front());
@@ -397,6 +400,8 @@ private:
         vw::FileChooser chooser;
         chooser.set_title("Load cabinet impulse response")
                .add_extension_filter("Impulse response (WAV/AIFF/FLAC)", "wav;aiff;aif;flac");
+        if (const std::string dir = gpu_nam_content_subdir("Cabinets"); !dir.empty())
+            chooser.set_initial_directory(dir);
         auto& proc = proc_;
         chooser.open([&proc](std::vector<std::string> paths) {
             if (!paths.empty()) proc.load_ir(paths.front());

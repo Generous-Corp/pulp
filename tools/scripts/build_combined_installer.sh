@@ -21,6 +21,9 @@
 #     --out DIR \
 #     [--plugin au|vst3|clap PATH]...     (repeatable)
 #     [--app "Title" PATH [ENTITLEMENTS]]...  (repeatable; installs to /Applications)
+#     [--content "Title" "Desc" DEST SRCDIR]...  (repeatable; installs SRCDIR's
+#                                                 contents to DEST, e.g. sample
+#                                                 models/IRs into Application Support)
 #     [--no-notarize]
 #
 # Example (see examples/super-convolver/package.sh for a real invocation).
@@ -34,6 +37,7 @@ NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
 # Parallel arrays of components.
 declare -a P_KIND P_PATH      # plugins: kind + bundle path
 declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
+declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --app)
       A_TITLE+=("$2"); A_PATH+=("$3")
       if [[ "${4:-}" == --* || -z "${4:-}" ]]; then A_ENT+=(""); shift 3; else A_ENT+=("$4"); shift 4; fi;;
+    --content) C_TITLE+=("$2"); C_DESC+=("$3"); C_DEST+=("$4"); C_SRC+=("$5"); shift 5;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -115,6 +120,18 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
+done
+
+echo "== content =="
+for ((i=0; i<${#C_TITLE[@]}; i++)); do
+  t="${C_TITLE[$i]}"; desc="${C_DESC[$i]}"; dest="${C_DEST[$i]}"; src="${C_SRC[$i]}"
+  [[ -d "$src" ]] || { echo "missing: $src" >&2; exit 2; }
+  id="content-$(echo "$t" | tr ' A-Z' '-a-z' | tr -cd 'a-z0-9-')"
+  r="$STAGE/root-$id"; mkdir -p "$r$dest"; cp -R "$src/." "$r$dest/"
+  f="$id.pkg"
+  pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
+    --install-location / "$STAGE/comp/$f" >/dev/null
+  add_ref "$id" "$t" "$desc" "$f"
 done
 
 cat > "$STAGE/distribution.xml" <<XML

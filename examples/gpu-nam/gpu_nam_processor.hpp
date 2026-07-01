@@ -60,6 +60,8 @@
 #include <utility>
 #include <vector>
 
+#include <filesystem>
+
 #if defined(__APPLE__)
 #include <dlfcn.h>
 #endif
@@ -136,6 +138,43 @@ inline std::string gpu_nam_default_model_path() {
     return GPU_NAM_DEFAULT_MODEL_PATH;
 }
 
+// User-facing directory holding the installed sample `.nam` models + cabinet IRs
+// (the installer writes them under "GPU NAM/Models" and "GPU NAM/Cabinets"). The
+// file-chooser slots default here so a user testing the plugin lands on the
+// samples without hunting. Resolution order: a GPU_NAM_CONTENT override, then a
+// per-user copy under ~/Music or ~/Documents, then the system Application Support
+// copy the installer creates. Empty when none exists.
+//
+// (This is a per-plugin convention prototyped here; a `pulp::platform` helper that
+// returns the same per-OS location for any plugin would let the SDK own it.)
+inline std::string gpu_nam_content_dir() {
+    auto is_dir = [](const std::string& p) {
+        std::error_code ec;
+        return !p.empty() && std::filesystem::is_directory(p, ec);
+    };
+    if (const char* env = std::getenv("GPU_NAM_CONTENT"); env && is_dir(env)) return env;
+    std::vector<std::string> cands;
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        cands.push_back(std::string(home) + "/Music/GPU NAM");
+        cands.push_back(std::string(home) + "/Documents/GPU NAM");
+    }
+    cands.push_back("/Library/Application Support/GPU NAM");
+    for (const std::string& c : cands)
+        if (is_dir(c)) return c;
+    return {};
+}
+
+// A subdirectory of the content dir if it exists, else the content dir itself, else
+// empty — used to point a file chooser at Models/ or Cabinets/.
+inline std::string gpu_nam_content_subdir(const std::string& sub) {
+    const std::string base = gpu_nam_content_dir();
+    if (base.empty()) return {};
+    std::error_code ec;
+    const std::string p = base + "/" + sub;
+    if (std::filesystem::is_directory(p, ec)) return p;
+    return base;
+}
+
 // Filename (no directory) of a path, for display.
 inline std::string gpu_nam_basename(const std::string& path) {
     const auto slash = path.find_last_of("/\\");
@@ -183,7 +222,7 @@ public:
             .name = "GPU NAM",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.gpunam",
-            .version = "1.0.0",
+            .version = "1.1.0",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},

@@ -19,14 +19,28 @@ builds the matching network, and streams audio through it sample-by-sample.
 
 | Architecture | Status | Notes |
 |---|---|---|
-| **WaveNet** | Supported | The standard/most common NAM capture. Runs on the CPU oracle and, opt-in, on the fused GPU engine. |
+| **WaveNet (A1)** | Supported | The original/standard NAM capture. Runs on the CPU oracle and, opt-in, on the fused GPU engine. |
 | **LSTM** | Supported | The recurrent NAM option. CPU engine; validated bit-approximately (max abs diff ~7e-8 over the reference vector) against NeuralAmpModelerCore's own output. |
+| **NAM Architecture 2 (A2)** | Not modeled | NAM's next-gen architecture (the default for new captures on TONE3000). It departs from A1 — LeakyReLU activations, a convolutional head, mixed kernel sizes per layer array, grouped convolutions, and packed-slimmable Full/Lite sizing — so it needs its own engine. GPU NAM rejects A2 files cleanly rather than mis-rendering. Download **A1 – Legacy** models to use with GPU NAM today (see below). |
 | ConvNet, Linear | Not modeled | Rare in practice; not yet implemented. |
 | Parametric / conditioned WaveNet (`condition_size > 1`) | Not modeled | Its extra condition channels come from host controls that aren't wired; rejected rather than mis-rendered. |
-| Experimental WaveNet variants (grouped convolutions, FiLM conditioning, `head1x1`, bottlenecks) and `SlimmableContainer` | Not modeled | Research-stage architectures from the training tool; not what shipping captures use. GPU NAM rejects them with a clear message rather than producing wrong audio. |
+| Experimental WaveNet variants (grouped convolutions, FiLM conditioning, `head1x1`, bottlenecks) and `SlimmableContainer` | Not modeled | Research-stage architectures from the training tool; not what shipping A1 captures use. GPU NAM rejects them with a clear message rather than producing wrong audio. |
 
 An unsupported model fails to load with a specific reason (surfaced in the log
 and left as a dry pass-through) — it never silently mis-renders.
+
+### Where to get loadable models
+
+NAM's model library at [TONE3000](https://www.tone3000.com/search) now defaults
+new captures to **A2**, which GPU NAM does not yet load. To download captures
+that work today, filter for the legacy A1 architecture:
+
+> Filters → Technical → **A1 – Legacy**, then download the A1 models from a tone
+> pack's *Models* section.
+
+A1 (WaveNet) and LSTM captures load and run; A2 captures are rejected with a
+clear message until GPU NAM grows a dedicated A2 engine. A2 is fully MIT-licensed
+open source, so a clean-room A2 engine is a plausible future addition.
 
 ## CPU oracle + opt-in GPU engine
 
