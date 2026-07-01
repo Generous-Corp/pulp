@@ -228,7 +228,16 @@ public:
     void load_model(const std::string& path) {
         std::lock_guard<std::mutex> lock(model_req_mutex_);
         requested_model_path_ = path.empty() ? gpu_nam_default_model_path() : path;
+        // A non-empty path is a real user selection; empty resets to the bundled
+        // default. The file-slot UI shows the prompt until a user picks a model.
+        user_model_loaded_.store(!path.empty(), std::memory_order_release);
         model_req_generation_.fetch_add(1, std::memory_order_release);
+    }
+
+    /// True once a user has selected a model via load_model(); false for the
+    /// bundled default. UI-thread only. Drives the file-slot prompt vs name.
+    bool user_model_loaded() const {
+        return user_model_loaded_.load(std::memory_order_acquire);
     }
 
     /// True when the live audio path is actually the GPU engine (Engine=GPU is
@@ -893,6 +902,7 @@ private:
     mutable std::mutex model_mutex_;
     nam::NamModel model_;
     std::string model_name_ = "(no model)";
+    std::atomic<bool> user_model_loaded_{false};
     TransferCurve transfer_curve_{};
     std::atomic<std::uint32_t> model_generation_{0};
 

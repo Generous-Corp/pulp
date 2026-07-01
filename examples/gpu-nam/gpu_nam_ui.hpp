@@ -51,11 +51,18 @@ inline constexpr float kKnobCy = 152.0f, kKnobR = 33.0f;
 inline constexpr float kKnobLabelY = 110.0f, kKnobValueY = 202.0f;
 inline constexpr float kToggleY = 232.0f, kToggleW = 38.0f, kToggleH = 17.0f;
 inline constexpr float kToggleLabelY = 268.0f;
-inline constexpr float kFileL = 200.0f, kFileR = 400.0f;
-inline constexpr float kModelT = 309.0f, kFileH = 30.0f, kIrDy = 38.0f;
+// File rows span most of the content width like NAM: a type icon sits to the
+// LEFT of a wide FileBackground field; the field carries a left-aligned
+// folder + ‹ › browse cluster, centered path text, and a right-edge globe.
+inline constexpr float kFileIconL = 32.0f;   // type icon (model / IR), left of field
+inline constexpr float kFileFieldL = 58.0f;  // FileBackground left edge
+inline constexpr float kFileR = 560.0f;      // FileBackground right edge
+inline constexpr float kModelT = 312.0f, kFileH = 30.0f, kIrDy = 38.0f;
 inline constexpr float kMeterInL = 10.0f, kMeterOutL = 560.0f;
 inline constexpr float kMeterT = 86.0f, kMeterW = 30.0f, kMeterH = 178.0f;
-inline constexpr float kGearX = 566.0f, kGearY = 12.0f, kGearSz = 22.0f;
+// Settings gear: inside the panel on the title line, right of the title (NAM
+// places it there, not in the window corner).
+inline constexpr float kGearX = 534.0f, kGearY = 46.0f, kGearSz = 20.0f;
 inline float knob_cx(int i) {
     const float cw = (kKnobAreaR - kKnobAreaL) / kNumKnobs;
     return kKnobAreaL + (static_cast<float>(i) + 0.5f) * cw;
@@ -120,6 +127,9 @@ public:
     void on_mouse_down(vw::Point p) override { pointer_press(p); }
     void on_mouse_drag(vw::Point p) override { pointer_move(p); }
     void on_mouse_up(vw::Point) override { pointer_release(); }
+
+    // Open/close the settings overlay programmatically (screenshots, tests).
+    void show_settings(bool on) { show_settings_ = on; }
 
     // Test accessors (headless interaction verification).
     vw::Point knob_center_for_test(int i) {
@@ -224,15 +234,18 @@ private:
         constexpr float kSweep = 135.0f;  // ±135° → 270° travel
         const float a0 = -kSweep * 3.14159265f / 180.0f;
         const float a1 = (-kSweep + frac * 2.0f * kSweep) * 3.14159265f / 180.0f;
-        stroke_arc_points(canvas, scx, scy, sR + ss(3.0f), a0,  kSweep * 3.14159265f / 180.0f,
+        // Value arc hugs the knob face (NAM's ring sits just outside the cap, not
+        // floating with a gap).
+        const float arc_r = sR + ss(0.5f);
+        stroke_arc_points(canvas, scx, scy, arc_r, a0,  kSweep * 3.14159265f / 180.0f,
                           colors_.arc_track, ss(2.5f));
-        stroke_arc_points(canvas, scx, scy, sR + ss(3.0f), a0, a1, colors_.accent, ss(2.5f));
+        stroke_arc_points(canvas, scx, scy, arc_r, a0, a1, colors_.accent, ss(2.5f));
 
-        // Indicator dot at the current angle.
-        const float ix = scx + std::sin(a1) * sR * 0.66f;
-        const float iy = scy - std::cos(a1) * sR * 0.66f;
+        // Indicator dot set inside the cap (not riding the rim), like NAM.
+        const float ix = scx + std::sin(a1) * sR * 0.5f;
+        const float iy = scy - std::cos(a1) * sR * 0.5f;
         canvas.set_fill_color(colors_.accent);
-        canvas.fill_circle(ix, iy, ss(3.0f));
+        canvas.fill_circle(ix, iy, ss(2.6f));
 
         // Value readout below.
         char buf[40];
@@ -296,54 +309,70 @@ private:
     void paint_meter(cv::Canvas& canvas, float x, float level_db) {
         const float y = nam_geom::kMeterT, w = nam_geom::kMeterW, h = nam_geom::kMeterH;
         canvas.draw_image_from_file(img("MeterBackground.png"), sx(x), sy(y), ss(w), ss(h));
+        const float pad = 4.0f;
+        const float bx = x + pad, bw = w - 2 * pad;
         // Map −48..0 dB → 0..1 of the bar height, filling from the bottom. The
         // −48 dB floor keeps the meter dark at rest (matching NAM's idle look).
         const float frac = std::clamp((level_db + 48.0f) / 48.0f, 0.0f, 1.0f);
-        if (frac <= 0.001f) return;
-        const float pad = 4.0f;
-        const float bar_h = (h - 2 * pad) * frac;
-        const float bx = x + pad, bw = w - 2 * pad;
-        const float by = y + h - pad - bar_h;
-        // Green→amber→red toward the top, like NAM's meter.
-        cv::Color c = level_db > -3.0f  ? cv::Color::rgba8(226, 96, 80)
-                    : level_db > -12.0f ? cv::Color::rgba8(230, 184, 90)
-                                        : colors_.accent;
-        canvas.set_fill_color(c);
-        canvas.fill_rounded_rect(sx(bx), sy(by), ss(bw), ss(bar_h), ss(2.0f));
+        if (frac > 0.001f) {
+            const float bar_h = (h - 2 * pad) * frac;
+            const float by = y + h - pad - bar_h;
+            // Green→amber→red toward the top, like NAM's meter.
+            cv::Color c = level_db > -3.0f  ? cv::Color::rgba8(226, 96, 80)
+                        : level_db > -12.0f ? cv::Color::rgba8(230, 184, 90)
+                                            : colors_.accent;
+            canvas.set_fill_color(c);
+            canvas.fill_rounded_rect(sx(bx), sy(by), ss(bw), ss(bar_h), ss(2.0f));
+        }
+        // Accent baseline at the meter's foot — present even at rest, like NAM's
+        // blue floor line under each meter.
+        canvas.set_fill_color(colors_.accent);
+        canvas.fill_rect(sx(bx), sy(y + h - pad - 1.5f), ss(bw), ss(1.5f));
     }
 
     void paint_file_slots(cv::Canvas& canvas) {
+        // Show the model path only once a user picks one; the bundled default
+        // reads as NAM's first-open prompt (faithful to the reference default).
+        const std::string model_label = proc_.user_model_loaded()
+                                            ? proc_.model_name()
+                                            : "Select model directory...";
         paint_file_slot(canvas, nam_geom::kModelT, "ModelIcon.svg",
-                        proc_.model_name(), /*model=*/true);
+                        model_label, proc_.user_model_loaded());
         paint_file_slot(canvas, nam_geom::kModelT + nam_geom::kIrDy, "IRIconOff.svg",
-                        "Select IR directory...", /*model=*/false);
+                        "Select IR directory...", /*loaded=*/false);
     }
 
     void paint_file_slot(cv::Canvas& canvas, float top, const char* type_icon,
-                         const std::string& label, bool model) {
-        const float x = nam_geom::kFileL, w = nam_geom::kFileR - nam_geom::kFileL;
+                         const std::string& label, bool loaded) {
+        const float fx = nam_geom::kFileFieldL;
+        const float w = nam_geom::kFileR - fx;
         const float h = nam_geom::kFileH;
-        canvas.draw_image_from_file(img("FileBackground.png"), sx(x), sy(top), ss(w), ss(h));
         const float mid = top + h * 0.5f;
-        auto draw_icon = [&](const char* name, float ix, float iy, float sz) {
+        auto draw_icon = [&](const char* name, float ix, float iy, float sw, float sh) {
             const auto& s = svg(name);
-            if (!s.empty()) canvas.draw_svg(s, sx(ix), sy(iy), ss(sz), ss(sz));
+            if (!s.empty()) canvas.draw_svg(s, sx(ix), sy(iy), ss(sw), ss(sh));
         };
 
-        // Left group: type icon · folder · ‹ · › (matching NAM's control order).
-        const float isz = 15.0f;
-        draw_icon(type_icon,      x + 7.0f,  mid - isz * 0.5f, isz);
-        draw_icon("File.svg",     x + 26.0f, mid - isz * 0.5f, isz);
-        draw_icon("ArrowLeft.svg",  x + 46.0f, mid - 5.5f, 11.0f);
-        draw_icon("ArrowRight.svg", x + 60.0f, mid - 5.5f, 11.0f);
-        // Globe (right edge).
-        draw_icon("Globe.svg", x + w - 22.0f, mid - isz * 0.5f, isz);
+        // Type icon (model / IR) sits to the LEFT of the field, like NAM.
+        draw_icon(type_icon, nam_geom::kFileIconL, mid - 8.0f, 20.0f, 16.0f);
 
-        // Centered name (loaded model name, else the NAM placeholder text).
-        canvas.set_fill_color(model ? colors_.text : colors_.text_dim);
+        // Wide FileBackground field.
+        canvas.draw_image_from_file(img("FileBackground.png"), sx(fx), sy(top), ss(w), ss(h));
+
+        // Left-aligned browse cluster inside the field: folder · ‹ · ›. The arrow
+        // glyphs fill only ~35% of their 800px viewBox, so draw them oversized to
+        // read as visible chevrons at this scale.
+        draw_icon("File.svg",       fx + 10.0f, mid - 7.5f, 15.0f, 15.0f);
+        draw_icon("ArrowLeft.svg",  fx + 28.0f, mid - 12.0f, 24.0f, 24.0f);
+        draw_icon("ArrowRight.svg", fx + 44.0f, mid - 12.0f, 24.0f, 24.0f);
+        // Globe at the right edge.
+        draw_icon("Globe.svg", nam_geom::kFileR - 22.0f, mid - 7.5f, 15.0f, 15.0f);
+
+        // Centered path text (loaded model name, else NAM's placeholder prompt).
+        canvas.set_fill_color(loaded ? colors_.text : colors_.text_dim);
         canvas.set_font("Roboto", ss(11.0f));
         canvas.set_text_align(cv::TextAlign::center);
-        canvas.fill_text(label, sx(x + w * 0.5f), sy(mid + 3.8f));
+        canvas.fill_text(label, sx(fx + w * 0.5f + 20.0f), sy(mid + 3.8f));
         canvas.set_text_align(cv::TextAlign::left);
     }
 
