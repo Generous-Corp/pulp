@@ -12,9 +12,9 @@ truth this demo measures itself against.
 | | NeuralAmpModelerPlugin (reference) | GPU NAM (this demo) |
 |---|---|---|
 | UI framework | iPlug2 `IGraphics` (NanoVG) | Pulp view/canvas (Skia Graphite on Dawn) |
-| Neural inference | NeuralAmpModelerCore (Eigen), **CPU** | Clean-room WaveNet: **CPU oracle + opt-in GPU engine** |
+| Neural inference | NeuralAmpModelerCore (Eigen), CPU | Clean-room WaveNet: CPU oracle + opt-in GPU engine |
 | `.nam` model support | Yes (trainer + player) | Player only (loads `.nam` WaveNet captures) |
-| License posture | iPlug2 (NOASSERTION), eigen (MPL-2.0) | MIT-releasable, no copyleft deps |
+| Purpose | A complete, shipping product | A Pulp GPU-audio showcase built around the same UX |
 
 ## Rendering — GPU in both, different stacks
 
@@ -48,6 +48,33 @@ switching engines is seamless and phase-aligned (`gpu-nam-plugin-test` proves
 the switch is live at fixed latency, and that the amped output is identical
 regardless of host block size).
 
+## Performance — what is actually measured
+
+A claim of "faster" is only worth making with a number behind it, so here is
+exactly what has been measured and what it does and does not say.
+
+`gpu-nam-gpu-test` times the two engines on a **deliberately large synthetic
+model** (48 channels, two 16-layer arrays, 4096-sample block) on this machine:
+
+| Engine | µs / block (that model) |
+|---|---|
+| CPU oracle (serial, per-sample) | ≈ 7.81 × 10⁶ |
+| GPU engine (block-parallel, one submit) | ≈ 5.3 × 10⁴ |
+
+The GPU engine runs the whole block in parallel; the CPU oracle is strictly
+serial per sample. The gap widens with model size, which is the point the GPU
+engine is there to demonstrate.
+
+**What this does not claim.** This measures GPU block-parallelism against *this
+demo's own* CPU oracle, which is a straightforward serial reference (it even
+reallocates per sample). It is **not** a benchmark against the reference
+plugin's optimized Eigen CPU inference, and we do not claim to beat that — no
+such benchmark has been run. For a typical `.nam` capture the CPU oracle is
+already comfortably real-time, which is exactly why it is the default engine.
+The honest, measured takeaway is narrow and true: **our GPU engine scales to
+model sizes where our serial CPU oracle cannot**, and it reproduces the CPU
+oracle bit-for-bit while doing so.
+
 ## Signal-face parity
 
 | Control | Reference | GPU NAM | Notes |
@@ -60,23 +87,27 @@ regardless of host block size).
 | Model (`.nam`) slot | ✅ | ✅ | Loads WaveNet captures |
 | Engine CPU/GPU switch | ✕ (CPU only) | ✅ | The point of the GPU demo |
 
-## Honest gaps (where the reference does more, today)
+## Scope differences
+
+Two signal features exist in the reference and differ in GPU NAM today:
 
 - **Impulse-response (IR) convolution** — the reference loads and applies a
-  cabinet IR. GPU NAM shows the IR slot for layout faithfulness but **does not
-  apply an IR yet**; it is a UI placeholder, not wired to a convolver. (Pulp has
-  a partitioned convolver — see SuperConvolver — so this is a wiring task, not a
-  missing capability.)
-- **Output mode / calibration** — the reference offers Raw / Normalized /
-  Calibrated output and input-level calibration. GPU NAM has plain output gain
-  only.
-- **Model training** — out of scope by design; GPU NAM is a player. Train with
-  the [NAM trainer](https://github.com/sdatkinson/neural-amp-modeler).
+  cabinet IR. GPU NAM shows the IR slot; applying a loaded IR through Pulp's
+  partitioned convolver (in the same fixed-block chain as the model) is the
+  active next slice.
+- **Output mode (Raw / Normalized / Calibrated)** — the reference offers
+  loudness-normalized and calibrated output. GPU NAM offers plain output gain;
+  loudness-normalized output from the model's embedded metadata is a candidate
+  follow-up, while full digital-analog calibration depends on host calibration
+  and is out of scope for a demo.
+
+Model training is intentionally out of scope here — GPU NAM is a player; train
+with the [NAM trainer](https://github.com/sdatkinson/neural-amp-modeler).
 
 ## Summary
 
 On the faithful signal face and the editor, GPU NAM reaches parity with the
 reference. Its distinct contribution is running the **neural amp inference on
-the GPU** (opt-in, bit-exact against the CPU), which the CPU-only reference does
-not offer. It trails the reference on IR convolution and output calibration,
-both of which are known follow-ups rather than architectural limits.
+the GPU** (opt-in, bit-exact against the CPU oracle) — the reference runs its
+inference on the CPU. Both editors are GPU-rendered; the audio path is where the
+GPU work is unique to this demo.

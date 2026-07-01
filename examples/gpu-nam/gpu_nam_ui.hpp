@@ -234,18 +234,19 @@ private:
         constexpr float kSweep = 135.0f;  // ±135° → 270° travel
         const float a0 = -kSweep * 3.14159265f / 180.0f;
         const float a1 = (-kSweep + frac * 2.0f * kSweep) * 3.14159265f / 180.0f;
-        // Value arc hugs the knob face (NAM's ring sits just outside the cap, not
-        // floating with a gap).
-        const float arc_r = sR + ss(0.5f);
+        // Value arc: a thin, delicate ring hugging the cap. The reference's ring
+        // is subtle — a near-invisible dark track with a fine accent sweep — so
+        // keep the stroke light and the track very dim.
+        const float arc_r = sR + ss(1.0f);
         stroke_arc_points(canvas, scx, scy, arc_r, a0,  kSweep * 3.14159265f / 180.0f,
-                          colors_.arc_track, ss(2.5f));
-        stroke_arc_points(canvas, scx, scy, arc_r, a0, a1, colors_.accent, ss(2.5f));
+                          colors_.arc_track, ss(1.7f));
+        stroke_arc_points(canvas, scx, scy, arc_r, a0, a1, colors_.accent, ss(1.7f));
 
         // Indicator dot set inside the cap (not riding the rim), like NAM.
-        const float ix = scx + std::sin(a1) * sR * 0.5f;
-        const float iy = scy - std::cos(a1) * sR * 0.5f;
+        const float ix = scx + std::sin(a1) * sR * 0.52f;
+        const float iy = scy - std::cos(a1) * sR * 0.52f;
         canvas.set_fill_color(colors_.accent);
-        canvas.fill_circle(ix, iy, ss(2.6f));
+        canvas.fill_circle(ix, iy, ss(2.1f));
 
         // Value readout below.
         char buf[40];
@@ -376,56 +377,113 @@ private:
         canvas.set_text_align(cv::TextAlign::left);
     }
 
-    // ── settings overlay (this demo's GPU controls) ──
+    // ── settings page (this demo's GPU controls) ──
+    // A full-panel page in the same structure as the reference's settings view:
+    // a SETTINGS title, sectioned control rows with help text, and Model / About
+    // blocks along the bottom. The reference's page carries output-mode +
+    // input-calibration; ours carries the GPU demo's Engine + Bypass, since that
+    // is what this demo adds.
     void paint_settings(cv::Canvas& canvas) {
-        const float x = 150.0f, y = 90.0f, w = 300.0f, h = 200.0f;
-        canvas.set_fill_color(colors_.overlay.with_alpha(0.96f));
-        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(10.0f));
+        const float x = 34.0f, y = 34.0f;
+        const float w = nam_geom::kW - 68.0f, h = nam_geom::kH - 68.0f;
+        // Dim the face, then draw the page.
+        canvas.set_fill_color(colors_.overlay.with_alpha(0.55f));
+        canvas.fill_rect(sx(0), sy(0), ss(nam_geom::kW), ss(nam_geom::kH));
+        canvas.set_fill_color(cv::Color::rgba8(20, 20, 22).with_alpha(0.985f));
+        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(8.0f));
         canvas.set_stroke_color(colors_.accent);
         canvas.set_line_width(ss(1.0f));
-        canvas.stroke_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(10.0f));
+        canvas.stroke_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(8.0f));
 
+        // Title (Michroma, like the reference's settings title).
         canvas.set_fill_color(colors_.text);
-        canvas.set_font("Michroma", ss(13.0f));
+        canvas.set_font("Michroma", ss(22.0f));
         canvas.set_text_align(cv::TextAlign::center);
-        canvas.fill_text("SETTINGS", sx(x + w * 0.5f), sy(y + 26.0f));
+        canvas.fill_text("SETTINGS", sx(nam_geom::kW * 0.5f), sy(y + 42.0f));
         canvas.set_text_align(cv::TextAlign::left);
 
-        settings_engine_ = pill(canvas, x + 24.0f, y + 52.0f, w - 48.0f,
-                                store_.get_value(kEngine) >= 0.5f ? "Audio engine: GPU"
-                                                                  : "Audio engine: CPU",
-                                store_.get_value(kEngine) >= 0.5f);
-        settings_bypass_ = pill(canvas, x + 24.0f, y + 96.0f, w - 48.0f,
-                                store_.get_value(kBypass) >= 0.5f ? "Bypassed" : "Active",
-                                store_.get_value(kBypass) >= 0.5f);
+        // Close (×) top-right.
+        settings_close_ = {sx(x + w - 34.0f), sy(y + 14.0f), ss(24.0f), ss(24.0f)};
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(20.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text("\xC3\x97", sx(x + w - 22.0f), sy(y + 30.0f));  // ×
+        canvas.set_text_align(cv::TextAlign::left);
 
-        // Live GPU status line.
-        const auto g = proc_.gpu_status();
-        std::string s;
-        if (g.active) {
-            char buf[96];
-            std::snprintf(buf, sizeof buf, "GPU %s · %.0f%% RT",
-                          g.backend.empty() ? "on" : g.backend.c_str(), g.rt_percent);
-            s = buf;
-        } else {
-            s = "GPU idle (CPU oracle live)";
-        }
+        const float rowL = x + 40.0f, rowW = w - 80.0f;
+        const float segW = (rowW - 14.0f) * 0.5f;
+        float cy = y + 84.0f;
+
+        // Audio engine — a two-option selector (parallels the reference's
+        // Output-Mode radio).
+        section_label(canvas, rowL, cy, "AUDIO ENGINE");
+        cy += 12.0f;
+        const bool gpu = store_.get_value(kEngine) >= 0.5f;
+        settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
+        settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
+        cy += 40.0f;
+        help(canvas, rowL, cy,
+             "Runs the neural amp on the CPU (always available) or the GPU");
+        help(canvas, rowL, cy + 15.0f, "(opt-in, bit-exact against the CPU oracle).");
+        cy += 44.0f;
+
+        // Bypass — a switch row (parallels the reference's Calibrate-Input switch).
+        section_label(canvas, rowL, cy, "BYPASS");
+        cy += 12.0f;
+        const bool byp = store_.get_value(kBypass) >= 0.5f;
+        settings_bypass_ = seg(canvas, rowL, cy, segW, byp ? "Bypassed" : "Active", byp);
+        cy += 40.0f;
+        help(canvas, rowL, cy, "Passes the dry input through, unprocessed.");
+
+        // Bottom: Model (left) + About (right), like the reference's Model-Info /
+        // About blocks.
+        const float by = y + h - 74.0f;
+        section_label(canvas, rowL, by, "MODEL");
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Roboto", ss(11.0f));
+        canvas.fill_text(proc_.model_name(), sx(rowL), sy(by + 22.0f));
         canvas.set_fill_color(colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
-        canvas.set_text_align(cv::TextAlign::center);
-        canvas.fill_text(s, sx(x + w * 0.5f), sy(y + h - 20.0f));
-        canvas.fill_text(proc_.model_name(), sx(x + w * 0.5f), sy(y + h - 36.0f));
-        canvas.set_text_align(cv::TextAlign::left);
+        canvas.fill_text("WaveNet .nam capture", sx(rowL), sy(by + 38.0f));
+
+        const float ax = x + w * 0.5f + 20.0f;
+        section_label(canvas, ax, by, "ABOUT");
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Roboto", ss(11.0f));
+        canvas.fill_text("GPU NAM \xC2\xB7 Pulp GPU audio demo", sx(ax), sy(by + 22.0f));
+        const auto g = proc_.gpu_status();
+        char buf[96];
+        if (g.active)
+            std::snprintf(buf, sizeof buf, "GPU %s \xC2\xB7 %.0f%% RT",
+                          g.backend.empty() ? "on" : g.backend.c_str(), g.rt_percent);
+        else
+            std::snprintf(buf, sizeof buf, "GPU idle (CPU oracle live)");
+        canvas.set_fill_color(g.active ? colors_.accent : colors_.text_dim);
+        canvas.set_font("Roboto", ss(10.0f));
+        canvas.fill_text(buf, sx(ax), sy(by + 38.0f));
     }
 
-    vw::Rect pill(cv::Canvas& canvas, float x, float y, float w, const std::string& text, bool on) {
-        const float h = 30.0f;
+    void section_label(cv::Canvas& canvas, float x, float y, const char* text) {
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(9.5f));
+        canvas.set_text_align(cv::TextAlign::left);
+        canvas.fill_text(text, sx(x), sy(y));
+    }
+    void help(cv::Canvas& canvas, float x, float y, const char* text) {
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(9.5f));
+        canvas.set_text_align(cv::TextAlign::left);
+        canvas.fill_text(text, sx(x), sy(y));
+    }
+    // A selectable segment: lit = accent fill, else dim outline. Returns its rect.
+    vw::Rect seg(cv::Canvas& canvas, float x, float y, float w, const std::string& text, bool on) {
+        const float h = 28.0f;
         canvas.set_fill_color(on ? colors_.accent : colors_.toggle_off);
-        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(h * 0.5f));
+        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(6.0f));
         canvas.set_fill_color(on ? colors_.panel : colors_.text);
         canvas.set_font("Roboto", ss(12.0f));
         canvas.set_text_align(cv::TextAlign::center);
-        canvas.fill_text(text, sx(x + w * 0.5f), sy(y + h * 0.62f));
+        canvas.fill_text(text, sx(x + w * 0.5f), sy(y + h * 0.64f));
         canvas.set_text_align(cv::TextAlign::left);
         return {sx(x), sy(y), ss(w), ss(h)};
     }
@@ -445,9 +503,14 @@ private:
         pointer_down_ = true;
 
         if (show_settings_) {
-            if (in_rect(p, settings_engine_)) { toggle_param(kEngine); return; }
+            if (in_rect(p, settings_close_)) { show_settings_ = false; return; }
+            if (in_rect(p, settings_engine_cpu_)) { set_param(kEngine, 0.0f); return; }
+            if (in_rect(p, settings_engine_gpu_)) { set_param(kEngine, 1.0f); return; }
             if (in_rect(p, settings_bypass_)) { toggle_param(kBypass); return; }
-            show_settings_ = false;  // click-away closes
+            // A click outside the page closes it; clicks inside are inert.
+            const vw::Rect page{sx(34.0f), sy(34.0f),
+                                ss(nam_geom::kW - 68.0f), ss(nam_geom::kH - 68.0f)};
+            if (!in_rect(p, page)) show_settings_ = false;
             return;
         }
         if (in_circle(p, sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
@@ -493,10 +556,12 @@ private:
         if (active_knob_ >= 0) { edit_.finish(); active_knob_ = -1; }
     }
 
-    void toggle_param(pulp::state::ParamID id) {
-        const float v = store_.get_value(id) >= 0.5f ? 0.0f : 1.0f;
+    void set_param(pulp::state::ParamID id, float v) {
         pulp::state::ParameterEdit t(store_);
         t.begin(id); t.set(id, v); t.finish();
+    }
+    void toggle_param(pulp::state::ParamID id) {
+        set_param(id, store_.get_value(id) >= 0.5f ? 0.0f : 1.0f);
     }
 
     float knob_value(int i) const {
@@ -523,7 +588,7 @@ private:
     float drag_start_y_ = 0.0f, drag_start_frac_ = 0.0f;
     bool pointer_down_ = false;
     bool show_settings_ = false;
-    vw::Rect settings_engine_{}, settings_bypass_{};
+    vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{}, settings_close_{};
 };
 
 } // namespace pulp::examples
