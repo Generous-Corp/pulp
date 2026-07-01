@@ -260,38 +260,69 @@ private:
 
 namespace detail_a2 {
 
-// Parse one activation entry: {"type":"LeakyReLU","negative_slope":0.01} or a
-// bare string name. Defaults to LeakyReLU(0.01) — A2's activation.
-inline A2Act parse_act(const choc::value::ValueView& v) {
+// Parse a JSON value as an integer in [lo, hi]. Sets ok=false (never flips it back
+// to true) on anything that is not a finite, integral number in range — including
+// strings/objects/arrays/bools, NaN/Inf, fractional values, and out-of-range
+// magnitudes like 1e100 that would be undefined to cast to int. Returns lo on
+// failure so downstream arithmetic stays bounded.
+inline long parse_int(const choc::value::ValueView& v, long lo, long hi, bool& ok) {
+    if (v.isVoid() || v.isObject() || v.isArray() || v.isString() || v.isBool()) {
+        ok = false;
+        return lo;
+    }
+    const double d = detail::num(v);
+    if (!std::isfinite(d) || d < static_cast<double>(lo) || d > static_cast<double>(hi)
+        || d != std::floor(d)) {
+        ok = false;
+        return lo;
+    }
+    return static_cast<long>(d);
+}
+
+// Parse one activation entry: {"type":"LeakyReLU","negative_slope":0.01} or a bare
+// string name. Returns false on an unknown/malformed type or a non-finite slope, so
+// a typo like "LeakyyReLU" fails the load instead of silently rendering Identity.
+inline bool parse_act(const choc::value::ValueView& v, A2Act& out) {
     A2Act a;
     std::string type;
     if (v.isString()) {
         type = std::string(v.getString());
     } else if (v.isObject() && v.hasObjectMember("type") && v["type"].isString()) {
         type = std::string(v["type"].getString());
-        if (v.hasObjectMember("negative_slope"))
-            a.slope = static_cast<float>(v["negative_slope"].getWithDefault<double>(0.01));
+        if (v.hasObjectMember("negative_slope")) {
+            const double s = detail::num(v["negative_slope"]);
+            if (!std::isfinite(s)) return false;
+            a.slope = static_cast<float>(s);
+        }
+    } else {
+        return false;
     }
-    if (type == "LeakyReLU" || type.empty()) a.kind = A2Act::LeakyReLU;
-    else if (type == "Tanh")                 a.kind = A2Act::Tanh;
-    else if (type == "ReLU")                 a.kind = A2Act::ReLU;
-    else if (type == "Sigmoid")              a.kind = A2Act::Sigmoid;
-    else if (type == "Hardtanh")             a.kind = A2Act::Hardtanh;
-    else                                     a.kind = A2Act::Identity;
-    return a;
+    if (type == "LeakyReLU")                     a.kind = A2Act::LeakyReLU;
+    else if (type == "Tanh")                     a.kind = A2Act::Tanh;
+    else if (type == "ReLU")                     a.kind = A2Act::ReLU;
+    else if (type == "Sigmoid")                  a.kind = A2Act::Sigmoid;
+    else if (type == "Hardtanh")                 a.kind = A2Act::Hardtanh;
+    else if (type == "Linear" || type == "Identity") a.kind = A2Act::Identity;
+    else return false;  // unknown activation -> reject, never silently mis-render
+    out = a;
+    return true;
 }
 
-// True iff config.layers[0] carries A2's distinguishing markers (per-layer
-// kernel_sizes array, or a windowed head dict, or a per-layer activation array).
+// True iff any layer array carries A2's distinguishing markers (per-layer
+// kernel_sizes array, a windowed head dict, or a per-layer activation array).
+// Scans every array — a multi-array file with A2 markers only in a later array
+// must still route to A2 (or be rejected there) rather than to the A1 loader.
 inline bool looks_like_a2(const choc::value::ValueView& config) {
     if (!config.isObject() || !config.hasObjectMember("layers")) return false;
     const choc::value::ValueView layers = config["layers"];
     if (!layers.isArray() || layers.size() == 0) return false;
-    const choc::value::ValueView L = layers[0];
-    if (!L.isObject()) return false;
-    if (L.hasObjectMember("kernel_sizes") && L["kernel_sizes"].isArray()) return true;
-    if (L.hasObjectMember("head") && L["head"].isObject()) return true;
-    if (L.hasObjectMember("activation") && L["activation"].isArray()) return true;
+    for (uint32_t i = 0; i < layers.size(); ++i) {
+        const choc::value::ValueView L = layers[i];
+        if (!L.isObject()) continue;
+        if (L.hasObjectMember("kernel_sizes") && L["kernel_sizes"].isArray()) return true;
+        if (L.hasObjectMember("head") && L["head"].isObject()) return true;
+        if (L.hasObjectMember("activation") && L["activation"].isArray()) return true;
+    }
     return false;
 }
 
@@ -315,11 +346,17 @@ inline bool parse_submodel(const choc::value::ValueView& model, A2ArrayConfig& a
 
     const choc::value::ValueView L = layers[0];
     A2ArrayConfig a;
-    a.input_size = static_cast<int>(detail::num(L["input_size"]));
-    a.condition_size = static_cast<int>(detail::num(L["condition_size"]));
-    a.channels = static_cast<int>(detail::num(L["channels"]));
+    bool ok = true;
+    // parse_int with lo=1 enforces strictly-positive dimensions and finite/in-range
+    // values, so channels:0, channels:1e100, and channels:"x" all fail cleanly
+    // instead of building empty/degenerate convs.
+    a.input_size = static_cast<int>(parse_int(L["input_size"], 1, 1 << 16, ok));
+    a.condition_size = static_cast<int>(parse_int(L["condition_size"], 1, 1 << 16, ok));
+    a.channels = static_cast<int>(parse_int(L["channels"], 1, 1 << 16, ok));
     a.bottleneck = L.hasObjectMember("bottleneck")
-                       ? static_cast<int>(detail::num(L["bottleneck"])) : a.channels;
+                       ? static_cast<int>(parse_int(L["bottleneck"], 1, 1 << 16, ok)) : a.channels;
+    if (!ok) return fail("A2: missing or out-of-range layer dimension "
+                         "(input_size/condition_size/channels/bottleneck)");
 
     if (a.input_size != 1) return fail("A2: input_size != 1 not supported");
     if (a.condition_size != 1)
@@ -349,11 +386,13 @@ inline bool parse_submodel(const choc::value::ValueView& model, A2ArrayConfig& a
     std::vector<int> kernels;
     if (L.hasObjectMember("kernel_sizes") && L["kernel_sizes"].isArray()) {
         const choc::value::ValueView ks = L["kernel_sizes"];
-        for (uint32_t i = 0; i < ks.size(); ++i) kernels.push_back(static_cast<int>(detail::num(ks[i])));
-    } else if (L.hasObjectMember("kernel_size")) {
-        // A single scalar applies to every layer.
-        kernels.assign(0, 0);  // filled after we know the dilation count
-    } else {
+        for (uint32_t i = 0; i < ks.size(); ++i) {
+            bool kok = true;
+            const int kv = static_cast<int>(parse_int(ks[i], 1, 1 << 12, kok));
+            if (!kok) return fail("A2: kernel size out of range");
+            kernels.push_back(kv);
+        }
+    } else if (!L.hasObjectMember("kernel_size")) {
         return fail("A2: missing kernel_sizes/kernel_size");
     }
 
@@ -361,32 +400,41 @@ inline bool parse_submodel(const choc::value::ValueView& model, A2ArrayConfig& a
         return fail("A2: 'dilations' must be an array");
     const choc::value::ValueView dil = L["dilations"];
     for (uint32_t d = 0; d < dil.size(); ++d) {
-        const int dv = static_cast<int>(detail::num(dil[d]));
-        if (dv <= 0 || dv > (1 << 16)) return fail("A2: dilation out of range");
+        bool dok = true;
+        const int dv = static_cast<int>(parse_int(dil[d], 1, 1 << 16, dok));
+        if (!dok) return fail("A2: dilation out of range");
         a.dilations.push_back(dv);
     }
     if (a.dilations.empty()) return fail("A2: 'dilations' must be non-empty");
 
-    if (kernels.empty()) {  // scalar kernel_size path
-        const int k = static_cast<int>(detail::num(L["kernel_size"]));
+    if (kernels.empty()) {  // scalar kernel_size applied to every layer
+        bool kok = true;
+        const int k = static_cast<int>(parse_int(L["kernel_size"], 1, 1 << 12, kok));
+        if (!kok) return fail("A2: kernel size out of range");
         kernels.assign(a.dilations.size(), k);
     }
     if (kernels.size() != a.dilations.size())
         return fail("A2: kernel_sizes length (" + std::to_string(kernels.size())
                     + ") != dilations length (" + std::to_string(a.dilations.size()) + ")");
-    for (int k : kernels)
-        if (k <= 0 || k > (1 << 12)) return fail("A2: kernel size out of range");
     a.kernel_sizes = std::move(kernels);
 
-    // Per-layer activation array, a single object, or a bare string.
+    // Per-layer activation array, a single object/string, or absent (default). An
+    // unknown or malformed activation is rejected, never coerced to Identity.
     if (L.hasObjectMember("activation") && L["activation"].isArray()) {
         const choc::value::ValueView av = L["activation"];
         if (av.size() != a.dilations.size())
             return fail("A2: activation array length != layer count");
-        for (uint32_t i = 0; i < av.size(); ++i) a.activations.push_back(parse_act(av[i]));
-    } else {
-        A2Act one = L.hasObjectMember("activation") ? parse_act(L["activation"]) : A2Act{};
+        for (uint32_t i = 0; i < av.size(); ++i) {
+            A2Act one;
+            if (!parse_act(av[i], one)) return fail("A2: unknown or malformed activation");
+            a.activations.push_back(one);
+        }
+    } else if (L.hasObjectMember("activation")) {
+        A2Act one;
+        if (!parse_act(L["activation"], one)) return fail("A2: unknown or malformed activation");
         a.activations.assign(a.dilations.size(), one);
+    } else {
+        a.activations.assign(a.dilations.size(), A2Act{});  // default LeakyReLU(0.01)
     }
 
     // Reject any active secondary activation / gating (present-but-off is fine).
@@ -405,26 +453,35 @@ inline bool parse_submodel(const choc::value::ValueView& model, A2ArrayConfig& a
     }
 
     // Windowed head: {out_channels, kernel_size, bias}. Absent -> 1x1 head.
+    bool hok = true;
     if (L.hasObjectMember("head") && L["head"].isObject()) {
         const choc::value::ValueView h = L["head"];
-        a.head_out = h.hasObjectMember("out_channels") ? static_cast<int>(detail::num(h["out_channels"])) : 1;
-        a.head_kernel = h.hasObjectMember("kernel_size") ? static_cast<int>(detail::num(h["kernel_size"])) : 1;
+        a.head_out = h.hasObjectMember("out_channels")
+                         ? static_cast<int>(parse_int(h["out_channels"], 1, 1 << 16, hok)) : 1;
+        a.head_kernel = h.hasObjectMember("kernel_size")
+                            ? static_cast<int>(parse_int(h["kernel_size"], 1, 1 << 12, hok)) : 1;
         a.head_bias = !h.hasObjectMember("bias") || h["bias"].getWithDefault<bool>(true);
     } else {
-        a.head_out = L.hasObjectMember("head_size") ? static_cast<int>(detail::num(L["head_size"])) : 1;
+        a.head_out = L.hasObjectMember("head_size")
+                         ? static_cast<int>(parse_int(L["head_size"], 1, 1 << 16, hok)) : 1;
         a.head_kernel = 1;
         a.head_bias = L.hasObjectMember("head_bias") && L["head_bias"].getWithDefault<bool>(false);
     }
+    if (!hok) return fail("A2: head out_channels/kernel_size out of range");
     if (a.head_out != 1) return fail("A2: head out_channels != 1 not supported");
-    if (a.head_kernel <= 0 || a.head_kernel > (1 << 12)) return fail("A2: head kernel out of range");
 
-    // weights (per submodel, includes the trailing head_scale).
+    // weights (per submodel, includes the trailing head_scale). Reject non-finite
+    // entries so a NaN/Inf weight can't poison the whole output.
     if (!model.hasObjectMember("weights")) return fail("A2: submodel missing 'weights'");
     const choc::value::ValueView wv = model["weights"];
     if (!wv.isArray()) return fail("A2: 'weights' must be an array");
     weights_out.clear();
     weights_out.reserve(wv.size());
-    for (uint32_t i = 0; i < wv.size(); ++i) weights_out.push_back(static_cast<float>(detail::num(wv[i])));
+    for (uint32_t i = 0; i < wv.size(); ++i) {
+        const double wd = detail::num(wv[i]);
+        if (!std::isfinite(wd)) return fail("A2: non-finite weight");
+        weights_out.push_back(static_cast<float>(wd));
+    }
 
     arr_out = std::move(a);
     return true;
@@ -460,6 +517,7 @@ public:
                 if (!s.isObject() || !s.hasObjectMember("model"))
                     return fail("A2: submodel " + std::to_string(i) + " missing 'model'");
                 const double mv = s.hasObjectMember("max_value") ? detail::num(s["max_value"]) : 1.0;
+                if (!std::isfinite(mv)) return fail("A2: submodel " + std::to_string(i) + " non-finite max_value");
                 if (!add_variant(s["model"], mv, error)) return false;
             }
         } else {
@@ -471,6 +529,12 @@ public:
         for (std::size_t i = 1; i < variants_.size(); ++i)
             for (std::size_t j = i; j > 0 && variants_[j].max_value < variants_[j - 1].max_value; --j)
                 std::swap(variants_[j], variants_[j - 1]);
+        // Duplicate max_values make selection order-dependent (load defaults to the
+        // last, set_size() picks the first with max_value >= size), so the same
+        // requested size would resolve to different models. Reject the ambiguity.
+        for (std::size_t i = 1; i < variants_.size(); ++i)
+            if (variants_[i].max_value == variants_[i - 1].max_value)
+                return fail("A2: duplicate submodel max_value is ambiguous");
         active_ = static_cast<int>(variants_.size()) - 1;
         return true;
     }

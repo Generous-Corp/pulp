@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -23,9 +24,11 @@
 #include <vector>
 
 #include "nam_a2.hpp"
+#include "nam_model.hpp"
 #include "nam_runtime.hpp"
 
 using namespace pulp::examples::nam;
+using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
 
 namespace {
@@ -115,13 +118,15 @@ TEST_CASE("A2 single-layer forward matches a hand-computed closed form", "[nam][
     std::filesystem::remove(path);
 }
 
-TEST_CASE("A2 windowed head (kernel 2) convolves over time", "[nam][a2]") {
+TEST_CASE("A2 windowed head (kernel 2) convolves causally over time", "[nam][a2]") {
     // Identity layer (slope=1 makes LeakyReLU the identity, condition weight 0), so
-    // the skip a[n] == x[n]. Head kernel=2 with equal taps 1.0 and bias 0:
-    //   output[n] = a[n] + a[n-1] = x[n] + x[n-1].
+    // the skip a[n] == x[n]. Head kernel=2 with ASYMMETRIC taps so the test pins the
+    // causal tap order (a reversed order or off-by-one would change the result):
+    // the .nam head weights are [k0, k1] and the conv maps k0 -> oldest sample, so
+    //   output[n] = 2*a[n-1] + 3*a[n] = 2*x[n-1] + 3*x[n].
     // Weights: rechannel[1], conv[1,0], input_mixin[0], layer1x1[1,0],
-    //          head[1,1,0], head_scale[1].
-    const std::vector<float> w = {1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
+    //          head[k0=2, k1=3, bias=0], head_scale[1].
+    const std::vector<float> w = {1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 2.0f, 3.0f, 0.0f, 1.0f};
     NamA2 m;
     std::string err;
     const std::string json = a2_submodel(1, {1}, {1}, /*slope=*/1.0f, /*head_kernel=*/2, w);
@@ -129,7 +134,8 @@ TEST_CASE("A2 windowed head (kernel 2) convolves over time", "[nam][a2]") {
     REQUIRE(load_nam_a2(path, m, &err));
     m.reset();
     const std::vector<float> in = {1.0f, 0.0f, 0.0f, 2.0f, -1.0f};
-    const std::vector<float> golden = {1.0f, 1.0f, 0.0f, 2.0f, 1.0f};
+    // n0: 2*0 + 3*1 = 3 ; n1: 2*1 + 3*0 = 2 ; n2: 0 ; n3: 2*0 + 3*2 = 6 ; n4: 2*2 + 3*-1 = 1.
+    const std::vector<float> golden = {3.0f, 2.0f, 0.0f, 6.0f, 1.0f};
     for (std::size_t i = 0; i < in.size(); ++i)
         CHECK_THAT(m.process_sample(in[i]), WithinAbs(golden[i], 1e-6));
     std::filesystem::remove(path);
@@ -194,69 +200,94 @@ TEST_CASE("A2 loads through NamRuntime dispatch", "[nam][a2][runtime]") {
     std::filesystem::remove(path);
 }
 
-TEST_CASE("A2 rejects unsupported shapes rather than mis-rendering", "[nam][a2]") {
-    auto load_fails = [](const std::string& json) {
+TEST_CASE("A2 rejects unsupported shapes with the right error, not a stray one", "[nam][a2]") {
+    // Returns the load error (or "<loaded ok>"). Each case asserts the SPECIFIC guard
+    // fires — otherwise deleting a guard could still "pass" via a later weight-count
+    // failure. The base weights are shape-correct for a channels-1/head-kernel-1 model,
+    // so a structural guard is what actually trips.
+    auto err_for = [](const std::string& json) {
         NamA2 m;
         std::string err;
-        const bool ok = m.build(choc::json::parse(json), &err);
-        return !ok && !err.empty();
+        return m.build(choc::json::parse(json), &err) ? std::string("<loaded ok>") : err;
     };
     const std::vector<float> w = {1, 2, 0.5f, 1, 1, 0, 1, 0, 0.5f};
+    auto with = [&](const std::string& find, const std::string& repl) {
+        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
+        j.replace(j.find(find), find.size(), repl);
+        return j;
+    };
+    auto insert_before_head = [&](const std::string& frag) {
+        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
+        j.insert(j.find("\"head\":"), frag);
+        return j;
+    };
 
-    // bottleneck != channels.
+    CHECK_THAT(err_for(with("\"bottleneck\":1", "\"bottleneck\":2")),
+               ContainsSubstring("bottleneck != channels"));
+    CHECK_THAT(err_for(insert_before_head("\"gating_mode\":[\"gated\"],")),
+               ContainsSubstring("gating"));
+    CHECK_THAT(err_for(insert_before_head("\"conv_pre_film\":{\"active\":true},")),
+               ContainsSubstring("FiLM"));
+    CHECK_THAT(err_for(with("\"condition_size\":1", "\"condition_size\":2")),
+               ContainsSubstring("condition_size != 1"));
+    CHECK_THAT(err_for(with("\"out_channels\":1", "\"out_channels\":2")),
+               ContainsSubstring("head out_channels != 1"));
+    CHECK_THAT(err_for(with("\"channels\":1", "\"channels\":0")),
+               ContainsSubstring("layer dimension"));   // nonpositive dim rejected
+    CHECK_THAT(err_for(with("\"channels\":1", "\"channels\":1e100")),
+               ContainsSubstring("layer dimension"));   // out-of-range int rejected
+    CHECK_THAT(err_for(with("{\"type\":\"LeakyReLU\",\"negative_slope\":0.1}",
+                            "{\"type\":\"LeakyyReLU\",\"negative_slope\":0.1}")),
+               ContainsSubstring("activation"));         // typo'd activation rejected
+
+    // Non-finite weight: JSON has no nan/inf literal, but an overflowing exponent
+    // (1e400) parses to infinity — inject it as a raw token past the sentinel tail.
     {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        // Force bottleneck to 2 while channels stays 1.
-        const std::string from = "\"bottleneck\":1";
-        j.replace(j.find(from), from.size(), "\"bottleneck\":2");
-        CHECK(load_fails(j));
+        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, {1, 2, 0.5f, 1, 1, 0, 1, 0, 0.25f});
+        j.replace(j.rfind("0.25]"), 5, "1e400]");
+        CHECK_THAT(err_for(j), ContainsSubstring("non-finite weight"));
     }
-    // Active gating.
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        j.insert(j.find("\"head\":"), "\"gating_mode\":[\"gated\"],");
-        CHECK(load_fails(j));
-    }
-    // Active FiLM.
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        j.insert(j.find("\"head\":"), "\"conv_pre_film\":{\"active\":true},");
-        CHECK(load_fails(j));
-    }
-    // condition_size != 1.
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        const std::string from = "\"condition_size\":1";
-        j.replace(j.find(from), from.size(), "\"condition_size\":2");
-        CHECK(load_fails(j));
-    }
-    // head out_channels != 1.
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        const std::string from = "\"out_channels\":1";
-        j.replace(j.find(from), from.size(), "\"out_channels\":2");
-        CHECK(load_fails(j));
-    }
-    // Multi-array (two layer arrays) not supported.
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, w);
-        // Duplicate the single layer object into a second array entry.
-        const std::string one = j.substr(j.find("\"layers\":[") + 9);  // from the '['
-        // Simpler: build a bespoke two-array config.
-        std::string two =
-            "{\"architecture\":\"WaveNet\",\"config\":{\"layers\":[{\"input_size\":1,"
-            "\"condition_size\":1,\"channels\":1,\"bottleneck\":1,\"kernel_sizes\":[1],"
-            "\"dilations\":[1],\"activation\":[{\"type\":\"LeakyReLU\",\"negative_slope\":0.1}],"
-            "\"head\":{\"out_channels\":1,\"kernel_size\":1,\"bias\":true}},{\"input_size\":1,"
-            "\"condition_size\":1,\"channels\":1,\"bottleneck\":1,\"kernel_sizes\":[1],"
-            "\"dilations\":[1],\"activation\":[{\"type\":\"LeakyReLU\",\"negative_slope\":0.1}],"
-            "\"head\":{\"out_channels\":1,\"kernel_size\":1,\"bias\":true}}],\"head_scale\":1.0},"
-            "\"weights\":[1,2,0.5,1,1,0,1,0,1,2,0.5,1,1,0,1,0,0.5]}";
-        CHECK(load_fails(two));
-    }
-    // Weight-count mismatch (too few).
-    {
-        std::string j = a2_submodel(1, {1}, {1}, 0.1f, 1, {1, 2, 0.5f});
-        CHECK(load_fails(j));
-    }
+
+    // Weight-count mismatch (too few) surfaces from A2Model::build.
+    CHECK_THAT(err_for(a2_submodel(1, {1}, {1}, 0.1f, 1, {1, 2, 0.5f})),
+               ContainsSubstring("weight count mismatch"));
+
+    // Multi-array WaveNet is rejected (A2 captures are single-array).
+    const std::string one_layer =
+        "{\"input_size\":1,\"condition_size\":1,\"channels\":1,\"bottleneck\":1,"
+        "\"kernel_sizes\":[1],\"dilations\":[1],"
+        "\"activation\":[{\"type\":\"LeakyReLU\",\"negative_slope\":0.1}],"
+        "\"head\":{\"out_channels\":1,\"kernel_size\":1,\"bias\":true}}";
+    const std::string two_array =
+        "{\"architecture\":\"WaveNet\",\"config\":{\"layers\":[" + one_layer + "," + one_layer
+        + "],\"head_scale\":1.0},\"weights\":[1,2,0.5,1,1,0,1,0,1,2,0.5,1,1,0,1,0,0.5]}";
+    CHECK_THAT(err_for(two_array), ContainsSubstring("multi-array"));
+
+    // Duplicate max_value in a container is ambiguous.
+    const std::string sub = a2_submodel(1, {1}, {1}, 1.0f, 1,
+                                        {1, 2, 0, 0, 1, 0, 1, 0, 1});
+    CHECK_THAT(err_for(a2_container({{0.5, sub}, {0.5, sub}})),
+               ContainsSubstring("duplicate submodel max_value"));
+}
+
+TEST_CASE("A2-shaped WaveNet is never mis-parsed by the A1 loader", "[nam][a2]") {
+    // Even in a build with A2 compiled out, an A2-shaped "WaveNet" file must be
+    // rejected by the A1 loader rather than read with missing scalar fields as zero.
+    const std::string a2wave = a2_submodel(1, {1}, {1}, 0.1f, 2,
+                                           {1, 1, 0, 0, 1, 0, 1, 1, 0, 1});
+    const std::string path = write_temp("gpu_nam_a2_vs_a1.nam", a2wave);
+    NamModel a1;
+    std::string err;
+    CHECK_FALSE(load_nam(path, a1, &err));
+    CHECK_THAT(err, ContainsSubstring("A2-shaped"));
+    std::filesystem::remove(path);
+
+    // A2 markers in a LATER layer array must still be detected by the classifier.
+    const std::string mixed =
+        "{\"architecture\":\"WaveNet\",\"config\":{\"layers\":[{\"input_size\":1,"
+        "\"condition_size\":1,\"channels\":1,\"kernel_size\":1,\"head_size\":1,"
+        "\"activation\":\"Tanh\",\"dilations\":[1]},{\"input_size\":1,\"condition_size\":1,"
+        "\"channels\":1,\"kernel_sizes\":[1],\"dilations\":[1]}],\"head_scale\":1.0},"
+        "\"weights\":[]}";
+    CHECK(is_nam_a2(choc::json::parse(mixed)));
 }

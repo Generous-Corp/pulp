@@ -551,6 +551,14 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
     arrays.reserve(layers.size());
     for (uint32_t i = 0; i < layers.size(); ++i) {
         const choc::value::ValueView L = layers[i];
+        // A2-shaped WaveNet (per-layer kernel_sizes array, a windowed head dict, or a
+        // per-layer activation array) is a distinct architecture. Reject it here so an
+        // A2 file can never be silently mis-parsed as A1 — even when the A2 lane is
+        // compiled out (build with GPU_NAM_WITH_A2 to run these captures).
+        if ((L.hasObjectMember("kernel_sizes") && L["kernel_sizes"].isArray())
+            || (L.hasObjectMember("head") && L["head"].isObject())
+            || (L.hasObjectMember("activation") && L["activation"].isArray()))
+            return fail("A2-shaped WaveNet capture; rebuild with GPU_NAM_WITH_A2 enabled");
         LayerArrayConfig a;
         a.input_size = static_cast<int>(detail::num(L["input_size"]));
         a.condition_size = static_cast<int>(detail::num(L["condition_size"]));
