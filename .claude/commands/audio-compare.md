@@ -1,0 +1,66 @@
+---
+name: audio-compare
+description: Advisory before/after audio judgment — measure → compare → judge two renders and weigh in on a DSP change with cited evidence (agent-facing, not a gate)
+---
+
+Use this when you (an agent) need to **weigh in on a DSP change**: render/capture the audio
+before and after, then get a defended judgment — "did this make it worse?" — with cited
+evidence, not a bare pass/fail. It wraps the **Audio Quality Lab**'s `compare` surface
+(`tools/audio/quality-lab/`, opt-in Python; see the `audio-harness` skill for the full
+vocabulary and rationale). Advisory and off-gate: it never fails a build.
+
+**Not this — reach for the gate instead** when you just want an exact/numeric/spectral
+before-after *diff* with a pass/fail exit: use `pulp audio validate compare a.wav b.wav
+[--mode null|spectral] [--tolerance <dbfs>]` (shipped, deterministic, gate-oriented). Use
+`/audio-compare` when you want an *interpreted judgment* an agent can act on.
+
+## One-time setup (opt-in deps)
+
+```bash
+pulp tool install audio-quality-lab      # managed venv under ~/.pulp/tools
+# — or a plain checkout venv —
+cd tools/audio/quality-lab && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+```
+
+## Run it
+
+Invoke with two WAVs (`$ARGUMENTS` = `<reference.wav> <candidate.wav> [extra flags]`):
+
+```bash
+# managed:  pulp tool run audio-quality-lab -- compare $ARGUMENTS
+python -m quality_lab.cli compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
+```
+
+- **`--reference-role golden`** — declare the reference known-good and the candidate
+  *expected unchanged*. This is the ONLY mode that can return `regression_suspected`.
+- **default `--reference-role peer`** — a neutral A/B; a duller candidate reads as
+  `material_change_detected`, never "regression" (we don't assume which side is right).
+- **`--profile tonal-balance`** — the one axis today (LTAS spectral-centroid: brighter/duller).
+  More profiles (distortion, level, pitch) arrive in later slices.
+
+## Read the verdict
+
+The report (`quality_lab.compare.v1`, JSON at `--json`) has a top-level `verdict` + `summary`
+and a `measurements[]` list of typed evidence envelopes:
+
+- `regression_suspected` — golden reference + materially duller candidate → investigate/revert.
+- `material_change_detected` — a real tonal change, direction reported (duller/brighter).
+- `no_material_change_detected` — within threshold; the change didn't move tonal balance.
+- `inconclusive` — couldn't support a verdict (e.g. `not_applicable`: silent/too-short/no HF).
+- `invalid` — couldn't measure (bad WAV, sample-rate mismatch); the CLI exits non-zero ONLY here.
+
+Each measurement carries `status`/`applicable`/`materiality`/`level_match`/`provenance`, so you
+can cite *why*: e.g. "LTAS centroid 3200→2750 Hz (duller 14%), RMS matched, no clip/NaN →
+regression_suspected." Quote that evidence when you weigh in — don't just report the label.
+
+## Diff-integration: judging a DSP change in review (advisory)
+
+When a diff touches a DSP path and you want to say whether it helped or hurt:
+
+1. Render/capture **before** (base) and **after** (branch) to WAVs — offline, no device:
+   `pulp audio render --plugin <bundle> --out before.wav --duration-ms 1000 …` on each side, or
+   reuse existing golden/captured renders.
+2. `/audio-compare before.wav after.wav --reference-role golden` (base is the known-good).
+3. Attach the `summary` + cited evidence to your review note. **Advisory only** — it informs
+   your judgment; it does not gate the PR, and it requires the opt-in lab deps (never wire it
+   into default CI).
