@@ -94,6 +94,8 @@
         "tools/scripts/hotspot_size_guard.json",
         "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
+        "tools/scripts/scheduled_workflow_fork_guard_check.py",
+        "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
         "tools/scripts/host_vitals.sh",
         "tools/scripts/test_host_vitals.sh",
         "tools/scripts/host_vitals_sensor.sh",

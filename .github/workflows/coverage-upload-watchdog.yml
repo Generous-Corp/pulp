@@ -46,6 +46,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     steps:
       - name: Scan main for a recent successful Coverage run

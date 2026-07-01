@@ -44,6 +44,7 @@ permissions:
 
 jobs:
   sweep:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Scan merged PRs for unresolved bot comments
 

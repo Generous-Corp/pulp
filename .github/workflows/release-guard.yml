@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   catch-failure:
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' }}
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success') }}
     runs-on: ubuntu-latest
     name: Open issue on release-cli failure
     steps:
@@ -83,7 +83,7 @@ jobs:
               --label ci
 
   catch-missing-release:
-    if: ${{ github.event_name != 'workflow_run' }}
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (github.event_name != 'workflow_run') }}
     runs-on: ubuntu-latest
     name: Detect tag-without-release
     steps:

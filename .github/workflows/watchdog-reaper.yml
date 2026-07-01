@@ -27,6 +27,7 @@ concurrency:
 jobs:
   reap:
     name: Close stale release-watchdog trackers
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-24.04
     steps:
       - name: Reap superseded/released trackers
