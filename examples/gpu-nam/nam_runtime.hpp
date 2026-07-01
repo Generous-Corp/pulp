@@ -22,6 +22,9 @@
 #ifndef GPU_NAM_WITH_WAVENET
 #define GPU_NAM_WITH_WAVENET 1
 #endif
+#ifndef GPU_NAM_WITH_A2
+#define GPU_NAM_WITH_A2 1
+#endif
 #ifndef GPU_NAM_WITH_LSTM
 #define GPU_NAM_WITH_LSTM 1
 #endif
@@ -29,12 +32,15 @@
 #define GPU_NAM_WITH_LINEAR 1
 #endif
 
-#if !(GPU_NAM_WITH_WAVENET || GPU_NAM_WITH_LSTM || GPU_NAM_WITH_LINEAR)
-#error "GPU NAM: at least one architecture must be enabled (WaveNet, LSTM, or Linear)"
+#if !(GPU_NAM_WITH_WAVENET || GPU_NAM_WITH_A2 || GPU_NAM_WITH_LSTM || GPU_NAM_WITH_LINEAR)
+#error "GPU NAM: at least one architecture must be enabled (WaveNet, A2, LSTM, or Linear)"
 #endif
 
 #if GPU_NAM_WITH_WAVENET
 #include "nam_model.hpp"
+#endif
+#if GPU_NAM_WITH_A2
+#include "nam_a2.hpp"
 #endif
 #if GPU_NAM_WITH_LSTM
 #include "nam_lstm.hpp"
@@ -57,7 +63,7 @@ public:
     // Enum tags are always present (they name architectures regardless of which
     // are compiled in); a disabled architecture simply can never be produced by
     // the loader, which reports it as not built in this configuration.
-    enum class Arch { None, WaveNet, Lstm, Linear };
+    enum class Arch { None, WaveNet, WaveNetA2, Lstm, Linear };
 
     NamRuntime() = default;
 
@@ -65,10 +71,11 @@ public:
     Arch arch() const { return arch_; }
     const char* arch_name() const {
         switch (arch_) {
-            case Arch::WaveNet: return "WaveNet";
-            case Arch::Lstm:    return "LSTM";
-            case Arch::Linear:  return "Linear";
-            default:            return "none";
+            case Arch::WaveNet:   return "WaveNet";
+            case Arch::WaveNetA2: return "WaveNet-A2";
+            case Arch::Lstm:      return "LSTM";
+            case Arch::Linear:    return "Linear";
+            default:              return "none";
         }
     }
     double sample_rate() const {
@@ -78,6 +85,9 @@ public:
 #endif
 #if GPU_NAM_WITH_LINEAR
             case Arch::Linear: return linear_.sample_rate();
+#endif
+#if GPU_NAM_WITH_A2
+            case Arch::WaveNetA2: return a2_.sample_rate();
 #endif
 #if GPU_NAM_WITH_WAVENET
             case Arch::WaveNet: return wavenet_.sample_rate();
@@ -89,6 +99,9 @@ public:
     void reset() {
 #if GPU_NAM_WITH_WAVENET
         if (arch_ == Arch::WaveNet) { wavenet_.reset(); return; }
+#endif
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) { a2_.reset(); return; }
 #endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.reset(); return; }
@@ -105,6 +118,9 @@ public:
 #if GPU_NAM_WITH_WAVENET
         if (arch_ == Arch::WaveNet) { wavenet_.prewarm(); return; }
 #endif
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) { a2_.prewarm(); return; }
+#endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.prewarm(); return; }
 #endif
@@ -119,6 +135,9 @@ public:
 #if GPU_NAM_WITH_WAVENET
         if (arch_ == Arch::WaveNet) return wavenet_.process_sample(x);
 #endif
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) return a2_.process_sample(x);
+#endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) return lstm_.process_sample(x);
 #endif
@@ -131,6 +150,9 @@ public:
     void process(const float* in, float* out, std::uint32_t n) {
 #if GPU_NAM_WITH_WAVENET
         if (arch_ == Arch::WaveNet) { wavenet_.process(in, out, n); return; }
+#endif
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) { a2_.process(in, out, n); return; }
 #endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.process(in, out, n); return; }
@@ -169,6 +191,9 @@ private:
 #if GPU_NAM_WITH_WAVENET
     NamModel wavenet_;
 #endif
+#if GPU_NAM_WITH_A2
+    NamA2 a2_;
+#endif
 #if GPU_NAM_WITH_LSTM
     NamLstmModel lstm_;
 #endif
@@ -199,15 +224,33 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
     if (text.empty()) return fail("empty file: " + path);
 
     std::string architecture;
+    bool a2_shaped = false;
     try {
         const choc::value::Value root = choc::json::parse(text);
         if (root.isObject() && root.hasObjectMember("architecture"))
             architecture = std::string(root["architecture"].getString());
+        // A2 shares the "WaveNet" string but a SlimmableContainer / per-layer
+        // kernel_sizes / windowed head distinguish it, so classify before routing.
+#if GPU_NAM_WITH_A2
+        a2_shaped = is_nam_a2(root);
+#endif
     } catch (const std::exception& e) {
         return fail(std::string("JSON parse error: ") + e.what());
     }
 
     std::string err;
+    // A2 (SlimmableContainer, or an A2-shaped WaveNet) takes priority over the A1
+    // WaveNet loader, which shares the architecture string but rejects the shape.
+    if (a2_shaped) {
+#if GPU_NAM_WITH_A2
+        if (!load_nam_a2(path, out.a2_, &err)) return fail(err);
+        out.arch_ = NamRuntime::Arch::WaveNetA2;
+        out.error_.clear();
+        return true;
+#else
+        return fail("architecture 'WaveNet-A2' is not compiled into this build");
+#endif
+    }
 #if GPU_NAM_WITH_WAVENET
     if (architecture == "WaveNet") {
         if (!load_nam(path, out.wavenet_, &err)) return fail(err);
@@ -233,9 +276,9 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
     }
 #endif
     // A known architecture that is compiled out lands here with a clear message;
-    // so do the experimental WaveNet variants (grouped convs, FiLM, head1x1,
-    // SlimmableContainer) and ConvNet, whose loaders would also reject the shape.
-    if (architecture == "WaveNet" || architecture == "LSTM" || architecture == "Linear")
+    // so does ConvNet and any other shape whose loader would also reject it.
+    if (architecture == "WaveNet" || architecture == "LSTM" || architecture == "Linear"
+        || architecture == "SlimmableContainer")
         return fail("architecture '" + architecture + "' is not compiled into this build");
     return fail("unsupported architecture: '" + architecture + "'");
 }

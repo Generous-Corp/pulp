@@ -9,10 +9,11 @@
 # architectures; the WaveNet GPU engine is WaveNet-specific, so a subset build
 # that drops WaveNet targets the CPU inference layer, not the GPU plugin.)
 option(GPU_NAM_WITH_WAVENET "GPU NAM: build WaveNet (A1) architecture" ON)
+option(GPU_NAM_WITH_A2      "GPU NAM: build WaveNet A2 architecture" ON)
 option(GPU_NAM_WITH_LSTM    "GPU NAM: build LSTM architecture" ON)
 option(GPU_NAM_WITH_LINEAR  "GPU NAM: build Linear architecture" ON)
 set(_gpu_nam_arch_defs "")
-foreach(_gn_arch WAVENET LSTM LINEAR)
+foreach(_gn_arch WAVENET A2 LSTM LINEAR)
     if(NOT GPU_NAM_WITH_${_gn_arch})
         list(APPEND _gpu_nam_arch_defs "GPU_NAM_WITH_${_gn_arch}=0")
     endif()
@@ -69,6 +70,14 @@ if(TARGET pulp::runtime)
             target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
+        endif()
+
+        # WaveNet A2 architecture (SlimmableContainer + windowed head) + dispatch.
+        if(GPU_NAM_WITH_A2)
+            add_executable(gpu-nam-a2-test test_nam_a2.cpp)
+            target_link_libraries(gpu-nam-a2-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-a2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-a2-test COMMAND gpu-nam-a2-test)
         endif()
 
         # LSTM architecture + NamRuntime dispatch (no GPU needed).
