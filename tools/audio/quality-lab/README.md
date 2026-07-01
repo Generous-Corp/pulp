@@ -137,17 +137,30 @@ you liked maps back to how it was made.
 
 ### Perceptual models (opt-in, license-fenced)
 
-A full-reference perceptual MOS predictor is a coarse global guard, advisory only — it
-won't localize a defect but it flags when a change is perceptually worse overall. These are
-reached only across a process boundary via an explicit env-path, never bundled or
-auto-downloaded, and they degrade to `skipped` when absent (the default, and always in
-public CI):
+A full-reference perceptual predictor is a coarse global guard, advisory only — it
+won't localize a defect but it flags when a change is perceptually worse overall. Each is
+reached only across a process boundary via its **own** env-path, never bundled or
+auto-downloaded, and each degrades to `skipped` independently when absent (the default,
+and always in public CI) — so you enable any subset, or all, purely by which env-paths you
+set. `evaluate()` consults all of them:
 
-| Tool | License | Role |
-|------|---------|------|
-| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | full-reference perceptual MOS (music + speech) — the recommended starting point |
-| [PEAQ](https://en.wikipedia.org/wiki/PEAQ) (ITU-R BS.1387; e.g. GstPEAQ/PeaqB) | GPL | the classic broadcast metric |
-| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | bundles PEAQ + embedding distances (FAD, etc.) |
+| Tool | License | Env-path | Role |
+|------|---------|----------|------|
+| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | `PULP_VISQOL_BIN` | full-reference perceptual MOS-LQO (music + speech) — the recommended starting point |
+| [PEAQ](https://en.wikipedia.org/wiki/PEAQ) (ITU-R BS.1387; e.g. GstPEAQ/PeaqB) | GPL | `PULP_PEAQ_BIN` | the classic broadcast metric (ODG, -4..0) |
+| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | `PULP_AQUATK_BIN` | a PEAQ port + embedding distances (ODG) |
+
+This layer is deliberately **full-reference, music/general-audio**. Speech metrics (PESQ,
+POLQA) and no-reference neural speech metrics (DNSMOS, NISQA) are out of scope — they're
+band-limited or speech-tuned and don't fit the reference-vs-candidate contract on music.
+
+### MIR structural oracle (opt-in, license-fenced, advisory)
+
+Separate from the perceptual models above — a feature extractor, **not** a quality
+metric, so it does not sit in that table. [aubio](https://github.com/aubio/aubio)
+(`PULP_AUBIO_BIN`, GPL-3.0) gives an **independent** onset/timing cross-check (surfaced
+under the report's `advisory.mir_oracles` block), useful for non-circularly validating the
+experimental `onset_drift` detector. Never a gate, never a committed baseline.
 
 GPL tools stay developer-local. See `NOTICE.md` and the public licensing page for full
 attribution.
@@ -207,7 +220,8 @@ compared to itself.
 | `quality_lab/reference_pv.py` | independent textbook phase vocoder for non-circular validation |
 | `quality_lab/engine.py` | adapter to the real stretch engine (`stretchcli`), skip-when-absent |
 | `quality_lab/engine_baseline.py` | real-engine regression gate |
-| `quality_lab/perceptual.py` | opt-in, license-fenced perceptual-model adapters |
+| `quality_lab/perceptual.py` | opt-in, license-fenced full-reference perceptual-model adapters (ViSQOL / PEAQ / AQUA-Tk) |
+| `quality_lab/mir.py` | opt-in, license-fenced MIR structural oracle adapters (aubio onset cross-check) — advisory, not metrics |
 | `quality_lab/reviewer.py` | opt-in advisory LLM/multimodal reviewer (never a gate) |
 | `quality_lab/loop.py` | experimental tuning loop: rank candidates, Goodhart guard, label proposals |
 | `quality_lab/corpus.py` | versioned, license-guarded corpus |

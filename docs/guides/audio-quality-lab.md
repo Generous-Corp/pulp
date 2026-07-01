@@ -104,10 +104,24 @@ beta when:* the real-engine negative control + a false-positive sweep across tem
 pass.
 
 **Perceptual models** — a coarse, full-reference “is it perceptually worse overall” guard,
-complementary to the localized detectors. Opt-in via an env-path, never bundled, GPL tools
-stay developer-local: [ViSQOL](https://github.com/google/visqol) (`PULP_VISQOL_BIN`),
-[PEAQ](https://en.wikipedia.org/wiki/PEAQ), [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk).
-Advisory only.
+complementary to the localized detectors. Each is opt-in via its **own** env-path, never
+bundled, and skips independently when absent — so you enable any subset (or all) just by
+which env-paths you set, and public CI (none set) skips the whole layer:
+[ViSQOL](https://github.com/google/visqol) (`PULP_VISQOL_BIN`, MOS-LQO),
+[PEAQ](https://en.wikipedia.org/wiki/PEAQ) (`PULP_PEAQ_BIN`, ITU-R BS.1387 ODG), and
+[AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) (`PULP_AQUATK_BIN`, PEAQ-family ODG). GPL
+tools stay developer-local. Advisory only. This layer is deliberately **full-reference,
+music/general-audio**: speech-intelligibility metrics (PESQ, POLQA) and no-reference
+neural speech metrics (DNSMOS, NISQA) are out of scope — they’re band-limited or tuned to
+speech and don’t fit the reference-vs-candidate contract on musical material.
+
+**MIR structural oracle (aubio)** — a *separate*, advisory cross-check, not a quality
+metric. [aubio](https://github.com/aubio/aubio) (`PULP_AUBIO_BIN`, GPL-3.0,
+developer-local) is a feature extractor, not a MOS predictor, so it does not sit beside
+the perceptual models above. It gives an **independent** second opinion on onset/timing
+structure (surfaced under the report’s `advisory.mir_oracles` block) — useful for
+non-circularly validating the experimental `onset_drift` detector. Never a gate, never a
+committed baseline.
 
 **Advisory reviewer** — a model reads the report (+ optional clips) and names what sounds
 wrong in plain language, catching novel/compound artifacts no fixed detector encodes.

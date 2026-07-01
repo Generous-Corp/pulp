@@ -205,20 +205,24 @@ Full inventory and boundary live in `DEPENDENCIES.md`.
 | **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
 | **soundfile** (libsndfile) | BSD-3-Clause (package); libsndfile LGPL-2.1 | WAV/audio IO for the Audio Quality Lab |
 
-**Audio Quality Lab — optional perceptual models (not bundled, developer-supplied).**
+**Audio Quality Lab — optional perceptual models + MIR oracle (not bundled, developer-supplied).**
 The Audio Quality Lab (`tools/audio/quality-lab`) can optionally consult full-reference
-perceptual audio-quality models as an advisory cross-check. These are **never bundled,
-vendored, fetched, or shipped**; each is reached only across a process boundary via an
-explicit env-path the developer sets (e.g. `PULP_VISQOL_BIN`), and the lab degrades to
-"skipped" when one is absent (the default, and always in public CI). They are acknowledged
-here even though Pulp does not distribute them:
+perceptual audio-quality models and an independent MIR structural oracle as advisory
+cross-checks. These are **never bundled, vendored, fetched, or shipped**; each is reached
+only across a process boundary via its **own** explicit env-path the developer sets, and
+the lab degrades to "skipped" when one is absent (the default, and always in public CI) —
+each tool independently, so any subset can be enabled. They are acknowledged here even
+though Pulp does not distribute them:
 
-| Name | License | Role |
-|------|---------|------|
-| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | full-reference perceptual MOS (music + speech) |
-| PEAQ (ITU-R BS.1387; e.g. GstPEAQ, PeaqB) | GPL | classic broadcast perceptual metric — developer-local only |
-| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | bundles a PEAQ port + embedding distances — developer-local only |
+| Name | License | Env-path | Role |
+|------|---------|----------|------|
+| [ViSQOL](https://github.com/google/visqol) | Apache-2.0 | `PULP_VISQOL_BIN` | full-reference perceptual MOS-LQO (music + speech) |
+| PEAQ (ITU-R BS.1387; e.g. GstPEAQ, PeaqB) | GPL | `PULP_PEAQ_BIN` | classic broadcast perceptual ODG — developer-local only |
+| [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | GPL-3.0 | `PULP_AQUATK_BIN` | PEAQ port + embedding distances — developer-local only |
+| [aubio](https://github.com/aubio/aubio) | GPL-3.0 | `PULP_AUBIO_BIN` | MIR structural oracle (onset cross-check) — a feature extractor, *not* a perceptual metric; developer-local only |
 
+The perceptual layer is deliberately full-reference and music/general-audio; speech
+(PESQ, POLQA) and no-reference neural speech metrics (DNSMOS, NISQA) are out of scope.
 The GPL-licensed tools above are used only as separate developer-installed programs over a
 process boundary; no GPL code is compiled, linked, or redistributed with Pulp.
 

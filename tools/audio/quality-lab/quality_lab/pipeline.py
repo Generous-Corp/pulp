@@ -193,7 +193,7 @@ def run_and_export(
     `listening` block of relative paths to the report."""
     import os
 
-    from . import perceptual, regions
+    from . import mir, perceptual, regions
 
     x = _execute(degradation, detectors, latency_ms, smear_ms, case)
     listening = regions.export_artifacts(
@@ -212,6 +212,8 @@ def run_and_export(
     report["listening"] = listening
     # Layer B perceptual models (advisory; skipped unless the developer opts in via env).
     report["perceptual"] = perceptual.evaluate(ref_wav, cand_wav)
+    # MIR structural oracles (advisory cross-checks, not metrics; own env-path fence).
+    report.setdefault("advisory", {})["mir_oracles"] = mir.evaluate(ref_wav, cand_wav)
     return report
 
 

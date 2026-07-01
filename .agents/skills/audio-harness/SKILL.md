@@ -332,6 +332,21 @@ harness or `ctest`.
   every verdict/gate path through `schema.detectors_for_verdict` /
   `detectors_for_engine_baseline`, never re-implement the filter. New detectors ship
   `experimental`. (Plan: planning/2026-06-29-audio-quality-lab-postmvp-detectors-maturity-gate.md.)
+- **Perceptual models** (`perceptual.py`, opt-in, license-fenced): full-reference,
+  music/general-audio quality predictors, each behind its OWN env-path and each
+  `skipped`-independently when absent — set only the ones you want. `evaluate()` consults
+  all: ViSQOL (`PULP_VISQOL_BIN`, Apache-2.0, MOS-LQO), PEAQ (`PULP_PEAQ_BIN`, GPL, ITU-R
+  BS.1387 ODG), AQUA-Tk (`PULP_AQUATK_BIN`, GPL-3.0, ODG). Results land under
+  `report["perceptual"]`, ADVISORY ONLY. Deliberately excludes speech/telephony (PESQ,
+  POLQA) and no-reference neural speech (DNSMOS, NISQA) metrics — wrong domain/contract.
+- **MIR structural oracle** (`mir.py`, opt-in, license-fenced): aubio (`PULP_AUBIO_BIN`,
+  GPL-3.0) — a *feature extractor*, NOT a quality metric, so it is a SEPARATE layer from
+  `perceptual.py`. Gives an independent onset-count cross-check under
+  `report["advisory"]["mir_oracles"]` to non-circularly validate `onset_drift`. ADVISORY,
+  never a gate/baseline. **License fence for both layers:** GPL tools (PEAQ/AQUA-Tk/aubio)
+  are reached ONLY via a developer-set env-path over a process boundary, never bundled,
+  fetched, linked, or added to `tool-registry.json` — so no copyleft obligation attaches
+  and no runtime warning is needed (consistent with how the lab already treats PEAQ).
 - **Advisory reviewer** (`reviewer.py`, opt-in `PULP_QLAB_REVIEWER_CMD` subprocess, `run
   --review`): an LLM/multimodal model names artifacts in plain language under
   `advisory.reviewers`. ADVISORY ONLY — never changes the verdict/gate; skip-when-absent;
