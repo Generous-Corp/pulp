@@ -12,18 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..dsp import ltas
+from ..dsp import hf_fraction_delta
 from ..schema import DetectorResult
 
 TOLERANCE_CLASS = "hf_fizz.v1"
-
-
-def _hf_fraction(freqs: np.ndarray, mag: np.ndarray, cutoff_hz: float) -> float:
-    energy = mag * mag
-    total = float(np.sum(energy))
-    if total <= 1e-20:
-        return 0.0
-    return float(np.sum(energy[freqs >= cutoff_hz]) / total)
 
 
 def detect(
@@ -36,11 +28,7 @@ def detect(
 ) -> DetectorResult:
     """Added HF-energy fraction of candidate vs reference. scalar = max(0, delta);
     fired = scalar >= threshold. onset_pairs is ignored (global metric)."""
-    f, m_ref = ltas(reference, sr)
-    _, m_cand = ltas(candidate, sr)
-    hf_ref = _hf_fraction(f, m_ref, cutoff_hz)
-    hf_cand = _hf_fraction(f, m_cand, cutoff_hz)
-    delta = hf_cand - hf_ref
+    delta, hf_ref, hf_cand = hf_fraction_delta(reference, candidate, sr, cutoff_hz)
     added = max(0.0, delta)  # only ADDED fizz fires; losing HF is the centroid detector's job
     return DetectorResult(
         name="hf_fizz",

@@ -162,6 +162,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     report = compare.compare_files(
         args.reference, args.candidate,
         profile=args.profile, reference_role=args.reference_role,
+        threshold=args.threshold,
     )
     print(f"[quality-lab compare] {report['verdict']}: {report['summary']}")
     if args.json:
@@ -231,17 +232,21 @@ def main(argv: list[str] | None = None) -> int:
                     help="write label proposals to <dir>/LABEL_PROPOSALS.json (never MANIFEST.json)")
     lp.set_defaults(func=_cmd_loop)
 
+    from . import compare
     cmp_ = sub.add_parser(
         "compare",
         help="advisory before/after judgment over two WAVs (agent-facing; not a gate)")
     cmp_.add_argument("reference", help="reference (before) WAV")
     cmp_.add_argument("candidate", help="candidate (after) WAV")
-    cmp_.add_argument("--profile", choices=["tonal-balance"], default="tonal-balance",
-                      help="measurement profile (only tonal-balance in this slice)")
+    cmp_.add_argument("--profile", choices=list(compare.PROFILES), default="tonal-balance",
+                      help="measurement axis: tonal-balance (LTAS centroid shift) or "
+                           "added-hf (high-frequency fizz fraction)")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
                            "peer = neutral material_change_detected only")
+    cmp_.add_argument("--threshold", type=float, default=None,
+                      help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
     cmp_.set_defaults(func=_cmd_compare)
 

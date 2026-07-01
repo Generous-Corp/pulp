@@ -197,6 +197,115 @@ def test_threshold_boundary_is_material_at_exactly_threshold():
     assert r["verdict"] == compare.VERDICT_MATERIAL
 
 
+# ── added-hf axis (the second registry entry — proves the profile registry generalizes) ──
+
+def test_added_hf_fizz_is_regression_when_golden():
+    ref, sr = _drum()
+    cand = generate.add_fizz(ref, sr, amount=0.5)  # metallic high-frequency sizzle
+    report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_REGRESSION
+    m = report["measurements"][0]
+    assert m["axis"] == "added_hf"
+    assert m["payload"]["direction"] == "added HF"
+    assert m["materiality"]["delta"] > 0
+    assert "fizz" in report["summary"]
+
+
+def test_added_hf_fizz_is_only_material_change_for_a_peer_reference():
+    ref, sr = _drum()
+    cand = generate.add_fizz(ref, sr, amount=0.5)
+    report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="peer")
+    assert report["verdict"] == compare.VERDICT_MATERIAL
+
+
+def test_added_hf_dulling_is_material_not_regression_even_when_golden():
+    """Losing HF is a material change on the added-hf axis, but never a *regression* — only
+    added fizz is the bad direction (bad_sign=+1), so a duller candidate can't trip it."""
+    ref, sr = _drum()
+    report = compare.compare_arrays(ref, generate.dull(ref, sr), sr,
+                                    profile="added-hf", reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_MATERIAL
+    assert report["measurements"][0]["payload"]["direction"] == "reduced HF"
+
+
+def test_added_hf_identity_is_no_material_change():
+    ref, sr = _drum()
+    report = compare.compare_arrays(ref, ref.copy(), sr, profile="added-hf", reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_NO_CHANGE
+
+
+def test_added_hf_uses_its_own_default_threshold():
+    """Each axis carries its own default; added-hf's is tighter than tonal-balance's."""
+    ref, sr = _drum()
+    cand = generate.add_fizz(ref, sr, amount=0.5)
+    report = compare.compare_arrays(ref, cand, sr, profile="added-hf")
+    assert report["measurements"][0]["materiality"]["threshold"] == 0.02
+
+
+def test_registry_exposes_both_profiles():
+    assert set(compare.PROFILES) == {"tonal-balance", "added-hf"}
+
+
+def test_added_hf_cli_profile_smoke(tmp_path, capsys):
+    from quality_lab import cli
+    ref, sr = _drum()
+    cand = generate.add_fizz(ref, sr, amount=0.5)
+    ref_p, cand_p = str(tmp_path / "r.wav"), str(tmp_path / "c.wav")
+    audio_io.save_wav(ref_p, ref, sr)
+    audio_io.save_wav(cand_p, cand, sr)
+    rc = cli.main(["compare", ref_p, cand_p, "--profile", "added-hf",
+                   "--reference-role", "golden"])
+    assert rc == 0
+    assert "regression_suspected" in capsys.readouterr().out
+
+
+def test_verdict_keys_off_exceeds_not_rounded_delta():
+    """Rounding-boundary regression guard: a raw delta just under the threshold that ROUNDS up
+    to the threshold (so materiality.delta == threshold) but whose raw `exceeds` is False must
+    read as no-change — the verdict keys off the raw `exceeds`, never the rounded delta."""
+    axis = compare._AXES["added-hf"]
+    payload = {"kind": "scalar", "hf_frac_delta": 0.02, "direction": "added HF",
+               "ref_hf_frac": 0.10, "cand_hf_frac": 0.12}
+    not_exceeded = compare._measurement(
+        axis, compare.STATUS_MEASURED, applicable=True,
+        materiality={"delta": 0.02, "unit": "hf_energy_frac_delta", "tolerance_class": "hf_fizz.v1",
+                     "threshold": 0.02, "exceeds": False},
+        payload=payload)
+    assert compare._verdict(axis, not_exceeded, "golden") == compare.VERDICT_NO_CHANGE
+    exceeded = compare._measurement(
+        axis, compare.STATUS_MEASURED, applicable=True,
+        materiality={"delta": 0.02, "unit": "hf_energy_frac_delta", "tolerance_class": "hf_fizz.v1",
+                     "threshold": 0.02, "exceeds": True},
+        payload=payload)
+    assert compare._verdict(axis, exceeded, "golden") == compare.VERDICT_REGRESSION
+
+
+def test_nonfinite_kernel_delta_is_invalid(monkeypatch):
+    """A kernel that returns a non-finite delta must yield `invalid`, never slip into a verdict."""
+    ref, sr = _drum()
+    axis = compare._AXES["tonal-balance"]
+    monkeypatch.setitem(
+        compare._AXES, "tonal-balance",
+        compare._Axis(profile=axis.profile, axis=axis.axis, tool=axis.tool,
+                      default_threshold=axis.default_threshold, bad_sign=axis.bad_sign,
+                      kernel=lambda m, r, s: {"applicable": True, "delta": float("nan"),
+                                              "unit": "x", "tolerance_class": "t", "payload": {}},
+                      summarize=axis.summarize))
+    report = compare.compare_arrays(ref, ref.copy(), sr)
+    assert report["verdict"] == compare.VERDICT_INVALID
+    assert "non-finite delta" in report["measurements"][0]["reason"]
+
+
+def test_compare_files_unknown_profile_raises_before_io():
+    """Unknown profile must raise (like compare_arrays) even if the files can't be read — it
+    must NOT silently fall back to tonal-balance via the decode-error path."""
+    try:
+        compare.compare_files("/nope/ref.wav", "/nope/cand.wav", profile="loudness")
+    except ValueError:
+        return
+    raise AssertionError("unknown profile should raise ValueError before file I/O")
+
+
 def test_cli_exit_code_is_2_only_for_invalid(tmp_path, capsys):
     from quality_lab import cli
     rc = cli.main(["compare", "/nope/ref.wav", "/nope/cand.wav"])
