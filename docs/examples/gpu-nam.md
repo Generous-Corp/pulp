@@ -6,8 +6,8 @@ Standalone). It exists to showcase Pulp's GPU audio runtime around a faithful
 recreation of the reference NeuralAmpModeler editor, and it doubles as the
 reference for **how to add NAM inference to your own Pulp project**.
 
-The neural inference is **clean-room** — written from the model math and the
-`.nam` file format, not ported from any existing implementation.
+The neural inference is an **independent implementation** — written from the model
+math and the `.nam` file format, not ported from any existing implementation.
 
 ## What a `.nam` file is
 
@@ -19,28 +19,25 @@ builds the matching network, and streams audio through it sample-by-sample.
 
 | Architecture | Status | Notes |
 |---|---|---|
-| **WaveNet (A1)** | Supported | The original/standard NAM capture. Runs on the CPU oracle and, opt-in, on the fused GPU engine. |
-| **LSTM** | Supported | The recurrent NAM option. CPU engine; validated bit-approximately (max abs diff ~7e-8 over the reference vector) against NeuralAmpModelerCore's own output. |
-| **NAM Architecture 2 (A2)** | Not modeled | NAM's next-gen architecture (the default for new captures on TONE3000). It departs from A1 — LeakyReLU activations, a convolutional head, mixed kernel sizes per layer array, grouped convolutions, and packed-slimmable Full/Lite sizing — so it needs its own engine. GPU NAM rejects A2 files cleanly rather than mis-rendering. Download **A1 – Legacy** models to use with GPU NAM today (see below). |
-| ConvNet, Linear | Not modeled | Rare in practice; not yet implemented. |
+| **WaveNet (A1)** | Supported | The original/standard NAM capture. Runs on the CPU engine and, opt-in, on the fused GPU engine. |
+| **NAM Architecture 2 (A2)** | Supported | NAM's next-gen architecture (the default for new captures on TONE3000): LeakyReLU activations, a windowed convolutional head, mixed per-layer kernel sizes, and a `SlimmableContainer` of Full/Lite sizes selected at run time. CPU engine; validated bit-exact (max abs diff ~6e-8) against the reference inference engine on a real A2 capture. GPU forward not yet wired (CPU-only for now). |
+| **ConvNet** | Supported | Feedforward conv blocks (kernel 2, optional batch-norm, activation) + a linear head. CPU engine; validated bit-exact (~3e-8) against the reference. GPU forward not yet wired. |
+| **LSTM** | Supported | The recurrent NAM option. CPU engine (recurrence runs sequentially, so no GPU path); validated bit-approximately (~7e-8) against the reference. |
+| **Linear** | Supported | A single causal FIR + bias. CPU engine. |
 | Parametric / conditioned WaveNet (`condition_size > 1`) | Not modeled | Its extra condition channels come from host controls that aren't wired; rejected rather than mis-rendered. |
-| Experimental WaveNet variants (grouped convolutions, FiLM conditioning, `head1x1`, bottlenecks) and `SlimmableContainer` | Not modeled | Research-stage architectures from the training tool; not what shipping A1 captures use. GPU NAM rejects them with a clear message rather than producing wrong audio. |
+| Experimental variants (grouped convolutions, FiLM conditioning, `head1x1`, active gating/secondary activation) | Not modeled | Research-stage knobs from the training tool; shipping captures leave them off. Rejected with a clear message rather than producing wrong audio. |
 
-An unsupported model fails to load with a specific reason (surfaced in the log
-and left as a dry pass-through) — it never silently mis-renders.
+Each architecture is a self-contained header behind a `GPU_NAM_WITH_<ARCH>` CMake
+toggle (all on by default), so a project can build GPU NAM for just the subset it
+needs. An unsupported model fails to load with a specific reason (surfaced in the
+log and left as a dry pass-through) — it never silently mis-renders.
 
 ### Where to get loadable models
 
-NAM's model library at [TONE3000](https://www.tone3000.com/search) now defaults
-new captures to **A2**, which GPU NAM does not yet load. To download captures
-that work today, filter for the legacy A1 architecture:
-
-> Filters → Technical → **A1 – Legacy**, then download the A1 models from a tone
-> pack's *Models* section.
-
-A1 (WaveNet) and LSTM captures load and run; A2 captures are rejected with a
-clear message until GPU NAM grows a dedicated A2 engine. A2 is fully MIT-licensed
-open source, so a clean-room A2 engine is a plausible future addition.
+NAM's model library at [TONE3000](https://www.tone3000.com/search) hosts A1, A2,
+LSTM, and ConvNet captures — all of which GPU NAM loads. A2 (the default for new
+captures) runs on the CPU engine today; the opt-in GPU forward currently applies
+to WaveNet A1 (see below).
 
 ## CPU oracle + opt-in GPU engine
 
@@ -75,14 +72,19 @@ unit-energy normalized (see [`read_impulse_response`](../reference/modules.md)).
 ## Adding NAM inference to your own Pulp project
 
 The inference is self-contained and depends only on `choc` (JSON) plus the
-standard library — no Eigen, no external SDK. Three headers under
-`examples/gpu-nam/` are the reusable substrate:
+standard library — no Eigen, no external SDK. The headers under
+`examples/gpu-nam/` are the reusable substrate (each architecture stands alone
+behind a `GPU_NAM_WITH_<ARCH>` toggle):
 
-- `nam_model.hpp` — the WaveNet loader + CPU inference.
+- `nam_model.hpp` — the WaveNet (A1) loader + CPU inference (`Conv` primitive).
+- `nam_a2.hpp` — WaveNet A2 (mixed kernels, LeakyReLU, windowed head, `SlimmableContainer`).
+- `nam_convnet.hpp` — ConvNet (conv blocks + batch-norm + linear head).
 - `nam_lstm.hpp` — the LSTM loader + CPU inference.
-- `nam_runtime.hpp` — `NamRuntime`, which peeks the `architecture` field and
-  presents one architecture-agnostic surface: `load_nam_runtime(path, rt)`, then
-  `rt.reset()` / `rt.process(in, out, n)` / `rt.process_sample(x)`.
+- `nam_linear.hpp` — the Linear (FIR) loader + CPU inference.
+- `nam_runtime.hpp` — `NamRuntime`, which peeks the `architecture` field (and the
+  A2 shape) and presents one architecture-agnostic surface:
+  `load_nam_runtime(path, rt)`, then `rt.reset()` / `rt.process(in, out, n)` /
+  `rt.process_sample(x)`.
 
 A minimal integration inside a `Processor`:
 
@@ -96,11 +98,11 @@ if (!load_nam_runtime(path, nam, &err))
     /* log err; pass dry */;
 
 // In process(), per channel (keep one NamRuntime per channel for state):
-nam.process(drive, wet, num_samples);   // WaveNet or LSTM, transparently
+nam.process(drive, wet, num_samples);   // any architecture, transparently
 ```
 
 `NamRuntime::gpu_eligible()` tells you whether the fused GPU path applies (only
-WaveNet today); `wavenet()` returns the concrete model for the GPU node to upload.
+WaveNet A1 today); `wavenet()` returns the concrete model for the GPU node to upload.
 Everything else — the noise gate, tone stack, cabinet IR, dry/wet delay, meters,
 and the GPU engine wiring — lives in `gpu_nam_processor.hpp` as a worked example
 you can lift patterns from.
