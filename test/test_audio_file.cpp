@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/impulse_response.hpp>
 #include <pulp/audio/mmap_reader.hpp>
 #include <pulp/audio/offline_processor.hpp>
 #include <pulp/audio/streaming_writer.hpp>
@@ -2455,4 +2456,75 @@ TEST_CASE("AIFF writer rejects edge shapes and writes AIF extension",
         REQUIRE_THAT(read_data->channels[0][2], WithinAbs(0.0f, 0.001f));
         std::filesystem::remove(tmp_path);
     }
+}
+
+namespace {
+std::string write_temp_ir(const std::string& name, const std::vector<float>& s,
+                          std::uint32_t sr) {
+    const auto path = (std::filesystem::temp_directory_path() / name).string();
+    pulp::audio::AudioFileData d;
+    d.sample_rate = sr;
+    d.channels = {s};
+    REQUIRE(pulp::audio::write_wav_file(path, d));
+    return path;
+}
+double energy_of(const std::vector<float>& v) {
+    double e = 0.0;
+    for (float x : v) e += static_cast<double>(x) * x;
+    return e;
+}
+}  // namespace
+
+TEST_CASE("read_impulse_response normalizes and preserves shape at matching rate") {
+    const auto path = write_temp_ir("pulp_ir_shape.wav", {1.0f, 0.5f, 0.25f}, 48000);
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0);
+    std::filesystem::remove(path);
+    REQUIRE(ir.has_value());
+    REQUIRE(ir->size() == 3);
+    // Unit-energy normalized by default.
+    REQUIRE_THAT(energy_of(*ir), Catch::Matchers::WithinAbs(1.0, 1e-4));
+    // Shape preserved: ratios match the input (1 : 0.5 : 0.25). Tolerance covers
+    // write_wav_file's 16-bit PCM quantization of the sample values.
+    REQUIRE_THAT((*ir)[1] / (*ir)[0], Catch::Matchers::WithinAbs(0.5, 3e-3));
+    REQUIRE_THAT((*ir)[2] / (*ir)[0], Catch::Matchers::WithinAbs(0.25, 3e-3));
+}
+
+TEST_CASE("read_impulse_response can skip normalization") {
+    const auto path = write_temp_ir("pulp_ir_raw.wav", {0.2f, 0.2f, 0.2f, 0.2f}, 48000);
+    pulp::audio::ImpulseResponseLoadOptions opts;
+    opts.normalize_unit_energy = false;
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0, opts);
+    std::filesystem::remove(path);
+    REQUIRE(ir.has_value());
+    // Raw energy = 4 * 0.2^2 = 0.16, not 1.
+    REQUIRE_THAT(energy_of(*ir), Catch::Matchers::WithinAbs(0.16, 1e-3));
+}
+
+TEST_CASE("read_impulse_response resamples to the target rate") {
+    // 480 samples at 48k → ~240 at 24k (half length, within resampler margin).
+    std::vector<float> s(480, 0.0f);
+    for (std::size_t i = 0; i < s.size(); ++i)
+        s[i] = std::sin(0.05f * static_cast<float>(i));
+    const auto path = write_temp_ir("pulp_ir_resample.wav", s, 48000);
+    const auto ir = pulp::audio::read_impulse_response(path, 24000.0);
+    std::filesystem::remove(path);
+    REQUIRE(ir.has_value());
+    // ~half length (480 → ~240) plus the resampler's filter-tap margin; clearly
+    // shorter than the 480-sample source and non-trivially long.
+    REQUIRE(ir->size() > 200);
+    REQUIRE(ir->size() < 400);
+    for (float v : *ir) REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("read_impulse_response rejects a silent file") {
+    const auto path = write_temp_ir("pulp_ir_silent.wav", std::vector<float>(64, 0.0f), 48000);
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0);
+    std::filesystem::remove(path);
+    REQUIRE_FALSE(ir.has_value());  // zero energy → nullopt (never NaN downstream)
+}
+
+TEST_CASE("read_impulse_response returns nullopt for a missing file") {
+    const auto ir = pulp::audio::read_impulse_response(
+        "/nonexistent/pulp/ir/does_not_exist.wav", 48000.0);
+    REQUIRE_FALSE(ir.has_value());
 }

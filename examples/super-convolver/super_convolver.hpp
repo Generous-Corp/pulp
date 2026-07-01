@@ -57,6 +57,7 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/resampler.hpp>
+#include <pulp/audio/impulse_response.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/audio/format_registry.hpp>
@@ -898,92 +899,12 @@ private:
     // normalized. Returns nullopt on any failure so the caller falls back to the
     // synthetic IR. Worker / prepare thread only.
     std::optional<std::vector<float>> load_ir_file(const std::string& path) const {
-        // Preflight on metadata (no decode): reject a pathologically large file
-        // before read() pulls the whole thing into memory. We cap to kMaxIrSeconds
-        // at the file's own rate so the post-resample IR also stays within the cap.
-        const double session_sr = sample_rate_ > 0.0 ? sample_rate_ : 48000.0;
-        if (auto info = audio::FormatRegistry::instance().read_info(path)) {
-            if (info->num_frames == 0) return std::nullopt;
-            const double info_sr =
-                info->sample_rate > 0 ? static_cast<double>(info->sample_rate) : session_sr;
-            const double dur = static_cast<double>(info->num_frames) / info_sr;
-            // Allow generous headroom for a file we will truncate anyway; only
-            // refuse the truly absurd (≥ 5 min) so a fat-finger never OOMs.
-            if (dur > 300.0) return std::nullopt;
-        }
-
-        const auto data = audio::FormatRegistry::instance().read(path);
-        if (!data || data->channels.empty() || data->num_frames() == 0)
-            return std::nullopt;
-        const double file_sr =
-            data->sample_rate > 0 ? static_cast<double>(data->sample_rate) : session_sr;
-
-        // Truncate at the source rate so the resampled result fits kMaxIrSeconds.
-        std::size_t frames = static_cast<std::size_t>(data->num_frames());
-        const std::size_t max_file_frames =
-            static_cast<std::size_t>(kMaxIrSeconds * file_sr);
-        if (frames > max_file_frames) frames = max_file_frames;
-        const std::uint32_t ch = data->num_channels();
-
-        // Sum to mono (v1 is mono; true-stereo IR is a future extension).
-        std::vector<float> mono(frames, 0.0f);
-        for (std::uint32_t c = 0; c < ch; ++c) {
-            const auto& src = data->channels[c];
-            const std::size_t m = std::min<std::size_t>(frames, src.size());
-            for (std::size_t i = 0; i < m; ++i) mono[i] += src[i];
-        }
-        if (ch > 1) {
-            const float inv = 1.0f / static_cast<float>(ch);
-            for (float& v : mono) v *= inv;
-        }
-
-        // Resample from the file's sample rate to the session rate so the IR
-        // length and tone are correct regardless of the file's recording rate.
-        std::vector<float> ir;
-        if (std::abs(file_sr - session_sr) > 1e-3 && file_sr > 0.0) {
-            signal::Resampler rs;
-            rs.prepare(file_sr, session_sr, 1, frames);
-            // Pad with one filter span of zeros so the resampler can flush its
-            // group-delay tail and the full IR is captured.
-            const std::size_t pad = rs.taps_per_phase();
-            std::vector<float> padded = std::move(mono);
-            padded.resize(frames + pad, 0.0f);
-            const std::size_t cap = rs.max_output_for(padded.size());
-            ir.assign(cap, 0.0f);
-            const std::size_t produced =
-                rs.process_block_mono(padded.data(), padded.size(), ir.data(), cap);
-            ir.resize(produced);
-
-            // Drop the resampler's leading group delay so the IR onset (and thus
-            // the dry/wet alignment) is not shifted by an artificial silence.
-            // Group delay is (taps_per_phase-1)/2 at the INPUT rate; convert to
-            // output samples by the resample ratio.
-            const double ratio = session_sr / file_sr;
-            const std::size_t gd_out = static_cast<std::size_t>(
-                (static_cast<double>(rs.taps_per_phase()) - 1.0) * 0.5 * ratio);
-            if (gd_out > 0 && gd_out < ir.size())
-                ir.erase(ir.begin(), ir.begin() + static_cast<std::ptrdiff_t>(gd_out));
-        } else {
-            ir = std::move(mono);
-        }
-        if (ir.empty()) return std::nullopt;
-
-        // Final clamp at the session rate (defensive: resampler margin + any
-        // rounding can nudge the length just past the cap).
-        const std::size_t max_session_frames =
-            static_cast<std::size_t>(kMaxIrSeconds * session_sr);
-        if (ir.size() > max_session_frames) ir.resize(max_session_frames);
-
-        // Unit-energy normalize (same contract as make_reverb_ir) so Mix stays a
-        // sane dry/wet balance regardless of the loaded file's level. Reject a
-        // non-finite or silent file: +Inf energy passes `> 0`, so an explicit
-        // isfinite gate is required or Inf*0 would publish NaN to the audio thread.
-        double energy = 0.0;
-        for (float v : ir) energy += static_cast<double>(v) * v;
-        if (!std::isfinite(energy) || energy <= 0.0) return std::nullopt;
-        const float g = static_cast<float>(1.0 / std::sqrt(energy));
-        for (float& v : ir) v *= g;
-        return ir;
+        // Shared loader (decode → mono → resample → unit-energy normalize). The
+        // kMaxIrSeconds cap keeps the decode + GPU FFT bounded; unit-energy norm
+        // matches make_reverb_ir so Mix stays a sane dry/wet balance.
+        return audio::read_impulse_response(
+            path, sample_rate_,
+            {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
     }
 
     // A deterministic decorrelated room variant of the base IR. Room 0 returns

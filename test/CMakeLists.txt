@@ -2048,7 +2048,7 @@ target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2
 catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
-pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio pulp::signal)
 
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)
