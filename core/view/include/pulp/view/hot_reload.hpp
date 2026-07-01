@@ -65,6 +65,18 @@ public:
     // How many reloads have occurred
     uint32_t reload_count() const { return reload_count_.load(); }
 
+    // Content-addressed reload gate: returns true only when `path` is a readable
+    // .js/.mjs whose content hash differs from the last observed hash (a
+    // save-without-edit or an editor's atomic-rename touch does not reload).
+    // Updates the observed-hash map as a side effect. Public because it is
+    // exercised directly by the unit tests: a private definition that is
+    // referenced from only one in-library call site is elided by MSVC (a private
+    // method cannot be referenced across a translation unit), so a test reaching
+    // it via `#define private public` links on Clang/GCC but fails on MSVC with
+    // an unresolved external. Exposing it guarantees an out-of-line symbol on
+    // every toolchain.
+    bool should_reload_for_modified_file(const std::filesystem::path& path);
+
 private:
     std::filesystem::path watched_path_;
     std::string entry_file_;
@@ -85,7 +97,6 @@ private:
     std::optional<std::string> try_read_file(const std::filesystem::path& path);
     std::string read_file(const std::filesystem::path& path);
     void seed_observed_content_hashes();
-    bool should_reload_for_modified_file(const std::filesystem::path& path);
     static std::uint64_t content_hash(std::string_view content);
 };
 
