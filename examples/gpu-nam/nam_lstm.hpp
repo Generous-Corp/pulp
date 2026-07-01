@@ -153,8 +153,15 @@ public:
         sample_rate_ = sample_rate;
         error_.clear();
 
-        if (hidden_size_ <= 0 || num_layers_ <= 0 || input_size_ <= 0) {
-            error_ = "LSTM requires positive input_size, hidden_size, num_layers";
+        if (hidden_size_ <= 0 || num_layers_ <= 0) {
+            error_ = "LSTM requires positive hidden_size and num_layers";
+            return false;
+        }
+        // The runtime feeds a 1-wide (mono) input sample; a model whose first layer
+        // expects more than one input channel would read past that buffer. NAM
+        // captures are mono, so require it rather than mis-render.
+        if (input_size_ != 1) {
+            error_ = "LSTM input_size must be 1 (mono); got " + std::to_string(input_size_);
             return false;
         }
 

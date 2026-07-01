@@ -32,6 +32,7 @@
 #include "gpu_nam.hpp"
 #include "gpu_nam_cloud_node.hpp"
 #include "nam_model.hpp"
+#include "nam_retire_list.hpp"
 #include "nam_runtime.hpp"
 
 #include <pulp/format/processor.hpp>
@@ -380,9 +381,9 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
         current_cpu_.reset();
-        retired_cpu_.reset();
+        retirees_.clear();                                   // worker stopped — safe
+        audio_epoch_.store(0, std::memory_order_relaxed);
 
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
@@ -434,12 +435,18 @@ public:
                 cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
             }
             current_cpu_ = std::move(cpu);
-            cpu_active_.store(current_cpu_.get(), std::memory_order_release);
+            cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
         }
 
         // Learn the GPU transport latency by pre-building the stack once when a
         // device exists. The stack stays built even when Engine=CPU; gpu_active_
         // is only published when Engine=GPU.
+        // GPU availability (and the transport's extra latency) is decided ONCE here
+        // and fixed for the prepared lifetime, because the reported latency must not
+        // move while streaming. A consequence: if prepare() loads a CPU-only model
+        // (e.g. an LSTM), the GPU engine stays unavailable for this activation even
+        // if a WaveNet is loaded later — reopen/re-prepare to re-probe. The default
+        // bundled model is WaveNet, so normally the device is probed here.
         gpu_extra_ = 0;
         device_available_ = false;
         if (ok && model.gpu_eligible()) {
@@ -464,7 +471,6 @@ public:
         // Rebuild a previously-selected IR at the (possibly new) sample rate,
         // synchronously so the first block has it. Empty = no IR = pass-through.
         current_ir_.reset();
-        retired_ir_.reset();
         ir_active_.store(nullptr, std::memory_order_release);
         if (const std::string ipath = current_requested_ir_path(); !ipath.empty())
             build_and_publish_ir(ipath);
@@ -474,7 +480,7 @@ public:
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             if (current_stack_) {
-                gpu_active_.store(current_stack_->transport.get(), std::memory_order_release);
+                gpu_active_.store(current_stack_->transport.get(), std::memory_order_seq_cst);
                 gpu_engine_active_.store(true, std::memory_order_release);
             }
         }
@@ -492,11 +498,9 @@ public:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
-        retired_stack_.reset();
         current_cpu_.reset();
-        retired_cpu_.reset();
         current_ir_.reset();
-        retired_ir_.reset();
+        retirees_.clear();   // worker stopped — safe to free all retirees now
     }
 
     void process(audio::BufferView<float>& output,
@@ -505,6 +509,14 @@ public:
                  const format::ProcessContext&) override {
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
+
+        // Monotonic per-callback epoch: the worker frees a retired engine only once
+        // this has advanced past the retirement, so an engine the audio thread is
+        // still using is never freed. seq_cst so the bump and the engine-pointer
+        // loads below share one total order with the worker's unpublish + stamp read
+        // — the retirement grace is then airtight, not timing-dependent. One atomic
+        // op per block (not per sample): negligible on the audio thread.
+        audio_epoch_.fetch_add(1, std::memory_order_seq_cst);
 
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
@@ -535,7 +547,7 @@ public:
             in_len_[ch] += n;
         }
 
-        gpu_audio::GpuAudioTransport* tp = gpu_active_.load(std::memory_order_acquire);
+        gpu_audio::GpuAudioTransport* tp = gpu_active_.load(std::memory_order_seq_cst);
         if (tp) fill_wet_gpu(tp);
         else    fill_wet_cpu();
 
@@ -600,7 +612,7 @@ private:
     // oracle per channel, delay by the GPU transport's fixed extra latency so the
     // two engines align, and push to the output FIFO. RT-safe (no alloc/free).
     void fill_wet_cpu() {
-        CpuEngine* cpu = cpu_active_.load(std::memory_order_acquire);
+        CpuEngine* cpu = cpu_active_.load(std::memory_order_seq_cst);
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             while (in_len_[ch] >= kInternalBlock) {
                 if (cpu) cpu->model[ch].process(in_buf_[ch].data(), wet_.data(),
@@ -688,7 +700,7 @@ private:
     // signal::ConvolverIrSwapper (staged off-thread, swapped in place preserving
     // the overlap history), as SuperConvolver does — a follow-up RT slice.
     void apply_ir(std::size_t ch, float* buf) {
-        IrEngine* ir = ir_active_.load(std::memory_order_acquire);
+        IrEngine* ir = ir_active_.load(std::memory_order_seq_cst);
         if (ir) ir->conv[ch].process(buf, buf, kInternalBlock);
     }
 
@@ -742,12 +754,11 @@ private:
     // tears the GPU stack down and returns: the audio path falls back to the CPU
     // engine, whose fixed extra-latency ring keeps the reported latency unchanged.
     void rebuild_gpu_stack(const nam::NamRuntime& model) {
-        retired_stack_.reset();
-        gpu_active_.store(nullptr, std::memory_order_release);
+        gpu_active_.store(nullptr, std::memory_order_seq_cst);   // unpublish before retiring
         gpu_engine_active_.store(false, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(stack_mutex_);
-            retired_stack_ = std::move(current_stack_);
+            retire_engine(std::shared_ptr<void>(std::move(current_stack_)));
         }
         if (!model.gpu_eligible()) {
             runtime::log_info("GPU NAM: '{}' is CPU-only; GPU engine disabled for this model.",
@@ -765,7 +776,7 @@ private:
             current_stack_ = std::move(fresh);
         }
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
-            gpu_active_.store(tp, std::memory_order_release);
+            gpu_active_.store(tp, std::memory_order_seq_cst);   // reader loads this, then it retires
             gpu_engine_active_.store(true, std::memory_order_release);
         }
     }
@@ -773,16 +784,15 @@ private:
     // Worker-thread only. Publish a fresh inline CPU engine for `model`, retiring
     // the old one (freed one rebuild later).
     void rebuild_cpu_engine(const nam::NamRuntime& model) {
-        retired_cpu_.reset();
-        retired_cpu_ = std::move(current_cpu_);
-        cpu_active_.store(nullptr, std::memory_order_release);
+        cpu_active_.store(nullptr, std::memory_order_seq_cst);   // unpublish before retiring
+        retire_engine(std::shared_ptr<void>(std::move(current_cpu_)));
         auto cpu = std::make_unique<CpuEngine>();
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             cpu->model[ch] = model;
             cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
         }
         current_cpu_ = std::move(cpu);
-        cpu_active_.store(current_cpu_.get(), std::memory_order_release);
+        cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
     }
 
     // Compute the static input→output transfer curve on a fresh model copy: for
@@ -895,18 +905,31 @@ private:
         auto eng = std::make_unique<IrEngine>();
         for (std::size_t ch = 0; ch < kChannels; ++ch)
             eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
-        retired_ir_ = std::move(current_ir_);          // free the prior one (worker-owned)
+        auto old_ir = std::move(current_ir_);
         current_ir_ = std::move(eng);
-        ir_active_.store(current_ir_.get(), std::memory_order_release);
+        ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);   // publish new
+        retire_engine(std::shared_ptr<void>(std::move(old_ir)));          // retire old with grace
         std::lock_guard<std::mutex> lock(ir_mutex_);
         ir_name_ = gpu_nam_basename(path);
     }
 
     void clear_ir() {
-        retired_ir_ = std::move(current_ir_);          // park for one-rebuild-later free
-        ir_active_.store(nullptr, std::memory_order_release);
+        ir_active_.store(nullptr, std::memory_order_seq_cst);   // unpublish before retiring
+        retire_engine(std::shared_ptr<void>(std::move(current_ir_)));
         std::lock_guard<std::mutex> lock(ir_mutex_);
         ir_name_.clear();
+    }
+
+    // Record a just-unpublished engine for grace-period reclamation. The epoch is
+    // read AFTER the atomic pointer was set to null / the new engine published, so
+    // any audio callback that could still hold this engine has an epoch <= it and
+    // the RetireList frees it only once the audio thread has cycled past. Worker /
+    // prepare thread only (the audio thread is never here).
+    void retire_engine(std::shared_ptr<void> engine) {
+        // seq_cst stamp read, ordered after the caller's seq_cst unpublish/publish
+        // store: any audio callback that could still hold this engine has an epoch
+        // <= the stamp, so RetireList frees it only once the audio thread cycled past.
+        retirees_.retire(std::move(engine), audio_epoch_.load(std::memory_order_seq_cst));
     }
 
     void start_worker() {
@@ -927,6 +950,10 @@ private:
     void worker_loop() {
         using namespace std::chrono_literals;
         while (worker_run_.load(std::memory_order_acquire)) {
+            // Free engines retired long enough ago that the audio thread has
+            // provably cycled past them (grace-period reclamation).
+            retirees_.reclaim(audio_epoch_.load(std::memory_order_acquire));
+
             // Model reload?
             const std::uint32_t gen = model_req_generation_.load(std::memory_order_acquire);
             if (gen != last_seen_model_gen_) {
@@ -972,7 +999,7 @@ private:
                         if (current_stack_) tp = current_stack_->transport.get();
                     }
                     if (tp) {
-                        gpu_active_.store(tp, std::memory_order_release);
+                        gpu_active_.store(tp, std::memory_order_seq_cst);
                         gpu_engine_active_.store(true, std::memory_order_release);
                     }
                 } else if (want == 0 && gpu_active_.load(std::memory_order_relaxed) != nullptr) {
@@ -1011,20 +1038,23 @@ private:
     float cached_middle_ = 0.0f;
     float cached_treble_ = 0.0f;
 
+    // Monotonic audio-callback epoch (audio thread bumps, worker reads) and the
+    // grace-period retirement list every live engine swap parks its predecessor in,
+    // so the audio thread never frees or uses-after-free across a swap.
+    std::atomic<std::uint64_t> audio_epoch_{0};
+    nam::RetireList retirees_;   // worker / prepare thread only (audio thread never here)
+
     // Inline CPU engine, published lock-free for the audio thread.
     std::unique_ptr<CpuEngine> current_cpu_;
-    std::unique_ptr<CpuEngine> retired_cpu_;
     std::atomic<CpuEngine*> cpu_active_{nullptr};
 
-    // Cabinet IR engine (default none), published lock-free; built/swapped off
-    // the audio thread, retired one rebuild later so the audio thread never frees.
+    // Cabinet IR engine (default none), published lock-free; built/swapped off the
+    // audio thread and retired through retirees_ so the audio thread never frees.
     std::unique_ptr<IrEngine> current_ir_;
-    std::unique_ptr<IrEngine> retired_ir_;
     std::atomic<IrEngine*> ir_active_{nullptr};
 
     // Optional GPU engine (default OFF), switchable live.
     std::unique_ptr<GpuStack> current_stack_;
-    std::unique_ptr<GpuStack> retired_stack_;
     std::atomic<gpu_audio::GpuAudioTransport*> gpu_active_{nullptr};
     mutable std::mutex stack_mutex_;
     std::atomic<bool> gpu_engine_active_{false};

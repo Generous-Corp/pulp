@@ -118,6 +118,19 @@ TEST_CASE("LSTM loader parses a .nam and rejects a bad weight count", "[nam][lst
     CHECK_FALSE(err2.empty());
 }
 
+TEST_CASE("LSTM build rejects a non-mono input_size", "[nam][lstm]") {
+    // The runtime feeds a 1-wide input; a first layer expecting >1 channel would
+    // read past that buffer, so build() must refuse it.
+    NamLstmModel m;
+    // 40 weights for input_size=2: cell W[8 x 4]=32, b[8]=8 ... but build should
+    // reject on the shape before it even checks the count.
+    std::vector<float> w(64, 0.1f);
+    std::string err;
+    CHECK_FALSE(m.build(2, 2, 1, 1, w, 48000.0));
+    CHECK(err.empty());  // build() sets its own error_, not this local
+    CHECK(m.error().find("input_size") != std::string::npos);
+}
+
 TEST_CASE("NamRuntime dispatches on the architecture field", "[nam][runtime]") {
     // LSTM file → LSTM engine, faithful output.
     const std::string lpath = write_temp("pulp_rt_lstm.nam", lstm_json(kLstmWeights, 1, 2, 1));

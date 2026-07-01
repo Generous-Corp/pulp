@@ -328,6 +328,25 @@ public:
 
         if (arrays_cfg_.empty()) { error_ = "WaveNet requires at least one layer array"; return false; }
 
+        // Shape / memory-safety guards. The per-sample forward feeds array 0 a
+        // 1-wide input (the mono sample) and chains each later array from the
+        // previous array's channel count. A file whose shapes don't line up would
+        // read past the fixed-size input buffers, so reject it up front.
+        if (in_channels_ != 1) {
+            error_ = "only mono input (in_channels == 1) is supported";
+            return false;
+        }
+        if (arrays_cfg_[0].input_size != in_channels_) {
+            error_ = "first layer array input_size must equal in_channels (1)";
+            return false;
+        }
+        for (std::size_t i = 1; i < arrays_cfg_.size(); ++i)
+            if (arrays_cfg_[i].input_size != arrays_cfg_[i - 1].channels) {
+                error_ = "layer array " + std::to_string(i)
+                         + " input_size must equal the previous array's channel count";
+                return false;
+            }
+
         arrays_.clear();
         arrays_.resize(arrays_cfg_.size());
         for (std::size_t i = 0; i < arrays_cfg_.size(); ++i) arrays_[i].configure(arrays_cfg_[i]);
@@ -381,8 +400,14 @@ public:
     // (it runs thousands of samples); never the audio thread.
     void prewarm() {
         reset();
-        const int n = 2 * receptive_field() + 512;   // margin past a full RF
-        for (int i = 0; i < n; ++i) process_sample(0.0f);
+        // Margin past a full receptive field, clamped so a pathological model
+        // (huge dilations) can't turn prewarm into a multi-second stall. Real
+        // captures settle in a few thousand samples; the cap is far above that.
+        constexpr long long kMaxPrewarm = 1 << 18;   // 262144 samples
+        long long n = 2LL * receptive_field() + 512;
+        if (n < 0) n = 512;
+        if (n > kMaxPrewarm) n = kMaxPrewarm;
+        for (long long i = 0; i < n; ++i) process_sample(0.0f);
     }
 
     // One mono sample in -> one mono output sample. The per-sample core; process()
@@ -565,8 +590,14 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
         const choc::value::ValueView dil = L["dilations"];
         if (!dil.isArray() || dil.size() == 0)
             return fail("layer " + std::to_string(i) + ": 'dilations' must be a non-empty array");
-        for (uint32_t d = 0; d < dil.size(); ++d)
-            a.dilations.push_back(static_cast<int>(detail::num(dil[d])));
+        for (uint32_t d = 0; d < dil.size(); ++d) {
+            const int dv = static_cast<int>(detail::num(dil[d]));
+            // Keep the receptive field (and hence prewarm cost) bounded and int-safe.
+            // Real captures top out around 512; the cap is far above that.
+            if (dv <= 0 || dv > (1 << 16))
+                return fail("layer " + std::to_string(i) + ": dilation out of range (1.." + std::to_string(1 << 16) + ")");
+            a.dilations.push_back(dv);
+        }
         arrays.push_back(std::move(a));
     }
 

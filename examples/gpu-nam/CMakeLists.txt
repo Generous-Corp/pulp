@@ -43,6 +43,12 @@ if(TARGET pulp::runtime)
         target_link_libraries(gpu-nam-lstm-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-lstm-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-lstm-test COMMAND gpu-nam-lstm-test)
+
+        # Grace-period engine retirement (audio-thread-safe live swaps; no GPU).
+        add_executable(gpu-nam-retire-test test_nam_retire_list.cpp)
+        target_link_libraries(gpu-nam-retire-test PRIVATE Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-retire-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-retire-test COMMAND gpu-nam-retire-test)
     endif()
 endif()
 
