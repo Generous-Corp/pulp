@@ -76,6 +76,21 @@ def spectral_centroid_hz(freqs: np.ndarray, mag: np.ndarray) -> float:
     return float(np.sum(freqs * mag) / total) if total > 1e-20 else 0.0
 
 
+def relative_centroid_shift(
+    reference: np.ndarray, candidate: np.ndarray, sr: int
+) -> tuple[float, float, float]:
+    """LTAS spectral-centroid relative shift of candidate vs reference plus both centroids
+    (Hz): ``rel = (c_cand - c_ref) / c_ref`` (negative = duller, positive = brighter), and
+    ``0.0`` when the reference has no spectral energy. Shared by the ``spectral_centroid``
+    detector and the ``compare`` report so the two can never drift apart."""
+    f, m_ref = ltas(reference, sr)
+    _, m_cand = ltas(candidate, sr)
+    c_ref = spectral_centroid_hz(f, m_ref)
+    c_cand = spectral_centroid_hz(f, m_cand)
+    rel = (c_cand - c_ref) / c_ref if c_ref > 1e-9 else 0.0
+    return rel, c_ref, c_cand
+
+
 def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:
     """Sliding normalized cross-correlation of `short` within `long` (values in ~[-1,1]).
 

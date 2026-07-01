@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..dsp import ltas, spectral_centroid_hz
+from ..dsp import relative_centroid_shift
 from ..schema import DetectorResult
 
 TOLERANCE_CLASS = "spectral_centroid.v1"
@@ -28,14 +28,7 @@ def detect(
 ) -> DetectorResult:
     """Relative centroid shift of candidate vs reference. scalar = |relative shift|;
     fired = scalar >= threshold (default 5%). onset_pairs is ignored (global metric)."""
-    f, m_ref = ltas(reference, sr)
-    _, m_cand = ltas(candidate, sr)
-    c_ref = spectral_centroid_hz(f, m_ref)
-    c_cand = spectral_centroid_hz(f, m_cand)
-    if c_ref <= 1e-9:
-        rel = 0.0
-    else:
-        rel = (c_cand - c_ref) / c_ref
+    rel, c_ref, c_cand = relative_centroid_shift(reference, candidate, sr)
     direction = "duller" if rel < 0 else "brighter"
     return DetectorResult(
         name="spectral_centroid",

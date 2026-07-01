@@ -180,3 +180,79 @@ def build_report(
         "determinism": determinism,
         "provenance": provenance,
     }
+
+
+# ── Compare report schema (agent-facing before/after judgment) ──────────────────────────
+# The `compare` surface (quality_lab/compare.py) owns the MEASUREMENT logic; this module
+# owns its SHAPE, like every other lab schema. The constructor below is the single place a
+# measurement envelope is built, so `measured` / `not_applicable` / `invalid` always share
+# one contract — a reader (and the future MCP tool) never special-cases the shape. It is
+# axis-agnostic: the caller supplies `alignment`/`region`, so no tonal-balance assumption
+# leaks into the schema.
+COMPARE_SCHEMA = "quality_lab.compare.v1"
+
+# Action-oriented verdicts an agent can act on — advisory, never a gate.
+COMPARE_VERDICT_REGRESSION = "regression_suspected"
+COMPARE_VERDICT_MATERIAL = "material_change_detected"
+COMPARE_VERDICT_NO_CHANGE = "no_material_change_detected"
+COMPARE_VERDICT_INCONCLUSIVE = "inconclusive"
+COMPARE_VERDICT_INVALID = "invalid"
+
+# Per-measurement status (rolls up into the verdict).
+COMPARE_STATUS_MEASURED = "measured"
+COMPARE_STATUS_NOT_APPLICABLE = "not_applicable"
+COMPARE_STATUS_INVALID = "invalid"
+
+
+def compare_measurement(
+    axis: str,
+    tool: str,
+    status: str,
+    *,
+    applicable: bool,
+    alignment: dict[str, Any],
+    region: str = "global",
+    reason: str | None = None,
+    **evidence: Any,
+) -> dict[str, Any]:
+    """Build one compare evidence envelope with the common contract keys ALWAYS present.
+    `measured` envelopes pass extra evidence (level_match/materiality/payload) via
+    **evidence; `not_applicable`/`invalid` pass a `reason`. Never hand-build one elsewhere."""
+    env: dict[str, Any] = {
+        "axis": axis,
+        "tool": tool,
+        "role": "detector",
+        "status": status,
+        "applicable": applicable,
+        "alignment": alignment,
+        "region": region,
+        "coverage": 1.0 if status == COMPARE_STATUS_MEASURED else 0.0,
+        "can_support_verdict": status == COMPARE_STATUS_MEASURED and applicable,
+    }
+    if reason is not None:
+        env["reason"] = reason
+    env.update(evidence)
+    return env
+
+
+def compare_report(
+    profile: str,
+    reference_role: str,
+    verdict: str,
+    summary: str,
+    measurements: list[dict[str, Any]],
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Assemble the agent-facing compare report envelope. `provenance` is attached whenever
+    available — including on `invalid` reports — so an agent can always trace what it read."""
+    report: dict[str, Any] = {
+        "schema": COMPARE_SCHEMA,
+        "profile": profile,
+        "reference_role": reference_role,
+        "verdict": verdict,
+        "summary": summary,
+        "measurements": measurements,
+    }
+    if provenance is not None:
+        report["provenance"] = provenance
+    return report
