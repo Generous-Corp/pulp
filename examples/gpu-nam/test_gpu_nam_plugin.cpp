@@ -173,6 +173,41 @@ std::vector<float> run_cpu(double sr, std::size_t block, int nblocks,
     return out;
 }
 
+// Stream a continuous signal through a fresh CPU-engine processor in host blocks
+// of `hblock` samples (final chunk = remainder), each process() call using the
+// chunk's real width, and return channel-0 output with the processor's reported
+// latency trimmed so different host-block schedules line up sample-for-sample.
+// The point: exercise the re-block FIFO with host blocks that are NOT the
+// internal block size, the case a 512-aligned test never hits.
+std::vector<float> run_stream_cpu(double sr, std::size_t hblock,
+                                  const std::vector<float>& sig) {
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    prepare_proc(proc, store, sr, hblock, /*engine=*/0.0f);
+    std::vector<float> out;
+    out.reserve(sig.size());
+    std::vector<float> in_l(hblock), in_r(hblock), out_l(hblock), out_r(hblock);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = sr;
+    for (std::size_t off = 0; off < sig.size(); off += hblock) {
+        const std::size_t n = std::min(hblock, sig.size() - off);
+        for (std::size_t i = 0; i < n; ++i) in_l[i] = in_r[i] = sig[off + i];
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, n);
+        pulp::audio::BufferView<float> ov(op, 2, n);
+        pctx.num_samples = static_cast<int>(n);
+        proc.process(ov, iv, mi, mo, pctx);
+        for (std::size_t i = 0; i < n; ++i) out.push_back(out_l[i]);
+    }
+    const int lat = proc.latency_samples();
+    proc.release();
+    if (lat > 0 && static_cast<std::size_t>(lat) < out.size())
+        out.erase(out.begin(), out.begin() + lat);
+    return out;
+}
+
 }  // namespace
 
 TEST_CASE("GPU NAM CPU engine produces finite non-trivial amped output", "[nam]") {
@@ -388,6 +423,40 @@ TEST_CASE("GPU NAM EQ is transparent when flat and shapes tone when boosted", "[
     for (float v : eq_treble) { REQUIRE(std::isfinite(v)); e_treble += static_cast<double>(v) * v; }
     INFO("flat_energy=" << e_flat << " treble_energy=" << e_treble);
     REQUIRE(e_treble > e_flat * 1.05);
+}
+
+TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
+    // A real host feeds variable, often-smaller-than-internal blocks. The re-block
+    // FIFO must make the amped output independent of that chunking; a fixed-block
+    // processor that silently dry-passes or desyncs on an unaligned block would
+    // pass every 512-aligned test yet be wrong in a DAW. Prove it: the same signal
+    // streamed at awkward block sizes matches the internal-block reference
+    // sample-for-sample, and is genuinely amped (not silently the dry signal).
+    constexpr double SR = 48000.0;
+    const std::size_t IB = GpuNamProcessor::kInternalBlock;
+    const auto sig = sine(IB * 12);  // long enough for a steady window past latency
+
+    const auto ref = run_stream_cpu(SR, IB, sig);       // internal-block schedule
+    REQUIRE(ref.size() > IB * 3);
+
+    // The reference is a real amped signal, not a dry/silent pass-through.
+    double e_ref = 0.0;
+    for (float v : ref) { REQUIRE(std::isfinite(v)); e_ref += static_cast<double>(v) * v; }
+    REQUIRE(e_ref > 1e-3);
+
+    for (std::size_t hb : {std::size_t{1}, std::size_t{32}, std::size_t{96},
+                           std::size_t{300}, std::size_t{480}, std::size_t{777}}) {
+        const auto got = run_stream_cpu(SR, hb, sig);
+        const std::size_t len = std::min(ref.size(), got.size());
+        REQUIRE(len > IB * 2);
+        // Compare a steady window past the FIFO priming region.
+        double max_abs = 0.0;
+        for (std::size_t i = IB; i < len; ++i)
+            max_abs = std::max(max_abs,
+                               std::abs(static_cast<double>(got[i]) - ref[i]));
+        INFO("host_block=" << hb << " max_abs_diff=" << max_abs);
+        REQUIRE(max_abs < 1e-4);   // chunk-schedule-independent to the sample
+    }
 }
 
 TEST_CASE("GPU NAM load_model rebuilds without NaNs", "[nam]") {
