@@ -141,6 +141,38 @@ void prepare_proc(GpuNamProcessor& proc, pulp::state::StateStore& store, double 
     proc.prepare(ctx);
 }
 
+// Run `nblocks` of the per-block signal `sig` through a fresh CPU-engine
+// processor, applying `setup(store)` on top of the neutral defaults, and return
+// the concatenated channel-0 output. Isolates a single DSP stage under test.
+template <class Setup>
+std::vector<float> run_cpu(double sr, std::size_t block, int nblocks,
+                           const std::vector<float>& sig, Setup setup) {
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 0.0f);
+    store.set_value(kOutputGain, 0.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    setup(store);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = sr;
+    ctx.max_buffer_size = static_cast<int>(block);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+    Driver d(proc, block, sr);
+    std::vector<float> out;
+    for (int b = 0; b < nblocks; ++b) {
+        const auto o = d.block_io(sig, 0);
+        out.insert(out.end(), o.begin(), o.end());
+    }
+    proc.release();
+    return out;
+}
+
 }  // namespace
 
 TEST_CASE("GPU NAM CPU engine produces finite non-trivial amped output", "[nam]") {
@@ -293,6 +325,69 @@ TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][
     REQUIRE(proc.latency_samples() == latency);   // still fixed
     REQUIRE(drive(8, 0) > 1e-4);                  // CPU resumed, stays finite
     proc.release();
+}
+
+TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    // ~ -29 dBFS sustained tone — well below a -12 dB gate threshold.
+    const auto quiet = sine(BLOCK, 0.06f, 0.05f);
+
+    const auto open = run_cpu(SR, BLOCK, 24, quiet,
+                              [](auto& s) { s.set_value(kNoiseGateActive, 0.0f); });
+    const auto gated = run_cpu(SR, BLOCK, 24, quiet, [](auto& s) {
+        s.set_value(kNoiseGateActive, 1.0f);
+        s.set_value(kNoiseGateThreshold, -12.0f);
+    });
+
+    double e_open = 0.0, e_gated = 0.0;
+    for (float v : open)  { REQUIRE(std::isfinite(v)); e_open  += static_cast<double>(v) * v; }
+    for (float v : gated) { REQUIRE(std::isfinite(v)); e_gated += static_cast<double>(v) * v; }
+    INFO("open=" << e_open << " gated=" << e_gated);
+    REQUIRE(e_open > 1e-8);               // the ungated amp produced real output
+    REQUIRE(e_gated < e_open * 0.05);     // the gate cut the sub-threshold signal hard
+}
+
+TEST_CASE("GPU NAM EQ is transparent when flat and shapes tone when boosted", "[nam]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    // Two-tone drive: a low (~150 Hz) and a high (~6.9 kHz) partial.
+    std::vector<float> sig(BLOCK);
+    for (std::size_t i = 0; i < BLOCK; ++i)
+        sig[i] = 0.3f * std::sin(0.02f * static_cast<float>(i))
+               + 0.3f * std::sin(0.90f * static_cast<float>(i));
+
+    const auto eq_off = run_cpu(SR, BLOCK, 24, sig,
+                                [](auto& s) { s.set_value(kEQActive, 0.0f); });
+    const auto eq_flat = run_cpu(SR, BLOCK, 24, sig, [](auto& s) {
+        s.set_value(kEQActive, 1.0f);
+        s.set_value(kToneBass, 5.0f); s.set_value(kToneMiddle, 5.0f);
+        s.set_value(kToneTreble, 5.0f);
+    });
+    const auto eq_treble = run_cpu(SR, BLOCK, 24, sig, [](auto& s) {
+        s.set_value(kEQActive, 1.0f);
+        s.set_value(kToneBass, 5.0f); s.set_value(kToneMiddle, 5.0f);
+        s.set_value(kToneTreble, 10.0f);
+    });
+
+    // A flat tone stack (5/5/5) is unity gain — the output matches EQ-off.
+    REQUIRE(eq_off.size() == eq_flat.size());
+    double num = 0, da = 0, db = 0;
+    for (std::size_t i = 0; i < eq_off.size(); ++i) {
+        num += static_cast<double>(eq_off[i]) * eq_flat[i];
+        da  += static_cast<double>(eq_off[i]) * eq_off[i];
+        db  += static_cast<double>(eq_flat[i]) * eq_flat[i];
+    }
+    const double xc = num / std::sqrt(da * db + 1e-30);
+    INFO("flat-vs-off xcorr=" << xc);
+    REQUIRE(xc > 0.999);
+
+    // A +12 dB treble (high-shelf) boost lifts the high partial's energy.
+    double e_flat = 0.0, e_treble = 0.0;
+    for (float v : eq_flat)   { REQUIRE(std::isfinite(v)); e_flat   += static_cast<double>(v) * v; }
+    for (float v : eq_treble) { REQUIRE(std::isfinite(v)); e_treble += static_cast<double>(v) * v; }
+    INFO("flat_energy=" << e_flat << " treble_energy=" << e_treble);
+    REQUIRE(e_treble > e_flat * 1.05);
 }
 
 TEST_CASE("GPU NAM load_model rebuilds without NaNs", "[nam]") {

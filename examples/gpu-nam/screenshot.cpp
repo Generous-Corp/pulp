@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     examples::GpuNamProcessor proc;
     proc.set_state_store(&store);
     proc.define_parameters(store);
-    store.set_value(examples::kInputGain, 6.0f);
+    store.set_value(examples::kInputGain, 0.0f);
     store.set_value(examples::kOutputGain, 0.0f);
     store.set_value(examples::kMix, 100.0f);
     store.set_value(examples::kBypass, 0.0f);
@@ -60,12 +60,14 @@ int main(int argc, char** argv) {
     format::ProcessContext pctx;
     pctx.sample_rate = SR;
     pctx.num_samples = BLOCK;
-    const int nblocks = gpu_engine ? 64 : 8;
+    const int nblocks = gpu_engine ? 64 : 48;
     for (int b = 0; b < nblocks; ++b) {
         for (int i = 0; i < BLOCK; ++i) {
             s = s * 1664525u + 1013904223u;
             const float white = static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
-            l[i] = r[i] = 0.4f * white;
+            // Idle editor for the faithful comparison: silence keeps the edge
+            // meters dark like NAM at rest. (GN_GPU still exercises the worker.)
+            l[i] = r[i] = gpu_engine ? 0.4f * white : 0.0f;
         }
         const float* inp[2] = {l.data(), r.data()};
         float* outp[2] = {ol.data(), orr.data()};
@@ -89,7 +91,7 @@ int main(int argc, char** argv) {
     }
 
     auto v = proc.create_view();
-    const bool ok = view::render_to_file(*v, 820, 560, out, 2.0f, backend);
+    const bool ok = view::render_to_file(*v, 600, 400, out, 2.0f, backend);
     std::printf("GPU NAM editor screenshot [%s]: %s -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",
                 ok ? "OK" : "FAILED", out);

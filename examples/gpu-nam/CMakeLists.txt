@@ -48,6 +48,7 @@ endif()
 # primitive (pulp::render) and the GPU audio runtime (pulp::gpu-audio).
 if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     set(GPU_NAM_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+    set(GPU_NAM_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/assets/nam")
 
     pulp_add_plugin(GpuNam
         FORMATS           VST3 AU CLAP Standalone
@@ -71,6 +72,10 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         target_include_directories(GpuNam_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         target_link_libraries(GpuNam_Core PUBLIC
             pulp::render pulp::gpu-audio pulp::signal pulp::view pulp::canvas pulp::runtime)
+        # Source-tree asset fallback for dev/standalone runs from the build tree;
+        # shipped bundles resolve the executable-relative Resources/assets/nam copy.
+        target_compile_definitions(GpuNam_Core PRIVATE
+            GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
     endif()
 
     # Bundle the default model into each format's Resources so the plugin finds it
@@ -84,14 +89,20 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${GPU_NAM_MODEL}"
                         "$<TARGET_BUNDLE_DIR:${_gn_target}>/Contents/Resources/example.nam"
-                    COMMENT "Bundling example.nam into ${_gn_target}"
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${GPU_NAM_ASSETS}"
+                        "$<TARGET_BUNDLE_DIR:${_gn_target}>/Contents/Resources/assets/nam"
+                    COMMENT "Bundling example.nam + UI assets into ${_gn_target}"
                     VERBATIM)
             else()
                 add_custom_command(TARGET ${_gn_target} POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${GPU_NAM_MODEL}"
                         "$<TARGET_FILE_DIR:${_gn_target}>/example.nam"
-                    COMMENT "Copying example.nam next to ${_gn_target}"
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${GPU_NAM_ASSETS}"
+                        "$<TARGET_FILE_DIR:${_gn_target}>/assets/nam"
+                    COMMENT "Copying example.nam + UI assets next to ${_gn_target}"
                     VERBATIM)
             endif()
         endif()
@@ -115,7 +126,8 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             pulp::view pulp::canvas pulp::runtime)
         target_include_directories(gpu-nam-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(gpu-nam-shot PRIVATE
-            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}")
+            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+            GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
     endif()
 
     # Processor tests (CPU + GPU engine, live switch, load_model). Links
@@ -128,8 +140,23 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-plugin-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(gpu-nam-plugin-test PRIVATE
-            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}")
+            GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+            GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
         catch_discover_tests(gpu-nam-plugin-test)
+
+        # Editor tests: faithful UI renders non-blank + composited (Skia), and
+        # pointer input (toggles, knob drag) drives real parameters.
+        if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
+            add_executable(gpu-nam-ui-test test_gpu_nam_ui.cpp gpu_nam_view.cpp)
+            target_link_libraries(gpu-nam-ui-test PRIVATE
+                pulp::format pulp::render pulp::gpu-audio pulp::signal
+                pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-ui-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-ui-test PRIVATE
+                GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+                GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
+            catch_discover_tests(gpu-nam-ui-test)
+        endif()
     endif()
 
     # CLAP load smoke test — the plugin's shared object must dlopen cleanly.

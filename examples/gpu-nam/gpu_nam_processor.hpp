@@ -37,7 +37,9 @@
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/signal/biquad.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/noise_gate.hpp>
 
 #include <array>
 #include <atomic>
@@ -69,9 +71,17 @@ namespace pulp::examples {
 enum GpuNamParams : state::ParamID {
     kInputGain  = 1,  // drive into the model, dB
     kOutputGain = 2,  // output gain, dB
-    kMix        = 3,  // dry/wet, %
+    kMix        = 3,  // dry/wet, % — retained for state compat; face UI is 100% wet
     kEngine     = 4,  // 0 = CPU (default), 1 = GPU
     kBypass     = 5,
+    // NAM-faithful control set. The noise gate runs on the drive before the
+    // model; the Bass/Middle/Treble tone stack runs on the model output.
+    kNoiseGateThreshold = 6,  // gate threshold, dB
+    kToneBass           = 7,  // low shelf, 0..10 (5 = flat)
+    kToneMiddle         = 8,  // mid peak,  0..10 (5 = flat)
+    kToneTreble         = 9,  // high shelf,0..10 (5 = flat)
+    kNoiseGateActive    = 10, // 0 = off, 1 = on
+    kEQActive           = 11, // 0 = off (tone stack bypassed), 1 = on
 };
 
 // Live output magnitude spectrum (dB), published lock-free from the audio thread
@@ -128,6 +138,32 @@ inline std::string gpu_nam_basename(const std::string& path) {
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
+#ifndef GPU_NAM_ASSET_DIR
+#define GPU_NAM_ASSET_DIR ""
+#endif
+
+// Resolve the vendored NAM UI-asset directory (images + fonts): an explicit
+// GPU_NAM_ASSETS override, then the copy bundled into the plugin's Resources
+// (relative to the binary), then the source-tree copy baked in at build time.
+// Returns the first directory that exists; empty when none is found.
+inline std::string gpu_nam_asset_dir() {
+    auto dir_ok = [](const std::string& p) {
+        if (p.empty()) return false;
+        std::ifstream f(p + "/Background.jpg", std::ios::binary);
+        return static_cast<bool>(f);
+    };
+    if (const char* env = std::getenv("GPU_NAM_ASSETS"); env && dir_ok(env)) return env;
+    const std::string dir = gpu_nam_module_dir();
+    if (!dir.empty()) {
+        for (const std::string& rel : {"/../Resources/assets/nam", "/assets/nam"}) {
+            const std::string p = dir + rel;
+            if (dir_ok(p)) return p;
+        }
+    }
+    if (dir_ok(GPU_NAM_ASSET_DIR)) return GPU_NAM_ASSET_DIR;
+    return {};
+}
+
 class GpuNamProcessor : public format::Processor {
 public:
     // Fixed engine block. The GPU NAM forward is prepared at this size, so an
@@ -151,10 +187,11 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
+        // Ranges mirror NeuralAmpModelerPlugin's face controls.
         store.add_parameter({.id = kInputGain,  .name = "Input",  .unit = "dB",
-                             .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
+                             .range = {-20.0f, 20.0f, 0.0f, 0.0f}});
         store.add_parameter({.id = kOutputGain, .name = "Output", .unit = "dB",
-                             .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
+                             .range = {-40.0f, 40.0f, 0.0f, 0.0f}});
         store.add_parameter({.id = kMix, .name = "Mix", .unit = "%",
                              .range = {0.0f, 100.0f, 100.0f, 0.1f}});
         // Engine: 0 = inline CPU oracle (default), 1 = GPU runtime. CPU is the
@@ -163,6 +200,18 @@ public:
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        store.add_parameter({.id = kNoiseGateThreshold, .name = "Gate", .unit = "dB",
+                             .range = {-100.0f, 0.0f, -80.0f, 0.0f}});
+        store.add_parameter({.id = kToneBass,   .name = "Bass",   .unit = "",
+                             .range = {0.0f, 10.0f, 5.0f, 0.0f}});
+        store.add_parameter({.id = kToneMiddle, .name = "Middle", .unit = "",
+                             .range = {0.0f, 10.0f, 5.0f, 0.0f}});
+        store.add_parameter({.id = kToneTreble, .name = "Treble", .unit = "",
+                             .range = {0.0f, 10.0f, 5.0f, 0.0f}});
+        store.add_parameter({.id = kNoiseGateActive, .name = "Noise Gate", .unit = "",
+                             .range = {0.0f, 1.0f, 1.0f, 1.0f}});
+        store.add_parameter({.id = kEQActive, .name = "EQ", .unit = "",
+                             .range = {0.0f, 1.0f, 1.0f, 1.0f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -267,11 +316,20 @@ public:
     /// Lock-free latest output spectrum for the UI (UI is sole reader).
     SpectrumBus& spectrum_bus() { return spectrum_bus_; }
 
+    /// Live {input, output} meter levels in dBFS (peak with fast-attack/
+    /// slow-release ballistics). Published from the audio thread; UI reads.
+    /// −120 dB is the noise floor / silence sentinel.
+    std::pair<float, float> meter_levels_db() const {
+        return {in_level_db_.load(std::memory_order_relaxed),
+                out_level_db_.load(std::memory_order_relaxed)};
+    }
+
     /// Native GPU front-end.
     std::unique_ptr<view::View> create_view() override;
 
     format::ViewSize view_size() const override {
-        return format::view_size_from_design(820, 560);
+        // NeuralAmpModelerPlugin's window aspect (its Background art is 600×400).
+        return format::view_size_from_design(600, 400);
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -298,6 +356,17 @@ public:
             gpu_wet_[ch].assign(kInternalBlock, 0.0f);
         }
         wet_.assign(kInternalBlock, 0.0f);
+
+        // Noise gate + tone-stack DSP (RT-safe; no alloc after this). Reset filter
+        // state and invalidate the cached coefficients so process() retunes on its
+        // first block from the live parameter values.
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            gate_[ch].set_sample_rate(static_cast<float>(sample_rate_));
+            gate_[ch].reset();
+            for (auto& b : tone_[ch]) b.reset();
+        }
+        cached_gate_threshold_ = std::nanf("");
+        cached_bass_ = cached_middle_ = cached_treble_ = std::nanf("");
 
         // Resolve + load the model synchronously so the first block is correct.
         const std::string path = current_requested_path();
@@ -394,12 +463,24 @@ public:
         requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
                                 std::memory_order_relaxed);
 
-        // Append the drive signal (input × input-gain) to the re-block FIFO; the
-        // active engine transforms drive → wet (the model output).
+        // Retune the gate + tone stack from the live parameters (only when they
+        // change, at this block boundary — the RT-safe way to move IIR/gate coeffs).
+        gate_active_ = state().get_value(kNoiseGateActive) >= 0.5f;
+        eq_active_ = state().get_value(kEQActive) >= 0.5f;
+        update_gate(state().get_value(kNoiseGateThreshold));
+        update_tone(state().get_value(kToneBass), state().get_value(kToneMiddle),
+                    state().get_value(kToneTreble));
+
+        // Append the drive signal (input × input-gain, then noise gate) to the
+        // re-block FIFO; the active engine transforms drive → wet (model output).
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             float* dst = in_buf_[ch].data() + in_len_[ch];
             const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
-            for (std::size_t i = 0; i < n; ++i) dst[i] = in ? in[i] * in_gain : 0.0f;
+            for (std::size_t i = 0; i < n; ++i) {
+                float drive = in ? in[i] * in_gain : 0.0f;
+                if (gate_active_) drive = gate_[ch].process(drive);
+                dst[i] = drive;
+            }
             in_len_[ch] += n;
         }
 
@@ -429,6 +510,7 @@ public:
             out_len_[ch] -= consumed;
         }
 
+        publish_meters(input, output, n);
         if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
     }
 
@@ -466,6 +548,7 @@ private:
                 std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
                              (in_len_[ch] - kInternalBlock) * sizeof(float));
                 in_len_[ch] -= kInternalBlock;
+                apply_tone(ch, wet_.data());
                 delay_cpu_wet(ch);
                 std::memcpy(out_buf_[ch].data() + out_len_[ch], wet_.data(),
                             kInternalBlock * sizeof(float));
@@ -489,6 +572,49 @@ private:
         }
     }
 
+    // Retune the per-channel noise gate on a threshold change (block boundary).
+    // Fast, alloc-free — safe to call every block; the cache skips the no-op case.
+    void update_gate(float threshold_db) {
+        if (threshold_db == cached_gate_threshold_) return;
+        cached_gate_threshold_ = threshold_db;
+        signal::NoiseGate::Params p;
+        p.threshold_db = threshold_db;
+        p.ratio = 10.0f;       // hard downward expander ≈ gate
+        p.attack_ms = 1.0f;
+        p.release_ms = 50.0f;
+        p.range_db = -80.0f;
+        for (std::size_t ch = 0; ch < kChannels; ++ch) gate_[ch].set_params(p);
+    }
+
+    // Retune the per-channel Bass/Middle/Treble tone stack. 0..10 maps linearly to
+    // ±kToneRangeDb with 5 = flat: low shelf (Bass), mid peak (Middle), high shelf
+    // (Treble). Only recomputes coefficients when a value actually changes.
+    void update_tone(float bass, float middle, float treble) {
+        if (bass == cached_bass_ && middle == cached_middle_ && treble == cached_treble_)
+            return;
+        cached_bass_ = bass;
+        cached_middle_ = middle;
+        cached_treble_ = treble;
+        const float sr = static_cast<float>(sample_rate_);
+        const float bass_db   = (bass   - 5.0f) / 5.0f * kToneRangeDb;
+        const float mid_db    = (middle - 5.0f) / 5.0f * kToneRangeDb;
+        const float treble_db = (treble - 5.0f) / 5.0f * kToneRangeDb;
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            tone_[ch][0].set_coefficients(signal::Biquad::Type::low_shelf, 120.0f, 0.707f, sr, bass_db);
+            tone_[ch][1].set_coefficients(signal::Biquad::Type::peaking, 750.0f, 0.7f, sr, mid_db);
+            tone_[ch][2].set_coefficients(signal::Biquad::Type::high_shelf, 3000.0f, 0.707f, sr, treble_db);
+        }
+    }
+
+    // Apply one channel's tone stack in place over an internal block (RT-safe).
+    // A no-op when EQ is off, so the model output passes through unfiltered.
+    void apply_tone(std::size_t ch, float* buf) {
+        if (!eq_active_) return;
+        auto& t = tone_[ch];
+        for (std::size_t i = 0; i < kInternalBlock; ++i)
+            buf[i] = t[2].process(t[1].process(t[0].process(buf[i])));
+    }
+
     // GPU engine: same fixed re-blocking, each B-block processed as ONE stereo
     // block through the GPU transport (RT-safe by contract — the GPU forward runs
     // on the transport's non-RT worker; a worker miss runs the node's CpuFallback).
@@ -504,6 +630,7 @@ private:
                 std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
                              (in_len_[ch] - kInternalBlock) * sizeof(float));
                 in_len_[ch] -= kInternalBlock;
+                apply_tone(ch, gpu_wet_[ch].data());
                 std::memcpy(out_buf_[ch].data() + out_len_[ch], gpu_wet_[ch].data(),
                             kInternalBlock * sizeof(float));
                 out_len_[ch] += kInternalBlock;
@@ -599,6 +726,29 @@ private:
             transfer_curve_ = curve;
         }
         model_generation_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Peak meter with fast-attack / slow-release ballistics, per block. Input is
+    // the raw (pre-gain) signal; output is the post-mix result. Audio-thread only.
+    void publish_meters(const audio::BufferView<const float>& input,
+                        const audio::BufferView<float>& output, std::size_t n) {
+        float in_peak = 0.0f, out_peak = 0.0f;
+        for (std::size_t ch = 0; ch < input.num_channels(); ++ch) {
+            const float* p = input.channel(ch).data();
+            for (std::size_t i = 0; i < n; ++i) in_peak = std::max(in_peak, std::abs(p[i]));
+        }
+        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
+            const float* p = output.channel(ch).data();
+            for (std::size_t i = 0; i < n; ++i) out_peak = std::max(out_peak, std::abs(p[i]));
+        }
+        const float rel = 0.10f;  // slow release toward the new peak
+        in_env_  = in_peak  > in_env_  ? in_peak  : in_env_  + rel * (in_peak  - in_env_);
+        out_env_ = out_peak > out_env_ ? out_peak : out_env_ + rel * (out_peak - out_env_);
+        auto to_db = [](float lin) {
+            return lin > 1e-6f ? 20.0f * std::log10(lin) : -120.0f;
+        };
+        in_level_db_.store(to_db(in_env_), std::memory_order_relaxed);
+        out_level_db_.store(to_db(out_env_), std::memory_order_relaxed);
     }
 
     void publish_spectrum(const float* mono, int n) {
@@ -703,6 +853,18 @@ private:
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::vector<float> wet_;                                  // internal-block scratch
 
+    // Noise gate (on the drive) + Bass/Middle/Treble tone stack (on the model
+    // output). Audio-thread only; retuned at block boundaries via the caches.
+    static constexpr float kToneRangeDb = 12.0f;
+    std::array<signal::NoiseGate, kChannels> gate_{};
+    std::array<std::array<signal::Biquad, 3>, kChannels> tone_{};
+    bool gate_active_ = true;
+    bool eq_active_ = true;
+    float cached_gate_threshold_ = 0.0f;
+    float cached_bass_ = 0.0f;
+    float cached_middle_ = 0.0f;
+    float cached_treble_ = 0.0f;
+
     // Inline CPU engine, published lock-free for the audio thread.
     std::unique_ptr<CpuEngine> current_cpu_;
     std::unique_ptr<CpuEngine> retired_cpu_;
@@ -733,6 +895,12 @@ private:
     std::string model_name_ = "(no model)";
     TransferCurve transfer_curve_{};
     std::atomic<std::uint32_t> model_generation_{0};
+
+    // Live peak meters (audio thread writes, UI reads). in_env_/out_env_ are
+    // audio-thread-only envelope state; the dB atomics are the published values.
+    float in_env_ = 0.0f, out_env_ = 0.0f;
+    std::atomic<float> in_level_db_{-120.0f};
+    std::atomic<float> out_level_db_{-120.0f};
 
     // Live output spectrum (audio thread writes, UI reads).
     static constexpr int kSpectrumFft = 2 * kSpectrumBins;  // 512
