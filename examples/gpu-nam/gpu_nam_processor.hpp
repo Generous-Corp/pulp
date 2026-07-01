@@ -50,8 +50,10 @@
 #include <pulp/audio/impulse_response.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/noise_gate.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
 #include <atomic>
@@ -337,10 +339,15 @@ public:
         // Noise gate + tone-stack DSP (RT-safe; no alloc after this). Reset filter
         // state and invalidate the cached coefficients so process() retunes on its
         // first block from the live parameter values.
+        // ~10 Hz high-pass pole for the wet-output DC blocker: pole = 1 - 2*pi*fc/sr.
+        const float dc_pole = sample_rate_ > 0.0
+            ? 1.0f - static_cast<float>(2.0 * M_PI * 10.0 / sample_rate_) : 0.999f;
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             gate_[ch].set_sample_rate(static_cast<float>(sample_rate_));
             gate_[ch].reset();
             for (auto& b : tone_[ch]) b.reset();
+            dc_[ch].set_pole(dc_pole);
+            dc_[ch].reset();
         }
         cached_gate_threshold_ = std::nanf("");
         cached_bass_ = cached_middle_ = cached_treble_ = std::nanf("");
@@ -353,6 +360,17 @@ public:
         if (!ok) {
             runtime::log_error("GPU NAM: failed to load model '{}' ({}); passing dry.",
                                path, err);
+        } else {
+            // NAM captures are trained at a fixed rate (usually 48 kHz). Running the
+            // network at a different host rate shifts its frequency response and time
+            // constants. Rate-matching resampling around the model is not yet applied,
+            // so surface the mismatch rather than silently mis-rendering.
+            const double msr = model.sample_rate();
+            if (msr > 0.0 && std::abs(msr - sample_rate_) > 0.01 * msr)
+                runtime::log_warn(
+                    "GPU NAM: model '{}' was captured at {} Hz but the host runs at {} Hz; "
+                    "its response is shifted (rate-matching resampling not yet applied).",
+                    gpu_nam_basename(path), msr, sample_rate_);
         }
         loaded_ok_ = ok;
         {
@@ -444,6 +462,11 @@ public:
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const format::ProcessContext&) override {
+        // NAM's decaying state (WaveNet dilation history, LSTM cell tails) generates
+        // denormals; flushing them to zero for the whole callback avoids the CPU
+        // stalls that show up as xruns in a real DAW. RAII-restored on return.
+        signal::ScopedFlushDenormals flush_denormals;
+
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
 
@@ -496,7 +519,10 @@ public:
             const std::size_t avail = out_len_[ch];
             const std::size_t delay = dry_ring_[ch].size();
             for (std::size_t i = 0; i < n; ++i) {
-                const float wet_i = i < avail ? out_buf_[ch][i] : 0.0f;
+                // DC-block the wet stream once per sample, in order, before it reaches
+                // the mix/meters/spectrum — covers both the CPU and GPU engines, which
+                // both feed out_buf_.
+                const float wet_i = dc_[ch].process(i < avail ? out_buf_[ch][i] : 0.0f);
                 const float dry_i = delay > 0 ? dry_ring_[ch][dry_pos_[ch]] : (in ? in[i] : 0.0f);
                 if (delay > 0) {
                     dry_ring_[ch][dry_pos_[ch]] = in ? in[i] : 0.0f;
@@ -900,6 +926,12 @@ private:
                 std::string err;
                 if (nam::load_nam_runtime(path, m, &err)) {
                     loaded_ok_ = true;
+                    const double msr = m.sample_rate();
+                    if (msr > 0.0 && std::abs(msr - sample_rate_) > 0.01 * msr)
+                        runtime::log_warn(
+                            "GPU NAM: model '{}' was captured at {} Hz but the host runs at {} Hz; "
+                            "its response is shifted (rate-matching resampling not yet applied).",
+                            gpu_nam_basename(path), msr, sample_rate_);
                     {
                         std::lock_guard<std::mutex> lock(model_mutex_);
                         model_ = m;
@@ -968,6 +1000,11 @@ private:
     static constexpr float kToneRangeDb = 12.0f;
     std::array<signal::NoiseGate, kChannels> gate_{};
     std::array<std::array<signal::Biquad, 3>, kChannels> tone_{};
+    // A NAM capture's response to silence is a nonzero DC (network biases; prewarm
+    // settles to a DC steady state), and gate/mix/engine changes step that offset.
+    // A one-pole high-pass on the wet output removes it so it never reaches the mix,
+    // the meters, or the spectrum, and there are no thumps on those transitions.
+    std::array<signal::DcBlocker<float>, kChannels> dc_{};
     bool gate_active_ = true;
     bool eq_active_ = true;
     float cached_gate_threshold_ = 0.0f;

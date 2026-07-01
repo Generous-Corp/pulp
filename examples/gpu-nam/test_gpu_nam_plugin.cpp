@@ -591,3 +591,35 @@ TEST_CASE("GPU NAM load_model rebuilds without NaNs", "[nam]") {
     REQUIRE(energy > 1e-4);
     proc.release();
 }
+
+// The wet path carries the model's DC (a capture's steady response to any input is
+// a nonzero DC from its biases/asymmetry). The processor's output DC blocker must
+// remove it. Premise (measured from the engine) + outcome (measured at the output).
+TEST_CASE("Wet output DC offset is removed", "[gpu-nam][plugin][dc]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 512;
+    constexpr float kDcIn = 0.3f;
+
+    // Premise: the model's steady response to a constant input is itself a nonzero DC.
+    nam::NamRuntime rt;
+    std::string err;
+    REQUIRE(nam::load_nam_runtime(gpu_nam_default_model_path(), rt, &err));
+    rt.prewarm();
+    for (int i = 0; i < 8000; ++i) rt.process_sample(kDcIn);   // reach steady state
+    double raw = 0.0;
+    const int meas = 4000;
+    for (int i = 0; i < meas; ++i) raw += rt.process_sample(kDcIn);
+    raw /= meas;
+    REQUIRE(std::abs(raw) > 1e-3);   // the model genuinely carries DC to remove
+
+    // Outcome: full wet, gate off, constant input -> the output settles to ~0 mean.
+    const std::vector<float> dc(BLOCK, kDcIn);
+    const auto out = run_cpu(SR, BLOCK, 40, dc,
+                             [](auto& s) { s.set_value(kNoiseGateActive, 0.0f); });
+    double mean = 0.0;
+    const std::size_t tail = out.size() / 4;                   // past prewarm + HP settle
+    for (std::size_t i = out.size() - tail; i < out.size(); ++i) mean += out[i];
+    mean /= static_cast<double>(tail);
+    CHECK(std::abs(mean) < 1e-3);                              // DC removed
+    CHECK(std::abs(mean) < 0.2 * std::abs(raw));               // << the raw model DC
+}
