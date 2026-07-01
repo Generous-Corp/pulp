@@ -59,6 +59,7 @@ done
   echo "missing required args (--name --version --sign-identity --installer-identity --out)" >&2; exit 2; }
 
 STAGE="$(mktemp -d)"; mkdir -p "$OUT" "$STAGE/comp"
+trap 'rm -rf "$STAGE"' EXIT   # clean the staging tree on any exit (success, error, signal)
 source ~/.config/pulp/secrets/keychain.env 2>/dev/null || true
 
 # Non-interactive signing preflight — reuse the codified `pulp ship doctor` setup
@@ -92,10 +93,18 @@ plugin_dir() { case "$1" in
     au) echo /Library/Audio/Plug-Ins/Components;; vst3) echo /Library/Audio/Plug-Ins/VST3;;
     clap) echo /Library/Audio/Plug-Ins/CLAP;; *) echo "bad plugin kind: $1" >&2; exit 2;; esac; }
 
+xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " ' stay valid
+  local s="$1"
+  s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"
+  s="${s//\"/&quot;}"; s="${s//\'/&apos;}"
+  printf '%s' "$s"
+}
+
 CHOICES=""; DEFS=""; REFS=""
-add_ref() {  # $1=choice-id  $2=title  $3=desc  $4=pkgfile
+add_ref() {  # $1=choice-id (already [a-z0-9-])  $2=title  $3=desc  $4=pkgfile
+  local title desc; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
   CHOICES="$CHOICES<line choice=\"$1\"/>"
-  DEFS="$DEFS<choice id=\"$1\" title=\"$2\" description=\"$3\"><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
+  DEFS="$DEFS<choice id=\"$1\" title=\"$title\" description=\"$desc\"><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
   REFS="$REFS<pkg-ref id=\"com.pulp.$NAME.$1.pkg\" version=\"$VERSION\">$4</pkg-ref>"
 }
 
@@ -151,4 +160,4 @@ if [[ "$NOTARIZE" == 1 ]]; then
   xcrun stapler validate "$PKG"
 fi
 echo "OK → $PKG"
-rm -rf "$STAGE"
+# staging tree removed by the EXIT trap

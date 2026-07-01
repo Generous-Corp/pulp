@@ -18,7 +18,9 @@ OUT="${OUT:-/tmp/gpu-nam-release}"
 # file choosers expect (Models/, Cabinets/). Installed to
 # /Library/Application Support/GPU NAM/ (see gpu_nam_content_dir()).
 MODELS="$HERE/models"
-CONTENT="$(mktemp -d)/GPU NAM"
+CONTENT_TMP="$(mktemp -d)"
+trap 'rm -rf "$CONTENT_TMP"' EXIT   # clean the assembled content tree on exit
+CONTENT="$CONTENT_TMP/GPU NAM"
 mkdir -p "$CONTENT/Models" "$CONTENT/Cabinets"
 cp "$MODELS/wavenet.nam"              "$CONTENT/Models/" 2>/dev/null \
   || cp "$MODELS/example.nam"         "$CONTENT/Models/wavenet.nam"
@@ -37,4 +39,5 @@ args=(--name GpuNam --version "$VER"
                 "NAM example captures (two WaveNet sizes + an LSTM) and a cabinet IR, installed to /Library/Application Support/GPU NAM. Optional — the plugin's file choosers open here first." \
                 "/Library/Application Support/GPU NAM" "$CONTENT")
 
-exec "$ROOT/tools/scripts/build_combined_installer.sh" "${args[@]}"
+# Not exec'd: run as a child so package.sh's EXIT trap cleans the content tree.
+"$ROOT/tools/scripts/build_combined_installer.sh" "${args[@]}"

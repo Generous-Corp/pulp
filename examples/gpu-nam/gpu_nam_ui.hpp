@@ -16,6 +16,7 @@
 // parameters through host gestures (begin/set/finish) so edits stick and record.
 
 #include "gpu_nam_processor.hpp"
+#include "gpu_nam_paths.hpp"
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>

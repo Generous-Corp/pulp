@@ -1,5 +1,33 @@
 # GPU NAM — fused block-parallel WaveNet neural-amp inference on the GPU.
-# Correctness + value check (GPU conv-stack vs the CPU WaveNet reference).
+#
+# Per-architecture build toggles for the reusable NAM inference substrate
+# (nam_runtime.hpp + the per-arch headers). All default ON; turn one OFF to build
+# a smaller binary that supports only the subset you need — e.g.
+# `-DGPU_NAM_WITH_LSTM=OFF`. The toggles pass GPU_NAM_WITH_<ARCH>=0 to the
+# substrate + its tests; a define is emitted only for a DISABLED arch, so the
+# default all-on build is byte-for-byte unchanged. (The full GPU plugin ships all
+# architectures; the WaveNet GPU engine is WaveNet-specific, so a subset build
+# that drops WaveNet targets the CPU inference layer, not the GPU plugin.)
+option(GPU_NAM_WITH_WAVENET "GPU NAM: build WaveNet (A1) architecture" ON)
+option(GPU_NAM_WITH_LSTM    "GPU NAM: build LSTM architecture" ON)
+option(GPU_NAM_WITH_LINEAR  "GPU NAM: build Linear architecture" ON)
+set(_gpu_nam_arch_defs "")
+foreach(_gn_arch WAVENET LSTM LINEAR)
+    if(NOT GPU_NAM_WITH_${_gn_arch})
+        list(APPEND _gpu_nam_arch_defs "GPU_NAM_WITH_${_gn_arch}=0")
+    endif()
+endforeach()
+# Apply the toggles directory-wide so EVERY gpu-nam target that compiles the
+# inference substrate — the plugin core, its format adapters, and the tests —
+# sees a consistent GPU_NAM_WITH_<ARCH> set (ODR-safe: they all share one
+# NamRuntime layout). A define is emitted only for a DISABLED arch, so the
+# default all-on build passes nothing and is unchanged. The full GPU plugin
+# additionally requires WaveNet (its GPU engine is WaveNet-specific) and
+# #errors at compile time if WaveNet is turned off.
+if(_gpu_nam_arch_defs)
+    add_compile_definitions(${_gpu_nam_arch_defs})
+endif()
+
 if(TARGET pulp::render)
     add_executable(gpu-nam-check wavenet_check.cpp)
     target_link_libraries(gpu-nam-check PRIVATE pulp::render)
@@ -33,16 +61,31 @@ if(TARGET pulp::runtime)
     target_include_directories(gpu-nam-model-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     if(TARGET Catch2::Catch2WithMain)
-        add_executable(gpu-nam-model-test test_nam_model.cpp)
-        target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
-        target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-        add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
+        # Each architecture's test (loader + NamRuntime dispatch) is built only
+        # when that architecture is enabled — a disabled arch's runtime dispatch
+        # correctly rejects the model, which would fail the test by design.
+        if(GPU_NAM_WITH_WAVENET)
+            add_executable(gpu-nam-model-test test_nam_model.cpp)
+            target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
+        endif()
 
         # LSTM architecture + NamRuntime dispatch (no GPU needed).
-        add_executable(gpu-nam-lstm-test test_nam_lstm.cpp)
-        target_link_libraries(gpu-nam-lstm-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
-        target_include_directories(gpu-nam-lstm-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-        add_test(NAME gpu-nam-lstm-test COMMAND gpu-nam-lstm-test)
+        if(GPU_NAM_WITH_LSTM)
+            add_executable(gpu-nam-lstm-test test_nam_lstm.cpp)
+            target_link_libraries(gpu-nam-lstm-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-lstm-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-lstm-test COMMAND gpu-nam-lstm-test)
+        endif()
+
+        # Linear architecture (single causal FIR) + NamRuntime dispatch (no GPU).
+        if(GPU_NAM_WITH_LINEAR)
+            add_executable(gpu-nam-linear-test test_nam_linear.cpp)
+            target_link_libraries(gpu-nam-linear-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-linear-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-linear-test COMMAND gpu-nam-linear-test)
+        endif()
 
         # Grace-period engine retirement (audio-thread-safe live swaps; no GPU).
         add_executable(gpu-nam-retire-test test_nam_retire_list.cpp)
