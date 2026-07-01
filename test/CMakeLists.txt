@@ -1345,8 +1345,12 @@ pulp_add_test_suite(pulp-test-midi-ci-pe LIBRARIES pulp::midi)
 # not linked on non-Apple lanes).
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     add_executable(pulp-test-au-v2-effect test_au_v2_effect.cpp)
+    # Links ausdk directly: this test includes AudioUnitSDK headers, which
+    # pulp::format no longer exports (ausdk is PRIVATE on pulp-format to stop
+    # leaking those headers onto every consumer). AU-header access is opt-in
+    # via linking ausdk, same as _pulp_add_au does for real AU plugins.
     target_link_libraries(pulp-test-au-v2-effect PRIVATE
-        pulp::format pulp::midi Catch2::Catch2WithMain)
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain)
     # pulp::format on Apple compiles at C++23 (AudioUnitSDK 1.4 requires
     # std::expected). Match it here so the adapter header parses.
     set_target_properties(pulp-test-au-v2-effect PROPERTIES CXX_STANDARD 23)
@@ -1359,7 +1363,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
         test_au_v2_cocoa_ui.mm
         ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm)
     target_link_libraries(pulp-test-au-v2-cocoa-ui PRIVATE
-        pulp::format pulp::view Catch2::Catch2WithMain
+        pulp::format pulp::view ausdk Catch2::Catch2WithMain
         "-framework AppKit" "-framework AudioToolbox" "-framework QuartzCore")
     target_compile_definitions(pulp-test-au-v2-cocoa-ui PRIVATE
         PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Test)
@@ -2302,6 +2306,7 @@ if(APPLE AND PULP_HAS_AUSDK)
     )
     target_link_libraries(pulp-test-au-plugin-state PRIVATE
         pulp::format
+        ausdk
         Catch2::Catch2WithMain
         "-framework AudioToolbox"
         "-framework AVFoundation"
