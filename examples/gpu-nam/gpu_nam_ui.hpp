@@ -49,11 +49,12 @@ inline constexpr int   kNumKnobs = 6;
 inline constexpr float kKnobAreaL = 50.0f, kKnobAreaR = 550.0f;
 inline constexpr float kKnobCy = 152.0f, kKnobR = 33.0f;
 inline constexpr float kKnobLabelY = 110.0f, kKnobValueY = 202.0f;
-inline constexpr float kToggleY = 220.0f, kToggleW = 38.0f, kToggleH = 17.0f;
+inline constexpr float kToggleY = 232.0f, kToggleW = 38.0f, kToggleH = 17.0f;
+inline constexpr float kToggleLabelY = 268.0f;
 inline constexpr float kFileL = 200.0f, kFileR = 400.0f;
 inline constexpr float kModelT = 309.0f, kFileH = 30.0f, kIrDy = 38.0f;
 inline constexpr float kMeterInL = 10.0f, kMeterOutL = 560.0f;
-inline constexpr float kMeterT = 75.0f, kMeterW = 30.0f, kMeterH = 200.0f;
+inline constexpr float kMeterT = 86.0f, kMeterW = 30.0f, kMeterH = 178.0f;
 inline constexpr float kGearX = 566.0f, kGearY = 12.0f, kGearSz = 22.0f;
 inline float knob_cx(int i) {
     const float cw = (kKnobAreaR - kKnobAreaL) / kNumKnobs;
@@ -64,11 +65,11 @@ inline float knob_cx(int i) {
 // NAM's palette, sampled from the reference editor.
 struct GnColors {
     cv::Color panel      = cv::Color::rgba8(25, 25, 25);     // #191919 letterbox
-    cv::Color accent     = cv::Color::rgba8(139, 154, 222);  // #8b9ade periwinkle
-    cv::Color accent_dim = cv::Color::rgba8(93, 131, 226);   // #5D83E2 (globe blue)
+    cv::Color accent     = cv::Color::rgba8(93, 131, 226);   // #5D83E2 cornflower blue
+    cv::Color accent_dim = cv::Color::rgba8(74, 104, 190);
     cv::Color text       = cv::Color::rgba8(214, 214, 218);
     cv::Color text_dim   = cv::Color::rgba8(150, 150, 156);
-    cv::Color arc_track  = cv::Color::rgba8(58, 58, 64);
+    cv::Color arc_track  = cv::Color::rgba8(52, 52, 60);
     cv::Color toggle_off = cv::Color::rgba8(72, 72, 80);
     cv::Color overlay    = cv::Color::rgba8(12, 12, 14);
 };
@@ -139,12 +140,12 @@ public:
 private:
     struct KnobSpec { pulp::state::ParamID id; const char* label; float lo, hi; const char* unit; };
     static constexpr std::array<KnobSpec, nam_geom::kNumKnobs> kKnobs{{
-        {kInputGain,           "INPUT",  -20.0f,  20.0f, "dB"},
-        {kNoiseGateThreshold,  "GATE",  -100.0f,   0.0f, "dB"},
-        {kToneBass,            "BASS",     0.0f,  10.0f, ""},
-        {kToneMiddle,          "MIDDLE",   0.0f,  10.0f, ""},
-        {kToneTreble,          "TREBLE",   0.0f,  10.0f, ""},
-        {kOutputGain,          "OUTPUT", -40.0f,  40.0f, "dB"},
+        {kInputGain,           "Input",     -20.0f,  20.0f, "dB"},
+        {kNoiseGateThreshold,  "Threshold", -100.0f,  0.0f, "dB"},
+        {kToneBass,            "Bass",         0.0f, 10.0f, ""},
+        {kToneMiddle,          "Middle",       0.0f, 10.0f, ""},
+        {kToneTreble,          "Treble",       0.0f, 10.0f, ""},
+        {kOutputGain,          "Output",     -40.0f, 40.0f, "dB"},
     }};
 
     // ── design→screen transform (uniform scale + centering) ──
@@ -261,11 +262,12 @@ private:
     }
 
     void paint_toggles(cv::Canvas& canvas) {
-        paint_toggle(canvas, 1, kNoiseGateActive);  // under the Gate knob
-        paint_toggle(canvas, 3, kEQActive);         // under the Middle knob
+        paint_toggle(canvas, 1, kNoiseGateActive, "Noise Gate");  // under Threshold
+        paint_toggle(canvas, 3, kEQActive, "EQ");                 // under Middle
     }
 
-    void paint_toggle(cv::Canvas& canvas, int under_knob, pulp::state::ParamID id) {
+    void paint_toggle(cv::Canvas& canvas, int under_knob, pulp::state::ParamID id,
+                      const char* label) {
         const bool on = store_.get_value(id) >= 0.5f;
         const float cx = nam_geom::knob_cx(under_knob);
         const float w = nam_geom::kToggleW, h = nam_geom::kToggleH;
@@ -277,6 +279,12 @@ private:
         const float hx = on ? (x + w - hd - 2.0f) : (x + 2.0f);
         canvas.draw_image_from_file(img("SlideSwitchHandle.png"),
                                     sx(hx), sy(y + 2.0f), ss(hd), ss(hd));
+        // Label below the switch.
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(10.5f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text(label, sx(cx), sy(nam_geom::kToggleLabelY));
+        canvas.set_text_align(cv::TextAlign::left);
     }
 
     void paint_meters(cv::Canvas& canvas) {
@@ -288,8 +296,9 @@ private:
     void paint_meter(cv::Canvas& canvas, float x, float level_db) {
         const float y = nam_geom::kMeterT, w = nam_geom::kMeterW, h = nam_geom::kMeterH;
         canvas.draw_image_from_file(img("MeterBackground.png"), sx(x), sy(y), ss(w), ss(h));
-        // Map −60..0 dB → 0..1 of the bar height, filling from the bottom.
-        const float frac = std::clamp((level_db + 60.0f) / 60.0f, 0.0f, 1.0f);
+        // Map −48..0 dB → 0..1 of the bar height, filling from the bottom. The
+        // −48 dB floor keeps the meter dark at rest (matching NAM's idle look).
+        const float frac = std::clamp((level_db + 48.0f) / 48.0f, 0.0f, 1.0f);
         if (frac <= 0.001f) return;
         const float pad = 4.0f;
         const float bar_h = (h - 2 * pad) * frac;
@@ -310,39 +319,31 @@ private:
                         "Select IR directory...", /*model=*/false);
     }
 
-    void paint_file_slot(cv::Canvas& canvas, float top, const char* icon,
+    void paint_file_slot(cv::Canvas& canvas, float top, const char* type_icon,
                          const std::string& label, bool model) {
         const float x = nam_geom::kFileL, w = nam_geom::kFileR - nam_geom::kFileL;
         const float h = nam_geom::kFileH;
         canvas.draw_image_from_file(img("FileBackground.png"), sx(x), sy(top), ss(w), ss(h));
-
-        const float icon_sz = 16.0f, inset = 8.0f;
         const float mid = top + h * 0.5f;
-        const auto& ic = svg(icon);
-        if (!ic.empty())
-            canvas.draw_svg(ic, sx(x + inset), sy(mid - icon_sz * 0.5f), ss(icon_sz), ss(icon_sz));
+        auto draw_icon = [&](const char* name, float ix, float iy, float sz) {
+            const auto& s = svg(name);
+            if (!s.empty()) canvas.draw_svg(s, sx(ix), sy(iy), ss(sz), ss(sz));
+        };
 
-        // Prev / next arrows.
-        const auto& al = svg("ArrowLeft.svg");
-        const auto& ar = svg("ArrowRight.svg");
-        const float arr = 11.0f;
-        if (!al.empty())
-            canvas.draw_svg(al, sx(x + inset + icon_sz + 4.0f), sy(mid - arr * 0.5f), ss(arr), ss(arr));
-        if (!ar.empty())
-            canvas.draw_svg(ar, sx(x + w - inset - icon_sz - arr - 4.0f), sy(mid - arr * 0.5f),
-                            ss(arr), ss(arr));
+        // Left group: type icon · folder · ‹ · › (matching NAM's control order).
+        const float isz = 15.0f;
+        draw_icon(type_icon,      x + 7.0f,  mid - isz * 0.5f, isz);
+        draw_icon("File.svg",     x + 26.0f, mid - isz * 0.5f, isz);
+        draw_icon("ArrowLeft.svg",  x + 46.0f, mid - 5.5f, 11.0f);
+        draw_icon("ArrowRight.svg", x + 60.0f, mid - 5.5f, 11.0f);
+        // Globe (right edge).
+        draw_icon("Globe.svg", x + w - 22.0f, mid - isz * 0.5f, isz);
 
-        // Globe (right).
-        const auto& gl = svg("Globe.svg");
-        if (!gl.empty())
-            canvas.draw_svg(gl, sx(x + w - inset - icon_sz), sy(mid - icon_sz * 0.5f),
-                            ss(icon_sz), ss(icon_sz));
-
-        // Centered name.
+        // Centered name (loaded model name, else the NAM placeholder text).
         canvas.set_fill_color(model ? colors_.text : colors_.text_dim);
-        canvas.set_font("Roboto", ss(10.5f));
+        canvas.set_font("Roboto", ss(11.0f));
         canvas.set_text_align(cv::TextAlign::center);
-        canvas.fill_text(label, sx(x + w * 0.5f), sy(mid + 3.5f));
+        canvas.fill_text(label, sx(x + w * 0.5f), sy(mid + 3.8f));
         canvas.set_text_align(cv::TextAlign::left);
     }
 
