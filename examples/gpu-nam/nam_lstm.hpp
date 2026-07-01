@@ -201,12 +201,17 @@ public:
     }
 
     // Settle at the silence steady-state (reset to the stored initial state, then
-    // run silence). For a NAM LSTM the stored (h0,c0) is already the resting state,
-    // so this mostly confirms it; kept for parity with the WaveNet prewarm and to
-    // absorb any residual transient. Off-thread only.
+    // run silence). The stored (h0,c0) is the trained initial state, not necessarily
+    // the true silence attractor, and a slow-state LSTM (bass amps, compressors) can
+    // take a fair fraction of a second to settle — so run ~0.5 s of silence (the
+    // reference's prewarm length), floored at 1024 for unknown/degenerate rates.
+    // Off-thread only.
     void prewarm() {
         reset();
-        for (int i = 0; i < 1024; ++i) process_sample(0.0f);
+        long n = sample_rate_ > 0.0 ? static_cast<long>(0.5 * sample_rate_) : 1024;
+        if (n < 1024) n = 1024;
+        if (n > (1 << 20)) n = 1 << 20;
+        for (long i = 0; i < n; ++i) process_sample(0.0f);
     }
 
     float process_sample(float x) {
