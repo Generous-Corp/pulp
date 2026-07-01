@@ -156,6 +156,23 @@ def _cmd_loop(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare(args: argparse.Namespace) -> int:
+    import json
+    from . import compare
+    report = compare.compare_files(
+        args.reference, args.candidate,
+        profile=args.profile, reference_role=args.reference_role,
+    )
+    print(f"[quality-lab compare] {report['verdict']}: {report['summary']}")
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(report, fh, indent=2)
+        print(f"  wrote report -> {args.json}")
+    # Advisory: exit nonzero ONLY when we could not measure (invalid input/tool failure),
+    # never for a judgment — a regression_suspected verdict is advice, not a gate failure.
+    return 2 if report["verdict"] == compare.VERDICT_INVALID else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quality-lab", description="Audio Quality Lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -213,6 +230,20 @@ def main(argv: list[str] | None = None) -> int:
     lp.add_argument("--corpus-dir", default="", dest="corpus_dir",
                     help="write label proposals to <dir>/LABEL_PROPOSALS.json (never MANIFEST.json)")
     lp.set_defaults(func=_cmd_loop)
+
+    cmp_ = sub.add_parser(
+        "compare",
+        help="advisory before/after judgment over two WAVs (agent-facing; not a gate)")
+    cmp_.add_argument("reference", help="reference (before) WAV")
+    cmp_.add_argument("candidate", help="candidate (after) WAV")
+    cmp_.add_argument("--profile", choices=["tonal-balance"], default="tonal-balance",
+                      help="measurement profile (only tonal-balance in this slice)")
+    cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
+                      dest="reference_role",
+                      help="golden = reference is known-good (enables regression_suspected); "
+                           "peer = neutral material_change_detected only")
+    cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
+    cmp_.set_defaults(func=_cmd_compare)
 
     args = p.parse_args(argv)
     return args.func(args)

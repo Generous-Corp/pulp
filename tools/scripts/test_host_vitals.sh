@@ -122,6 +122,14 @@ else
   FAIL=$((FAIL+1)); printf '  [FAIL] json: got %s\n' "$json_out"
 fi
 
+# 12. JSON carries sampled_at = the epoch used to compute the ages (PULP_VITALS_NOW),
+# so a consumer can reconstruct an incident's absolute time as sampled_at - age_s.
+if printf '%s' "$json_out" | grep -q "\"sampled_at\":${NOW}"; then
+  PASS=$((PASS+1)); printf '  [PASS] json: sampled_at matches now\n'
+else
+  FAIL=$((FAIL+1)); printf '  [FAIL] json: sampled_at != %s in %s\n' "$NOW" "$json_out"
+fi
+
 echo ""
 echo "host_vitals: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

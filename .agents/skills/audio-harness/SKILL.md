@@ -357,5 +357,43 @@ harness or `ctest`.
   PROPOSAL-ONLY label updates to `corpus/LABEL_PROPOSALS.json` — never `MANIFEST.json`,
   never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
   regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
+- **Agent compare report** (`compare.py`, `quality-lab compare before.wav after.wav`): the
+  agent-facing **measure → compare → judge** surface. Level-matches, runs one curated
+  measurement (`--profile tonal-balance` → LTAS spectral-centroid shift), and emits a typed
+  evidence envelope + an action-oriented verdict (`regression_suspected` /
+  `material_change_detected` / `no_material_change_detected` / `inconclusive` / `invalid`).
+  **Intent-safe:** `regression_suspected` needs `--reference-role golden`; a `peer` compare is
+  neutral. **Advisory:** exits non-zero only on `invalid` (couldn't measure), never for a
+  judgment — the gate primitive stays `pulp audio validate compare`. Report shape (`quality_lab.
+  compare.v1`) is owned by `schema.py`; every envelope carries `status`/`applicable`/
+  `materiality`/`provenance`. Use this when an agent must weigh in on a DSP change with cited
+  evidence rather than a bare pass/fail.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.
+
+### Compare/measure design rationale & non-goals (why we built it this way / what we skipped)
+
+Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not workflow history):
+
+- **A vertical agent report before a shared measurement record.** The harness + lab + inspector
+  already measure; the gap was orchestration + a *defended verdict*. A universal `{ref,cand,delta}`
+  scalar is too lossy to defend a judgment, so measurements are typed *evidence envelopes* and
+  curves/THD stay first-class. (Two independent adversarial reviews converged on this.)
+- **Cross-tool "agreement = trust" is NOT a signal** and is deliberately absent — different
+  algorithms disagree for legitimate reasons; treating agreement as trust manufactures
+  overconfidence. If ever added, it reads as "corroborated under a comparable-axis contract."
+- **Doctor `--response`/`--thd` are NOT valid on arbitrary before/after WAVs** — `--response` is a
+  peak-normalized self-spectrum (not a transfer response); THD is gate-grade only for a steady
+  bin-coherent sine. They need a controlled stimulus, so they're excluded from `compare` and join
+  later behind stimulus-supplying profiles.
+- **Alignment is `not_required` for tonal-balance** — a global LTAS/centroid metric is
+  alignment-free; the envelope records the *policy*, we don't build general alignment for it.
+- **`regression_suspected` requires `--reference-role golden`** — "worse" assumes the reference is
+  the known-good baseline; without that, a change is neutral.
+- **Speech/perceptual & feature-extractor scope is bounded** — PESQ/POLQA/DNSMOS/NISQA are speech/
+  telephony (out of scope for full-reference music); aubio/librosa/Essentia are feature extractors,
+  not MOS predictors (advisory raw-comparators behind profiles, never verdicts); scalar-only where
+  the scalar is the calibrated deliverable (PEAQ/AQUA-Tk ODG). GPL/AGPL tools stay behind the
+  env-path license fence.
+- **`audio_io.load_wav` mono-downmixes** — fine for tonal balance; a future stereo-image axis must
+  NOT use that loader.

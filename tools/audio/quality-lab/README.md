@@ -76,6 +76,10 @@ python -m quality_lab.cli corpus list
 python -m quality_lab.cli corpus add --file vocal.wav --name vocal1 \
     --class vocal --license CC0 --expect "graininess on sustained notes"
 
+# agent-facing before/after judgment over two WAVs (advisory; NOT a gate)
+python -m quality_lab.cli compare before.wav after.wav --profile tonal-balance --json report.json
+python -m quality_lab.cli compare golden.wav candidate.wav --reference-role golden   # enables regression_suspected
+
 pytest tests/ -q
 ```
 
@@ -121,6 +125,24 @@ real behavior — the `clean` character smears attacks (transient fires); `varis
 additionally dulls brightness (centroid fires). `engine-baseline` freezes the current
 engine's detector scalars and flags when a future build deviates — *did this change make
 it worse?* — with `transient_sharpness` increasing flagged as **WORSE**.
+
+### Before/after compare (agent-facing, advisory)
+
+`compare before.wav after.wav` is the agent-facing **measure → compare → judge** surface: it
+level-matches the candidate to the reference, runs one curated measurement (`--profile
+tonal-balance` → the global LTAS spectral-centroid shift), and emits a typed *evidence
+envelope* plus a defended, action-oriented verdict — so an agent tuning DSP can weigh in on a
+change with cited evidence rather than a bare pass/fail.
+
+- **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
+  · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).
+- **Intent-safe:** `regression_suspected` is only emitted with `--reference-role golden` (reference
+  is known-good). A default `peer` comparison of a duller candidate is the neutral
+  `material_change_detected` — the lab doesn't assume which side is "right".
+- **Advisory, never a gate.** It exits non-zero only when it *couldn't measure* (`invalid`), never
+  for a judgment. The gate primitive remains `pulp audio validate compare`. Report shape is owned
+  by `schema.py` (`quality_lab.compare.v1`); every envelope carries `status`/`applicable`/
+  `materiality`/`provenance` so a reader never has to guess whether the number is trustworthy.
 
 ### Real audio
 

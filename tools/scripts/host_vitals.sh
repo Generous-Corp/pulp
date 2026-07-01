@@ -185,9 +185,12 @@ main() {
     quiet) : ;;
     level) printf '%s\n' "$level" ;;
     json)
-      printf '{"level":"%s","code":%d,"reason":"%s","os":"%s","ncpu":%s,"load1":"%s","pressure_level":"%s","jetsam_age_s":%s,"windowserver_age_s":%s}\n' \
+      # `sampled_at` is the epoch used to compute the ages above, so a consumer
+      # can reconstruct an incident's absolute time as `sampled_at - age_s`
+      # without trusting the file mtime (which a touch/copy could drift).
+      printf '{"level":"%s","code":%d,"reason":"%s","os":"%s","ncpu":%s,"load1":"%s","pressure_level":"%s","jetsam_age_s":%s,"windowserver_age_s":%s,"sampled_at":%s}\n' \
         "$level" "$code" "$reason" "$os" "$ncpu" "$load1" "$pressure" \
-        "${jetsam_age:-null}" "${winserver_age:-null}"
+        "${jetsam_age:-null}" "${winserver_age:-null}" "$(_now)"
       ;;
     human)
       printf 'host_vitals: %s — %s (host=%s load1=%s cores=%s pressure=%s)\n' \
