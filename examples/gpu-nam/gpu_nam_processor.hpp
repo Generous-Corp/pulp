@@ -37,7 +37,9 @@
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/audio/impulse_response.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/noise_gate.hpp>
 
@@ -240,6 +242,26 @@ public:
         return user_model_loaded_.load(std::memory_order_acquire);
     }
 
+    /// Load (or clear, with an empty path) a cabinet impulse response. The IR is
+    /// decoded + built off the audio thread and swapped in RT-safely; it sits
+    /// after the tone stack in the wet chain, matching the reference's order.
+    void load_ir(const std::string& path) {
+        std::lock_guard<std::mutex> lock(ir_req_mutex_);
+        requested_ir_path_ = path;
+        ir_req_generation_.fetch_add(1, std::memory_order_release);
+    }
+    /// True when an IR is actually applied (built + published), NOT merely
+    /// requested — so a pending or failed load reads as "no IR", matching what
+    /// the audio path is doing. UI-thread only.
+    bool user_ir_loaded() const {
+        return ir_active_.load(std::memory_order_acquire) != nullptr;
+    }
+    /// Display name of the loaded IR (filename), or "" when none. UI-thread only.
+    std::string ir_name() const {
+        std::lock_guard<std::mutex> lock(ir_mutex_);
+        return ir_name_;
+    }
+
     /// True when the live audio path is actually the GPU engine (Engine=GPU is
     /// requested AND a GPU device is available AND the transport is published).
     bool gpu_engine_active() const {
@@ -430,6 +452,14 @@ public:
             cpu_extra_pos_[ch] = 0;
         }
 
+        // Rebuild a previously-selected IR at the (possibly new) sample rate,
+        // synchronously so the first block has it. Empty = no IR = pass-through.
+        current_ir_.reset();
+        retired_ir_.reset();
+        ir_active_.store(nullptr, std::memory_order_release);
+        if (const std::string ipath = current_requested_ir_path(); !ipath.empty())
+            build_and_publish_ir(ipath);
+
         requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
                                 std::memory_order_relaxed);
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
@@ -448,6 +478,7 @@ public:
         gpu_active_.store(nullptr, std::memory_order_release);
         gpu_engine_active_.store(false, std::memory_order_release);
         cpu_active_.store(nullptr, std::memory_order_release);
+        ir_active_.store(nullptr, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
@@ -455,6 +486,8 @@ public:
         retired_stack_.reset();
         current_cpu_.reset();
         retired_cpu_.reset();
+        current_ir_.reset();
+        retired_ir_.reset();
     }
 
     void process(audio::BufferView<float>& output,
@@ -532,6 +565,15 @@ private:
         std::array<nam::NamModel, kChannels> model{};
     };
 
+    // Cabinet IR: one partitioned convolver per channel over the fixed internal
+    // block. Heap-owned, built/freed only off the audio thread; the audio thread
+    // loads a pointer to it (nullptr = no IR = pass-through).
+    struct IrEngine {
+        std::array<signal::PartitionedConvolver, kChannels> conv{};
+    };
+    // Cabinet IRs are short; cap the decode + convolution cost.
+    static constexpr double kMaxIrSeconds = 2.0;
+
     // One GPU engine: the node (per-channel GPU NAM forward + CPU fallback) plus
     // the transport. The stack owns its OWN model copy so the node's model pointer
     // stays valid across a live model reload (the processor's authoritative model_
@@ -558,6 +600,7 @@ private:
                              (in_len_[ch] - kInternalBlock) * sizeof(float));
                 in_len_[ch] -= kInternalBlock;
                 apply_tone(ch, wet_.data());
+                apply_ir(ch, wet_.data());
                 delay_cpu_wet(ch);
                 std::memcpy(out_buf_[ch].data() + out_len_[ch], wet_.data(),
                             kInternalBlock * sizeof(float));
@@ -624,6 +667,14 @@ private:
             buf[i] = t[2].process(t[1].process(t[0].process(buf[i])));
     }
 
+    // Apply the cabinet IR (if loaded) in place over one internal block. RT-safe:
+    // the convolver is preallocated; nullptr = no IR = pass-through. In-place is
+    // safe — the convolver reads the whole input block before writing output.
+    void apply_ir(std::size_t ch, float* buf) {
+        IrEngine* ir = ir_active_.load(std::memory_order_acquire);
+        if (ir) ir->conv[ch].process(buf, buf, kInternalBlock);
+    }
+
     // GPU engine: same fixed re-blocking, each B-block processed as ONE stereo
     // block through the GPU transport (RT-safe by contract — the GPU forward runs
     // on the transport's non-RT worker; a worker miss runs the node's CpuFallback).
@@ -640,6 +691,7 @@ private:
                              (in_len_[ch] - kInternalBlock) * sizeof(float));
                 in_len_[ch] -= kInternalBlock;
                 apply_tone(ch, gpu_wet_[ch].data());
+                apply_ir(ch, gpu_wet_[ch].data());
                 std::memcpy(out_buf_[ch].data() + out_len_[ch], gpu_wet_[ch].data(),
                             kInternalBlock * sizeof(float));
                 out_len_[ch] += kInternalBlock;
@@ -786,9 +838,43 @@ private:
         return requested_model_path_;
     }
 
+    std::string current_requested_ir_path() {
+        std::lock_guard<std::mutex> lock(ir_req_mutex_);
+        return requested_ir_path_;
+    }
+
+    // Build per-channel convolvers from an IR file at the session rate and
+    // publish them for the audio thread, retiring the previous engine (freed one
+    // rebuild later). Worker / prepare thread only. On failure, leaves the
+    // current IR untouched.
+    void build_and_publish_ir(const std::string& path) {
+        auto ir = audio::read_impulse_response(
+            path, sample_rate_, {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
+        if (!ir || ir->empty()) {
+            runtime::log_error("GPU NAM: load_ir('{}') failed; keeping current IR.", path);
+            return;
+        }
+        auto eng = std::make_unique<IrEngine>();
+        for (std::size_t ch = 0; ch < kChannels; ++ch)
+            eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
+        retired_ir_ = std::move(current_ir_);          // free the prior one (worker-owned)
+        current_ir_ = std::move(eng);
+        ir_active_.store(current_ir_.get(), std::memory_order_release);
+        std::lock_guard<std::mutex> lock(ir_mutex_);
+        ir_name_ = gpu_nam_basename(path);
+    }
+
+    void clear_ir() {
+        retired_ir_ = std::move(current_ir_);          // park for one-rebuild-later free
+        ir_active_.store(nullptr, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(ir_mutex_);
+        ir_name_.clear();
+    }
+
     void start_worker() {
         worker_run_.store(true, std::memory_order_release);
         last_seen_model_gen_ = model_req_generation_.load(std::memory_order_acquire);
+        last_seen_ir_gen_ = ir_req_generation_.load(std::memory_order_acquire);
         worker_ = std::thread([this] { worker_loop(); });
     }
 
@@ -823,6 +909,15 @@ private:
                 } else {
                     runtime::log_error("GPU NAM: load_model('{}') failed ({}).", path, err);
                 }
+            }
+
+            // IR reload / clear?
+            const std::uint32_t ir_gen = ir_req_generation_.load(std::memory_order_acquire);
+            if (ir_gen != last_seen_ir_gen_) {
+                last_seen_ir_gen_ = ir_gen;
+                const std::string ipath = current_requested_ir_path();
+                if (ipath.empty()) clear_ir();
+                else               build_and_publish_ir(ipath);
             }
 
             // Engine toggle (GPU publish/unpublish; the stack stays built).
@@ -879,6 +974,12 @@ private:
     std::unique_ptr<CpuEngine> retired_cpu_;
     std::atomic<CpuEngine*> cpu_active_{nullptr};
 
+    // Cabinet IR engine (default none), published lock-free; built/swapped off
+    // the audio thread, retired one rebuild later so the audio thread never frees.
+    std::unique_ptr<IrEngine> current_ir_;
+    std::unique_ptr<IrEngine> retired_ir_;
+    std::atomic<IrEngine*> ir_active_{nullptr};
+
     // Optional GPU engine (default OFF), switchable live.
     std::unique_ptr<GpuStack> current_stack_;
     std::unique_ptr<GpuStack> retired_stack_;
@@ -897,6 +998,14 @@ private:
     std::string requested_model_path_;
     std::atomic<std::uint32_t> model_req_generation_{0};
     std::uint32_t last_seen_model_gen_ = 0;
+
+    // IR live-load request + display state (UI/worker only).
+    std::mutex ir_req_mutex_;
+    std::string requested_ir_path_;
+    std::atomic<std::uint32_t> ir_req_generation_{0};
+    std::uint32_t last_seen_ir_gen_ = 0;
+    mutable std::mutex ir_mutex_;
+    std::string ir_name_;
 
     // Authoritative model + display (UI/worker only; never the audio thread).
     mutable std::mutex model_mutex_;

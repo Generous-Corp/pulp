@@ -7,9 +7,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/audio_file.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
+
+#include <filesystem>
 
 #include "gpu_nam_processor.hpp"
 
@@ -184,6 +187,60 @@ std::vector<float> run_stream_cpu(double sr, std::size_t hblock,
     GpuNamProcessor proc;
     pulp::state::StateStore store;
     prepare_proc(proc, store, sr, hblock, /*engine=*/0.0f);
+    std::vector<float> out;
+    out.reserve(sig.size());
+    std::vector<float> in_l(hblock), in_r(hblock), out_l(hblock), out_r(hblock);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = sr;
+    for (std::size_t off = 0; off < sig.size(); off += hblock) {
+        const std::size_t n = std::min(hblock, sig.size() - off);
+        for (std::size_t i = 0; i < n; ++i) in_l[i] = in_r[i] = sig[off + i];
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, n);
+        pulp::audio::BufferView<float> ov(op, 2, n);
+        pctx.num_samples = static_cast<int>(n);
+        proc.process(ov, iv, mi, mo, pctx);
+        for (std::size_t i = 0; i < n; ++i) out.push_back(out_l[i]);
+    }
+    const int lat = proc.latency_samples();
+    proc.release();
+    if (lat > 0 && static_cast<std::size_t>(lat) < out.size())
+        out.erase(out.begin(), out.begin() + lat);
+    return out;
+}
+
+// Write a mono IR WAV so load_ir() has a real file to decode.
+void write_ir_wav(const std::string& path, const std::vector<float>& samples,
+                  std::uint32_t sr = 48000) {
+    pulp::audio::AudioFileData d;
+    d.sample_rate = sr;
+    d.channels = {samples};
+    REQUIRE(pulp::audio::write_wav_file(path, d));
+}
+
+// Like run_stream_cpu but loads `ir_path` before prepare() (so the IR is built
+// synchronously and the first block has it). Empty path = no IR.
+std::vector<float> run_stream_cpu_ir(double sr, std::size_t hblock,
+                                     const std::vector<float>& sig,
+                                     const std::string& ir_path) {
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 0.0f);
+    store.set_value(kOutputGain, 0.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    if (!ir_path.empty()) proc.load_ir(ir_path);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = sr;
+    ctx.max_buffer_size = static_cast<int>(hblock);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
     std::vector<float> out;
     out.reserve(sig.size());
     std::vector<float> in_l(hblock), in_r(hblock), out_l(hblock), out_r(hblock);
@@ -457,6 +514,46 @@ TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
         INFO("host_block=" << hb << " max_abs_diff=" << max_abs);
         REQUIRE(max_abs < 1e-4);   // chunk-schedule-independent to the sample
     }
+}
+
+TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
+    constexpr double SR = 48000.0;
+    const std::size_t IB = GpuNamProcessor::kInternalBlock;
+    const auto sig = sine(IB * 8);
+
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path();
+    const auto id_path = (dir / "gpu_nam_ir_identity.wav").string();
+    const auto lp_path = (dir / "gpu_nam_ir_decay.wav").string();
+    write_ir_wav(id_path, {1.0f});                          // identity (stays [1] after norm)
+    write_ir_wav(lp_path, {0.5f, 0.5f, 0.25f, 0.12f});      // short decaying kernel
+
+    const auto no_ir = run_stream_cpu_ir(SR, IB, sig, "");
+    const auto ident = run_stream_cpu_ir(SR, IB, sig, id_path);
+    const auto decay = run_stream_cpu_ir(SR, IB, sig, lp_path);
+    REQUIRE(no_ir.size() > IB * 2);
+    REQUIRE(ident.size() == no_ir.size());
+    REQUIRE(decay.size() == no_ir.size());
+
+    // A unit-impulse IR is transparent (0-latency overlap-save): the wet chain is
+    // unchanged. Proves the convolver is wired correctly, not just "does something".
+    double max_id = 0.0;
+    for (std::size_t i = IB; i < no_ir.size(); ++i)
+        max_id = std::max(max_id, std::abs(static_cast<double>(ident[i]) - no_ir[i]));
+    INFO("identity-IR max_abs_diff=" << max_id);
+    REQUIRE(max_id < 1e-3);
+
+    // A real (multi-tap) IR is actually convolved in: the output changes and
+    // stays finite.
+    double diff_e = 0.0, ref_e = 0.0;
+    for (std::size_t i = IB; i < no_ir.size(); ++i) {
+        REQUIRE(std::isfinite(decay[i]));
+        const double d = static_cast<double>(decay[i]) - no_ir[i];
+        diff_e += d * d;
+        ref_e += static_cast<double>(no_ir[i]) * no_ir[i];
+    }
+    INFO("decay-IR diff/ref energy=" << diff_e / (ref_e + 1e-30));
+    REQUIRE(diff_e > ref_e * 1e-4);
 }
 
 TEST_CASE("GPU NAM load_model rebuilds without NaNs", "[nam]") {

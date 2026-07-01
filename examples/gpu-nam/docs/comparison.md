@@ -85,16 +85,18 @@ oracle bit-for-bit while doing so.
 | EQ enable toggle | ✅ | ✅ | |
 | Input / Output meters | ✅ | ✅ | Idle-dark with an accent baseline |
 | Model (`.nam`) slot | ✅ | ✅ | Loads WaveNet captures |
+| Cabinet IR convolution | ✅ | ✅ | Partitioned convolver, after the tone stack; 0-latency |
 | Engine CPU/GPU switch | ✕ (CPU only) | ✅ | The point of the GPU demo |
 
 ## Scope differences
 
-Two signal features exist in the reference and differ in GPU NAM today:
-
-- **Impulse-response (IR) convolution** — the reference loads and applies a
-  cabinet IR. GPU NAM shows the IR slot; applying a loaded IR through Pulp's
-  partitioned convolver (in the same fixed-block chain as the model) is the
-  active next slice.
+- **Impulse-response (IR) convolution** — parity. GPU NAM loads a cabinet IR
+  (WAV/AIFF/FLAC) and applies it through Pulp's `PartitionedConvolver` after the
+  tone stack, matching the reference's chain order. The IR is decoded and built
+  off the audio thread and swapped in RT-safely; it is 0-latency (overlap-save),
+  so dry/wet stay aligned. The file-decode→mono→resample→normalize loader is a
+  shared core helper (`pulp::audio::read_impulse_response`) used by both this
+  demo and SuperConvolver.
 - **Output mode (Raw / Normalized / Calibrated)** — the reference offers
   loudness-normalized and calibrated output. GPU NAM offers plain output gain;
   loudness-normalized output from the model's embedded metadata is a candidate

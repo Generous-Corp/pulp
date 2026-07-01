@@ -19,6 +19,7 @@
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/file_chooser.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 
@@ -337,14 +338,17 @@ private:
         const std::string model_label = proc_.user_model_loaded()
                                             ? proc_.model_name()
                                             : "Select model directory...";
-        paint_file_slot(canvas, nam_geom::kModelT, "ModelIcon.svg",
-                        model_label, proc_.user_model_loaded());
-        paint_file_slot(canvas, nam_geom::kModelT + nam_geom::kIrDy, "IRIconOff.svg",
-                        "Select IR directory...", /*loaded=*/false);
+        model_slot_ = paint_file_slot(canvas, nam_geom::kModelT, "ModelIcon.svg",
+                                      model_label, proc_.user_model_loaded());
+        const bool ir_loaded = proc_.user_ir_loaded();
+        const std::string ir_label = ir_loaded ? proc_.ir_name() : "Select IR directory...";
+        ir_slot_ = paint_file_slot(canvas, nam_geom::kModelT + nam_geom::kIrDy,
+                                   ir_loaded ? "IRIconOn.svg" : "IRIconOff.svg",
+                                   ir_label, ir_loaded);
     }
 
-    void paint_file_slot(cv::Canvas& canvas, float top, const char* type_icon,
-                         const std::string& label, bool loaded) {
+    vw::Rect paint_file_slot(cv::Canvas& canvas, float top, const char* type_icon,
+                             const std::string& label, bool loaded) {
         const float fx = nam_geom::kFileFieldL;
         const float w = nam_geom::kFileR - fx;
         const float h = nam_geom::kFileH;
@@ -375,6 +379,28 @@ private:
         canvas.set_text_align(cv::TextAlign::center);
         canvas.fill_text(label, sx(fx + w * 0.5f + 20.0f), sy(mid + 3.8f));
         canvas.set_text_align(cv::TextAlign::left);
+        return {sx(fx), sy(top), ss(w), ss(h)};
+    }
+
+    // Native file pickers for the model / IR slots (modal on the UI thread on
+    // macOS, so capturing the processor by reference is safe).
+    void open_model_chooser() {
+        vw::FileChooser chooser;
+        chooser.set_title("Load NAM model")
+               .add_extension_filter("NAM capture (.nam)", "nam");
+        auto& proc = proc_;
+        chooser.open([&proc](std::vector<std::string> paths) {
+            if (!paths.empty()) proc.load_model(paths.front());
+        });
+    }
+    void open_ir_chooser() {
+        vw::FileChooser chooser;
+        chooser.set_title("Load cabinet impulse response")
+               .add_extension_filter("Impulse response (WAV/AIFF/FLAC)", "wav;aiff;aif;flac");
+        auto& proc = proc_;
+        chooser.open([&proc](std::vector<std::string> paths) {
+            if (!paths.empty()) proc.load_ir(paths.front());
+        });
     }
 
     // ── settings page (this demo's GPU controls) ──
@@ -517,6 +543,9 @@ private:
                       sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f), ss(18.0f))) {
             show_settings_ = true; return;
         }
+        // File slots open the native pickers.
+        if (in_rect(p, model_slot_)) { open_model_chooser(); return; }
+        if (in_rect(p, ir_slot_)) { open_ir_chooser(); return; }
         // Toggles.
         if (hit_toggle(p, 1, kNoiseGateActive)) return;
         if (hit_toggle(p, 3, kEQActive)) return;
@@ -589,6 +618,7 @@ private:
     bool pointer_down_ = false;
     bool show_settings_ = false;
     vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{}, settings_close_{};
+    vw::Rect model_slot_{}, ir_slot_{};
 };
 
 } // namespace pulp::examples
