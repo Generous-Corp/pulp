@@ -12,8 +12,8 @@ truth this demo measures itself against.
 | | NeuralAmpModelerPlugin (reference) | GPU NAM (this demo) |
 |---|---|---|
 | UI framework | iPlug2 `IGraphics` (NanoVG) | Pulp view/canvas (Skia Graphite on Dawn) |
-| Neural inference | NeuralAmpModelerCore (Eigen), CPU | Clean-room WaveNet: CPU oracle + opt-in GPU engine |
-| `.nam` model support | Yes (trainer + player) | Player only (loads `.nam` WaveNet captures) |
+| Neural inference | NeuralAmpModelerCore (Eigen), CPU | Clean-room WaveNet + LSTM: CPU oracle + opt-in GPU engine (WaveNet) |
+| `.nam` model support | Yes (trainer + player) | Player only (loads `.nam` WaveNet and LSTM captures) |
 | Purpose | A complete, shipping product | A Pulp GPU-audio showcase built around the same UX |
 
 ## Rendering — GPU in both, different stacks
@@ -84,7 +84,7 @@ oracle bit-for-bit while doing so.
 | Bass / Middle / Treble tone stack | ✅ | ✅ | Low-shelf / peak / high-shelf; 5 = flat |
 | EQ enable toggle | ✅ | ✅ | |
 | Input / Output meters | ✅ | ✅ | Idle-dark with an accent baseline |
-| Model (`.nam`) slot | ✅ | ✅ | Loads WaveNet captures |
+| Model (`.nam`) slot | ✅ | ✅ | Loads WaveNet and LSTM captures |
 | Cabinet IR convolution | ✅ | ✅ | Partitioned convolver, after the tone stack; 0-latency |
 | Engine CPU/GPU switch | ✕ (CPU only) | ✅ | The point of the GPU demo |
 

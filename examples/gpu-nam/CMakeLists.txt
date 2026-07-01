@@ -37,6 +37,12 @@ if(TARGET pulp::runtime)
         target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
+
+        # LSTM architecture + NamRuntime dispatch (no GPU needed).
+        add_executable(gpu-nam-lstm-test test_nam_lstm.cpp)
+        target_link_libraries(gpu-nam-lstm-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-lstm-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-lstm-test COMMAND gpu-nam-lstm-test)
     endif()
 endif()
 

@@ -172,3 +172,60 @@ TEST_CASE("real model output is finite, non-trivial, and causal", "[nam]") {
         if (out[i] != out2[i]) { diverged = true; break; }
     REQUIRE(diverged);
 }
+
+TEST_CASE("prewarm settles the model at its silence steady-state", "[nam]") {
+    // Two dilated arrays (receptive field > 0) with non-trivial weights, so the
+    // response to silence is a non-zero DC that takes a full receptive field to
+    // populate. After prewarm() the model must already be at that steady state:
+    // its next silence output equals the output after much more silence, and it
+    // differs from a cold (reset-only) start.
+    LayerArrayConfig a0;
+    a0.input_size = 1; a0.condition_size = 1; a0.channels = 3; a0.kernel_size = 3;
+    a0.dilations = {1, 2}; a0.head_size = 2; a0.head_bias = true; a0.gated = false;
+    LayerArrayConfig a1;
+    a1.input_size = 3; a1.condition_size = 1; a1.channels = 2; a1.kernel_size = 3;
+    a1.dilations = {8}; a1.head_size = 1; a1.head_bias = true; a1.gated = false;
+
+    NamModel probe;
+    REQUIRE(probe.build({a0, a1}, 0.5f, std::vector<float>(2, 0.0f), 1, 48000.0) == false);
+    const std::size_t count = probe.expected_weight_count();
+    REQUIRE(count > 0);
+    std::vector<float> weights(count);
+    for (std::size_t i = 0; i < count; ++i)
+        weights[i] = 0.05f * std::sin(0.7f * static_cast<float>(i) + 0.3f);
+
+    NamModel model;
+    REQUIRE(model.build({a0, a1}, 0.5f, weights, 1, 48000.0));
+    REQUIRE(model.receptive_field() > 0);
+
+    model.prewarm();
+    const float y_pre = model.process_sample(0.0f);
+    float y_settled = 0.0f;
+    for (int i = 0; i < 8192; ++i) y_settled = model.process_sample(0.0f);
+    REQUIRE(std::isfinite(y_pre));
+    REQUIRE_THAT(y_pre, WithinAbs(y_settled, 1e-6f));
+
+    model.reset();
+    const float y_cold = model.process_sample(0.0f);
+    // The cold first sample is the pre-history-fill transient, not the steady
+    // state — so prewarm demonstrably changes the starting output.
+    REQUIRE(std::fabs(y_cold - y_settled) > 1e-7f);
+}
+
+TEST_CASE("loader rejects a conditioned (condition_size > 1) model", "[nam]") {
+    // A parametric/conditioned capture carries a multi-dimensional condition we do
+    // not wire; running it would read past the 1-element condition buffer. The
+    // loader must refuse it rather than mis-render.
+    const std::string path = "/tmp/pulp_nam_cond.nam";
+    {
+        std::ofstream f(path, std::ios::binary);
+        f << "{\"architecture\":\"WaveNet\",\"config\":{\"layers\":[{\"input_size\":1,"
+             "\"condition_size\":3,\"channels\":2,\"kernel_size\":1,\"dilations\":[1],"
+             "\"head_size\":1,\"head_bias\":true,\"gated\":false,\"activation\":\"Tanh\"}],"
+             "\"head_scale\":1.0},\"sample_rate\":48000,\"weights\":[]}";
+    }
+    NamModel model;
+    std::string err;
+    REQUIRE_FALSE(load_nam(path, model, &err));
+    REQUIRE(err.find("condition_size") != std::string::npos);
+}

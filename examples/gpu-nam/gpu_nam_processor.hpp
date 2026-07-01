@@ -32,6 +32,7 @@
 #include "gpu_nam.hpp"
 #include "gpu_nam_cloud_node.hpp"
 #include "nam_model.hpp"
+#include "nam_runtime.hpp"
 
 #include <pulp/format/processor.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -333,6 +334,13 @@ public:
         return model_name_;
     }
 
+    /// Architecture of the loaded model ("WaveNet", "LSTM", or "none"), for the
+    /// UI to surface which .nam family is running. UI/main-thread only.
+    std::string model_arch() const {
+        std::lock_guard<std::mutex> lock(model_mutex_);
+        return model_arch_;
+    }
+
     /// Snapshot of the input→output transfer ("amp character") curve. UI-thread
     /// only — never the audio thread.
     TransferCurve transfer_curve_snapshot() const {
@@ -401,9 +409,9 @@ public:
 
         // Resolve + load the model synchronously so the first block is correct.
         const std::string path = current_requested_path();
-        nam::NamModel model;
+        nam::NamRuntime model;
         std::string err;
-        const bool ok = nam::load_nam(path, model, &err);
+        const bool ok = nam::load_nam_runtime(path, model, &err);
         if (!ok) {
             runtime::log_error("GPU NAM: failed to load model '{}' ({}); passing dry.",
                                path, err);
@@ -413,6 +421,7 @@ public:
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
             model_name_ = ok ? gpu_nam_basename(path) : std::string("(no model)");
+            model_arch_ = ok ? model.arch_name() : "none";
         }
         recompute_transfer_curve();
 
@@ -422,7 +431,7 @@ public:
             auto cpu = std::make_unique<CpuEngine>();
             for (std::size_t ch = 0; ch < kChannels; ++ch) {
                 cpu->model[ch] = model;
-                cpu->model[ch].reset();
+                cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
             }
             current_cpu_ = std::move(cpu);
             cpu_active_.store(current_cpu_.get(), std::memory_order_release);
@@ -433,8 +442,8 @@ public:
         // is only published when Engine=GPU.
         gpu_extra_ = 0;
         device_available_ = false;
-        if (ok) {
-            auto stack = build_gpu_stack(model);
+        if (ok && model.gpu_eligible()) {
+            auto stack = build_gpu_stack(*model.wavenet());
             if (stack) {
                 device_available_ = true;
                 gpu_extra_ = static_cast<std::size_t>(stack->transport->latency_samples());
@@ -559,10 +568,11 @@ public:
 private:
     static constexpr std::size_t kChannels = 2;
 
-    // The inline CPU engine: one NAM oracle per channel. Heap-owned, built/freed
-    // only off the audio thread; the audio thread loads a pointer to it.
+    // The inline CPU engine: one NAM oracle per channel (WaveNet or LSTM — the
+    // NamRuntime hides which). Heap-owned, built/freed only off the audio thread;
+    // the audio thread loads a pointer to it.
     struct CpuEngine {
-        std::array<nam::NamModel, kChannels> model{};
+        std::array<nam::NamRuntime, kChannels> model{};
     };
 
     // Cabinet IR: one partitioned convolver per channel over the fixed internal
@@ -728,8 +738,10 @@ private:
 
     // Worker-thread only. Build + publish a fresh GPU stack for `model`. The
     // current stack is RETIRED and freed on the NEXT rebuild — never freed while
-    // the audio thread might still be loading its pointer.
-    void rebuild_gpu_stack(const nam::NamModel& model) {
+    // the audio thread might still be loading its pointer. A CPU-only model (LSTM)
+    // tears the GPU stack down and returns: the audio path falls back to the CPU
+    // engine, whose fixed extra-latency ring keeps the reported latency unchanged.
+    void rebuild_gpu_stack(const nam::NamRuntime& model) {
         retired_stack_.reset();
         gpu_active_.store(nullptr, std::memory_order_release);
         gpu_engine_active_.store(false, std::memory_order_release);
@@ -737,7 +749,12 @@ private:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             retired_stack_ = std::move(current_stack_);
         }
-        auto fresh = build_gpu_stack(model);
+        if (!model.gpu_eligible()) {
+            runtime::log_info("GPU NAM: '{}' is CPU-only; GPU engine disabled for this model.",
+                              model.arch_name());
+            return;
+        }
+        auto fresh = build_gpu_stack(*model.wavenet());
         if (!fresh) {
             runtime::log_info("GPU NAM: GPU stack rebuild failed; routing the CPU engine.");
             return;
@@ -755,14 +772,14 @@ private:
 
     // Worker-thread only. Publish a fresh inline CPU engine for `model`, retiring
     // the old one (freed one rebuild later).
-    void rebuild_cpu_engine(const nam::NamModel& model) {
+    void rebuild_cpu_engine(const nam::NamRuntime& model) {
         retired_cpu_.reset();
         retired_cpu_ = std::move(current_cpu_);
         cpu_active_.store(nullptr, std::memory_order_release);
         auto cpu = std::make_unique<CpuEngine>();
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             cpu->model[ch] = model;
-            cpu->model[ch].reset();
+            cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
         }
         current_cpu_ = std::move(cpu);
         cpu_active_.store(current_cpu_.get(), std::memory_order_release);
@@ -773,13 +790,13 @@ private:
     // last output. Publishes under model_mutex_ + bumps model_generation_. UI/
     // worker-thread only (never the audio thread).
     void recompute_transfer_curve() {
-        nam::NamModel m;
+        nam::NamRuntime m;
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             m = model_;
         }
         TransferCurve curve{};
-        if (loaded_ok_ && m.weights_size() > 0) {
+        if (loaded_ok_ && m.ok()) {
             constexpr int settle = 1024;
             for (int p = 0; p < kCurvePoints; ++p) {
                 const float x = -kCurveRange + 2.0f * kCurveRange * p / (kCurvePoints - 1);
@@ -915,16 +932,20 @@ private:
             if (gen != last_seen_model_gen_) {
                 last_seen_model_gen_ = gen;
                 const std::string path = current_requested_path();
-                nam::NamModel m;
+                nam::NamRuntime m;
                 std::string err;
-                if (nam::load_nam(path, m, &err)) {
+                if (nam::load_nam_runtime(path, m, &err)) {
                     loaded_ok_ = true;
                     {
                         std::lock_guard<std::mutex> lock(model_mutex_);
                         model_ = m;
                         model_name_ = gpu_nam_basename(path);
+                        model_arch_ = m.arch_name();
                     }
                     rebuild_cpu_engine(m);
+                    // A CPU-only model (LSTM) still calls rebuild_gpu_stack, which
+                    // tears down the GPU stack and returns — the fixed latency ring
+                    // keeps dry/wet aligned on the CPU path.
                     if (device_available_) rebuild_gpu_stack(m);
                     recompute_transfer_curve();
                 } else {
@@ -1030,8 +1051,9 @@ private:
 
     // Authoritative model + display (UI/worker only; never the audio thread).
     mutable std::mutex model_mutex_;
-    nam::NamModel model_;
+    nam::NamRuntime model_;
     std::string model_name_ = "(no model)";
+    std::string model_arch_ = "none";
     std::atomic<bool> user_model_loaded_{false};
     TransferCurve transfer_curve_{};
     std::atomic<std::uint32_t> model_generation_{0};

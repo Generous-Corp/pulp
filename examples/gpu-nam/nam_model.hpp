@@ -362,6 +362,29 @@ public:
         for (LayerArray& a : arrays_) a.reset();
     }
 
+    // Samples of past input that influence the current output — the sum over every
+    // dilated layer of its causal reach (kernel-1)*dilation. Used to size a prewarm
+    // long enough to fully populate the dilation history.
+    int receptive_field() const {
+        int rf = 0;
+        for (const LayerArrayConfig& a : arrays_cfg_)
+            for (int d : a.dilations) rf += (a.kernel_size - 1) * d;
+        return rf;
+    }
+
+    // Settle the model at its silence steady-state: reset, then run enough silence
+    // to fully fill the dilation history. A NAM capture's response to silence is
+    // NOT zero (biases), and the dilated buffers take a full receptive field to
+    // populate — so a cold start (reset only) produces a ~receptive-field-long DC
+    // transient and does not match the reference, which prewarms on load. Call this
+    // instead of reset() before the model goes live on the audio path. Off-thread
+    // (it runs thousands of samples); never the audio thread.
+    void prewarm() {
+        reset();
+        const int n = 2 * receptive_field() + 512;   // margin past a full RF
+        for (int i = 0; i < n; ++i) process_sample(0.0f);
+    }
+
     // One mono sample in -> one mono output sample. The per-sample core; process()
     // wraps it for a block. Carries dilation history across calls (streaming).
     float process_sample(float x) {
@@ -523,6 +546,13 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
         if (L.hasObjectMember("bottleneck")
             && static_cast<int>(detail::num(L["bottleneck"])) != a.channels)
             return fail("layer " + std::to_string(i) + ": bottleneck != channels is not supported");
+        // The forward feeds every layer a 1-dimensional condition (the raw input).
+        // A condition_size > 1 is a parametric/conditioned model whose extra
+        // condition channels come from host controls we do not wire — running it
+        // would read past the 1-element condition buffer and mis-render. Reject it.
+        if (a.condition_size != 1)
+            return fail("layer " + std::to_string(i)
+                        + ": condition_size != 1 (parametric/conditioned model) not supported");
         if (active("head1x1")) return fail("layer " + std::to_string(i) + ": head1x1 not supported");
         if (L.hasObjectMember("layer1x1") && L["layer1x1"].isObject()
             && L["layer1x1"].hasObjectMember("active")

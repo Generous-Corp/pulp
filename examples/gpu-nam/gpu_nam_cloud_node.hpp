@@ -24,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace pulp::examples {
 
@@ -59,15 +60,25 @@ public:
     // no device is available or the model shape is unsupported on the GPU.
     bool prepare() override {
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
+        // Prewarm both the GPU forward's on-device history and the CPU fallback to
+        // the model's silence steady-state (a NAM capture's silence response is not
+        // zero, and the dilated history takes a full receptive field to populate).
+        // Without this the first live block is a cold-start DC transient that
+        // matches neither the reference nor the prewarmed inline CPU engine. Runs
+        // off-thread in prepare().
+        const int warm = 2 * model_->receptive_field() + static_cast<int>(block_size_);
+        const int warm_blocks =
+            (warm + static_cast<int>(block_size_) - 1) / static_cast<int>(block_size_);
+        std::vector<float> zeros(block_size_, 0.0f), scratch(block_size_, 0.0f);
         for (std::uint32_t ch = 0; ch < channels_; ++ch) {
             if (!gpu_[ch].prepare(*model_, block_size_)) return false;
-            // Per-channel CPU oracle for the CpuFallback miss policy. Copy the
-            // authoritative model and warm it so process_sample never resizes its
-            // scratch on the audio thread (RT-safe fallback).
+            for (int b = 0; b < warm_blocks; ++b)
+                gpu_[ch].forward(zeros.data(), scratch.data(), block_size_);
+            // Per-channel CPU oracle for the CpuFallback miss policy: same silence
+            // steady-state (prewarm also pre-allocates its scratch, so the RT-safe
+            // fallback never resizes on the audio thread).
             cpu_[ch] = *model_;
-            cpu_[ch].reset();
-            for (std::uint32_t i = 0; i < block_size_; ++i) cpu_[ch].process_sample(0.0f);
-            cpu_[ch].reset();
+            cpu_[ch].prewarm();
         }
         return true;
     }

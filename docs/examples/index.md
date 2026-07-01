@@ -36,6 +36,7 @@ These examples explore features that are not yet stable across all platforms.
 | Example | Summary | Formats |
 |---------|---------|---------|
 | [UI Preview](example-ui-preview.html) | Standalone app for testing the view/widget and GPU rendering pipeline | Standalone (macOS only) |
+| [GPU NAM](gpu-nam.html) | Neural Amp Modeler (`.nam` WaveNet + LSTM) player with a GPU audio engine | VST3, AU v2, CLAP, Standalone |
 
 ## Building Examples
 
