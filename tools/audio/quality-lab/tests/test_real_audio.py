@@ -39,7 +39,7 @@ def test_real_audio_dry_input_runs_and_is_well_formed(tmp_path):
     assert report["verdict"] in ("CLEAN", "FIRED")
     assert report["case"]["reference_policy"] == "dry-input"
     names = {d["name"] for d in report["detectors"]}
-    assert {"spectral_centroid", "hf_fizz", "spectral_flux"} == names
+    assert {"spectral_centroid", "hf_fizz", "spectral_flux", "hnr"} == names
     # a faithful clean time-stretch should not wildly alter a steady tone's brightness
     centroid = next(d for d in report["detectors"] if d["name"] == "spectral_centroid")
     assert centroid["scalar"] < 0.5

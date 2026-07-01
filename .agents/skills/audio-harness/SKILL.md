@@ -358,16 +358,25 @@ harness or `ctest`.
   never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
   regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
 - **Agent compare report** (`compare.py`, `quality-lab compare before.wav after.wav`): the
-  agent-facing **measure → compare → judge** surface. Level-matches, runs one curated
-  measurement (`--profile tonal-balance` → LTAS spectral-centroid shift), and emits a typed
-  evidence envelope + an action-oriented verdict (`regression_suspected` /
-  `material_change_detected` / `no_material_change_detected` / `inconclusive` / `invalid`).
-  **Intent-safe:** `regression_suspected` needs `--reference-role golden`; a `peer` compare is
-  neutral. **Advisory:** exits non-zero only on `invalid` (couldn't measure), never for a
-  judgment — the gate primitive stays `pulp audio validate compare`. Report shape (`quality_lab.
-  compare.v1`) is owned by `schema.py`; every envelope carries `status`/`applicable`/
-  `materiality`/`provenance`. Use this when an agent must weigh in on a DSP change with cited
-  evidence rather than a bare pass/fail.
+  agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
+  (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
+  (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
+  `inconclusive` / `invalid`). Two axes today, both global/alignment-free — a new axis is one
+  `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
+
+  | `--profile` | axis | measures | bad direction (`bad_sign`) |
+  |-------------|------|----------|----------------------------|
+  | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift | duller (−1) |
+  | `added-hf` | `added_hf` | ≥8 kHz energy fraction | added fizz (+1) |
+
+  **Intent-safe:** `regression_suspected` needs `--reference-role golden` AND a change in the
+  axis's bad direction (a duller candidate can't trip the `added-hf` axis; added fizz can't trip
+  it on a `peer` compare); otherwise the change is the neutral `material_change_detected`.
+  **Advisory:** exits non-zero only on `invalid` (couldn't measure), never for a judgment — the
+  gate primitive stays `pulp audio validate compare`. Each axis has its own materiality default
+  (`--threshold` overrides). Report shape (`quality_lab.compare.v1`) is owned by `schema.py`;
+  every envelope carries `status`/`applicable`/`materiality`/`provenance`. Use this when an agent
+  must weigh in on a DSP change with cited evidence rather than a bare pass/fail.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.
 
@@ -386,10 +395,23 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   peak-normalized self-spectrum (not a transfer response); THD is gate-grade only for a steady
   bin-coherent sine. They need a controlled stimulus, so they're excluded from `compare` and join
   later behind stimulus-supplying profiles.
-- **Alignment is `not_required` for tonal-balance** — a global LTAS/centroid metric is
-  alignment-free; the envelope records the *policy*, we don't build general alignment for it.
+- **Alignment is `not_required` for both current axes** — global LTAS metrics (centroid shift,
+  HF fraction) are alignment-free; the envelope records the *policy*, we don't build general
+  alignment for them. A future transients/timing axis will need a real alignment policy first.
+- **Axes are a per-profile registry, added one entry at a time** — each axis declares its
+  `axis`/`tool`/`bad_sign`/`default_threshold`/`kernel`/`summarize`; the shared `_measure` does
+  applicability + level-match + materiality and `_verdict` does the intent-safe mapping. `bad_sign`
+  is the sign of the delta that is a regression against a golden reference (−1 = a drop is bad,
+  +1 = an increase is bad). Only axes on the *same contract* (global, delta-in-(0,1), self-
+  applicability) belong here — stimulus/alignment-dependent measures do NOT.
 - **`regression_suspected` requires `--reference-role golden`** — "worse" assumes the reference is
-  the known-good baseline; without that, a change is neutral.
+  the known-good baseline; without that, a change is neutral. It ALSO requires the change to be in
+  the axis's bad direction (`bad_sign`), so a legitimately-brighter or HF-reduced candidate reads
+  as `material_change_detected`, not a false regression.
+- **Axis thresholds are per-axis and unit-bound to (0, 1)** — every current axis's delta is a
+  dimensionless ratio in (0, 1), so the threshold guard is `0 < t < 1`. A dB-unit axis (e.g. HNR
+  drop) is deliberately deferred until the threshold validation is made per-axis; don't shove a
+  dB metric onto the (0,1) contract.
 - **Speech/perceptual & feature-extractor scope is bounded** — PESQ/POLQA/DNSMOS/NISQA are speech/
   telephony (out of scope for full-reference music); aubio/librosa/Essentia are feature extractors,
   not MOS predictors (advisory raw-comparators behind profiles, never verdicts); scalar-only where

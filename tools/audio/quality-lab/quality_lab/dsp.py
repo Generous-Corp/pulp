@@ -91,6 +91,34 @@ def relative_centroid_shift(
     return rel, c_ref, c_cand
 
 
+def hf_energy_fraction(freqs: np.ndarray, mag: np.ndarray, cutoff_hz: float) -> float:
+    """Fraction of summed LTAS magnitude-squared at/above ``cutoff_hz`` (0..1).
+
+    ``mag`` is the long-term-average *magnitude* spectrum, so this squares the mean magnitude
+    per bin — it is NOT a true mean frame-power LTAS. It is a scale-invariant brightness/fizz
+    proxy and the established ``hf_fizz`` metric; thresholds are tuned to exactly this
+    definition, so renaming it or switching to a power-LTAS would require re-tuning them.
+    """
+    energy = mag * mag
+    total = float(np.sum(energy))
+    if total <= 1e-20:
+        return 0.0
+    return float(np.sum(energy[freqs >= cutoff_hz]) / total)
+
+
+def hf_fraction_delta(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, cutoff_hz: float = 8000.0
+) -> tuple[float, float, float]:
+    """Added-HF energy-fraction of candidate vs reference: ``(hf_cand - hf_ref)`` plus both
+    fractions. Positive = candidate added high-frequency energy (metallic fizz/sizzle the
+    source didn't have). Shared by the ``hf_fizz`` detector and the ``compare`` report."""
+    f, m_ref = ltas(reference, sr)
+    _, m_cand = ltas(candidate, sr)
+    hf_ref = hf_energy_fraction(f, m_ref, cutoff_hz)
+    hf_cand = hf_energy_fraction(f, m_cand, cutoff_hz)
+    return hf_cand - hf_ref, hf_ref, hf_cand
+
+
 def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:
     """Sliding normalized cross-correlation of `short` within `long` (values in ~[-1,1]).
 

@@ -46,16 +46,26 @@ python -m quality_lab.cli engine-baseline
 
 # 4. Agent-facing before/after judgment over two WAVs (advisory; not a gate)
 python -m quality_lab.cli compare before.wav after.wav --profile tonal-balance --json report.json
-python -m quality_lab.cli compare golden.wav candidate.wav --reference-role golden
+python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --reference-role golden
 ```
 
 `compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
-curated measurement (`--profile tonal-balance` → the LTAS spectral-centroid shift), and returns a
-typed evidence envelope plus an action-oriented verdict (`regression_suspected` /
-`material_change_detected` / `no_material_change_detected` / `inconclusive` / `invalid`). It is
-**intent-safe** — `regression_suspected` needs `--reference-role golden` — and **advisory**: it
-exits non-zero only when it couldn't measure, never for a judgment. So an agent tuning DSP can
-weigh in on a change with cited evidence instead of a bare pass/fail.
+curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
+action-oriented verdict (`regression_suspected` / `material_change_detected` /
+`no_material_change_detected` / `inconclusive` / `invalid`). Two axes today, both global and
+alignment-free:
+
+| `--profile` | axis | measures | bad direction (regression vs a golden reference) |
+|-------------|------|----------|--------------------------------------------------|
+| `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | **duller** |
+| `added-hf` | `added_hf` | high-frequency (≥8 kHz) energy fraction | **added HF fizz** |
+
+Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
+registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,
+applicability, materiality, and intent-safe verdict. `compare` is **intent-safe** —
+`regression_suspected` needs `--reference-role golden` AND a change in the axis's bad direction —
+and **advisory**: it exits non-zero only when it couldn't measure, never for a judgment. So an
+agent tuning DSP can weigh in on a change with cited evidence instead of a bare pass/fail.
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

@@ -78,7 +78,7 @@ python -m quality_lab.cli corpus add --file vocal.wav --name vocal1 \
 
 # agent-facing before/after judgment over two WAVs (advisory; NOT a gate)
 python -m quality_lab.cli compare before.wav after.wav --profile tonal-balance --json report.json
-python -m quality_lab.cli compare golden.wav candidate.wav --reference-role golden   # enables regression_suspected
+python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --reference-role golden  # enables regression_suspected
 
 pytest tests/ -q
 ```
@@ -129,10 +129,18 @@ it worse?* — with `transient_sharpness` increasing flagged as **WORSE**.
 ### Before/after compare (agent-facing, advisory)
 
 `compare before.wav after.wav` is the agent-facing **measure → compare → judge** surface: it
-level-matches the candidate to the reference, runs one curated measurement (`--profile
-tonal-balance` → the global LTAS spectral-centroid shift), and emits a typed *evidence
-envelope* plus a defended, action-oriented verdict — so an agent tuning DSP can weigh in on a
-change with cited evidence rather than a bare pass/fail.
+level-matches the candidate to the reference, runs one curated **axis** (`--profile`), and emits a
+typed *evidence envelope* plus a defended, action-oriented verdict — so an agent tuning DSP can
+weigh in on a change with cited evidence rather than a bare pass/fail. Two axes today, both global
+and alignment-free (a new axis is one `_AXES` registry entry in `compare.py`; the shared machinery
+does level-matching, applicability, materiality, and the intent-safe verdict):
+
+| `--profile` | axis | measures | bad direction |
+|-------------|------|----------|---------------|
+| `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | duller |
+| `added-hf` | `added_hf` | high-frequency (≥8 kHz) energy fraction | added HF fizz |
+
+Each axis carries its own materiality default; `--threshold` overrides.
 
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).

@@ -33,20 +33,25 @@ python -m quality_lab.cli compare $ARGUMENTS --profile tonal-balance --json /tmp
 
 - **`--reference-role golden`** — declare the reference known-good and the candidate
   *expected unchanged*. This is the ONLY mode that can return `regression_suspected`.
-- **default `--reference-role peer`** — a neutral A/B; a duller candidate reads as
+- **default `--reference-role peer`** — a neutral A/B; a changed candidate reads as
   `material_change_detected`, never "regression" (we don't assume which side is right).
-- **`--profile tonal-balance`** — the one axis today (LTAS spectral-centroid: brighter/duller).
-  More profiles (distortion, level, pitch) arrive in later slices.
+- **`--profile`** — the measurement axis. Two today, both global/alignment-free:
+  - `tonal-balance` — LTAS spectral-centroid shift; the bad direction is **duller**.
+  - `added-hf` — high-frequency (≥8 kHz) energy fraction; the bad direction is **added fizz**.
+  - `regression_suspected` also requires the change to be in that axis's bad direction — a
+    brighter candidate on `tonal-balance`, or an HF-reduced one on `added-hf`, stays a neutral
+    `material_change_detected`. More profiles (distortion, level, pitch) arrive in later slices.
+- **`--threshold <t>`** — override the axis's own materiality default (must be in `(0, 1)`).
 
 ## Read the verdict
 
 The report (`quality_lab.compare.v1`, JSON at `--json`) has a top-level `verdict` + `summary`
 and a `measurements[]` list of typed evidence envelopes:
 
-- `regression_suspected` — golden reference + materially duller candidate → investigate/revert.
-- `material_change_detected` — a real tonal change, direction reported (duller/brighter).
-- `no_material_change_detected` — within threshold; the change didn't move tonal balance.
-- `inconclusive` — couldn't support a verdict (e.g. `not_applicable`: silent/too-short/no HF).
+- `regression_suspected` — golden reference + a materially bad-direction change → investigate/revert.
+- `material_change_detected` — a real change on the axis, direction reported (duller/brighter, added/reduced HF).
+- `no_material_change_detected` — within threshold; the change didn't move this axis.
+- `inconclusive` — couldn't support a verdict (e.g. `not_applicable`: silent/too-short reference).
 - `invalid` — couldn't measure (bad WAV, sample-rate mismatch); the CLI exits non-zero ONLY here.
 
 Each measurement carries `status`/`applicable`/`materiality`/`level_match`/`provenance`, so you
