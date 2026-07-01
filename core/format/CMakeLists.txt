@@ -165,7 +165,20 @@ if(PULP_HAS_AUSDK)
         # pin it here explicitly for pulp-format.
         target_compile_features(pulp-format PRIVATE cxx_std_23)
     endif()
-    target_link_libraries(pulp-format PUBLIC ausdk)
+    # PRIVATE, not PUBLIC: pulp-format uses AudioUnitSDK only in its own AU v2
+    # .cpp sources, so it needs the headers at build time but must NOT export
+    # external/AudioUnitSDK/include onto every consumer of pulp::format. A
+    # PUBLIC link leaked ausdk's $<INSTALL_INTERFACE:external/AudioUnitSDK/include>
+    # to anything linking pulp::format (e.g. a JUCE plugin embedding Pulp via
+    # pulp-view-embed), colliding with the host's OWN vendored, differently-
+    # versioned AudioUnitSDK. Pulp's own AU plugins don't rely on this
+    # propagation — _pulp_add_au links ausdk PRIVATE directly to the AU target,
+    # and the only public headers that pull AudioUnitSDK (au_v2_entry.hpp et al)
+    # are opt-in, compiled solely into an AU plugin entry point. Static-lib link
+    # propagation still pulls ausdk's objects into consumers that need them; only
+    # the stray include-dir is withheld. C++23 propagation is a separate PUBLIC
+    # compile-feature below, unaffected.
+    target_link_libraries(pulp-format PRIVATE ausdk)
     # AudioUnitSDK 1.4 headers `#include <expected>` (C++23). Apple clang
     # only exposes std::expected when the consuming TU is compiled with
     # -std=c++23. Set the standard explicitly (target_compile_features
