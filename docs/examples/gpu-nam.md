@@ -68,6 +68,10 @@ unit-energy normalized (see [`read_impulse_response`](../reference/modules.md)).
   bundled default.
 - **Load a cabinet IR:** click the IR slot and choose an impulse-response file.
 - **Switch engines:** toggle `Engine` (CPU ↔ GPU) in the settings page.
+- **Normalize output:** toggle `Normalize` in the settings page to level captures
+  to a common loudness (using each model's `metadata.loudness`), so switching
+  models doesn't jump in volume. Off by default; a no-op for models without
+  loudness metadata.
 
 ## Adding NAM inference to your own Pulp project
 
@@ -85,6 +89,14 @@ behind a `GPU_NAM_WITH_<ARCH>` toggle):
   A2 shape) and presents one architecture-agnostic surface:
   `load_nam_runtime(path, rt)`, then `rt.reset()` / `rt.process(in, out, n)` /
   `rt.process_sample(x)`.
+- `keras_runtime.hpp` — `KerasRuntime`, a separate CPU engine for the
+  RTNeural/Keras `.json` model format (a common export for recurrent amp
+  captures). Supports a stack of GRU, LSTM, Dense, and activation layers;
+  validated bit-exact against the reference RTNeural inference. Kept separate
+  from `NamRuntime` because it is a different file format with a recurrent-only
+  weight layout, and it is CPU-only (recurrence is sequential over time). It is a
+  reusable engine — not yet wired into this plugin's model chooser, which loads
+  `.nam` today.
 
 A minimal integration inside a `Processor`:
 

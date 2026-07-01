@@ -127,3 +127,47 @@ TEST_CASE("Linear loads through NamRuntime dispatch", "[nam][linear][runtime]") 
     CHECK_THAT(rt.process_sample(0.0f), WithinAbs(0.35f, 1e-6));
     std::filesystem::remove(path);
 }
+
+TEST_CASE("NamRuntime reads version + loudness metadata", "[nam][runtime][metadata]") {
+    // Metadata is parsed once in load_nam_runtime, independent of architecture.
+    auto with_meta = [](const std::string& extra) {
+        return "{\"architecture\":\"Linear\"," + extra
+               + "\"config\":{\"receptive_field\":2,\"bias\":true},"
+                 "\"sample_rate\":48000,\"weights\":[0.5,0.25,0.1]}";
+    };
+
+    SECTION("present") {
+        const std::string path = write_temp(
+            "gpu_nam_meta.nam",
+            with_meta("\"version\":\"0.5.4\",\"metadata\":{\"loudness\":-20.5},"));
+        NamRuntime rt;
+        std::string err;
+        REQUIRE(load_nam_runtime(path, rt, &err));
+        CHECK(rt.version() == "0.5.4");
+        REQUIRE(rt.has_loudness());
+        CHECK_THAT(rt.loudness_db(), WithinAbs(-20.5, 1e-9));
+        std::filesystem::remove(path);
+    }
+
+    SECTION("absent") {
+        const std::string path = write_temp("gpu_nam_nometa.nam", with_meta(""));
+        NamRuntime rt;
+        std::string err;
+        REQUIRE(load_nam_runtime(path, rt, &err));
+        CHECK(rt.version().empty());
+        CHECK_FALSE(rt.has_loudness());
+        std::filesystem::remove(path);
+    }
+
+    SECTION("non-finite loudness is ignored") {
+        // A malformed loudness must not set has_loudness (no NaN/inf correction).
+        const std::string path = write_temp(
+            "gpu_nam_badloud.nam",
+            with_meta("\"metadata\":{\"loudness\":\"loud\"},"));
+        NamRuntime rt;
+        std::string err;
+        REQUIRE(load_nam_runtime(path, rt, &err));
+        CHECK_FALSE(rt.has_loudness());
+        std::filesystem::remove(path);
+    }
+}

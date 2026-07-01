@@ -482,6 +482,44 @@ TEST_CASE("GPU NAM EQ is transparent when flat and shapes tone when boosted", "[
     REQUIRE(e_treble > e_flat * 1.05);
 }
 
+TEST_CASE("GPU NAM Normalize retargets output to the model loudness", "[nam][normalize]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+
+    // The make-up gain Normalize should apply is derived from the bundled model's
+    // loudness metadata, retargeted to kNormalizeTargetDb and clamped.
+    nam::NamRuntime ref;
+    std::string err;
+    REQUIRE(nam::load_nam_runtime(GPU_NAM_DEFAULT_MODEL_PATH, ref, &err));
+    REQUIRE(ref.has_loudness());
+    float exp_db = kNormalizeTargetDb - static_cast<float>(ref.loudness_db());
+    exp_db = std::clamp(exp_db, -kNormalizeMaxAbsDb, kNormalizeMaxAbsDb);
+    const double exp_ratio = std::pow(10.0f, exp_db / 20.0f);
+
+    std::vector<float> sig(BLOCK);
+    for (std::size_t i = 0; i < BLOCK; ++i)
+        sig[i] = 0.4f * std::sin(0.05f * static_cast<float>(i));
+
+    // Everything else identical — only Normalize toggles — so the per-sample
+    // output ratio is exactly the make-up gain and the RMS ratio matches it.
+    const auto off = run_cpu(SR, BLOCK, 24, sig,
+                             [](auto& s) { s.set_value(kNormalize, 0.0f); });
+    const auto on = run_cpu(SR, BLOCK, 24, sig,
+                            [](auto& s) { s.set_value(kNormalize, 1.0f); });
+    REQUIRE(off.size() == on.size());
+
+    double e_on = 0.0, e_off = 0.0;
+    for (std::size_t i = 0; i < off.size(); ++i) {
+        e_on  += static_cast<double>(on[i]) * on[i];
+        e_off += static_cast<double>(off[i]) * off[i];
+    }
+    REQUIRE(e_off > 1e-9);
+    const double ratio = std::sqrt(e_on / e_off);
+    INFO("ratio=" << ratio << " expected=" << exp_ratio);
+    CHECK(std::abs(ratio - exp_ratio) < 0.01 * exp_ratio);
+    CHECK(exp_ratio > 1.0);  // this capture is quieter than the target, so it boosts
+}
+
 TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
     // A real host feeds variable, often-smaller-than-internal blocks. The re-block
     // FIFO must make the amped output independent of that chunking; a fixed-block

@@ -55,6 +55,7 @@
 #include "nam_linear.hpp"
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
@@ -206,6 +207,15 @@ public:
 
     const std::string& error() const { return error_; }
 
+    // Optional capture loudness (dBFS) from the model's `metadata.loudness`, used
+    // to normalize output level across models. `has_loudness()` is false when the
+    // model omits it (older captures) — callers should then apply no correction.
+    bool has_loudness() const { return has_loudness_; }
+    double loudness_db() const { return loudness_db_; }
+
+    // The `.nam` format version string (e.g. "0.5.2"), empty if absent.
+    const std::string& version() const { return version_; }
+
     friend bool load_nam_runtime(const std::string& path, NamRuntime& out, std::string* error);
 
 private:
@@ -226,6 +236,9 @@ private:
     NamLinearModel linear_;
 #endif
     std::string error_;
+    bool has_loudness_ = false;
+    double loudness_db_ = 0.0;
+    std::string version_;
 };
 
 // Peek the ``architecture`` field and dispatch to the matching loader. Returns
@@ -241,6 +254,11 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         return false;
     };
 
+    // Clear any metadata from a prior load so a failed load leaves no stale values.
+    out.has_loudness_ = false;
+    out.loudness_db_ = 0.0;
+    out.version_.clear();
+
     std::ifstream f(path, std::ios::binary);
     if (!f) return fail("could not open file: " + path);
     std::ostringstream ss;
@@ -254,6 +272,23 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         const choc::value::Value root = choc::json::parse(text);
         if (root.isObject() && root.hasObjectMember("architecture"))
             architecture = std::string(root["architecture"].getString());
+        // Optional header metadata. `version` is advisory (the shape checks in each
+        // loader are the real gate). `metadata.loudness` (dBFS) drives the optional
+        // output Normalize mode; only a finite number counts as present.
+        if (root.isObject()) {
+            if (root.hasObjectMember("version") && root["version"].isString())
+                out.version_ = std::string(root["version"].getString());
+            if (root.hasObjectMember("metadata") && root["metadata"].isObject()) {
+                const choc::value::ValueView meta = root["metadata"];
+                if (meta.hasObjectMember("loudness")) {
+                    const choc::value::ValueView l = meta["loudness"];
+                    if (l.isInt() || l.isFloat()) {
+                        const double v = l.getWithDefault<double>(0.0);
+                        if (std::isfinite(v)) { out.loudness_db_ = v; out.has_loudness_ = true; }
+                    }
+                }
+            }
+        }
         // A2 shares the "WaveNet" string but a SlimmableContainer / per-layer
         // kernel_sizes / windowed head distinguish it, so classify before routing.
 #if GPU_NAM_WITH_A2

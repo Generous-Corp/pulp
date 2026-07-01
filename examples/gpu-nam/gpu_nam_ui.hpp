@@ -459,13 +459,19 @@ private:
         help(canvas, rowL, cy + 15.0f, "(opt-in, bit-exact against the CPU oracle).");
         cy += 44.0f;
 
-        // Bypass — a switch row (parallels the reference's Calibrate-Input switch).
+        // Bypass + Normalize — two switch rows side by side (Bypass parallels the
+        // reference's Calibrate-Input switch; Normalize is the demo's loudness-match).
+        const float colR = rowL + segW + 14.0f;
         section_label(canvas, rowL, cy, "BYPASS");
+        section_label(canvas, colR, cy, "NORMALIZE OUTPUT");
         cy += 12.0f;
         const bool byp = store_.get_value(kBypass) >= 0.5f;
+        const bool norm = store_.get_value(kNormalize) >= 0.5f;
         settings_bypass_ = seg(canvas, rowL, cy, segW, byp ? "Bypassed" : "Active", byp);
+        settings_normalize_ = seg(canvas, colR, cy, segW, norm ? "On" : "Off", norm);
         cy += 40.0f;
         help(canvas, rowL, cy, "Passes the dry input through, unprocessed.");
+        help(canvas, colR, cy, "Matches captures to a common loudness (needs metadata).");
 
         // Bottom: Model (left) + About (right), like the reference's Model-Info /
         // About blocks.
@@ -539,6 +545,7 @@ private:
             if (in_rect(p, settings_engine_cpu_)) { set_param(kEngine, 0.0f); return; }
             if (in_rect(p, settings_engine_gpu_)) { set_param(kEngine, 1.0f); return; }
             if (in_rect(p, settings_bypass_)) { toggle_param(kBypass); return; }
+            if (in_rect(p, settings_normalize_)) { toggle_param(kNormalize); return; }
             // A click outside the page closes it; clicks inside are inert.
             const vw::Rect page{sx(34.0f), sy(34.0f),
                                 ss(nam_geom::kW - 68.0f), ss(nam_geom::kH - 68.0f)};
@@ -623,7 +630,8 @@ private:
     float drag_start_y_ = 0.0f, drag_start_frac_ = 0.0f;
     bool pointer_down_ = false;
     bool show_settings_ = false;
-    vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{}, settings_close_{};
+    vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{},
+        settings_normalize_{}, settings_close_{};
     vw::Rect model_slot_{}, ir_slot_{};
 };
 

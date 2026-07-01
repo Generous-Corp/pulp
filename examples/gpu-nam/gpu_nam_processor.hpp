@@ -55,6 +55,7 @@
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -90,7 +91,14 @@ enum GpuNamParams : state::ParamID {
     kToneTreble         = 9,  // high shelf,0..10 (5 = flat)
     kNoiseGateActive    = 10, // 0 = off, 1 = on
     kEQActive           = 11, // 0 = off (tone stack bypassed), 1 = on
+    kNormalize          = 12, // 0 = off, 1 = normalize output to the model's loudness
 };
+
+// Target output loudness (dBFS) the Normalize mode aims for, and the maximum
+// correction it will apply in either direction (models without loudness metadata,
+// or with an extreme value, get no more than this much gain/cut).
+inline constexpr float kNormalizeTargetDb = -18.0f;
+inline constexpr float kNormalizeMaxAbsDb = 24.0f;
 
 // Live output magnitude spectrum (dB), published lock-free from the audio thread
 // to the GPU UI's frequency display. 256 log-ready bins.
@@ -155,6 +163,9 @@ public:
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
         store.add_parameter({.id = kEQActive, .name = "EQ", .unit = "",
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
+        // Off by default so the shipped level is exactly the model's, not retargeted.
+        store.add_parameter({.id = kNormalize, .name = "Normalize", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -373,6 +384,7 @@ public:
                     gpu_nam_basename(path), msr, sample_rate_);
         }
         loaded_ok_ = ok;
+        publish_normalize_gain(model, ok);
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
@@ -481,7 +493,11 @@ public:
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
         const float in_gain = std::pow(10.0f, state().get_value(kInputGain) / 20.0f);
-        const float out_gain = std::pow(10.0f, state().get_value(kOutputGain) / 20.0f);
+        // Output make-up gain: the user Output knob, times the Normalize retarget
+        // (unity when Normalize is off or the model has no loudness metadata).
+        const float norm = state().get_value(kNormalize) >= 0.5f
+                               ? normalize_gain_.load(std::memory_order_relaxed) : 1.0f;
+        const float out_gain = std::pow(10.0f, state().get_value(kOutputGain) / 20.0f) * norm;
 
         requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
                                 std::memory_order_relaxed);
@@ -744,6 +760,21 @@ private:
         }
     }
 
+    // Loader-thread only. Derive the linear Normalize gain from the model's
+    // loudness metadata (retarget to kNormalizeTargetDb, clamped to
+    // ±kNormalizeMaxAbsDb) and publish it for the audio thread. Models without
+    // loudness metadata (and any failed load) get unity — Normalize then does
+    // nothing rather than guessing.
+    void publish_normalize_gain(const nam::NamRuntime& model, bool ok) {
+        float gain = 1.0f;
+        if (ok && model.has_loudness()) {
+            float db = kNormalizeTargetDb - static_cast<float>(model.loudness_db());
+            db = std::clamp(db, -kNormalizeMaxAbsDb, kNormalizeMaxAbsDb);
+            gain = std::pow(10.0f, db / 20.0f);
+        }
+        normalize_gain_.store(gain, std::memory_order_relaxed);
+    }
+
     // Worker-thread only. Publish a fresh inline CPU engine for `model`, retiring
     // the old one (freed one rebuild later).
     void rebuild_cpu_engine(const nam::NamRuntime& model) {
@@ -926,6 +957,7 @@ private:
                 std::string err;
                 if (nam::load_nam_runtime(path, m, &err)) {
                     loaded_ok_ = true;
+                    publish_normalize_gain(m, true);
                     const double msr = m.sample_rate();
                     if (msr > 0.0 && std::abs(msr - sample_rate_) > 0.01 * msr)
                         runtime::log_warn(
@@ -1067,6 +1099,11 @@ private:
     float in_env_ = 0.0f, out_env_ = 0.0f;
     std::atomic<float> in_level_db_{-120.0f};
     std::atomic<float> out_level_db_{-120.0f};
+
+    // Linear output gain applied when Normalize is on: retargets the loaded model's
+    // metadata loudness to kNormalizeTargetDb. 1.0 (no correction) when the model
+    // has no loudness metadata. Published from the loader thread, read on audio.
+    std::atomic<float> normalize_gain_{1.0f};
 
     // Live output spectrum (audio thread writes, UI reads).
     static constexpr int kSpectrumFft = 2 * kSpectrumBins;  // 512
