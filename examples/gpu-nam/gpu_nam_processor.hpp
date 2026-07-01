@@ -138,6 +138,32 @@ inline std::string gpu_nam_basename(const std::string& path) {
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
+#ifndef GPU_NAM_ASSET_DIR
+#define GPU_NAM_ASSET_DIR ""
+#endif
+
+// Resolve the vendored NAM UI-asset directory (images + fonts): an explicit
+// GPU_NAM_ASSETS override, then the copy bundled into the plugin's Resources
+// (relative to the binary), then the source-tree copy baked in at build time.
+// Returns the first directory that exists; empty when none is found.
+inline std::string gpu_nam_asset_dir() {
+    auto dir_ok = [](const std::string& p) {
+        if (p.empty()) return false;
+        std::ifstream f(p + "/Background.jpg", std::ios::binary);
+        return static_cast<bool>(f);
+    };
+    if (const char* env = std::getenv("GPU_NAM_ASSETS"); env && dir_ok(env)) return env;
+    const std::string dir = gpu_nam_module_dir();
+    if (!dir.empty()) {
+        for (const std::string& rel : {"/../Resources/assets/nam", "/assets/nam"}) {
+            const std::string p = dir + rel;
+            if (dir_ok(p)) return p;
+        }
+    }
+    if (dir_ok(GPU_NAM_ASSET_DIR)) return GPU_NAM_ASSET_DIR;
+    return {};
+}
+
 class GpuNamProcessor : public format::Processor {
 public:
     // Fixed engine block. The GPU NAM forward is prepared at this size, so an
@@ -290,11 +316,20 @@ public:
     /// Lock-free latest output spectrum for the UI (UI is sole reader).
     SpectrumBus& spectrum_bus() { return spectrum_bus_; }
 
+    /// Live {input, output} meter levels in dBFS (peak with fast-attack/
+    /// slow-release ballistics). Published from the audio thread; UI reads.
+    /// −120 dB is the noise floor / silence sentinel.
+    std::pair<float, float> meter_levels_db() const {
+        return {in_level_db_.load(std::memory_order_relaxed),
+                out_level_db_.load(std::memory_order_relaxed)};
+    }
+
     /// Native GPU front-end.
     std::unique_ptr<view::View> create_view() override;
 
     format::ViewSize view_size() const override {
-        return format::view_size_from_design(820, 560);
+        // NeuralAmpModelerPlugin's window aspect (its Background art is 600×400).
+        return format::view_size_from_design(600, 400);
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -475,6 +510,7 @@ public:
             out_len_[ch] -= consumed;
         }
 
+        publish_meters(input, output, n);
         if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
     }
 
@@ -692,6 +728,29 @@ private:
         model_generation_.fetch_add(1, std::memory_order_relaxed);
     }
 
+    // Peak meter with fast-attack / slow-release ballistics, per block. Input is
+    // the raw (pre-gain) signal; output is the post-mix result. Audio-thread only.
+    void publish_meters(const audio::BufferView<const float>& input,
+                        const audio::BufferView<float>& output, std::size_t n) {
+        float in_peak = 0.0f, out_peak = 0.0f;
+        for (std::size_t ch = 0; ch < input.num_channels(); ++ch) {
+            const float* p = input.channel(ch).data();
+            for (std::size_t i = 0; i < n; ++i) in_peak = std::max(in_peak, std::abs(p[i]));
+        }
+        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
+            const float* p = output.channel(ch).data();
+            for (std::size_t i = 0; i < n; ++i) out_peak = std::max(out_peak, std::abs(p[i]));
+        }
+        const float rel = 0.10f;  // slow release toward the new peak
+        in_env_  = in_peak  > in_env_  ? in_peak  : in_env_  + rel * (in_peak  - in_env_);
+        out_env_ = out_peak > out_env_ ? out_peak : out_env_ + rel * (out_peak - out_env_);
+        auto to_db = [](float lin) {
+            return lin > 1e-6f ? 20.0f * std::log10(lin) : -120.0f;
+        };
+        in_level_db_.store(to_db(in_env_), std::memory_order_relaxed);
+        out_level_db_.store(to_db(out_env_), std::memory_order_relaxed);
+    }
+
     void publish_spectrum(const float* mono, int n) {
         for (int i = 0; i < n; ++i) {
             spec_ring_[static_cast<std::size_t>(spec_pos_)] = mono[i];
@@ -836,6 +895,12 @@ private:
     std::string model_name_ = "(no model)";
     TransferCurve transfer_curve_{};
     std::atomic<std::uint32_t> model_generation_{0};
+
+    // Live peak meters (audio thread writes, UI reads). in_env_/out_env_ are
+    // audio-thread-only envelope state; the dB atomics are the published values.
+    float in_env_ = 0.0f, out_env_ = 0.0f;
+    std::atomic<float> in_level_db_{-120.0f};
+    std::atomic<float> out_level_db_{-120.0f};
 
     // Live output spectrum (audio thread writes, UI reads).
     static constexpr int kSpectrumFft = 2 * kSpectrumBins;  // 512

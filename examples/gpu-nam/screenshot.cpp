@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     }
 
     auto v = proc.create_view();
-    const bool ok = view::render_to_file(*v, 820, 560, out, 2.0f, backend);
+    const bool ok = view::render_to_file(*v, 600, 400, out, 2.0f, backend);
     std::printf("GPU NAM editor screenshot [%s]: %s -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",
                 ok ? "OK" : "FAILED", out);

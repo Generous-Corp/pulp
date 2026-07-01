@@ -1,28 +1,35 @@
 #pragma once
 
-// Native GPU UI for the GPU NAM example processor, built on Pulp's view stack.
+// Native GPU UI for the GPU NAM example, a faithful recreation of
+// NeuralAmpModelerPlugin's editor built entirely in Pulp's view/canvas stack and
+// rendered through Skia/Dawn. The image + font assets are reused from the plugin
+// under their own licenses (see assets/nam/ATTRIBUTION.md); none of the plugin's
+// iPlug2/IGraphics UI code is used — the layout, painting, and interaction here
+// are an independent Pulp implementation.
 //
-// Three live panels stacked vertically: a hero input→output transfer ("amp
-// character") curve that redraws from the processor's model snapshot (so it
-// visibly changes when a new .nam capture loads), a log-frequency spectrum of the
-// output, and a control strip with vertical sliders for Input / Output / Mix plus
-// Engine (CPU/GPU) and Bypass toggles. Layout is fully proportional to the view
-// bounds so it scales with the host window. Pointer input drives parameters
-// through proper host gestures (begin/set/finish) so edits stick and record.
+// Layout mirrors NeuralAmpModeler.cpp's mLayoutFunc in a 600×400 design space
+// (its Background art size): a title band, a six-knob row (Input · Gate · Bass ·
+// Middle · Treble · Output), Noise-Gate and EQ slide switches under their knobs,
+// input/output edge meters, and Model + IR file slots. A settings gear reveals
+// this demo's GPU-specific controls (audio Engine CPU/GPU + Bypass + live GPU
+// status), keeping them off the faithful face panel. Pointer input drives real
+// parameters through host gestures (begin/set/finish) so edits stick and record.
 
 #include "gpu_nam_processor.hpp"
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/theme.hpp>
-#include <pulp/view/theme_presets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::examples {
@@ -30,91 +37,71 @@ namespace pulp::examples {
 namespace cv = pulp::canvas;
 namespace vw = pulp::view;
 
-// Palette resolved from Pulp's "Ink & Signal" design language (the flagship token
-// preset), each lookup falling back to a brand-matched constant.
-struct GnPalette {
-    cv::Color bg, surface, elevated, border, text, text_dim, accent, accent_warm;
-    cv::Color curve_lo, curve_hi, axis, spec_line, spec_fill;
-    cv::Color slider_track, slider_fill, bypass_on;
-};
-
-inline GnPalette make_ink_signal_palette() {
-    vw::Theme th;
-    if (const auto* preset = vw::find_preset("ink-signal"))
-        th = vw::theme_from_preset(*preset, /*dark=*/true);
-    auto C = [&](const char* name, cv::Color fb) { return th.color(name).value_or(fb); };
-    GnPalette p;
-    p.bg           = C("bg.primary",       cv::Color::rgba8(18, 19, 30));
-    p.surface      = C("bg.surface",       cv::Color::rgba8(30, 32, 48));
-    p.elevated     = C("bg.elevated",      cv::Color::rgba8(46, 49, 70));
-    p.border       = C("control.border",   cv::Color::rgba8(70, 74, 100));
-    p.text         = C("text.primary",     cv::Color::rgba8(214, 221, 245));
-    p.text_dim     = C("text.secondary",   cv::Color::rgba8(150, 158, 188));
-    p.accent       = C("accent.primary",   cv::Color::rgba8(22, 218, 194));   // signal teal
-    p.accent_warm  = C("accent.secondary", cv::Color::rgba8(139, 108, 245));  // ink violet
-    p.curve_lo     = C("waveform.line",    cv::Color::rgba8(22, 218, 194));
-    p.curve_hi     = C("accent.warning",   cv::Color::rgba8(246, 184, 71));
-    p.axis         = C("waveform.grid",    cv::Color::rgba8(58, 62, 86));
-    p.spec_line    = C("waveform.line",    cv::Color::rgba8(22, 218, 194));
-    p.spec_fill    = p.spec_line.with_alpha(0.16f);
-    p.slider_track = C("slider.track",     cv::Color::rgba8(40, 43, 62));
-    p.slider_fill  = C("slider.fill",      p.accent).with_alpha(0.45f);
-    p.bypass_on    = C("accent.warning",   cv::Color::rgba8(246, 184, 71));
-    return p;
+// NAM's mLayoutFunc geometry, in its 600×400 design space (all values in design
+// units; the view scales uniformly to the host window). Derived independently
+// from the documented IRECT math, not copied from iPlug2 code.
+namespace nam_geom {
+inline constexpr float kW = 600.0f, kH = 400.0f;
+inline constexpr float kContentL = 30.0f, kContentT = 30.0f;
+inline constexpr float kContentR = 570.0f, kContentB = 370.0f;
+inline constexpr float kTitleH = 50.0f;
+inline constexpr int   kNumKnobs = 6;
+inline constexpr float kKnobAreaL = 50.0f, kKnobAreaR = 550.0f;
+inline constexpr float kKnobCy = 152.0f, kKnobR = 33.0f;
+inline constexpr float kKnobLabelY = 110.0f, kKnobValueY = 202.0f;
+inline constexpr float kToggleY = 220.0f, kToggleW = 38.0f, kToggleH = 17.0f;
+inline constexpr float kFileL = 200.0f, kFileR = 400.0f;
+inline constexpr float kModelT = 309.0f, kFileH = 30.0f, kIrDy = 38.0f;
+inline constexpr float kMeterInL = 10.0f, kMeterOutL = 560.0f;
+inline constexpr float kMeterT = 75.0f, kMeterW = 30.0f, kMeterH = 200.0f;
+inline constexpr float kGearX = 566.0f, kGearY = 12.0f, kGearSz = 22.0f;
+inline float knob_cx(int i) {
+    const float cw = (kKnobAreaR - kKnobAreaL) / kNumKnobs;
+    return kKnobAreaL + (static_cast<float>(i) + 0.5f) * cw;
 }
+}  // namespace nam_geom
+
+// NAM's palette, sampled from the reference editor.
+struct GnColors {
+    cv::Color panel      = cv::Color::rgba8(25, 25, 25);     // #191919 letterbox
+    cv::Color accent     = cv::Color::rgba8(139, 154, 222);  // #8b9ade periwinkle
+    cv::Color accent_dim = cv::Color::rgba8(93, 131, 226);   // #5D83E2 (globe blue)
+    cv::Color text       = cv::Color::rgba8(214, 214, 218);
+    cv::Color text_dim   = cv::Color::rgba8(150, 150, 156);
+    cv::Color arc_track  = cv::Color::rgba8(58, 58, 64);
+    cv::Color toggle_off = cv::Color::rgba8(72, 72, 80);
+    cv::Color overlay    = cv::Color::rgba8(12, 12, 14);
+};
 
 class GpuNamUi : public vw::View {
 public:
+    // The spectrum bus is accepted for a stable create_view() signature but is
+    // unused: NeuralAmpModeler's face has no spectrum display, so neither does
+    // this faithful recreation.
     GpuNamUi(pulp::state::StateStore& store,
-             pulp::examples::SpectrumBus& spectrum,
+             [[maybe_unused]] pulp::examples::SpectrumBus& spectrum,
              pulp::examples::GpuNamProcessor& proc)
-        : store_(store), spectrum_(spectrum), proc_(proc), edit_(store) {
+        : store_(store), proc_(proc), edit_(store) {
+        asset_dir_ = gpu_nam_asset_dir();
+        ensure_fonts();
         set_continuous_repaint(true);
         set_requires_gpu_host(true);
     }
 
-    void on_resized() override { layout(); }
-
     void paint(cv::Canvas& canvas) override {
-        if (layout_dirty_) layout();
-        const float W = local_bounds().width, H = local_bounds().height;
-        const float s = scale();
+        compute_transform();
+        // Letterbox fill behind the fixed-aspect design surface.
+        canvas.set_fill_color(colors_.panel);
+        canvas.fill_rect(0, 0, local_bounds().width, local_bounds().height);
 
-        canvas.set_fill_color(pal_.bg);
-        canvas.fill_rect(0, 0, W, H);
-
-        canvas.set_fill_color(pal_.text);
-        canvas.set_font("Inter", 21.0f * s);
-        canvas.fill_text("GPU NAM", 20 * s, 32 * s);
-
-        // Subtitle carries the live engine status (whether the AUDIO is on the
-        // GPU; the UI is GPU-rendered either way) plus the loaded model name.
-        std::string audio_status = "Audio: CPU";
-        const auto g = proc_.gpu_status();
-        if (g.active) {
-            audio_status = g.backend.empty() ? "Audio: GPU"
-                                             : ("Audio: GPU · " + g.backend);
-            audio_status += " · " + std::to_string(g.blocks) + " blocks";
-            if (g.misses > 0)
-                audio_status += ", " + std::to_string(g.misses) + " misses";
-            if (g.blocks > 0 && g.avg_us > 0.0) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), " · %.0f µs/block (%.0f%% of real-time)",
-                              g.avg_us, g.rt_percent);
-                audio_status += buf;
-            }
-        }
-        canvas.set_fill_color(pal_.text_dim);
-        canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text("Neural amp · " + proc_.model_name() + " · GPU-rendered UI · "
-                             + audio_status,
-                         20 * s, 50 * s);
-
-        read_spectrum();
-        paint_curve(canvas);
-        paint_spectrum(canvas);
-        paint_controls(canvas);
-
+        paint_background(canvas);
+        paint_title(canvas);
+        paint_meters(canvas);
+        paint_knobs(canvas);
+        paint_toggles(canvas);
+        paint_file_slots(canvas);
+        paint_gear(canvas);
+        if (show_settings_) paint_settings(canvas);
         request_repaint();
     }
 
@@ -125,10 +112,7 @@ public:
             case vw::MousePhase::release: pointer_release(); break;
             case vw::MousePhase::hover:   break;
             case vw::MousePhase::automatic:
-                if (e.is_down) {
-                    if (pointer_down_) pointer_move(e.position);
-                    else pointer_press(e.position);
-                }
+                if (e.is_down) { pointer_down_ ? pointer_move(e.position) : pointer_press(e.position); }
                 break;
         }
     }
@@ -137,289 +121,379 @@ public:
     void on_mouse_up(vw::Point) override { pointer_release(); }
 
     // Test accessors (headless interaction verification).
-    void layout_for_test() { layout(); }
-    vw::Rect curve_rect_for_test() { if (layout_dirty_) layout(); return curve_; }
-    vw::Point slider_center_for_test(int i) {
-        if (layout_dirty_) layout();
-        const auto& t = sliders_[static_cast<size_t>(i)].track;
-        return {t.x + t.width * 0.5f, t.y + t.height * 0.5f};
+    vw::Point knob_center_for_test(int i) {
+        compute_transform();
+        return {sx(nam_geom::knob_cx(i)), sy(nam_geom::kKnobCy)};
     }
-    vw::Point bypass_center_for_test() {
-        if (layout_dirty_) layout();
-        return {bypass_.x + bypass_.width * 0.5f, bypass_.y + bypass_.height * 0.5f};
+    vw::Point toggle_center_for_test(int which) {  // 0 = noise gate, 1 = EQ
+        compute_transform();
+        const int knob = which == 0 ? 1 : 3;
+        return {sx(nam_geom::knob_cx(knob)), sy(nam_geom::kToggleY + nam_geom::kToggleH * 0.5f)};
     }
-    vw::Point engine_center_for_test() {
-        if (layout_dirty_) layout();
-        return {engine_.x + engine_.width * 0.5f, engine_.y + engine_.height * 0.5f};
+    vw::Point gear_center_for_test() {
+        compute_transform();
+        return {sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
+                sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f)};
     }
 
 private:
-    struct Slider {
-        pulp::state::ParamID id;
-        const char* label;
-        float lo, hi;
-        int decimals;
-        const char* unit;
-        vw::Rect cell{};
-        vw::Rect track{};
-    };
+    struct KnobSpec { pulp::state::ParamID id; const char* label; float lo, hi; const char* unit; };
+    static constexpr std::array<KnobSpec, nam_geom::kNumKnobs> kKnobs{{
+        {kInputGain,           "INPUT",  -20.0f,  20.0f, "dB"},
+        {kNoiseGateThreshold,  "GATE",  -100.0f,   0.0f, "dB"},
+        {kToneBass,            "BASS",     0.0f,  10.0f, ""},
+        {kToneMiddle,          "MIDDLE",   0.0f,  10.0f, ""},
+        {kToneTreble,          "TREBLE",   0.0f,  10.0f, ""},
+        {kOutputGain,          "OUTPUT", -40.0f,  40.0f, "dB"},
+    }};
 
-    static bool in_rect(vw::Point p, const vw::Rect& r) {
-        return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
-    }
-    float scale() const { return std::max(0.5f, local_bounds().height / 560.0f); }
-
-    void layout() {
+    // ── design→screen transform (uniform scale + centering) ──
+    void compute_transform() {
         const float W = local_bounds().width, H = local_bounds().height;
-        const float s = scale();
-        const float m = 20 * s, top = 64 * s;
-        const float avail = H - top - m;
+        scale_ = std::min(W / nam_geom::kW, H / nam_geom::kH);
+        ox_ = (W - nam_geom::kW * scale_) * 0.5f;
+        oy_ = (H - nam_geom::kH * scale_) * 0.5f;
+    }
+    float sx(float dx) const { return ox_ + dx * scale_; }
+    float sy(float dy) const { return oy_ + dy * scale_; }
+    float ss(float v) const { return v * scale_; }
 
-        const float curve_h = avail * 0.42f;
-        const float spec_h  = avail * 0.26f;
-        const float ctl_h   = avail - curve_h - spec_h - 2 * (12 * s);
-
-        curve_     = {m, top, W - 2 * m, curve_h};
-        spectrum_rect_ = {m, curve_.bottom() + 12 * s, W - 2 * m, spec_h};
-        controls_  = {m, spectrum_rect_.bottom() + 12 * s, W - 2 * m, ctl_h};
-
-        // Four equal columns: three sliders (Input/Output/Mix) + a toggle column
-        // holding Engine (CPU/GPU) stacked over Bypass.
-        const float cw = controls_.width / 4.0f;
-        const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
-        for (int i = 0; i < 3; ++i) {
-            Slider& sl = sliders_[static_cast<size_t>(i)];
-            sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
-            const float tw = std::min(16 * s, cw * 0.22f);
-            const float tx = sl.cell.x + (cw - tw) * 0.5f;
-            const float ty = sl.cell.y + label_h + pad;
-            const float th = sl.cell.height - label_h - value_h - 2 * pad;
-            sl.track = {tx, ty, tw, std::max(20.0f, th)};
+    // ── asset loading ──
+    void ensure_fonts() {
+        if (fonts_done_ || asset_dir_.empty()) return;
+        fonts_done_ = true;
+        cv::register_font_file(asset_dir_ + "/Michroma-Regular.ttf", "Michroma");
+        cv::register_font_file(asset_dir_ + "/Roboto-Regular.ttf", "Roboto");
+    }
+    std::string img(const char* name) const { return asset_dir_.empty() ? "" : asset_dir_ + "/" + name; }
+    const std::string& svg(const char* name) {
+        auto it = svg_cache_.find(name);
+        if (it != svg_cache_.end()) return it->second;
+        std::string content;
+        if (!asset_dir_.empty()) {
+            std::ifstream f(asset_dir_ + "/" + name, std::ios::binary);
+            std::ostringstream ss; ss << f.rdbuf(); content = ss.str();
         }
-        const float bw = std::min(cw - 20 * s, 120 * s);
-        const float bh = std::min(controls_.height * 0.34f, 48 * s);
-        const float bx = controls_.x + 3 * cw + (cw - bw) * 0.5f;
-        const float gap = 12 * s;
-        const float stack_h = 2 * bh + gap;
-        const float y0 = controls_.y + (controls_.height - stack_h) * 0.5f;
-        engine_ = {bx, y0, bw, bh};
-        bypass_ = {bx, y0 + bh + gap, bw, bh};
-        layout_dirty_ = false;
+        return svg_cache_.emplace(name, std::move(content)).first->second;
     }
 
-    void read_spectrum() {
-        const SpectrumFrame& frame = spectrum_.read();
-        for (int i = 0; i < kSpectrumBins; ++i) {
-            const float db = frame[static_cast<size_t>(i)];
-            const float target = std::clamp((db + 90.0f) / 90.0f, 0.0f, 1.0f);
-            float& v = spec_display_[static_cast<size_t>(i)];
-            v += (target > v ? 0.5f : 0.18f) * (target - v);
-        }
+    // ── painters ──
+    void paint_background(cv::Canvas& canvas) {
+        canvas.draw_image_from_file(img("Background.jpg"), sx(0), sy(0),
+                                    ss(nam_geom::kW), ss(nam_geom::kH));
     }
 
-    // ── transfer curve (hero) ──
-    void paint_curve(cv::Canvas& canvas) {
-        const float s = scale();
-        const auto& r = curve_;
-        canvas.set_fill_color(pal_.surface);
-        canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
-        canvas.set_fill_color(pal_.text_dim);
-        canvas.set_font("Inter", 11.0f * s);
-        canvas.fill_text("transfer curve (out vs in)", r.x + 10 * s, r.y + 16 * s);
-
-        canvas.save();
-        canvas.clip_rect(r.x, r.y, r.width, r.height);
-
-        const float x0 = r.x + 10 * s, xspan = r.width - 20 * s;
-        const float top = r.y + 24 * s, bot = r.bottom() - 10 * s;
-        const float midY = (top + bot) * 0.5f, halfH = (bot - top) * 0.5f;
-        const float midX = x0 + xspan * 0.5f;
-
-        // Axes (input on x, output on y; unity-gain diagonal for reference).
-        canvas.set_stroke_color(pal_.axis);
-        canvas.set_line_width(1.0f);
-        canvas.stroke_line(x0, midY, x0 + xspan, midY);
-        canvas.stroke_line(midX, top, midX, bot);
-
-        // Refresh the cached curve only when the model changed.
-        const std::uint32_t gen = proc_.model_generation();
-        if (gen != curve_gen_) { curve_data_ = proc_.transfer_curve_snapshot(); curve_gen_ = gen; }
-
-        // Find the output extent so a quiet model still fills the panel.
-        float ymax = 1e-6f;
-        for (float v : curve_data_) ymax = std::max(ymax, std::abs(v));
-        const float yscale = halfH * 0.92f / ymax;
-
-        std::array<cv::Canvas::Point2D, kCurvePoints> poly{};
-        for (int i = 0; i < kCurvePoints; ++i) {
-            const float fx = static_cast<float>(i) / (kCurvePoints - 1);   // 0..1
-            const float x = x0 + fx * xspan;
-            const float y = midY - std::clamp(curve_data_[static_cast<size_t>(i)] * yscale,
-                                              -halfH, halfH);
-            poly[static_cast<size_t>(i)] = {x, y};
-        }
-        // Tint cold→hot toward the loud (clipped) extremes.
-        canvas.set_stroke_color(pal_.curve_lo);
-        canvas.set_line_width(2.2f);
-        canvas.stroke_path(poly.data(), kCurvePoints);
-        canvas.restore();
+    void paint_title(cv::Canvas& canvas) {
+        // Neutral product title in Michroma (NOT NAM's wordmark) — see the plan's
+        // clean-room note: we state factually that this plays NAM .nam captures.
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Michroma", ss(19.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        const float cy = nam_geom::kContentT + nam_geom::kTitleH * 0.5f + 7.0f;
+        canvas.fill_text("GPU NAM", sx(nam_geom::kW * 0.5f), sy(cy));
+        canvas.set_text_align(cv::TextAlign::left);
     }
 
-    // ── output spectrum panel (log-frequency dB curve) ──
-    void paint_spectrum(cv::Canvas& canvas) {
-        const float s = scale();
-        const auto& r = spectrum_rect_;
-        canvas.set_fill_color(pal_.surface);
-        canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 8 * s);
-        canvas.set_fill_color(pal_.text_dim);
-        canvas.set_font("Inter", 11.0f * s);
-        canvas.fill_text("output spectrum (log f)", r.x + 8 * s, r.y + 16 * s);
-
-        canvas.save();
-        canvas.clip_rect(r.x, r.y, r.width, r.height);
-        const int n = kSpectrumBins;
-        const float base = r.bottom() - 6 * s, topY = r.y + 22 * s;
-        const float x0 = r.x + 6 * s, xspan = r.width - 12 * s;
-        const float inv_logn = 1.0f / std::log10(static_cast<float>(n));
-        std::array<cv::Canvas::Point2D, kSpectrumBins + 2> poly{};
-        int pc = 0;
-        for (int i = 1; i < n; ++i) {
-            const float lf = std::log10(1.0f + i) * inv_logn;
-            const float x = x0 + lf * xspan;
-            const float y = base - spec_display_[static_cast<size_t>(i)] * (base - topY);
-            poly[static_cast<size_t>(pc++)] = {x, y};
-        }
-        const int curve_pts = pc;
-        poly[static_cast<size_t>(pc++)] = {x0 + xspan, base};
-        poly[static_cast<size_t>(pc++)] = {x0, base};
-        canvas.set_fill_color(pal_.spec_fill);
-        canvas.fill_path(poly.data(), static_cast<size_t>(pc));
-        canvas.set_stroke_color(pal_.spec_line);
-        canvas.set_line_width(1.6f);
-        canvas.stroke_path(poly.data(), static_cast<size_t>(curve_pts));
-        canvas.restore();
+    void paint_gear(cv::Canvas& canvas) {
+        const auto& s = svg("Gear.svg");
+        if (!s.empty())
+            canvas.draw_svg(s, sx(nam_geom::kGearX), sy(nam_geom::kGearY),
+                            ss(nam_geom::kGearSz), ss(nam_geom::kGearSz));
     }
 
-    // ── controls ──
-    void paint_controls(cv::Canvas& canvas) {
-        const float s = scale();
-        canvas.set_fill_color(pal_.surface);
-        canvas.fill_rounded_rect(controls_.x, controls_.y, controls_.width,
-                                 controls_.height, 8 * s);
+    void paint_knobs(cv::Canvas& canvas) {
+        for (int i = 0; i < nam_geom::kNumKnobs; ++i) paint_knob(canvas, i);
+    }
 
-        for (int i = 0; i < 3; ++i) {
-            const Slider& sl = sliders_[static_cast<size_t>(i)];
-            const auto& t = sl.track;
-            canvas.set_fill_color(pal_.text_dim);
-            canvas.set_font("Inter", 12.0f * s);
-            canvas.fill_text(sl.label, sl.cell.x + (sl.cell.width - 36 * s) * 0.5f,
-                             sl.cell.y + 16 * s);
+    void paint_knob(cv::Canvas& canvas, int i) {
+        const KnobSpec& k = kKnobs[static_cast<std::size_t>(i)];
+        const float cx = nam_geom::knob_cx(i), cy = nam_geom::kKnobCy, R = nam_geom::kKnobR;
+        const float scx = sx(cx), scy = sy(cy), sR = ss(R);
 
-            const float frac = value_frac(i);
-            const float handle_y = t.bottom() - frac * t.height;
-            canvas.set_fill_color(pal_.slider_track);
-            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.width * 0.5f);
-            canvas.set_fill_color(pal_.slider_fill);
-            canvas.fill_rounded_rect(t.x, handle_y, t.width, t.bottom() - handle_y,
-                                     t.width * 0.5f);
-            const bool active = (active_slider_ == i);
-            canvas.set_fill_color(active ? pal_.accent_warm : pal_.accent);
-            canvas.fill_circle(t.x + t.width * 0.5f, handle_y, t.width * 0.9f);
+        // Label above the knob.
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(10.5f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text(k.label, scx, sy(nam_geom::kKnobLabelY));
 
-            char buf[40];
-            std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
-                          static_cast<double>(slider_value(i)),
-                          sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(pal_.text);
-            canvas.set_font("Inter", 13.0f * s);
-            canvas.fill_text(buf, sl.cell.x + (sl.cell.width - 44 * s) * 0.5f,
-                             sl.cell.bottom() - 8 * s);
+        // Knob face (reused bitmap) + value arc + indicator.
+        canvas.draw_image_from_file(img("KnobBackground.png"), scx - sR, scy - sR, 2 * sR, 2 * sR);
+
+        const float frac = knob_frac(i);
+        constexpr float kSweep = 135.0f;  // ±135° → 270° travel
+        const float a0 = -kSweep * 3.14159265f / 180.0f;
+        const float a1 = (-kSweep + frac * 2.0f * kSweep) * 3.14159265f / 180.0f;
+        stroke_arc_points(canvas, scx, scy, sR + ss(3.0f), a0,  kSweep * 3.14159265f / 180.0f,
+                          colors_.arc_track, ss(2.5f));
+        stroke_arc_points(canvas, scx, scy, sR + ss(3.0f), a0, a1, colors_.accent, ss(2.5f));
+
+        // Indicator dot at the current angle.
+        const float ix = scx + std::sin(a1) * sR * 0.66f;
+        const float iy = scy - std::cos(a1) * sR * 0.66f;
+        canvas.set_fill_color(colors_.accent);
+        canvas.fill_circle(ix, iy, ss(3.0f));
+
+        // Value readout below.
+        char buf[40];
+        const float val = knob_value(i);
+        if (k.unit[0]) std::snprintf(buf, sizeof buf, "%.1f %s", static_cast<double>(val), k.unit);
+        else           std::snprintf(buf, sizeof buf, "%.1f", static_cast<double>(val));
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Roboto", ss(10.5f));
+        canvas.fill_text(buf, scx, sy(nam_geom::kKnobValueY));
+        canvas.set_text_align(cv::TextAlign::left);
+    }
+
+    // Stroke a circular arc as a polyline. `a_start`/`a_end` are radians measured
+    // from 12 o'clock, positive clockwise (screen coords). Robust across backends
+    // (no arc-direction convention dependency).
+    void stroke_arc_points(cv::Canvas& canvas, float cx, float cy, float r,
+                           float a_start, float a_end, cv::Color color, float width) {
+        constexpr int kSeg = 48;
+        std::array<cv::Canvas::Point2D, kSeg + 1> pts{};
+        for (int s = 0; s <= kSeg; ++s) {
+            const float a = a_start + (a_end - a_start) * static_cast<float>(s) / kSeg;
+            pts[static_cast<std::size_t>(s)] = {cx + std::sin(a) * r, cy - std::cos(a) * r};
         }
+        canvas.set_stroke_color(color);
+        canvas.set_line_width(width);
+        canvas.stroke_path(pts.data(), pts.size());
+    }
 
-        // Engine toggle (CPU / GPU).
-        const bool gpu_req = store_.get_value(kEngine) >= 0.5f;
-        canvas.set_fill_color(gpu_req ? pal_.accent : pal_.elevated);
-        canvas.fill_rounded_rect(engine_.x, engine_.y, engine_.width, engine_.height, 8 * s);
-        canvas.set_fill_color(gpu_req ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(gpu_req ? "● GPU" : "CPU",
-                         engine_.x + 16 * s, engine_.y + engine_.height * 0.62f);
+    void paint_toggles(cv::Canvas& canvas) {
+        paint_toggle(canvas, 1, kNoiseGateActive);  // under the Gate knob
+        paint_toggle(canvas, 3, kEQActive);         // under the Middle knob
+    }
 
-        // Bypass toggle.
-        const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        canvas.set_fill_color(bypassed ? pal_.bypass_on : pal_.elevated);
-        canvas.fill_rounded_rect(bypass_.x, bypass_.y, bypass_.width, bypass_.height, 8 * s);
-        canvas.set_fill_color(bypassed ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(bypassed ? "● BYPASSED" : "BYPASS",
-                         bypass_.x + 16 * s, bypass_.y + bypass_.height * 0.62f);
+    void paint_toggle(cv::Canvas& canvas, int under_knob, pulp::state::ParamID id) {
+        const bool on = store_.get_value(id) >= 0.5f;
+        const float cx = nam_geom::knob_cx(under_knob);
+        const float w = nam_geom::kToggleW, h = nam_geom::kToggleH;
+        const float x = cx - w * 0.5f, y = nam_geom::kToggleY;
+        canvas.set_fill_color(on ? colors_.accent : colors_.toggle_off);
+        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(h * 0.5f));
+        // Handle (reused bitmap) slides to the lit side.
+        const float hd = h - 4.0f;
+        const float hx = on ? (x + w - hd - 2.0f) : (x + 2.0f);
+        canvas.draw_image_from_file(img("SlideSwitchHandle.png"),
+                                    sx(hx), sy(y + 2.0f), ss(hd), ss(hd));
+    }
+
+    void paint_meters(cv::Canvas& canvas) {
+        const auto [in_db, out_db] = proc_.meter_levels_db();
+        paint_meter(canvas, nam_geom::kMeterInL, in_db);
+        paint_meter(canvas, nam_geom::kMeterOutL, out_db);
+    }
+
+    void paint_meter(cv::Canvas& canvas, float x, float level_db) {
+        const float y = nam_geom::kMeterT, w = nam_geom::kMeterW, h = nam_geom::kMeterH;
+        canvas.draw_image_from_file(img("MeterBackground.png"), sx(x), sy(y), ss(w), ss(h));
+        // Map −60..0 dB → 0..1 of the bar height, filling from the bottom.
+        const float frac = std::clamp((level_db + 60.0f) / 60.0f, 0.0f, 1.0f);
+        if (frac <= 0.001f) return;
+        const float pad = 4.0f;
+        const float bar_h = (h - 2 * pad) * frac;
+        const float bx = x + pad, bw = w - 2 * pad;
+        const float by = y + h - pad - bar_h;
+        // Green→amber→red toward the top, like NAM's meter.
+        cv::Color c = level_db > -3.0f  ? cv::Color::rgba8(226, 96, 80)
+                    : level_db > -12.0f ? cv::Color::rgba8(230, 184, 90)
+                                        : colors_.accent;
+        canvas.set_fill_color(c);
+        canvas.fill_rounded_rect(sx(bx), sy(by), ss(bw), ss(bar_h), ss(2.0f));
+    }
+
+    void paint_file_slots(cv::Canvas& canvas) {
+        paint_file_slot(canvas, nam_geom::kModelT, "ModelIcon.svg",
+                        proc_.model_name(), /*model=*/true);
+        paint_file_slot(canvas, nam_geom::kModelT + nam_geom::kIrDy, "IRIconOff.svg",
+                        "Select IR directory...", /*model=*/false);
+    }
+
+    void paint_file_slot(cv::Canvas& canvas, float top, const char* icon,
+                         const std::string& label, bool model) {
+        const float x = nam_geom::kFileL, w = nam_geom::kFileR - nam_geom::kFileL;
+        const float h = nam_geom::kFileH;
+        canvas.draw_image_from_file(img("FileBackground.png"), sx(x), sy(top), ss(w), ss(h));
+
+        const float icon_sz = 16.0f, inset = 8.0f;
+        const float mid = top + h * 0.5f;
+        const auto& ic = svg(icon);
+        if (!ic.empty())
+            canvas.draw_svg(ic, sx(x + inset), sy(mid - icon_sz * 0.5f), ss(icon_sz), ss(icon_sz));
+
+        // Prev / next arrows.
+        const auto& al = svg("ArrowLeft.svg");
+        const auto& ar = svg("ArrowRight.svg");
+        const float arr = 11.0f;
+        if (!al.empty())
+            canvas.draw_svg(al, sx(x + inset + icon_sz + 4.0f), sy(mid - arr * 0.5f), ss(arr), ss(arr));
+        if (!ar.empty())
+            canvas.draw_svg(ar, sx(x + w - inset - icon_sz - arr - 4.0f), sy(mid - arr * 0.5f),
+                            ss(arr), ss(arr));
+
+        // Globe (right).
+        const auto& gl = svg("Globe.svg");
+        if (!gl.empty())
+            canvas.draw_svg(gl, sx(x + w - inset - icon_sz), sy(mid - icon_sz * 0.5f),
+                            ss(icon_sz), ss(icon_sz));
+
+        // Centered name.
+        canvas.set_fill_color(model ? colors_.text : colors_.text_dim);
+        canvas.set_font("Roboto", ss(10.5f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text(label, sx(x + w * 0.5f), sy(mid + 3.5f));
+        canvas.set_text_align(cv::TextAlign::left);
+    }
+
+    // ── settings overlay (this demo's GPU controls) ──
+    void paint_settings(cv::Canvas& canvas) {
+        const float x = 150.0f, y = 90.0f, w = 300.0f, h = 200.0f;
+        canvas.set_fill_color(colors_.overlay.with_alpha(0.96f));
+        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(10.0f));
+        canvas.set_stroke_color(colors_.accent);
+        canvas.set_line_width(ss(1.0f));
+        canvas.stroke_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(10.0f));
+
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Michroma", ss(13.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text("SETTINGS", sx(x + w * 0.5f), sy(y + 26.0f));
+        canvas.set_text_align(cv::TextAlign::left);
+
+        settings_engine_ = pill(canvas, x + 24.0f, y + 52.0f, w - 48.0f,
+                                store_.get_value(kEngine) >= 0.5f ? "Audio engine: GPU"
+                                                                  : "Audio engine: CPU",
+                                store_.get_value(kEngine) >= 0.5f);
+        settings_bypass_ = pill(canvas, x + 24.0f, y + 96.0f, w - 48.0f,
+                                store_.get_value(kBypass) >= 0.5f ? "Bypassed" : "Active",
+                                store_.get_value(kBypass) >= 0.5f);
+
+        // Live GPU status line.
+        const auto g = proc_.gpu_status();
+        std::string s;
+        if (g.active) {
+            char buf[96];
+            std::snprintf(buf, sizeof buf, "GPU %s · %.0f%% RT",
+                          g.backend.empty() ? "on" : g.backend.c_str(), g.rt_percent);
+            s = buf;
+        } else {
+            s = "GPU idle (CPU oracle live)";
+        }
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.set_font("Roboto", ss(10.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text(s, sx(x + w * 0.5f), sy(y + h - 20.0f));
+        canvas.fill_text(proc_.model_name(), sx(x + w * 0.5f), sy(y + h - 36.0f));
+        canvas.set_text_align(cv::TextAlign::left);
+    }
+
+    vw::Rect pill(cv::Canvas& canvas, float x, float y, float w, const std::string& text, bool on) {
+        const float h = 30.0f;
+        canvas.set_fill_color(on ? colors_.accent : colors_.toggle_off);
+        canvas.fill_rounded_rect(sx(x), sy(y), ss(w), ss(h), ss(h * 0.5f));
+        canvas.set_fill_color(on ? colors_.panel : colors_.text);
+        canvas.set_font("Roboto", ss(12.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text(text, sx(x + w * 0.5f), sy(y + h * 0.62f));
+        canvas.set_text_align(cv::TextAlign::left);
+        return {sx(x), sy(y), ss(w), ss(h)};
     }
 
     // ── interaction ──
+    static bool in_rect(vw::Point p, const vw::Rect& r) {
+        return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
+    }
+    static bool in_circle(vw::Point p, float cx, float cy, float r) {
+        const float dx = p.x - cx, dy = p.y - cy;
+        return dx * dx + dy * dy <= r * r;
+    }
+
     void pointer_press(vw::Point p) {
         if (pointer_down_) return;
-        if (layout_dirty_) layout();
+        compute_transform();
         pointer_down_ = true;
-        if (in_rect(p, bypass_)) { toggle_param(kBypass); return; }
-        if (in_rect(p, engine_)) { toggle_param(kEngine); return; }
-        for (int i = 0; i < 3; ++i) {
-            if (in_rect(p, sliders_[static_cast<size_t>(i)].cell)) {
-                active_slider_ = i;
-                edit_.begin(sliders_[static_cast<size_t>(i)].id);
-                apply_slider(p);
+
+        if (show_settings_) {
+            if (in_rect(p, settings_engine_)) { toggle_param(kEngine); return; }
+            if (in_rect(p, settings_bypass_)) { toggle_param(kBypass); return; }
+            show_settings_ = false;  // click-away closes
+            return;
+        }
+        if (in_circle(p, sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
+                      sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f), ss(18.0f))) {
+            show_settings_ = true; return;
+        }
+        // Toggles.
+        if (hit_toggle(p, 1, kNoiseGateActive)) return;
+        if (hit_toggle(p, 3, kEQActive)) return;
+        // Knobs (vertical drag).
+        for (int i = 0; i < nam_geom::kNumKnobs; ++i) {
+            if (in_circle(p, sx(nam_geom::knob_cx(i)), sy(nam_geom::kKnobCy), ss(nam_geom::kKnobR + 6.0f))) {
+                active_knob_ = i;
+                drag_start_y_ = p.y;
+                drag_start_frac_ = knob_frac(i);
+                edit_.begin(kKnobs[static_cast<std::size_t>(i)].id);
                 return;
             }
         }
     }
-    void pointer_move(vw::Point p) { if (active_slider_ >= 0) apply_slider(p); }
+
+    bool hit_toggle(vw::Point p, int under_knob, pulp::state::ParamID id) {
+        const float cx = nam_geom::knob_cx(under_knob);
+        const vw::Rect r{sx(cx - nam_geom::kToggleW * 0.5f), sy(nam_geom::kToggleY),
+                         ss(nam_geom::kToggleW), ss(nam_geom::kToggleH)};
+        if (!in_rect(p, r)) return false;
+        toggle_param(id);
+        return true;
+    }
+
+    void pointer_move(vw::Point p) {
+        if (active_knob_ < 0) return;
+        // 200 px of vertical drag spans the full range (up = increase).
+        const float dfrac = (drag_start_y_ - p.y) / (200.0f * scale_);
+        const float frac = std::clamp(drag_start_frac_ + dfrac, 0.0f, 1.0f);
+        const KnobSpec& k = kKnobs[static_cast<std::size_t>(active_knob_)];
+        edit_.set(k.id, k.lo + frac * (k.hi - k.lo));
+    }
+
     void pointer_release() {
         if (!pointer_down_) return;
         pointer_down_ = false;
-        if (active_slider_ >= 0) { edit_.finish(); active_slider_ = -1; }
-    }
-    void apply_slider(vw::Point p) {
-        const Slider& sl = sliders_[static_cast<size_t>(active_slider_)];
-        const auto& t = sl.track;
-        const float frac = std::clamp((t.bottom() - p.y) / t.height, 0.0f, 1.0f);
-        const float v = sl.lo + frac * (sl.hi - sl.lo);
-        edit_.set(sl.id, v);
-    }
-    void toggle_param(pulp::state::ParamID id) {
-        const float v = store_.get_value(id) >= 0.5f ? 0.0f : 1.0f;
-        pulp::state::ParameterEdit toggle(store_);
-        toggle.begin(id);
-        toggle.set(id, v);
-        toggle.finish();
+        if (active_knob_ >= 0) { edit_.finish(); active_knob_ = -1; }
     }
 
-    float slider_value(int i) const {
-        const Slider& sl = sliders_[static_cast<size_t>(i)];
-        if (i == active_slider_) return edit_.display_value(sl.id, store_.get_value(sl.id));
-        return store_.get_value(sl.id);
+    void toggle_param(pulp::state::ParamID id) {
+        const float v = store_.get_value(id) >= 0.5f ? 0.0f : 1.0f;
+        pulp::state::ParameterEdit t(store_);
+        t.begin(id); t.set(id, v); t.finish();
     }
-    float value_frac(int i) const {
-        const Slider& sl = sliders_[static_cast<size_t>(i)];
-        return std::clamp((slider_value(i) - sl.lo) / (sl.hi - sl.lo), 0.0f, 1.0f);
+
+    float knob_value(int i) const {
+        const KnobSpec& k = kKnobs[static_cast<std::size_t>(i)];
+        if (i == active_knob_) return edit_.display_value(k.id, store_.get_value(k.id));
+        return store_.get_value(k.id);
+    }
+    float knob_frac(int i) const {
+        const KnobSpec& k = kKnobs[static_cast<std::size_t>(i)];
+        return std::clamp((knob_value(i) - k.lo) / (k.hi - k.lo), 0.0f, 1.0f);
     }
 
     pulp::state::StateStore& store_;
-    pulp::examples::SpectrumBus& spectrum_;
     pulp::examples::GpuNamProcessor& proc_;
     pulp::state::ParameterEdit edit_;
-    GnPalette pal_ = make_ink_signal_palette();
+    GnColors colors_;
 
-    vw::Rect curve_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{};
-    std::array<Slider, 3> sliders_{{
-        {kInputGain,  "Input",  -24.0f, 24.0f, 1, "dB"},
-        {kOutputGain, "Output", -24.0f, 24.0f, 1, "dB"},
-        {kMix,        "Mix",      0.0f, 100.0f, 0, "%"},
-    }};
-    std::array<float, kSpectrumBins> spec_display_{};
-    TransferCurve curve_data_{};
-    std::uint32_t curve_gen_ = 0xFFFFFFFFu;
-    int active_slider_ = -1;
+    std::string asset_dir_;
+    bool fonts_done_ = false;
+    std::unordered_map<std::string, std::string> svg_cache_;
+
+    float scale_ = 1.0f, ox_ = 0.0f, oy_ = 0.0f;
+    int active_knob_ = -1;
+    float drag_start_y_ = 0.0f, drag_start_frac_ = 0.0f;
     bool pointer_down_ = false;
-    bool layout_dirty_ = true;
+    bool show_settings_ = false;
+    vw::Rect settings_engine_{}, settings_bypass_{};
 };
 
 } // namespace pulp::examples
