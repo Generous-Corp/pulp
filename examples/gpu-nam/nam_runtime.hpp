@@ -25,6 +25,9 @@
 #ifndef GPU_NAM_WITH_A2
 #define GPU_NAM_WITH_A2 1
 #endif
+#ifndef GPU_NAM_WITH_CONVNET
+#define GPU_NAM_WITH_CONVNET 1
+#endif
 #ifndef GPU_NAM_WITH_LSTM
 #define GPU_NAM_WITH_LSTM 1
 #endif
@@ -32,8 +35,8 @@
 #define GPU_NAM_WITH_LINEAR 1
 #endif
 
-#if !(GPU_NAM_WITH_WAVENET || GPU_NAM_WITH_A2 || GPU_NAM_WITH_LSTM || GPU_NAM_WITH_LINEAR)
-#error "GPU NAM: at least one architecture must be enabled (WaveNet, A2, LSTM, or Linear)"
+#if !(GPU_NAM_WITH_WAVENET || GPU_NAM_WITH_A2 || GPU_NAM_WITH_CONVNET || GPU_NAM_WITH_LSTM || GPU_NAM_WITH_LINEAR)
+#error "GPU NAM: at least one architecture must be enabled (WaveNet, A2, ConvNet, LSTM, or Linear)"
 #endif
 
 #if GPU_NAM_WITH_WAVENET
@@ -41,6 +44,9 @@
 #endif
 #if GPU_NAM_WITH_A2
 #include "nam_a2.hpp"
+#endif
+#if GPU_NAM_WITH_CONVNET
+#include "nam_convnet.hpp"
 #endif
 #if GPU_NAM_WITH_LSTM
 #include "nam_lstm.hpp"
@@ -63,7 +69,7 @@ public:
     // Enum tags are always present (they name architectures regardless of which
     // are compiled in); a disabled architecture simply can never be produced by
     // the loader, which reports it as not built in this configuration.
-    enum class Arch { None, WaveNet, WaveNetA2, Lstm, Linear };
+    enum class Arch { None, WaveNet, WaveNetA2, ConvNet, Lstm, Linear };
 
     NamRuntime() = default;
 
@@ -73,6 +79,7 @@ public:
         switch (arch_) {
             case Arch::WaveNet:   return "WaveNet";
             case Arch::WaveNetA2: return "WaveNet-A2";
+            case Arch::ConvNet:   return "ConvNet";
             case Arch::Lstm:      return "LSTM";
             case Arch::Linear:    return "Linear";
             default:              return "none";
@@ -89,6 +96,9 @@ public:
 #if GPU_NAM_WITH_A2
             case Arch::WaveNetA2: return a2_.sample_rate();
 #endif
+#if GPU_NAM_WITH_CONVNET
+            case Arch::ConvNet: return convnet_.sample_rate();
+#endif
 #if GPU_NAM_WITH_WAVENET
             case Arch::WaveNet: return wavenet_.sample_rate();
 #endif
@@ -102,6 +112,9 @@ public:
 #endif
 #if GPU_NAM_WITH_A2
         if (arch_ == Arch::WaveNetA2) { a2_.reset(); return; }
+#endif
+#if GPU_NAM_WITH_CONVNET
+        if (arch_ == Arch::ConvNet) { convnet_.reset(); return; }
 #endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.reset(); return; }
@@ -121,6 +134,9 @@ public:
 #if GPU_NAM_WITH_A2
         if (arch_ == Arch::WaveNetA2) { a2_.prewarm(); return; }
 #endif
+#if GPU_NAM_WITH_CONVNET
+        if (arch_ == Arch::ConvNet) { convnet_.prewarm(); return; }
+#endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.prewarm(); return; }
 #endif
@@ -138,6 +154,9 @@ public:
 #if GPU_NAM_WITH_A2
         if (arch_ == Arch::WaveNetA2) return a2_.process_sample(x);
 #endif
+#if GPU_NAM_WITH_CONVNET
+        if (arch_ == Arch::ConvNet) return convnet_.process_sample(x);
+#endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) return lstm_.process_sample(x);
 #endif
@@ -153,6 +172,9 @@ public:
 #endif
 #if GPU_NAM_WITH_A2
         if (arch_ == Arch::WaveNetA2) { a2_.process(in, out, n); return; }
+#endif
+#if GPU_NAM_WITH_CONVNET
+        if (arch_ == Arch::ConvNet) { convnet_.process(in, out, n); return; }
 #endif
 #if GPU_NAM_WITH_LSTM
         if (arch_ == Arch::Lstm) { lstm_.process(in, out, n); return; }
@@ -193,6 +215,9 @@ private:
 #endif
 #if GPU_NAM_WITH_A2
     NamA2 a2_;
+#endif
+#if GPU_NAM_WITH_CONVNET
+    NamConvNet convnet_;
 #endif
 #if GPU_NAM_WITH_LSTM
     NamLstmModel lstm_;
@@ -275,10 +300,17 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         return true;
     }
 #endif
-    // A known architecture that is compiled out lands here with a clear message;
-    // so does ConvNet and any other shape whose loader would also reject it.
+#if GPU_NAM_WITH_CONVNET
+    if (architecture == "ConvNet") {
+        if (!load_nam_convnet(path, out.convnet_, &err)) return fail(err);
+        out.arch_ = NamRuntime::Arch::ConvNet;
+        out.error_.clear();
+        return true;
+    }
+#endif
+    // A known architecture that is compiled out lands here with a clear message.
     if (architecture == "WaveNet" || architecture == "LSTM" || architecture == "Linear"
-        || architecture == "SlimmableContainer")
+        || architecture == "ConvNet" || architecture == "SlimmableContainer")
         return fail("architecture '" + architecture + "' is not compiled into this build");
     return fail("unsupported architecture: '" + architecture + "'");
 }

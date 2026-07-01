@@ -10,10 +10,11 @@
 # that drops WaveNet targets the CPU inference layer, not the GPU plugin.)
 option(GPU_NAM_WITH_WAVENET "GPU NAM: build WaveNet (A1) architecture" ON)
 option(GPU_NAM_WITH_A2      "GPU NAM: build WaveNet A2 architecture" ON)
+option(GPU_NAM_WITH_CONVNET "GPU NAM: build ConvNet architecture" ON)
 option(GPU_NAM_WITH_LSTM    "GPU NAM: build LSTM architecture" ON)
 option(GPU_NAM_WITH_LINEAR  "GPU NAM: build Linear architecture" ON)
 set(_gpu_nam_arch_defs "")
-foreach(_gn_arch WAVENET A2 LSTM LINEAR)
+foreach(_gn_arch WAVENET A2 CONVNET LSTM LINEAR)
     if(NOT GPU_NAM_WITH_${_gn_arch})
         list(APPEND _gpu_nam_arch_defs "GPU_NAM_WITH_${_gn_arch}=0")
     endif()
@@ -78,6 +79,14 @@ if(TARGET pulp::runtime)
             target_link_libraries(gpu-nam-a2-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-a2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             add_test(NAME gpu-nam-a2-test COMMAND gpu-nam-a2-test)
+        endif()
+
+        # ConvNet architecture (dilated conv blocks + batchnorm) + dispatch.
+        if(GPU_NAM_WITH_CONVNET)
+            add_executable(gpu-nam-convnet-test test_nam_convnet.cpp)
+            target_link_libraries(gpu-nam-convnet-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-convnet-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            add_test(NAME gpu-nam-convnet-test COMMAND gpu-nam-convnet-test)
         endif()
 
         # LSTM architecture + NamRuntime dispatch (no GPU needed).
