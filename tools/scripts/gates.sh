@@ -98,6 +98,25 @@ fail=0
 
 echo "gates: base = $BASE" >&2
 
+# ── 0. host-vitals (ADVISORY) ──────────────────────────────────────────────
+# A pushing developer/agent on a self-hosted CI host is often the SAME machine
+# that runs the required macos gate. If that host is shedding memory (jetsam) or
+# at critical pressure, piling a foreground build/ship on top risks an unclean
+# reboot that kills the in-flight CI job. This banner surfaces that BEFORE the
+# push so you can ship via GitHub-native auto-merge (survives a restart) instead
+# of a foreground watch. Advisory only — it never changes the exit code.
+HOST_VITALS="$ROOT/tools/scripts/host_vitals.sh"
+if [ -x "$HOST_VITALS" ]; then
+    echo "" >&2
+    echo "▸ host-vitals (advisory)" >&2
+    vitals_out="$("$HOST_VITALS" 2>/dev/null)"; vitals_code=$?
+    echo "  $vitals_out" >&2
+    if [ "$vitals_code" -ge 20 ]; then
+        echo "  ⚠︎ host is CRITICAL — prefer 'shipyard pr' / GitHub auto-merge over a" >&2
+        echo "    foreground watch, and shed idle load (RepoPrompt/Figma/MCP) before builds." >&2
+    fi
+fi
+
 # ── 1. skill-sync ──────────────────────────────────────────────────────────
 echo "" >&2
 echo "▸ skill-sync check" >&2

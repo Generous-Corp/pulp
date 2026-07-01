@@ -111,6 +111,48 @@ specific to that setup (App-dispatched workflows; local runners) — skip them. 
 tool-agnostic rule still holds: distinguish the *required* checks from *advisory*
 lanes, and verify a runner is actually busy before blaming capacity.
 
+## Host-vitals preflight — back off before a saturating CI host reboots
+
+The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
+interactive agent session and a heavy MCP stack (RepoPrompt, Figma,
+chrome-devtools, several pulp-mcp). When RAM fills, macOS jetsam starts killing
+processes, the window server crashes, and the host reboots uncleanly — taking any
+in-flight required-gate CI job down with it and reddening the leg for reasons that
+have nothing to do with the code (the 2026-07-01 incident). This whole class of
+failure is **predictable ~20 minutes out** from cheap metrics, so the agent, the
+CI pool, and Shipyard should all read one shared signal and back off.
+
+`tools/scripts/host_vitals.sh` is that signal. It reports `green` / `warn` /
+`critical` (exit `0` / `10` / `20`) keyed on **memory pressure first**
+(`kern.memorystatus_vm_pressure_level` + fresh `JetsamEvent-*` reports), with load
+only ever corroborating a warn — a healthy parallel build (load 1–2× cores, normal
+pressure) never trips it. Use it before heavy work:
+
+```bash
+tools/scripts/host_vitals.sh            # one-line summary; exit code = level
+tools/scripts/host_vitals.sh --json     # machine-readable
+```
+
+- **Agent admission control:** before launching a local build or a heavy MCP call
+  on a CI-host session, check `host_vitals.sh`. If `critical`, don't pile on —
+  ship via `shipyard pr` / GitHub-native auto-merge (survives a restart) instead
+  of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
+  /idle MCP) before building. `gates.sh` prints this banner advisorily on every
+  pre-push.
+- **Continuous sensor:** `tools/scripts/install_host_vitals_sensor.sh` installs a
+  per-user launchd agent (`com.pulp.host-vitals`, 60 s) that publishes the latest
+  reading to `~/.local/state/pulp/host_vitals.json` and a rotating
+  `host_vitals.log`. It is observation-only — it never stops a runner or kills a
+  process — so it is safe to run on the required-gate host. Installed on the m3/m5
+  /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
+  reading; `--uninstall` removes the agent.
+- **A whole-pool-fails-at-once red leg is infra, not code** (per
+  `macos-required-leg-timeout-saturation`): if `windows` + both `macos` legs fail
+  together and the diff can't explain it, correlate against host reboot / jetsam
+  time and **re-run the required leg** rather than debugging the change. Active
+  back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
+  gate + infra-vs-code classification) consume this same `host_vitals` state.
+
 ## GitHub workflow gotchas
 
 - **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Two distinct guard layers exist and they catch different things: `test_codecov_components.py` / `test_codecov_config.py` (PR-gate) guard the **codecov.yml mapping** (a subsystem matching no component → invisible); `coverage-upload-watchdog.yml` (hourly, main) guards the **outcome** — "main had a *successful* Coverage run in the last N hours." The watchdog exists because the dashboard degrades silently when fresh complete uploads stop arriving, from causes the config gate can't see: coverage runs cancelled by `stale-run-reaper.yml` when a CI dispatch throttle makes them queue past the cutoff (the 2026-06-28 incident — 8 consecutive main Coverage runs cancelled), an `llvm-cov -object`-set regression (a `libpulp-*.a` drops out → a whole subsystem vanishes while `lines-valid` stays > 0, which `verify_cobertura_xml.py`'s `lines-valid > 0` check cannot catch), or Codecov's `after_n_builds` waiting forever on a missing per-OS leg. When triaging a coverage-surface complaint: first check `gh run list --workflow coverage.yml --branch main` for recent **successful** runs (cancelled ≠ uploaded); only then suspect codecov.yml. Note the config gate is **advisory** (not in branch protection), so a fleet-auto-merged PR can land config drift despite a red gate — the watchdog is the main-branch backstop.
