@@ -1,4 +1,4 @@
-// Tests for the clean-room NAM "Linear" CPU inference, its .nam loader, and the
+// Tests for the NAM "Linear" CPU inference, its .nam loader, and the
 // NamRuntime architecture dispatch.
 //
 // A Linear NAM is a single causal FIR + optional bias: y[n] = bias + sum_k

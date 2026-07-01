@@ -21,7 +21,7 @@ Cabinets/          Impulse responses (.wav) — pick one with the IR chooser
 
 These .nam models are the open, MIT-licensed Neural Amp Modeler example
 captures (github.com/sdatkinson/NeuralAmpModelerCore, example_models). The
-cabinet IR is a synthetic clean-room impulse. See the plugin's model
+cabinet IR is a synthetic impulse. See the plugin's model
 attribution for details. Load your own .nam captures and IRs for real tones.
 
 GPU NAM's file choosers default to this folder. To point them somewhere else,

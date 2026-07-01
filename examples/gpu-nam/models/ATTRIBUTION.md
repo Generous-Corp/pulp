@@ -13,7 +13,7 @@ for real amp tones.
 | `wavenet_a1_standard.nam` | `wavenet_a1_standard.nam` | WaveNet (A1-Standard), 16 channels |
 | `lstm.nam` | `lstm.nam` | LSTM |
 
-`cabinet.wav` is a short **synthetic, clean-room** guitar-cabinet impulse
+`cabinet.wav` is a short **synthetic, original** guitar-cabinet impulse
 response generated for this example — not a third-party capture.
 
 `README-content.txt` is the note the installer places alongside the samples it
@@ -24,7 +24,7 @@ MIT-licensed Neural Amp Modeler standard
 (https://github.com/sdatkinson/neural-amp-modeler,
 https://github.com/sdatkinson/NeuralAmpModelerCore). Pulp's inference
 (`examples/gpu-nam/nam_model.hpp`, `nam_lstm.hpp`) and GPU forward
-(`GpuCompute::nam_forward`) are independent, clean-room implementations of those
+(`GpuCompute::nam_forward`) are independent implementations of those
 public architectures; these `.nam` files are the only third-party artifacts.
 
 ## A note on NAM Architecture 2 (A2)

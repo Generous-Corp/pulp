@@ -197,8 +197,8 @@ private:
     }
 
     void paint_title(cv::Canvas& canvas) {
-        // Neutral product title in Michroma (NOT NAM's wordmark) — see the plan's
-        // clean-room note: we state factually that this plays NAM .nam captures.
+        // Neutral product title in Michroma (NOT NAM's wordmark); we state
+        // factually that this plays NAM .nam captures.
         canvas.set_fill_color(colors_.text);
         canvas.set_font("Michroma", ss(19.0f));
         canvas.set_text_align(cv::TextAlign::center);

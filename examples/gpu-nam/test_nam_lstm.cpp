@@ -1,4 +1,4 @@
-// Tests for the clean-room NAM "LSTM" CPU inference, its .nam loader, and the
+// Tests for the NAM "LSTM" CPU inference, its .nam loader, and the
 // NamRuntime architecture dispatch.
 //
 // The correctness golden (synthetic single-layer LSTM below) was produced by an

@@ -1,8 +1,16 @@
 # WebGPU Compute for Audio: Feasibility Report
 
+> **Historical report — superseded.** This is the original 2026-03-31
+> feasibility spike that predates the shipped GPU audio runtime. For how GPU
+> audio actually works today (compute primitives, the real-time CPU↔GPU
+> transport, ready-made processors, and CPU fallback), read the current
+> developer guide: [GPU audio runtime](../guides/gpu-audio-sdk.md). This report
+> is retained for provenance; its conclusions have been overtaken by the
+> implementation.
+
 **Phase:** 11 (WebGPU/audio exploration)
 **Date:** 2026-03-31
-**Status:** Complete
+**Status:** Complete (superseded by docs/guides/gpu-audio-sdk.md)
 
 ## Summary
 

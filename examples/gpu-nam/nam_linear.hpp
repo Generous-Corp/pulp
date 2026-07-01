@@ -9,8 +9,8 @@
 // single bias term when config.bias is true. Amp captures are mono (1-in/1-out);
 // a multi-channel Linear is rejected rather than mis-rendered.
 //
-// This is clean-room: written from the model math and the .nam layout, not ported
-// from any implementation. The reference engine convolves via FFT/partitions for
+// Written from the model math and the .nam layout, not ported from any
+// implementation. A reference engine may convolve via FFT/partitions for
 // speed, but the result is exactly this direct FIR — so a direct implementation is
 // the faithful oracle, and small captures are the only ones seen in practice.
 

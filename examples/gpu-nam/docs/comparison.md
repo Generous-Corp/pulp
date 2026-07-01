@@ -32,7 +32,7 @@ path), which is how this demo keeps its editor under visual-regression cover.
 ## Audio — this is where "on GPU" is real
 
 The reference runs its WaveNet **entirely on the CPU** (NeuralAmpModelerCore is
-an Eigen/CPU implementation). GPU NAM runs a clean-room WaveNet with **two
+an Eigen/CPU implementation). GPU NAM runs an independent WaveNet with **two
 interchangeable engines**:
 
 - **CPU oracle** (default) — the exact NAM forward inline on the audio thread.
