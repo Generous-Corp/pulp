@@ -361,7 +361,7 @@ harness or `ctest`.
   agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
   (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
   (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
-  `inconclusive` / `invalid`). Four axes today, all global/alignment-free — a new axis is one
+  `inconclusive` / `invalid`). Five axes today, all global/alignment-free — a new axis is one
   `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
 
   | `--profile` | axis | measures | bad direction (`bad_sign`) |
@@ -370,6 +370,7 @@ harness or `ctest`.
   | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added fizz (+1) |
   | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher/noisier (−1) |
   | `graininess` | `graininess` | relative spectral-flux increase | grainier (+1) |
+  | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower/collapsed (−1) |
 
   `noise-roughness` (HNR, pitch range 40–1000 Hz so bass fundamentals count) and `graininess`
   (relative `mean_spectral_flux` increase) are meaningful on tonal/sustained material — a
@@ -377,8 +378,14 @@ harness or `ctest`.
   both per-signal scalars in the payload, NOT an automatic tonal/percussive classifier in the
   honesty path (which would just be a tunable threshold on the same statistic). Only mathematically
   degenerate inputs go `not_applicable` (a flux reference below an epsilon floor — the div-by-zero
-  edge). That takes compare to **4 of the lab's 7 detectors** reachable from the agent-facing
-  surface (up from 2).
+  edge). **`stereo-width`** is the one axis fed the ORIGINAL 2-channel signal (via
+  `audio_io.load_wav_multichannel`, the `_Axis.needs_stereo` flag, and the `_measure_stereo` path)
+  rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
+  level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
+  of phase (mono-incompatible) in the summary. That takes compare to **5 of the lab's 7 detectors**
+  reachable from the agent-facing surface (up from 2). `compare.MONO_PROFILES` /
+  `compare.STEREO_PROFILES` split which axes need 2-channel input — the regression net defaults to
+  the mono set so a mono comparison doesn't emit a spurious not_applicable stereo-width row.
 
   The `added-hf` axis measures the **ratio of the ≥8 kHz energy fraction** (`10·log10(frac_cand /
   frac_ref)`, default ±3 dB), NOT the absolute fraction *delta* — the absolute delta is
@@ -434,12 +441,14 @@ harness or `ctest`.
   license fence is disproportionate surface for the value; the pure-numpy residual carries the
   corroboration story license-free.
 
-  **Honesty disclosures (what compare admits it can't see).** compare mean-**downmixes** every
-  input to mono, so a stereo/spatial change (widener, panner, M/S) is invisible to it. When a
-  file was multichannel the report says so: `provenance.ref_channels`/`cand_channels`, a
-  `downmix` note on the measurement envelope, and a one-line summary clause — a stereo-widener
-  whose mid is unchanged reads `no_material_change` but the report never hides that imaging was
-  discarded (a real stereo-width axis is future work). The **`added-hf`** axis reports
+  **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
+  mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is
+  invisible. When a file was multichannel the report says so on the mono axes:
+  `provenance.ref_channels`/`cand_channels`, a `downmix` note on the measurement envelope, and a
+  one-line summary clause — a stereo-widener whose mid is unchanged reads `no_material_change` on
+  `tonal-balance` but the report never hides that imaging was discarded, and pointing the same pair
+  at `--profile stereo-width` catches the change directly (the downmix note is correctly suppressed
+  there, since that axis DID read the stereo image). The **`added-hf`** axis reports
   `not_applicable` (→ `inconclusive`) at low sample rates where the ≥8 kHz band collapses to a
   degenerate handful of LTAS bins (e.g. sr = 16 kHz is the single Nyquist bin) instead of a
   confident "no change" over nothing. A **DC offset** concentrates energy in LTAS bin 0 and drags

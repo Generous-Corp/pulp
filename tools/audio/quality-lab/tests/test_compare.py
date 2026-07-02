@@ -274,7 +274,10 @@ def test_added_hf_uses_its_own_default_threshold():
 
 
 def test_registry_exposes_all_profiles():
-    assert set(compare.PROFILES) == {"tonal-balance", "added-hf", "noise-roughness", "graininess"}
+    assert set(compare.PROFILES) == {"tonal-balance", "added-hf", "noise-roughness",
+                                     "graininess", "stereo-width"}
+    assert compare.STEREO_PROFILES == ("stereo-width",)
+    assert "stereo-width" not in compare.MONO_PROFILES
 
 
 def test_added_hf_cli_profile_smoke(tmp_path, capsys):

@@ -131,16 +131,21 @@ it worse?* — with `transient_sharpness` increasing flagged as **WORSE**.
 `compare before.wav after.wav` is the agent-facing **measure → compare → judge** surface: it
 level-matches the candidate to the reference, runs one curated **axis** (`--profile`), and emits a
 typed *evidence envelope* plus a defended, action-oriented verdict — so an agent tuning DSP can
-weigh in on a change with cited evidence rather than a bare pass/fail. Two axes today, both global
+weigh in on a change with cited evidence rather than a bare pass/fail. Five axes today, all global
 and alignment-free (a new axis is one `_AXES` registry entry in `compare.py`; the shared machinery
 does level-matching, applicability, materiality, and the intent-safe verdict):
 
 | `--profile` | axis | measures | bad direction |
 |-------------|------|----------|---------------|
 | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | duller |
-| `added-hf` | `added_hf` | high-frequency (≥8 kHz) energy fraction | added HF fizz |
+| `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added HF fizz |
+| `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher / noisier |
+| `graininess` | `graininess` | relative spectral-flux increase | grainier |
+| `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower / collapsed |
 
-Each axis carries its own materiality default; `--threshold` overrides.
+Each axis carries its own materiality default; `--threshold` overrides. `noise-roughness` and
+`graininess` are meaningful on tonal/sustained material; `stereo-width` reads the original 2-channel
+signal (mono input → `not_applicable`) and flags an out-of-phase candidate.
 
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).

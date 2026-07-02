@@ -32,6 +32,16 @@ def load_wav(path: str) -> tuple[np.ndarray, int]:
     return y, sr
 
 
+def load_wav_multichannel(path: str) -> tuple[np.ndarray, int, int]:
+    """Load a WAV PRESERVING channels: returns (y, sr, channels) where y is (N,) for mono or (N, C)
+    for multichannel. `compare`'s stereo-width axis needs the un-downmixed signal; every other
+    caller keeps using `load_wav` / `load_wav_info` (mono). Does not modify `load_wav`'s contract."""
+    y, sr = sf.read(path, always_2d=False)
+    y = np.asarray(y, dtype=np.float64)
+    channels = 1 if y.ndim == 1 else int(y.shape[1])
+    return y, int(sr), channels
+
+
 def save_wav(path: str, y: np.ndarray, sr: int) -> None:
     """Write a float32 WAV (no int16 quantization floor — what doctor/compare want)."""
     sf.write(path, np.asarray(y, dtype=np.float32), int(sr), subtype="FLOAT")

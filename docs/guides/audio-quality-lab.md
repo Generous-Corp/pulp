@@ -52,7 +52,7 @@ python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --
 `compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
 curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
 action-oriented verdict (`regression_suspected` / `material_change_detected` /
-`no_material_change_detected` / `inconclusive` / `invalid`). Four axes today, all global and
+`no_material_change_detected` / `inconclusive` / `invalid`). Five axes today, all global and
 alignment-free:
 
 | `--profile` | axis | measures | bad direction (regression vs a golden reference) |
@@ -61,10 +61,14 @@ alignment-free:
 | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | **added HF fizz** |
 | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | **rougher / noisier** |
 | `graininess` | `graininess` | relative spectral-flux increase | **grainier** |
+| `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | **narrower / collapsed** |
 
 `noise-roughness` and `graininess` are meaningful on tonal/sustained material — that is a
 caller-declared contract (you pick the profile), surfaced as a standing caveat in the summary
-rather than an automatic tonal/percussive classifier.
+rather than an automatic tonal/percussive classifier. `stereo-width` is the one axis that reads the
+**original 2-channel** signal (every other axis mean-downmixes to mono); mono input on either side
+is `not_applicable`, and a candidate whose interchannel correlation goes negative is flagged as out
+of phase (mono-incompatible) in the summary.
 
 Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
 registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,
@@ -124,7 +128,7 @@ identically, CPU or GPU):
 | Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
 | bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
 | bendr ratio changes / tempo-sampler **offsets** | ⚠ engine path, not this net | the candidate is time-misaligned; the null-residual flags the shift as a false alarm for "did the *tone* change?" — use the lab's reference-free engine path (or the deferred alignment axis) |
-| Stereo width / imaging | ❌ invisible today | `compare` downmixes to mono (it discloses this); needs the stereo axis |
+| Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build
