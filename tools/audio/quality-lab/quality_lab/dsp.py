@@ -156,6 +156,36 @@ def hf_fraction_delta(
     return hf_cand - hf_ref, hf_ref, hf_cand
 
 
+def hf_fraction_ratio_db(
+    reference: np.ndarray, candidate: np.ndarray, sr: int,
+    cutoff_hz: float = 8000.0, floor: float = 1e-6,
+) -> tuple[float, float, float]:
+    """Band-relative high-frequency change: ``10*log10(frac_cand / frac_ref)`` in dB, plus both
+    ≥``cutoff_hz`` energy *fractions*.
+
+    Each ``frac`` is the ≥cutoff share of the signal's OWN total LTAS energy
+    (:func:`hf_energy_fraction`), so the metric is a RATIO of fractions — invariant to a broadband
+    gain and to the compare level-match (both numerator and denominator scale together). That is
+    the fix for the absolute ≥8 kHz *fraction delta*, which is signal-dependent and effectively
+    blind on a bass-heavy source (a harsh amp render's HF fraction is ~1e-4, so even a clearly
+    harsh addition barely moves the absolute number). Positive dB = candidate is relatively
+    brighter/harsher; negative = relatively duller.
+
+    Both fractions are floor-clamped (default 1e-6, ~-60 dB, far below any real HF fraction) so a
+    zero-HF reference (fizz added to a dark source) or a zero-HF candidate (brickwall low-pass,
+    silent render) yields a large FINITE dB delta and a normal verdict — never ``-inf`` → an
+    `invalid` report that would break the "nonzero exit only when we could not measure" contract.
+    NOTE: a broadband gain cancels exactly, but an EQ move that redistributes energy across the
+    cutoff (e.g. a large LF shelf) still moves the fraction somewhat — far less than it moves the
+    absolute band energy through the level-match, but not to zero."""
+    f, m_ref = ltas(reference, sr)
+    _, m_cand = ltas(candidate, sr)
+    hf_ref = hf_energy_fraction(f, m_ref, cutoff_hz)
+    hf_cand = hf_energy_fraction(f, m_cand, cutoff_hz)
+    ratio_db = 10.0 * np.log10(max(hf_cand, floor) / max(hf_ref, floor))
+    return float(ratio_db), hf_ref, hf_cand
+
+
 def dc_offset_metrics(
     reference: np.ndarray, candidate: np.ndarray, present_frac: float = 0.01
 ) -> DcOffset:

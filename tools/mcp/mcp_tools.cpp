@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -1114,11 +1115,16 @@ std::string handle_audio_compare(const std::string& params_json) {
     }
     if (auto raw = extract_raw(params_json, "threshold"); !raw.empty() && raw != "null") {
         double t = extract_double(params_json, "threshold", -1.0);
-        if (!(t > 0.0 && t < 1.0))
-            return arg_error("Error: threshold must be in (0, 1)");
+        // Passthrough: the VALID range is per-axis and lives in the Python registry (a
+        // dimensionless fraction in (0,1) for tonal-balance, a dB magnitude for added-hf), which
+        // is the single source of truth and rejects an out-of-range value itself. Guarding only
+        // the universal invariant here — a threshold is a finite positive magnitude
+        // (abs(delta) >= threshold) — so a valid dB threshold like 3.0 is no longer rejected by a
+        // hardcoded (0,1) fraction bound that only fits one axis.
+        if (!(std::isfinite(t) && t > 0.0))
+            return arg_error("Error: threshold must be a finite positive number");
         // Shortest round-trippable form — std::to_string fixes 6 decimals and would
-        // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000",
-        // which the tool then rejects as outside (0,1)).
+        // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000").
         std::array<char, 32> buf{};
         auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), t);
         if (ec != std::errc())

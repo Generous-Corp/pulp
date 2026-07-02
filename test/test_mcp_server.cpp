@@ -808,10 +808,17 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out",
     require_contains(
         call(R"JSON({"reference":"a.wav","candidate":"b.wav","reference_role":"truth"})JSON"),
         "reference_role must be peer or golden");
-    // Threshold must be a fraction in (0, 1).
+    // Threshold is passed through to the Python registry (the per-axis source of truth: a
+    // fraction for tonal-balance, dB for added-hf); the MCP guards only the universal invariant
+    // that it is a finite positive magnitude. A negative threshold is rejected here...
     require_contains(
-        call(R"JSON({"reference":"a.wav","candidate":"b.wav","threshold":1.5})JSON"),
-        "threshold must be in (0, 1)");
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","threshold":-0.5})JSON"),
+        "threshold must be a finite positive number");
+    // ...but a dB-scale threshold (e.g. 3.0, valid for added-hf) is NO LONGER rejected by a
+    // hardcoded (0,1) fraction bound — it flows through to the delegated tool.
+    require_contains(
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"added-hf","threshold":3.0})JSON"),
+        R"JSON("jsonrpc":"2.0")JSON");
 }
 
 TEST_CASE("pulp_audio_compare forwards valid options through the delegated shell-out",

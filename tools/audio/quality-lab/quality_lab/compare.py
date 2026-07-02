@@ -32,7 +32,7 @@ from . import audio_io, schema
 from .dsp import (
     dc_offset_metrics,
     hf_band_bin_count,
-    hf_fraction_delta,
+    hf_fraction_ratio_db,
     null_residual_db,
     relative_centroid_shift,
 )
@@ -61,6 +61,10 @@ _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
 # hundreds of bins), keeping the guard honest without excluding a real working rate.
 _HF_CUTOFF_HZ = 8000.0
 _HF_MIN_BINS = 8
+# Floor for the band-relative HF fraction-ratio: a fraction at/below this (~-60 dB, far under any
+# real HF fraction) clamps so a zero-HF reference or candidate yields a large FINITE dB delta, not
+# -inf → an `invalid` report (which would violate "nonzero exit only when we could not measure").
+_HF_FRACTION_FLOOR = 1e-6
 
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
@@ -134,12 +138,12 @@ def _added_hf_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dic
         return {"applicable": False,
                 "reason": (f"high-frequency band too narrow at {sr} Hz: only {n_hf} LTAS "
                            f"bin(s) >= {_HF_CUTOFF_HZ:.0f} Hz (need >= {_HF_MIN_BINS})")}
-    delta, hf_ref, hf_cand = hf_fraction_delta(reference, matched, sr, _HF_CUTOFF_HZ)
-    direction = "added HF" if delta > 0 else "reduced HF"
-    return {"applicable": True, "delta": delta, "unit": "hf_energy_frac_delta",
-            "tolerance_class": "hf_fizz.v1",
-            "payload": {"kind": "scalar", "ref_hf_frac": round(hf_ref, 4),
-                        "cand_hf_frac": round(hf_cand, 4), "hf_frac_delta": round(delta, 4),
+    ratio_db, hf_ref, hf_cand = hf_fraction_ratio_db(reference, matched, sr, _HF_CUTOFF_HZ, _HF_FRACTION_FLOOR)
+    direction = "added HF" if ratio_db > 0 else "reduced HF"
+    return {"applicable": True, "delta": ratio_db, "unit": "hf_fraction_ratio_db",
+            "tolerance_class": "hf_fizz.v2",
+            "payload": {"kind": "scalar", "ref_hf_frac": round(hf_ref, 6),
+                        "cand_hf_frac": round(hf_cand, 6), "hf_ratio_db": round(ratio_db, 2),
                         "direction": direction}}
 
 
@@ -148,13 +152,13 @@ def _added_hf_summary(verdict: str, env: dict[str, Any]) -> str:
     if head:
         return head
     p = env["payload"]
-    frac = (f"HF(>=8kHz) fraction {p['ref_hf_frac']:.3f}->{p['cand_hf_frac']:.3f} "
-            f"(delta {p['hf_frac_delta']:+.3f})")
+    band = (f"HF(>=8kHz) fraction {p['ref_hf_frac']:.4g}->{p['cand_hf_frac']:.4g} "
+            f"(band-relative {p['hf_ratio_db']:+.1f} dB)")
     if verdict == VERDICT_NO_CHANGE:
-        return f"No material high-frequency change ({frac})."
+        return f"No material high-frequency balance change ({band})."
     if verdict == VERDICT_REGRESSION:
-        return f"Regression suspected: candidate added metallic high-frequency fizz vs the golden reference ({frac})."
-    return f"Material high-frequency change: candidate {p['direction']} ({frac})."
+        return f"Regression suspected: candidate added metallic high-frequency fizz vs the golden reference ({band})."
+    return f"Material high-frequency balance change: candidate {p['direction']} ({band})."
 
 
 _TONAL_BALANCE = _Axis(
@@ -163,7 +167,8 @@ _TONAL_BALANCE = _Axis(
 )
 _ADDED_HF = _Axis(
     profile="added-hf", axis="added_hf", tool="quality-lab:hf_fizz",
-    default_threshold=0.02, bad_sign=+1, kernel=_added_hf_kernel, summarize=_added_hf_summary,
+    default_threshold=3.0, bad_sign=+1, kernel=_added_hf_kernel, summarize=_added_hf_summary,
+    threshold_range=(0.0, 60.0),  # dB magnitude — its own unit, so the shared guard travels with it
 )
 _AXES: dict[str, _Axis] = {a.profile: a for a in (_TONAL_BALANCE, _ADDED_HF)}
 
@@ -451,6 +456,16 @@ def compare_files(
         "profile": profile,
     }
     return report
+
+
+def invalid_report(
+    profile: str, reference_role: str, reason: str, *, provenance: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Public builder for a caller-contract `invalid` report (e.g. an out-of-range `--threshold`
+    caught at a CLI/MCP surface). Emitting a structured report — instead of letting the ValueError
+    escape as a traceback — lets a delegating caller (the MCP tool, which reads the report JSON)
+    see a clean `invalid` verdict rather than misread an empty file as 'tool not installed'."""
+    return _invalid_report(profile, reference_role, reason, provenance=provenance)
 
 
 def _invalid_report(

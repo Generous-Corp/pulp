@@ -17,6 +17,33 @@ def _drum(seed: int = 0):
     return y, 48000
 
 
+def _hf_atten(y, sr, atten_db=-26.0, corner_hz=2000.0):
+    """Attenuate energy >= corner_hz by atten_db via a spectral shelf — turns the bright drum
+    into a bass-heavy 'amp analog' source with a small (nonzero) >=8 kHz fraction, where the
+    band-relative HF metric earns its keep (the absolute fraction is near-blind on such a source)."""
+    Y = np.fft.rfft(y); f = np.fft.rfftfreq(len(y), 1.0 / sr)
+    return np.fft.irfft(Y * np.where(f >= corner_hz, 10 ** (atten_db / 20.0), 1.0), n=len(y))
+
+
+def _lf_shelf(y, sr, boost_db, corner_hz=500.0):
+    """Boost energy below corner_hz by boost_db — a broadband EQ move OUTSIDE the HF band."""
+    Y = np.fft.rfft(y); f = np.fft.rfftfreq(len(y), 1.0 / sr)
+    return np.fft.irfft(Y * np.where(f < corner_hz, 10 ** (boost_db / 20.0), 1.0), n=len(y))
+
+
+def _brickwall_lpf(y, sr, cutoff_hz):
+    """Hard low-pass — a candidate LPF'd below the 8 kHz cutoff has ~zero HF fraction."""
+    Y = np.fft.rfft(y); f = np.fft.rfftfreq(len(y), 1.0 / sr)
+    Y[f >= cutoff_hz] = 0.0
+    return np.fft.irfft(Y, n=len(y))
+
+
+def _bass_heavy(seed: int = 0):
+    """A bass-heavy render (small nonzero >=8 kHz fraction) — the added-hf axis's real target."""
+    y, sr = _drum(seed)
+    return _hf_atten(y, sr), sr
+
+
 def test_dulling_is_regression_when_reference_is_golden():
     ref, sr = _drum()
     cand = generate.dull(ref, sr)  # whole-signal low-pass → duller
@@ -200,20 +227,21 @@ def test_threshold_boundary_is_material_at_exactly_threshold():
 # ── added-hf axis (the second registry entry — proves the profile registry generalizes) ──
 
 def test_added_hf_fizz_is_regression_when_golden():
-    ref, sr = _drum()
-    cand = generate.add_fizz(ref, sr, amount=0.5)  # metallic high-frequency sizzle
+    ref, sr = _bass_heavy()                          # bass-heavy amp analog: HF fraction ~0.004
+    cand = generate.add_fizz(ref, sr, amount=0.3)    # metallic high-frequency sizzle (~+15 dB band-rel)
     report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="golden")
     assert report["verdict"] == compare.VERDICT_REGRESSION
     m = report["measurements"][0]
     assert m["axis"] == "added_hf"
     assert m["payload"]["direction"] == "added HF"
-    assert m["materiality"]["delta"] > 0
+    assert m["materiality"]["delta"] > 0             # band-relative dB, positive = brighter/harsher
+    assert m["materiality"]["unit"] == "hf_fraction_ratio_db"
     assert "fizz" in report["summary"]
 
 
 def test_added_hf_fizz_is_only_material_change_for_a_peer_reference():
-    ref, sr = _drum()
-    cand = generate.add_fizz(ref, sr, amount=0.5)
+    ref, sr = _bass_heavy()
+    cand = generate.add_fizz(ref, sr, amount=0.3)
     report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="peer")
     assert report["verdict"] == compare.VERDICT_MATERIAL
 
@@ -235,11 +263,14 @@ def test_added_hf_identity_is_no_material_change():
 
 
 def test_added_hf_uses_its_own_default_threshold():
-    """Each axis carries its own default; added-hf's is tighter than tonal-balance's."""
-    ref, sr = _drum()
-    cand = generate.add_fizz(ref, sr, amount=0.5)
+    """Each axis carries its own default in its own unit; added-hf's is a dB magnitude."""
+    ref, sr = _bass_heavy()
+    cand = generate.add_fizz(ref, sr, amount=0.3)
     report = compare.compare_arrays(ref, cand, sr, profile="added-hf")
-    assert report["measurements"][0]["materiality"]["threshold"] == 0.02
+    m = report["measurements"][0]["materiality"]
+    assert m["threshold"] == 3.0
+    assert m["unit"] == "hf_fraction_ratio_db"
+    assert m["tolerance_class"] == "hf_fizz.v2"
 
 
 def test_registry_exposes_both_profiles():
@@ -248,8 +279,8 @@ def test_registry_exposes_both_profiles():
 
 def test_added_hf_cli_profile_smoke(tmp_path, capsys):
     from quality_lab import cli
-    ref, sr = _drum()
-    cand = generate.add_fizz(ref, sr, amount=0.5)
+    ref, sr = _bass_heavy()
+    cand = generate.add_fizz(ref, sr, amount=0.3)
     ref_p, cand_p = str(tmp_path / "r.wav"), str(tmp_path / "c.wav")
     audio_io.save_wav(ref_p, ref, sr)
     audio_io.save_wav(cand_p, cand, sr)
@@ -257,6 +288,56 @@ def test_added_hf_cli_profile_smoke(tmp_path, capsys):
                    "--reference-role", "golden"])
     assert rc == 0
     assert "regression_suspected" in capsys.readouterr().out
+
+
+def test_added_hf_is_broadband_gain_invariant():
+    """The band-relative fraction-RATIO is invariant to a broadband gain / the level-match — a
+    candidate that is just the reference scaled reads no material change (the whole reason the
+    metric replaced the absolute ≥8 kHz fraction delta, which the level-match dragged around)."""
+    ref, sr = _bass_heavy()
+    report = compare.compare_arrays(ref, ref * 2.0, sr, profile="added-hf", reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_NO_CHANGE
+    assert abs(report["measurements"][0]["materiality"]["delta"]) < 3.0
+
+
+def test_added_hf_moderate_lf_shelf_is_not_material():
+    """An EQ move OUTSIDE the HF band (a moderate +3 dB LF shelf) must not read as an HF change —
+    the fraction ratio removes the broadband-gain component the absolute metric would mistake for
+    'reduced HF'. (Large shelves still leave residual sensitivity, documented in the dsp metric.)"""
+    ref, sr = _bass_heavy()
+    cand = _lf_shelf(ref, sr, boost_db=2.0)           # ~-1.9 dB band-relative, comfortably < 3 dB
+    report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_NO_CHANGE
+    assert abs(report["measurements"][0]["materiality"]["delta"]) < 3.0
+
+
+def test_added_hf_zero_hf_reference_is_finite_material_not_invalid():
+    """Fizz added to a dark (zero-HF) source: the reference HF fraction is at the floor, so a naive
+    ratio would be +inf → invalid → exit 2. Floor-clamping both sides yields a large FINITE dB
+    delta and a normal 'added HF' verdict — never invalid."""
+    sr = 48000
+    t = np.arange(sr) / sr
+    dark = 0.3 * np.sin(2 * np.pi * 200.0 * t)       # a low tone: ~no >=8 kHz energy
+    cand = generate.add_fizz(dark, sr, amount=0.5)
+    report = compare.compare_arrays(dark, cand, sr, profile="added-hf", reference_role="golden")
+    m = report["measurements"][0]
+    assert m["status"] == compare.STATUS_MEASURED
+    assert np.isfinite(m["materiality"]["delta"]) and m["materiality"]["delta"] > 0
+    assert report["verdict"] == compare.VERDICT_REGRESSION
+
+
+def test_added_hf_zero_hf_candidate_is_finite_material_not_invalid():
+    """A brickwall low-pass leaves the candidate with ~zero HF: the candidate fraction is at the
+    floor, so a naive ratio would be -inf → invalid → exit 2. Floor-clamping yields a large FINITE
+    negative dB delta and a normal 'reduced HF' verdict."""
+    ref, sr = _drum()                                # bright source (HF fraction ~0.58)
+    cand = _brickwall_lpf(ref, sr, cutoff_hz=4000.0)  # removes all >=8 kHz energy
+    report = compare.compare_arrays(ref, cand, sr, profile="added-hf", reference_role="golden")
+    m = report["measurements"][0]
+    assert m["status"] == compare.STATUS_MEASURED
+    assert np.isfinite(m["materiality"]["delta"]) and m["materiality"]["delta"] < 0
+    assert m["payload"]["direction"] == "reduced HF"
+    assert report["verdict"] == compare.VERDICT_MATERIAL   # HF loss is material but not a regression
 
 
 def test_verdict_keys_off_exceeds_not_rounded_delta():
@@ -409,6 +490,29 @@ def test_dc_offset_does_not_move_the_verdict():
     axis = compare._AXES["tonal-balance"]
     recomputed = compare._verdict(axis, report["measurements"][0], "golden")
     assert report["verdict"] == recomputed
+
+
+def test_cli_out_of_range_threshold_is_clean_invalid_not_traceback(tmp_path, capsys):
+    """An out-of-range --threshold must produce a clean `invalid` report + exit 2, NOT an uncaught
+    ValueError traceback — otherwise the MCP's empty-report heuristic misreads it as 'tool absent'.
+    (added-hf's dB range is (0, 60), so 999 is out of range.)"""
+    from quality_lab import cli
+    ref, sr = _drum()
+    ref_p, cand_p = str(tmp_path / "r.wav"), str(tmp_path / "c.wav")
+    out_p = str(tmp_path / "report.json")
+    audio_io.save_wav(ref_p, ref, sr)
+    audio_io.save_wav(cand_p, ref, sr)
+    rc = cli.main(["compare", ref_p, cand_p, "--profile", "added-hf",
+                   "--threshold", "999", "--json", out_p])
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "invalid" in out
+    import json, os
+    assert os.path.exists(out_p)
+    with open(out_p) as fh:
+        report = json.load(fh)
+    assert report["verdict"] == compare.VERDICT_INVALID
+    assert "must be in" in report["summary"]           # the range message is surfaced, not swallowed
 
 
 def test_cli_compare_smoke(tmp_path, capsys):
