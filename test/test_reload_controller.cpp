@@ -225,6 +225,48 @@ TEST_CASE("reap_stale_staged removes dead-pid litter, keeps live + unrelated",
     fs::remove_all(dir, ec);
 }
 
+// Content-hash gate (item 1.10): an mtime bump with identical bytes (a touch or
+// a byte-identical rebuild) or an empty/unreadable file must NOT trigger a
+// reload; only genuinely new bytes do.
+TEST_CASE("ReloadController content-hash gate skips identical + empty rewrites",
+          "[reload][controller][gate]") {
+    const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_reload_hashgate.dylib";
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/0);
+
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+    ProcessorHotSwapSlot slot(std::move(initial));
+    ReloadSession session(slot, live, current_build_fingerprint(), format::PrepareContext{});
+    ReloadController controller(session, watched);
+
+    REQUIRE_FALSE(controller.poll().has_value());     // baseline (records hash)
+    REQUIRE(controller.reload_attempts() == 0);
+
+    // Re-install BYTE-IDENTICAL content with a fresh mtime (a `touch` / identical
+    // rebuild). mtime changed but the hash matches → no reload.
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/1);
+    REQUIRE_FALSE(controller.poll().has_value());
+    REQUIRE(controller.reload_attempts() == 0);        // gate suppressed the redundant reload
+
+    // An empty file with a fresh mtime (a rebuild caught mid-write) → skip.
+    { std::ofstream(watched, std::ios::binary | std::ios::trunc); }
+    fs::last_write_time(watched, fs::file_time_type{} + std::chrono::seconds(1002));
+    REQUIRE_FALSE(controller.poll().has_value());
+    REQUIRE(controller.reload_attempts() == 0);
+
+    // Genuinely different bytes with a fresh mtime → acts (rejected at the
+    // contract gate here, but the point is the controller ATTEMPTED it).
+    install(RELOAD_LOGIC_INCOMPATIBLE, watched, /*tick=*/3);
+    auto changed = controller.poll();
+    REQUIRE(changed.has_value());
+    REQUIRE(controller.reload_attempts() == 1);        // new content → reload attempted
+
+    std::error_code ec; fs::remove(watched, ec);
+}
+
 TEST_CASE("ReloadController.reload_now forces a reload regardless of mtime",
           "[reload][controller]") {
     const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_reload_watched_force.dylib";

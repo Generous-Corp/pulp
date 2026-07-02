@@ -40,9 +40,12 @@
 
 #include <pulp/format/reload/reload_transaction.hpp>
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -124,11 +127,25 @@ public:
         if (!mtime) return std::nullopt;          // missing / unreadable — nothing to do
         if (!baseline_set_) {                     // first sight: record, don't reload
             last_mtime_ = *mtime;
+            if (const auto h = hash_file(path_)) { last_hash_ = *h; hash_valid_ = true; }
             baseline_set_ = true;
             return std::nullopt;
         }
-        if (*mtime == last_mtime_) return std::nullopt;  // unchanged
-        last_mtime_ = *mtime;                     // act once per distinct version
+        if (*mtime == last_mtime_) return std::nullopt;  // unchanged mtime
+        last_mtime_ = *mtime;                     // act once per distinct mtime
+
+        // Content-hash gate (item 1.10): an mtime bump does not prove the BYTES
+        // changed. Distinguish the three non-reload cases from a real edit:
+        //   - empty / unreadable right now (a rebuild mid-write) → skip; the next
+        //     completed write (new mtime) is retried.
+        //   - identical content (a `touch`, or a rebuild that produced byte-
+        //     identical output) → skip; no redundant stage + dlopen + gate churn.
+        //   - genuinely new bytes → record the hash and reload.
+        const auto hash = hash_file(path_);
+        if (!hash) return std::nullopt;           // empty / unreadable → not a real version yet
+        if (hash_valid_ && *hash == last_hash_) return std::nullopt;  // unchanged content
+        last_hash_ = *hash;
+        hash_valid_ = true;
         return stage_and_reload();
     }
 
@@ -138,6 +155,10 @@ public:
         if (const auto mtime = current_mtime()) {
             last_mtime_ = *mtime;
             baseline_set_ = true;
+        }
+        if (const auto hash = hash_file(path_)) {   // resync the content baseline too
+            last_hash_ = *hash;
+            hash_valid_ = true;
         }
         return stage_and_reload();
     }
@@ -151,6 +172,30 @@ private:
         const auto t = std::filesystem::last_write_time(path_, ec);
         if (ec) return std::nullopt;
         return t;
+    }
+
+    // FNV-1a 64-bit over the watched file's bytes — a content fingerprint for
+    // change detection only (not security; the fail-closed ABI/fingerprint/
+    // contract gates are the trust boundary). Returns nullopt for an unreadable
+    // OR empty file (an empty logic image is never a real version — usually a
+    // rebuild mid-write), so the caller skips rather than acting on it.
+    static std::optional<std::uint64_t> hash_file(const std::filesystem::path& p) {
+        std::ifstream f(p, std::ios::binary);
+        if (!f) return std::nullopt;
+        std::uint64_t h = 1469598103934665603ULL;   // FNV offset basis
+        std::array<char, 64 * 1024> buf{};
+        std::size_t total = 0;
+        while (f) {
+            f.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+            const std::streamsize got = f.gcount();
+            for (std::streamsize i = 0; i < got; ++i) {
+                h ^= static_cast<unsigned char>(buf[static_cast<std::size_t>(i)]);
+                h *= 1099511628211ULL;                // FNV prime
+            }
+            total += static_cast<std::size_t>(got);
+        }
+        if (f.bad() || total == 0) return std::nullopt;  // unreadable or empty
+        return h;
     }
 
     // Copy the watched file to a fresh, uniquely-named path and reload THAT, so
@@ -207,6 +252,8 @@ private:
     std::filesystem::path stage_dir_;
     std::filesystem::file_time_type last_mtime_{};
     std::filesystem::path last_staged_;  // this instance's prior staged copy (reaped on next stage)
+    std::uint64_t last_hash_ = 0;        // content hash last acted on (item 1.10)
+    bool hash_valid_ = false;            // last_hash_ has been established
     bool baseline_set_ = false;
     std::uint64_t attempts_ = 0;
 };
