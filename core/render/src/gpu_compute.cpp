@@ -1738,7 +1738,8 @@ public:
 
     bool prepare_wavenet(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
                      const float* weights, uint32_t weights_len,
-                     uint32_t block_size, float head_scale) override {
+                     uint32_t block_size, float head_scale,
+                     uint32_t instance) override {
         if (!initialized_ || !arrays || !weights) return false;
         const uint32_t B = block_size;
         if (num_arrays == 0 || B == 0) return false;
@@ -1899,14 +1900,14 @@ public:
         plan.hist_temp = create_storage_buffer(hist_bytes, act_usage);
         if (!plan.hist_temp) return false;
 
-        wavenet_plans_.insert_or_assign(B, std::move(plan));
+        wavenet_plans_.insert_or_assign(wavenet_plan_key(B, instance), std::move(plan));
         return true;
     }
 
     bool wavenet_forward(const float* in_block, float* out_block,
-                     uint32_t block_size) override {
+                     uint32_t block_size, uint32_t instance) override {
         if (!initialized_ || !in_block || !out_block) return false;
-        auto it = wavenet_plans_.find(block_size);
+        auto it = wavenet_plans_.find(wavenet_plan_key(block_size, instance));
         if (it == wavenet_plans_.end()) return false;
         WavenetPlan& plan = it->second;
         const uint32_t B = plan.B;
@@ -2662,7 +2663,13 @@ private:
         wgpu::BindGroup scale_bg;
         std::vector<WavenetArray> arrays;
     };
-    std::unordered_map<uint32_t, WavenetPlan> wavenet_plans_;
+    // Keyed by (block_size, instance) so multiple independent WaveNet streams
+    // (e.g. stereo channels) coexist on one device — each with its own buffers and
+    // dilation history, sharing the device/queue/pipelines. Instance defaults to 0.
+    static uint64_t wavenet_plan_key(uint32_t block_size, uint32_t instance) {
+        return (static_cast<uint64_t>(block_size) << 32) | instance;
+    }
+    std::unordered_map<uint64_t, WavenetPlan> wavenet_plans_;
 
     // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
     // the render path is non-RT so a resize here is fine).

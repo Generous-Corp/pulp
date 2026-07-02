@@ -833,6 +833,52 @@ TEST_CASE("GpuCompute wavenet_forward chains two arrays through the head seed",
     }
 }
 
+TEST_CASE("GpuCompute wavenet_forward keeps two instances independent on one device",
+          "[render][gpu][compute]") {
+    // Two WaveNet streams (e.g. stereo channels) prepared on ONE device with the
+    // SAME block_size but different weights must not collide: each instance keeps
+    // its own device buffers and produces its own reference. Before the plans were
+    // keyed by (block_size, instance) the second prepare clobbered the shared plan,
+    // so instance 0 would have run instance 1's weights — this pins the isolation
+    // that lets a stereo plugin share one device instead of one per channel.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+
+    // Distinct weights per instance so a collision would be caught by value.
+    const float head_scale0 = 0.8f, head_scale1 = 0.6f;
+    std::vector<float> w0 = {0.7f, 1.3f, -0.2f, 0.5f, 0.9f, 0.1f, 1.1f, head_scale0};
+    std::vector<float> w1 = {0.4f, 0.9f,  0.3f, 1.2f, 0.6f, 0.2f, 0.7f, head_scale1};
+
+    const uint32_t B = 16;
+    // Prepare BOTH instances before forwarding EITHER — the ordering under which a
+    // shared-plan bug would let instance 1's prepare overwrite instance 0.
+    REQUIRE(compute->prepare_wavenet(&spec, 1, w0.data(),
+                                     static_cast<uint32_t>(w0.size()), B, head_scale0, 0));
+    REQUIRE(compute->prepare_wavenet(&spec, 1, w1.data(),
+                                     static_cast<uint32_t>(w1.size()), B, head_scale1, 1));
+
+    std::vector<float> in0(B), in1(B), out0(B, 0.0f), out1(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) {
+        in0[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+        in1[i] = 0.25f * std::cos(0.17f * i) + 0.05f;
+    }
+    REQUIRE(compute->wavenet_forward(in0.data(), out0.data(), B, 0));
+    REQUIRE(compute->wavenet_forward(in1.data(), out1.data(), B, 1));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float e0 = wavenet_ref_1x1(in0[i], w0[0], w0[1], w0[2], w0[3], w0[6], head_scale0);
+        const float e1 = wavenet_ref_1x1(in1[i], w1[0], w1[1], w1[2], w1[3], w1[6], head_scale1);
+        REQUIRE(std::abs(out0[i] - e0) < 1e-5f);
+        REQUIRE(std::abs(out1[i] - e1) < 1e-5f);
+    }
+}
+
 TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();

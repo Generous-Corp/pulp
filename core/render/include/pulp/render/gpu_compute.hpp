@@ -336,18 +336,27 @@ public:
     /// invalid args (channels > 64, condition_size != 1, an array-chaining shape
     /// mismatch, a weight-count mismatch) or GPU failure. Call once before
     /// wavenet_forward(block_size).
+    ///
+    /// `instance` selects an independent plan slot on THIS device: two instances
+    /// (e.g. stereo channels) prepared with the same `block_size` get separate
+    /// device-resident buffers + dilation history but share the device, queue, and
+    /// compiled pipelines — so a stereo plugin needs one device, not one per
+    /// channel. Instances are identified by `(block_size, instance)`; the default 0
+    /// preserves the single-stream behaviour.
     virtual bool prepare_wavenet(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
                                  const float* weights, uint32_t weights_len,
-                                 uint32_t block_size, float head_scale) = 0;
+                                 uint32_t block_size, float head_scale,
+                                 uint32_t instance = 0) = 0;
 
     /// Run the fused WaveNet forward for one mono block (`block_size` in/out): the
     /// per-array rechannel, dilated conv layers (+ condition mixin, activation,
     /// residual, head accumulate), head rechannels, and the final head_scale, all
     /// in one submit. Carries each layer's dilation history across calls so
     /// streaming blocks match the CPU reference run sample-continuously. Returns
-    /// false if prepare_wavenet was not called for `block_size`.
+    /// false if prepare_wavenet was not called for `(block_size, instance)`.
+    /// `instance` selects the plan slot prepared above (default 0).
     virtual bool wavenet_forward(const float* in_block, float* out_block,
-                                 uint32_t block_size) = 0;
+                                 uint32_t block_size, uint32_t instance = 0) = 0;
 
     // ── Capabilities ─────────────────────────────────────────────────────
 
