@@ -20,6 +20,8 @@ public:
         float range_db = -80.0f;       // Max attenuation
     };
 
+    NoiseGate() { recompute_coeffs(); }  // coeffs match the default params up front
+
     void set_params(const Params& p) {
         params_.threshold_db =
             std::isfinite(p.threshold_db) ? p.threshold_db : -40.0f;
@@ -30,10 +32,12 @@ public:
             std::isfinite(p.release_ms) ? std::max(0.0f, p.release_ms) : 0.0f;
         params_.range_db =
             std::isfinite(p.range_db) ? std::min(0.0f, p.range_db) : -80.0f;
+        recompute_coeffs();
     }
 
     void set_sample_rate(float sr) {
         sample_rate_ = (std::isfinite(sr) && sr > 0.0f) ? sr : 44100.0f;
+        recompute_coeffs();
     }
 
     float process(float input) {
@@ -49,15 +53,10 @@ public:
             gain_db = std::max(gain_db, params_.range_db);
         }
 
-        // Envelope follower
-        float attack_coeff = params_.attack_ms > 0.0f
-            ? 1.0f - std::exp(-1.0f / (params_.attack_ms * 0.001f * sample_rate_))
-            : 1.0f;
-        float release_coeff = params_.release_ms > 0.0f
-            ? 1.0f - std::exp(-1.0f / (params_.release_ms * 0.001f * sample_rate_))
-            : 1.0f;
-
-        float coeff = (gain_db < envelope_db_) ? attack_coeff : release_coeff;
+        // Envelope follower — coefficients depend only on the attack/release times
+        // and the sample rate, so they are cached in the setters (bit-identical to
+        // recomputing the two exp() per sample, minus the per-sample transcendentals).
+        float coeff = (gain_db < envelope_db_) ? attack_coeff_ : release_coeff_;
         envelope_db_ += coeff * (gain_db - envelope_db_);
 
         // Clamp to prevent overflow
@@ -78,9 +77,23 @@ public:
     void reset() { envelope_db_ = 0.0f; }
 
 private:
+    // Envelope attack/release one-pole coefficients, recomputed only when the
+    // params or sample rate change (never per sample). Expression is identical to
+    // the former inline computation, so results are bit-for-bit unchanged.
+    void recompute_coeffs() {
+        attack_coeff_ = params_.attack_ms > 0.0f
+            ? 1.0f - std::exp(-1.0f / (params_.attack_ms * 0.001f * sample_rate_))
+            : 1.0f;
+        release_coeff_ = params_.release_ms > 0.0f
+            ? 1.0f - std::exp(-1.0f / (params_.release_ms * 0.001f * sample_rate_))
+            : 1.0f;
+    }
+
     Params params_;
     float sample_rate_ = 44100.0f;
     float envelope_db_ = 0.0f;
+    float attack_coeff_ = 1.0f;
+    float release_coeff_ = 1.0f;
 };
 
 } // namespace pulp::signal
