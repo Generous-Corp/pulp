@@ -2528,3 +2528,38 @@ TEST_CASE("read_impulse_response returns nullopt for a missing file") {
         "/nonexistent/pulp/ir/does_not_exist.wav", 48000.0);
     REQUIRE_FALSE(ir.has_value());
 }
+
+TEST_CASE("read_impulse_response rejects a hostile sample-rate header") {
+    // A header claiming an absurd rate would make the Kaiser resampler demand ~10⁹
+    // taps (a multi-GB allocation) and would also shorten the computed duration so
+    // it slips past the length preflight. It must be rejected, not resampled.
+    std::vector<float> s(256, 0.0f);
+    s[0] = 1.0f;
+    const auto path = write_temp_ir("pulp_ir_evilrate.wav", s, 900000000u);  // 900 MHz
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0);
+    std::filesystem::remove(path);
+    REQUIRE_FALSE(ir.has_value());
+}
+
+TEST_CASE("read_impulse_response rejects an over-length file") {
+    // 4 s at 48 kHz with the reject threshold set to 1 s → rejected before it can
+    // pull a huge file fully into memory / FFT.
+    std::vector<float> s(48000 * 4, 0.1f);
+    const auto path = write_temp_ir("pulp_ir_toolong.wav", s, 48000);
+    pulp::audio::ImpulseResponseLoadOptions opts;
+    opts.reject_longer_than_seconds = 1.0;
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0, opts);
+    std::filesystem::remove(path);
+    REQUIRE_FALSE(ir.has_value());
+}
+
+TEST_CASE("read_impulse_response still accepts a high-resolution 96 kHz IR") {
+    // The rejection window's ceiling must not turn away legitimate hi-res files.
+    std::vector<float> s(512, 0.0f);
+    for (std::size_t i = 0; i < s.size(); ++i) s[i] = std::sin(0.03f * static_cast<float>(i));
+    const auto path = write_temp_ir("pulp_ir_96k.wav", s, 96000);
+    const auto ir = pulp::audio::read_impulse_response(path, 48000.0);
+    std::filesystem::remove(path);
+    REQUIRE(ir.has_value());
+    for (float v : *ir) REQUIRE(std::isfinite(v));
+}
