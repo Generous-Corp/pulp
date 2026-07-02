@@ -377,6 +377,28 @@ harness or `ctest`.
   (`--threshold` overrides). Report shape (`quality_lab.compare.v1`) is owned by `schema.py`;
   every envelope carries `status`/`applicable`/`materiality`/`provenance`. Use this when an agent
   must weigh in on a DSP change with cited evidence rather than a bare pass/fail.
+- **Shipped surfaces (same measurement, three entry points):** the Python `quality-lab compare`
+  is the dev-loop surface; **`pulp audio compare <ref> <cand> [--profile …] [--reference-role …]
+  [--json …]`** is the shipped CLI verb (thin delegator — `tools/cli/cmd_audio_compare.cpp` locates
+  the opt-in managed tool and forwards, so no DSP links into the CLI); **`pulp_audio_compare`** is
+  the MCP tool mirroring it (returns the report JSON). All three run the identical axis logic. The
+  `/audio-compare` slash command wraps the CLI. Install the tool once: `pulp tool install
+  audio-quality-lab`.
+- **Live plugin before/after (measure a real plugin, then judge the change).** `compare` needs two
+  WAVs; capture them from a live/hosted plugin with the existing steady-state tap, then judge:
+  ```bash
+  # capture the KNOWN-GOOD baseline (announce audio + cap duration per the local-dev etiquette)
+  pulp run --plugin before.clap --audio-capture-rolling before.wav --headless   # tear down promptly
+  # …apply the DSP change, rebuild…
+  pulp run --plugin after.clap  --audio-capture-rolling after.wav  --headless
+  pulp audio compare before.wav after.wav --reference-role golden               # base = golden
+  ```
+  Use `--audio-capture-rolling` (last-N steady-state window — the region `compare` wants), NOT
+  `--audio-capture-wav` (earliest int16 window). `--audio-capture-rolling` opens the live audio
+  device: announce before launching, cap the wall-clock, and tear down (see the local-dev audio
+  etiquette in CLAUDE.md). For a fully offline capture of an explicit bundle, `pulp audio render
+  --plugin <bundle> --out cand.wav …` writes a WAV without a live device — feed that to `compare`
+  the same way. This is the "measure a plugin with the scope/inspector and compare findings" path.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.
 

@@ -626,6 +626,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_probe_json")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_scope")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     require_contains(tools, R"JSON("name":"pulp_inspect_audio")JSON");
     require_contains(tools, R"JSON("name":"pulp_kit")JSON");
@@ -667,6 +668,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
     // The full set of tools advertised today (18 names). Keep this list
     // sorted alphabetically so additions are obvious in a diff.
     const auto expected = {
+        "pulp_audio_compare",
         "pulp_audio_excerpt_find",
         "pulp_audio_model_activate",
         "pulp_audio_model_list",
@@ -743,6 +745,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_audio_excerpt_find", "Error: text and input_path are required"},
         std::pair{"pulp_audio_read_bundle", "Error: bundle_path is required"},
         std::pair{"pulp_audio_render", "Error: plugin is required"},
+        std::pair{"pulp_audio_compare", "Error: reference and candidate are required"},
         std::pair{"pulp_create", "Error: name is required"},
         std::pair{"pulp_docs_search", "Error: query is required"},
         std::pair{"pulp_content", "Error: subcommand is required"},
@@ -784,12 +787,78 @@ TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools
     require_contains(response, R"JSON("content")JSON");
 }
 
+TEST_CASE("pulp_audio_compare validates its arguments before shelling out",
+          "[mcp][tools][audio]") {
+    // Each invocation drives one guard branch in handle_audio_compare so the
+    // typed validation fails fast (with an actionable message) instead of
+    // spawning the delegated command on bad input.
+    ScopedCurrentPath cwd(repo_root());
+    int id = 70;
+    auto call = [&](const char* args) {
+        return handle_request(tool_call(std::to_string(id++), "pulp_audio_compare", args));
+    };
+
+    // Option-looking paths (leading '-') are rejected, not forwarded as flags.
+    require_contains(call(R"JSON({"reference":"-x.wav","candidate":"b.wav"})JSON"),
+                     "must be WAV paths, not options");
+    // Unknown profile / reference_role are rejected with the allowed set.
+    require_contains(
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"loudness"})JSON"),
+        "profile must be tonal-balance or added-hf");
+    require_contains(
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","reference_role":"truth"})JSON"),
+        "reference_role must be peer or golden");
+    // Threshold must be a fraction in (0, 1).
+    require_contains(
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","threshold":1.5})JSON"),
+        "threshold must be in (0, 1)");
+}
+
+TEST_CASE("pulp_audio_compare forwards valid options through the delegated shell-out",
+          "[mcp][tools][audio]") {
+    // Valid profile + reference_role + a tiny threshold flow past every guard and
+    // into the shell-out tail (the threshold is serialized via std::to_chars, so a
+    // small value is preserved rather than floored to fixed decimals). The opt-in
+    // tool is absent here, so the handler returns its install/upgrade hint — but the
+    // response is a well-formed JSON-RPC result, which is all we assert.
+    ScopedCurrentPath cwd(repo_root());
+    auto response = handle_request(tool_call(
+        "68", "pulp_audio_compare",
+        R"JSON({"reference":"/nonexistent/ref.wav","candidate":"/nonexistent/cand.wav",)JSON"
+        R"JSON("profile":"added-hf","reference_role":"golden","threshold":0.0001})JSON"));
+    require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(response, R"JSON("content")JSON");
+}
+
+TEST_CASE("pulp_audio_compare dispatch reaches the delegated shell-out", "[mcp][tools][audio]") {
+    // Exercise handle_audio_compare's tail past argument validation: from a project
+    // root it makes the private temp report dir, builds the `pulp audio compare …
+    // --json <temp>` command, shells out, and folds the result. The opt-in Audio
+    // Quality Lab tool is not installed here, so the delegated command writes no
+    // report and the handler returns its actionable install/upgrade hint — but the
+    // response is a well-formed JSON-RPC result wrapping that text, which is all we
+    // assert (and it covers the temp-dir → exec → empty-report → hint branch that
+    // the required-argument case returns before ever reaching).
+    ScopedCurrentPath cwd(repo_root());
+    auto response = handle_request(tool_call(
+        "62", "pulp_audio_compare",
+        R"JSON({"reference":"/nonexistent/ref.wav","candidate":"/nonexistent/cand.wav"})JSON"));
+    require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(response, R"JSON("content")JSON");
+}
+
 TEST_CASE("MCP project-root dependent tools reject non-project directories", "[mcp][tools]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
     auto response = handle_request(tool_call("20", "pulp_status"));
     require_contains(response, "Error: not in a Pulp project");
+
+    // pulp_audio_compare resolves the delegated CLI relative to the project root,
+    // so it too must refuse to run outside a project.
+    auto compare = handle_request(tool_call(
+        "21", "pulp_audio_compare", R"JSON({"reference":"a.wav","candidate":"b.wav"})JSON"));
+    require_contains(compare, "Error: not in a Pulp project");
 }
 
 TEST_CASE("MCP audio probe JSON validates frames before shelling out",

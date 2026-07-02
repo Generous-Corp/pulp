@@ -105,7 +105,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
 | Motion tracing + fixture replay | `pulp_motion_start_trace`, `pulp_motion_stop_trace`, `pulp_motion_snapshot`, `pulp_motion_list_traces`, `pulp_motion_load_fixture`, `pulp_motion_scrub_to`, `pulp_motion_play`, `pulp_motion_pause`, `pulp_motion_enable_cost`, `pulp_motion_disable_cost` |
-| Audio model / WAV-first excerpt-find / live probe/scope JSON / offline render | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_render` |
+| Audio model / WAV-first excerpt-find / live probe/scope JSON / offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_render`, `pulp_audio_compare` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
@@ -128,6 +128,15 @@ JSON back — a test signal plus optional single `param`/`midi` automation throu
 `PluginSlot`. It is the offline-source counterpart to the live probe/scope tools:
 reach for it when you have a plugin bundle and want deterministic
 render-then-measure without standing up a host.
+
+Use `pulp_audio_compare` to get an advisory before/after **judgment** between two
+WAVs (measure → compare → judge) through `pulp audio compare`. It delegates to the
+opt-in Audio Quality Lab tool, level-matches, runs one axis (`profile`), and
+returns the typed `quality_lab.compare.v1` report (evidence envelope + a verdict
+like `regression_suspected` / `material_change_detected`). It is advisory, never a
+gate; set `reference_role: golden` when the reference is the known-good baseline.
+Requires `pulp tool install audio-quality-lab`. For an exact pass/fail diff use
+the deterministic `pulp audio validate compare` surface instead.
 
 The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 

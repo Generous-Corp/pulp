@@ -67,6 +67,7 @@ add_executable(pulp-cli
     cmd_audio_render.cpp
     cmd_audio_render_parse.cpp
     cmd_audio_validate.cpp
+    cmd_audio_compare.cpp
     cmd_version.cpp
     cmd_dev.cpp
     cmd_loop.cpp
