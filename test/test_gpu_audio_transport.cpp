@@ -233,8 +233,90 @@ TEST_CASE("GpuAudioTransport background worker drains the pipeline", "[gpu_audio
     // Exact, timing-independent invariant: every fed block was produced or
     // dropped whole (no partial/misaligned blocks).
     REQUIRE(s.produced_blocks + s.input_dropped_frames / BS == static_cast<std::uint64_t>(N));
+    // A resync can only ever cancel a prior miss's late wet block, so the count
+    // of resynced blocks can never exceed the misses. A depth-based resync would
+    // violate this under worker timing (it drains a block the worker raced ahead
+    // to produce even with zero misses); the miss-counting resync cannot.
+    REQUIRE(s.resynced_blocks <= s.miss_blocks);
 
     // release() must cleanly stop + join the worker (no hang / no crash).
+    t.release();
+    REQUIRE_FALSE(t.is_prepared());
+}
+
+TEST_CASE("GpuAudioTransport resyncs the wet timeline after a miss", "[gpu_audio][transport]") {
+    // A miss emits a substitute (dry) block for its timeline slot; when the worker
+    // later catches up it back-fills that slot's wet block, pushing the output ring
+    // above the primed steady-state depth. Without a resync the RT read would pick
+    // up that stale wet block, permanently delaying the wet stream one block per
+    // miss (a comb filter of dry against a one-block-late wet). This drives a
+    // deterministic miss-then-catch-up sequence with manual pump control and proves
+    // the resync drops the redundant block so effective latency stays pinned.
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));   // no worker thread — we drive pump()
+
+    Block in(CH, BS), out(CH, BS);
+    std::vector<float> got;
+    constexpr int NBLK = 8;
+    for (int k = 0; k < NBLK; ++k) {
+        // Worker catches up BEFORE the callback from k>=6 on: drain the backlog
+        // (including the late wet block for the missed slot) so the RT read sees
+        // the over-filled ring the resync must correct.
+        if (k >= 6) t.pump();
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        // Keep pace through call 2; starve calls 3-5 (drains the 2-block cushion,
+        // forcing exactly one miss at call 5); catch-up handled above from k>=6.
+        if (k <= 2) t.pump();
+        got.push_back(out.storage[0][0]);
+    }
+
+    // out[5] is the dry substitute (input 6) — the one block the miss cost us.
+    // out[6] is realigned to the no-miss value (10), NOT the stale late wet (8).
+    const std::vector<float> expected = {0, 0, 2, 4, 6, /*miss→dry*/6, /*resynced*/10, 12};
+    REQUIRE(got == expected);
+    REQUIRE(t.stats().miss_blocks == 1);
+    REQUIRE(t.stats().resynced_blocks == 1);   // exactly the one late wet block dropped
+}
+
+TEST_CASE("GpuAudioTransport wake-on-write worker drains the pipeline", "[gpu_audio][transport]") {
+    // Same whole-block conservation invariant as the polling worker, but with the
+    // opt-in wake-on-write path: process() posts a semaphore the worker waits on.
+    // Proves the semaphore-driven worker still drains every fed block and that
+    // release() cleanly joins it.
+    constexpr uint32_t CH = 2, BS = 64, L = 2, RING = 32;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING, /*run_worker_thread=*/true, /*wake_on_write=*/true}));
+
+    Block in(CH, BS), out(CH, BS);
+    constexpr int N = 200;
+    for (int k = 0; k < N; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        std::this_thread::sleep_for(std::chrono::microseconds(300));
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto s = t.stats();
+        if (s.produced_blocks + s.input_dropped_frames / BS >= static_cast<std::uint64_t>(N)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    const auto s = t.stats();
+    REQUIRE(s.produced_blocks > 0);
+    REQUIRE(s.produced_blocks + s.input_dropped_frames / BS == static_cast<std::uint64_t>(N));
+
     t.release();
     REQUIRE_FALSE(t.is_prepared());
 }

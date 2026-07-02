@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
+#include <algorithm>
+
 namespace pulp::gpu_audio {
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
@@ -59,8 +61,13 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     produced_blocks_.store(0, std::memory_order_relaxed);
     miss_blocks_.store(0, std::memory_order_relaxed);
     input_dropped_blocks_.store(0, std::memory_order_relaxed);
+    resynced_blocks_.store(0, std::memory_order_relaxed);
+    blocks_owed_ = 0;
     last_block_ns_.store(0, std::memory_order_relaxed);
     avg_block_ns_.store(0, std::memory_order_relaxed);
+    // Wake-on-write only matters when we own the worker thread; when the caller
+    // drives pump() there is nothing waiting on the semaphore to wake.
+    wake_on_write_ = config.wake_on_write && config.run_worker_thread;
     prepared_ = true;
 
     if (config.run_worker_thread) {
@@ -88,7 +95,14 @@ void GpuAudioTransport::worker_loop() noexcept {
             std::lock_guard<std::mutex> lock(pump_mutex_);
             pump();
         }
-        std::this_thread::sleep_for(poll_interval_);
+        // Wait for the next RT input write, bounded by the poll interval so a
+        // missed/coalesced post (or offline mode, which posts nothing) still
+        // makes progress. Falls back to a plain sleep when wake-on-write is off.
+        if (wake_on_write_) {
+            wake_sem_.try_acquire_for(poll_interval_);
+        } else {
+            std::this_thread::sleep_for(poll_interval_);
+        }
     }
     std::lock_guard<std::mutex> lock(pump_mutex_);
     pump();  // final drain of any input left at stop
@@ -133,15 +147,48 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
     // more). A full ring drops the whole block (telemetry) rather than blocking.
     if (input_ring_.free_frames() >= n) {
         input_ring_.write(input, n);
+        // Nudge the worker awake (opt-in) so it reacts within the block instead
+        // of at the next poll tick. RT-safe: a counting-semaphore post neither
+        // allocates nor blocks. No-op when wake-on-write is off.
+        if (wake_on_write_) wake_sem_.release();
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Resync after prior misses. Each miss substituted a dry/fallback block for
+    // its timeline slot; when the worker later catches up it back-fills that
+    // slot's wet block, one block behind the timeline. Reading that stale block
+    // would comb-filter dry against a one-block-late wet and creep effective
+    // latency one block per miss. Drop the redundant late block(s) so the read
+    // below returns the block that is exactly `latency_blocks` old.
+    //
+    // We drain exactly `blocks_owed_` — the count of past misses, mutated only
+    // here on the audio thread — never "excess ring depth". Inferring the debt
+    // from depth is racy under a real worker thread: the worker can commit a
+    // fresh block into the output ring between this call's input write and this
+    // read, transiently lifting depth above steady-state with NO miss, which a
+    // depth-based drain would misread as owed and discard the very block being
+    // read. Counting misses is immune to that. We only drain while a block also
+    // remains behind the dropped one (`avail_blocks > 1`), so a resync never
+    // starves the read. drain() just advances the read cursor — no copy/alloc.
+    if (blocks_owed_ > 0) {
+        const std::uint64_t avail_blocks = output_ring_.available_frames() / n;
+        if (avail_blocks > 1) {
+            const std::uint64_t drop =
+                std::min<std::uint64_t>(blocks_owed_, avail_blocks - 1);
+            output_ring_.drain(drop * n);
+            blocks_owed_ -= drop;
+            resynced_blocks_.fetch_add(drop, std::memory_order_relaxed);
+        }
     }
 
     // Read the latency-delayed output produced earlier by the worker.
     if (output_ring_.read(output, n)) return;
 
-    // Miss: the worker has not produced this block in time. Apply the policy.
+    // Miss: the worker has not produced this block in time. Substitute per the
+    // policy and record the debt so the late wet block is dropped once it lands.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
+    ++blocks_owed_;
     switch (miss_policy_) {
         case MissPolicy::Silence:
             output.clear();
@@ -249,6 +296,7 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.miss_blocks = miss_blocks_.load(std::memory_order_relaxed);
     s.input_dropped_frames =
         input_dropped_blocks_.load(std::memory_order_relaxed) * block_size_;
+    s.resynced_blocks = resynced_blocks_.load(std::memory_order_relaxed);
     s.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     s.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     return s;

@@ -4,6 +4,7 @@
 #include <mutex>
 #include <chrono>
 #include <cstdint>
+#include <semaphore>
 #include <thread>
 #include <vector>
 
@@ -37,12 +38,26 @@ public:
         // path stays fully decoupled and lock-free. When false, the caller
         // drives pump() (deterministic tests / custom worker integration).
         bool run_worker_thread = false;
+        // Opt-in: the RT process() posts a semaphore after each input write and
+        // the worker waits on it (with the poll interval as a fallback timeout)
+        // instead of always sleeping the full quantum. Cuts the worker's
+        // reaction latency — and thus the miss probability at low latency_blocks
+        // — without a busy loop. Signaling a semaphore is RT-safe (no alloc, no
+        // block); default OFF keeps the pure-polling RT path byte-identical.
+        // Only meaningful when run_worker_thread is true.
+        bool wake_on_write = false;
     };
 
     struct Stats {
         std::uint64_t produced_blocks = 0;   // blocks the worker completed
         std::uint64_t miss_blocks = 0;       // RT reads with no ready output
         std::uint64_t input_dropped_frames = 0;   // RT writes lost to a full input ring
+        // Wet blocks the worker dropped to realign the stream after a miss. Each
+        // miss already emitted a substitute (dry/fallback) block for that timeline
+        // slot, so its late-arriving wet counterpart is redundant; dropping it
+        // keeps effective latency pinned at latency_blocks instead of creeping one
+        // block per miss (which would comb-filter dry against wet).
+        std::uint64_t resynced_blocks = 0;
         // Wall-clock cost of the node's work per block, measured on the worker
         // thread (includes the GPU submit + the blocking readback — the honest
         // real cost of the GPU path). last = most recent block; avg = an EWMA.
@@ -121,6 +136,14 @@ private:
     std::atomic<std::uint64_t> produced_blocks_{0};
     std::atomic<std::uint64_t> miss_blocks_{0};
     std::atomic<std::uint64_t> input_dropped_blocks_{0};  // whole-block input drops
+    std::atomic<std::uint64_t> resynced_blocks_{0};       // late wet blocks dropped to realign
+    // Resync debt: output slots a miss already substituted for, whose late wet
+    // counterparts must still be dropped to realign the stream. Incremented on a
+    // miss, decremented as those blocks are drained. Touched ONLY by process() on
+    // the audio thread, so it needs no atomicity — counting misses explicitly
+    // (rather than inferring "excess ring depth") keeps the drain immune to a
+    // worker that races a fresh block in before the RT read of the same call.
+    std::uint64_t blocks_owed_ = 0;
     // Per-block worker timing, published as integer nanoseconds for lock-free
     // reads by the UI thread (double isn't reliably lock-free).
     std::atomic<std::uint64_t> last_block_ns_{0};
@@ -132,6 +155,16 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_running_{false};
     std::chrono::microseconds poll_interval_{200};
+
+    // Opt-in wake-on-write (Config::wake_on_write). The RT process() posts
+    // `wake_sem_` after each input write; the worker waits on it (bounded by
+    // poll_interval_) instead of always sleeping the full quantum, cutting its
+    // reaction latency without a busy loop. release() on a counting semaphore is
+    // non-blocking and allocation-free, so posting it stays RT-safe. Default
+    // OFF: worker_loop() falls back to a plain sleep so the polling path is
+    // unchanged.
+    bool wake_on_write_ = false;
+    std::counting_semaphore<> wake_sem_{0};
 
     // Synchronous (offline) drive. When `synchronous_` is set, the background
     // worker yields and process_offline() pumps the node inline under
