@@ -1247,6 +1247,8 @@ set_target_properties(pulp-reload-logic-unity PROPERTIES
 target_link_libraries(pulp-reload-logic-unity PRIVATE pulp::format)
 # Unified UX+DSP live-swap transaction (item 1.8) — pure coordinator, no RT.
 pulp_add_test_suite(pulp-test-live-swap-transaction LIBRARIES pulp::format)
+# Sealed swap-pack manifest + per-file integrity (item 3.1a) — reuses crypto.
+pulp_add_test_suite(pulp-test-swap-pack LIBRARIES pulp::format pulp::runtime)
 pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
 add_dependencies(pulp-test-reloadable-shell
     pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
