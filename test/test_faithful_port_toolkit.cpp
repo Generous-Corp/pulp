@@ -19,14 +19,20 @@
 #include <vector>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/callout_box.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_fragment.hpp>
 
 using Catch::Approx;
 using namespace pulp;
+using pulp::view::CalloutPlacement;
+using pulp::view::CalloutSide;
+using pulp::view::CalloutStyle;
+using pulp::view::AnchoredCallout;
 using pulp::view::DesignFrameElement;
 using pulp::view::DesignFrameView;
 using pulp::view::FragmentTransform;
+using pulp::view::Rect;
 
 namespace {
 
@@ -264,4 +270,126 @@ TEST_CASE("DesignFrameView hover/bypass restyle rides draw_fragment",
         REQUIRE(canvas.svg_calls.size() == 2);
         CHECK(canvas.svg_calls[1].document.find("#6b7280") != std::string::npos);
     }
+}
+
+// ── P6.5: Anchored popover with pointer triangle (AnchoredCallout parity) ─────────
+// Pure placement math (place_callout) — no canvas needed.
+
+namespace {
+constexpr float kWinW = 400.0f, kWinH = 400.0f;
+const Rect kWindow{0, 0, kWinW, kWinH};
+}  // namespace
+
+TEST_CASE("place_callout keeps the preferred side when it fits",
+          "[view][callout][issue-juce-port]") {
+    // Anchor mid-window: everything fits, so preferred survives.
+    const Rect anchor{190, 190, 20, 20};
+    auto p = pulp::view::place_callout(anchor, 120, 80, kWindow, CalloutSide::below);
+    CHECK(p.side == CalloutSide::below);
+    // Body sits below the anchor, centered on it.
+    CHECK(p.body.y > anchor.bottom());
+    CHECK(p.body.center().x == Approx(anchor.center().x));
+}
+
+TEST_CASE("place_callout auto-flips when the preferred side would clip",
+          "[view][callout][issue-juce-port]") {
+    CalloutStyle style;  // defaults
+    SECTION("near top edge, prefer above -> flips below") {
+        const Rect anchor{190, 4, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 120, kWindow,
+                                           CalloutSide::above, style);
+        CHECK(p.side == CalloutSide::below);
+        CHECK(p.body.y >= anchor.bottom());
+    }
+    SECTION("near bottom edge, prefer below -> flips above") {
+        const Rect anchor{190, kWinH - 24, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 120, kWindow,
+                                           CalloutSide::below, style);
+        CHECK(p.side == CalloutSide::above);
+        CHECK(p.body.bottom() <= anchor.y);
+    }
+    SECTION("near left edge, prefer left_of -> flips right_of") {
+        const Rect anchor{4, 190, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 120, kWindow,
+                                           CalloutSide::left_of, style);
+        CHECK(p.side == CalloutSide::right_of);
+        CHECK(p.body.x >= anchor.right());
+    }
+    SECTION("no room either side keeps preferred (best effort)") {
+        const Rect tiny{0, 0, 40, 40};
+        const Rect anchor{10, 10, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 120, tiny,
+                                           CalloutSide::below, style);
+        CHECK(p.side == CalloutSide::below);  // neither side fits -> no flip
+    }
+}
+
+TEST_CASE("place_callout clamps the body inside the window margins",
+          "[view][callout][issue-juce-port]") {
+    CalloutStyle style;  // margin = 8
+    // Anchor hugging the left edge with a wide body: centering would push the body
+    // off the left of the window, so the cross axis clamps to the margin.
+    const Rect anchor{2, 190, 12, 12};
+    auto p = pulp::view::place_callout(anchor, 160, 80, kWindow,
+                                       CalloutSide::below, style);
+    CHECK(p.body.x >= style.margin - 0.01f);
+    CHECK(p.body.right() <= kWinW - style.margin + 0.01f);
+}
+
+TEST_CASE("place_callout arrow tracks the anchor and stays on the body edge",
+          "[view][callout][issue-juce-port]") {
+    CalloutStyle style;
+    SECTION("centered anchor: arrow tip aligns with the anchor center") {
+        const Rect anchor{190, 190, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 80, kWindow,
+                                           CalloutSide::below, style);
+        CHECK(p.arrow_tip_x == Approx(anchor.center().x));
+        // Tip points UP at the anchor: above the body top edge.
+        CHECK(p.arrow_tip_y < p.body.y);
+        CHECK(p.arrow_base_y == Approx(p.body.y));
+    }
+    SECTION("clamped body: arrow base stays within the body edge, clear of corners") {
+        // Anchor at far left forces the body to clamp; the arrow should still
+        // point roughly at the anchor but never leave the body's flat edge.
+        const Rect anchor{2, 190, 12, 12};
+        auto p = pulp::view::place_callout(anchor, 160, 80, kWindow,
+                                           CalloutSide::below, style);
+        const float half_aw = style.arrow_width * 0.5f;
+        CHECK(p.arrow_base_x >= p.body.x + style.corner_radius + half_aw - 0.01f);
+        CHECK(p.arrow_base_x <= p.body.right() - style.corner_radius - half_aw + 0.01f);
+    }
+    SECTION("horizontal side: arrow points sideways at the anchor") {
+        const Rect anchor{190, 190, 20, 20};
+        auto p = pulp::view::place_callout(anchor, 120, 80, kWindow,
+                                           CalloutSide::right_of, style);
+        CHECK(p.side == CalloutSide::right_of);
+        CHECK(p.arrow_tip_x < p.body.x);          // tip left of the body (toward anchor)
+        CHECK(p.arrow_tip_y == Approx(anchor.center().y));
+    }
+}
+
+TEST_CASE("AnchoredCallout hosts content and mounts as an overlay",
+          "[view][callout][issue-juce-port]") {
+    // View-level: mode is geometry assertion (no Skia raster in this build).
+    auto root = std::make_unique<pulp::view::View>();
+    root->set_bounds({0, 0, kWinW, kWinH});
+
+    auto content = std::make_unique<pulp::view::View>();
+    const Rect anchor{190, 20, 20, 20};  // near top -> should flip below
+    AnchoredCallout* box = AnchoredCallout::show(root.get(), anchor, std::move(content),
+                                       CalloutSide::above);
+    REQUIRE(box != nullptr);
+    box->set_content_size(100, 60);
+    box->set_bounds({0, 0, kWinW, kWinH});
+    box->layout_children();
+
+    auto p = box->compute_placement({0, 0, kWinW, kWinH});
+    CHECK(p.side == CalloutSide::below);           // flipped away from the top edge
+    // Content child is inset inside the body by the padding.
+    REQUIRE(box->content() != nullptr);
+    const Rect cb = box->content()->bounds();
+    CHECK(cb.x > p.body.x);
+    CHECK(cb.y > p.body.y);
+    CHECK(cb.width == Approx(100.0f));
+    CHECK(cb.height == Approx(60.0f));
 }
