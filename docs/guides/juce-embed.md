@@ -93,9 +93,13 @@ adapter/ABI sources. Two ways to wire the dependencies:
         -DPULP_VIEW_EMBED_DIR=/path/to/pulp-view-embed
   ```
 
-The template's `cmake/ResolvePulpEmbed.cmake` auto-selects prebuilt vs siblings,
-so a fresh clone "just builds" either way. Coordinated versions are tracked in
-`pulp-view-embed`'s `COMPAT.md` (SDK version × embed ABI × adapter tag).
+The single `-DPULP_VIEW_EMBED_DIR` flag is enough when you build a plugin (or
+`pulp-embed-juce`) directly. The **template's** siblings mode wants both
+adapter checkouts next to it — `../pulp-view-embed` and `../pulp-embed-juce`
+(or pass `-DPULP_EMBED_JUCE_DIR` too); its `cmake/ResolvePulpEmbed.cmake`
+auto-detects them and otherwise falls back to prebuilt, so a fresh clone "just
+builds" either way. Coordinated versions are tracked in `pulp-view-embed`'s
+`COMPAT.md` (SDK version × embed ABI × adapter tag).
 
 ## What you get, mapped to JUCE concepts
 
