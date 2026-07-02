@@ -520,6 +520,67 @@ TEST_CASE("GPU NAM Normalize retargets output to the model loudness", "[nam][nor
     CHECK(exp_ratio > 1.0);  // this capture is quieter than the target, so it boosts
 }
 
+TEST_CASE("GPU NAM resamples around an off-rate host", "[nam][resample]") {
+    // The bundled model is captured at some rate MSR. Driving it at MSR (matched,
+    // no resampling) vs 2*MSR (resampling engaged around the model) with the same
+    // tone must yield the same model response — proving the host<->model rate
+    // conversion is wired correctly, not pitch-shifting or diverging.
+    nam::NamRuntime probe;
+    std::string err;
+    REQUIRE(nam::load_nam_runtime(GPU_NAM_DEFAULT_MODEL_PATH, probe, &err));
+    const double MSR = probe.sample_rate();
+    REQUIRE(MSR > 0.0);
+
+    const double freq = 300.0, dur = 0.25;
+    auto sine = [&](double sr, std::size_t n) {
+        std::vector<float> s(n);
+        for (std::size_t i = 0; i < n; ++i)
+            s[i] = 0.3f * std::sin(2.0 * M_PI * freq * static_cast<double>(i) / sr);
+        return s;
+    };
+
+    // Reference: host == model rate (matched path, no resampling).
+    const auto out_ref = run_stream_cpu(MSR, 512, sine(MSR, static_cast<std::size_t>(MSR * dur)));
+
+    // Off-rate: host = 2x model rate — resampling engages around the model.
+    const double host2 = 2.0 * MSR;
+    const auto out2 = run_stream_cpu(host2, 512, sine(host2, static_cast<std::size_t>(host2 * dur)));
+
+    for (float v : out2) REQUIRE(std::isfinite(v));
+    for (float v : out2) REQUIRE(std::abs(v) < 10.0f);   // no resampler blow-up
+
+    // Downsample the 2x output back to MSR to compare like-for-like.
+    pulp::signal::Resampler down;
+    down.prepare(host2, MSR, 1, out2.size());
+    std::vector<float> out2d(down.max_output_for(out2.size()), 0.0f);
+    out2d.resize(down.process_block_mono(out2.data(), out2.size(), out2d.data(), out2d.size()));
+
+    REQUIRE(out_ref.size() > 3000);
+    REQUIRE(out2d.size() > 3000);
+
+    // Best-lag normalized cross-correlation over a mid window (skips warm-up and
+    // the tail so the two latency-trimmed streams line up).
+    auto mid = [](const std::vector<float>& v) {
+        return std::vector<float>(v.begin() + v.size() / 4, v.begin() + 3 * v.size() / 4);
+    };
+    const auto a = mid(out_ref);
+    const auto b = mid(out2d);
+    const std::size_t len = std::min(a.size(), b.size());
+    double best = -1.0;
+    const int max_lag = 400;
+    for (int lag = -max_lag; lag <= max_lag; ++lag) {
+        double num = 0, ea = 0, eb = 0;
+        for (std::size_t i = max_lag; i + max_lag < len; ++i) {
+            const float av = a[i];
+            const float bv = b[static_cast<std::size_t>(static_cast<int>(i) + lag)];
+            num += av * bv; ea += av * av; eb += bv * bv;
+        }
+        best = std::max(best, num / std::sqrt(ea * eb + 1e-20));
+    }
+    INFO("resample round-trip best xcorr = " << best);
+    CHECK(best > 0.9);
+}
+
 TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
     // A real host feeds variable, often-smaller-than-internal blocks. The re-block
     // FIFO must make the amped output independent of that chunking; a fixed-block

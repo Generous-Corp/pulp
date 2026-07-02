@@ -51,6 +51,7 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/noise_gate.hpp>
+#include <pulp/signal/resampler.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <algorithm>
@@ -326,14 +327,8 @@ public:
         sample_rate_ = ctx.sample_rate;
         const std::size_t max_block =
             ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 512;
-
-        const std::size_t cap = max_block + 4 * kInternalBlock;
-        for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            in_buf_[ch].assign(cap, 0.0f);   in_len_[ch] = 0;
-            out_buf_[ch].assign(cap, 0.0f);  out_len_[ch] = kInternalBlock;  // primed: B zeros
-            gpu_wet_[ch].assign(kInternalBlock, 0.0f);
-        }
-        wet_.assign(kInternalBlock, 0.0f);
+        // The re-blocking FIFOs are sized below, once the model's rate (and thus the
+        // internal pipeline rate) is known — the FIFOs carry internal-rate samples.
 
         // Noise gate + tone-stack DSP (RT-safe; no alloc after this). Reset filter
         // state and invalidate the cached coefficients so process() retunes on its
@@ -359,20 +354,51 @@ public:
         if (!ok) {
             runtime::log_error("GPU NAM: failed to load model '{}' ({}); passing dry.",
                                path, err);
-        } else {
-            // NAM captures are trained at a fixed rate (usually 48 kHz). Running the
-            // network at a different host rate shifts its frequency response and time
-            // constants. Rate-matching resampling around the model is not yet applied,
-            // so surface the mismatch rather than silently mis-rendering.
-            const double msr = model.sample_rate();
-            if (msr > 0.0 && std::abs(msr - sample_rate_) > 0.01 * msr)
-                runtime::log_warn(
-                    "GPU NAM: model '{}' was captured at {} Hz but the host runs at {} Hz; "
-                    "its response is shifted (rate-matching resampling not yet applied).",
-                    gpu_nam_basename(path), msr, sample_rate_);
         }
         loaded_ok_ = ok;
         publish_normalize_gain(model, ok);
+
+        // Pin the internal pipeline to the model's rate and resample the drive in /
+        // wet out when the host runs at a different rate. NAM captures are trained
+        // at a fixed rate (usually 48 kHz); running the network off-rate shifts its
+        // response. Matched rates (the common case) skip resampling entirely.
+        {
+            const double msr = ok ? model.sample_rate() : 0.0;
+            internal_rate_ = (msr > 0.0) ? msr : sample_rate_;
+            resample_active_ =
+                sample_rate_ > 0.0 && std::abs(internal_rate_ - sample_rate_) > 0.01 * sample_rate_;
+            if (resample_active_) {
+                for (std::size_t ch = 0; ch < kChannels; ++ch) {
+                    in_rs_[ch].prepare(sample_rate_, internal_rate_, 1, max_block);
+                    out_rs_[ch].prepare(internal_rate_, sample_rate_, 1,
+                                        in_rs_[ch].max_output_for(max_block));
+                }
+                runtime::log_info(
+                    "GPU NAM: model '{}' captured at {} Hz; host at {} Hz — resampling "
+                    "around the model (CPU engine).",
+                    gpu_nam_basename(path), internal_rate_, sample_rate_);
+            }
+        }
+
+        // Size the re-block FIFOs for internal-rate samples. A host block of
+        // max_block samples yields up to ceil(max_block * internal/host) internal
+        // samples; the output staging FIFO carries host-rate wet.
+        const double up = resample_active_ ? internal_rate_ / sample_rate_ : 1.0;
+        const std::size_t max_internal =
+            static_cast<std::size_t>(std::ceil(static_cast<double>(max_block) * up)) + 8;
+        const std::size_t cap = max_internal + 4 * kInternalBlock;
+        const std::size_t host_cap = max_block + 4 * kInternalBlock;
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            in_buf_[ch].assign(cap, 0.0f);   in_len_[ch] = 0;
+            out_buf_[ch].assign(cap, 0.0f);  out_len_[ch] = kInternalBlock;  // primed: B zeros
+            gpu_wet_[ch].assign(kInternalBlock, 0.0f);
+            out_host_[ch].assign(host_cap + kInternalBlock, 0.0f);
+            out_host_len_[ch] = 0;
+            in_rs_[ch].reset();
+            out_rs_[ch].reset();
+        }
+        wet_.assign(kInternalBlock, 0.0f);
+        rs_drive_.assign(max_block, 0.0f);
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
@@ -402,9 +428,12 @@ public:
         // (e.g. an LSTM), the GPU engine stays unavailable for this activation even
         // if a WaveNet is loaded later — reopen/re-prepare to re-probe. The default
         // bundled model is WaveNet, so normally the device is probed here.
+        // The opt-in GPU engine runs the model at the host rate; when resampling is
+        // active the model runs at the internal rate on the CPU engine, so the GPU
+        // stack is not built (device stays unavailable and the engine is CPU).
         gpu_extra_ = 0;
         device_available_ = false;
-        if (ok && model.gpu_eligible()) {
+        if (ok && model.gpu_eligible() && !resample_active_) {
             auto stack = build_gpu_stack(*model.wavenet());
             if (stack) {
                 device_available_ = true;
@@ -414,7 +443,20 @@ public:
             }
         }
 
-        latency_samples_ = static_cast<int>(kInternalBlock + gpu_extra_);
+        // Reported latency is at the HOST rate. The re-block FIFO + GPU-transport
+        // delay are internal-rate sample counts; when resampling, convert them to
+        // host samples and add each resampler's group delay (≈ (taps-1)/2 at its
+        // input rate). Matched rates reduce to kInternalBlock + gpu_extra_.
+        if (resample_active_) {
+            const double to_host = sample_rate_ / internal_rate_;
+            const double in_delay = 0.5 * static_cast<double>(in_rs_[0].taps_per_phase() - 1);
+            const double out_delay =
+                0.5 * static_cast<double>(out_rs_[0].taps_per_phase() - 1) * to_host;
+            latency_samples_ = static_cast<int>(std::llround(
+                static_cast<double>(kInternalBlock) * to_host + in_delay + out_delay));
+        } else {
+            latency_samples_ = static_cast<int>(kInternalBlock + gpu_extra_);
+        }
         const std::size_t dry_delay = static_cast<std::size_t>(latency_samples_);
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             dry_ring_[ch].assign(dry_delay, 0.0f);
@@ -500,33 +542,67 @@ public:
 
         // Append the drive signal (input × input-gain, then noise gate) to the
         // re-block FIFO; the active engine transforms drive → wet (model output).
+        // The gate runs at the host rate on the input; when resampling, the gated
+        // drive is converted host→internal before entering the internal-rate FIFO.
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            float* dst = in_buf_[ch].data() + in_len_[ch];
             const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
-            for (std::size_t i = 0; i < n; ++i) {
-                float drive = in ? in[i] * in_gain : 0.0f;
-                if (gate_active_) drive = gate_[ch].process(drive);
-                dst[i] = drive;
+            if (!resample_active_) {
+                float* dst = in_buf_[ch].data() + in_len_[ch];
+                for (std::size_t i = 0; i < n; ++i) {
+                    float drive = in ? in[i] * in_gain : 0.0f;
+                    if (gate_active_) drive = gate_[ch].process(drive);
+                    dst[i] = drive;
+                }
+                in_len_[ch] += n;
+            } else {
+                for (std::size_t i = 0; i < n; ++i) {
+                    float drive = in ? in[i] * in_gain : 0.0f;
+                    if (gate_active_) drive = gate_[ch].process(drive);
+                    rs_drive_[i] = drive;
+                }
+                const std::size_t room = in_buf_[ch].size() - in_len_[ch];
+                const std::size_t produced = in_rs_[ch].process_block_mono(
+                    rs_drive_.data(), n, in_buf_[ch].data() + in_len_[ch], room);
+                in_len_[ch] += produced;
             }
-            in_len_[ch] += n;
         }
 
         gpu_audio::GpuAudioTransport* tp = gpu_active_.load(std::memory_order_seq_cst);
         if (tp) fill_wet_gpu(tp);
         else    fill_wet_cpu();
 
+        // When resampling, convert the internal-rate model output (out_buf_) back to
+        // the host rate into out_host_, consuming out_buf_. The emit then reads
+        // host-rate wet from out_host_; otherwise it reads out_buf_ directly (the
+        // matched-rate path is byte-for-byte unchanged).
+        if (resample_active_) {
+            for (std::size_t ch = 0; ch < kChannels; ++ch) {
+                const std::size_t room = out_host_[ch].size() - out_host_len_[ch];
+                const auto res = out_rs_[ch].process_block_mono_detailed(
+                    out_buf_[ch].data(), out_len_[ch],
+                    out_host_[ch].data() + out_host_len_[ch], room);
+                out_host_len_[ch] += res.output_frames;
+                if (res.input_frames_consumed > 0) {
+                    std::memmove(out_buf_[ch].data(),
+                                 out_buf_[ch].data() + res.input_frames_consumed,
+                                 (out_len_[ch] - res.input_frames_consumed) * sizeof(float));
+                    out_len_[ch] -= res.input_frames_consumed;
+                }
+            }
+        }
+
         // Emit n samples per channel: wet from the primed output FIFO, dry delayed
         // by the fixed total latency so they stay aligned under either engine.
         for (std::size_t ch = 0; ch < ch_count && ch < kChannels; ++ch) {
             const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
             float* out = output.channel(ch).data();
-            const std::size_t avail = out_len_[ch];
+            const float* wet_src = resample_active_ ? out_host_[ch].data() : out_buf_[ch].data();
+            const std::size_t avail = resample_active_ ? out_host_len_[ch] : out_len_[ch];
             const std::size_t delay = dry_ring_[ch].size();
             for (std::size_t i = 0; i < n; ++i) {
                 // DC-block the wet stream once per sample, in order, before it reaches
-                // the mix/meters/spectrum — covers both the CPU and GPU engines, which
-                // both feed out_buf_.
-                const float wet_i = dc_[ch].process(i < avail ? out_buf_[ch][i] : 0.0f);
+                // the mix/meters — covers both the CPU and GPU engines.
+                const float wet_i = dc_[ch].process(i < avail ? wet_src[i] : 0.0f);
                 const float dry_i = delay > 0 ? dry_ring_[ch][dry_pos_[ch]] : (in ? in[i] : 0.0f);
                 if (delay > 0) {
                     dry_ring_[ch][dry_pos_[ch]] = in ? in[i] : 0.0f;
@@ -535,9 +611,15 @@ public:
                 out[i] = (1.0f - mix) * dry_i + mix * out_gain * wet_i;
             }
             const std::size_t consumed = n < avail ? n : avail;
-            std::memmove(out_buf_[ch].data(), out_buf_[ch].data() + consumed,
-                         (out_len_[ch] - consumed) * sizeof(float));
-            out_len_[ch] -= consumed;
+            if (resample_active_) {
+                std::memmove(out_host_[ch].data(), out_host_[ch].data() + consumed,
+                             (out_host_len_[ch] - consumed) * sizeof(float));
+                out_host_len_[ch] -= consumed;
+            } else {
+                std::memmove(out_buf_[ch].data(), out_buf_[ch].data() + consumed,
+                             (out_len_[ch] - consumed) * sizeof(float));
+                out_len_[ch] -= consumed;
+            }
         }
 
         publish_meters(input, output, n);
@@ -629,13 +711,15 @@ private:
     // Retune the per-channel Bass/Middle/Treble tone stack. 0..10 maps linearly to
     // ±kToneRangeDb with 5 = flat: low shelf (Bass), mid peak (Middle), high shelf
     // (Treble). Only recomputes coefficients when a value actually changes.
+    // The tone stack runs on the model output inside the internal-rate pipeline,
+    // so its coefficients use the internal rate (== host rate when not resampling).
     void update_tone(float bass, float middle, float treble) {
         if (bass == cached_bass_ && middle == cached_middle_ && treble == cached_treble_)
             return;
         cached_bass_ = bass;
         cached_middle_ = middle;
         cached_treble_ = treble;
-        const float sr = static_cast<float>(sample_rate_);
+        const float sr = static_cast<float>(internal_rate_);
         const float bass_db   = (bass   - 5.0f) / 5.0f * kToneRangeDb;
         const float mid_db    = (middle - 5.0f) / 5.0f * kToneRangeDb;
         const float treble_db = (treble - 5.0f) / 5.0f * kToneRangeDb;
@@ -852,7 +936,7 @@ private:
         std::optional<std::vector<float>> ir;
         try {
             ir = audio::read_impulse_response(
-                path, sample_rate_, {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
+                path, internal_rate_, {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
         } catch (const std::exception& e) {
             runtime::log_error("GPU NAM: load_ir('{}') threw ({}); keeping current IR.",
                                path, e.what());
@@ -927,12 +1011,16 @@ private:
                 if (nam::load_nam_runtime(path, m, &err)) {
                     loaded_ok_ = true;
                     publish_normalize_gain(m, true);
+                    // The internal pipeline rate is pinned at prepare(); a runtime
+                    // swap to a model captured at a different rate runs at the pinned
+                    // rate (response shifted). Reopen the plugin to re-pin. Matched-
+                    // rate swaps (the norm) are exact.
                     const double msr = m.sample_rate();
-                    if (msr > 0.0 && std::abs(msr - sample_rate_) > 0.01 * msr)
+                    if (msr > 0.0 && std::abs(msr - internal_rate_) > 0.01 * internal_rate_)
                         runtime::log_warn(
-                            "GPU NAM: model '{}' was captured at {} Hz but the host runs at {} Hz; "
-                            "its response is shifted (rate-matching resampling not yet applied).",
-                            gpu_nam_basename(path), msr, sample_rate_);
+                            "GPU NAM: model '{}' was captured at {} Hz but the pipeline is pinned "
+                            "to {} Hz; its response is shifted. Reopen the plugin to re-pin.",
+                            gpu_nam_basename(path), msr, internal_rate_);
                     {
                         std::lock_guard<std::mutex> lock(model_mutex_);
                         model_ = m;
@@ -995,6 +1083,22 @@ private:
     std::array<std::size_t, kChannels> cpu_extra_pos_{};
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::vector<float> wet_;                                  // internal-block scratch
+
+    // Sample-rate conversion around the model. NAM captures are trained at a fixed
+    // rate (usually 48 kHz); running the network at a different rate shifts its
+    // response. When the host rate differs from the model rate we pin the internal
+    // pipeline (re-block FIFO, model, tone stack, IR) to the MODEL rate and
+    // resample the drive in and the wet out. `internal_rate_` == `sample_rate_`
+    // (and `resample_active_` is false) in the common matched case, so that path
+    // is byte-for-byte the non-resampling pipeline. Resampling forces the CPU
+    // engine (the opt-in GPU path stays for the matched case).
+    double internal_rate_ = 48000.0;
+    bool resample_active_ = false;
+    std::array<signal::Resampler, kChannels> in_rs_{};    // host -> internal (drive)
+    std::array<signal::Resampler, kChannels> out_rs_{};   // internal -> host (wet)
+    std::vector<float> rs_drive_;                          // host-rate gated drive scratch
+    std::array<std::vector<float>, kChannels> out_host_{};// host-rate wet staging FIFO
+    std::array<std::size_t, kChannels> out_host_len_{};
 
     // Noise gate (on the drive) + Bass/Middle/Treble tone stack (on the model
     // output). Audio-thread only; retuned at block boundaries via the caches.
