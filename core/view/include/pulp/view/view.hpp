@@ -17,6 +17,8 @@ namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
+class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
+class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 
 class FrameClock;
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
@@ -242,6 +244,27 @@ public:
 
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
+
+    // ── Transient-animation glue ─────────────────────────────────────────────
+    // Tween/easing already exist; what a faithful port re-rolls every time is
+    // the View-lifecycle glue — self-(un)subscribing a FrameClock callback and
+    // repainting. animate() does exactly that: it interpolates a float from
+    // `from` to `to` over `duration_s` seconds through `ease`, applies each
+    // step via `apply`, and repaints. It auto-unsubscribes on completion AND on
+    // View destruction (so a fade that outlives its view can't use-after-free).
+    // Returns an animation id, or -1 if no FrameClock is reachable yet
+    // (previews/screenshots — the caller should just set the final value).
+    // A non-empty `tag` makes the animation self-cancelling: starting a new one
+    // with the same tag cancels the prior (e.g. re-hovering before a fade ends).
+    // `on_done` fires once when the tween reaches `to`, never when cancelled.
+    int animate(std::function<void(float)> apply, float from, float to,
+                float duration_s, std::function<float(float)> ease = {},
+                std::function<void()> on_done = {}, const std::string& tag = {});
+
+    /// Cancel a running animation by id (no-op if already finished/unknown).
+    void cancel_animation(int id);
+    /// Number of animations currently running on this view. For tests.
+    int active_animation_count() const { return static_cast<int>(animations_.size()); }
 
     // ── Theme dimension resolution ──────────────────────────────────────
 
@@ -1250,6 +1273,20 @@ public:
     void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
 
+    /// The runtime host-parameter accessor for this view tree, or nullptr in
+    /// previews/screenshots (a view degrades to local state when null, exactly
+    /// like a sandboxed native view). Set by the host that owns the tree —
+    /// StateStore-backed natively, or ABI-backed under a foreign-host embed —
+    /// and propagated to children like window_host()/plugin_view_host(). See
+    /// pulp/view/host_param_surface.hpp for the tick-only call contract.
+    void set_host_params(HostParamSurface* surface);
+    HostParamSurface* host_params() const { return host_params_; }
+
+    /// The runtime host command channel for this view tree, or nullptr. Same
+    /// ownership/propagation/null-degradation semantics as host_params().
+    void set_host_actions(HostActionSurface* surface);
+    HostActionSurface* host_actions() const { return host_actions_; }
+
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,
                                          const std::vector<Color>& colors,
@@ -1573,6 +1610,16 @@ private:
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
+    HostParamSurface* host_params_ = nullptr;
+    HostActionSurface* host_actions_ = nullptr;
+
+    // Running animate() tweens: our returned id is the FrameClock subscription
+    // id; `tag` supports self-cancelling animations. Unsubscribed in ~View.
+    // `clock` is cached at subscribe time so ~View can unsubscribe even after
+    // this view is detached (frame_clock() walks parent_, which a removed child
+    // has cleared to null — see the detached-child UAF the cache fixes).
+    struct RunningAnimation { int clock_id = -1; std::string tag; FrameClock* clock = nullptr; };
+    std::vector<RunningAnimation> animations_;
     std::shared_ptr<canvas::ViewEffect> effect_;
     int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial, 3=conic
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;

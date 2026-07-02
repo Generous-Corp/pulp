@@ -27,6 +27,18 @@ target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::state
     pulp::platform)
 
+# Annotated-capture import lane: manifest parse + DesignFrameView codegen.
+# Kept as a small static lib so the test target can link the parser/codegen core
+# directly (no CLI process spawn) while the CLI below drives it end-to-end.
+add_library(pulp-annotated-capture STATIC annotated_capture.cpp)
+target_include_directories(pulp-annotated-capture PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-annotated-capture PUBLIC pulp::view)
+
+add_executable(pulp-annotated-capture-import annotated_capture_import.cpp)
+target_include_directories(pulp-annotated-capture-import PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-annotated-capture-import PRIVATE
+    pulp-annotated-capture pulp::view pulp::state pulp::platform)
+
 # svg_probe — diagnostic: render an SVG via DesignFrameView (SkSVGDOM) to PNG.
 add_executable(pulp-svg-probe svg_probe.cpp)
 target_include_directories(pulp-svg-probe PRIVATE ${CMAKE_SOURCE_DIR})
@@ -39,3 +51,4 @@ target_link_libraries(pulp-svg-probe PRIVATE pulp::view pulp::state pulp::platfo
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
 pulp_link_fontconfig_after_skia(pulp-import-design)
 pulp_link_fontconfig_after_skia(pulp-design-import-bench)
+pulp_link_fontconfig_after_skia(pulp-annotated-capture-import)

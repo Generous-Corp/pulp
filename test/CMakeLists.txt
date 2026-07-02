@@ -5421,6 +5421,26 @@ target_link_libraries(pulp-test-design-frame-view
 catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 
+# HostParamSurface / HostActionSurface — the SDK runtime host-param + action
+# surfaces: StateStore backing, DesignFrameView
+# sync/route/re-key, action forwarding, and cross-host binding via a fake.
+add_executable(pulp-test-host-param-surface
+    test_host_param_surface.cpp)
+target_link_libraries(pulp-test-host-param-surface
+    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-host-param-surface
+    PROPERTIES LABELS "view")
+
+# Faithful port toolkit — SDK primitives
+# (SVG fragment handles, anchored popover, drag-to-reorder, paint-space painters).
+add_executable(pulp-test-faithful-port-toolkit
+    test_faithful_port_toolkit.cpp)
+target_include_directories(pulp-test-faithful-port-toolkit PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-faithful-port-toolkit
+    PRIVATE pulp::view pulp-annotated-capture Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-faithful-port-toolkit
+    PROPERTIES LABELS "view")
+
 # MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
 # via DesignFrameView). Pins SVG load, headless render, catalog registration.
 add_executable(pulp-test-musical-typing-keyboard

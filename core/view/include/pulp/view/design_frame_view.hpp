@@ -1,9 +1,11 @@
 #pragma once
 
+#include <pulp/view/svg_fragment.hpp>
 #include <pulp/view/view.hpp>
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -68,6 +70,10 @@ struct DesignFrameElement {
     /// Lights with the tint on press and clears on release, instead of the
     /// default sticky on/off flip — the right feel for a momentary command.
     bool flash = false;
+    /// When false, the element is bypassed/disabled: hit-testing skips it (it
+    /// cannot be hovered, dragged, clicked, or gesture) and a subclass/painter
+    /// may dim it (see DesignFrameView::element_enabled). Defaults enabled.
+    bool enabled = true;
 
     // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
@@ -355,6 +361,108 @@ public:
     // (octave/velocity/sustain/pitch-bend). UI thread.
     std::function<void(const std::string& action)> on_action;
 
+    // ── Runtime host-parameter surface (the "port once, three hosts" path) ──
+    // Beyond the bind-once path (a consumer wiring on_element_changed +
+    // element_for_param_key), a DesignFrameView can bind DIRECTLY to the SDK's
+    // framework-agnostic HostParamSurface (View::host_params()). This is what
+    // lets one view run unchanged embedded in JUCE (APVTS-backed), embedded in
+    // iPlug2 (IParams-backed), or native (StateStore-backed).
+    //
+    // Enable with route_changes_to_host_params(true): thereafter a user gesture
+    // on a param_key-tagged element drives host_params() directly
+    // (begin_gesture / set_param / end_gesture), and sync_from_host_params()
+    // pulls current values + display text back at tick. on_element_changed still
+    // fires as an additional observer, so existing consumers are unaffected. A
+    // control whose param_key is empty or unknown to the surface is left to
+    // local state (degrades exactly like a preview with a null surface). OFF by
+    // default — the embed/binder path is unchanged.
+    void route_changes_to_host_params(bool enable) { route_to_host_params_ = enable; }
+    bool routes_changes_to_host_params() const { return route_to_host_params_; }
+
+    // Host→UI snapshot, called once per tick (never from paint — see the
+    // HostParamSurface call-context contract). For every active-frame element
+    // with a non-empty param_key that host_params() resolves, pulls the current
+    // normalized value into the element (silently, via set_element_value) and,
+    // for Kind::value_label readouts whose `action` names a param key, pulls the
+    // formatted display text (via set_element_text). No-op when host_params() is
+    // null. This is the snapshot views paint from, so per-frame ABI/host calls
+    // never happen inside paint().
+    void sync_from_host_params();
+
+    // Dynamically re-key element `i` to a new host-parameter key (paged racks,
+    // tabbed effect slots). Updates the element's param_key, releases the old
+    // binding, and fires on_param_key_changed so an owning key→index registry
+    // (e.g. the embed facade's) can mark itself dirty and rebuild. The next
+    // sync_from_host_params() re-pulls the element under its new key. No-op if
+    // `i` is out of range or the key is unchanged.
+    void set_element_param_key(int i, std::string key);
+
+    // Fired by set_element_param_key after a successful re-key. A foreign-host
+    // embed uses this to invalidate its cached key→index registry; a native
+    // consumer can ignore it (sync_from_host_params resolves live). UI thread.
+    std::function<void(int index, const std::string& key)> on_param_key_changed;
+
+    // ── Host action/command channel ─────────────────────────────────────────
+    // When enabled, a Kind::action button click is ALSO forwarded to
+    // View::host_actions()->send_host_action(action, "{}") in addition to
+    // on_action. Lets a view trigger structural host commands (insert/remove/
+    // reorder rack slot, load preset) through the same framework-agnostic
+    // channel the import lane uses. OFF by default. args_json is "{}" here;
+    // richer payloads are the consumer's job via on_action.
+    void route_actions_to_host(bool enable) { route_actions_to_host_ = enable; }
+    bool routes_actions_to_host() const { return route_actions_to_host_; }
+
+    // ── Per-element hover + enabled/bypass state ─────────────────────────────
+    // DesignFrameView had no hover concept; every faithful port needs one
+    // (hover affordances, EDIT overlays, bypass dimming). Hover is tracked by
+    // hit-testing pointer moves (drive it with simulate_hover / the host's
+    // mouse-move). One element is hovered at a time; a disabled element is never
+    // hovered and never hit.
+    //
+    // The state is exposed for a subclass or painter to honor visually (e.g.
+    // brighten the hovered element, desaturate a disabled one) — the base view
+    // tracks state + interaction gating; pixel-level SVG restyling rides on the
+    // fragment-handle primitive. on_element_hover fires on the UI thread
+    // with the entered/exited index so a consumer can drive its own affordance.
+    int element_hovered() const { return hovered_element_; }
+    bool element_is_hovered(int i) const { return i >= 0 && i == hovered_element_; }
+    std::function<void(int index, bool entered)> on_element_hover;
+
+    // ── SVG fragment handles ─────────────────────────────────────────────────
+    // Tag a sub-tree of the live SVG once by a unique marker substring (a path
+    // `d`, the same handle the knob-needle patch keys on), then redraw JUST that
+    // fragment on demand — transformed (translate/rotate/scale), composited at an
+    // opacity, and optionally recolored — composited over the already-drawn frame
+    // through the SAME panel fit paint() uses, so it lands on its original spot.
+    // This is the primitive the hover-brighten / bypass-dim visuals ride on,
+    // and what a meter-needle redraw, reorder ghost, or focus glow reuses. The
+    // string/geometry work is the pure svg_fragment.hpp helpers; these methods add
+    // the Canvas::draw_svg call and the panel-fit draw box.
+    void register_fragment(std::string id, std::string marker);
+    bool has_fragment(const std::string& id) const {
+        return fragments_.find(id) != fragments_.end();
+    }
+    // Draw the registered fragment `id`. Returns false if the id is unknown, its
+    // marker isn't in the current SVG, the panel isn't laid out, or the backend
+    // can't render SVG. Never throws / never mutates the live document.
+    bool draw_fragment(canvas::Canvas& canvas, const std::string& id,
+                       const FragmentTransform& xform = {}, float opacity = 1.0f,
+                       const std::string& recolor_hex = {}) const;
+    // Lower-level: draw an arbitrary (not pre-registered) marker fragment.
+    bool draw_fragment_marker(canvas::Canvas& canvas, const std::string& marker,
+                              const FragmentTransform& xform = {},
+                              float opacity = 1.0f,
+                              const std::string& recolor_hex = {}) const;
+
+    // Enable/disable (bypass) element `i`. A disabled element is skipped by
+    // hit-testing — it cannot be hovered, dragged, clicked, or gesture — and if
+    // it was the hovered element the hover is cleared. Repaints. No-op out of
+    // range.
+    void set_element_enabled(int i, bool enabled);
+    bool element_enabled(int i) const {
+        return i >= 0 && i < static_cast<int>(elements_.size()) && elements_[i].enabled;
+    }
+
     // The panel is the view's natural size — a host should size its window to
     // this aspect so the design fills it with no letterbox (see paint()).
     float intrinsic_width() const override { return panel_w_; }
@@ -365,6 +473,8 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    void on_hover_move(Point pos) override;  // hover-track the element under the pointer
+    void on_mouse_leave() override;          // clear hover on exit
 
 protected:
     // Called after the active frame changes (set_active_frame or the initial
@@ -392,6 +502,14 @@ private:
     int   norm_to_choice(int i, float v) const;
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
+
+    // User-gesture emit helpers: route to host_params() (when routing is on and
+    // the element carries a key the surface resolves) AND fire the public
+    // on_element_changed / on_gesture_* callback. Single funnel so every
+    // value-bearing gesture path stays consistent.
+    void emit_element_changed(int i, float value);
+    void emit_gesture_begin(int i);
+    void emit_gesture_end(int i);
     // Build the native-overlay child widgets (TextEditor / ComboBox / tabs) for
     // the non-knob elements of the active frame; called when a frame activates.
     void build_overlays();
@@ -430,6 +548,19 @@ private:
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
+    bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
+    bool route_actions_to_host_ = false;  ///< forward action clicks to host_actions()
+    int hovered_element_ = -1;            ///< element under the pointer, or -1
+    std::unordered_map<std::string, std::string> fragments_;  ///< id -> marker
+
+    // The panel→view draw box for the current bounds — the exact (x,y,w,h) paint()
+    // hands Canvas::draw_svg for the full frame. A fragment mini-document drawn at
+    // this box composites over its original position. Returns false (leaves out-*
+    // untouched) when the panel isn't laid out.
+    bool current_svg_draw_box(float& ox, float& oy, float& ow, float& oh) const;
+
+    // Set the hovered element (fires on_element_hover on change, repaints).
+    void set_hovered_element(int i);
 };
 
 // The native-overlay widget for a `tab_group` element: a compact segmented

@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6255,
+      "max_loc":     6275,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
@@ -117,7 +117,7 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1611,
+      "max_loc": 1658,
       "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
     },
     {
