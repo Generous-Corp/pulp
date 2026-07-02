@@ -25,6 +25,17 @@
 
 namespace pulp::audio {
 
+// Plausible-audio sample-rate window. A hostile WAV header claiming, say, 500 MHz
+// makes the Kaiser resampler demand ~10⁹ taps (a multi-GB allocation + minutes of
+// design work); a higher claimed rate also *shortens* the computed duration, so it
+// sails past the length preflight. Anything outside this range is not a real audio
+// file — reject it. The ceiling covers every standard hi-res rate (up to 384 kHz)
+// and is set so the natural resampler tap count for a downsample to a normal
+// session rate stays under Resampler::prepare's 65536-tap cap — i.e. an accepted
+// IR is resampled at full designed quality, never silently clamped.
+inline constexpr double kMinIrSampleRate = 4000.0;
+inline constexpr double kMaxIrSampleRate = 400000.0;
+
 struct ImpulseResponseLoadOptions {
     /// Truncate the IR to at most this many seconds (measured at both the source
     /// and the target rate so a huge file can't OOM the decode or the FFT). 0
@@ -47,12 +58,17 @@ inline std::optional<std::vector<float>> read_impulse_response(
     const double session_sr = target_sample_rate > 0.0 ? target_sample_rate : 48000.0;
 
     // Preflight on metadata (no decode) to reject a pathologically large file
-    // before read() pulls the whole thing into memory.
+    // before read() pulls the whole thing into memory. A claimed sample rate
+    // outside the plausible-audio window is rejected outright (it also defeats the
+    // duration math), and the duration check uses the real rate, not an absurd one.
     if (opts.reject_longer_than_seconds > 0.0) {
         if (auto info = FormatRegistry::instance().read_info(path)) {
             if (info->num_frames == 0) return std::nullopt;
-            const double info_sr =
-                info->sample_rate > 0 ? static_cast<double>(info->sample_rate) : session_sr;
+            const double claimed_sr = static_cast<double>(info->sample_rate);
+            if (info->sample_rate > 0
+                && (claimed_sr < kMinIrSampleRate || claimed_sr > kMaxIrSampleRate))
+                return std::nullopt;
+            const double info_sr = info->sample_rate > 0 ? claimed_sr : session_sr;
             const double dur = static_cast<double>(info->num_frames) / info_sr;
             if (dur > opts.reject_longer_than_seconds) return std::nullopt;
         }
@@ -62,6 +78,15 @@ inline std::optional<std::vector<float>> read_impulse_response(
     if (!data || data->channels.empty() || data->num_frames() == 0) return std::nullopt;
     const double file_sr =
         data->sample_rate > 0 ? static_cast<double>(data->sample_rate) : session_sr;
+
+    // The metadata preflight can fail open (a header that defeats read_info but not
+    // read, or a hostile rate). Re-check against the DECODED data, fail-closed:
+    // reject an out-of-range file rate (which would explode the resampler) and any
+    // file whose true duration exceeds the reject threshold.
+    if (file_sr < kMinIrSampleRate || file_sr > kMaxIrSampleRate) return std::nullopt;
+    if (opts.reject_longer_than_seconds > 0.0
+        && static_cast<double>(data->num_frames()) / file_sr > opts.reject_longer_than_seconds)
+        return std::nullopt;
 
     // Truncate at the source rate so the resampled result also fits the cap.
     std::size_t frames = static_cast<std::size_t>(data->num_frames());

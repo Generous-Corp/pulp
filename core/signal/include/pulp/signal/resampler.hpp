@@ -227,6 +227,15 @@ public:
         const double beta = kaiser_beta_for_stopband(quality_.stopband_db);
         std::size_t n_taps = kaiser_length_for_transition(quality_.stopband_db, df_norm);
 
+        // Hard-cap the prototype length. The tap count grows with the rate ratio, so
+        // an extreme input:output ratio (e.g. a hostile IR header) would otherwise
+        // demand a multi-GB prototype and minutes of design work. A real audio
+        // resample needs only a few hundred taps; this ceiling is orders of
+        // magnitude above that, so it only ever clamps a pathological ratio —
+        // trading a slightly wider transition band for a bounded allocation.
+        constexpr std::size_t kMaxProtoTaps = 1u << 16;   // 65536
+        if (n_taps > kMaxProtoTaps) n_taps = kMaxProtoTaps;
+
         // Force n_taps to be `L * taps_per_phase` so the polyphase
         // decomposition is rectangular.
         const std::size_t L = quality_.phases;
