@@ -11,6 +11,8 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/reload_transaction.hpp>
+#include <pulp/format/reload/reload_swap_units.hpp>
+#include <pulp/format/reload/live_swap_transaction.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -295,5 +297,42 @@ TEST_CASE("hot-reload rejects a candidate that fails the behavioral probe (NaN)"
     INFO("detail: " << r.detail);
     REQUIRE(r.detail.find("non-finite") != std::string::npos);
     REQUIRE(render_one(slot) == 0.5f);                 // live DSP untouched (no swap)
+}
+#endif
+
+#if defined(RELOAD_LOGIC_COMPATIBLE) && defined(RELOAD_LOGIC_INCOMPATIBLE)
+// item 1.8b/2.5b: the real DSP SwapUnit adapter drives a reload through the
+// unified transaction — a compatible pack swaps, an incompatible one fails the
+// transaction and leaves the live DSP untouched (atomic; DSP stage is terminal).
+TEST_CASE("DspReloadSwapUnit swaps DSP through apply_live_swap",
+          "[reload][transaction][swap-unit][1.8]") {
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+    ProcessorHotSwapSlot slot(std::move(initial));
+    format::PrepareContext ctx;
+    const BuildFingerprint host = current_build_fingerprint();
+    ReloadSession session(slot, live, host, ctx);
+
+    REQUIRE(render_one(slot) == 0.5f);   // initial unity × 0.5
+
+    SECTION("a compatible reload succeeds via the transaction") {
+        DspReloadSwapUnit unit(session, RELOAD_LOGIC_COMPATIBLE);
+        std::vector<SwapUnit*> units{&unit};
+        auto r = apply_live_swap(units);
+        REQUIRE(r.ok);
+        REQUIRE(unit.last_outcome().ok());
+        REQUIRE(render_one(slot) == 1.0f);   // DSP swapped
+    }
+    SECTION("an incompatible reload fails the transaction, live DSP untouched") {
+        DspReloadSwapUnit unit(session, RELOAD_LOGIC_INCOMPATIBLE);
+        std::vector<SwapUnit*> units{&unit};
+        auto r = apply_live_swap(units);
+        REQUIRE_FALSE(r.ok);
+        REQUIRE(r.failed_stage == "dsp");
+        REQUIRE(render_one(slot) == 0.5f);   // atomic: unchanged
+    }
 }
 #endif
