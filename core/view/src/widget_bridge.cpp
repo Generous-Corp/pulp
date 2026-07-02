@@ -807,6 +807,12 @@ void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
         else if (auto* t = dynamic_cast<Toggle*>(view)) out.scalar_values[id] = t->is_on() ? 1.0f : 0.0f;
         else if (auto* cb = dynamic_cast<Checkbox*>(view)) out.scalar_values[id] = cb->is_checked() ? 1.0f : 0.0f;
         else if (auto* tb = dynamic_cast<ToggleButton*>(view)) out.scalar_values[id] = tb->is_on() ? 1.0f : 0.0f;
+        // Selection controls: their selected INDEX is reload state too — without
+        // this a dev reload silently resets the user's dropdown / segment choice
+        // (item 1.4 coverage gap). Stored as the index-as-float in scalar_values;
+        // restore keys by id so the type is unambiguous.
+        else if (auto* combo = dynamic_cast<ComboBox*>(view)) out.scalar_values[id] = static_cast<float>(combo->selected());
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(view)) out.scalar_values[id] = static_cast<float>(seg->selected());
         else if (auto* xy = dynamic_cast<XYPad*>(view)) out.xy_values[id] = {.x = xy->x_value(), .y = xy->y_value()};
     }
 }
@@ -821,6 +827,10 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
         else if (auto* t = dynamic_cast<Toggle*>(it->second)) t->set_on(val > 0.5f);
         else if (auto* cb = dynamic_cast<Checkbox*>(it->second)) cb->set_checked(val > 0.5f);
         else if (auto* tb = dynamic_cast<ToggleButton*>(it->second)) tb->set_on(val > 0.5f);
+        // Selection controls — restore the index SILENTLY so re-applying it during
+        // a reload doesn't fire the widget's on_change as if the user clicked.
+        else if (auto* combo = dynamic_cast<ComboBox*>(it->second)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
     }
     for (auto& [id, val] : snapshot.xy_values) {
         auto it = widgets_.find(id);

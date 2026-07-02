@@ -7,6 +7,7 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <chrono>
 #include <filesystem>
@@ -648,6 +649,43 @@ TEST_CASE("ScriptedUiSession reload rolls back cleanly on a bad theme (no post-c
     write_text(theme_path, R"({ "colors": { "bg.primary": "#445566" } })");
     REQUIRE(session.reload(&error));
     REQUIRE(session.bridge()->widget("after") != nullptr);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession preserves ComboBox selection across reload (item 1.4)",
+          "[view][scripted-ui][hotreload]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-combo");
+    const auto script_path = temp_dir / "main.js";
+    // Combo with 3 items; the script does NOT set a selection, so a fresh build
+    // defaults to index 0. Preservation must come from the reload snapshot.
+    const char* script_v1 =
+        "createCombo('mode', '');\nsetItems('mode', ['a','b','c']);\n";
+    write_text(script_path, script_v1);
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    auto* combo = dynamic_cast<ComboBox*>(session.bridge()->widget("mode"));
+    REQUIRE(combo != nullptr);
+    REQUIRE(combo->selected() == 0);          // default
+    combo->set_selected(2);                    // user picks the third item
+
+    // Reload (same combo + items, plus a new widget to force a real rebuild).
+    write_text(script_path, std::string(script_v1) + "createLabel('added', 'v2', '');\n");
+    REQUIRE(session.reload(&error));
+
+    auto* combo2 = dynamic_cast<ComboBox*>(session.bridge()->widget("mode"));
+    REQUIRE(combo2 != nullptr);
+    REQUIRE(combo2->selected() == 2);          // selection preserved across reload
+    REQUIRE(session.bridge()->widget("added") != nullptr);  // reload really happened
 
     fs::remove_all(temp_dir);
 }
