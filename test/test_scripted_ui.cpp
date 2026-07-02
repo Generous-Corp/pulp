@@ -610,3 +610,44 @@ TEST_CASE("ScriptedUiSession records JS-axis reload metrics (item 1.2)",
 
     fs::remove_all(temp_dir);
 }
+
+TEST_CASE("ScriptedUiSession reload rolls back cleanly on a bad theme (no post-commit failure)",
+          "[view][scripted-ui][reload][rollback]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-rollback");
+    const auto script_path = temp_dir / "main.js";
+    const auto theme_path = temp_dir / "theme.json";
+    write_text(script_path, "createLabel('before', 'v1', '');\n");
+    write_text(theme_path, R"({ "colors": { "bg.primary": "#112233" } })");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script_path,
+        .enable_hot_reload = false,
+        .enable_theme_reload = true,
+    });
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(session.bridge()->widget("before") != nullptr);
+
+    // New code (would add 'after') + a MALFORMED theme file. The theme is
+    // pre-resolved before the commit, so the reload must FAIL with the OLD UI
+    // fully intact — NOT commit the new bridge and then error (item 1.5).
+    write_text(script_path, "createLabel('after', 'v2', '');\n");
+    write_text(theme_path, "{ this is not valid json ]]]");
+
+    std::string reload_error;
+    REQUIRE_FALSE(session.reload(&reload_error));      // reload failed…
+    REQUIRE_FALSE(reload_error.empty());
+    REQUIRE(session.bridge()->widget("before") != nullptr);  // …old UI still live
+    REQUIRE(session.bridge()->widget("after") == nullptr);   // …new NOT committed
+
+    // A subsequent good reload (fix the theme) still works — no wedged state.
+    write_text(theme_path, R"({ "colors": { "bg.primary": "#445566" } })");
+    REQUIRE(session.reload(&error));
+    REQUIRE(session.bridge()->widget("after") != nullptr);
+
+    fs::remove_all(temp_dir);
+}

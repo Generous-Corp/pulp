@@ -110,6 +110,13 @@ private:
 
     bool rebuild_from_code(const std::string& code, bool preserve_state, std::string* error);
     bool apply_theme_override(std::string* error);
+    // Read + parse the sibling theme override onto `base` WITHOUT mutating any
+    // live state — the FALLIBLE half of a theme apply, split out so a reload can
+    // validate the theme BEFORE the irreversible bridge commit (rollback-safety,
+    // item 1.5). Fills out_* and returns false (with `error`) on a bad theme file.
+    bool resolve_theme_override(const Theme& base, Theme& out_merged, bool& out_exists,
+                                std::optional<std::filesystem::file_time_type>& out_write_time,
+                                std::string* error) const;
     bool poll_theme_reload(std::string* error);
 
     static std::string read_text_file(const std::filesystem::path& path);

@@ -159,6 +159,21 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         probe_bridge->load_script(code);
         const auto t_probe = clock::now();
 
+        // Pre-resolve the theme override HERE — the last FALLIBLE step — BEFORE
+        // we snapshot/clear/commit, so a bad theme file fails the reload with the
+        // live UI fully intact instead of AFTER the bridge is already swapped
+        // (rollback-safety, item 1.5). The apply past the commit is infallible.
+        Theme resolved_theme = theme_for_reload;
+        bool next_theme_exists = false;
+        std::optional<std::filesystem::file_time_type> next_theme_write_time;
+        if (theme_reload_enabled_ &&
+            !resolve_theme_override(theme_for_reload, resolved_theme, next_theme_exists,
+                                    next_theme_write_time, error)) {
+            last_reload_metrics_.probe_ms = ms(t0, t_probe);
+            last_reload_metrics_.total_ms = ms(t0, clock::now());
+            return false;  // nothing snapshot/cleared/committed yet — old UI intact
+        }
+
         WidgetReloadSnapshot saved_values;
         if (preserve_state && bridge_) {
             bridge_->snapshot_values(saved_values);
@@ -179,11 +194,12 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
 
         engine_ = std::move(next_engine);
         bridge_ = std::move(next_bridge);
-        if (!apply_theme_override(error)) {
-            last_reload_metrics_.probe_ms = ms(t0, t_probe);
-            last_reload_metrics_.snapshot_ms = ms(t_probe, t_snapshot);
-            last_reload_metrics_.total_ms = ms(t0, clock::now());
-            return false;
+        // Infallible apply of the pre-resolved theme — no failure point past the
+        // commit (item 1.5).
+        if (theme_reload_enabled_) {
+            root_.set_theme(resolved_theme);
+            last_theme_exists_ = next_theme_exists;
+            last_theme_write_time_ = next_theme_write_time;
         }
         const auto t_rebuild = clock::now();
         if (preserve_state) {
@@ -208,31 +224,27 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
     }
 }
 
-bool ScriptedUiSession::apply_theme_override(std::string* error) {
-    if (!theme_reload_enabled_) {
-        return true;
-    }
-
-    root_.set_theme(base_theme_);
-
+bool ScriptedUiSession::resolve_theme_override(
+    const Theme& base, Theme& out_merged, bool& out_exists,
+    std::optional<std::filesystem::file_time_type>& out_write_time,
+    std::string* error) const {
     if (!std::filesystem::exists(theme_path_)) {
-        last_theme_exists_ = false;
-        last_theme_write_time_.reset();
+        out_merged = base;          // no override file → the base theme as-is
+        out_exists = false;
+        out_write_time.reset();
         return true;
     }
-
     auto json = read_text_file(theme_path_);
     if (json.empty()) {
         if (error) *error = "could not read theme file: " + theme_path_.string();
         return false;
     }
-
     try {
-        auto merged = base_theme_;
-        merged.apply_overrides(Theme::from_json(json));
-        root_.set_theme(merged);
-        last_theme_exists_ = true;
-        last_theme_write_time_ = safe_last_write_time(theme_path_);
+        Theme merged = base;
+        merged.apply_overrides(Theme::from_json(json));   // FALLIBLE: JSON parse
+        out_merged = std::move(merged);
+        out_exists = true;
+        out_write_time = safe_last_write_time(theme_path_);
         return true;
     } catch (const std::exception& e) {
         if (error) *error = e.what();
@@ -241,6 +253,22 @@ bool ScriptedUiSession::apply_theme_override(std::string* error) {
         if (error) *error = describe_exception();
         return false;
     }
+}
+
+bool ScriptedUiSession::apply_theme_override(std::string* error) {
+    if (!theme_reload_enabled_) {
+        return true;
+    }
+    Theme merged;
+    bool exists = false;
+    std::optional<std::filesystem::file_time_type> write_time;
+    if (!resolve_theme_override(base_theme_, merged, exists, write_time, error)) {
+        return false;
+    }
+    root_.set_theme(merged);           // infallible apply
+    last_theme_exists_ = exists;
+    last_theme_write_time_ = write_time;
+    return true;
 }
 
 bool ScriptedUiSession::poll_theme_reload(std::string* error) {
