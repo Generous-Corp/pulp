@@ -114,3 +114,55 @@ TEST_CASE("a throwing rollback is best-effort and flagged, others still run", "[
     REQUIRE(log == std::vector<std::string>{
         "apply:a", "apply:b", "apply:c", "rollback:b", "rollback:a"});
 }
+
+// ── SwapUnit contract (item 2.5) ──────────────────────────────────────────────
+namespace {
+// A fake swappable unit: records to_stage/apply/rollback into a shared log.
+class FakeUnit : public SwapUnit {
+public:
+    FakeUnit(std::vector<std::string>& log, std::string name, bool apply_result)
+        : log_(log), name_(std::move(name)), apply_result_(apply_result) {}
+    std::string name() const override { return name_; }
+    SwapStage to_stage() override {
+        log_.push_back("stage:" + name_);   // snapshot happens here
+        return SwapStage{
+            name_,
+            [this] { log_.push_back("apply:" + name_); return apply_result_; },
+            [this] { log_.push_back("rollback:" + name_); }};
+    }
+private:
+    std::vector<std::string>& log_;
+    std::string name_;
+    bool apply_result_;
+};
+}  // namespace
+
+TEST_CASE("SwapUnit transaction commits and snapshots all units up front", "[reload][transaction][1.8][2.5]") {
+    std::vector<std::string> log;
+    FakeUnit ux(log, "ux", true), dsp(log, "dsp", true);
+    std::vector<SwapUnit*> units{&ux, &dsp};
+    auto r = apply_live_swap(units);
+    REQUIRE(r.ok);
+    // Both stages built (state snapshotted) before either applies, then applied.
+    REQUIRE(log == std::vector<std::string>{"stage:ux", "stage:dsp", "apply:ux", "apply:dsp"});
+}
+
+TEST_CASE("SwapUnit transaction rolls earlier units back when a later unit fails", "[reload][transaction][1.8][2.5]") {
+    std::vector<std::string> log;
+    FakeUnit ux(log, "ux", true), dsp(log, "dsp", false);
+    std::vector<SwapUnit*> units{&ux, &dsp};
+    auto r = apply_live_swap(units);
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.failed_stage == "dsp");
+    REQUIRE(log == std::vector<std::string>{
+        "stage:ux", "stage:dsp", "apply:ux", "apply:dsp", "rollback:ux"});
+}
+
+TEST_CASE("SwapUnit transaction skips null units", "[reload][transaction][1.8][2.5]") {
+    std::vector<std::string> log;
+    FakeUnit ux(log, "ux", true);
+    std::vector<SwapUnit*> units{nullptr, &ux, nullptr};
+    auto r = apply_live_swap(units);
+    REQUIRE(r.ok);
+    REQUIRE(log == std::vector<std::string>{"stage:ux", "apply:ux"});
+}

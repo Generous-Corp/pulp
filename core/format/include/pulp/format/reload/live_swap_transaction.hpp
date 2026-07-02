@@ -85,4 +85,43 @@ inline LiveSwapResult apply_live_swap(const std::vector<SwapStage>& stages) {
     return {true, "", "", true};
 }
 
+/// The contract a swappable subsystem implements to join a live-swap transaction
+/// (live-swap plan item 2.5). A `SwapUnit` is anything that can be swapped as one
+/// half of a unified reload — DSP (a `ReloadSession`), scripted UI (a
+/// `ScriptedUiSession`), or a future GPU-resource unit. It produces a `SwapStage`
+/// that captures its current state for rollback at the moment `to_stage()` is
+/// called; the transaction then applies the stages in order and unwinds on
+/// failure (see `apply_live_swap`).
+///
+/// Implementations MUST honour the same atomicity + ordering contract as
+/// `SwapStage`: `apply` leaves no partial state on failure, and units are handed
+/// to the transaction easiest-to-roll-back first so the hardest-to-undo unit is
+/// last. `to_stage()` is expected to snapshot the pre-swap state now (e.g. the
+/// current UI code + widget values, or "keep the current processor") so the
+/// returned `rollback` can restore it if a LATER unit fails.
+class SwapUnit {
+public:
+    virtual ~SwapUnit() = default;
+
+    /// Human-readable identity, surfaced in `LiveSwapResult::failed_stage`.
+    virtual std::string name() const = 0;
+
+    /// Build the stage for this unit's pending swap, capturing the current state
+    /// for rollback. Called once per transaction, before any stage is applied.
+    virtual SwapStage to_stage() = 0;
+};
+
+/// Run an ordered set of `SwapUnit`s as one transaction: collect each unit's
+/// stage (snapshotting current state), then delegate to `apply_live_swap`. Order
+/// units easiest-rollback-first (UX before the DSP slot swap). Null entries are
+/// skipped.
+inline LiveSwapResult apply_live_swap(const std::vector<SwapUnit*>& units) {
+    std::vector<SwapStage> stages;
+    stages.reserve(units.size());
+    for (auto* unit : units) {
+        if (unit) stages.push_back(unit->to_stage());
+    }
+    return apply_live_swap(stages);
+}
+
 }  // namespace pulp::format::reload
