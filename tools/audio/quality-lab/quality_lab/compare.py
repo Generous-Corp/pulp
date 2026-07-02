@@ -29,7 +29,13 @@ from typing import Any, Callable
 import numpy as np
 
 from . import audio_io, schema
-from .dsp import hf_fraction_delta, null_residual_db, relative_centroid_shift
+from .dsp import (
+    dc_offset_metrics,
+    hf_band_bin_count,
+    hf_fraction_delta,
+    null_residual_db,
+    relative_centroid_shift,
+)
 
 # Re-export the schema's compare vocabulary so the agent-facing API is one import.
 SCHEMA = schema.COMPARE_SCHEMA
@@ -48,6 +54,14 @@ CORROBORATION_NA = schema.COMPARE_CORROBORATION_NA
 _LTAS_N_FFT = 2048  # a valid LTAS needs at least this many samples
 _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
 
+# added-hf band. Below `_HF_MIN_BINS` LTAS bins at/above the cutoff, the >=cutoff band is too
+# narrow for an energy *fraction* to mean anything (e.g. sr=16 kHz → the >=8 kHz band is the
+# single Nyquist bin), so the axis reports `not_applicable` instead of a confident fraction. 8
+# bins cleanly separates degenerate rates (<=~16 kHz) from every normal one (>=22.05 kHz has
+# hundreds of bins), keeping the guard honest without excluding a real working rate.
+_HF_CUTOFF_HZ = 8000.0
+_HF_MIN_BINS = 8
+
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
 # rel means the residual is ~1/1000 of the signal RMS. It gates *materiality* only, never the
@@ -56,6 +70,7 @@ _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
 # own (and trailing silence does not), keeping the identity claim honest for any render length.
 _RESIDUAL_MATERIAL_DB = -60.0
 _RAW_NULL_TOOL = "quality-lab:null_residual"
+_RAW_DC_TOOL = "quality-lab:dc_offset"
 
 
 # ── Axis registry ───────────────────────────────────────────────────────────────────────
@@ -114,7 +129,12 @@ def _tonal_summary(verdict: str, env: dict[str, Any]) -> str:
 
 
 def _added_hf_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
-    delta, hf_ref, hf_cand = hf_fraction_delta(reference, matched, sr)
+    n_hf = hf_band_bin_count(sr, _HF_CUTOFF_HZ, _LTAS_N_FFT)
+    if n_hf < _HF_MIN_BINS:
+        return {"applicable": False,
+                "reason": (f"high-frequency band too narrow at {sr} Hz: only {n_hf} LTAS "
+                           f"bin(s) >= {_HF_CUTOFF_HZ:.0f} Hz (need >= {_HF_MIN_BINS})")}
+    delta, hf_ref, hf_cand = hf_fraction_delta(reference, matched, sr, _HF_CUTOFF_HZ)
     direction = "added HF" if delta > 0 else "reduced HF"
     return {"applicable": True, "delta": delta, "unit": "hf_energy_frac_delta",
             "tolerance_class": "hf_fizz.v1",
@@ -285,8 +305,23 @@ def _advisory_block(reference: np.ndarray, candidate: np.ndarray, primary_env: d
         detail={"ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"],
                 "level_match_applied": nr.level_matched},
     )
+    # DC-offset diagnostic (appended AFTER null_residual so the residual stays at index 0 for the
+    # corroboration cross-check and its tests). A DC offset drags the LTAS centroid down and can
+    # masquerade as tonal 'dulling' — surface it, off-gate, so the headline stops misdirecting.
+    dc = dc_offset_metrics(reference, candidate)
+    dc_raw = schema.compare_raw_comparator(
+        "dc_offset", _RAW_DC_TOOL, "mean_amplitude",
+        ("Per-signal DC offset (mean sample value) and its magnitude relative to RMS. A DC "
+         "component concentrates energy in LTAS bin 0, pulling the spectral centroid DOWN — a "
+         "nonzero offset can read as tonal 'dulling' when nothing timbral changed. Informational "
+         "only; never a verdict. `present` marks an offset large enough to bias the measurement."),
+        ref_value=round(dc.ref_mean, 6), cand_value=round(dc.cand_mean, 6),
+        delta=round(dc.cand_mean - dc.ref_mean, 6),
+        detail={"ref_frac_of_rms": round(dc.ref_frac, 4),
+                "cand_frac_of_rms": round(dc.cand_frac, 4), "present": bool(dc.present)},
+    )
     exceeds = bool(primary_env["materiality"]["exceeds"])
-    return schema.compare_advisory([raw], _corroboration(exceeds, nr.residual_db, length))
+    return schema.compare_advisory([raw, dc_raw], _corroboration(exceeds, nr.residual_db, length))
 
 
 def _resolve(profile: str) -> _Axis:
@@ -294,6 +329,28 @@ def _resolve(profile: str) -> _Axis:
     if axis is None:
         raise ValueError(f"unknown profile {profile!r} (available: {', '.join(PROFILES)})")
     return axis
+
+
+def _summary_with_disclosures(
+    axis: _Axis, verdict: str, env: dict[str, Any], advisory: dict[str, Any] | None
+) -> str:
+    """The axis's own summary plus any honesty disclosures (mono downmix, DC offset). These are
+    PRESENTATION ONLY — appended after the verdict is decided, reading only off-gate facts (the
+    envelope's `downmix` note and the advisory's `dc_offset` comparator); they never change the
+    verdict. This stops the headline from actively misdirecting (a DC offset read as 'dulling',
+    or a 'no change' that silently discarded a stereo difference)."""
+    summary = axis.summarize(verdict, env)
+    # The structured `downmix` field always discloses the fold (machine-readable); the prose clause
+    # is suppressed on `invalid`, where "we downmixed to mono" reads oddly on a report that never
+    # actually compared anything.
+    if env.get("downmix") and verdict != VERDICT_INVALID:
+        summary += " Stereo/spatial image not compared — input(s) were downmixed to mono."
+    if advisory:
+        dc = next((r for r in advisory.get("raw_comparators", []) if r.get("name") == "dc_offset"), None)
+        if dc and dc.get("detail", {}).get("present"):
+            summary += (" A DC offset is present in the input(s); it biases the LTAS toward bin 0 "
+                        "and can be mistaken for a tonal change — high-pass the inputs before comparing.")
+    return summary
 
 
 def compare_arrays(
@@ -304,11 +361,15 @@ def compare_arrays(
     profile: str = "tonal-balance",
     reference_role: str = "peer",
     threshold: float | None = None,
+    input_channels: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Compare two in-memory signals and return the full report (envelope + verdict). Pure —
     no file I/O. Raises ValueError on a caller-contract error (unknown profile/role, out-of-range
     threshold, non-positive sr); returns an `invalid` report for *data* problems (non-finite
-    samples). `threshold` defaults to the selected axis's default."""
+    samples). `threshold` defaults to the selected axis's default. `input_channels` is the
+    ORIGINAL (ref, cand) channel counts when the signals came from multichannel files — supplied
+    by `compare_files` so the report can disclose that a stereo/spatial input was folded to mono
+    (the signals themselves are already mono here)."""
     axis = _resolve(profile)
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
@@ -329,10 +390,12 @@ def compare_arrays(
         env = _measure(axis, reference, candidate, sr, threshold)
         advisory = _advisory_block(reference, candidate, env)
 
+    if input_channels is not None and (input_channels[0] > 1 or input_channels[1] > 1):
+        env["downmix"] = schema.compare_downmix_note(input_channels[0], input_channels[1])
+
     verdict = _verdict(axis, env, reference_role)
-    return schema.compare_report(
-        profile, reference_role, verdict, axis.summarize(verdict, env), [env], advisory=advisory
-    )
+    summary = _summary_with_disclosures(axis, verdict, env, advisory)
+    return schema.compare_report(profile, reference_role, verdict, summary, [env], advisory=advisory)
 
 
 def _sha256(path: str) -> str:
@@ -360,8 +423,8 @@ def compare_files(
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
     try:
-        ref, sr_ref = audio_io.load_wav(reference_wav)
-        cand, sr_cand = audio_io.load_wav(candidate_wav)
+        ref, sr_ref, ref_ch = audio_io.load_wav_info(reference_wav)
+        cand, sr_cand, cand_ch = audio_io.load_wav_info(candidate_wav)
     except Exception as exc:  # decode/open failure → structured invalid, not a crash
         return _invalid_report(profile, reference_role, f"could not read inputs: {exc}",
                                provenance={"reference": reference_wav, "candidate": candidate_wav,
@@ -374,7 +437,8 @@ def compare_files(
                         "cand_sample_rate": sr_cand})
 
     report = compare_arrays(
-        ref, cand, sr_ref, profile=profile, reference_role=reference_role, threshold=threshold
+        ref, cand, sr_ref, profile=profile, reference_role=reference_role, threshold=threshold,
+        input_channels=(ref_ch, cand_ch),
     )
     report["provenance"] = {
         "reference": reference_wav,
@@ -382,6 +446,8 @@ def compare_files(
         "ref_sha256": _sha256(reference_wav),
         "cand_sha256": _sha256(candidate_wav),
         "sample_rate": sr_ref,
+        "ref_channels": ref_ch,
+        "cand_channels": cand_ch,
         "profile": profile,
     }
     return report

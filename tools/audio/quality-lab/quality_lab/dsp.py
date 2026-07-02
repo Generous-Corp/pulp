@@ -21,6 +21,18 @@ class NullResidual(NamedTuple):
     level_matched: bool
 
 
+class DcOffset(NamedTuple):
+    """Result of :func:`dc_offset_metrics`. `ref_mean`/`cand_mean` are the raw DC (mean sample
+    value) of each signal; `ref_frac`/`cand_frac` are those magnitudes relative to each signal's
+    own RMS; `present` is True when either fraction reaches the significance floor — i.e. the DC
+    component is large enough to bias LTAS bin 0 and masquerade as a tonal change."""
+    ref_mean: float
+    cand_mean: float
+    ref_frac: float
+    cand_frac: float
+    present: bool
+
+
 def highband(y: np.ndarray) -> np.ndarray:
     """Cheap high-pass via first difference — emphasizes attack edges (>~300 Hz)."""
     return np.diff(np.asarray(y, dtype=np.float64), prepend=0.0)
@@ -103,6 +115,19 @@ def relative_centroid_shift(
     return rel, c_ref, c_cand
 
 
+def hf_band_bin_count(sr: int, cutoff_hz: float = 8000.0, n_fft: int = 2048) -> int:
+    """Number of LTAS bins at/above ``cutoff_hz`` for this sample rate + FFT size.
+
+    How much spectral support the added-HF band actually has. As the Nyquist frequency
+    approaches the cutoff the band collapses to one or two bins, where an energy *fraction*
+    over it is meaningless — e.g. at ``sr=16 kHz`` the ``>=8 kHz`` band is the single Nyquist
+    bin. `compare`'s added-hf axis uses this to declare `not_applicable` rather than report a
+    confident fraction over a degenerate band. Must be called with the SAME ``n_fft`` the LTAS
+    uses (`ltas` default 2048) or the count will not match the measured band."""
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
+    return int(np.count_nonzero(freqs >= cutoff_hz))
+
+
 def hf_energy_fraction(freqs: np.ndarray, mag: np.ndarray, cutoff_hz: float) -> float:
     """Fraction of summed LTAS magnitude-squared at/above ``cutoff_hz`` (0..1).
 
@@ -129,6 +154,29 @@ def hf_fraction_delta(
     hf_ref = hf_energy_fraction(f, m_ref, cutoff_hz)
     hf_cand = hf_energy_fraction(f, m_cand, cutoff_hz)
     return hf_cand - hf_ref, hf_ref, hf_cand
+
+
+def dc_offset_metrics(
+    reference: np.ndarray, candidate: np.ndarray, present_frac: float = 0.01
+) -> DcOffset:
+    """Per-signal DC offset (mean sample value) + its magnitude relative to RMS.
+
+    A DC component concentrates energy in LTAS bin 0, which pulls the spectral centroid DOWN —
+    so a nonzero offset can read as tonal 'dulling' when nothing timbral changed. This is a
+    deterministic, algorithm-agnostic diagnostic for `compare`'s advisory namespace; it makes no
+    good/bad judgment. `present` fires when either signal's |mean|/RMS reaches ``present_frac``
+    (default 1%, ~-40 dB) — small enough to catch a real offset, large enough not to trip on the
+    numeric floor. Pure; operates on the raw (not level-matched) inputs."""
+    ref = np.asarray(reference, dtype=np.float64)
+    cand = np.asarray(candidate, dtype=np.float64)
+    ref_mean = float(np.mean(ref)) if ref.size else 0.0
+    cand_mean = float(np.mean(cand)) if cand.size else 0.0
+    ref_rms = float(np.sqrt(np.mean(ref * ref))) if ref.size else 0.0
+    cand_rms = float(np.sqrt(np.mean(cand * cand))) if cand.size else 0.0
+    ref_frac = abs(ref_mean) / ref_rms if ref_rms > 1e-12 else 0.0
+    cand_frac = abs(cand_mean) / cand_rms if cand_rms > 1e-12 else 0.0
+    present = max(ref_frac, cand_frac) >= present_frac
+    return DcOffset(ref_mean, cand_mean, ref_frac, cand_frac, present)
 
 
 def null_residual_db(reference: np.ndarray, candidate: np.ndarray) -> NullResidual:

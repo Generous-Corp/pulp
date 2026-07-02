@@ -313,6 +313,104 @@ def test_cli_exit_code_is_2_only_for_invalid(tmp_path, capsys):
     assert "invalid" in capsys.readouterr().out
 
 
+# ── Slice 1: honesty fixes (downmix disclosure, added-hf applicability, DC-offset) ────────
+
+def test_stereo_candidate_downmix_is_disclosed(tmp_path):
+    """A stereo candidate whose MID equals the reference reads 'no material change' on the mono
+    axis — but the report MUST disclose that it folded to mono and never saw the stereo image,
+    rather than silently returning a clean verdict (honesty-per-measurement)."""
+    ref, sr = _drum()
+    side = 0.5 * highband(ref)                       # decorrelated side content (a widener)
+    cand_stereo = np.stack([ref + side, ref - side], axis=1)  # mid == ref, but now wide
+    ref_p, cand_p = str(tmp_path / "r.wav"), str(tmp_path / "c.wav")
+    audio_io.save_wav(ref_p, ref, sr)
+    audio_io.save_wav(cand_p, cand_stereo, sr)
+
+    report = compare.compare_files(ref_p, cand_p, reference_role="golden")
+    assert report["provenance"]["ref_channels"] == 1
+    assert report["provenance"]["cand_channels"] == 2
+    m = report["measurements"][0]
+    assert m["downmix"]["applied"] is True
+    assert m["downmix"]["cand_channels"] == 2
+    assert "downmix" in report["summary"].lower()
+    # The mono downmix is ~identical to the reference, so the axis itself sees no material change.
+    assert report["verdict"] == compare.VERDICT_NO_CHANGE
+
+
+def test_mono_inputs_carry_no_downmix_note(tmp_path):
+    """Mono-in/mono-out must NOT add a downmix note — the disclosure only fires on real folding."""
+    ref, sr = _drum()
+    report = compare.compare_arrays(ref, ref.copy(), sr, input_channels=(1, 1))
+    assert "downmix" not in report["measurements"][0]
+    assert "downmix" not in report["summary"].lower()
+
+
+def test_invalid_report_keeps_downmix_field_but_drops_prose_clause():
+    """On the invalid path the structured `downmix` field still discloses the fold, but the prose
+    clause is suppressed — 'downmixed to mono' reads oddly on a report that compared nothing."""
+    ref, sr = _drum()
+    bad = ref.copy(); bad[100] = np.nan
+    report = compare.compare_arrays(ref, bad, sr, input_channels=(2, 2))
+    assert report["verdict"] == compare.VERDICT_INVALID
+    assert report["measurements"][0]["downmix"]["applied"] is True   # structured disclosure kept
+    assert "downmix" not in report["summary"].lower()                # prose clause suppressed
+
+
+def test_added_hf_not_applicable_when_band_too_narrow():
+    """At sr=16 kHz the >=8 kHz band is the single Nyquist bin — the added-hf axis must report
+    `not_applicable`, never a confident 'no material change' over a degenerate band (F4)."""
+    sr = 16000
+    y = np.random.default_rng(0).standard_normal(sr) * 0.1  # >= one LTAS frame, not silent
+    report = compare.compare_arrays(y, y.copy(), sr, profile="added-hf")
+    m = report["measurements"][0]
+    assert m["status"] == compare.STATUS_NOT_APPLICABLE
+    assert report["verdict"] == compare.VERDICT_INCONCLUSIVE
+    assert "band too narrow" in m["reason"]
+
+
+def test_added_hf_applicable_at_normal_rate():
+    """Guard sanity: a normal rate (48 kHz) keeps the axis fully applicable."""
+    ref, sr = _drum()
+    m = compare.compare_arrays(ref, ref.copy(), sr, profile="added-hf")["measurements"][0]
+    assert m["status"] == compare.STATUS_MEASURED
+
+
+def test_dc_offset_is_surfaced_and_cross_referenced():
+    """A pure DC offset drags the centroid down and reads as 'duller' (F5). The DC-offset raw
+    comparator must be present and `present=True`, and the summary must cross-reference it so an
+    agent doesn't hunt phantom dullness — all advisory, never moving the verdict."""
+    ref, sr = _drum()
+    cand = ref + 0.1                                  # pure DC offset, no timbral change
+    report = compare.compare_arrays(ref, cand, sr, reference_role="golden")
+    raws = report["advisory"]["raw_comparators"]
+    assert raws[0]["name"] == "null_residual"         # residual stays at index 0 (corroboration contract)
+    dc = next(r for r in raws if r["name"] == "dc_offset")
+    assert dc["participates_in_verdict"] is False
+    assert dc["detail"]["present"] is True
+    assert "DC offset" in report["summary"]
+
+
+def test_clean_inputs_have_no_dc_cross_reference():
+    """No DC offset → the comparator is present (informational) but `present=False`, and the
+    summary carries no DC caveat."""
+    ref, sr = _drum()
+    report = compare.compare_arrays(ref, generate.dull(ref, sr), sr, reference_role="golden")
+    dc = next(r for r in report["advisory"]["raw_comparators"] if r["name"] == "dc_offset")
+    assert dc["detail"]["present"] is False
+    assert "DC offset" not in report["summary"]
+
+
+def test_dc_offset_does_not_move_the_verdict():
+    """Verdict-independence: the verdict computed from the primary measurement + role must equal
+    the report's verdict even though a DC offset added a summary caveat and a raw comparator."""
+    ref, sr = _drum()
+    cand = ref + 0.1
+    report = compare.compare_arrays(ref, cand, sr, reference_role="golden")
+    axis = compare._AXES["tonal-balance"]
+    recomputed = compare._verdict(axis, report["measurements"][0], "golden")
+    assert report["verdict"] == recomputed
+
+
 def test_cli_compare_smoke(tmp_path, capsys):
     from quality_lab import cli
     ref, sr = _drum()

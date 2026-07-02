@@ -10,13 +10,26 @@ import numpy as np
 import soundfile as sf
 
 
-def load_wav(path: str) -> tuple[np.ndarray, int]:
-    """Load a WAV as mono float64 + sample rate (channels are mean-downmixed)."""
+def load_wav_info(path: str) -> tuple[np.ndarray, int, int]:
+    """Load a WAV as mono float64 + sample rate + the ORIGINAL channel count.
+
+    Same mean-downmix to mono as :func:`load_wav`, but also reports how many channels the
+    file actually had. `compare` uses this to DISCLOSE that a multichannel input was folded
+    to mono (so stereo/spatial changes were not compared) — honesty-per-measurement. Every
+    other caller keeps using `load_wav` and its unchanged (mono, sr) contract.
+    """
     y, sr = sf.read(path, always_2d=False)
     y = np.asarray(y, dtype=np.float64)
+    channels = 1 if y.ndim == 1 else int(y.shape[1])
     if y.ndim > 1:
         y = y.mean(axis=1)
-    return y, int(sr)
+    return y, int(sr), channels
+
+
+def load_wav(path: str) -> tuple[np.ndarray, int]:
+    """Load a WAV as mono float64 + sample rate (channels are mean-downmixed)."""
+    y, sr, _ = load_wav_info(path)
+    return y, sr
 
 
 def save_wav(path: str, y: np.ndarray, sr: int) -> None:
