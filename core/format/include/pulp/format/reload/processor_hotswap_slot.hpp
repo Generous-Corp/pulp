@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -50,6 +51,17 @@
 #include <vector>
 
 namespace pulp::format::reload {
+
+/// Amplitude law applied across a crossfade. Both are evaluated over the
+/// smoothstepped ramp (zero slope at both ends), so both stay click-free at the
+/// swap instant and the fade end; they differ only in the mid-fade sum:
+///   - `Smoothstep` — equal-GAIN (old_gain + new_gain == 1). No power bump when
+///     old and new are correlated (the usual hot-reload case: same input, a
+///     small DSP tweak). Default.
+///   - `EqualPower` — constant POWER (old_gain² + new_gain² == 1), cos/sin. Avoids
+///     the mid-fade level dip when old and new are decorrelated (a big DSP
+///     change). Mirrors `signal::DryWetMixer`'s EqualPower law.
+enum class CrossfadeCurve { Smoothstep, EqualPower };
 
 class ProcessorHotSwapSlot {
 public:
@@ -146,6 +158,15 @@ public:
     void set_crossfade_samples(std::size_t samples) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         fade_samples_ = samples;
+    }
+
+    /// Select the crossfade amplitude law (default `Smoothstep` = equal-gain).
+    /// Control thread, before swaps. Takes effect on the next swap; changing it
+    /// mid-fade is allowed (the running fade keeps its ramp position, only the
+    /// gain mapping changes) but not typical.
+    void set_crossfade_curve(CrossfadeCurve curve) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        fade_curve_ = curve;
     }
 
     /// Allocate the scratch the fade-out processor renders into, sized for the
@@ -247,14 +268,25 @@ private:
         fading_out_->process(sv, in, fade_midi_in_, fade_midi_out_, ctx);
 
         const float inv_total = 1.0f / static_cast<float>(fade_total_);
+        const bool equal_power = fade_curve_ == CrossfadeCurve::EqualPower;
+        constexpr float kHalfPi = 1.57079632679489661923f;
         for (std::size_t c = 0; c < ch; ++c) {
             auto o = out.channel(c);
-            auto s = sv.channel(c);
+            auto old_ch = sv.channel(c);                      // fading-out (old) DSP output
             for (std::size_t n = 0; n < frames; ++n) {
                 float t = static_cast<float>(fade_pos_ + n) * inv_total;
                 if (t > 1.0f) t = 1.0f;
-                const float g = t * t * (3.0f - 2.0f * t);   // smoothstep: 0 slope at 0 and 1
-                o[n] = s[n] * (1.0f - g) + o[n] * g;          // old→new, click-free
+                const float ramp = t * t * (3.0f - 2.0f * t); // smoothstep: 0 slope at 0 and 1
+                float old_gain, new_gain;
+                if (equal_power) {                            // cos/sin over the ramp:
+                    const float theta = ramp * kHalfPi;       // click-free (ramp ends flat)
+                    old_gain = std::cos(theta);               // AND old²+new² == 1
+                    new_gain = std::sin(theta);
+                } else {                                      // equal-gain: old+new == 1
+                    old_gain = 1.0f - ramp;
+                    new_gain = ramp;
+                }
+                o[n] = old_ch[n] * old_gain + o[n] * new_gain;  // old→new, click-free
             }
         }
         fade_pos_ += frames;
@@ -285,6 +317,7 @@ private:
     // ── Crossfade state ──────────────────────────────────────────────────────
     std::unique_ptr<Processor> fading_out_;       // retained old DSP during a fade
     std::size_t fade_samples_ = 0;                // configured fade length (0 = instant)
+    CrossfadeCurve fade_curve_ = CrossfadeCurve::Smoothstep;  // amplitude law
     std::size_t fade_total_ = 0;                  // active fade length
     std::size_t fade_pos_ = 0;                    // samples elapsed in the active fade
     std::atomic<bool> fade_done_{true};           // audio thread sets; reclaim() reads

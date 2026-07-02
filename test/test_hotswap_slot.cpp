@@ -258,6 +258,44 @@ TEST_CASE("HotSwapSlot crossfades old->new without a click", "[hot-reload][slot]
     REQUIRE(live.load() == 1);                        // old ×2 processor destroyed
 }
 
+TEST_CASE("HotSwapSlot equal-power crossfade is click-free and constant-power",
+          "[hot-reload][slot][crossfade]") {
+    using pulp::format::reload::CrossfadeCurve;
+    std::atomic<int> live{0};
+    ProcessorHotSwapSlot slot(std::make_unique<ScaleProc>(2.0f, &live));
+    slot.prepare_crossfade(/*max_frames=*/512, /*max_channels=*/2);
+    constexpr int kFade = 256;
+    slot.set_crossfade_samples(kFade);
+    slot.set_crossfade_curve(CrossfadeCurve::EqualPower);
+
+    REQUIRE(render_one(slot) == 2.0f);
+    REQUIRE(slot.swap(std::make_unique<ScaleProc>(4.0f, &live)) == nullptr);
+    REQUIRE(slot.crossfade_active());
+
+    std::vector<float> seq;
+    render_into(slot, seq, kFade + 128);              // block=32 → seq[n] == fade sample n
+    REQUIRE(seq.size() >= static_cast<std::size_t>(kFade + 128));
+
+    // Endpoints unchanged (old ×2 → new ×4); ends stay click-free because the
+    // cos/sin law is evaluated over the zero-slope smoothstep ramp.
+    REQUIRE(seq.front() == Catch::Approx(2.0f).margin(0.05));
+    REQUIRE(seq.back() == Catch::Approx(4.0f).margin(0.01));
+    float max_step = 0.0f;
+    for (std::size_t i = 1; i < seq.size(); ++i)
+        max_step = std::max(max_step, std::abs(seq[i] - seq[i - 1]));
+    REQUIRE(max_step < 0.1f);                          // click-free
+
+    // Constant-power law: at the ramp midpoint the gains are cos(π/4)=sin(π/4)
+    // =0.7071, so the (correlated, same-sign) outputs sum to 6·0.7071 ≈ 4.243 —
+    // the deliberate power "bump" that distinguishes EqualPower from the
+    // equal-gain Smoothstep law (which would give 2·0.5+4·0.5 = 3.0 here).
+    REQUIRE(seq[128] == Catch::Approx(4.2426f).margin(0.05));
+    REQUIRE(seq[128] > 4.0f);                          // unambiguously not equal-gain (3.0)
+
+    slot.reclaim();
+    REQUIRE(live.load() == 1);
+}
+
 TEST_CASE("HotSwapSlot swap during a fade collapses the prior fade-out (no leak)",
           "[hot-reload][slot][crossfade]") {
     std::atomic<int> live{0};
