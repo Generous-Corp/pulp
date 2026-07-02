@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05520"></a>
+## [0.552.0] - 2026-07-02
+
+- feat(view): complete widget↔parameter automation + ComboBox polish ([#5419](https://github.com/danielraffel/pulp/pull/5419))
+- feat(quality-lab): promote corroboration disagreement into the headline ([#5447](https://github.com/danielraffel/pulp/pull/5447))
+- fix(quality-lab): make added-hf band-relative (dB), fix the bass-heavy blind spot ([#5443](https://github.com/danielraffel/pulp/pull/5443))
+- docs(skills): add code-comments skill for durable comments ([#5421](https://github.com/danielraffel/pulp/pull/5421))
+- fix(quality-lab): disclose downmix, guard added-hf band, surface DC offset ([#5439](https://github.com/danielraffel/pulp/pull/5439))
+- docs/planning audio measurement brief ([#5432](https://github.com/danielraffel/pulp/pull/5432))
+- docs(guides): clarify the template's siblings mode needs both adapter checkouts ([#5426](https://github.com/danielraffel/pulp/pull/5426))
+- docs(guides): add "Putting a Pulp UI in a JUCE plugin" guide ([#5424](https://github.com/danielraffel/pulp/pull/5424))
+
 <a id="v05510"></a>
 ## [0.551.0] - 2026-07-02
 
@@ -5765,6 +5777,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.552.0]: https://github.com/danielraffel/pulp/releases/tag/v0.552.0
 [0.551.0]: https://github.com/danielraffel/pulp/releases/tag/v0.551.0
 [0.550.0]: https://github.com/danielraffel/pulp/releases/tag/v0.550.0
 [0.549.3]: https://github.com/danielraffel/pulp/releases/tag/v0.549.3
