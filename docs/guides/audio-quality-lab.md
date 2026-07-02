@@ -58,7 +58,7 @@ alignment-free:
 | `--profile` | axis | measures | bad direction (regression vs a golden reference) |
 |-------------|------|----------|--------------------------------------------------|
 | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | **duller** |
-| `added-hf` | `added_hf` | high-frequency (≥8 kHz) energy fraction | **added HF fizz** |
+| `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | **added HF fizz** |
 
 Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
 registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,

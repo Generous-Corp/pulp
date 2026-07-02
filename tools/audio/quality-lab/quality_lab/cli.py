@@ -159,11 +159,18 @@ def _cmd_loop(args: argparse.Namespace) -> int:
 def _cmd_compare(args: argparse.Namespace) -> int:
     import json
     from . import compare
-    report = compare.compare_files(
-        args.reference, args.candidate,
-        profile=args.profile, reference_role=args.reference_role,
-        threshold=args.threshold,
-    )
+    try:
+        report = compare.compare_files(
+            args.reference, args.candidate,
+            profile=args.profile, reference_role=args.reference_role,
+            threshold=args.threshold,
+        )
+    except ValueError as exc:
+        # A caller-contract error — in practice an out-of-range --threshold for this axis (profile
+        # and reference_role are argparse-constrained). Emit a structured `invalid` report so a
+        # delegating caller (the MCP tool) reads a clean verdict instead of a raw traceback that
+        # its "empty report" heuristic would misread as "the tool isn't installed".
+        report = compare.invalid_report(args.profile, args.reference_role, str(exc))
     print(f"[quality-lab compare] {report['verdict']}: {report['summary']}")
     if args.json:
         with open(args.json, "w") as fh:
@@ -240,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     cmp_.add_argument("candidate", help="candidate (after) WAV")
     cmp_.add_argument("--profile", choices=list(compare.PROFILES), default="tonal-balance",
                       help="measurement axis: tonal-balance (LTAS centroid shift) or "
-                           "added-hf (high-frequency fizz fraction)")
+                           "added-hf (band-relative >=8kHz fraction ratio, dB)")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "

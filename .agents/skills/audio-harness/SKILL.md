@@ -367,7 +367,21 @@ harness or `ctest`.
   | `--profile` | axis | measures | bad direction (`bad_sign`) |
   |-------------|------|----------|----------------------------|
   | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift | duller (−1) |
-  | `added-hf` | `added_hf` | ≥8 kHz energy fraction | added fizz (+1) |
+  | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added fizz (+1) |
+
+  The `added-hf` axis measures the **ratio of the ≥8 kHz energy fraction** (`10·log10(frac_cand /
+  frac_ref)`, default ±3 dB), NOT the absolute fraction *delta* — the absolute delta is
+  signal-dependent and effectively blind on a bass-heavy source (an amp render's HF fraction is
+  ~1e-4, so even a clearly harsh addition barely moves it; only the null-residual corroboration
+  caught it before). The ratio is invariant to a broadband gain / the level-match, so it flags a
+  real harshness change on a dark source that the absolute delta missed. Both band fractions are
+  floor-clamped, so a zero-HF reference (fizz on a dark source) or candidate (brickwall low-pass)
+  gives a large *finite* dB delta, never `inf` → a false `invalid`. It flags HF *loss* as material
+  too (a negative dB delta) — only *added* fizz is the bad direction. A large EQ move outside the
+  band (e.g. a big LF shelf) still leaves some residual sensitivity — far less than the absolute
+  metric, not zero. The threshold is a dB magnitude with its own per-axis range, so the shipped
+  CLI / MCP pass any positive threshold through to the Python registry (the single source of truth
+  for the valid range) rather than a hardcoded fraction bound.
 
   **Intent-safe:** `regression_suspected` needs `--reference-role golden` AND a change in the
   axis's bad direction (a duller candidate can't trip the `added-hf` axis; added fizz can't trip
