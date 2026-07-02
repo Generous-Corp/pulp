@@ -5422,7 +5422,7 @@ catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 
 # HostParamSurface / HostActionSurface — the SDK runtime host-param + action
-# surfaces (JUCE port accelerator P1/P2): StateStore backing, DesignFrameView
+# surfaces: StateStore backing, DesignFrameView
 # sync/route/re-key, action forwarding, and cross-host binding via a fake.
 add_executable(pulp-test-host-param-surface
     test_host_param_surface.cpp)
@@ -5431,7 +5431,7 @@ target_link_libraries(pulp-test-host-param-surface
 catch_discover_tests(pulp-test-host-param-surface
     PROPERTIES LABELS "view")
 
-# Faithful port toolkit — JUCE-port-accelerator Phase 6 SDK primitives
+# Faithful port toolkit — SDK primitives
 # (SVG fragment handles, anchored popover, drag-to-reorder, paint-space painters).
 add_executable(pulp-test-faithful-port-toolkit
     test_faithful_port_toolkit.cpp)

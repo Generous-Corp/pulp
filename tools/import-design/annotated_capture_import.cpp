@@ -1,5 +1,5 @@
-// pulp-annotated-capture-import — the no-metadata design-import lane (JUCE port
-// accelerator P6.1). Turns a bare captured SVG + a sidecar manifest into the same
+// pulp-annotated-capture-import — the no-metadata design-import lane.
+// Turns a bare captured SVG + a sidecar manifest into the same
 // artifacts the faithful-vector Figma path emits: a DesignFrameView subclass
 // (populated typed element table), the embedded-SVG accessor, and the wiring
 // lines to paste into CMake / the catalog. See annotated_capture.hpp for the

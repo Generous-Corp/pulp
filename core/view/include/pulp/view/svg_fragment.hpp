@@ -2,7 +2,7 @@
 
 #include <string>
 
-// SVG fragment handles (JUCE port accelerator P6.3).
+// SVG fragment handles.
 //
 // A faithful design port renders one big SVG document (the frame) via
 // Canvas::draw_svg, then needs to restyle or move ONE sub-tree of it on demand:

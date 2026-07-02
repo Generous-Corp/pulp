@@ -486,7 +486,7 @@ void DesignFrameView::sync_from_host_params() {
     }
 }
 
-// ── Per-element hover + enabled state (P6.2) ─────────────────────────────────
+// ── Per-element hover + enabled state ────────────────────────────────────────
 
 void DesignFrameView::set_hovered_element(int i) {
     if (i == hovered_element_) return;
@@ -507,7 +507,7 @@ void DesignFrameView::on_mouse_leave() {
     set_hovered_element(-1);
 }
 
-// ── SVG fragment handles (P6.3) ──────────────────────────────────────────────
+// ── SVG fragment handles ─────────────────────────────────────────────────────
 
 void DesignFrameView::register_fragment(std::string id, std::string marker) {
     if (id.empty() || marker.empty()) return;
@@ -737,7 +737,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
 
-    // Per-element hover / bypass restyle (P6.2's visual half, riding the P6.3
+    // Per-element hover / bypass restyle (the visual half, riding the
     // fragment-handle primitive). We only have a reliable, pixel-exact handle for
     // elements whose moving part is a tagged SVG path (needle_d: knob needle,
     // fader/xy_pad thumb, switch dot); for those, redraw JUST that fragment over

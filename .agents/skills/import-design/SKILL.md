@@ -78,8 +78,8 @@ components were built — never hand-paint.
 `make_catalog_component.py` needs Figma as the source of truth — typed nodes,
 node ids, component names. A **bare SVG capture** (a vectorized screenshot, a
 hand-authored asset, or a JUCE UI run through an extractor) has none of that: it
-is just paths and rects. The annotated-capture lane (JUCE port accelerator P6.1,
-`tools/import-design/annotated_capture.{hpp,cpp}` + the
+is just paths and rects. The annotated-capture lane
+(`tools/import-design/annotated_capture.{hpp,cpp}` + the
 `pulp-annotated-capture-import` CLI) is the no-metadata analog: feed it the bare
 SVG plus a **sidecar manifest** that supplies the missing semantics per element,
 and it emits the SAME artifacts (populated `DesignFrameElement` table +

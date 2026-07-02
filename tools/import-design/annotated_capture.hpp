@@ -1,6 +1,6 @@
 #pragma once
 
-// Annotated-capture import lane (JUCE port accelerator P6.1).
+// Annotated-capture import lane.
 //
 // The faithful-vector Figma lane (make_catalog_component.py + the Figma plugin's
 // scene export) works because the SOURCE carries semantics: typed nodes, node ids,

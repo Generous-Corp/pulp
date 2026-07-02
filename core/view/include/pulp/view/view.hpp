@@ -245,7 +245,7 @@ public:
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
 
-    // ── Transient-animation glue (Phase 6 P6.2/P6.4) ────────────────────────
+    // ── Transient-animation glue ─────────────────────────────────────────────
     // Tween/easing already exist; what a faithful port re-rolls every time is
     // the View-lifecycle glue — self-(un)subscribing a FrameClock callback and
     // repainting. animate() does exactly that: it interpolates a float from

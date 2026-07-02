@@ -1,4 +1,4 @@
-// Tests for the SDK runtime host-parameter surface (JUCE port accelerator P1/P2):
+// Tests for the SDK runtime host-parameter surface:
 //   - StateStoreHostParamSurface: the native backing (get/set/gesture/display).
 //   - DesignFrameView integration: sync_from_host_params (host->UI snapshot),
 //     route_changes_to_host_params (UI->host), set_element_param_key re-key,
@@ -276,7 +276,7 @@ TEST_CASE("set_element_param_key re-keys and re-binds without a remount",
     REQUIRE(rekey_calls == 1);
 }
 
-TEST_CASE("DesignFrameView tracks per-element hover (P6.2)", "[view][hover][issue-5230]") {
+TEST_CASE("DesignFrameView tracks per-element hover", "[view][hover][issue-5230]") {
     DesignFrameView dfv = make_single_knob("gain");
     dfv.set_bounds({0, 0, 100, 100});
 
@@ -302,7 +302,7 @@ TEST_CASE("DesignFrameView tracks per-element hover (P6.2)", "[view][hover][issu
     REQUIRE(dfv.element_hovered() == -1);
 }
 
-TEST_CASE("A disabled element is not hit-testable (P6.2)", "[view][hover][issue-5230]") {
+TEST_CASE("A disabled element is not hit-testable", "[view][hover][issue-5230]") {
     DesignFrameView dfv = make_single_knob("gain");
     dfv.set_bounds({0, 0, 100, 100});
     FakeHostParamSurface params;
@@ -321,7 +321,7 @@ TEST_CASE("A disabled element is not hit-testable (P6.2)", "[view][hover][issue-
     REQUIRE(params.set_calls >= 1);
 }
 
-TEST_CASE("View::animate tweens via the frame clock and self-unsubscribes (P6.4)",
+TEST_CASE("View::animate tweens via the frame clock and self-unsubscribes",
           "[view][animate][issue-5230]") {
     view::FrameClock clock;
     auto root = std::make_unique<view::View>();
@@ -354,7 +354,7 @@ TEST_CASE("View::animate returns -1 with no frame clock (preview path)",
     REQUIRE(v == Catch::Approx(5.0f));  // untouched
 }
 
-TEST_CASE("A tagged animate cancels the prior one with the same tag (P6.4)",
+TEST_CASE("A tagged animate cancels the prior one with the same tag",
           "[view][animate][issue-5230]") {
     view::FrameClock clock;
     auto root = std::make_unique<view::View>();
@@ -385,7 +385,7 @@ TEST_CASE("cancel_animation stops a tween without firing on_done",
     REQUIRE_FALSE(done);
 }
 
-TEST_CASE("Destroying a view mid-animation unsubscribes safely (P6.4)",
+TEST_CASE("Destroying a view mid-animation unsubscribes safely",
           "[view][animate][issue-5230]") {
     view::FrameClock clock;
     float v = 0.0f;
@@ -401,7 +401,7 @@ TEST_CASE("Destroying a view mid-animation unsubscribes safely (P6.4)",
     REQUIRE(v == Catch::Approx(0.3f));   // unchanged
 }
 
-TEST_CASE("Detaching a child mid-animation then destroying it is safe (P6.4 regression)",
+TEST_CASE("Detaching a child mid-animation then destroying it is safe (regression)",
           "[view][animate][issue-5230]") {
     // Regression for the review-found UAF: a non-root child resolves the clock
     // via its parent; once remove_child clears parent_, ~View could no longer

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file control_painters.hpp
-/// Skinnable paint-space control painters (JUCE port accelerator P6.7).
+/// Skinnable paint-space control painters.
 ///
 /// A faithful port often needs to draw a control directly from a paint() in panel
 /// coordinates — no View, no layout, no hit-testing — because the interaction is

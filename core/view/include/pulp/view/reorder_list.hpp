@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file reorder_list.hpp
-/// Drag-to-reorder container (JUCE port accelerator P6.6).
+/// Drag-to-reorder container.
 ///
 /// A faithful port re-rolls the same interaction every time it has a rack of
 /// effect slots, a modulation list, or a preset order: pick a row up, slide the

@@ -1,16 +1,16 @@
-// Tests for the JUCE-port-accelerator "faithful port toolkit" SDK primitives
-// (Phase 6). Each primitive a faithful design port would otherwise re-roll by
-// hand, tested at the level the GPU-OFF build can assert deterministically:
+// Tests for the "faithful port toolkit" SDK primitives. Each primitive a
+// faithful design port would otherwise re-roll by hand, tested at the level the
+// GPU-OFF build can assert deterministically:
 //
-//   P6.3 — SVG fragment handles: extraction / document-build / transform math are
+//   SVG fragment handles: extraction / document-build / transform math are
 //          pure string+geometry and asserted directly; draw_fragment's Canvas op
 //          is asserted against a RecordingCanvas subclass that captures draw_svg
 //          (the base RecordingCanvas returns false for draw_svg, so this build —
 //          PULP_ENABLE_GPU=OFF, no Skia raster — can't pixel-check; the comment on
 //          each SECTION states which mode it is in).
 //
-// Additional primitives (P6.5 anchored popover, P6.6 drag-to-reorder, P6.7
-// paint-space painters) append their own sections below as they land.
+// Additional primitives (anchored popover, drag-to-reorder, paint-space
+// painters) append their own sections below as they land.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -77,7 +77,7 @@ DesignFrameView make_knob_view() {
 
 }  // namespace
 
-// ── P6.3: SVG fragment handles ───────────────────────────────────────────────
+// ── SVG fragment handles ─────────────────────────────────────────────────────
 
 TEST_CASE("FragmentTransform emits composed SVG transform attribute",
           "[view][fragment][issue-juce-port]") {
@@ -273,7 +273,7 @@ TEST_CASE("DesignFrameView hover/bypass restyle rides draw_fragment",
     }
 }
 
-// ── P6.5: Anchored popover with pointer triangle (AnchoredCallout parity) ─────────
+// ── Anchored popover with pointer triangle (AnchoredCallout parity) ──────────────
 // Pure placement math (place_callout) — no canvas needed.
 
 namespace {
@@ -395,7 +395,7 @@ TEST_CASE("AnchoredCallout hosts content and mounts as an overlay",
     CHECK(cb.height == Approx(60.0f));
 }
 
-// ── P6.6: Drag-to-reorder container ──────────────────────────────────────────
+// ── Drag-to-reorder container ────────────────────────────────────────────────
 
 #include <pulp/view/reorder_list.hpp>
 using pulp::view::ReorderList;
@@ -494,7 +494,7 @@ TEST_CASE("ReorderList opens a gap for the lifted item during a drag",
     CHECK(lifted.y == Approx(pitch * 2.0f).margin(0.5f));
 }
 
-// ── P6.7: Skinnable paint-space control painters ─────────────────────────────
+// ── Skinnable paint-space control painters ───────────────────────────────────
 // Mode: RecordingCanvas command-stream assertions (no Skia raster in this
 // GPU-OFF build) — each painter's geometry must be value-dependent.
 
@@ -618,7 +618,7 @@ TEST_CASE("paint_waveform strokes one segment per sample gap",
     }
 }
 
-// ── P6.1: Annotated-capture import lane ──────────────────────────────────────
+// ── Annotated-capture import lane ────────────────────────────────────────────
 // Mode: parse + codegen assertions (generated stub is compile-SHAPED, not
 // compiled in-process). The manifest parse is the testable core; the generated
 // header/source are asserted for the class decl, the typed element table, and

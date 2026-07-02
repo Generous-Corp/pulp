@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file callout_box.hpp
-/// Anchored popover with a pointer triangle (JUCE `CallOutBox` parity, JUCE port
-/// accelerator P6.5).
+/// Anchored popover with a pointer triangle (JUCE `CallOutBox` parity).
 ///
 /// Named AnchoredCallout to avoid colliding with Pulp's existing `CallOutBox` in
 /// ui_components.hpp, which is a modal message/confirm box with no anchor or

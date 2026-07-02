@@ -27,8 +27,8 @@ namespace pulp::view {
 /// remains the fast path for static top-level controls; this surface is the
 /// fallthrough for keys a static registry does not carry.
 ///
-/// Threading / call-context contract (hard rule — see the JUCE port accelerator
-/// plan §1). On macOS the embed's paint/idle is already marshaled to the main
+/// Threading / call-context contract (hard rule). On macOS the embed's
+/// paint/idle is already marshaled to the main
 /// thread, so "which thread" is not the hazard; the hazards are re-entrancy and
 /// inverting the push-at-tick architecture. Therefore:
 ///   - These calls are legal ONLY from tick/update, NEVER from paint(). The
@@ -105,7 +105,7 @@ private:
 /// send_host_action("insert_slot", R"({"index":2})") and the host routes it;
 /// the bool is a routing/diagnostic signal (log/assert on unhandled), NEVER
 /// control flow. Return payloads and async completion are deliberately deferred
-/// (see the plan) until two real consumers need them. The action/args_json
+/// until two real consumers need them. The action/args_json
 /// vocabulary matches NativeImportHostActionDescriptor so the import lane and
 /// the runtime lane stay one concept.
 class HostActionSurface {

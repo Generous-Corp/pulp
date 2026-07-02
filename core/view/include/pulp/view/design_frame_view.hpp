@@ -402,7 +402,7 @@ public:
     // consumer can ignore it (sync_from_host_params resolves live). UI thread.
     std::function<void(int index, const std::string& key)> on_param_key_changed;
 
-    // ── Host action/command channel (Phase 2) ──────────────────────────────
+    // ── Host action/command channel ─────────────────────────────────────────
     // When enabled, a Kind::action button click is ALSO forwarded to
     // View::host_actions()->send_host_action(action, "{}") in addition to
     // on_action. Lets a view trigger structural host commands (insert/remove/
@@ -412,7 +412,7 @@ public:
     void route_actions_to_host(bool enable) { route_actions_to_host_ = enable; }
     bool routes_actions_to_host() const { return route_actions_to_host_; }
 
-    // ── Per-element hover + enabled/bypass state (Phase 6 P6.2) ─────────────
+    // ── Per-element hover + enabled/bypass state ─────────────────────────────
     // DesignFrameView had no hover concept; every faithful port needs one
     // (hover affordances, EDIT overlays, bypass dimming). Hover is tracked by
     // hit-testing pointer moves (drive it with simulate_hover / the host's
@@ -422,19 +422,19 @@ public:
     // The state is exposed for a subclass or painter to honor visually (e.g.
     // brighten the hovered element, desaturate a disabled one) — the base view
     // tracks state + interaction gating; pixel-level SVG restyling rides on the
-    // fragment-handle primitive (P6.3). on_element_hover fires on the UI thread
+    // fragment-handle primitive. on_element_hover fires on the UI thread
     // with the entered/exited index so a consumer can drive its own affordance.
     int element_hovered() const { return hovered_element_; }
     bool element_is_hovered(int i) const { return i >= 0 && i == hovered_element_; }
     std::function<void(int index, bool entered)> on_element_hover;
 
-    // ── SVG fragment handles (Phase 6 P6.3) ────────────────────────────────
+    // ── SVG fragment handles ─────────────────────────────────────────────────
     // Tag a sub-tree of the live SVG once by a unique marker substring (a path
     // `d`, the same handle the knob-needle patch keys on), then redraw JUST that
     // fragment on demand — transformed (translate/rotate/scale), composited at an
     // opacity, and optionally recolored — composited over the already-drawn frame
     // through the SAME panel fit paint() uses, so it lands on its original spot.
-    // This is the primitive P6.2's hover-brighten / bypass-dim visuals ride on,
+    // This is the primitive the hover-brighten / bypass-dim visuals ride on,
     // and what a meter-needle redraw, reorder ghost, or focus glow reuses. The
     // string/geometry work is the pure svg_fragment.hpp helpers; these methods add
     // the Canvas::draw_svg call and the panel-fit draw box.
@@ -551,7 +551,7 @@ private:
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
     bool route_actions_to_host_ = false;  ///< forward action clicks to host_actions()
     int hovered_element_ = -1;            ///< element under the pointer, or -1
-    std::unordered_map<std::string, std::string> fragments_;  ///< id -> marker (P6.3)
+    std::unordered_map<std::string, std::string> fragments_;  ///< id -> marker
 
     // The panel→view draw box for the current bounds — the exact (x,y,w,h) paint()
     // hands Canvas::draw_svg for the full frame. A fragment mini-document drawn at

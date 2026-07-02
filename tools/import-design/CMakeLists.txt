@@ -27,7 +27,7 @@ target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::state
     pulp::platform)
 
-# Annotated-capture import lane (P6.1): manifest parse + DesignFrameView codegen.
+# Annotated-capture import lane: manifest parse + DesignFrameView codegen.
 # Kept as a small static lib so the test target can link the parser/codegen core
 # directly (no CLI process spawn) while the CLI below drives it end-to-end.
 add_library(pulp-annotated-capture STATIC annotated_capture.cpp)
