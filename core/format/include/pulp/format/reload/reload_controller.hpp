@@ -40,12 +40,19 @@
 
 #include <pulp/format/reload/reload_transaction.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace pulp::format::reload {
 
@@ -100,9 +107,27 @@ private:
     // path it already opened.
     ReloadOutcome stage_and_reload() {
         ++attempts_;
+        // Stage to a name unique per-INSTANCE and per-process. Two shells
+        // watching the same logic_path share a default stage_dir (the watched
+        // file's directory), so a name keyed only on a per-controller counter
+        // (both start at 1) collides: the second instance's copy_file races the
+        // first's dlopen of the same path, and on Linux an overwrite-while-mapped
+        // corrupts the other instance's live image (see the header note + the
+        // identical hazard ReloadableShell::stage_initial guards). PID
+        // disambiguates processes; the process-wide atomic counter disambiguates
+        // instances and successive reloads within a process.
+        static std::atomic<std::uint64_t> global_counter{0};
+        const long pid =
+#if defined(_WIN32)
+            static_cast<long>(::_getpid());
+#else
+            static_cast<long>(::getpid());
+#endif
         const auto staged =
-            stage_dir_ / (path_.stem().string() + ".reload" +
-                          std::to_string(attempts_) + path_.extension().string());
+            stage_dir_ /
+            (path_.stem().string() + ".reload." + std::to_string(pid) + "." +
+             std::to_string(global_counter.fetch_add(1, std::memory_order_relaxed)) +
+             path_.extension().string());
         std::error_code ec;
         std::filesystem::copy_file(
             path_, staged, std::filesystem::copy_options::overwrite_existing, ec);
@@ -110,6 +135,19 @@ private:
             return {ReloadOutcome::Status::RejectedLoadFailed,
                     "stage copy failed: " + ec.message()};
         }
+        // Best-effort reap THIS instance's previous staged copy so a long dev
+        // session doesn't accumulate one file per reload. Safe: on POSIX the
+        // prior image was dlopen'd (LeakPolicy::Retain) and its mapping survives
+        // unlink, so the fading-out processor keeps running; on Windows a loaded
+        // module's file is locked, so remove() fails and is ignored. Only reaps
+        // our own files — never another instance's, and never the just-staged
+        // one. (Cross-restart orphans from dead PIDs are a separate startup-reap
+        // follow-up under item 1.11's staged-file bookkeeping.)
+        if (!last_staged_.empty() && last_staged_ != staged) {
+            std::error_code rm_ec;
+            std::filesystem::remove(last_staged_, rm_ec);
+        }
+        last_staged_ = staged;
         return session_.reload(staged.string());
     }
 
@@ -117,6 +155,7 @@ private:
     std::filesystem::path path_;
     std::filesystem::path stage_dir_;
     std::filesystem::file_time_type last_mtime_{};
+    std::filesystem::path last_staged_;  // this instance's prior staged copy (reaped on next stage)
     bool baseline_set_ = false;
     std::uint64_t attempts_ = 0;
 };

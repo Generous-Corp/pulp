@@ -125,6 +125,61 @@ TEST_CASE("ReloadController watches a logic file and reloads on change",
     std::error_code ec; fs::remove(watched, ec);
 }
 
+// Two independent shells/controllers watching the SAME logic path with the
+// default stage dir must stage to DISTINCT files — otherwise the second
+// instance's copy_file races the first's dlopen and, on Linux, corrupts the
+// other's live mapping (issue derisked as P0.8; fix mirrors stage_initial's
+// pid+counter naming).
+TEST_CASE("ReloadController stages per-instance unique names (no multi-instance collision)",
+          "[reload][controller][issue-p0-8]") {
+    const fs::path dir = fs::path(RELOAD_WATCH_DIR);
+    const fs::path watched = dir / "pulp_reload_multiinstance.dylib";
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/0);
+
+    auto make_slot = [&](state::StateStore& live) {
+        auto initial = std::make_unique<InitialGain>();
+        initial->define_parameters(live);
+        initial->set_state_store(&live);
+        live.set_value(1, 0.5f);
+        return std::make_unique<ProcessorHotSwapSlot>(std::move(initial));
+    };
+
+    auto count_staged = [&]() {
+        int n = 0;
+        for (auto& e : fs::directory_iterator(dir))
+            if (e.path().filename().string().rfind("pulp_reload_multiinstance.reload", 0) == 0)
+                ++n;
+        return n;
+    };
+
+    state::StateStore liveA, liveB;
+    auto slotA = make_slot(liveA);
+    auto slotB = make_slot(liveB);
+    ReloadSession sessionA(*slotA, liveA, current_build_fingerprint(), format::PrepareContext{});
+    ReloadSession sessionB(*slotB, liveB, current_build_fingerprint(), format::PrepareContext{});
+    ReloadController ctlA(sessionA, watched);  // default stage dir == dir
+    ReloadController ctlB(sessionB, watched);  // same watched path + stage dir
+
+    REQUIRE(ctlA.reload_now().ok());
+    REQUIRE(ctlB.reload_now().ok());
+
+    // Fixed behavior: two distinct staged files (pid+global-counter qualified),
+    // so neither instance overwrites the other's staged image.
+    CHECK(count_staged() == 2);
+
+    // Reap: a second reload on A drops A's first staged copy (best-effort), so
+    // the on-disk set stays bounded (A's new + B's still-live == 2) rather than
+    // growing to 3 — a long dev session doesn't accumulate a file per reload.
+    REQUIRE(ctlA.reload_now().ok());
+    CHECK(count_staged() == 2);
+
+    for (auto& e : fs::directory_iterator(dir)) {
+        if (e.path().filename().string().rfind("pulp_reload_multiinstance", 0) == 0) {
+            std::error_code ec; fs::remove(e.path(), ec);
+        }
+    }
+}
+
 TEST_CASE("ReloadController.reload_now forces a reload regardless of mtime",
           "[reload][controller]") {
     const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_reload_watched_force.dylib";
