@@ -31,6 +31,17 @@ if(_gpu_nam_arch_defs)
     add_compile_definitions(${_gpu_nam_arch_defs})
 endif()
 
+# Optional licensing gate (default OFF) — a reference for paid plugins. The shipped
+# MIT demo leaves it OFF, so nothing is restricted. Turn it ON and supply a public
+# key to gate the opt-in GPU acceleration behind a valid license (the free tier
+# falls back to the bit-exact CPU engine).
+option(GPU_NAM_WITH_LICENSE "GPU NAM: gate the GPU engine behind a license (reference)" OFF)
+set(GPU_NAM_LICENSE_PUBKEY "" CACHE STRING "PEM RSA public key for the GPU NAM license gate")
+if(GPU_NAM_WITH_LICENSE)
+    add_compile_definitions(GPU_NAM_WITH_LICENSE=1
+        "GPU_NAM_LICENSE_PUBKEY=\"${GPU_NAM_LICENSE_PUBKEY}\"")
+endif()
+
 if(TARGET pulp::render)
     add_executable(gpu-nam-check wavenet_check.cpp)
     target_link_libraries(gpu-nam-check PRIVATE pulp::render)
@@ -115,6 +126,12 @@ if(TARGET pulp::runtime)
             target_include_directories(gpu-nam-keras-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             add_test(NAME gpu-nam-keras-test COMMAND gpu-nam-keras-test)
         endif()
+
+        # Optional licensing gate (free-tier default, locks on an invalid license).
+        add_executable(gpu-nam-license-test test_gpu_nam_license.cpp)
+        target_link_libraries(gpu-nam-license-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-license-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-license-test COMMAND gpu-nam-license-test)
 
         # Grace-period engine retirement (audio-thread-safe live swaps; no GPU).
         add_executable(gpu-nam-retire-test test_nam_retire_list.cpp)

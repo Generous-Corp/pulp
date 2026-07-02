@@ -33,6 +33,7 @@
 #include "gpu_nam_cloud_node.hpp"
 #include "nam_model.hpp"
 #include "nam_retire_list.hpp"
+#include "gpu_nam_license.hpp"
 #include "nam_runtime.hpp"
 
 // The GPU NAM plugin's engine is WaveNet-specific (the fused GPU forward uploads a
@@ -284,6 +285,10 @@ public:
         return model_arch_;
     }
 
+    /// Licensing status for the editor's About panel. "Free (MIT) build" for the
+    /// shipped demo; a GPU_NAM_WITH_LICENSE build reports Registered / Unregistered.
+    std::string license_status() const { return license_.status_text(); }
+
     /// Snapshot of the input→output transfer ("amp character") curve. UI-thread
     /// only — never the audio thread.
     TransferCurve transfer_curve_snapshot() const {
@@ -428,12 +433,23 @@ public:
         // (e.g. an LSTM), the GPU engine stays unavailable for this activation even
         // if a WaveNet is loaded later — reopen/re-prepare to re-probe. The default
         // bundled model is WaveNet, so normally the device is probed here.
+        // Configure the licensing gate. Free-tier (unlocked) unless a
+        // GPU_NAM_WITH_LICENSE build supplies a public key + license key, in which
+        // case an invalid/absent license locks the GPU path to the CPU engine.
+#if GPU_NAM_WITH_LICENSE
+        {
+            const char* key = std::getenv("GPU_NAM_LICENSE_KEY");
+            license_.configure_rsa(GPU_NAM_LICENSE_PUBKEY, key ? key : "");
+        }
+#endif
+
         // The opt-in GPU engine runs the model at the host rate; when resampling is
         // active the model runs at the internal rate on the CPU engine, so the GPU
-        // stack is not built (device stays unavailable and the engine is CPU).
+        // stack is not built (device stays unavailable and the engine is CPU). The
+        // license gate can also hold the GPU path to the free-tier CPU engine.
         gpu_extra_ = 0;
         device_available_ = false;
-        if (ok && model.gpu_eligible() && !resample_active_) {
+        if (ok && model.gpu_eligible() && !resample_active_ && license_.unlocked()) {
             auto stack = build_gpu_stack(*model.wavenet());
             if (stack) {
                 device_available_ = true;
@@ -1091,6 +1107,11 @@ private:
 
     double sample_rate_ = 48000.0;
     bool loaded_ok_ = false;
+
+    // Optional licensing gate (a reference for paid Pulp plugins). Free-tier by
+    // default, so the shipped MIT demo is unrestricted; a GPU_NAM_WITH_LICENSE
+    // build gates the opt-in GPU acceleration behind a valid license.
+    LicenseGate license_;
 
     // Re-blocking FIFO state (audio thread only). in_buf_ carries the drive.
     std::array<std::vector<float>, kChannels> in_buf_{};
