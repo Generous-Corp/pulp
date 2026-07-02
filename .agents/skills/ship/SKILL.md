@@ -1005,7 +1005,9 @@ tools/scripts/build_combined_installer.sh \
   --plugin vst3 build/VST3/MyPlugin.vst3 \
   --plugin clap build/CLAP/MyPlugin.clap \
   --app "Standalone app" build/examples/myplugin/MyPlugin.app \
-  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements
+  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements \
+  --content "Sample models" "Example .nam captures" \
+           "/Library/Application Support/MyPlugin/models" build/models
 ```
 
 It produces ONE component-selectable, notarized installer (Customize pane picks
@@ -1015,3 +1017,12 @@ so a build that only works on the build machine never ships. Identities are the
 `security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
+
+**`--content "Title" "Desc" DEST SRCDIR`** (repeatable) adds a selectable
+component that installs the *contents* of `SRCDIR` to an absolute `DEST` (e.g.
+sample models / IRs into `/Library/Application Support/<Plugin>/...`), rather than
+a plugin bundle or `/Applications` app. Use it to ship bundled demo content that a
+plugin loads at runtime. Titles/descriptions are XML-escaped before they go into
+the distribution XML, so `&`/`<`/`>`/quotes in a human-readable title no longer
+corrupt the installer; the staging tree is removed via an `EXIT` trap on any exit
+(success, error, or signal).
