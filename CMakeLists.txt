@@ -281,7 +281,10 @@ if(PULP_ENABLE_GPU AND NOT ANDROID)
     add_subdirectory(inspect)
 endif()
 add_subdirectory(ship)
-add_subdirectory(tools/audio)
+# tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/audio)
+endif()
 
 # ── Testing ─────────────────────────────────────────────────────────────────
 # Tests are not built on iOS or Android — they assume a desktop POSIX shell,
@@ -328,7 +331,7 @@ include(PulpUtils)
 # GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
 # .github/workflows/sanitizers.yml) fail at CMake configure with
 # "Target ... links to pulp::inspect but the target was not found".
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
 
@@ -344,31 +347,41 @@ endif()
 # cargo happens to be on PATH, introducing unrelated Rust-toolchain
 # / network failures (and minutes of cargo build time) in lanes that
 # intentionally disable the CLI/GPU paths.
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
+# PROJECT_IS_TOP_LEVEL: Pulp's own experimental CLI builds only when Pulp is the
+# top-level project. A consumer that vendors Pulp via add_subdirectory() wants the
+# libraries + pulp_add_plugin(), not Pulp's dev CLIs.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
-if(NOT ANDROID AND NOT IOS)
+# Dev tools below build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
+if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
-add_subdirectory(tools/screenshot)
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/screenshot)
+endif()
 
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
-if(NOT IOS AND NOT ANDROID)
+if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
+if(PROJECT_IS_TOP_LEVEL AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
     add_subdirectory(tools/design)
 endif()
 
 # ── Import Design Tool ────────────────────────────────────────────────────
-add_subdirectory(tools/import-design)
+# Dev tool — only when Pulp is the top-level project (see PROJECT_IS_TOP_LEVEL
+# note above); an embedding consumer doesn't build Pulp's authoring CLIs.
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/import-design)
+endif()
 
 # ── Python Bindings ────────────────────────────────────────────────────────
 option(PULP_BUILD_PYTHON "Build Python bindings via pybind11" OFF)
