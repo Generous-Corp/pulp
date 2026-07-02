@@ -211,6 +211,26 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
+
+### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
+
+`pulp dev --hot-dsp` (cmd_dev.cpp) is a watch-loop MODE flag, not a new command.
+It sets `WatchOptions::hot_dsp`, which `watch_loop()` (cli_common.cpp) reads to
+**suppress the post-rebuild relaunch**: the launched app stays alive and its
+`ReloadableShell` filesystem watcher hot-swaps the rebuilt DSP logic library in
+place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
+- `--hot-dsp` requires `--run <target>`; cmd_dev errors (exit 2) otherwise.
+- Only meaningful for a **reloadable-shell** target (one whose processor is a
+  `ReloadableShell`); for a plain plugin it just means "don't relaunch." The CLI
+  deliberately doesn't inspect the target — it only changes relaunch behavior.
+- The rebuild must produce the logic library the shell watches; a normal
+  `cmake --build` of the project rebuilds it, and the shell's poll picks it up.
+- `pulp loop --ar-swap-from` is **retired** to a redirect that points here — it
+  no longer prints a bare not-implemented notice (cmd_loop.cpp). If you touch the
+  reload dev loop, keep that redirect message accurate.
+- The C++ delegate (`pulp-cli`) is GPU-gated (`PULP_ENABLE_GPU`), so a GPU-off
+  worktree can't build/run it; verify CLI edits via a `-fsyntax-only` parse and
+  rely on the GPU-on CI lane for the link + shell-out `--help` assertion.
 - Parser-order fixes that preserve the documented command surface still need
   tests proving malformed argv is rejected before platform guards or side
   effects, especially for commands like `pulp ship release` where macOS-only

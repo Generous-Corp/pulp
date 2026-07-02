@@ -1800,6 +1800,9 @@ commands:
       - name: --run
         kind: option
         description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
+      - name: --hot-dsp
+        kind: flag
+        description: With `--run`, keep the launched app alive across rebuilds so its ReloadableShell watcher hot-swaps the rebuilt DSP logic library in place instead of relaunching the process (live DSP dev loop); requires --run
       - name: --design
         kind: option
         description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once
