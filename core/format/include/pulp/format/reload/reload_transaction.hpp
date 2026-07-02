@@ -32,6 +32,8 @@
 #include <pulp/state/store.hpp>
 
 #include <chrono>
+#include <cmath>
+#include <cstddef>
 #include <exception>
 #include <memory>
 #include <string>
@@ -217,6 +219,41 @@ inline ReloadOutcome reload_processor_from_library(
         candidate->set_state_store(&live_store);
         candidate->prepare(prepare_ctx);
         const auto t_prepare = clock::now();
+
+        // Behavioral entry-point probe (item 1.10): a candidate can pass every
+        // STATIC gate (load / ABI / fingerprint / contract) yet still misbehave
+        // at runtime — most dangerously by emitting NaN/Inf, which a swap would
+        // push straight to the audio thread and silently corrupt the signal.
+        // Render ONE silence block through the freshly-prepared candidate into
+        // scratch and reject if the output is not finite, so a garbage-producing
+        // build never goes live. Cheap, pre-commit (old DSP stays on rejection),
+        // and a universal invariant — silence in → finite out holds for effects
+        // AND instruments (NaN/Inf is always a bug). Runs inside the try, so a
+        // throwing process() is caught like any other candidate fault.
+        {
+            const int probe_frames =
+                std::max(1, std::min(64, prepare_ctx.max_buffer_size > 0
+                                             ? prepare_ctx.max_buffer_size : 64));
+            const std::size_t frames = static_cast<std::size_t>(probe_frames);
+            std::vector<float> in_l(frames, 0.0f), in_r(frames, 0.0f);
+            std::vector<float> out_l(frames, 0.0f), out_r(frames, 0.0f);
+            const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+            float* out_ptrs[2] = {out_l.data(), out_r.data()};
+            audio::BufferView<const float> probe_in(in_ptrs, 2, frames);
+            audio::BufferView<float> probe_out(out_ptrs, 2, frames);
+            midi::MidiBuffer probe_mi, probe_mo;
+            candidate->process(probe_out, probe_in, probe_mi, probe_mo, ProcessContext{});
+            for (std::size_t c = 0; c < probe_out.num_channels(); ++c) {
+                auto o = probe_out.channel(c);
+                for (std::size_t n = 0; n < frames; ++n) {
+                    if (!std::isfinite(o[n])) {
+                        return reject({ReloadOutcome::Status::RejectedCandidateThrew,
+                                       "candidate produced non-finite output on a silence probe"});
+                    }
+                }
+            }
+        }
+
         std::unique_ptr<Processor> displaced = slot.swap(std::move(candidate));
         (void)displaced;  // ~Processor() here — control thread, never the audio thread.
         const auto t_swap = clock::now();

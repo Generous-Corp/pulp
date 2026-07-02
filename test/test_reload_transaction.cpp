@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace pulp;
@@ -269,3 +270,30 @@ TEST_CASE("hot-reload records DSP-axis phase metrics (item 1.2)",
         CHECK(r.metrics.swap_ms == 0.0);
     }
 }
+
+#ifdef RELOAD_LOGIC_NAN
+// item 1.10 behavioral probe: a candidate that passes every static gate but
+// emits NaN at runtime must be rejected PRE-commit — the live DSP stays.
+TEST_CASE("hot-reload rejects a candidate that fails the behavioral probe (NaN)",
+          "[reload][transaction][probe]") {
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+
+    ProcessorHotSwapSlot slot(std::move(initial));
+    format::PrepareContext ctx;
+    std::vector<ReloadLibrary> images;
+    const BuildFingerprint host = current_build_fingerprint();
+
+    REQUIRE(render_one(slot) == 0.5f);                 // initial unity × 0.5
+
+    auto r = reload_processor_from_library(slot, RELOAD_LOGIC_NAN, host, live, ctx, images);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.status == ReloadOutcome::Status::RejectedCandidateThrew);
+    INFO("detail: " << r.detail);
+    REQUIRE(r.detail.find("non-finite") != std::string::npos);
+    REQUIRE(render_one(slot) == 0.5f);                 // live DSP untouched (no swap)
+}
+#endif
