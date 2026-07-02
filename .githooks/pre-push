@@ -176,8 +176,9 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
 fi
 
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
-# lines in changed docs/reference files and shared skills, with ci/SKILL.md and
-# archival/report/policy/contract paths allowlisted by the script.
+# lines in changed docs/reference files, shared skills, and source-tree comments
+# and test tags (core/examples/tools/test/apple/inspect/ship), with ci/SKILL.md
+# and archival/report/policy/contract paths allowlisted by the script.
 if [ -f "$DNL" ]; then
     "$PYTHON" "$DNL" --base "$BASE" --mode=report
     case $? in
