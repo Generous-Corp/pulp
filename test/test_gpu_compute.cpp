@@ -674,6 +674,140 @@ TEST_CASE("GpuCompute dense_tanh matches CPU", "[render][gpu][compute]") {
     REQUIRE_FALSE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), 0, OUT));
 }
 
+// ── Fused WaveNet inference ─────────────────────────────────────────────────
+
+namespace {
+// Scalar CPU reference for the simplest WaveNet: 1 array, 1 layer, channels=1,
+// kernel=1, ungated, no head bias. With kernel=1 there is no dilation history so
+// each output sample depends only on the current input:
+//   layer_in = Wre * x
+//   z        = Wconv * layer_in + bconv + Wmix * x   (condition = the raw input)
+//   a        = tanh(z)                               (the head accumulates a)
+//   out      = Whr * a * head_scale
+// The layer1x1 (residual) weights exist in the blob but do not affect a
+// single-layer array's output (nothing downstream consumes the residual).
+float wavenet_ref_1x1(float x, float Wre, float Wconv, float bconv, float Wmix,
+                      float Whr, float head_scale) {
+    const float layer_in = Wre * x;
+    const float z = Wconv * layer_in + bconv + Wmix * x;
+    return Whr * std::tanh(z) * head_scale;
+}
+}  // namespace
+
+TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // Weight blob for 1 array / 1 layer / channels=1 / kernel=1 / ungated:
+    // [rechannel Wre][conv Wconv][conv bconv][mixin Wmix]
+    // [layer1x1 W1x1][layer1x1 b1x1][head_rechannel Whr][trailing head_scale].
+    const float Wre = 0.7f, Wconv = 1.3f, bconv = -0.2f, Wmix = 0.5f;
+    const float W1x1 = 0.9f, b1x1 = 0.1f, Whr = 1.1f, head_scale = 0.8f;
+    std::vector<float> weights = {Wre, Wconv, bconv, Wmix, W1x1, b1x1, Whr, head_scale};
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+
+    const uint32_t B = 16;
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(),
+                                     static_cast<uint32_t>(weights.size()), B, head_scale));
+
+    std::vector<float> in(B), out(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float expect =
+            wavenet_ref_1x1(in[i], Wre, Wconv, bconv, Wmix, Whr, head_scale);
+        REQUIRE(std::abs(out[i] - expect) < 1e-5f);
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward is deterministic across a gated multi-layer net",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // 1 array, 2 gated dilated layers, channels=4, kernel=3, head_size=4. This
+    // exercises the gated (tanh*sigmoid) path, multi-channel conv, dilation
+    // history, and the head accumulate/rechannel — not a hand reference, but a
+    // determinism + finiteness contract on the full forward.
+    const uint32_t C = 4, K = 3, L = 2, H = 4, Z = 2 * C;
+    const uint32_t need = C /*rechannel*/
+        + L * (Z * C * K + Z /*conv W+b*/ + Z /*mixin*/ + C * C + C /*1x1 W+b*/)
+        + H * C /*head rechannel*/ + 1 /*trailing head_scale*/;
+    std::vector<float> weights(need);
+    for (uint32_t i = 0; i < need; ++i)
+        weights[i] = 0.15f * std::sin(0.37f * i) - 0.05f * std::cos(0.11f * i);
+
+    std::vector<uint32_t> dilations = {1, 2};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = C;
+    spec.kernel = K; spec.head_size = H; spec.gated = 1; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = L;
+
+    const uint32_t B = 32;
+    const float head_scale = 0.6f;
+    std::vector<float> in(B);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.4f * std::sin(0.23f * i);
+
+    std::vector<float> a(B, 0.0f), b(B, 0.0f);
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+    REQUIRE(compute->wavenet_forward(in.data(), a.data(), B));
+    // A fresh plan on the same input must reproduce it bit-for-bit.
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+    REQUIRE(compute->wavenet_forward(in.data(), b.data(), B));
+    for (uint32_t i = 0; i < B; ++i) {
+        REQUIRE(std::isfinite(a[i]));
+        REQUIRE(a[i] == b[i]);
+    }
+}
+
+TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    std::vector<uint32_t> dilations = {1};
+    auto base = [&]() {
+        GpuCompute::WavenetLayerArraySpec s;
+        s.input_size = 1; s.condition_size = 1; s.channels = 1; s.kernel = 1;
+        s.head_size = 1; s.gated = 0; s.head_bias = 0;
+        s.dilations = dilations.data(); s.num_layers = 1;
+        return s;
+    };
+    // A valid 8-weight blob for the base (channels=1/kernel=1/1 layer) shape.
+    std::vector<float> ok = {0.7f, 1.3f, -0.2f, 0.5f, 0.9f, 0.1f, 1.1f, 0.8f};
+    const uint32_t B = 8;
+
+    // Sanity: the base shape is accepted.
+    { auto s = base(); REQUIRE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // A non-mono condition is not modeled.
+    { auto s = base(); s.condition_size = 2;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // Channel count above the fixed cap.
+    { auto s = base(); s.channels = 65;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // Zero layers.
+    { auto s = base(); s.num_layers = 0;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // A weight blob that does not match the declared shape.
+    { auto s = base(); REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 7, B, 0.8f)); }
+
+    // wavenet_forward before a matching prepare (wrong block size) fails.
+    { auto s = base(); REQUIRE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f));
+      std::vector<float> in(B, 0.1f), out(B * 2, 0.0f);
+      REQUIRE_FALSE(compute->wavenet_forward(in.data(), out.data(), B * 2)); }
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
