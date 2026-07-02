@@ -637,9 +637,13 @@ private:
 
     // Cabinet IR: one partitioned convolver per channel over the fixed internal
     // block. Heap-owned, built/freed only off the audio thread; the audio thread
-    // loads a pointer to it (nullptr = no IR = pass-through).
+    // loads a pointer to it (nullptr = no IR = pass-through). The per-channel
+    // swapper lets a NEW cabinet be staged off-thread and picked up in place by the
+    // audio thread (try_swap_ir), preserving the convolver's overlap history — so
+    // auditioning cabinets is click-free (no reset to zeroed overlap).
     struct IrEngine {
         std::array<signal::PartitionedConvolver, kChannels> conv{};
+        std::array<signal::ConvolverIrSwapper, kChannels> swapper{};
     };
     // Cabinet IRs are short; cap the decode + convolution cost.
     static constexpr double kMaxIrSeconds = 2.0;
@@ -743,15 +747,16 @@ private:
     // the convolver is preallocated; nullptr = no IR = pass-through. In-place is
     // safe — the convolver reads the whole input block before writing output.
     //
-    // A live IR change swaps the whole IrEngine, so the new convolver starts with
-    // zeroed overlap → one internal block (~11 ms) of discontinuity on the swap.
-    // That is audible only on a manual IR load (rare, user-initiated). Making it
-    // click-free means persistent per-channel convolvers fed via
-    // signal::ConvolverIrSwapper (staged off-thread, swapped in place preserving
-    // the overlap history), as SuperConvolver does — a follow-up RT slice.
+    // Changing cabinets stages the new IR into the live engine's swapper off the
+    // audio thread; here the audio thread picks it up in place (try_swap_ir keeps
+    // the convolver's overlap history) so the swap is click-free. The first load
+    // (no IR → IR) and removal (IR → no IR) go through the ir_active_ pointer, as
+    // adding/removing a cabinet is an expected timbral change.
     void apply_ir(std::size_t ch, float* buf) {
         IrEngine* ir = ir_active_.load(std::memory_order_seq_cst);
-        if (ir) ir->conv[ch].process(buf, buf, kInternalBlock);
+        if (!ir) return;
+        ir->conv[ch].try_swap_ir(ir->swapper[ch]);
+        ir->conv[ch].process(buf, buf, kInternalBlock);
     }
 
     // GPU engine: same fixed re-blocking, each B-block processed as ONE stereo
@@ -949,13 +954,22 @@ private:
             runtime::log_error("GPU NAM: load_ir('{}') failed; keeping current IR.", path);
             return;
         }
-        auto eng = std::make_unique<IrEngine>();
-        for (std::size_t ch = 0; ch < kChannels; ++ch)
-            eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
-        auto old_ir = std::move(current_ir_);
-        current_ir_ = std::move(eng);
-        ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);   // publish new
-        retire_engine(std::shared_ptr<void>(std::move(old_ir)));          // retire old with grace
+        if (IrEngine* active = ir_active_.load(std::memory_order_acquire)) {
+            // Cabinet change while an IR is live: stage the new IR into the running
+            // engine's swappers (allocates + FFTs here, off the audio thread). The
+            // audio thread swaps it in place next block, preserving the overlap
+            // tail — click-free. drain the displaced state back here on the next
+            // worker tick.
+            for (std::size_t ch = 0; ch < kChannels; ++ch)
+                active->swapper[ch].stage_ir(ir->data(), ir->size(), kInternalBlock);
+        } else {
+            // First IR (no cabinet was active): build + publish a fresh engine.
+            auto eng = std::make_unique<IrEngine>();
+            for (std::size_t ch = 0; ch < kChannels; ++ch)
+                eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
+            current_ir_ = std::move(eng);
+            ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);
+        }
         std::lock_guard<std::mutex> lock(ir_mutex_);
         ir_name_ = gpu_nam_basename(path);
     }
@@ -1000,6 +1014,12 @@ private:
             // Free engines retired long enough ago that the audio thread has
             // provably cycled past them (grace-period reclamation).
             retirees_.reclaim(audio_epoch_.load(std::memory_order_acquire));
+
+            // Reclaim IR states the audio thread displaced via try_swap_ir. Worker
+            // owns current_ir_, so draining its swappers here is thread-safe.
+            if (current_ir_)
+                for (std::size_t ch = 0; ch < kChannels; ++ch)
+                    current_ir_->swapper[ch].drain_old();
 
             // Model reload?
             const std::uint32_t gen = model_req_generation_.load(std::memory_order_acquire);
