@@ -2016,6 +2016,8 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+# Shared crossfade primitive (live-swap item 2.1) — the one click-free fixture.
+pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests (P5 test-split — extracted from test_signal.cpp).
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
