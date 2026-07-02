@@ -62,6 +62,16 @@ Each measurement carries `status`/`applicable`/`materiality`/`level_match`/`prov
 can cite *why*: e.g. "LTAS centroid 3200→2750 Hz (duller 14%), RMS matched, no clip/NaN →
 regression_suspected." Quote that evidence when you weigh in — don't just report the label.
 
+When the measurement succeeds, the report also carries an off-gate `advisory` block: a
+deterministic `null_residual` raw comparator (level-matched sample-domain residual vs the
+reference, in `db_rel_reference`; lower = more identical) plus a `corroboration` status. Treat
+corroboration as a **materiality cross-check, NOT a trust score** — it only says whether that
+raw residual *also* registers a material change. The useful case is disagreement:
+`not_corroborated` with `raw_material:true, axis_exceeds:false` means a real difference this axis
+can't see (e.g. a pure delay — try another `--profile`). Both raw comparators and corroboration
+are `experimental` / `participates_in_verdict:false`; they never change the verdict — cite them as
+extra context, never as confidence.
+
 ## Diff-integration: judging a DSP change in review (advisory)
 
 When a diff touches a DSP path and you want to say whether it helped or hurt:
