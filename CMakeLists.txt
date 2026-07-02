@@ -7,6 +7,16 @@ project(Pulp
     LANGUAGES CXX C
 )
 
+# Pulp's own source-tree root. Use this — NOT CMAKE_SOURCE_DIR — when referencing
+# Pulp's own files (tools/cmake helpers, external SDKs, bundled fonts, git dir).
+# CMAKE_SOURCE_DIR is the *top-level* project's dir, which is Pulp only when Pulp
+# is the top-level build; when Pulp is consumed via add_subdirectory() (e.g. a
+# plugin repo vendoring Pulp as a submodule) CMAKE_SOURCE_DIR is the CONSUMER's
+# root and those paths don't exist. PULP_ROOT_DIR always resolves to this file's
+# directory in both cases. (The find_package(Pulp) path instead keys off
+# CMAKE_CURRENT_LIST_DIR in the installed helpers.)
+set(PULP_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Pulp source tree root")
+
 # ── C++20 Standard ──────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -398,7 +408,7 @@ if(ANDROID)
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
-        ${CMAKE_SOURCE_DIR}/core/platform/include
+        ${PULP_ROOT_DIR}/core/platform/include
     )
     target_link_libraries(pulp-jni PRIVATE
         pulp::platform
@@ -491,7 +501,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
         set(${out_var} "${_acc}" PARENT_SCOPE)
     endfunction()
 
-    _pulp_collect_executables_recursive(_all_executables "${CMAKE_SOURCE_DIR}")
+    _pulp_collect_executables_recursive(_all_executables "${PULP_ROOT_DIR}")
     foreach(_exec ${_all_executables})
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()

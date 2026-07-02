@@ -81,7 +81,7 @@ endif()
 
 # nanosvg (zlib license) for SVG loading
 target_include_directories(pulp-canvas PRIVATE
-    ${CMAKE_SOURCE_DIR}/external/nanosvg
+    ${PULP_ROOT_DIR}/external/nanosvg
 )
 
 # Platform-specific rendering backends
@@ -134,11 +134,11 @@ if(PULP_HAS_SKIA)
     # rest of PulpUtils.cmake (which fails fast unless format/view targets
     # already exist). Pulled in directly so the canvas subdir doesn't have
     # to wait for the parent to inject the helper.
-    include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake")
+    include("${PULP_ROOT_DIR}/tools/cmake/PulpEmbedData.cmake")
     pulp_add_binary_data(pulp-bundled-fonts
         SOURCES
-            ${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf
-            ${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/JetBrainsMono-Regular.ttf
         NAMESPACE pulp_bundled_fonts
     )
     target_link_libraries(pulp-canvas PRIVATE pulp-bundled-fonts)
@@ -168,7 +168,7 @@ if(PULP_HAS_SKIA)
     if(PULP_BUNDLE_NOTO_COLOR_EMOJI)
         pulp_add_binary_data(pulp-bundled-noto-color-emoji
             SOURCES
-                ${CMAKE_SOURCE_DIR}/external/fonts/NotoColorEmoji.ttf
+                ${PULP_ROOT_DIR}/external/fonts/NotoColorEmoji.ttf
             NAMESPACE pulp_bundled_noto_color_emoji
         )
         set_target_properties(pulp-bundled-noto-color-emoji PROPERTIES

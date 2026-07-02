@@ -121,7 +121,7 @@ option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when miss
 if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
         AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))
-    file(GLOB _pulp_local_skia "${CMAKE_SOURCE_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
+    file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
     if(NOT _pulp_local_skia)
         if(DEFINED ENV{PULP_SKIA_CACHE})
             set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
@@ -146,7 +146,7 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
                 execute_process(
                     COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
                             ${_pulp_skia_plat} --dest "${_pulp_skia_cache}"
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+                    WORKING_DIRECTORY ${PULP_ROOT_DIR})
                 file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
             endif()
         endif()
@@ -509,7 +509,7 @@ message(STATUS "Pulp: Mbed TLS crypto library enabled")
 # violation.
 add_library(pulp-cpp-httplib INTERFACE)
 target_include_directories(pulp-cpp-httplib INTERFACE
-    ${CMAKE_SOURCE_DIR}/external/cpp-httplib)
+    ${PULP_ROOT_DIR}/external/cpp-httplib)
 if(TARGET mbedcrypto)
     target_compile_definitions(pulp-cpp-httplib INTERFACE CPPHTTPLIB_MBEDTLS_SUPPORT)
     if(IOS OR PULP_IOS)
