@@ -5431,6 +5431,15 @@ target_link_libraries(pulp-test-host-param-surface
 catch_discover_tests(pulp-test-host-param-surface
     PROPERTIES LABELS "view")
 
+# Faithful port toolkit — JUCE-port-accelerator Phase 6 SDK primitives
+# (SVG fragment handles, anchored popover, drag-to-reorder, paint-space painters).
+add_executable(pulp-test-faithful-port-toolkit
+    test_faithful_port_toolkit.cpp)
+target_link_libraries(pulp-test-faithful-port-toolkit
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-faithful-port-toolkit
+    PROPERTIES LABELS "view")
+
 # MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
 # via DesignFrameView). Pins SVG load, headless render, catalog registration.
 add_executable(pulp-test-musical-typing-keyboard

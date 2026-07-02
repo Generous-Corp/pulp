@@ -507,6 +507,49 @@ void DesignFrameView::on_mouse_leave() {
     set_hovered_element(-1);
 }
 
+// ── SVG fragment handles (P6.3) ──────────────────────────────────────────────
+
+void DesignFrameView::register_fragment(std::string id, std::string marker) {
+    if (id.empty() || marker.empty()) return;
+    fragments_[std::move(id)] = std::move(marker);
+}
+
+bool DesignFrameView::current_svg_draw_box(float& ox, float& oy,
+                                           float& ow, float& oh) const {
+    if (svg_.empty() || panel_w_ <= 0 || panel_h_ <= 0) return false;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0) return false;
+    ox = t.ox - panel_x_ * t.scale;
+    oy = t.oy - panel_y_ * t.scale;
+    ow = svg_w_ * t.scale;
+    oh = svg_h_ * t.scale;
+    return true;
+}
+
+bool DesignFrameView::draw_fragment_marker(canvas::Canvas& canvas,
+                                           const std::string& marker,
+                                           const FragmentTransform& xform,
+                                           float opacity,
+                                           const std::string& recolor_hex) const {
+    if (marker.empty()) return false;
+    const std::string fragment = extract_svg_fragment(svg_, marker);
+    if (fragment.empty()) return false;
+    const std::string doc =
+        build_svg_fragment_document(svg_, fragment, xform, opacity, recolor_hex);
+    if (doc.empty()) return false;
+    float x = 0, y = 0, w = 0, h = 0;
+    if (!current_svg_draw_box(x, y, w, h)) return false;
+    return canvas.draw_svg(doc, x, y, w, h);
+}
+
+bool DesignFrameView::draw_fragment(canvas::Canvas& canvas, const std::string& id,
+                                    const FragmentTransform& xform, float opacity,
+                                    const std::string& recolor_hex) const {
+    const auto it = fragments_.find(id);
+    if (it == fragments_.end()) return false;
+    return draw_fragment_marker(canvas, it->second, xform, opacity, recolor_hex);
+}
+
 void DesignFrameView::set_element_enabled(int i, bool enabled) {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return;
     if (elements_[i].enabled == enabled) return;
@@ -690,6 +733,24 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // transform hit_element() inverts, so knobs are hit where they're drawn.
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
+
+    // Per-element hover / bypass restyle (P6.2's visual half, riding the P6.3
+    // fragment-handle primitive). We only have a reliable, pixel-exact handle for
+    // elements whose moving part is a tagged SVG path (needle_d: knob needle,
+    // fader/xy_pad thumb, switch dot); for those, redraw JUST that fragment over
+    // the frame — a bypassed element desaturates to a muted grey, the hovered one
+    // brightens with a translucent white recolor. Elements without a fragment
+    // handle keep their baked chrome (honest — no guessed overlay). draw_fragment
+    // never mutates the live document, so the dragged-knob patch above is intact.
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        if (e.needle_d.empty()) continue;
+        if (!e.enabled) {
+            draw_fragment_marker(canvas, e.needle_d, {}, 0.45f, "#6b7280");
+        } else if (i == hovered_element_) {
+            draw_fragment_marker(canvas, e.needle_d, {}, 0.18f, "#ffffff");
+        }
+    }
 
     // Toggle buttons tint their rect when on, translucent over the baked chrome
     // so the S/M/icon label shows through.

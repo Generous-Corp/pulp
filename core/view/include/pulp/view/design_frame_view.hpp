@@ -1,9 +1,11 @@
 #pragma once
 
+#include <pulp/view/svg_fragment.hpp>
 #include <pulp/view/view.hpp>
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -426,6 +428,32 @@ public:
     bool element_is_hovered(int i) const { return i >= 0 && i == hovered_element_; }
     std::function<void(int index, bool entered)> on_element_hover;
 
+    // ── SVG fragment handles (Phase 6 P6.3) ────────────────────────────────
+    // Tag a sub-tree of the live SVG once by a unique marker substring (a path
+    // `d`, the same handle the knob-needle patch keys on), then redraw JUST that
+    // fragment on demand — transformed (translate/rotate/scale), composited at an
+    // opacity, and optionally recolored — composited over the already-drawn frame
+    // through the SAME panel fit paint() uses, so it lands on its original spot.
+    // This is the primitive P6.2's hover-brighten / bypass-dim visuals ride on,
+    // and what a meter-needle redraw, reorder ghost, or focus glow reuses. The
+    // string/geometry work is the pure svg_fragment.hpp helpers; these methods add
+    // the Canvas::draw_svg call and the panel-fit draw box.
+    void register_fragment(std::string id, std::string marker);
+    bool has_fragment(const std::string& id) const {
+        return fragments_.find(id) != fragments_.end();
+    }
+    // Draw the registered fragment `id`. Returns false if the id is unknown, its
+    // marker isn't in the current SVG, the panel isn't laid out, or the backend
+    // can't render SVG. Never throws / never mutates the live document.
+    bool draw_fragment(canvas::Canvas& canvas, const std::string& id,
+                       const FragmentTransform& xform = {}, float opacity = 1.0f,
+                       const std::string& recolor_hex = {}) const;
+    // Lower-level: draw an arbitrary (not pre-registered) marker fragment.
+    bool draw_fragment_marker(canvas::Canvas& canvas, const std::string& marker,
+                              const FragmentTransform& xform = {},
+                              float opacity = 1.0f,
+                              const std::string& recolor_hex = {}) const;
+
     // Enable/disable (bypass) element `i`. A disabled element is skipped by
     // hit-testing — it cannot be hovered, dragged, clicked, or gesture — and if
     // it was the hovered element the hover is cleared. Repaints. No-op out of
@@ -523,6 +551,13 @@ private:
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
     bool route_actions_to_host_ = false;  ///< forward action clicks to host_actions()
     int hovered_element_ = -1;            ///< element under the pointer, or -1
+    std::unordered_map<std::string, std::string> fragments_;  ///< id -> marker (P6.3)
+
+    // The panel→view draw box for the current bounds — the exact (x,y,w,h) paint()
+    // hands Canvas::draw_svg for the full frame. A fragment mini-document drawn at
+    // this box composites over its original position. Returns false (leaves out-*
+    // untouched) when the panel isn't laid out.
+    bool current_svg_draw_box(float& ox, float& oy, float& ow, float& oh) const;
 
     // Set the hovered element (fires on_element_hover on change, repaints).
     void set_hovered_element(int i);
