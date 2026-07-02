@@ -492,3 +492,127 @@ TEST_CASE("ReorderList opens a gap for the lifted item during a drag",
     const Rect lifted = original[0]->bounds();
     CHECK(lifted.y == Approx(pitch * 2.0f).margin(0.5f));
 }
+
+// ── P6.7: Skinnable paint-space control painters ─────────────────────────────
+// Mode: RecordingCanvas command-stream assertions (no Skia raster in this
+// GPU-OFF build) — each painter's geometry must be value-dependent.
+
+#include <pulp/view/control_painters.hpp>
+namespace paint = pulp::view::painters;
+using Cmd = pulp::canvas::DrawCommand::Type;
+
+namespace {
+// Sweep (radians) of the LAST stroke_arc in a command stream, or -1 if none.
+float last_arc_sweep(const pulp::canvas::RecordingCanvas& c) {
+    for (auto it = c.commands().rbegin(); it != c.commands().rend(); ++it)
+        if (it->type == Cmd::stroke_arc) return it->f[4] - it->f[3];
+    return -1.0f;
+}
+// The LAST fill_rounded_rect (thumb), or nullptr.
+const pulp::canvas::DrawCommand* last_rrect(const pulp::canvas::RecordingCanvas& c) {
+    const pulp::canvas::DrawCommand* out = nullptr;
+    for (auto& cmd : c.commands())
+        if (cmd.type == Cmd::fill_rounded_rect) out = &cmd;
+    return out;
+}
+}  // namespace
+
+TEST_CASE("paint_mod_ring_knob active arc sweep grows with value",
+          "[view][painters][issue-juce-port]") {
+    const pulp::view::Rect r{0, 0, 80, 80};
+    pulp::canvas::RecordingCanvas lo, hi;
+    paint::paint_mod_ring_knob(lo, r, 0.25f);
+    paint::paint_mod_ring_knob(hi, r, 0.75f);
+
+    // Two arcs each (track + active) plus the indicator line.
+    CHECK(lo.count(Cmd::stroke_arc) == 2);
+    CHECK(lo.count(Cmd::stroke_line) == 1);
+    const float sweep_lo = last_arc_sweep(lo);
+    const float sweep_hi = last_arc_sweep(hi);
+    CHECK(sweep_hi > sweep_lo);
+    // 0.75 sweep should be ~3x the 0.25 sweep (both a fraction of 270deg).
+    CHECK(sweep_hi == Approx(sweep_lo * 3.0f).epsilon(0.02));
+}
+
+TEST_CASE("paint_level_fader thumb tracks the value",
+          "[view][painters][issue-juce-port]") {
+    const pulp::view::Rect r{10, 10, 20, 200};
+    SECTION("vertical: higher value -> thumb higher (smaller y)") {
+        pulp::canvas::RecordingCanvas lo, hi;
+        paint::paint_level_fader(lo, r, 0.2f);
+        paint::paint_level_fader(hi, r, 0.8f);
+        const auto* tlo = last_rrect(lo);
+        const auto* thi = last_rrect(hi);
+        REQUIRE(tlo);
+        REQUIRE(thi);
+        CHECK(thi->f[1] < tlo->f[1]);   // thumb y decreases as value rises
+    }
+    SECTION("horizontal: higher value -> thumb further right") {
+        pulp::view::painters::FaderStyle st; st.horizontal = true;
+        pulp::canvas::RecordingCanvas lo, hi;
+        paint::paint_level_fader(lo, {10, 10, 200, 20}, 0.2f, st);
+        paint::paint_level_fader(hi, {10, 10, 200, 20}, 0.8f, st);
+        CHECK(last_rrect(hi)->f[0] > last_rrect(lo)->f[0]);  // thumb x increases
+    }
+}
+
+TEST_CASE("paint_range_slider draws two thumbs spanning [lo,hi]",
+          "[view][painters][issue-juce-port]") {
+    pulp::canvas::RecordingCanvas c;
+    paint::paint_range_slider(c, {0, 0, 200, 20}, 0.25f, 0.75f);
+    // Two thumb circles.
+    REQUIRE(c.count(Cmd::fill_circle) == 2);
+    // First circle = lo, second = hi; hi is further right (larger x).
+    const pulp::canvas::DrawCommand* first = nullptr;
+    const pulp::canvas::DrawCommand* second = nullptr;
+    for (auto& cmd : c.commands()) {
+        if (cmd.type != Cmd::fill_circle) continue;
+        if (!first) first = &cmd; else second = &cmd;
+    }
+    CHECK(second->f[0] > first->f[0]);
+
+    SECTION("swapped lo/hi is normalized (lo <= hi)") {
+        pulp::canvas::RecordingCanvas s;
+        paint::paint_range_slider(s, {0, 0, 200, 20}, 0.9f, 0.1f);
+        const pulp::canvas::DrawCommand* a = nullptr;
+        const pulp::canvas::DrawCommand* b = nullptr;
+        for (auto& cmd : s.commands()) {
+            if (cmd.type != Cmd::fill_circle) continue;
+            if (!a) a = &cmd; else b = &cmd;
+        }
+        CHECK(a->f[0] <= b->f[0]);   // still lo-then-hi
+    }
+}
+
+TEST_CASE("paint_toggle knob moves with state",
+          "[view][painters][issue-juce-port]") {
+    const pulp::view::Rect r{0, 0, 48, 24};
+    pulp::canvas::RecordingCanvas off, on;
+    paint::paint_toggle(off, r, false);
+    paint::paint_toggle(on, r, true);
+    // One knob circle each.
+    REQUIRE(off.count(Cmd::fill_circle) == 1);
+    REQUIRE(on.count(Cmd::fill_circle) == 1);
+    float off_x = 0, on_x = 0;
+    for (auto& c : off.commands()) if (c.type == Cmd::fill_circle) off_x = c.f[0];
+    for (auto& c : on.commands())  if (c.type == Cmd::fill_circle) on_x = c.f[0];
+    CHECK(on_x > off_x);   // knob slides right when on
+}
+
+TEST_CASE("paint_waveform strokes one segment per sample gap",
+          "[view][painters][issue-juce-port]") {
+    const float samples[5] = {0.0f, 1.0f, -1.0f, 0.5f, 0.0f};
+    pulp::canvas::RecordingCanvas c;
+    paint::paint_waveform(c, {0, 0, 100, 40}, samples, 5);
+    // baseline (1) + polyline default fallback = 4 segments for 5 points.
+    CHECK(c.count(Cmd::stroke_line) == 1 + 4);
+
+    SECTION("too few samples is a no-op") {
+        pulp::canvas::RecordingCanvas empty;
+        const float one[1] = {0.5f};
+        paint::paint_waveform(empty, {0, 0, 100, 40}, one, 1);
+        CHECK(empty.command_count() == 0);
+        paint::paint_waveform(empty, {0, 0, 100, 40}, nullptr, 8);
+        CHECK(empty.command_count() == 0);
+    }
+}
