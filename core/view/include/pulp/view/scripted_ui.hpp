@@ -54,6 +54,22 @@ public:
     void set_repaint_callback(std::function<void()> cb);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
+    /// JS-axis reload timings, ms (plan item 1.2). Populated on every
+    /// rebuild_from_code() — full on success, partial (later phases 0) on an
+    /// early failure. The DSP-axis counterpart lives in reload_transaction.hpp's
+    /// ReloadMetrics; together they feed the `reloaded in NNN ms` diagnostic and
+    /// p50/p95 baselines.
+    struct ReloadMetrics {
+        double probe_ms = 0.0;     ///< parse + build a probe bridge to validate the code
+        double snapshot_ms = 0.0;  ///< snapshot the live widget values before the rebuild
+        double rebuild_ms = 0.0;   ///< build the live bridge from the new code + apply theme
+        double restore_ms = 0.0;   ///< restore preserved widget values into the new tree
+        double total_ms = 0.0;     ///< end-to-end
+    };
+    const ReloadMetrics& last_reload_metrics() const { return last_reload_metrics_; }
+    /// Convenience: total wall-clock of the last reload, ms.
+    double last_reload_ms() const { return last_reload_metrics_.total_ms; }
+
     // Attach the host's GpuSurface so the JS-side navigator.gpu /
     // canvas.getContext('webgpu') bridge routes through Pulp's live Dawn
     // instance. The format adapters open this session
@@ -88,6 +104,7 @@ private:
     render::GpuSurface* gpu_surface_ = nullptr;
 
     Theme base_theme_;
+    ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 

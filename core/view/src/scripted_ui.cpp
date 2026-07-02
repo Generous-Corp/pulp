@@ -1,5 +1,6 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/runtime/log.hpp>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -132,6 +133,13 @@ void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
 }
 
 bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve_state, std::string* error) {
+    // JS-axis reload timings (item 1.2). steady_clock; UI/control thread only.
+    using clock = std::chrono::steady_clock;
+    const auto t0 = clock::now();
+    const auto ms = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    last_reload_metrics_ = ReloadMetrics{};   // reset; stays partial on early failure
     try {
         const auto theme_for_reload = preserve_state ? base_theme_ : root_.theme();
         auto probe_engine = make_engine();
@@ -149,12 +157,14 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         auto probe_bridge = std::make_unique<WidgetBridge>(*probe_engine, probe_root, probe_store);
         probe_bridge->set_asset_roots(asset_roots_);
         probe_bridge->load_script(code);
+        const auto t_probe = clock::now();
 
         WidgetReloadSnapshot saved_values;
         if (preserve_state && bridge_) {
             bridge_->snapshot_values(saved_values);
             bridge_->clear();
         }
+        const auto t_snapshot = clock::now();
 
         root_.set_theme(theme_for_reload);
         auto next_engine = make_engine();
@@ -170,17 +180,30 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         engine_ = std::move(next_engine);
         bridge_ = std::move(next_bridge);
         if (!apply_theme_override(error)) {
+            last_reload_metrics_.probe_ms = ms(t0, t_probe);
+            last_reload_metrics_.snapshot_ms = ms(t_probe, t_snapshot);
+            last_reload_metrics_.total_ms = ms(t0, clock::now());
             return false;
         }
+        const auto t_rebuild = clock::now();
         if (preserve_state) {
             bridge_->restore_values(saved_values);
         }
+        const auto t_restore = clock::now();
+
+        last_reload_metrics_.probe_ms = ms(t0, t_probe);
+        last_reload_metrics_.snapshot_ms = ms(t_probe, t_snapshot);
+        last_reload_metrics_.rebuild_ms = ms(t_snapshot, t_rebuild);
+        last_reload_metrics_.restore_ms = ms(t_rebuild, t_restore);
+        last_reload_metrics_.total_ms = ms(t0, t_restore);
         return true;
     } catch (const std::exception& e) {
         if (error) *error = e.what();
+        last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;
     } catch (...) {
         if (error) *error = describe_exception();
+        last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;
     }
 }

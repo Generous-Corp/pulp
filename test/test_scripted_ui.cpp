@@ -575,3 +575,38 @@ TEST_CASE("ScriptedUiSession explicit reload() rebuilds without a watcher, prese
 
     fs::remove_all(temp_dir);
 }
+
+TEST_CASE("ScriptedUiSession records JS-axis reload metrics (item 1.2)",
+          "[view][scripted-ui][metrics]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-metrics");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, "createKnob('gain', 10, 10, 48, 48);\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    // A reload (preserve_state) exercises probe → snapshot → rebuild → restore.
+    write_text(script_path,
+               "createKnob('gain', 10, 10, 48, 48);\ncreateLabel('added', 'v2', '');\n");
+    REQUIRE(session.reload(&error));
+
+    const auto& m = session.last_reload_metrics();
+    CHECK(m.probe_ms >= 0.0);
+    CHECK(m.snapshot_ms >= 0.0);
+    CHECK(m.rebuild_ms >= 0.0);
+    CHECK(m.restore_ms >= 0.0);
+    CHECK(m.total_ms >= m.probe_ms);
+    CHECK(m.total_ms >= m.rebuild_ms);
+    CHECK(session.last_reload_ms() == m.total_ms);
+    const double sum = m.probe_ms + m.snapshot_ms + m.rebuild_ms + m.restore_ms;
+    CHECK(m.total_ms + 1.0 >= sum);   // total ≈ sum of contiguous phases
+
+    fs::remove_all(temp_dir);
+}
