@@ -801,13 +801,19 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out",
     // Option-looking paths (leading '-') are rejected, not forwarded as flags.
     require_contains(call(R"JSON({"reference":"-x.wav","candidate":"b.wav"})JSON"),
                      "must be WAV paths, not options");
-    // Unknown profile / reference_role are rejected with the allowed set.
+    // Profile is now passed THROUGH to the Python `_AXES` registry (the single source of truth for
+    // the valid set, which grows as axes are added); the MCP only rejects an option-looking value.
+    // reference_role stays a small closed set validated locally.
     require_contains(
-        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"loudness"})JSON"),
-        "profile must be tonal-balance or added-hf");
+        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"-x"})JSON"),
+        "profile must be an axis name, not an option");
     require_contains(
         call(R"JSON({"reference":"a.wav","candidate":"b.wav","reference_role":"truth"})JSON"),
         "reference_role must be peer or golden");
+    // A newer axis (not in the old hardcoded pair) flows straight through to a well-formed result.
+    require_contains(
+        call(R"JSON({"reference":"/nope/a.wav","candidate":"/nope/b.wav","profile":"noise-roughness"})JSON"),
+        R"JSON("jsonrpc":"2.0")JSON");
     // Threshold is passed through to the Python registry (the per-axis source of truth: a
     // fraction for tonal-balance, dB for added-hf); the MCP guards only the universal invariant
     // that it is a finite positive magnitude. A negative threshold is rejected here...

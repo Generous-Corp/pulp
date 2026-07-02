@@ -273,8 +273,8 @@ def test_added_hf_uses_its_own_default_threshold():
     assert m["tolerance_class"] == "hf_fizz.v2"
 
 
-def test_registry_exposes_both_profiles():
-    assert set(compare.PROFILES) == {"tonal-balance", "added-hf"}
+def test_registry_exposes_all_profiles():
+    assert set(compare.PROFILES) == {"tonal-balance", "added-hf", "noise-roughness", "graininess"}
 
 
 def test_added_hf_cli_profile_smoke(tmp_path, capsys):
@@ -340,6 +340,34 @@ def test_added_hf_zero_hf_candidate_is_finite_material_not_invalid():
     assert report["verdict"] == compare.VERDICT_MATERIAL   # HF loss is material but not a regression
 
 
+def test_verdict_direction_uses_raw_sign_not_rounded_delta():
+    """Regression-DIRECTION guard (Codex retrospective must-fix): with a threshold finer than the
+    4-decimal rounding of `materiality.delta`, a tiny BRIGHTER change (raw delta > 0) whose delta
+    rounds to 0.0 must NOT be read as a 'duller' regression. The verdict keys off the raw
+    `direction_sign`, so it stays consistent with the payload direction."""
+    ref, sr = _drum()
+    cand = ref + 5e-8 * highband(ref)                 # a hair brighter; |rel| rounds to 0.0000
+    report = compare.compare_arrays(ref, cand, sr, profile="tonal-balance",
+                                    reference_role="golden", threshold=1e-8)
+    m = report["measurements"][0]
+    assert m["materiality"]["exceeds"] is True        # it IS a (tiny) material change
+    assert m["materiality"]["direction_sign"] == 1    # raw sign = brighter
+    assert m["payload"]["direction"] == "brighter"
+    assert report["verdict"] == compare.VERDICT_MATERIAL   # brighter is NOT the duller-regression direction
+    assert report["verdict"] != compare.VERDICT_REGRESSION
+
+
+def test_dc_present_needs_absolute_floor_not_just_ratio():
+    """A near-silent signal has a meaningful mean/RMS RATIO but a negligible absolute DC that rounds
+    to 0.0 in the report — it must NOT raise a 'DC offset present' advisory over displayed zeros."""
+    sr = 48000
+    near = np.ones(48000) * 1.1e-9                    # tiny constant: ratio ~1 but |mean| < abs floor
+    report = compare.compare_arrays(near, near.copy(), sr, reference_role="peer")
+    dc = next(r for r in report["advisory"]["raw_comparators"] if r["name"] == "dc_offset")
+    assert dc["detail"]["present"] is False
+    assert "DC offset" not in report["summary"]
+
+
 def test_verdict_keys_off_exceeds_not_rounded_delta():
     """Rounding-boundary regression guard: a raw delta just under the threshold that ROUNDS up
     to the threshold (so materiality.delta == threshold) but whose raw `exceeds` is False must
@@ -356,7 +384,7 @@ def test_verdict_keys_off_exceeds_not_rounded_delta():
     exceeded = compare._measurement(
         axis, compare.STATUS_MEASURED, applicable=True,
         materiality={"delta": 0.02, "unit": "hf_energy_frac_delta", "tolerance_class": "hf_fizz.v1",
-                     "threshold": 0.02, "exceeds": True},
+                     "threshold": 0.02, "exceeds": True, "direction_sign": 1},
         payload=payload)
     assert compare._verdict(axis, exceeded, "golden") == compare.VERDICT_REGRESSION
 
@@ -490,6 +518,28 @@ def test_dc_offset_does_not_move_the_verdict():
     axis = compare._AXES["tonal-balance"]
     recomputed = compare._verdict(axis, report["measurements"][0], "golden")
     assert report["verdict"] == recomputed
+
+
+def test_cli_unknown_profile_is_clean_invalid_not_argparse_exit(tmp_path, capsys):
+    """An unknown --profile must produce a clean structured `invalid` report + exit 2, NOT an
+    argparse exit-2 with no report — otherwise a delegating caller (the MCP tool) reads the empty
+    report as 'tool not installed'. The valid set lives in the Python registry, surfaced here."""
+    from quality_lab import cli
+    ref, sr = _drum()
+    ref_p, cand_p = str(tmp_path / "r.wav"), str(tmp_path / "c.wav")
+    out_p = str(tmp_path / "report.json")
+    audio_io.save_wav(ref_p, ref, sr)
+    audio_io.save_wav(cand_p, ref, sr)
+    rc = cli.main(["compare", ref_p, cand_p, "--profile", "loudness", "--json", out_p])
+    assert rc == 2                                        # invalid exit, not an argparse SystemExit
+    out = capsys.readouterr().out
+    assert "invalid" in out
+    import json, os
+    assert os.path.exists(out_p)                          # a structured report WAS written
+    with open(out_p) as fh:
+        report = json.load(fh)
+    assert report["verdict"] == compare.VERDICT_INVALID
+    assert "unknown profile" in report["summary"]         # names the bad profile + the valid set
 
 
 def test_cli_out_of_range_threshold_is_clean_invalid_not_traceback(tmp_path, capsys):

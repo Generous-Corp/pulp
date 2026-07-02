@@ -31,8 +31,10 @@ import numpy as np
 from . import audio_io, schema
 from .dsp import (
     dc_offset_metrics,
+    harmonic_to_noise_ratio_db,
     hf_band_bin_count,
     hf_fraction_ratio_db,
+    mean_spectral_flux,
     null_residual_db,
     relative_centroid_shift,
 )
@@ -63,6 +65,18 @@ _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
 # hundreds of bins), keeping the guard honest without excluding a real working rate.
 _HF_CUTOFF_HZ = 8000.0
 _HF_MIN_BINS = 8
+# HNR (noise-roughness) pitch range: 40 Hz covers bass fundamentals (low E ~41 Hz) — the default
+# 70 Hz would miss them, precisely the material the compare axis is asked about. flux (graininess)
+# needs a non-degenerate reference; below this floor the reference has no sustained content to
+# measure churn against, so the axis is not_applicable (the div-by-~zero edge, cf. Slice 2).
+_HNR_FMIN, _HNR_FMAX = 40.0, 1000.0
+_FLUX_REF_FLOOR = 1e-9
+# noise-roughness and graininess are only meaningful on tonal/sustained material — a caller-declared
+# contract (the caller picks the profile), surfaced as a standing summary caveat rather than an
+# unvalidated tonal/percussive CLASSIFIER inside the honesty path (which would just be a tunable
+# threshold on the same statistic). Both axes still carry per-signal scalars in the payload so a
+# reader can judge, and only mathematically degenerate inputs go not_applicable.
+_MATERIAL_CAVEAT = " (meaningful on tonal/sustained material)"
 # Floor for the band-relative HF fraction-ratio: a fraction at/below this (~-60 dB, far under any
 # real HF fraction) clamps so a zero-HF reference or candidate yields a large FINITE dB delta, not
 # -inf → an `invalid` report (which would violate "nonzero exit only when we could not measure").
@@ -163,6 +177,59 @@ def _added_hf_summary(verdict: str, env: dict[str, Any]) -> str:
     return f"Material high-frequency balance change: candidate {p['direction']} ({band})."
 
 
+def _noise_roughness_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
+    hnr_ref = harmonic_to_noise_ratio_db(reference, sr, fmin=_HNR_FMIN, fmax=_HNR_FMAX)
+    hnr_cand = harmonic_to_noise_ratio_db(matched, sr, fmin=_HNR_FMIN, fmax=_HNR_FMAX)
+    delta = hnr_cand - hnr_ref              # dB; a DROP (negative) = added noise/roughness = bad
+    direction = "rougher/noisier" if delta < 0 else "cleaner"
+    return {"applicable": True, "delta": delta, "unit": "hnr_delta_db",
+            "tolerance_class": "hnr.v1",
+            "payload": {"kind": "scalar", "ref_hnr_db": round(hnr_ref, 2),
+                        "cand_hnr_db": round(hnr_cand, 2), "hnr_delta_db": round(delta, 2),
+                        "direction": direction}}
+
+
+def _noise_roughness_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    m = f"HNR {p['ref_hnr_db']:.1f}->{p['cand_hnr_db']:.1f} dB (delta {p['hnr_delta_db']:+.1f} dB)"
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material roughness change ({m}){_MATERIAL_CAVEAT}."
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: candidate is rougher/noisier than the golden reference ({m}){_MATERIAL_CAVEAT}."
+    return f"Material roughness change: candidate is {p['direction']} ({m}){_MATERIAL_CAVEAT}."
+
+
+def _graininess_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
+    flux_ref = mean_spectral_flux(reference, sr)
+    if flux_ref <= _FLUX_REF_FLOOR:
+        return {"applicable": False,
+                "reason": "reference has negligible spectral flux (no sustained content to measure graininess against)"}
+    flux_cand = mean_spectral_flux(matched, sr)
+    rel = (flux_cand - flux_ref) / flux_ref   # relative flux increase; a RISE (positive) = grainier = bad
+    direction = "grainier" if rel > 0 else "smoother"
+    return {"applicable": True, "delta": rel, "unit": "rel_flux_increase",
+            "tolerance_class": "spectral_flux.v1",
+            "payload": {"kind": "scalar", "ref_flux": round(flux_ref, 5),
+                        "cand_flux": round(flux_cand, 5), "rel_flux_increase": round(rel, 3),
+                        "direction": direction}}
+
+
+def _graininess_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    m = f"spectral flux {p['ref_flux']:.4g}->{p['cand_flux']:.4g} (rel {p['rel_flux_increase']:+.0%})"
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material graininess change ({m}){_MATERIAL_CAVEAT}."
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: candidate is grainier than the golden reference ({m}){_MATERIAL_CAVEAT}."
+    return f"Material graininess change: candidate is {p['direction']} ({m}){_MATERIAL_CAVEAT}."
+
+
 _TONAL_BALANCE = _Axis(
     profile="tonal-balance", axis="tonal_balance", tool="quality-lab:spectral_centroid",
     default_threshold=0.05, bad_sign=-1, kernel=_centroid_kernel, summarize=_tonal_summary,
@@ -172,7 +239,17 @@ _ADDED_HF = _Axis(
     default_threshold=3.0, bad_sign=+1, kernel=_added_hf_kernel, summarize=_added_hf_summary,
     threshold_range=(0.0, 60.0),  # dB magnitude — its own unit, so the shared guard travels with it
 )
-_AXES: dict[str, _Axis] = {a.profile: a for a in (_TONAL_BALANCE, _ADDED_HF)}
+_NOISE_ROUGHNESS = _Axis(
+    profile="noise-roughness", axis="noise_roughness", tool="quality-lab:hnr",
+    default_threshold=1.5, bad_sign=-1, kernel=_noise_roughness_kernel, summarize=_noise_roughness_summary,
+    threshold_range=(0.0, 60.0),  # dB magnitude (HNR delta)
+)
+_GRAININESS = _Axis(
+    profile="graininess", axis="graininess", tool="quality-lab:spectral_flux",
+    default_threshold=0.5, bad_sign=+1, kernel=_graininess_kernel, summarize=_graininess_summary,
+    threshold_range=(0.0, 100.0),  # relative flux increase — can exceed 1.0 (e.g. +500%)
+)
+_AXES: dict[str, _Axis] = {a.profile: a for a in (_TONAL_BALANCE, _ADDED_HF, _NOISE_ROUGHNESS, _GRAININESS)}
 
 PROFILES = tuple(sorted(_AXES))
 DEFAULT_THRESHOLD = _TONAL_BALANCE.default_threshold  # back-compat alias
@@ -220,8 +297,13 @@ def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int,
     return _measurement(
         axis, STATUS_MEASURED, applicable=True,
         level_match=_level_match_evidence(ref_rms, cand_rms_pre),
+        # `exceeds` and `direction_sign` are BOTH derived from the RAW (unrounded) delta so neither
+        # can disagree with the presentation-rounded `delta` at a boundary. `direction_sign` exists
+        # because `delta` rounds to 4 places: with a threshold finer than that (e.g. 1e-8), a raw
+        # delta that exceeds still rounds to 0.0, whose sign would flip the regression direction.
         materiality={"delta": round(delta, 4), "unit": k["unit"], "tolerance_class": k["tolerance_class"],
-                     "threshold": threshold, "exceeds": bool(abs(delta) >= threshold)},
+                     "threshold": threshold, "exceeds": bool(abs(delta) >= threshold),
+                     "direction_sign": (1 if delta > 0 else -1 if delta < 0 else 0)},
         payload=k["payload"],
     )
 
@@ -234,13 +316,12 @@ def _verdict(axis: _Axis, env: dict[str, Any], reference_role: str) -> str:
     if not env.get("applicable") or env.get("coverage", 0.0) < 1.0:
         return VERDICT_INCONCLUSIVE
     mat = env["materiality"]
-    # `exceeds` is the ONE materiality decision, computed from the raw (unrounded) delta in
-    # `_measure`. Keying the verdict off it means presentation-rounding of `delta` can never
-    # disagree with the envelope's own `exceeds` flag at the threshold boundary.
+    # `exceeds` and `direction_sign` are BOTH computed from the raw (unrounded) delta in `_measure`,
+    # so presentation-rounding of `delta` can never disagree with the verdict at the boundary —
+    # neither the materiality decision nor the regression DIRECTION reads the rounded `delta`.
     if not mat["exceeds"]:
         return VERDICT_NO_CHANGE
-    # `exceeds` implies |raw delta| >= threshold (> 0), so the rounded delta preserves the sign.
-    if reference_role == "golden" and (1 if mat["delta"] > 0 else -1) == axis.bad_sign:
+    if reference_role == "golden" and mat["direction_sign"] == axis.bad_sign:
         return VERDICT_REGRESSION
     return VERDICT_MATERIAL
 

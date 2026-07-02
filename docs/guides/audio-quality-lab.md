@@ -52,13 +52,19 @@ python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --
 `compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
 curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
 action-oriented verdict (`regression_suspected` / `material_change_detected` /
-`no_material_change_detected` / `inconclusive` / `invalid`). Two axes today, both global and
+`no_material_change_detected` / `inconclusive` / `invalid`). Four axes today, all global and
 alignment-free:
 
 | `--profile` | axis | measures | bad direction (regression vs a golden reference) |
 |-------------|------|----------|--------------------------------------------------|
 | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | **duller** |
 | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | **added HF fizz** |
+| `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | **rougher / noisier** |
+| `graininess` | `graininess` | relative spectral-flux increase | **grainier** |
+
+`noise-roughness` and `graininess` are meaningful on tonal/sustained material — that is a
+caller-declared contract (you pick the profile), surfaced as a standing caveat in the summary
+rather than an automatic tonal/percussive classifier.
 
 Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
 registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,

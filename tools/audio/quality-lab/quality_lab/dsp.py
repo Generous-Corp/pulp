@@ -187,7 +187,8 @@ def hf_fraction_ratio_db(
 
 
 def dc_offset_metrics(
-    reference: np.ndarray, candidate: np.ndarray, present_frac: float = 0.01
+    reference: np.ndarray, candidate: np.ndarray,
+    present_frac: float = 0.01, abs_floor: float = 1e-6,
 ) -> DcOffset:
     """Per-signal DC offset (mean sample value) + its magnitude relative to RMS.
 
@@ -195,8 +196,10 @@ def dc_offset_metrics(
     so a nonzero offset can read as tonal 'dulling' when nothing timbral changed. This is a
     deterministic, algorithm-agnostic diagnostic for `compare`'s advisory namespace; it makes no
     good/bad judgment. `present` fires when either signal's |mean|/RMS reaches ``present_frac``
-    (default 1%, ~-40 dB) — small enough to catch a real offset, large enough not to trip on the
-    numeric floor. Pure; operates on the raw (not level-matched) inputs."""
+    (default 1%, ~-40 dB) AND the raw |mean| clears ``abs_floor`` (default 1e-6). The absolute
+    floor is what stops a NEAR-SILENT signal — where the ratio is meaningful but the actual DC is
+    negligible (and rounds to 0.0 in the report) — from raising a loud 'DC present' advisory over
+    displayed zeros. Pure; operates on the raw (not level-matched) inputs."""
     ref = np.asarray(reference, dtype=np.float64)
     cand = np.asarray(candidate, dtype=np.float64)
     ref_mean = float(np.mean(ref)) if ref.size else 0.0
@@ -205,7 +208,8 @@ def dc_offset_metrics(
     cand_rms = float(np.sqrt(np.mean(cand * cand))) if cand.size else 0.0
     ref_frac = abs(ref_mean) / ref_rms if ref_rms > 1e-12 else 0.0
     cand_frac = abs(cand_mean) / cand_rms if cand_rms > 1e-12 else 0.0
-    present = max(ref_frac, cand_frac) >= present_frac
+    present = (max(ref_frac, cand_frac) >= present_frac
+               and max(abs(ref_mean), abs(cand_mean)) >= abs_floor)
     return DcOffset(ref_mean, cand_mean, ref_frac, cand_frac, present)
 
 

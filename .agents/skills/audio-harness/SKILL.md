@@ -361,13 +361,24 @@ harness or `ctest`.
   agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
   (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
   (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
-  `inconclusive` / `invalid`). Two axes today, both global/alignment-free — a new axis is one
+  `inconclusive` / `invalid`). Four axes today, all global/alignment-free — a new axis is one
   `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
 
   | `--profile` | axis | measures | bad direction (`bad_sign`) |
   |-------------|------|----------|----------------------------|
   | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift | duller (−1) |
   | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added fizz (+1) |
+  | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher/noisier (−1) |
+  | `graininess` | `graininess` | relative spectral-flux increase | grainier (+1) |
+
+  `noise-roughness` (HNR, pitch range 40–1000 Hz so bass fundamentals count) and `graininess`
+  (relative `mean_spectral_flux` increase) are meaningful on tonal/sustained material — a
+  caller-declared contract (the caller picks the profile), carried as a standing summary caveat +
+  both per-signal scalars in the payload, NOT an automatic tonal/percussive classifier in the
+  honesty path (which would just be a tunable threshold on the same statistic). Only mathematically
+  degenerate inputs go `not_applicable` (a flux reference below an epsilon floor — the div-by-zero
+  edge). That takes compare to **4 of the lab's 7 detectors** reachable from the agent-facing
+  surface (up from 2).
 
   The `added-hf` axis measures the **ratio of the ≥8 kHz energy fraction** (`10·log10(frac_cand /
   frac_ref)`, default ±3 dB), NOT the absolute fraction *delta* — the absolute delta is
