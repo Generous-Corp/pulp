@@ -2,6 +2,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/view/view.hpp>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -101,6 +102,14 @@ public:
     state::StateStore& store() { return store_; }
     bool uses_script_ui() const { return uses_script_ui_; }
 
+    /// Cross-thread liveness token. Set true at construction, false in the
+    /// destructor. A callback that outlives or races this bridge — the GPU
+    /// display-link scripted-idle pump is dispatched to the main queue and can
+    /// run after the bridge is replaced (host view reload) or freed (teardown
+    /// ordering / stop-doesn't-join races) — copies this shared token and
+    /// no-ops when it reads false, instead of dereferencing a freed bridge.
+    const std::shared_ptr<std::atomic<bool>>& alive_token() const { return alive_; }
+
     /// Access the scripted UI session, if the primary view was built from
     /// a JS script. This includes the framework-owned `PULP_UI_SCRIPT_PATH`
     /// path and custom processors that expose a session through
@@ -161,6 +170,9 @@ private:
     bool uses_script_ui_ = false;
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
+    /// Cross-thread liveness (see alive_token()). Flipped false in ~ViewBridge.
+    std::shared_ptr<std::atomic<bool>> alive_ =
+        std::make_shared<std::atomic<bool>>(true);
 
     struct Secondary {
         std::unique_ptr<view::View> view;
