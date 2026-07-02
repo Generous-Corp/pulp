@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05510"></a>
+## [0.551.0] - 2026-07-02
+
+- chore: raise hotspot ceilings for host-surface API + new test targets ([#5422](https://github.com/danielraffel/pulp/pull/5422))
+- feature/audio compare corroboration ([#5420](https://github.com/danielraffel/pulp/pull/5420))
+- docs(skills): add pr-review-sweep skill for material PRs ([#5416](https://github.com/danielraffel/pulp/pull/5416))
+
 <a id="v05500"></a>
 ## [0.550.0] - 2026-07-02
 
@@ -5758,6 +5765,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.551.0]: https://github.com/danielraffel/pulp/releases/tag/v0.551.0
 [0.550.0]: https://github.com/danielraffel/pulp/releases/tag/v0.550.0
 [0.549.3]: https://github.com/danielraffel/pulp/releases/tag/v0.549.3
 [0.549.2]: https://github.com/danielraffel/pulp/releases/tag/v0.549.2
