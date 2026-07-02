@@ -214,6 +214,17 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
     endif()
 
+    # Performance harness (CPU oracle vs GPU engine, realtime ratio across block
+    # sizes). A dev tool like gpu-nam-shot; not built into the shipped plugin.
+    add_executable(gpu-nam-bench bench.cpp gpu_nam_view.cpp)
+    target_link_libraries(gpu-nam-bench PRIVATE
+        pulp::format pulp::render pulp::gpu-audio pulp::signal
+        pulp::view pulp::canvas pulp::runtime)
+    target_include_directories(gpu-nam-bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(gpu-nam-bench PRIVATE
+        GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+        GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
+
     # Processor tests (CPU + GPU engine, live switch, load_model). Links
     # gpu_nam_view.cpp so the processor's vtable (first non-inline virtual is
     # create_view()) resolves at link time; the view is never CALLED headless.
