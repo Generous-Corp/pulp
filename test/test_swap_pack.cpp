@@ -100,3 +100,98 @@ TEST_CASE("swap-pack integrity fails closed on a missing file", "[reload][swap-p
     REQUIRE(r.status == SwapPackVerify::MissingFile);
     REQUIRE(r.detail == "gone.js");
 }
+
+// ── Ed25519 pack signature (item 3.1b) ────────────────────────────────────────
+namespace {
+// Sign a manifest with a keypair: set signer key + detached signature over the
+// canonical signed message.
+void sign_manifest(SwapPackManifest& m, const pulp::runtime::Ed25519KeyPair& kp) {
+    m.signer_public_key = kp.public_key;
+    const auto msg = swap_pack_signed_message(m);
+    auto sig = pulp::runtime::ed25519_sign(kp.private_key.data(), kp.private_key.size(),
+                                           msg.data(), msg.size());
+    REQUIRE(sig.has_value());
+    m.signature = *sig;
+}
+}  // namespace
+
+TEST_CASE("swap-pack signature: a pack signed by the trusted key verifies end to end",
+          "[reload][swap-pack][3.1]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto root = make_root("sig-ok");
+    write_file(root / "ui.js", "UI");
+    SwapPackManifest m;
+    m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+
+    REQUIRE(verify_swap_pack_signature(m, kp->public_key).ok());
+    REQUIRE(verify_swap_pack(root, m, kp->public_key).ok());   // sig + integrity
+}
+
+TEST_CASE("swap-pack signature: an untrusted signer fails closed", "[reload][swap-pack][3.1]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    auto other = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value()); REQUIRE(other.has_value());
+    SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+    // Verify against a DIFFERENT trusted key → UntrustedSigner.
+    auto r = verify_swap_pack_signature(m, other->public_key);
+    REQUIRE(r.status == SwapPackVerify::UntrustedSigner);
+}
+
+TEST_CASE("swap-pack signature: a flipped signature byte fails closed", "[reload][swap-pack][3.1]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+    m.signature[0] ^= 0x01;                                   // tamper the signature
+    auto r = verify_swap_pack_signature(m, kp->public_key);
+    REQUIRE(r.status == SwapPackVerify::BadSignature);
+}
+
+TEST_CASE("swap-pack signature: tampering a signed file hash breaks the signature",
+          "[reload][swap-pack][3.1]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+    m.files[0].sha256_hex = hash_of("EVIL");                  // re-point to attacker content
+    auto r = verify_swap_pack_signature(m, kp->public_key);
+    REQUIRE(r.status == SwapPackVerify::BadSignature);        // message changed → sig invalid
+}
+
+TEST_CASE("swap-pack verify: signature passes but a tampered FILE still fails integrity",
+          "[reload][swap-pack][3.1]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto root = make_root("sig-file-tamper");
+    write_file(root / "ui.js", "UI");
+    SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+    REQUIRE(verify_swap_pack(root, m, kp->public_key).ok());
+    write_file(root / "ui.js", "EVIL");                       // bytes differ from the signed hash
+    auto r = verify_swap_pack(root, m, kp->public_key);
+    REQUIRE(r.status == SwapPackVerify::HashMismatch);        // sig ok, integrity fails closed
+}
+
+TEST_CASE("swap-pack signed message is unambiguous: newline-in-path can't collide (3.1b hardening)",
+          "[reload][swap-pack][3.1]") {
+    // The length-prefixed encoding must NOT let a single file whose path embeds
+    // the delimiter structure collide with a two-file manifest (the classic
+    // newline-join forgery). Distinct manifests → distinct signed messages.
+    SwapPackManifest two; two.id = "p"; two.plugin_id = "q";
+    two.files = {{"A", "B", SwapPackKind::UiScript}, {"C", "D", SwapPackKind::DspGraph}};
+    SwapPackManifest one; one.id = "p"; one.plugin_id = "q";
+    one.files = {{"A\nB\nui-script\nC", "D", SwapPackKind::DspGraph}};
+    REQUIRE(swap_pack_signed_message(two) != swap_pack_signed_message(one));
+
+    // And the file COUNT is bound: dropping a file changes the message.
+    SwapPackManifest dropped = two; dropped.files.pop_back();
+    REQUIRE(swap_pack_signed_message(two) != swap_pack_signed_message(dropped));
+}

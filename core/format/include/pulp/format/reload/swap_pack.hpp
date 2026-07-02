@@ -44,6 +44,19 @@ inline SwapPackKind swap_pack_kind_from_string(std::string_view s) {
     return SwapPackKind::Unknown;
 }
 
+/// Stable canonical spelling of a kind, for the signed message (never localized
+/// / reformatted). Must round-trip with swap_pack_kind_from_string.
+inline const char* swap_pack_kind_to_string(SwapPackKind k) {
+    switch (k) {
+        case SwapPackKind::UiScript: return "ui-script";
+        case SwapPackKind::DspGraph: return "dsp-graph";
+        case SwapPackKind::NodePack: return "node-pack";
+        case SwapPackKind::WasmDsp:  return "wasm-dsp";
+        case SwapPackKind::Unknown:  break;
+    }
+    return "unknown";
+}
+
 struct SwapPackFile {
     std::string path;        ///< path relative to the pack root
     std::string sha256_hex;  ///< expected lowercase hex SHA-256 of the file bytes
@@ -55,7 +68,8 @@ struct SwapPackManifest {
     std::string plugin_id;      ///< the plugin this pack targets
     int format_version = 1;
     std::vector<SwapPackFile> files;
-    // Ed25519 signer_public_key + signature are added in 3.1b.
+    std::vector<std::uint8_t> signer_public_key;  ///< 32 bytes (Ed25519), empty if unsigned
+    std::vector<std::uint8_t> signature;          ///< 64 bytes (Ed25519 detached), empty if unsigned
 };
 
 enum class SwapPackVerify {
@@ -64,6 +78,8 @@ enum class SwapPackVerify {
     MissingFile,          ///< a declared file is absent under the pack root
     ReadError,            ///< a declared file could not be read
     HashMismatch,         ///< a file's SHA-256 != the manifest's declared hash
+    UntrustedSigner,      ///< the manifest's signer key is not the trusted key
+    BadSignature,         ///< Ed25519 verification failed (or malformed sig/key sizes)
 };
 
 struct SwapPackVerifyResult {
@@ -71,6 +87,26 @@ struct SwapPackVerifyResult {
     std::string detail;   ///< which file / what went wrong (diagnostics)
     bool ok() const { return status == SwapPackVerify::Ok; }
 };
+
+/// Decode a lowercase/uppercase hex string to bytes. Returns nullopt on an odd
+/// length or a non-hex digit (fail-closed — a malformed key/sig never verifies).
+inline std::optional<std::vector<std::uint8_t>> swap_pack_hex_decode(std::string_view hex) {
+    if (hex.size() % 2 != 0) return std::nullopt;
+    auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::vector<std::uint8_t> out;
+    out.reserve(hex.size() / 2);
+    for (std::size_t i = 0; i < hex.size(); i += 2) {
+        const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
+        if (hi < 0 || lo < 0) return std::nullopt;
+        out.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+    }
+    return out;
+}
 
 /// Parse a swap-pack manifest from JSON. Returns nullopt on any structural
 /// problem (missing/mistyped required field), writing a reason to @p error.
@@ -111,6 +147,15 @@ inline std::optional<SwapPackManifest> parse_swap_pack_manifest(std::string_view
                           : SwapPackKind::Unknown;
             m.files.push_back(std::move(pf));
         }
+        // Optional signature fields (hex). Absent → unsigned manifest (empty
+        // vectors); a malformed hex string is left empty so verification fails
+        // closed rather than parsing to garbage bytes.
+        if (v.hasObjectMember("signer") && v["signer"].isString()) {
+            if (auto k = swap_pack_hex_decode(v["signer"].getString())) m.signer_public_key = std::move(*k);
+        }
+        if (v.hasObjectMember("signature") && v["signature"].isString()) {
+            if (auto s = swap_pack_hex_decode(v["signature"].getString())) m.signature = std::move(*s);
+        }
     } catch (const std::exception& e) {
         error = std::string("manifest JSON parse failed: ") + e.what();
         return std::nullopt;
@@ -144,6 +189,84 @@ inline SwapPackVerifyResult verify_swap_pack_integrity(const std::filesystem::pa
         }
     }
     return {SwapPackVerify::Ok, ""};
+}
+
+/// Deterministic canonical payload the pack signature covers (item 3.1b). Binds
+/// pack identity, target plugin, format version, and every file's path + hash +
+/// kind — so a tampered file hash OR a re-pointed/re-kinded file breaks the
+/// signature. Independent of JSON formatting (re-serialization can't break it).
+///
+/// Every variable-length field is LENGTH-PREFIXED (u32 LE) and the file count is
+/// bound, so the encoding is unambiguous: unlike a newline-delimited join, no
+/// field value (even one containing newlines or the "files" label) can be
+/// reinterpreted to collide with a different manifest. The signature field itself
+/// is NOT bound. (Hardening over the node_pack '\n'-join scheme — review 3.1b.)
+inline std::vector<std::uint8_t> swap_pack_signed_message(const SwapPackManifest& m) {
+    std::vector<std::uint8_t> out;
+    auto put_u32 = [&out](std::uint32_t n) {
+        out.push_back(static_cast<std::uint8_t>(n & 0xFF));
+        out.push_back(static_cast<std::uint8_t>((n >> 8) & 0xFF));
+        out.push_back(static_cast<std::uint8_t>((n >> 16) & 0xFF));
+        out.push_back(static_cast<std::uint8_t>((n >> 24) & 0xFF));
+    };
+    auto put_field = [&](std::string_view s) {
+        put_u32(static_cast<std::uint32_t>(s.size()));
+        out.insert(out.end(), s.begin(), s.end());
+    };
+    put_field("pulp-swap-pack-v1");
+    put_field(m.id);
+    put_field(m.plugin_id);
+    put_u32(static_cast<std::uint32_t>(m.format_version));
+    put_u32(static_cast<std::uint32_t>(m.files.size()));   // bind the file count
+    for (const auto& f : m.files) {
+        put_field(f.path);
+        put_field(f.sha256_hex);
+        put_field(swap_pack_kind_to_string(f.kind));
+    }
+    return out;
+}
+
+/// Verify the pack's Ed25519 signature (item 3.1b). Fails closed on: a signer key
+/// that is not @p trusted_public_key (UntrustedSigner), or a malformed/inauthentic
+/// signature (BadSignature). Does NOT touch files — pair with
+/// verify_swap_pack_integrity for the hash layer (or use verify_swap_pack).
+inline SwapPackVerifyResult verify_swap_pack_signature(
+    const SwapPackManifest& manifest,
+    const std::vector<std::uint8_t>& trusted_public_key) {
+    // Trust root: the signer key must be exactly the trusted key. (Key
+    // distribution / a multi-key trust store is an owner-steer decision — see the
+    // Phase-3 scoping note; this takes a single trusted key by value.)
+    if (manifest.signer_public_key.size() != runtime::ed25519_public_key_size ||
+        trusted_public_key.size() != runtime::ed25519_public_key_size ||
+        manifest.signer_public_key != trusted_public_key) {
+        return {SwapPackVerify::UntrustedSigner, "signer key is not the trusted key"};
+    }
+    if (manifest.signature.size() != runtime::ed25519_signature_size) {
+        return {SwapPackVerify::BadSignature, "signature size invalid"};
+    }
+    const auto message = swap_pack_signed_message(manifest);
+    if (!runtime::ed25519_verify(manifest.signer_public_key.data(),
+                                 manifest.signer_public_key.size(),
+                                 manifest.signature.data(), manifest.signature.size(),
+                                 message.data(), message.size())) {
+        return {SwapPackVerify::BadSignature, "Ed25519 verification failed"};
+    }
+    return {SwapPackVerify::Ok, ""};
+}
+
+/// Full fail-closed verify: signature FIRST (binds the file hashes without
+/// reading the files), THEN per-file integrity (the files match the signed
+/// hashes). Order mirrors node_pack: authenticate before touching content.
+///
+/// This is the ONLY sanctioned "is this pack trustworthy?" entry point. The
+/// install path (3.1c) must call this — never verify_swap_pack_integrity alone
+/// (that proves the files match the manifest, NOT that the manifest is signed).
+inline SwapPackVerifyResult verify_swap_pack(
+    const std::filesystem::path& root, const SwapPackManifest& manifest,
+    const std::vector<std::uint8_t>& trusted_public_key) {
+    auto sig = verify_swap_pack_signature(manifest, trusted_public_key);
+    if (!sig.ok()) return sig;
+    return verify_swap_pack_integrity(root, manifest);
 }
 
 }  // namespace pulp::format::reload
