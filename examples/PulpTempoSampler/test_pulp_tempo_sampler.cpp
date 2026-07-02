@@ -170,7 +170,8 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 16);
+    REQUIRE(s.param_count() == 17);
+    REQUIRE(s.get_value(kPlaybackMode) == 0.0f);  // default mode = Classic
     REQUIRE(s.get_value(kDirection) == 0.0f);  // default direction = Forward
     REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop shape = Forward
     REQUIRE(s.get_value(kTempoLoop) == 0.0f);  // default LOOP = None (play once)
@@ -375,6 +376,7 @@ TEST_CASE("pitch-bend and mod-wheel reach the rendered audio",
 TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)",
           "[tempo-sampler]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: no whole-sample fallback
     auto loop = percussive_loop(48000, 4);
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -407,6 +409,7 @@ TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)"
 // keyboard mapping follows the slider.
 TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sampler]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: per-key slice mapping
     auto loop = percussive_loop(48000, 8);  // ~8 onsets available
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -751,6 +754,7 @@ TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set
 TEST_CASE("all slices play back at the same (native) rate — none faster/slower",
           "[tempo-sampler][issue-slice-rate]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: each key is its own slice at native rate
     auto loop = percussive_loop(48000, 6);            // 48k loop into 48k host -> R=1 at matched tempo
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -954,22 +958,29 @@ TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
         CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
 }
 
-// Product default: a freshly dropped loop is ONE slice (the whole loop), so
-// holding the root + LOOP tiles the entire loop — not a chop.
-TEST_CASE("default loads the whole loop as a single region (SENS 0)",
+// Product default is CLASSIC: every key plays the WHOLE tempo-matched loop
+// (region [0, N)), so holding a key with LOOP=Forward tiles the entire loop — not
+// a chop. The Slice DEFAULT, by contrast, chops the loop into several slices
+// (never 1), so switching to Slice is immediately playable per-key.
+TEST_CASE("default is Classic (whole loop); Slice chops into >1",
           "[tempo-sampler][issue-loop-tile]") {
     state::StateStore store;
     auto proc = std::make_unique<PulpTempoSamplerProcessor>();
     proc->set_state_store(&store);
-    proc->define_parameters(store);   // installs the DEFAULT SENS
+    proc->define_parameters(store);   // installs DEFAULT mode (Classic) + SENS
     format::PrepareContext ctx; ctx.sample_rate = 48000; ctx.max_buffer_size = 512;
     ctx.input_channels = 0; ctx.output_channels = 2; proc->prepare(ctx);
-    CHECK(store.get_value(kOnsetSens) == 0.0f);   // whole-loop default
+    CHECK(store.get_value(kPlaybackMode) == 0.0f);   // default mode = Classic
     auto loop = percussive_loop(48000, 8);
     const float* ch[1] = {loop.data()};
     REQUIRE(proc->load_loop(ch, 1, 48000, 48000.0));
     REQUIRE(wait_for([&] { return proc->has_sample(); }));
-    CHECK(proc->num_slices() == 1);               // one region = the whole loop
+    CHECK(proc->num_slices() > 1);                    // Slice default chops (never 1)
+    // Classic: the root's region is the WHOLE published loop, [0, N).
+    const long whole = proc->published_frames();
+    const auto r = proc->region_range_for_note_test(48, /*mode=*/0);  // 0 = Classic
+    CHECK(r.first == 0);
+    CHECK(static_cast<long>(r.second) == whole);
 }
 
 // AUDIO-LEVEL tiling proof (the "loops perfectly" claim): a click-per-beat loop,
