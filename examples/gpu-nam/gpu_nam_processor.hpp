@@ -26,8 +26,8 @@
 // when a device exists), applied to both engines so a live switch keeps the
 // host's PDC correct and dry/wet phase-aligned. See gpu_engine_active().
 //
-// The native GPU front-end (input→output transfer curve + output spectrum +
-// gain/mix/engine controls, rendered through canvas/Skia/Dawn) is in gpu_nam_ui.hpp.
+// The native GPU front-end (input→output transfer curve + gain/mix/engine
+// controls, rendered through canvas/Skia/Dawn) is in gpu_nam_ui.hpp.
 
 #include "gpu_nam.hpp"
 #include "gpu_nam_cloud_node.hpp"
@@ -45,13 +45,11 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
-#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/audio/impulse_response.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/dc_blocker.hpp>
-#include <pulp/signal/fft.hpp>
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
@@ -59,7 +57,6 @@
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <complex>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -99,12 +96,6 @@ enum GpuNamParams : state::ParamID {
 // or with an extreme value, get no more than this much gain/cut).
 inline constexpr float kNormalizeTargetDb = -18.0f;
 inline constexpr float kNormalizeMaxAbsDb = 24.0f;
-
-// Live output magnitude spectrum (dB), published lock-free from the audio thread
-// to the GPU UI's frequency display. 256 log-ready bins.
-inline constexpr int kSpectrumBins = 256;
-using SpectrumFrame = std::array<float, kSpectrumBins>;
-using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
 
 // Static input→output transfer ("amp character") curve. kCurvePoints output
 // levels for inputs swept linearly across [-kCurveRange, +kCurveRange].
@@ -302,9 +293,6 @@ public:
     std::uint32_t model_generation() const {
         return model_generation_.load(std::memory_order_relaxed);
     }
-
-    /// Lock-free latest output spectrum for the UI (UI is sole reader).
-    SpectrumBus& spectrum_bus() { return spectrum_bus_; }
 
     /// Live {input, output} meter levels in dBFS (peak with fast-attack/
     /// slow-release ballistics). Published from the audio thread; UI reads.
@@ -553,7 +541,6 @@ public:
         }
 
         publish_meters(input, output, n);
-        if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
     }
 
 private:
@@ -840,24 +827,6 @@ private:
         out_level_db_.store(to_db(out_env_), std::memory_order_relaxed);
     }
 
-    void publish_spectrum(const float* mono, int n) {
-        for (int i = 0; i < n; ++i) {
-            spec_ring_[static_cast<std::size_t>(spec_pos_)] = mono[i];
-            spec_pos_ = (spec_pos_ + 1) % kSpectrumFft;
-        }
-        for (int i = 0; i < kSpectrumFft; ++i) {
-            const float w = 0.5f - 0.5f * std::cos(2.0f * 3.14159265f * i / kSpectrumFft);
-            spec_time_[static_cast<std::size_t>(i)] =
-                spec_ring_[static_cast<std::size_t>((spec_pos_ + i) % kSpectrumFft)] * w;
-        }
-        spec_fft_.forward_real(spec_time_.data(), spec_freq_.data());
-        SpectrumFrame frame;
-        for (int k = 0; k < kSpectrumBins; ++k) {
-            const float mag = std::abs(spec_freq_[static_cast<std::size_t>(k)]) / (kSpectrumFft * 0.25f);
-            frame[static_cast<std::size_t>(k)] = 20.0f * std::log10(mag + 1e-7f);
-        }
-        spectrum_bus_.write(frame);
-    }
 
     std::string current_requested_path() {
         std::lock_guard<std::mutex> lock(model_req_mutex_);
@@ -1104,15 +1073,6 @@ private:
     // metadata loudness to kNormalizeTargetDb. 1.0 (no correction) when the model
     // has no loudness metadata. Published from the loader thread, read on audio.
     std::atomic<float> normalize_gain_{1.0f};
-
-    // Live output spectrum (audio thread writes, UI reads).
-    static constexpr int kSpectrumFft = 2 * kSpectrumBins;  // 512
-    SpectrumBus spectrum_bus_;
-    signal::Fft spec_fft_{kSpectrumFft};
-    std::array<float, kSpectrumFft> spec_ring_{};
-    std::array<float, kSpectrumFft> spec_time_{};
-    std::array<std::complex<float>, kSpectrumFft> spec_freq_{};
-    int spec_pos_ = 0;
 };
 
 inline std::unique_ptr<format::Processor> create_gpu_nam() {

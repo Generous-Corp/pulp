@@ -6,7 +6,7 @@
 namespace pulp::examples {
 
 std::unique_ptr<view::View> GpuNamProcessor::create_view() {
-    return std::make_unique<GpuNamUi>(state(), spectrum_bus(), *this);
+    return std::make_unique<GpuNamUi>(state(), *this);
 }
 
 } // namespace pulp::examples

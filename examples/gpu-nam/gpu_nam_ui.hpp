@@ -85,11 +85,7 @@ struct GnColors {
 
 class GpuNamUi : public vw::View {
 public:
-    // The spectrum bus is accepted for a stable create_view() signature but is
-    // unused: NeuralAmpModeler's face has no spectrum display, so neither does
-    // this faithful recreation.
     GpuNamUi(pulp::state::StateStore& store,
-             [[maybe_unused]] pulp::examples::SpectrumBus& spectrum,
              pulp::examples::GpuNamProcessor& proc)
         : store_(store), proc_(proc), edit_(store) {
         asset_dir_ = gpu_nam_asset_dir();
