@@ -155,3 +155,29 @@ if(NOT COMMAND pulp_make_bundle_relocatable
         "included by PulpConfig.cmake for downstream GPU plugins to ship "
         "self-contained bundles.")
 endif()
+
+# End-to-end relocatable GPU bundle check (GPU SDK only).
+#
+# pulp_add_plugin already places libwgpu_native.dylib next to each format binary
+# and bakes the @loader_path rpath (its internal target_copy_webgpu_binaries),
+# for find_package(Pulp) consumers just as for a source build. What is NOT
+# automatic is the *validation* — so add pulp_validate_bundle_relocatable on the
+# probe's real bundles. A regression in that installed-SDK copy/rpath path then
+# fails the smoke here instead of shipping a GPU plugin that passes every check
+# on the build machine and crashes ("Library not loaded") on a customer's Mac.
+#
+# Allow-list of self-contained single-bundle formats only. AUv3 is deliberately
+# excluded: its .appex is intentionally NOT relocatable in isolation — the wgpu
+# dylib and the AUv3 framework live in the *container app's* Contents/Frameworks,
+# and the appex references the framework by @rpath resolved only inside that
+# container, so scanning the standalone appex would be a false failure (and the
+# container app that IS the relocatability unit isn't a probe target here).
+# Gated on the `webgpu` IMPORTED target so the GPU-off smoke skips it.
+if(TARGET webgpu)
+    foreach(_fmt Standalone CLAP VST3 AU)
+        set(_pulp_gpu_bundle "PulpSDKSmokeProbe_${_fmt}")
+        if(TARGET ${_pulp_gpu_bundle})
+            pulp_validate_bundle_relocatable(${_pulp_gpu_bundle})
+        endif()
+    endforeach()
+endif()
