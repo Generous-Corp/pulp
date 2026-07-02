@@ -1,12 +1,49 @@
 // Automated test for ComboBox dropdown interaction
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/state/parameter.hpp>
+
+#include <memory>
+#include <string>
+#include <vector>
 
 using namespace pulp::view;
 using pulp::canvas::RecordingCanvas;
+
+// A combo bound via bind_parameter must follow host-automation writes (which
+// the editor host drains each vsync via pump_listeners) AND write its own
+// selection back to the store — the round trip that makes automation record
+// and play back with the on-screen control animating.
+TEST_CASE("ComboBox: bind_parameter round-trips with host automation", "[combo]") {
+    using namespace pulp::state;
+    StateStore store;
+    ParamInfo info;
+    info.id = 1;
+    info.name = "Type";
+    info.range = ParamRange{0.0f, 2.0f, 0.0f, 1.0f};  // stepped 0..2
+    store.add_parameter(info);
+
+    ComboBox combo;
+    combo.set_items({"Res. LP", "Band-Pass", "Peaking"});
+    auto pbind = bind_parameter(combo, store, 1);
+    REQUIRE(combo.selected() == 0);
+
+    // Host automation writes the parameter; the per-vsync pump drives the widget.
+    store.set_value(1, 2.0f);
+    store.pump_listeners();
+    REQUIRE(combo.selected() == 2);  // followed automation (Peaking)
+
+    // A UI selection writes back to the store (so the host records it).
+    combo.set_selected(1);
+    REQUIRE(store.get_value(1) == 1.0f);
+}
 
 TEST_CASE("ComboBox: set_items and selected_text", "[combo]") {
     ComboBox combo;
@@ -53,6 +90,141 @@ TEST_CASE("ComboBox: click opens, click item selects", "[combo]") {
 
     REQUIRE(changed_to == 1);
     REQUIRE(combo.selected_text() == "Two");
+}
+
+// A long list in a short window must clamp its menu inside the window and scroll,
+// so every item stays reachable (regression for dropdowns whose lower rows fell
+// past the plugin's bottom edge and became unclickable).
+TEST_CASE("ComboBox: long list clamps to the window and scrolls to reach items",
+          "[combo]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});  // deliberately short window
+
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});  // at the top of the window
+    std::vector<std::string> items;
+    for (int i = 0; i < 12; ++i) items.push_back("Item" + std::to_string(i));
+    combo->set_items(items);
+    combo->set_selected(10);             // a selection deep in the list
+    root->add_child(std::move(owned));
+
+    MouseEvent open_click;
+    open_click.position = {60, 12};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+
+    // The menu rect must stay fully inside the window and be shorter than the
+    // full list (i.e. it scrolled rather than spilling past the bottom).
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+    REQUIRE(y >= 0.0f);
+    REQUIRE(y + h <= 100.0f + 0.5f);         // clamped to the window bottom
+    REQUIRE(w <= 200.0f + 0.5f);             // clamped to the window right edge
+    REQUIRE(h < 12.0f * 24.0f);              // not the full list → scrolled
+
+    // Opening scrolled the window toward the current selection, so the first
+    // visible row is a deep item — clicking it selects an item that would have
+    // been off-screen (and thus unselectable) without scrolling.
+    MouseEvent pick;
+    pick.position = {60, y + 12.0f};         // centre of the first visible row
+    pick.is_down = true;
+    combo->on_mouse_event(pick);
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(combo->selected() >= 4);         // a scrolled-to item, not one of the first rows
+}
+
+// Every item must be reachable from every starting selection — including the
+// LAST item and moving more than one step (regression for "can't select
+// Peaking / can't reach Pass-Through from Whisper" reports).
+TEST_CASE("ComboBox: every item selectable from any start (fits in window)",
+          "[combo]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 300, 300});  // roomy — the 3-item menu fits, no scroll
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 140, 24});
+    combo->set_items({"Res. LP", "Band-Pass", "Peaking"});
+    root->add_child(std::move(owned));
+
+    for (int start = 0; start < 3; ++start) {
+        for (int target = 0; target < 3; ++target) {
+            combo->set_selected(start);
+            MouseEvent open_click; open_click.position = {70, 12}; open_click.is_down = true;
+            combo->on_mouse_event(open_click);
+            REQUIRE(combo->is_open());
+            float x = 0, y = 0, w = 0, h = 0;
+            REQUIRE(combo->dropdown_window_rect(x, y, w, h));  // y == top_local (combo at origin)
+            MouseEvent pick; pick.position = {70, y + target * 24.0f + 12.0f}; pick.is_down = true;
+            combo->on_mouse_event(pick);
+            INFO("start=" << start << " target=" << target);
+            REQUIRE(combo->selected() == target);
+        }
+    }
+}
+
+// A wheel event over an open, overflowing menu scrolls the item window (and is
+// consumed) so clipped items become reachable — this is what the mac host's
+// scrollWheel active_popup_ bypass routes to.
+TEST_CASE("ComboBox: wheel scrolls an overflowing open menu", "[combo]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});  // short window → menu clamps + scrolls
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    std::vector<std::string> items;
+    for (int i = 0; i < 12; ++i) items.push_back("Item" + std::to_string(i));
+    combo->set_items(items);
+    combo->set_selected(0);
+    root->add_child(std::move(owned));
+
+    MouseEvent open_click; open_click.position = {60, 12}; open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+
+    // Opened on item 0 → top of the list is visible; scroll down reveals later
+    // items. Wheel down a few times, then the last visible row must be a deeper
+    // item than fit on the first page.
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+    const int first_page_rows = static_cast<int>(h / 24.0f);
+
+    for (int k = 0; k < 6; ++k) {
+        MouseEvent wheel; wheel.is_wheel = true; wheel.scroll_delta_y = 1.0f;
+        wheel.position = {60, y + 12.0f};
+        combo->on_mouse_event(wheel);
+        REQUIRE(combo->is_open());  // wheel must NOT close the menu
+    }
+    // After scrolling, clicking the first visible row selects an item beyond the
+    // first page — i.e. a previously-clipped item became reachable.
+    combo->dropdown_window_rect(x, y, w, h);
+    MouseEvent pick; pick.position = {60, y + 12.0f}; pick.is_down = true;
+    combo->on_mouse_event(pick);
+    REQUIRE(combo->selected() >= first_page_rows);
+}
+
+// Robotization-editor geometry: a 5-item FFT combo high in a short (~230px)
+// single-row panel. The menu must clamp inside the panel and scroll — not spill
+// past the bottom edge (the "FFT falls behind the plugin" report).
+TEST_CASE("ComboBox: FFT-size menu clamps inside a short editor panel", "[combo]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 788, 230});         // robot editor panel size
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({560, 115, 120, 28});      // FFT combo, upper-middle row
+    combo->set_items({"256", "512", "1024", "2048", "4096"});
+    root->add_child(std::move(owned));
+
+    MouseEvent open_click; open_click.position = {5, 14}; open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+    INFO("menu y=" << y << " h=" << h << " bottom=" << (y + h) << " panel=230");
+    REQUIRE(y + h <= 230.0f + 0.5f);             // clamped inside the panel
+    REQUIRE(h < 5.0f * 24.0f);                    // not all 5 rows → clamped + scrollable
 }
 
 TEST_CASE("ComboBox: paints with correct tokens", "[combo]") {
@@ -405,6 +577,156 @@ TEST_CASE("ComboBox: closed-stepper arrow keys skip separators (no separator com
     up.is_down = true;
     REQUIRE(combo.on_key_event(up));
     REQUIRE(combo.selected_text() == "A");
+}
+
+// hit_test claims the whole open menu (so hover/click reach the combo even
+// though the menu paints outside the header bounds), and on_hover_move — the
+// path the platform host uses for hover samples over the menu — moves the row
+// highlight without committing the selection.
+TEST_CASE("ComboBox: hit_test claims the open menu and on_hover_move tracks the row",
+          "[combo]") {
+    ComboBox::close_active_popup();
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 300, 300});  // roomy — the 3-item menu fits, no scroll
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 140, 24});
+    combo->set_items({"Res. LP", "Band-Pass", "Peaking"});
+    combo->set_selected(0);
+    root->add_child(std::move(owned));
+
+    // Closed: only the header is hit-testable.
+    REQUIRE(combo->hit_test({70.0f, 12.0f}) == combo);
+
+    MouseEvent open; open.position = {70.0f, 12.0f}; open.is_down = true;
+    combo->on_mouse_event(open);
+    REQUIRE(combo->is_open());
+
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));  // y == menu top (combo at origin)
+
+    // Open: hit_test now claims a point over the menu, below the header.
+    REQUIRE(combo->hit_test({70.0f, y + 12.0f}) == combo);
+
+    // Hover moves the highlight only — the selection is not committed.
+    combo->on_hover_move({70.0f, y + 24.0f + 12.0f});  // row 1
+    REQUIRE(combo->hovered_index() == 1);
+    REQUIRE(combo->selected() == 0);
+    combo->on_hover_move({70.0f, y + 12.0f});          // row 0
+    REQUIRE(combo->hovered_index() == 0);
+
+    // A hover outside the menu clears the highlight.
+    combo->on_hover_move({70.0f, y + h + 100.0f});
+    REQUIRE(combo->hovered_index() == -1);
+
+    ComboBox::close_active_popup();
+}
+
+// Keyboard navigation through a menu taller than its window must scroll the
+// visible row window so every item — including the last — stays reachable and
+// commits correctly (exercises the move_hover scroll-follow path).
+TEST_CASE("ComboBox: keyboard nav scrolls the visible window in an overflowing menu",
+          "[combo]") {
+    ComboBox::close_active_popup();
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});  // short → the 12-item menu overflows
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    std::vector<std::string> items;
+    for (int i = 0; i < 12; ++i) items.push_back("Item" + std::to_string(i));
+    combo->set_items(items);
+    combo->set_selected(0);
+    root->add_child(std::move(owned));
+
+    KeyEvent enter; enter.key = KeyCode::enter; enter.is_down = true;
+    combo->on_key_event(enter);
+    REQUIRE(combo->is_open());
+    REQUIRE(combo->hovered_index() == 0);
+
+    KeyEvent down; down.key = KeyCode::down; down.is_down = true;
+    for (int k = 0; k < 11; ++k) combo->on_key_event(down);
+    REQUIRE(combo->hovered_index() == 11);  // reached the last row despite overflow
+
+    KeyEvent commit; commit.key = KeyCode::enter; commit.is_down = true;
+    combo->on_key_event(commit);
+    REQUIRE(combo->selected() == 11);
+    REQUIRE_FALSE(combo->is_open());
+
+    ComboBox::close_active_popup();
+}
+
+// A menu that both overflows its window (scroll carets top+bottom) AND extends
+// past the window's right edge (width clamp) must still paint its overlay and
+// stay clamped inside the window on both axes.
+TEST_CASE("ComboBox: overflowing menu near the right edge paints clamped with carets",
+          "[combo]") {
+    ComboBox::close_active_popup();
+    View::overlay_queue().clear();
+
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 300, 120});
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    // Narrow field near the right edge, but fully inside the window. Its items
+    // are wide enough that the menu's natural width (dropdown_width_hint) spills
+    // past the right edge, so the horizontal clamp must shrink it.
+    combo->set_bounds({200, 0, 80, 24});
+    std::vector<std::string> items;
+    for (int i = 0; i < 12; ++i)
+        items.push_back("Really Long Filter Option " + std::to_string(i));
+    combo->set_items(items);
+    combo->set_selected(6);  // middle selection → carets both above and below
+    root->add_child(std::move(owned));
+
+    const float hint = combo->dropdown_width_hint();
+    REQUIRE(hint > 80.0f);  // items force the menu wider than the field
+
+    KeyEvent enter; enter.key = KeyCode::enter; enter.is_down = true;
+    combo->on_key_event(enter);
+    REQUIRE(combo->is_open());
+
+    RecordingCanvas rc;
+    combo->paint(rc);  // queues the dropdown overlay (anchored via the root ancestor)
+    REQUIRE(View::overlay_queue().size() >= 1);
+    const auto before = rc.command_count();
+    View::paint_overlays(rc);
+    REQUIRE(View::overlay_queue().empty());
+    REQUIRE(rc.command_count() > before);  // the menu (rows + carets) painted
+
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+    REQUIRE(w < hint);                // horizontal clamp shrank the natural width
+    REQUIRE(x + w <= 300.0f + 0.5f);  // clamped inside the right edge
+    REQUIRE(y + h <= 120.0f + 0.5f);  // clamped inside the bottom edge
+    REQUIRE(h < 12.0f * 24.0f);       // not the full list → scrolled
+
+    ComboBox::close_active_popup();
+}
+
+// DesignStepper shares the ComboBox binding contract: automation playback drives
+// the selection silently, and a user step writes back through a one-shot gesture.
+TEST_CASE("DesignStepper: bind_parameter round-trips with host automation", "[combo]") {
+    using namespace pulp::state;
+    StateStore store;
+    ParamInfo info;
+    info.id = 2;
+    info.name = "Wave";
+    info.range = ParamRange{0.0f, 3.0f, 0.0f, 1.0f};  // stepped 0..3
+    store.add_parameter(info);
+
+    DesignStepper stepper({"Sine", "Saw", "Square", "Triangle"}, 0);
+    auto sbind = bind_parameter(stepper, store, 2);
+    REQUIRE(stepper.selected() == 0);
+
+    // Host automation writes the parameter; the per-vsync pump drives the widget.
+    store.set_value(2, 3.0f);
+    store.pump_listeners();
+    REQUIRE(stepper.selected() == 3);  // followed automation (Triangle)
+
+    // A user step writes back to the store as a gesture (so the host records it).
+    stepper.on_select(1);
+    REQUIRE(store.get_value(2) == 1.0f);
 }
 
 TEST_CASE("ComboBox: open-menu Enter on a separator does not commit", "[combo]") {

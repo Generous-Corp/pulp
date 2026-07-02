@@ -47,6 +47,20 @@ bool ViewBridge::open(std::string* error) {
     view_raw_ = view_.get();
 
     size_hints_ = processor_.view_size();
+    // A NATIVE create_view() already computed its own layout bounds; make the
+    // host window match them exactly so the editor's own edge padding is never
+    // clipped (otherwise a plugin that doesn't declare DESIGN_WIDTH/HEIGHT gets
+    // the default window size, which can be narrower than the laid-out editor —
+    // the right column + padding then fall off the right/bottom edge). Scripted
+    // UIs keep the processor-declared view_size(). This is SDK-level: every
+    // native editor is sized correctly without per-plugin hardcoding.
+    if (view_ && !uses_script_ui_) {
+        const auto b = view_->bounds();
+        if (b.width > 0.0f && b.height > 0.0f) {
+            size_hints_.preferred_width = static_cast<uint32_t>(b.width + 0.5f);
+            size_hints_.preferred_height = static_cast<uint32_t>(b.height + 0.5f);
+        }
+    }
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
     attached_ = false;

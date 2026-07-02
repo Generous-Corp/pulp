@@ -1228,8 +1228,8 @@ class XYPad : public View {
 public:
     XYPad() = default;
 
-    void set_x(float v) { x_ = std::clamp(v, 0.0f, 1.0f); }
-    void set_y(float v) { y_ = std::clamp(v, 0.0f, 1.0f); }
+    void set_x(float v) { x_ = std::clamp(v, 0.0f, 1.0f); request_repaint(); }
+    void set_y(float v) { y_ = std::clamp(v, 0.0f, 1.0f); request_repaint(); }
     float x_value() const { return x_; }
     float y_value() const { return y_; }
 

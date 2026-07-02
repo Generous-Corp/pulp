@@ -1095,3 +1095,14 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   host's frame loop alive (`has_idle`), so the pump runs even when nothing
   else is animating. A custom view that reads the store directly each frame
   (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.
+- **A native `create_view()` sizes the host window from its own layout bounds.**
+  In `ViewBridge::open`, when the editor is native (not a scripted UI) and the
+  view reports non-zero `bounds()`, those bounds override the processor's
+  `view_size()` hints (`preferred_width`/`preferred_height`). A native editor
+  that lays itself out — but doesn't declare `DESIGN_WIDTH`/`DESIGN_HEIGHT` —
+  would otherwise get the default window size, which can be narrower than the
+  laid-out content, so the right column + edge padding fall off the window's
+  right/bottom edge. Scripted UIs keep the processor-declared `view_size()`
+  (their layout is driven from JS/Yoga, not C++ `bounds()`). This is SDK-level:
+  every native editor is sized correctly without per-plugin hardcoding — do not
+  reintroduce per-plugin window-size constants to work around clipped editors.

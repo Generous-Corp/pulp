@@ -123,14 +123,30 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     if (open_ && !items_.empty()) {
         // On-screen position, peeling off ScrollView scroll (the overlay paints
         // at the root with no scroll transform).
-        float abs_x = 0, abs_y = 0, viewport_h = 0;
-        overlay_anchor_(abs_x, abs_y, viewport_h);
+        float abs_x = 0, abs_y = 0, viewport_h = 0, viewport_w = 0;
+        overlay_anchor_(abs_x, abs_y, viewport_h, viewport_w);
 
         float item_h = 24.0f;
-        float dd_w = b.width;
-        float dd_h = static_cast<float>(items_.size()) * item_h;
-        // dropdown_local_top() decides below/flip-up; paint, hit_test and hover all share it.
-        float dd_top = abs_y + dropdown_local_top();
+        // Flip/clamp/scroll-aware geometry — shared with hit_test, hover, mouse
+        // and the platform host's click routing so they always agree.
+        float top_local = 0.0f, dd_h = 0.0f;
+        int first = 0, visible = 0;
+        dropdown_metrics(top_local, dd_h, first, visible);
+        float dd_top = abs_y + top_local;
+
+        // Single width source shared with dropdown_window_rect() (mac click
+        // routing) and hit_test(), so what is painted is exactly what is
+        // clickable — no phantom/dead click zone on the menu's right side.
+        float dd_w = dropdown_width_hint();
+        if (viewport_w > 0.0f) {  // keep a little breathing room from the right edge
+            constexpr float pad = 14.0f;
+            if (abs_x + dd_w > viewport_w - pad)
+                dd_w = std::max(b.width, viewport_w - pad - abs_x);
+        }
+
+        const int n = static_cast<int>(items_.size());
+        const bool more_above = first > 0;
+        const bool more_below = first + visible < n;
         int sel = selected_;
         int* hover_ptr = &hover_index_;  // live pointer for dynamic hover tracking
         auto items_copy = items_;
@@ -138,13 +154,6 @@ void ComboBox::paint(canvas::Canvas& canvas) {
         auto accent_c = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
         auto border = border_c;
         auto text = text_c;
-        canvas.set_font("Inter", 12);
-        for (const auto& item : items_copy) {
-            if (item.size() >= 3 && item.substr(0, 3) == "---") {
-                continue;
-            }
-            dd_w = std::max(dd_w, canvas.measure_text(item) + 34.0f);
-        }
 
         overlay_queue().push_back({[=](canvas::Canvas& c) {
             c.save();
@@ -155,8 +164,12 @@ void ComboBox::paint(canvas::Canvas& canvas) {
             c.stroke_rounded_rect(abs_x, dd_top, dd_w, dd_h, 4);
 
             c.set_font("Inter", 12);
-            for (int i = 0; i < static_cast<int>(items_copy.size()); ++i) {
-                float iy = dd_top + static_cast<float>(i) * item_h;
+            // Only the visible window [first, first+visible) is drawn; row r maps
+            // to item index (first + r).
+            for (int r = 0; r < visible; ++r) {
+                const int i = first + r;
+                if (i < 0 || i >= static_cast<int>(items_copy.size())) continue;
+                float iy = dd_top + static_cast<float>(r) * item_h;
                 const auto& item = items_copy[static_cast<size_t>(i)];
 
                 if (item.size() >= 3 && item.substr(0, 3) == "---") {
@@ -169,14 +182,11 @@ void ComboBox::paint(canvas::Canvas& canvas) {
 
                 int hov = *hover_ptr;
                 // The SELECTED row is marked only by its checkmark; the row
-                // background highlight is reserved for HOVER (so the selected
-                // item is not permanently highlighted).
+                // background highlight is reserved for HOVER.
                 if (i == hov) {
                     c.set_fill_color(accent_c);
                     c.fill_rect(abs_x + 1, iy, dd_w - 2, item_h);
                 }
-                // Check glyph for the selected item (white over the hover fill,
-                // accent on the plain background).
                 if (i == sel) {
                     auto check_color = (i == hov) ? canvas::Color::rgba8(255, 255, 255)
                                                   : accent_c;
@@ -187,6 +197,20 @@ void ComboBox::paint(canvas::Canvas& canvas) {
                 c.set_fill_color(text);
                 c.set_text_align(canvas::TextAlign::left);
                 c.fill_text(item, abs_x + 22, iy + 16);
+            }
+
+            // Scroll affordance carets when the list overflows the visible window.
+            c.set_stroke_color(text);
+            c.set_line_width(1.2f);
+            if (more_above) {
+                float cx = abs_x + dd_w - 12.0f, cy = dd_top + 6.0f;
+                c.stroke_line(cx - 3, cy + 2, cx, cy - 2);
+                c.stroke_line(cx, cy - 2, cx + 3, cy + 2);
+            }
+            if (more_below) {
+                float cx = abs_x + dd_w - 12.0f, cy = dd_top + dd_h - 6.0f;
+                c.stroke_line(cx - 3, cy - 2, cx, cy + 2);
+                c.stroke_line(cx, cy + 2, cx + 3, cy - 2);
             }
             c.restore();
         }, this});
@@ -220,6 +244,17 @@ void ComboBox::open_dropdown() {
     hover_index_ = selected_;  // highlight the current selection on open so
                                // keyboard navigation has a visible starting row
     active_popup_ = this;
+    // Scroll only enough to reveal the current selection, and only when it sits
+    // BELOW the visible window — so the top items stay visible whenever the
+    // selection is already in the first page (a menu that fully fits never
+    // scrolls, and opening on a late item never hides earlier ones needlessly).
+    dropdown_scroll_ = 0;
+    float top = 0.0f, h = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, h, first, visible);
+    const int n = static_cast<int>(items_.size());
+    if (visible > 0 && visible < n && selected_ >= visible)
+        dropdown_scroll_ = std::clamp(selected_ - visible + 1, 0, n - visible);
 }
 
 void ComboBox::close_dropdown() {
@@ -229,53 +264,111 @@ void ComboBox::close_dropdown() {
     if (active_popup_ == this) active_popup_ = nullptr;
 }
 
-void ComboBox::overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h) const {
-    float x = 0.0f, y = 0.0f, viewport_h = 0.0f;
+void ComboBox::overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h,
+                              float& out_viewport_w) const {
+    float x = 0.0f, y = 0.0f, viewport_h = 0.0f, viewport_w = 0.0f;
     const View* v = this;
     while (v) {
         // A ScrollView paints its children shifted by -scroll; `this` lives in
         // that scrolled content, so peel the offset off to get the on-screen
-        // position. Track the nearest scroll viewport's height for flip logic.
+        // position. Track the nearest scroll viewport's size for flip/clamp logic.
         if (auto* sv = dynamic_cast<const ScrollView*>(v)) {
             x -= sv->scroll_x();
             y -= sv->scroll_y();
             if (viewport_h <= 0.0f) viewport_h = sv->bounds().height;
+            if (viewport_w <= 0.0f) viewport_w = sv->bounds().width;
         }
         x += v->bounds().x;
         y += v->bounds().y;
-        if (!v->parent()) {
-            // Root: its height is the window viewport when no ScrollView was seen.
+        if (!v->parent() && v != this) {
+            // Root ANCESTOR: its size is the window viewport when no ScrollView
+            // was seen. Guard `v != this` so a parentless/standalone ComboBox does
+            // NOT treat its own field height as the viewport — that would clamp
+            // the menu to ~0 rows. Leaving the viewport at 0 makes dropdown_metrics
+            // fall back to the unbounded (show-all-items-below) path.
             if (viewport_h <= 0.0f) viewport_h = v->bounds().height;
+            if (viewport_w <= 0.0f) viewport_w = v->bounds().width;
         }
         v = v->parent();
     }
     out_x = x;
     out_y = y;
     out_viewport_h = viewport_h;
+    out_viewport_w = viewport_w;
+}
+
+void ComboBox::dropdown_metrics(float& top_local, float& height,
+                                int& first_row, int& visible_rows) const {
+    constexpr float item_h = 24.0f;
+    const float base_h = std::min(local_bounds().height, 28.0f);
+    const int n = static_cast<int>(items_.size());
+    const float content_h = static_cast<float>(n) * item_h;
+
+    float abs_x = 0.0f, abs_y = 0.0f, viewport_h = 0.0f, viewport_w = 0.0f;
+    overlay_anchor_(abs_x, abs_y, viewport_h, viewport_w);
+    constexpr float pad = 4.0f;
+
+    // Room within the visible viewport below and above the field.
+    float avail_below = (viewport_h > 0.0f) ? (viewport_h - (abs_y + base_h + 2.0f) - pad)
+                                            : content_h;
+    float avail_above = (viewport_h > 0.0f) ? (abs_y - 2.0f - pad) : content_h;
+    if (avail_below < 0.0f) avail_below = 0.0f;
+    if (avail_above < 0.0f) avail_above = 0.0f;
+
+    // Prefer below if the whole list fits; else flip up if it fits; else take the
+    // side with more room and scroll the overflow.
+    bool below;
+    float avail;
+    if (viewport_h <= 0.0f || content_h <= avail_below) { below = true;  avail = content_h; }
+    else if (content_h <= avail_above)                  { below = false; avail = avail_above; }
+    else { below = (avail_below >= avail_above); avail = below ? avail_below : avail_above; }
+
+    int max_rows = (viewport_h > 0.0f) ? static_cast<int>(avail / item_h) : n;
+    if (max_rows < 1) max_rows = 1;
+    visible_rows = std::min(n < 1 ? 0 : n, max_rows);
+    height = static_cast<float>(visible_rows) * item_h;
+
+    first_row = std::clamp(dropdown_scroll_, 0, std::max(0, n - visible_rows));
+    top_local = below ? (base_h + 2.0f) : -(height + 2.0f);
 }
 
 float ComboBox::dropdown_local_top() const {
-    const float base_h = std::min(local_bounds().height, 28.0f);
-    const float dd_h = static_cast<float>(items_.size()) * 24.0f;
-    // Flip decision in viewport space: `abs_y` is the field's ON-SCREEN top
-    // (scroll already peeled off), compared against the visible viewport. Flip
-    // up only when the menu would spill past the viewport bottom AND there is
-    // room above — so a field near the bottom of a scrolled page pops upward.
-    float abs_x = 0.0f, abs_y = 0.0f, viewport_h = 0.0f;
-    overlay_anchor_(abs_x, abs_y, viewport_h);
-    if (viewport_h > 0.0f && abs_y + base_h + 2.0f + dd_h > viewport_h &&
-        abs_y - dd_h - 2.0f >= 0.0f)
-        return -(dd_h + 2.0f);  // flip above the field
-    return base_h + 2.0f;       // below the field
+    float top = 0.0f, height = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, height, first, visible);
+    return top;
+}
+
+bool ComboBox::dropdown_window_rect(float& x, float& y, float& w, float& h) const {
+    if (!open_ || items_.empty()) return false;
+    float abs_x = 0.0f, abs_y = 0.0f, viewport_h = 0.0f, viewport_w = 0.0f;
+    overlay_anchor_(abs_x, abs_y, viewport_h, viewport_w);
+    float top_local = 0.0f, height = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top_local, height, first, visible);
+    float dd_w = dropdown_width_hint();
+    if (viewport_w > 0.0f) {  // keep a little breathing room from the right edge
+        constexpr float pad = 14.0f;
+        if (abs_x + dd_w > viewport_w - pad)
+            dd_w = std::max(bounds().width, viewport_w - pad - abs_x);
+    }
+    x = abs_x;
+    y = abs_y + top_local;
+    w = dd_w;
+    h = height;
+    return true;
 }
 
 View* ComboBox::hit_test(Point local_point) {
     // When open, the menu overlay lives outside this view's own bounds (below, or above when
     // flipped). Claim hits over it so hover/click reach us regardless of flip direction.
     if (open_ && !items_.empty()) {
-        const float top = dropdown_local_top();
-        const float dd_h = static_cast<float>(items_.size()) * 24.0f;
-        if (local_point.x >= 0.0f && local_point.x <= local_bounds().width &&
+        float top = 0.0f, dd_h = 0.0f;
+        int first = 0, visible = 0;
+        dropdown_metrics(top, dd_h, first, visible);
+        // Claim the full menu width (same source as paint + routing), not just
+        // the header width, so hover and non-mac hit-testing cover the whole menu.
+        if (local_point.x >= 0.0f && local_point.x <= dropdown_width_hint() &&
             local_point.y >= std::min(top, 0.0f) &&
             local_point.y <= std::max(top + dd_h, local_bounds().height))
             return this;
@@ -295,6 +388,19 @@ void ComboBox::move_hover(int delta) {
         if (it.size() < 3 || it.substr(0, 3) != "---") break;  // landed on a real item
     }
     hover_index_ = idx;
+    // Keep the highlighted row inside the (possibly clamped) visible window so
+    // keyboard navigation never highlights — or commits — a row scrolled out of
+    // view.
+    float top = 0.0f, h = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, h, first, visible);
+    if (visible > 0 && visible < n) {
+        if (idx < dropdown_scroll_)
+            dropdown_scroll_ = idx;
+        else if (idx >= dropdown_scroll_ + visible)
+            dropdown_scroll_ = idx - visible + 1;
+        dropdown_scroll_ = std::clamp(dropdown_scroll_, 0, n - visible);
+    }
     request_repaint();
 }
 
@@ -304,30 +410,46 @@ void ComboBox::on_hover_move(Point local_pos) {
     // is updated here. hit_test() already claims the dropdown region, so this
     // fires for hovers over the menu even though it's outside our own bounds.
     if (!open_ || items_.empty()) return;
-    const float top = dropdown_local_top();
-    const float bottom = top + static_cast<float>(items_.size()) * 24.0f;
-    int idx = (local_pos.y >= top && local_pos.y < bottom)
-                  ? static_cast<int>((local_pos.y - top) / 24.0f) : -1;
-    int next = (idx >= 0 && idx < static_cast<int>(items_.size())) ? idx : -1;
+    float top = 0.0f, dd_h = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, dd_h, first, visible);
+    int next = -1;
+    if (local_pos.y >= top && local_pos.y < top + dd_h) {
+        const int row = static_cast<int>((local_pos.y - top) / 24.0f);
+        const int i = first + row;
+        if (row >= 0 && row < visible && i >= 0 && i < static_cast<int>(items_.size())) next = i;
+    }
     if (next != hover_index_) { hover_index_ = next; request_repaint(); }
 }
 
 void ComboBox::on_mouse_event(const MouseEvent& event) {
-    // Menu geometry in local coords — shared with paint/hit_test so hover/click line up with
-    // what's drawn, including the flipped-up case.
-    const float dropdown_top = dropdown_local_top();
-    const float dd_bottom = dropdown_top + static_cast<float>(items_.size()) * 24.0f;
-    const bool in_menu = event.position.y >= dropdown_top && event.position.y < dd_bottom;
+    // Menu geometry in local coords — shared with paint/hit_test so hover/click
+    // line up with what's drawn, including the flipped-up and scrolled cases.
+    float top = 0.0f, dd_h = 0.0f;
+    int first = 0, visible = 0;
+    dropdown_metrics(top, dd_h, first, visible);
+    const int n = static_cast<int>(items_.size());
+    const bool in_menu = event.position.y >= top && event.position.y < top + dd_h;
+    auto row_to_index = [&](float y) -> int {
+        const int row = static_cast<int>((y - top) / 24.0f);
+        const int i = first + row;
+        return (row >= 0 && row < visible && i >= 0 && i < n) ? i : -1;
+    };
 
-    // Track hover on mouse move (even without button down). Repaint so the highlight follows
-    // the pointer even when nothing else is driving frames (e.g. on the Settings tab).
-    if (open_ && !event.is_down && !event.is_wheel) {
-        if (in_menu) {
-            int idx = static_cast<int>((event.position.y - dropdown_top) / 24.0f);
-            hover_index_ = (idx >= 0 && idx < static_cast<int>(items_.size())) ? idx : -1;
-        } else {
-            hover_index_ = -1;
+    // Wheel scrolls the item list when it's taller than the visible window.
+    if (open_ && event.is_wheel) {
+        if (visible < n) {
+            const int step = (event.scroll_delta_y > 0.0f) ? 1
+                           : (event.scroll_delta_y < 0.0f ? -1 : 0);
+            dropdown_scroll_ = std::clamp(dropdown_scroll_ + step, 0, n - visible);
+            request_repaint();
         }
+        return;
+    }
+
+    // Track hover on mouse move (even without button down).
+    if (open_ && !event.is_down) {
+        hover_index_ = in_menu ? row_to_index(event.position.y) : -1;
         request_repaint();
         return;
     }
@@ -336,8 +458,8 @@ void ComboBox::on_mouse_event(const MouseEvent& event) {
 
     if (open_) {
         if (in_menu) {
-            int index = static_cast<int>((event.position.y - dropdown_top) / 24.0f);
-            if (index >= 0 && index < static_cast<int>(items_.size())) {
+            const int index = row_to_index(event.position.y);
+            if (index >= 0) {
                 const auto& item = items_[static_cast<size_t>(index)];
                 if (item.size() < 3 || item.substr(0, 3) != "---") set_selected(index);
             }

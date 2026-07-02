@@ -83,6 +83,13 @@ public:
     int hovered_index() const { return hover_index_; }
     float dropdown_width_hint() const;
 
+    /// On-screen rect (root/overlay space) of the open dropdown menu — already
+    /// flip-aware, scroll-aware, and clamped inside the window. The platform
+    /// window host uses this to route clicks over the menu to this combo so they
+    /// don't fall through to whatever sibling view sits underneath. Returns false
+    /// when the menu is closed.
+    bool dropdown_window_rect(float& x, float& y, float& w, float& h) const;
+
     /// Close any currently open ComboBox (call before opening a new one).
     static void close_active_popup();
 
@@ -97,18 +104,28 @@ private:
     // negative (above the field) when flipped up because it would spill past the window.
     // Shared by paint, hit_test, and mouse hover so they always agree.
     float dropdown_local_top() const;
+    // Flip/clamp/scroll-aware menu geometry in this combo's LOCAL coords, shared
+    // by paint, hit_test, hover and mouse so they always agree. `top_local` is the
+    // menu top relative to the field (negative = flipped above). `height` is the
+    // painted menu height (clamped so the menu never spills past the window).
+    // `first_row`/`visible_rows` select which items are drawn when the full list is
+    // taller than the available space (scrolling via dropdown_scroll_).
+    void dropdown_metrics(float& top_local, float& height,
+                          int& first_row, int& visible_rows) const;
     // On-screen (overlay-space) geometry of the field: top-left x/y and the
-    // height of the nearest scroll viewport. The dropdown overlay paints at the
-    // root canvas with NO scroll translation, so every ScrollView ancestor's
-    // scroll offset must be peeled off here — otherwise the menu renders at the
-    // unscrolled position (far from the field) once the page is scrolled, and
-    // the flip-up decision compares against the wrong viewport.
-    void overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h) const;
+    // height AND width of the nearest scroll viewport (root window when none).
+    // The dropdown overlay paints at the root canvas with NO scroll translation,
+    // so every ScrollView ancestor's scroll offset must be peeled off here —
+    // otherwise the menu renders at the unscrolled position once the page is
+    // scrolled, and the flip/clamp decisions compare against the wrong viewport.
+    void overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h,
+                         float& out_viewport_w) const;
     void move_hover(int delta);  // keyboard: move the highlighted row, skipping separators
 
     std::vector<std::string> items_;
     int selected_ = 0;
     int hover_index_ = -1;  ///< Currently hovered item in dropdown (-1 = none)
+    int dropdown_scroll_ = 0;  ///< First visible row when the menu is taller than the viewport.
     bool open_ = false;
 
 public:

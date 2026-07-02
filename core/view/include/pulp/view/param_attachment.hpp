@@ -48,6 +48,13 @@ attach_knob(state::StateStore& store, state::ParamID id, float size = 60.0f) {
     knob->on_change = [&store, param_id](float norm) {
         store.set_normalized(param_id, norm);
     };
+    // Bracket the drag in a host gesture so DAWs RECORD automation from UI
+    // moves: begin → value changes → end. The store's gesture callbacks map to
+    // the host (AU Begin/EndParameterChangeGesture, VST3 begin/endEdit, CLAP
+    // gesture events). Without this a knob emits value changes with no "touch"
+    // and hosts like Logic don't capture them into an automation lane.
+    knob->on_gesture_begin = [&store, param_id]() { store.begin_gesture(param_id); };
+    knob->on_gesture_end   = [&store, param_id]() { store.end_gesture(param_id); };
 
     return {std::move(knob), std::move(binding)};
 }
@@ -70,6 +77,9 @@ attach_fader(state::StateStore& store, state::ParamID id) {
     fader->on_change = [&store, param_id](float norm) {
         store.set_normalized(param_id, norm);
     };
+    // Gesture-bracket the drag so hosts record UI automation (see attach_knob).
+    fader->on_gesture_begin = [&store, param_id]() { store.begin_gesture(param_id); };
+    fader->on_gesture_end   = [&store, param_id]() { store.end_gesture(param_id); };
 
     return {std::move(fader), std::move(binding)};
 }
@@ -93,7 +103,10 @@ attach_toggle(state::StateStore& store, state::ParamID id) {
 
     auto param_id = id;
     toggle->on_toggle = [&store, param_id](bool on) {
+        // Discrete change bracketed in a one-shot gesture so hosts record it.
+        store.begin_gesture(param_id);
         store.set_normalized(param_id, on ? 1.0f : 0.0f);
+        store.end_gesture(param_id);
     };
 
     return {std::move(toggle), std::move(binding)};
@@ -113,7 +126,10 @@ attach_combo(state::StateStore& store, state::ParamID id,
 
     auto param_id = id;
     combo->on_change = [&store, param_id](int index) {
+        // Discrete change bracketed in a one-shot gesture so hosts record it.
+        store.begin_gesture(param_id);
         store.set_value(param_id, static_cast<float>(index));
+        store.end_gesture(param_id);
     };
 
     return {std::move(combo), std::move(binding)};
