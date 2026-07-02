@@ -61,6 +61,17 @@ if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
+# pulp-gpu-audio is the GPU-agnostic real-time audio transport plus the optional
+# GPU convolver/spectral nodes. The transport target is always built, but its
+# GPU nodes (and the PUBLIC link to pulp::render / pulp::signal) only compile
+# when GPU is enabled. Export it when configured so find_package(Pulp) consumers
+# — GPU plugins that drive a GpuAudioTransport — get pulp::gpu-audio. Its PUBLIC
+# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::render + pulp::signal)
+# are all already in the export set, so the export set stays self-consistent.
+if(TARGET pulp-gpu-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
+endif()
+
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
 endif()
@@ -167,7 +178,7 @@ if(TARGET SDL3_Headers)
 endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal graph format canvas render view native-components)
+foreach(subsystem platform runtime events state audio midi signal graph format canvas render view gpu_audio native-components)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"

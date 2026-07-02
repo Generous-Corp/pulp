@@ -105,3 +105,30 @@ pulp_add_plugin(PulpSDKSmokeProbe
     AAX_PRODUCT_CODE "SdSm"
     AAX_NATIVE_CODE "SdkS"
 )
+
+# GPU-audio transport export probe.
+#
+# find_package(Pulp) must expose Pulp::gpu-audio and its public headers so a
+# downstream GPU plugin can drive a GpuAudioTransport. A STATIC probe would only
+# prove the header compiles; an EXECUTABLE forces the linker to resolve a symbol
+# defined in the archive (GpuAudioTransport::stats(), which lives in
+# gpu_audio_transport.cpp, not the header), so a missing target export OR a
+# missing header install fails this smoke at configure/build time instead of
+# surfacing later as a broken downstream GPU plugin. Guarded because a non-GPU
+# or minimally-configured SDK need not carry the transport.
+if(TARGET Pulp::gpu-audio)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
+"#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
+"\n"
+"// Reference a header type and an archive-defined symbol (stats()) so the\n"
+"// probe fails to link when Pulp::gpu-audio or its headers are absent from\n"
+"// the installed SDK.\n"
+"int main() {\n"
+"    pulp::gpu_audio::GpuAudioTransport transport;\n"
+"    const auto stats = transport.stats();\n"
+"    return transport.is_prepared() ? 1 : (stats.miss_blocks == 0 ? 0 : 2);\n"
+"}\n")
+    add_executable(PulpSDKSmokeGpuAudioProbe
+        "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+endif()

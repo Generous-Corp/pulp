@@ -58,6 +58,13 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_dependency(ICU COMPONENTS uc i18n data)
 endif()
 
+# Pulp::gpu-audio links Threads::Threads PRIVATE. As with ICU above, a STATIC
+# lib propagates private link deps into its exported interface, so a downstream
+# find_package(Pulp) must re-find Threads or PulpTargets.cmake errors with
+# "target Threads::Threads not found". (Surfaced by the SDK smoke once
+# pulp-gpu-audio joined the export set.)
+find_dependency(Threads)
+
 # The Pulp SDK is built and installed in the Release configuration only.
 # When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo
 # (or the Visual Studio multi-config generator picks those configs), CMake
