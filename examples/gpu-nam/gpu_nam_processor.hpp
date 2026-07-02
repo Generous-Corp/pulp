@@ -10,7 +10,7 @@
 //
 // An optional, default-OFF GPU engine (the Engine knob) routes the same fixed
 // blocks through the real GPU audio runtime: a GpuNamCloudNode (one fused GPU
-// `nam_forward` per channel) driven by gpu_audio::GpuAudioTransport on a non-RT
+// `wavenet_forward` per channel) driven by gpu_audio::GpuAudioTransport on a non-RT
 // worker. The GPU forward blocks on the device readback, so it runs only on the
 // transport worker; the audio thread calls the lock-free transport.process() and,
 // on a worker miss, the node's CpuFallback runs the exact CPU oracle. If no GPU

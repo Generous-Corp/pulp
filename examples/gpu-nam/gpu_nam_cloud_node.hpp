@@ -3,8 +3,8 @@
 // GpuNamCloudNode — the GPU audio runtime node behind GPU NAM's opt-in GPU
 // engine.
 //
-// It wraps one GpuNam per channel (each driving the fused GPU `nam_forward` on
-// its own compute device — the NAM plan is device-resident, so channels cannot
+// It wraps one GpuNam per channel (each driving the fused GPU `wavenet_forward`
+// on its own compute device — the plan is device-resident, so channels cannot
 // share a device) and runs them as a GpuAudioNode on the transport's non-real-
 // time worker. process_block() runs the GPU forward for exactly one fixed block
 // per channel; the mono NAM model is applied independently to each channel.

@@ -1,12 +1,12 @@
 #pragma once
 
 // Glue between the CPU-side NAM loader/oracle (nam_model.hpp) and the generic
-// GPU NAM primitive (pulp::render::GpuCompute::prepare_nam / nam_forward). It
-// translates a parsed NamModel's per-array config into NamLayerArraySpec values
-// and hands the GPU the SAME flat weight blob the oracle runs — so the GPU
-// forward reproduces the CPU forward exactly (validated by cross-correlation in
-// the tests). The core primitive stays model-agnostic; this header owns the
-// NAM-specific translation.
+// GPU WaveNet primitive (pulp::render::GpuCompute::prepare_wavenet /
+// wavenet_forward). It translates a parsed NamModel's per-array config into
+// WavenetLayerArraySpec values and hands the GPU the SAME flat weight blob the
+// oracle runs — so the GPU forward reproduces the CPU forward exactly (validated
+// by cross-correlation in the tests). The core primitive stays model-agnostic;
+// this header owns the NAM-specific translation onto it.
 
 #include "nam_model.hpp"
 
@@ -38,12 +38,12 @@ public:
         dilations_.assign(cfg.size(), {});
         specs_.assign(cfg.size(), {});
         for (std::size_t i = 0; i < cfg.size(); ++i) {
-            // The GPU primitive implements NAM's default Tanh path (and the
-            // sigmoid gate); other activations would need extra shader variants.
+            // The GPU primitive implements the Tanh path (and the sigmoid gate);
+            // other activations would need extra shader variants.
             if (cfg[i].activation != "Tanh") return false;
             dilations_[i].assign(cfg[i].dilations.begin(), cfg[i].dilations.end());
 
-            render::GpuCompute::NamLayerArraySpec s;
+            render::GpuCompute::WavenetLayerArraySpec s;
             s.input_size = static_cast<std::uint32_t>(cfg[i].input_size);
             s.condition_size = static_cast<std::uint32_t>(cfg[i].condition_size);
             s.channels = static_cast<std::uint32_t>(cfg[i].channels);
@@ -58,7 +58,7 @@ public:
 
         gpu_ = &gpu;
         block_size_ = block_size;
-        return gpu.prepare_nam(specs_.data(), static_cast<std::uint32_t>(specs_.size()),
+        return gpu.prepare_wavenet(specs_.data(), static_cast<std::uint32_t>(specs_.size()),
                                model.weights_data(),
                                static_cast<std::uint32_t>(model.weights_size()),
                                block_size, model.head_scale());
@@ -67,7 +67,7 @@ public:
     // Run one mono block through the GPU forward (streaming-continuous across
     // calls). `n` must equal the prepared block size.
     bool forward(const float* in, float* out, std::uint32_t n) {
-        return gpu_ != nullptr && gpu_->nam_forward(in, out, n);
+        return gpu_ != nullptr && gpu_->wavenet_forward(in, out, n);
     }
 
     std::uint32_t block_size() const { return block_size_; }
@@ -76,7 +76,7 @@ public:
 private:
     std::unique_ptr<render::GpuCompute> owned_gpu_;
     render::GpuCompute* gpu_ = nullptr;     // owned_gpu_ or a caller-provided device
-    std::vector<render::GpuCompute::NamLayerArraySpec> specs_;
+    std::vector<render::GpuCompute::WavenetLayerArraySpec> specs_;
     std::vector<std::vector<std::uint32_t>> dilations_;  // stable storage for spec ptrs
     std::uint32_t block_size_ = 0;
 };

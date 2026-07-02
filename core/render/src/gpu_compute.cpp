@@ -446,14 +446,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
-// ── NAM WaveNet fused passes ────────────────────────────────────────────────
-// The exact open-source NAM forward, block-parallel (one thread per block
+// ── WaveNet fused passes ────────────────────────────────────────────────
+// The conditioned WaveNet forward, block-parallel (one thread per block
 // sample) and fused (all passes in one submit over resident buffers). Per-array
 // rechannel (1x1) → dilated conv layers (+ condition mixin, Tanh/gated, residual,
 // head accumulate) → head rechannel, chained array→array, then head_scale.
 // Channels are capped at 64 so the per-thread scratch arrays are fixed-size.
 
-static constexpr const char* kNamRechannelShader = R"wgsl(
+static constexpr const char* kWavenetRechannelShader = R"wgsl(
 // 1x1 rechannel (no bias): dst[t] = W * src[t]. Source vectors live at
 // (src_pad+t)*in_ch (so a deeper array reads the previous array's block region
 // past its history columns); the mono input is in_ch=1, src_pad=0.
@@ -479,8 +479,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
-static constexpr const char* kNamLayerShader = R"wgsl(
-// One NAM layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
+static constexpr const char* kWavenetLayerShader = R"wgsl(
+// One WaveNet layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
 // a = (gated ? tanh(z[:C])*sigmoid(z[C:]) : tanh(z[:C])) (C); head += a;
 // out = in + (layer1x1_bias + layer1x1_W * a). condition_size is 1 (mono input).
 struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32,
@@ -536,7 +536,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
-static constexpr const char* kNamHeadShader = R"wgsl(
+static constexpr const char* kWavenetHeadShader = R"wgsl(
 // head rechannel (1x1, optional bias): headout[t] = (bias?) + W * headacc[t].
 struct P { C:u32, H:u32, B:u32, hr_w:u32, hr_b:u32, head_bias:u32, p0:u32, p1:u32 };
 @group(0) @binding(0) var<storage, read>       wts     : array<f32>;
@@ -561,7 +561,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
-static constexpr const char* kNamScaleShader = R"wgsl(
+static constexpr const char* kWavenetScaleShader = R"wgsl(
 // Final output: out[t] = head_scale * last_headout[t*H + 0].
 struct P { B:u32, H:u32, scale:f32, p0:u32 };
 @group(0) @binding(0) var<storage, read>       headout : array<f32>;  // H*B
@@ -775,7 +775,7 @@ public:
         multi_conv_plans_.clear();
         spectral_stack_plans_.clear();
         conv_stack_plans_.clear();
-        nam_plans_.clear();
+        wavenet_plans_.clear();
         pipeline_cache_.clear();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
@@ -787,10 +787,10 @@ public:
         conv_in_pipeline_ = nullptr;
         conv_layer_pipeline_ = nullptr;
         conv_head_pipeline_ = nullptr;
-        nam_rechannel_pipeline_ = nullptr;
-        nam_layer_pipeline_ = nullptr;
-        nam_head_pipeline_ = nullptr;
-        nam_scale_pipeline_ = nullptr;
+        wavenet_rechannel_pipeline_ = nullptr;
+        wavenet_layer_pipeline_ = nullptr;
+        wavenet_head_pipeline_ = nullptr;
+        wavenet_scale_pipeline_ = nullptr;
         matmul_pipeline_ = nullptr;
         additive_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
@@ -1734,9 +1734,9 @@ public:
         return read_back(plan.readback, out_block, blk_bytes);
     }
 
-    // ── NAM WaveNet ─────────────────────────────────────────────────────────
+    // ── WaveNet ─────────────────────────────────────────────────────────
 
-    bool prepare_nam(const NamLayerArraySpec* arrays, uint32_t num_arrays,
+    bool prepare_wavenet(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
                      const float* weights, uint32_t weights_len,
                      uint32_t block_size, float head_scale) override {
         if (!initialized_ || !arrays || !weights) return false;
@@ -1744,10 +1744,10 @@ public:
         if (num_arrays == 0 || B == 0) return false;
 
         // Validate shapes + compute the exact weight count by walking the blob in
-        // NAM's serialization order. This must match the .nam layout byte-for-byte.
+        // the serialization order below. Layout must match the flat weight blob byte-for-byte.
         uint64_t need = 0;
         for (uint32_t a = 0; a < num_arrays; ++a) {
-            const NamLayerArraySpec& s = arrays[a];
+            const WavenetLayerArraySpec& s = arrays[a];
             if (s.channels == 0 || s.channels > 64 || s.kernel == 0 ||
                 s.num_layers == 0 || !s.dilations || s.head_size == 0)
                 return false;
@@ -1767,7 +1767,7 @@ public:
         need += 1;  // trailing head_scale
         if (weights_len != need) return false;
 
-        NamPlan plan;
+        WavenetPlan plan;
         plan.B = B;
         plan.head_scale = head_scale;
 
@@ -1797,7 +1797,7 @@ public:
         uint64_t woff = 0;
 
         for (uint32_t a = 0; a < num_arrays; ++a) {
-            const NamLayerArraySpec& s = arrays[a];
+            const WavenetLayerArraySpec& s = arrays[a];
             const uint32_t C = s.channels, K = s.kernel, H = s.head_size;
             const uint32_t Z = s.gated ? 2u * C : C;
             uint32_t max_dil = 1;
@@ -1805,7 +1805,7 @@ public:
                 max_dil = s.dilations[l] > max_dil ? s.dilations[l] : max_dil;
             const uint32_t PAD = max_dil * (K - 1u);
 
-            NamArray na;
+            WavenetArray na;
             na.channels = C; na.head_size = H; na.num_layers = s.num_layers;
             na.pad = PAD; na.head_bias = s.head_bias;
 
@@ -1832,7 +1832,7 @@ public:
 
             // rechannel uniform + bind group. Array 0 reads the mono input
             // (in_ch=1, src_pad=0); array a>0 reads the previous array's last
-            // activation (in_ch=prevC, src_pad=prevPAD), wired in nam_forward
+            // activation (in_ch=prevC, src_pad=prevPAD), wired in wavenet_forward
             // ordering (the bind group references the previous array's buffer).
             na.rechannel_u = make_uniform(32);
             const uint32_t src_pad = (a == 0) ? 0u : plan.arrays[a - 1].pad;
@@ -1841,7 +1841,7 @@ public:
             queue_.WriteBuffer(na.rechannel_u, 0, &rcu, sizeof(rcu));
             const wgpu::Buffer& rc_src = (a == 0) ? plan.input
                                                   : plan.arrays[a - 1].act.back();
-            na.rechannel_bg = create_bind_group(nam_rechannel_pipeline_,
+            na.rechannel_bg = create_bind_group(wavenet_rechannel_pipeline_,
                 {plan.weights, rc_src, na.act[0], na.rechannel_u});
             if (!na.rechannel_bg) return false;
 
@@ -1863,7 +1863,7 @@ public:
                     lyu{C, K, B, s.dilations[l], Z, s.gated, PAD,
                         conv_w, conv_b, mix_w, l1_w, l1_b, 0, 0, 0, 0};
                 queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
-                wgpu::BindGroup bg = create_bind_group(nam_layer_pipeline_,
+                wgpu::BindGroup bg = create_bind_group(wavenet_layer_pipeline_,
                     {plan.weights, na.act[l], na.act[l + 1], plan.input, na.headacc, u});
                 if (!bg) return false;
                 na.layer_u.push_back(std::move(u));
@@ -1879,7 +1879,7 @@ public:
             struct HdU { uint32_t C, H, B, hr_w, hr_b, head_bias, p0, p1; }
                 hdu{C, H, B, hr_w, hr_b, s.head_bias, 0, 0};
             queue_.WriteBuffer(na.head_u, 0, &hdu, sizeof(hdu));
-            na.head_bg = create_bind_group(nam_head_pipeline_,
+            na.head_bg = create_bind_group(wavenet_head_pipeline_,
                 {plan.weights, na.headacc, na.headout, na.head_u});
             if (!na.head_bg) return false;
 
@@ -1888,12 +1888,12 @@ public:
 
         // Final scale pass over the last array's head output (head_size==1 in the
         // standard model; the shader reads index 0 of each sample's head vector).
-        const NamArray& last = plan.arrays.back();
+        const WavenetArray& last = plan.arrays.back();
         plan.scale_u = make_uniform(16);
         struct ScU { uint32_t B, H; float scale; uint32_t p0; }
             scu{B, last.head_size, head_scale, 0};
         queue_.WriteBuffer(plan.scale_u, 0, &scu, sizeof(scu));
-        plan.scale_bg = create_bind_group(nam_scale_pipeline_,
+        plan.scale_bg = create_bind_group(wavenet_scale_pipeline_,
             {last.headout, plan.output, plan.scale_u});
         if (!plan.scale_bg) return false;
 
@@ -1901,23 +1901,23 @@ public:
         plan.hist_temp = create_storage_buffer(hist_bytes, act_usage);
         if (!plan.hist_temp) return false;
 
-        nam_zero_.assign(std::max(max_headacc_floats, 1u), 0.0f);
-        nam_plans_.insert_or_assign(B, std::move(plan));
+        wavenet_zero_.assign(std::max(max_headacc_floats, 1u), 0.0f);
+        wavenet_plans_.insert_or_assign(B, std::move(plan));
         return true;
     }
 
-    bool nam_forward(const float* in_block, float* out_block,
+    bool wavenet_forward(const float* in_block, float* out_block,
                      uint32_t block_size) override {
         if (!initialized_ || !in_block || !out_block) return false;
-        auto it = nam_plans_.find(block_size);
-        if (it == nam_plans_.end()) return false;
-        NamPlan& plan = it->second;
+        auto it = wavenet_plans_.find(block_size);
+        if (it == wavenet_plans_.end()) return false;
+        WavenetPlan& plan = it->second;
         const uint32_t B = plan.B;
         const uint32_t blk_bytes = B * 4u;
 
         queue_.WriteBuffer(plan.input, 0, in_block, blk_bytes);
         for (auto& na : plan.arrays)   // head accumulators start at zero each block
-            queue_.WriteBuffer(na.headacc, 0, nam_zero_.data(), na.channels * B * 4u);
+            queue_.WriteBuffer(na.headacc, 0, wavenet_zero_.data(), na.channels * B * 4u);
 
         const uint32_t wg = (B + 255u) / 256u;
         wgpu::CommandEncoderDescriptor enc_desc{};
@@ -1932,18 +1932,18 @@ public:
         };
 
         for (uint32_t a = 0; a < plan.arrays.size(); ++a) {
-            NamArray& na = plan.arrays[a];
-            run(nam_rechannel_pipeline_, na.rechannel_bg);
+            WavenetArray& na = plan.arrays[a];
+            run(wavenet_rechannel_pipeline_, na.rechannel_bg);
             if (a > 0) {  // seed this array's head accumulator with the previous head output
-                const NamArray& prev = plan.arrays[a - 1];
+                const WavenetArray& prev = plan.arrays[a - 1];
                 encoder.CopyBufferToBuffer(prev.headout, 0, na.headacc, 0,
                                            static_cast<uint64_t>(na.channels) * B * 4u);
             }
             for (uint32_t l = 0; l < na.num_layers; ++l)
-                run(nam_layer_pipeline_, na.layer_bg[l]);
-            run(nam_head_pipeline_, na.head_bg);
+                run(wavenet_layer_pipeline_, na.layer_bg[l]);
+            run(wavenet_head_pipeline_, na.head_bg);
         }
-        run(nam_scale_pipeline_, plan.scale_bg);
+        run(wavenet_scale_pipeline_, plan.scale_bg);
         encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
 
         // Slide each array's activation windows: the most-recent PAD columns
@@ -2485,10 +2485,10 @@ private:
     wgpu::ComputePipeline conv_in_pipeline_;     // conv-stack input projection
     wgpu::ComputePipeline conv_layer_pipeline_;  // conv-stack gated dilated layer
     wgpu::ComputePipeline conv_head_pipeline_;   // conv-stack linear head
-    wgpu::ComputePipeline nam_rechannel_pipeline_;  // NAM 1x1 rechannel
-    wgpu::ComputePipeline nam_layer_pipeline_;      // NAM dilated conv layer
-    wgpu::ComputePipeline nam_head_pipeline_;       // NAM head rechannel
-    wgpu::ComputePipeline nam_scale_pipeline_;      // NAM final head_scale
+    wgpu::ComputePipeline wavenet_rechannel_pipeline_;  // WaveNet 1x1 rechannel
+    wgpu::ComputePipeline wavenet_layer_pipeline_;      // WaveNet dilated conv layer
+    wgpu::ComputePipeline wavenet_head_pipeline_;       // WaveNet head rechannel
+    wgpu::ComputePipeline wavenet_scale_pipeline_;      // WaveNet final head_scale
     wgpu::ComputePipeline matmul_pipeline_;
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline modal_pipeline_;
@@ -2619,13 +2619,13 @@ private:
     std::unordered_map<uint32_t, ConvStackPlan> conv_stack_plans_;
     std::vector<float> cs_zero_;  // skip-buffer zeroing scratch
 
-    // NAM WaveNet plan: the full multi-array model, device-resident. `weights`
+    // WaveNet plan: the full multi-array model, device-resident. `weights`
     // holds the whole flat blob. Each array owns its activation buffers (one per
     // layer-input, C*(pad+B), padded for dilation history), a head accumulator
     // (C*B) and a head output (H*B). Pass uniforms + bind groups are pre-built so
     // each forward is just WriteBuffer(input) + encode + one readback. Keyed by
     // block size; rebuilt if it changes.
-    struct NamArray {
+    struct WavenetArray {
         uint32_t channels = 0, head_size = 0, num_layers = 0, pad = 0, head_bias = 0;
         std::vector<wgpu::Buffer> act;   // num_layers+1 activation buffers
         wgpu::Buffer headacc, headout;
@@ -2634,16 +2634,16 @@ private:
         wgpu::BindGroup rechannel_bg, head_bg;
         std::vector<wgpu::BindGroup> layer_bg;
     };
-    struct NamPlan {
+    struct WavenetPlan {
         uint32_t B = 0;
         float head_scale = 1.0f;
         wgpu::Buffer weights, input, output, readback, hist_temp;
         wgpu::Buffer scale_u;
         wgpu::BindGroup scale_bg;
-        std::vector<NamArray> arrays;
+        std::vector<WavenetArray> arrays;
     };
-    std::unordered_map<uint32_t, NamPlan> nam_plans_;
-    std::vector<float> nam_zero_;  // head-accumulator zeroing scratch (max C*B)
+    std::unordered_map<uint32_t, WavenetPlan> wavenet_plans_;
+    std::vector<float> wavenet_zero_;  // head-accumulator zeroing scratch (max C*B)
 
     // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
     // the render path is non-RT so a resize here is fine).
@@ -2699,14 +2699,14 @@ private:
         conv_head_pipeline_ = create_pipeline("conv_head", kConvStackHeadShader);
         if (!conv_head_pipeline_) return false;
 
-        nam_rechannel_pipeline_ = create_pipeline("nam_rechannel", kNamRechannelShader);
-        if (!nam_rechannel_pipeline_) return false;
-        nam_layer_pipeline_ = create_pipeline("nam_layer", kNamLayerShader);
-        if (!nam_layer_pipeline_) return false;
-        nam_head_pipeline_ = create_pipeline("nam_head", kNamHeadShader);
-        if (!nam_head_pipeline_) return false;
-        nam_scale_pipeline_ = create_pipeline("nam_scale", kNamScaleShader);
-        if (!nam_scale_pipeline_) return false;
+        wavenet_rechannel_pipeline_ = create_pipeline("wavenet_rechannel", kWavenetRechannelShader);
+        if (!wavenet_rechannel_pipeline_) return false;
+        wavenet_layer_pipeline_ = create_pipeline("wavenet_layer", kWavenetLayerShader);
+        if (!wavenet_layer_pipeline_) return false;
+        wavenet_head_pipeline_ = create_pipeline("wavenet_head", kWavenetHeadShader);
+        if (!wavenet_head_pipeline_) return false;
+        wavenet_scale_pipeline_ = create_pipeline("wavenet_scale", kWavenetScaleShader);
+        if (!wavenet_scale_pipeline_) return false;
 
         matmul_pipeline_ = create_pipeline("matmul", kMatmulShader);
         if (!matmul_pipeline_) return false;

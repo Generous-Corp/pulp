@@ -288,34 +288,36 @@ public:
     virtual bool conv_stack_forward(const float* in_block, float* out_block,
                                     uint32_t block_size) = 0;
 
-    // ── Fused Neural Amp Modeler (NAM) WaveNet inference ────────────────────
+    // ── Fused conditioned WaveNet inference (gated dilated conv sequence) ────
     //
-    // The exact open-source NAM "WaveNet" forward (the architecture behind .nam
-    // captures), reproduced GPU-resident and block-parallel. Unlike conv_stack
-    // (a single gated layer stack), this models NAM's full shape: a sequence of
-    // layer-arrays, each with an input rechannel (1x1), dilated causal conv
-    // layers that mix in a separate condition (the raw mono input), Tanh (or
-    // gated tanh·sigmoid) activation, a 1x1 residual, a per-array head
-    // accumulator, and a head rechannel — with the layer output and the head
-    // accumulator chained array→array. The whole block's samples compute in
-    // PARALLEL (the net is feedforward), every pass encodes into ONE submit over
+    // A conditioned WaveNet forward — a sequence of layer-arrays of gated,
+    // dilated, causal 1-D conv layers (van den Oord et al.) — reproduced
+    // GPU-resident and block-parallel. Unlike conv_stack (a single gated layer
+    // stack), this models the full shape: a sequence of layer-arrays, each with
+    // an input rechannel (1x1), dilated causal conv layers that mix in a
+    // separate condition signal (here the raw mono input), Tanh (or gated
+    // tanh·sigmoid) activation, a 1x1 residual, a per-array head accumulator,
+    // and a head rechannel — with the layer output and the head accumulator
+    // chained array→array. The whole block's samples compute in PARALLEL (the
+    // net is feedforward), every pass encodes into ONE submit over
     // device-resident activations, and only the final mono block is read back —
     // the round-trip is paid once per block. Dilation history slides across
     // calls so streaming blocks are continuous. Not real-time-safe (blocks on
-    // the readback); run on the GPU worker / offline.
+    // the readback); run on the GPU worker / offline. It is the GPU counterpart
+    // to a streaming CPU WaveNet and drives neural waveshaping / amp inference.
     //
-    // Weight layout matches NAM's serialization exactly. Per layer-array, walking
-    // the flat blob: rechannel W [channels*input_size] (no bias); then per layer:
-    // conv W [Z*channels*kernel] + bias [Z], input_mixin W [Z*condition_size] (no
-    // bias), layer1x1 W [channels*channels] + bias [channels]; then head_rechannel
-    // W [head_size*channels] (+ bias [head_size] if head_bias). After all arrays:
+    // Weight layout (flat f32 blob). Per layer-array, walking the blob:
+    // rechannel W [channels*input_size] (no bias); then per layer: conv W
+    // [Z*channels*kernel] + bias [Z], input_mixin W [Z*condition_size] (no bias),
+    // layer1x1 W [channels*channels] + bias [channels]; then head_rechannel W
+    // [head_size*channels] (+ bias [head_size] if head_bias). After all arrays:
     // one trailing head_scale scalar. Z = gated ? 2*channels : channels.
-    // Activation is Tanh (the published-capture default); the gate is sigmoid.
+    // Activation is Tanh; the gate is sigmoid.
 
-    /// One NAM layer-array's static shape. `dilations` points to `num_layers`
-    /// dilation factors. `condition_size` must be 1 (the raw mono condition, as
-    /// in every published capture). `gated` / `head_bias` are 0/1 flags.
-    struct NamLayerArraySpec {
+    /// One WaveNet layer-array's static shape. `dilations` points to `num_layers`
+    /// dilation factors. `condition_size` must be 1 (a mono condition signal).
+    /// `gated` / `head_bias` are 0/1 flags.
+    struct WavenetLayerArraySpec {
         uint32_t input_size = 1;
         uint32_t condition_size = 1;
         uint32_t channels = 1;
@@ -327,25 +329,25 @@ public:
         uint32_t num_layers = 0;
     };
 
-    /// Build the NAM plan: upload `weights` (flat, length `weights_len`,
+    /// Build the WaveNet plan: upload `weights` (flat, length `weights_len`,
     /// `head_scale` is the trailing scalar passed separately here), allocate the
     /// per-array/per-layer device-resident activation + head buffers for
     /// `block_size` samples, and compile the fused passes. Returns false on
     /// invalid args (channels > 64, condition_size != 1, an array-chaining shape
     /// mismatch, a weight-count mismatch) or GPU failure. Call once before
-    /// nam_forward(block_size).
-    virtual bool prepare_nam(const NamLayerArraySpec* arrays, uint32_t num_arrays,
-                             const float* weights, uint32_t weights_len,
-                             uint32_t block_size, float head_scale) = 0;
+    /// wavenet_forward(block_size).
+    virtual bool prepare_wavenet(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
+                                 const float* weights, uint32_t weights_len,
+                                 uint32_t block_size, float head_scale) = 0;
 
-    /// Run the fused NAM forward for one mono block (`block_size` in/out): the
+    /// Run the fused WaveNet forward for one mono block (`block_size` in/out): the
     /// per-array rechannel, dilated conv layers (+ condition mixin, activation,
     /// residual, head accumulate), head rechannels, and the final head_scale, all
     /// in one submit. Carries each layer's dilation history across calls so
     /// streaming blocks match the CPU reference run sample-continuously. Returns
-    /// false if prepare_nam was not called for `block_size`.
-    virtual bool nam_forward(const float* in_block, float* out_block,
-                             uint32_t block_size) = 0;
+    /// false if prepare_wavenet was not called for `block_size`.
+    virtual bool wavenet_forward(const float* in_block, float* out_block,
+                                 uint32_t block_size) = 0;
 
     // ── Capabilities ─────────────────────────────────────────────────────
 
