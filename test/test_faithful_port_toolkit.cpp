@@ -393,3 +393,102 @@ TEST_CASE("AnchoredCallout hosts content and mounts as an overlay",
     CHECK(cb.width == Approx(100.0f));
     CHECK(cb.height == Approx(60.0f));
 }
+
+// ── P6.6: Drag-to-reorder container ──────────────────────────────────────────
+
+#include <pulp/view/reorder_list.hpp>
+using pulp::view::ReorderList;
+
+TEST_CASE("reorder_target_index rounds the drag offset to a slot",
+          "[view][reorder][issue-juce-port]") {
+    const float pitch = 46.0f;  // extent 40 + gap 6
+    SECTION("no offset keeps the source index") {
+        CHECK(pulp::view::reorder_target_index(1, 0.0f, pitch, 4) == 1);
+    }
+    SECTION("dragging just past two slots lands on +2") {
+        CHECK(pulp::view::reorder_target_index(0, pitch * 2.1f, pitch, 4) == 2);
+    }
+    SECTION("upward drag rounds negative") {
+        CHECK(pulp::view::reorder_target_index(3, -pitch * 1.6f, pitch, 4) == 1);
+    }
+    SECTION("clamps into range") {
+        CHECK(pulp::view::reorder_target_index(0, pitch * 99.0f, pitch, 4) == 3);
+        CHECK(pulp::view::reorder_target_index(3, -pitch * 99.0f, pitch, 4) == 0);
+    }
+    SECTION("degenerate pitch / empty list is a no-op") {
+        CHECK(pulp::view::reorder_target_index(2, 100.0f, 0.0f, 4) == 2);
+        CHECK(pulp::view::reorder_target_index(0, 100.0f, pitch, 0) == 0);
+    }
+}
+
+namespace {
+// Build a 4-item vertical ReorderList (extent 40, gap 6 -> pitch 46) laid out.
+std::unique_ptr<ReorderList> make_reorder_list(std::vector<pulp::view::View*>& out) {
+    auto list = std::make_unique<ReorderList>();
+    list->set_item_extent(40.0f);
+    list->set_gap(6.0f);
+    list->set_bounds({0, 0, 200, 4 * 46.0f});
+    for (int i = 0; i < 4; ++i) {
+        auto item = std::make_unique<pulp::view::View>();
+        out.push_back(item.get());
+        list->add_item(std::move(item));
+    }
+    list->layout_children();
+    return list;
+}
+}  // namespace
+
+TEST_CASE("ReorderList commits a drag that moves item 0 past item 2",
+          "[view][reorder][issue-juce-port]") {
+    std::vector<pulp::view::View*> original;
+    auto list = make_reorder_list(original);
+
+    int from_seen = -1, to_seen = -1;
+    list->on_reorder = [&](int f, int t) { from_seen = f; to_seen = t; };
+
+    // Drag from within item 0 (y ~20) down past item 2 (offset ~2.2 * pitch).
+    const float pitch = list->pitch();
+    list->simulate_drag({100.0f, 20.0f}, {100.0f, 20.0f + pitch * 2.2f});
+
+    CHECK(from_seen == 0);
+    CHECK(to_seen == 2);
+    // Display order updated: the old item 0 is now at display index 2; the old
+    // items 1 and 2 shifted up to 0 and 1.
+    CHECK(list->item_at(2) == original[0]);
+    CHECK(list->item_at(0) == original[1]);
+    CHECK(list->item_at(1) == original[2]);
+    CHECK(list->item_at(3) == original[3]);
+    CHECK(list->dragging_index() == -1);  // drag released
+}
+
+TEST_CASE("ReorderList no-op drop does not fire on_reorder",
+          "[view][reorder][issue-juce-port]") {
+    std::vector<pulp::view::View*> original;
+    auto list = make_reorder_list(original);
+    bool fired = false;
+    list->on_reorder = [&](int, int) { fired = true; };
+
+    // Tiny drag within the same slot: target == source.
+    list->simulate_drag({100.0f, 20.0f}, {100.0f, 25.0f});
+    CHECK_FALSE(fired);
+    CHECK(list->item_at(0) == original[0]);  // order unchanged
+}
+
+TEST_CASE("ReorderList opens a gap for the lifted item during a drag",
+          "[view][reorder][issue-juce-port]") {
+    std::vector<pulp::view::View*> original;
+    auto list = make_reorder_list(original);
+    const float pitch = list->pitch();
+
+    // Begin a drag on item 0 and move it toward slot 2 WITHOUT releasing.
+    list->on_mouse_down({100.0f, 20.0f});
+    list->on_mouse_drag({100.0f, 20.0f + pitch * 2.0f});
+    CHECK(list->dragging_index() == 0);
+    CHECK(list->drop_target_index() == 2);
+    // Neighbour that was at slot 1 slid up toward the gap (y decreased by a pitch).
+    const Rect n1 = original[1]->bounds();
+    CHECK(n1.y == Approx(1 * pitch - pitch));  // slot 1 shifted to slot 0's y
+    // The lifted item tracks the pointer (offset ~2 pitches from its rest slot).
+    const Rect lifted = original[0]->bounds();
+    CHECK(lifted.y == Approx(pitch * 2.0f).margin(0.5f));
+}

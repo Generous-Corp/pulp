@@ -396,6 +396,7 @@ target_sources(pulp-view-core PRIVATE
     src/design_frame_view.cpp
     src/svg_fragment.cpp
     src/callout_box.cpp
+    src/reorder_list.cpp
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
