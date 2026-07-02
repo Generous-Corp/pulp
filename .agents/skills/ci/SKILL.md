@@ -576,6 +576,13 @@ Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+**After opening/merging a material PR, sweep its review comments.** `merge on
+green` fires before the automated reviewers (Codex, and cubic on Shipyard)
+finish, so a PR can land with unaddressed P1s. For any logic-bearing or
+destructive-path PR, follow the `pr-review-sweep` skill: read
+`pulls/<n>/comments` (via `ghapp`), verify each finding against the code, and
+ship a follow-up with a test for anything confirmed. Docs-only PRs can skip it.
+
 Direct `gh pr create` is an explicit emergency/manual bypass only. If the
 user asks for that path, state the tracking gap up front: the PR may not
 appear in Shipyard-managed state or the macOS GUI until it is reconciled or
