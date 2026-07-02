@@ -172,6 +172,15 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         # its "empty report" heuristic would misread as "the tool isn't installed".
         report = compare.invalid_report(args.profile, args.reference_role, str(exc))
     print(f"[quality-lab compare] {report['verdict']}: {report['summary']}")
+    # Corroboration status + any promoted headline flags, printed under the verdict on every run
+    # (advisory — a cross-check about materiality, never a gate; see the compare report contract).
+    corr = (report.get("advisory") or {}).get("corroboration")
+    if corr:
+        print(f"  corroboration: {corr['status']}")
+    for f in report.get("headline_flags", []):
+        exp = f.get("expected_for") or []
+        suffix = f" (expected for: {', '.join(exp)})" if exp else ""
+        print(f"  flag: {f['flag']}{suffix}")
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(report, fh, indent=2)

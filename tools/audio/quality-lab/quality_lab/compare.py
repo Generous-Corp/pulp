@@ -50,6 +50,8 @@ STATUS_INVALID = schema.COMPARE_STATUS_INVALID
 CORROBORATED = schema.COMPARE_CORROBORATED
 NOT_CORROBORATED = schema.COMPARE_NOT_CORROBORATED
 CORROBORATION_NA = schema.COMPARE_CORROBORATION_NA
+FLAG_UNCAPTURED_DIFF = schema.COMPARE_FLAG_UNCAPTURED_DIFF
+FLAG_AXIS_ONLY = schema.COMPARE_FLAG_AXIS_ONLY
 
 _LTAS_N_FFT = 2048  # a valid LTAS needs at least this many samples
 _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
@@ -280,6 +282,8 @@ def _corroboration(primary_exceeds: bool, residual_db: float, length: dict[str, 
         status, note,
         basis={"raw_comparator": _RAW_NULL_TOOL, "residual_db": round(residual_db, 2),
                "residual_material_floor_db": _RESIDUAL_MATERIAL_DB,
+               # bool() is load-bearing: `_headline_flags` uses `is True`/`is False` identity checks
+               # on these, which a numpy.bool_ would silently fail. Keep the wraps.
                "axis_exceeds": bool(primary_exceeds), "raw_material": bool(raw_material),
                "ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"]},
     )
@@ -336,14 +340,44 @@ def _resolve(profile: str) -> _Axis:
     return axis
 
 
+def _headline_flags(advisory: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Promote a corroboration DISAGREEMENT to a machine-readable top-level flag (never a verdict).
+    Two mirrored directions off the corroboration basis:
+    - axis blind, residual material  → `uncaptured_material_difference` — the single most actionable
+      line for a DSP dev (a real change the chosen axis can't see). It is ALSO the known false-alarm
+      for time/pitch-variant processing (the phase-sensitive residual always disagrees there), so it
+      carries `expected_for=["time_variant_processing"]` for machine suppression.
+    - axis flags, residual immaterial → `axis_change_without_residual` — a marginal or phase-only
+      change to weigh before acting on the axis verdict."""
+    if not advisory:
+        return []
+    basis = (advisory.get("corroboration") or {}).get("basis") or {}
+    # Identity checks (not truthiness) are deliberate: they distinguish a real False from an absent
+    # key (None). They rely on the basis storing genuine Python bools — `_corroboration` wraps both
+    # with bool(); do NOT drop those wraps or a numpy.bool_ would fail `is True`/`is False` and
+    # silently swallow a flag.
+    axis_exceeds, raw_material = basis.get("axis_exceeds"), basis.get("raw_material")
+    if axis_exceeds is False and raw_material is True:
+        return [schema.compare_headline_flag(
+            schema.COMPARE_FLAG_UNCAPTURED_DIFF,
+            "an independent sample-domain residual registers a material difference this axis does not measure",
+            expected_for=["time_variant_processing"])]
+    if axis_exceeds is True and raw_material is False:
+        return [schema.compare_headline_flag(
+            schema.COMPARE_FLAG_AXIS_ONLY,
+            "the axis flags a change the sample-domain residual does not register (marginal or phase-only)")]
+    return []
+
+
 def _summary_with_disclosures(
-    axis: _Axis, verdict: str, env: dict[str, Any], advisory: dict[str, Any] | None
+    axis: _Axis, verdict: str, env: dict[str, Any], advisory: dict[str, Any] | None,
+    headline_flags: list[dict[str, Any]],
 ) -> str:
-    """The axis's own summary plus any honesty disclosures (mono downmix, DC offset). These are
-    PRESENTATION ONLY — appended after the verdict is decided, reading only off-gate facts (the
-    envelope's `downmix` note and the advisory's `dc_offset` comparator); they never change the
-    verdict. This stops the headline from actively misdirecting (a DC offset read as 'dulling',
-    or a 'no change' that silently discarded a stereo difference)."""
+    """The axis's own summary plus any honesty disclosures (mono downmix, DC offset, corroboration
+    disagreement). These are PRESENTATION ONLY — appended after the verdict is decided, reading only
+    off-gate facts (the envelope's `downmix` note, the advisory's `dc_offset` comparator, and the
+    `headline_flags` derived from corroboration); they never change the verdict. This stops the
+    headline from actively misdirecting or from burying the most actionable corroboration signal."""
     summary = axis.summarize(verdict, env)
     # The structured `downmix` field always discloses the fold (machine-readable); the prose clause
     # is suppressed on `invalid`, where "we downmixed to mono" reads oddly on a report that never
@@ -355,6 +389,14 @@ def _summary_with_disclosures(
         if dc and dc.get("detail", {}).get("present"):
             summary += (" A DC offset is present in the input(s); it biases the LTAS toward bin 0 "
                         "and can be mistaken for a tonal change — high-pass the inputs before comparing.")
+    for f in headline_flags:
+        if f["flag"] == schema.COMPARE_FLAG_UNCAPTURED_DIFF:
+            summary += (" An independent sample-domain residual registers a material difference this "
+                        "axis does not measure (expected for time/pitch-variant processing; otherwise "
+                        "try another profile).")
+        elif f["flag"] == schema.COMPARE_FLAG_AXIS_ONLY:
+            summary += (" The sample-domain residual does not register a material difference — the "
+                        "flagged change may be marginal or phase-only; weigh the axis verdict accordingly.")
     return summary
 
 
@@ -399,8 +441,10 @@ def compare_arrays(
         env["downmix"] = schema.compare_downmix_note(input_channels[0], input_channels[1])
 
     verdict = _verdict(axis, env, reference_role)
-    summary = _summary_with_disclosures(axis, verdict, env, advisory)
-    return schema.compare_report(profile, reference_role, verdict, summary, [env], advisory=advisory)
+    headline_flags = _headline_flags(advisory)
+    summary = _summary_with_disclosures(axis, verdict, env, advisory, headline_flags)
+    return schema.compare_report(profile, reference_role, verdict, summary, [env],
+                                 advisory=advisory, headline_flags=headline_flags)
 
 
 def _sha256(path: str) -> str:

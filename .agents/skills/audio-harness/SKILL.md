@@ -403,7 +403,16 @@ harness or `ctest`.
   signal is disagreement: `not_corroborated` with `axis_exceeds:false, raw_material:true` means a
   real sample-domain difference this axis can't see (e.g. a pure delay — try another profile);
   `axis_exceeds:true, raw_material:false` means a marginal/phase-only change to treat with more
-  caution. Length is handled honestly: the candidate is level-matched over the **common region**
+  caution. **That disagreement is now PROMOTED to the headline** (it used to sit buried in the
+  advisory): a top-level `report["headline_flags"]` (always present, empty when there's nothing to
+  flag) carries a structured `{flag, detail, expected_for}` — `uncaptured_material_difference` or
+  `axis_change_without_residual` — and a matching sentence is appended to `summary`. The flag is
+  STRUCTURED, not prose, precisely so the known false-alarm class is machine-suppressible: every
+  time/pitch-variant A/B (chorus, phaser, bendr, any modulated effect) legitimately reads
+  `not_corroborated` forever because the phase-sensitive residual always disagrees with a tonal
+  axis, so `uncaptured_material_difference` carries `expected_for:["time_variant_processing"]` — a
+  caller doing time-variant work filters on that rather than treating the flag as noise. It still
+  NEVER moves the verdict. Length is handled honestly: the candidate is level-matched over the **common region**
   and the shorter signal **zero-padded** to the longer length, so a dropped/added tail *with
   content* raises the residual on its own (reads material) while trailing *silence* contributes
   ~0 (stays immaterial) — a truncated render can never masquerade as a near-identity match, and
