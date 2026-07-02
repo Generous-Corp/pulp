@@ -148,8 +148,8 @@ void AnchoredCallout::layout_children() {
 
 void AnchoredCallout::paint(canvas::Canvas& canvas) {
     const CalloutPlacement p = compute_placement(local_bounds());
-    const auto bg = resolve_color("surface.raised", canvas::Color::rgba8(30, 34, 40));
-    const auto border = resolve_color("border.default", canvas::Color::rgba8(60, 66, 74));
+    const auto bg = resolve_color("modal.bg", canvas::Color::rgba8(30, 34, 40));
+    const auto border = resolve_color("modal.border", canvas::Color::rgba8(60, 66, 74));
 
     // Body.
     canvas.set_fill_color(bg);
