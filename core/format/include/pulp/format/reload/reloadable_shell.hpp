@@ -198,6 +198,8 @@ public:
     std::uint64_t reload_attempts() const { return reload_attempts_.load(std::memory_order_relaxed); }
     std::uint64_t successful_reloads() const { return successful_reloads_.load(std::memory_order_relaxed); }
     ReloadOutcome::Status last_status() const { return last_status_.load(std::memory_order_relaxed); }
+    /// Total wall-clock of the last successful DSP reload, ms (item 1.2 diagnostic).
+    double last_reload_ms() const { return last_reload_ms_.load(std::memory_order_relaxed); }
     std::uint64_t contention_blocks() const { return slot_.contention_blocks(); }
     bool has_active_dsp() const { return slot_.has_active(); }
 
@@ -347,9 +349,17 @@ private:
         last_status_.store(outcome.status, std::memory_order_relaxed);
         if (outcome.ok()) {
             successful_reloads_.fetch_add(1, std::memory_order_relaxed);
-            runtime::log_info("[reload-shell] swapped DSP: {}", outcome.detail);
+            last_reload_ms_.store(outcome.metrics.total_ms, std::memory_order_relaxed);
+            // `swapped in NNN ms` dev diagnostic + per-phase breakdown (item 1.2).
+            const auto& m = outcome.metrics;
+            runtime::log_info(
+                "[reload-shell] swapped DSP in {:.2f} ms "
+                "(load+gate {:.2f} / construct {:.2f} / prepare {:.2f} / swap {:.2f}): {}",
+                m.total_ms, m.load_gate_ms, m.construct_ms, m.prepare_ms, m.swap_ms,
+                outcome.detail);
         } else {
-            runtime::log_warn("[reload-shell] reload rejected: {}", outcome.detail);
+            runtime::log_warn("[reload-shell] reload rejected after {:.2f} ms: {}",
+                              outcome.metrics.total_ms, outcome.detail);
         }
     }
 
@@ -374,6 +384,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> reload_attempts_{0};
     std::atomic<std::uint64_t> successful_reloads_{0};
+    std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap (item 1.2)
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
     std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)
 };

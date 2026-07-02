@@ -31,6 +31,7 @@
 #include <pulp/format/reload/reload_library.hpp>
 #include <pulp/state/store.hpp>
 
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <string>
@@ -38,6 +39,18 @@
 #include <vector>
 
 namespace pulp::format::reload {
+
+/// DSP-axis reload timings (control-thread, off the audio path). Populated by
+/// reload_processor_from_library() on every attempt — partial on early
+/// rejection (later phases stay 0). Milliseconds. Feeds the `swapped in NNN ms`
+/// dev diagnostic and p50/p95 baselines (plan item 1.2).
+struct ReloadMetrics {
+    double load_gate_ms = 0.0;  ///< dlopen + ABI/fingerprint gates + resolve create.
+    double construct_ms = 0.0;  ///< create() + define_parameters + contract gate.
+    double prepare_ms = 0.0;    ///< the candidate's prepare().
+    double swap_ms = 0.0;       ///< slot.swap() + displaced dtor (this thread).
+    double total_ms = 0.0;      ///< end-to-end (load → swap).
+};
 
 struct ReloadOutcome {
     enum class Status {
@@ -52,6 +65,7 @@ struct ReloadOutcome {
     Status status = Status::RejectedLoadFailed;
     std::string detail;               ///< Short human summary (one line).
     std::vector<std::string> issues;  ///< Structured per-field diffs (fingerprint/contract).
+    ReloadMetrics metrics;            ///< DSP-axis phase timings (item 1.2).
 
     bool ok() const { return status == Status::Swapped; }
     explicit operator bool() const { return ok(); }
@@ -139,10 +153,23 @@ inline ReloadOutcome reload_processor_from_library(
     const PrepareContext& prepare_ctx,
     std::vector<ReloadLibrary>& retained_images) {
 
+    // Phase timing (item 1.2). steady_clock; this whole function is control-thread
+    // (off the audio path), so timing here is never an RT concern.
+    using clock = std::chrono::steady_clock;
+    const auto t0 = clock::now();
+    const auto ms = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+
     // 1-4. Load + gate (ABI version, fingerprint) + resolve the factory — the
     //       shared, fail-closed gate sequence (see gate_logic_image).
     auto gated = gate_logic_image(library_path, host_fingerprint);
-    if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) return std::move(*rejected);
+    const auto t_gate = clock::now();
+    if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) {
+        rejected->metrics.load_gate_ms = ms(t0, t_gate);
+        rejected->metrics.total_ms = ms(t0, t_gate);
+        return std::move(*rejected);
+    }
     GatedImage& image = std::get<GatedImage>(gated);
     const ReloadCreateFn create_fn = image.create;
 
@@ -151,6 +178,13 @@ inline ReloadOutcome reload_processor_from_library(
     // leak policy). create_fn stays valid: the image remains loaded.
     retained_images.push_back(std::move(image.lib));
 
+    // Stamp partial metrics onto an early-rejection outcome (later phases 0).
+    const auto reject = [&](ReloadOutcome o) {
+        o.metrics.load_gate_ms = ms(t0, t_gate);
+        o.metrics.total_ms = ms(t0, clock::now());
+        return o;
+    };
+
     // 5. Construct + gate + commit. Wrapped so a throwing candidate (ctor,
     //    define_parameters, prepare) yields a graceful Rejected outcome instead
     //    of escaping as an exception — catching across the seam is sound because
@@ -158,7 +192,7 @@ inline ReloadOutcome reload_processor_from_library(
     try {
         std::unique_ptr<Processor> candidate(create_fn());
         if (!candidate) {
-            return {ReloadOutcome::Status::RejectedNoEntryPoints, "create returned null"};
+            return reject({ReloadOutcome::Status::RejectedNoEntryPoints, "create returned null"});
         }
 
         // Parameter-contract gate — the candidate must present the same
@@ -168,9 +202,10 @@ inline ReloadOutcome reload_processor_from_library(
         state::StateStore scratch;
         candidate->define_parameters(scratch);
         if (!param_contracts_match(live_store, scratch)) {
-            return {ReloadOutcome::Status::RejectedContract, "parameter contract differs",
-                    param_contract_diff(live_store, scratch)};
+            return reject({ReloadOutcome::Status::RejectedContract, "parameter contract differs",
+                           param_contract_diff(live_store, scratch)});
         }
+        const auto t_construct = clock::now();
 
         // Commit: bind the candidate to the LIVE store (same params + current
         // values by the gate above), prepare, and swap. Cross-module delete is
@@ -181,16 +216,24 @@ inline ReloadOutcome reload_processor_from_library(
         // kDestroySymbol instead — see reload_abi.hpp.)
         candidate->set_state_store(&live_store);
         candidate->prepare(prepare_ctx);
+        const auto t_prepare = clock::now();
         std::unique_ptr<Processor> displaced = slot.swap(std::move(candidate));
         (void)displaced;  // ~Processor() here — control thread, never the audio thread.
+        const auto t_swap = clock::now();
 
-        return {ReloadOutcome::Status::Swapped, library_path};
+        ReloadOutcome ok{ReloadOutcome::Status::Swapped, library_path};
+        ok.metrics.load_gate_ms = ms(t0, t_gate);
+        ok.metrics.construct_ms = ms(t_gate, t_construct);
+        ok.metrics.prepare_ms = ms(t_construct, t_prepare);
+        ok.metrics.swap_ms = ms(t_prepare, t_swap);
+        ok.metrics.total_ms = ms(t0, t_swap);
+        return ok;
     } catch (const std::exception& e) {
-        return {ReloadOutcome::Status::RejectedCandidateThrew,
-                std::string("candidate threw: ") + e.what()};
+        return reject({ReloadOutcome::Status::RejectedCandidateThrew,
+                       std::string("candidate threw: ") + e.what()});
     } catch (...) {
-        return {ReloadOutcome::Status::RejectedCandidateThrew,
-                "candidate threw (non-std exception)"};
+        return reject({ReloadOutcome::Status::RejectedCandidateThrew,
+                       "candidate threw (non-std exception)"});
     }
 }
 

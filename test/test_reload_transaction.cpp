@@ -224,3 +224,48 @@ TEST_CASE("ReloadSession owns the session state across multiple reloads",
     REQUIRE(session.retained_image_count() == 2);  // compatible + (constructed) incompatible
     REQUIRE(render_one(slot) == 1.0f);             // still the compatible processor
 }
+
+TEST_CASE("hot-reload records DSP-axis phase metrics (item 1.2)",
+          "[reload][transaction][metrics]") {
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+
+    ProcessorHotSwapSlot slot(std::move(initial));
+    format::PrepareContext ctx;
+    std::vector<ReloadLibrary> images;
+    const BuildFingerprint host = current_build_fingerprint();
+
+    SECTION("a successful reload populates all phases and a consistent total") {
+        auto r = reload_processor_from_library(slot, RELOAD_LOGIC_COMPATIBLE, host,
+                                               live, ctx, images);
+        REQUIRE(r.ok());
+        const auto& m = r.metrics;
+        // Every phase is measured (>= 0; a phase can round to 0 on a very fast host).
+        CHECK(m.load_gate_ms >= 0.0);
+        CHECK(m.construct_ms >= 0.0);
+        CHECK(m.prepare_ms >= 0.0);
+        CHECK(m.swap_ms >= 0.0);
+        // The phases are contiguous, so the total covers each of them and their
+        // sum (within a small slack for the clock reads between stamps).
+        CHECK(m.total_ms >= m.load_gate_ms);
+        CHECK(m.total_ms >= m.construct_ms);
+        CHECK(m.total_ms >= m.prepare_ms);
+        CHECK(m.total_ms >= m.swap_ms);
+        const double sum = m.load_gate_ms + m.construct_ms + m.prepare_ms + m.swap_ms;
+        CHECK(m.total_ms + 1.0 >= sum);   // total ≈ sum of contiguous phases
+    }
+
+    SECTION("an early rejection still stamps load_gate + total (later phases 0)") {
+        auto r = reload_processor_from_library(slot, "/no/such/logic.dylib", host,
+                                               live, ctx, images);
+        REQUIRE(r.status == ReloadOutcome::Status::RejectedLoadFailed);
+        CHECK(r.metrics.load_gate_ms >= 0.0);
+        CHECK(r.metrics.total_ms >= 0.0);
+        CHECK(r.metrics.construct_ms == 0.0);   // never reached
+        CHECK(r.metrics.prepare_ms == 0.0);
+        CHECK(r.metrics.swap_ms == 0.0);
+    }
+}
