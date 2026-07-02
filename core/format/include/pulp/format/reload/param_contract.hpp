@@ -96,6 +96,44 @@ inline bool param_contracts_match(const state::StateStore& live,
            param_contract_diff(live, candidate).empty();
 }
 
+/// Result of the SUPERSET contract check (live-swap plan item 2.4 — "add params
+/// and stay live"). A candidate is a valid superset when every LIVE parameter is
+/// present in the candidate with an identical contract (existing automation /
+/// saved sessions stay valid), and the candidate may ALSO declare new parameters.
+struct ParamSupersetResult {
+    bool is_superset = false;                ///< candidate ⊇ live, shared contracts identical
+    std::vector<state::ParamID> added_ids;   ///< IDs new in candidate (candidate order)
+};
+
+/// Superset gate: relaxes `param_contracts_match` from "identical" to "candidate
+/// is a superset of live". A strict match is the special case `is_superset==true
+/// && added_ids.empty()`. When `is_superset` is true with non-empty `added_ids`,
+/// the reload can hot-swap AND the host must then rescan the parameter list to
+/// pick up the additions (the live-store registration + per-adapter host-notify
+/// is item 2.4b — this predicate is pure and mutates nothing). Fails closed on
+/// duplicate IDs, exactly like the strict gate.
+inline ParamSupersetResult param_contract_superset(const state::StateStore& live,
+                                                    const state::StateStore& candidate) {
+    ParamSupersetResult result;
+    if (!has_unique_param_ids(live) || !has_unique_param_ids(candidate))
+        return result;  // is_superset stays false
+    // Every live parameter must survive unchanged in the candidate — a removed or
+    // re-ranged/re-flagged parameter would break automation, so it is NOT a
+    // superset (that case still requires a full reload).
+    for (const auto& l : live.all_params()) {
+        const state::ParamInfo* c = candidate.info(l.id);
+        if (!c || !param_contract_equal(l, *c))
+            return result;
+    }
+    // Collect the parameters the candidate adds (present in candidate, not live).
+    for (const auto& c : candidate.all_params()) {
+        if (!live.info(c.id))
+            result.added_ids.push_back(c.id);
+    }
+    result.is_superset = true;
+    return result;
+}
+
 /// Copy each live parameter value into @p candidate for IDs the candidate also
 /// defines, so a hot-swap preserves the current sound. Returns the number of
 /// values carried. Caller should gate this on param_contracts_match(); it is

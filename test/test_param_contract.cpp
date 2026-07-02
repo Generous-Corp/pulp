@@ -136,3 +136,51 @@ TEST_CASE("carry_state skips ids the candidate lacks", "[reload][contract]") {
     REQUIRE(carry_state(live, candidate) == 1);
     REQUIRE(candidate.get_value(kGain) == 0.7f);
 }
+
+// ── Superset gate (item 2.4: add params and stay live) ────────────────────────
+TEST_CASE("superset gate: an identical contract is a superset with no additions",
+          "[reload][contract][2.4]") {
+    using pulp::format::reload::param_contract_superset;
+    state::StateStore live; fill_store(live);
+    state::StateStore candidate; fill_store(candidate);
+    auto r = param_contract_superset(live, candidate);
+    REQUIRE(r.is_superset);
+    REQUIRE(r.added_ids.empty());        // strict match is the empty-additions case
+}
+
+TEST_CASE("superset gate: a candidate that ADDS a parameter is a superset",
+          "[reload][contract][2.4]") {
+    using pulp::format::reload::param_contract_superset;
+    state::StateStore live; fill_store(live);            // 3 params
+    state::StateStore candidate; fill_store(candidate);  // same 3 ...
+    candidate.add_parameter({.id = 4, .name = "Drive", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});  // ... + 1 new
+    auto r = param_contract_superset(live, candidate);
+    REQUIRE(r.is_superset);
+    REQUIRE(r.added_ids == std::vector<state::ParamID>{4});
+    // The strict gate still REJECTS it (sizes differ) — superset is the opt-in path.
+    REQUIRE_FALSE(param_contracts_match(live, candidate));
+}
+
+TEST_CASE("superset gate: removing or re-ranging a live parameter is NOT a superset",
+          "[reload][contract][2.4]") {
+    using pulp::format::reload::param_contract_superset;
+    SECTION("removed") {
+        state::StateStore live; fill_store(live);            // kGain,kFreq,kBypass
+        state::StateStore candidate;                          // missing kBypass
+        candidate.add_parameter({.id = kGain, .name = "Gain", .unit = "",
+                                 .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+        candidate.add_parameter({.id = kFreq, .name = "Freq", .unit = "Hz",
+                                 .range = {20.0f, 20000.0f, 440.0f, 0.0f}});
+        auto r = param_contract_superset(live, candidate);
+        REQUIRE_FALSE(r.is_superset);
+    }
+    SECTION("re-ranged") {
+        state::StateStore live; fill_store(live);
+        state::StateStore candidate; fill_store(candidate, /*gain_max=*/2.0f);  // kGain bound changed
+        candidate.add_parameter({.id = 4, .name = "Drive", .unit = "",
+                                 .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        auto r = param_contract_superset(live, candidate);
+        REQUIRE_FALSE(r.is_superset);   // a changed shared contract disqualifies it
+    }
+}
