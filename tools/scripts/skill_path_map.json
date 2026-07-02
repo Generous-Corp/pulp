@@ -125,6 +125,12 @@
         ".claude/commands/**"
       ]
     },
+    "code-comments": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) — applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+      }
+    },
     "kits": {
       "paths": [
         "tools/kits/**",
