@@ -64,6 +64,11 @@ docs:
     kind: guide
     summary: End-to-end signing, notarization, packaging, and distribution
 
+  - slug: juce-embed
+    path: guides/juce-embed.md
+    kind: guide
+    summary: Put a Pulp UI in a JUCE plugin — import vs template vs adapter, the binding contract, build recipe
+
   - slug: troubleshooting
     path: guides/troubleshooting.md
     kind: guide
