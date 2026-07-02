@@ -26,7 +26,13 @@ endif()
 # audio, live engine switch stays finite at fixed latency). Needs format + the
 # spectral runtime; links spectral_lab_view.cpp so the processor's vtable (first
 # non-inline virtual is create_view()) resolves at link time.
-if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND
+# NB: gate on pulp::render (the GPU compute lib this test LINKS), not merely
+# pulp::gpu-audio — the transport target is always built (GPU-agnostic), so a
+# render-absent config (GPU-off build, or a find_package consumer where only the
+# capital Pulp::view exists) would otherwise satisfy the guard and then fail to
+# generate on the missing pulp::render link. Mirrors the pulp::render gate on the
+# spectral-lab-bench/-test block above.
+if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND TARGET pulp::render AND
    (TARGET pulp::view OR TARGET Pulp::view) AND TARGET Catch2::Catch2WithMain)
     add_executable(spectral-lab-processor-test
         test_spectral_lab_processor.cpp spectral_lab_view.cpp)
@@ -39,7 +45,9 @@ endif()
 
 # Headless editor screenshot. macOS-only dev tool (Skia raster capture); would
 # otherwise pull the Linux windowing stack into the advisory Linux lane.
-if(APPLE AND TARGET pulp::gpu-audio AND (TARGET pulp::view OR TARGET Pulp::view))
+# Gate on pulp::render (linked below), not just the always-built pulp::gpu-audio.
+if(APPLE AND TARGET pulp::gpu-audio AND TARGET pulp::render AND
+   (TARGET pulp::view OR TARGET Pulp::view))
     add_executable(spectral-lab-shot screenshot.cpp spectral_lab_view.cpp)
     target_link_libraries(spectral-lab-shot PRIVATE
         pulp::format pulp::audio pulp::signal pulp::gpu-audio pulp::render
@@ -48,8 +56,10 @@ if(APPLE AND TARGET pulp::gpu-audio AND (TARGET pulp::view OR TARGET Pulp::view)
 endif()
 
 # The plugin (VST3, AU v2, CLAP, Standalone). Only when the GPU spectral runtime
-# is available — the processor is built on core/gpu_audio.
-if(TARGET pulp::gpu-audio)
+# is available — the processor is built on core/gpu_audio and SpectralLab_Core
+# links pulp::render, so gate on pulp::render (not just the always-built
+# pulp::gpu-audio transport) or a render-absent config fails to generate.
+if(TARGET pulp::gpu-audio AND TARGET pulp::render)
     pulp_add_plugin(SpectralLab
         FORMATS           VST3 AU CLAP Standalone
         SOURCES           spectral_lab_view.cpp
