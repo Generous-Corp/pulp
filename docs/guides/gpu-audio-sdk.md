@@ -266,6 +266,72 @@ an opt-in GPU engine, a CPU-reference correctness test, and a benchmark:
   GPU-resident spectral stack, and reusing the same status-line + headroom
   telemetry. The clearest read for writing a node from scratch.
 
+## Building against an installed Pulp SDK
+
+Everything above works whether Pulp is a source submodule or an installed SDK.
+A standalone plugin repo that consumes Pulp through `find_package(Pulp)` (rather
+than `add_subdirectory`) gets the GPU audio runtime from the SDK's exported
+targets:
+
+| You link | You get |
+|---|---|
+| `pulp::gpu-audio` | Layer 2 transport + Layer 3 ready-made processors (`GpuAudioTransport`, `GpuConvolver`, `GpuStft`, `GpuSpectralFreeze`/`Morph`) and their headers |
+| `pulp::render` | Layer 1 primitives (`GpuCompute`) — present only in a GPU-enabled SDK build |
+
+`pulp::gpu-audio` is always exported: it's GPU-agnostic and carries its own CPU
+fallback, so a non-GPU SDK still exposes the transport (it just runs the
+`signal::*` reference path). `pulp::render` exists only when the SDK was built
+`-DPULP_ENABLE_GPU=ON`, so gate any GPU-primitive code on it:
+
+```cmake
+find_package(Pulp CONFIG REQUIRED)
+
+pulp_add_plugin(MyPlugin
+    FORMATS      VST3 AU CLAP Standalone
+    SOURCES      my_plugin.cpp
+    PLUGIN_NAME  "MyPlugin"
+    # ...
+)
+
+target_link_libraries(MyPlugin_Core PUBLIC pulp::gpu-audio)
+if(TARGET pulp::render)
+    target_link_libraries(MyPlugin_Core PUBLIC pulp::render)  # Layer-1 GPU primitives
+endif()
+```
+
+`find_package(Pulp)` resolves the transport's private dependencies for you
+(`Threads`, and `ICU` on Linux) — a static library propagates its private link
+deps into its exported interface, so `PulpConfig` re-finds them; you don't list
+them yourself.
+
+### Ship a self-contained GPU bundle
+
+A GPU plugin loads `libwgpu_native.dylib` at runtime. From a source build the
+WebGPU dependency copies that dylib next to each format binary automatically; an
+installed-SDK consumer has no such upstream copy step, so a `find_package(Pulp)`
+plugin must place the dylib itself and bake an `@loader_path` rpath — otherwise
+the bundle passes every check on the build machine and fails to load
+("Library not loaded: @rpath/libwgpu_native.dylib") on any other Mac. The SDK
+exports two helpers for exactly this. `find_package(Pulp)` already defines them —
+no extra `include()` — so call them directly:
+
+```cmake
+foreach(_fmt MyPlugin_CLAP MyPlugin_VST3 MyPlugin_AU MyPlugin_Standalone)
+    if(TARGET ${_fmt})
+        pulp_make_bundle_relocatable(${_fmt})       # copy dylib + bake @loader_path
+        pulp_validate_bundle_relocatable(${_fmt})   # POST_BUILD guard: fail the build if not
+    endif()
+endforeach()
+```
+
+`pulp_validate_bundle_relocatable` runs at build time and fails hard if a bundle
+still references a build-machine-absolute path, so the footgun is caught in CI
+instead of on a customer's machine. Apply it to single-bundle formats
+(Standalone/CLAP/VST3/AU); an AUv3 `.appex` is intentionally not relocatable in
+isolation — its dylib and framework live in the container app's
+`Contents/Frameworks` and resolve by `@rpath` only inside that container, so the
+container app (not the standalone appex) is the relocatability unit.
+
 > In one line: **Pulp lets plugin developers selectively accelerate
 > computationally expensive DSP on the GPU while preserving real-time audio
 > guarantees and seamless CPU compatibility** — rather than "plugins run on the
