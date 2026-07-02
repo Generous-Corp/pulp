@@ -42,6 +42,7 @@
     "version": "Trivial via Bash (cat CMakeLists.txt | grep VERSION)"
   },
   "mcp_only": {
+    "pulp_audio_compare": "Sub-tool of `pulp audio` — advisory before/after compare RPC mirroring the shipped `pulp audio compare` verb; delegates to the opt-in Audio Quality Lab tool. `audio` is a parent command, so this sub-verb has no top-level CLI peer.",
     "pulp_audio_excerpt_find": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_model_activate": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_model_list": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",

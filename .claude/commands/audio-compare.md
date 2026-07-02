@@ -27,8 +27,12 @@ cd tools/audio/quality-lab && python3 -m venv .venv && . .venv/bin/activate && p
 Invoke with two WAVs (`$ARGUMENTS` = `<reference.wav> <candidate.wav> [extra flags]`):
 
 ```bash
-# managed:  pulp tool run audio-quality-lab -- compare $ARGUMENTS
-python -m quality_lab.cli compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
+# Preferred — the shipped CLI verb (delegates to the managed tool; no venv juggling):
+pulp audio compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
+# Equivalent lower-level forms:
+#   pulp tool run audio-quality-lab -- compare $ARGUMENTS
+#   python -m quality_lab.cli compare $ARGUMENTS
+# Agents inside an MCP client can call the pulp_audio_compare tool for the report JSON directly.
 ```
 
 - **`--reference-role golden`** — declare the reference known-good and the candidate
@@ -62,10 +66,13 @@ regression_suspected." Quote that evidence when you weigh in — don't just repo
 
 When a diff touches a DSP path and you want to say whether it helped or hurt:
 
-1. Render/capture **before** (base) and **after** (branch) to WAVs — offline, no device:
-   `pulp audio render --plugin <bundle> --out before.wav --duration-ms 1000 …` on each side, or
-   reuse existing golden/captured renders.
-2. `/audio-compare before.wav after.wav --reference-role golden` (base is the known-good).
+1. Render/capture **before** (base) and **after** (branch) to WAVs. Two ways:
+   - **Offline, no device (preferred in review):** `pulp audio render --plugin <bundle> --out
+     before.wav --duration-ms 1000 …` on each side, or reuse existing golden/captured renders.
+   - **Live/hosted plugin:** capture the steady-state window with `pulp run --plugin <bundle>
+     --audio-capture-rolling before.wav --headless` (announce the audio + cap the duration + tear
+     down per the CLAUDE.md local-dev audio etiquette; this opens the live device).
+2. `pulp audio compare before.wav after.wav --reference-role golden` (base is the known-good).
 3. Attach the `summary` + cited evidence to your review note. **Advisory only** — it informs
    your judgment; it does not gate the PR, and it requires the opt-in lab deps (never wire it
    into default CI).

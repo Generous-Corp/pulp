@@ -65,17 +65,28 @@ build, test, run, validate, ship, version, doctor, create, docs, status, design,
 
 `audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`. `pulp audio render` is also exposed as the `pulp_audio_render` MCP tool (`tools/mcp/mcp_tools.cpp` handler + `pulp_mcp.cpp` tools_list/dispatch + `test/test_mcp_server.cpp` membership/required-arg coverage + the `docs/guides/claude-code-plugin.md` tool table); it takes a single `param`/`midi` token (the hand-rolled MCP JSON has no array extractor), returns the metrics JSON, and defaults `--out` to a temp WAV. When adding a render flag worth exposing, mirror it there too.
 
-`audio-compare` is a workflow slash command over the **dev-only Python Audio Quality Lab**
-`compare` surface (`tools/audio/quality-lab/`, advisory measure→compare→judge) — it is NOT a
-`pulp` CLI subcommand, so it needs no `cli-commands.yaml` / `docs/reference/cli.md` entry.
-Deliberately, there is **no `pulp_audio_compare` MCP tool and no shipped `pulp audio compare`
-CLI yet**: MCP tools mirror shipped top-level `pulp` commands via the CLI↔MCP parity system, and
-`compare` is a `quality_lab` subcommand, so exposing it as MCP would bake the opt-in Python venv
-into `pulp-mcp` and be reworked when the shipped CLI lands. Both are deferred to the shipped-CLI
-slice; until then agents invoke it via `/audio-compare` (Bash) — no parity-baseline entry is
-needed (the checker only tracks top-level `pulp` commands). Keep the `.md`, this note, and the
-`audio-harness` skill in sync. Distinct from the gate-oriented `pulp audio validate compare`
-(null/spectral diff, nonzero exit): `/audio-compare` is an advisory *judgment*, never a gate.
+`pulp audio compare` is the shipped CLI verb over the **dev-only Python Audio Quality Lab**
+`compare` surface (`tools/audio/quality-lab/`, advisory measure→compare→judge). It is a thin
+ORCHESTRATOR: `tools/cli/cmd_audio_compare.cpp` locates the opt-in managed tool
+(`$HOME/.pulp/tools/python-envs/audio-quality-lab/run.sh`, via `tool_registry.hpp`
+`locate_tool`) and forwards the `compare` verb + all flags to it — no numpy/soundfile/FFT ever
+links into the MIT CLI. It parses arity locally (missing WAVs → exit 2), prints an actionable
+`pulp tool install audio-quality-lab` hint + exit 1 when the tool is absent, and otherwise
+passes the tool's stdout/stderr + exit code straight through (2 == could-not-measure/invalid,
+never a judgment). When touching it, mirror: `cmd_audio_compare.cpp/.hpp`, the dispatch +
+usage line in `cmd_audio.cpp`, `CMakeLists.txt`, `docs/status/cli-commands.yaml` (nested under
+`audio`), `docs/reference/cli.md#audio`, the shell-out test `test/test_cli_audio_compare.cpp`
+(help/arity/not-installed-hint/forward-and-passthrough via a fake `run.sh`), and the
+`audio-harness` skill. The `/audio-compare` slash command wraps the SAME surface for agents, and the
+`pulp_audio_compare` MCP tool mirrors this shipped verb (like `pulp_audio_render` mirrors
+`pulp audio render`): handler `handle_audio_compare` in `tools/mcp/mcp_tools.cpp` (+ decl in
+`mcp_tools.hpp`), tool JSON + dispatch + `using` in `pulp_mcp.cpp`, an `mcp_only` entry in
+`tools/scripts/cli_mcp_parity_baseline.json`, and membership + required-arg coverage in
+`test/test_mcp_server.cpp` + the `docs/guides/claude-code-plugin.md` tool table. A new `audio`
+SUB-verb needs no CLI↔MCP parity *promotion* (the checker only tracks top-level `pulp`
+commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Distinct from the
+gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
+compare` is an advisory *judgment*, never a gate.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.

@@ -147,6 +147,7 @@ ignore:
   - "**/aax_midi_node.cpp"
   - "**/cmd_projects.cpp"
   - "**/cmd_ci_host.cpp"
+  - "**/cmd_audio_compare.cpp"
   - "**/canvas.hpp"
   - "**/skia_canvas.cpp"
   - "**/gpu_surface_dawn.cpp"

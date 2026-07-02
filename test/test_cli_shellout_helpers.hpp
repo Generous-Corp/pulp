@@ -69,6 +69,10 @@ public:
         pulp_setenv(name_.c_str(), value.c_str(), 1);
     }
 
+    void unset() {
+        pulp_unsetenv(name_.c_str());
+    }
+
 private:
     std::string name_;
     bool had_value_ = false;

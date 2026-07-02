@@ -16,7 +16,9 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <charconv>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -1073,6 +1075,92 @@ std::string handle_audio_render(const std::string& params_json) {
     std::string parse_error;
     if (!normalize_structured_json(manifest_json, normalized_json, parse_error)) {
         std::string message = "Error: " + parse_error + "\n" + manifest_json;
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
+    return json_tool_payload(normalized_json);
+}
+
+std::string handle_audio_compare(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+
+    auto reference = extract_string(params_json, "reference");
+    auto candidate = extract_string(params_json, "candidate");
+    if (reference.empty() || candidate.empty()) {
+        return arg_error("Error: reference and candidate are required (paths to WAV files)");
+    }
+    if (reference.front() == '-' || candidate.front() == '-') {
+        return arg_error("Error: reference and candidate must be WAV paths, not options");
+    }
+
+    std::string flags;
+    auto profile = extract_string(params_json, "profile");
+    if (!profile.empty()) {
+        if (profile != "tonal-balance" && profile != "added-hf")
+            return arg_error("Error: profile must be tonal-balance or added-hf");
+        flags += " --profile " + shell_quote(profile);
+    }
+    auto role = extract_string(params_json, "reference_role");
+    if (!role.empty()) {
+        if (role != "peer" && role != "golden")
+            return arg_error("Error: reference_role must be peer or golden");
+        flags += " --reference-role " + shell_quote(role);
+    }
+    if (auto raw = extract_raw(params_json, "threshold"); !raw.empty() && raw != "null") {
+        double t = extract_double(params_json, "threshold", -1.0);
+        if (!(t > 0.0 && t < 1.0))
+            return arg_error("Error: threshold must be in (0, 1)");
+        // Shortest round-trippable form — std::to_string fixes 6 decimals and would
+        // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000",
+        // which the tool then rejects as outside (0,1)).
+        std::array<char, 32> buf{};
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), t);
+        if (ec != std::errc())
+            return arg_error("Error: threshold could not be formatted");
+        flags += " --threshold " + shell_quote(std::string(buf.data(), ptr));
+    }
+
+    // Always capture the structured report to a temp file and return it — the MCP
+    // caller wants the typed evidence envelope, not the human summary line.
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty()) {
+        return arg_error("Error: " + temp_error);
+    }
+    const fs::path temp_dir = temp.directory;
+    const auto report_path = (temp_dir / "compare.json").string();
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio compare";
+    cmd += " " + shell_quote(reference) + " " + shell_quote(candidate);
+    cmd += flags;
+    cmd += " --json " + shell_quote(report_path);
+    cmd += " 2>&1";  // capture the install hint / tool stderr so failures surface as text
+    auto output = exec(cmd);
+
+    auto report_json = read_text_file(report_path);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+
+    if (report_json.empty()) {
+        // No report written → the opt-in tool is absent or could not run. Surface the
+        // captured hint/output (e.g. "Audio Quality Lab is not installed …") verbatim.
+        std::string message =
+            "Error: pulp audio compare produced no report (is the Audio Quality Lab tool "
+            "installed? `pulp tool install audio-quality-lab`)";
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
+
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(report_json, normalized_json, parse_error)) {
+        std::string message = "Error: " + parse_error + "\n" + report_json;
         if (!output.empty()) message += "\n" + output;
         return arg_error(message);
     }
