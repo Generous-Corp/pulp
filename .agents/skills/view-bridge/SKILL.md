@@ -1095,3 +1095,17 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   host's frame loop alive (`has_idle`), so the pump runs even when nothing
   else is animating. A custom view that reads the store directly each frame
   (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.
+
+## In-DAW scripted-UI hot reload is opt-in (dev only)
+
+The DAW editor paths (`au_view_controller_mac.mm`, `au_v2_cocoa_view.mm`,
+`au_view_controller_ios.mm`) build the `ViewBridge` with
+`.enable_hot_reload = pulp::format::dev_editor_hot_reload_enabled()` — a
+header-inline helper in `view_bridge.hpp` that returns true only when the host's
+environment sets `PULP_DEV_HOT_RELOAD=1` (or `t`/`T`/`y`/`Y`). Default is OFF: a
+shipping plugin must never watch + reload scripted UI / `theme.json` from disk
+inside a host. The standalone app (`standalone.cpp`) always enables it — it is
+the dev tool. Editor polling runs every tick regardless; the flag only decides
+whether the watcher acts. To use the in-DAW edit→see-it loop, export
+`PULP_DEV_HOT_RELOAD=1` in the DAW's environment before launching it. (Live-swap
+plan item 1.3.)

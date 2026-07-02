@@ -257,8 +257,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     if (processor && store) {
         _bridge = std::make_unique<pulp::format::ViewBridge>(
             *processor, *store,
-            pulp::format::ViewBridge::Options{.enable_hot_reload = false,
-                                              .role = pulp::format::ViewRole::Editor});
+            pulp::format::ViewBridge::Options{
+                .enable_hot_reload = pulp::format::dev_editor_hot_reload_enabled(),
+                .role = pulp::format::ViewRole::Editor});
         std::string err;
         if (!_bridge->open(&err)) {
             pulp::runtime::log_error("AU mac: ViewBridge::open failed ({})", err);

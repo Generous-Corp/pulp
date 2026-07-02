@@ -451,3 +451,28 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     }
     REQUIRE(p.closed_count == 1);
 }
+
+// item 1.3: in-DAW editors enable scripted-UI hot reload only when the developer
+// opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
+// never watches + reloads from disk inside a host.
+TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][view-bridge][issue-1-3]") {
+    const char* prev = std::getenv("PULP_DEV_HOT_RELOAD");
+    const std::string saved = prev ? prev : "";
+    const bool had = prev != nullptr;
+
+    ::unsetenv("PULP_DEV_HOT_RELOAD");
+    CHECK_FALSE(format::dev_editor_hot_reload_enabled());     // default OFF
+
+    for (const char* on : {"1", "true", "yes", "T", "Y"}) {
+        ::setenv("PULP_DEV_HOT_RELOAD", on, 1);
+        CHECK(format::dev_editor_hot_reload_enabled());
+    }
+    for (const char* off : {"0", "false", "no", ""}) {
+        ::setenv("PULP_DEV_HOT_RELOAD", off, 1);
+        CHECK_FALSE(format::dev_editor_hot_reload_enabled());
+    }
+
+    // Restore the environment for other tests.
+    if (had) ::setenv("PULP_DEV_HOT_RELOAD", saved.c_str(), 1);
+    else ::unsetenv("PULP_DEV_HOT_RELOAD");
+}

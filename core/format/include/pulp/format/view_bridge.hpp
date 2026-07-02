@@ -2,6 +2,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/view/view.hpp>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -10,6 +11,23 @@ namespace pulp::runtime { class MessageChannel; }
 namespace pulp::view { class ScriptedUiSession; }
 
 namespace pulp::format {
+
+/// Whether a DAW-hosted editor should enable scripted-UI + theme hot reload
+/// (item 1.3). OFF by default — a shipping plugin must not watch and reload from
+/// disk inside a host — but a developer opts in for the edit→see-it loop by
+/// exporting `PULP_DEV_HOT_RELOAD=1` in the DAW's environment. (The standalone
+/// app always enables it; it IS the dev tool.) Polling already runs on every
+/// editor tick, so this only decides whether the watcher acts. Kept header-inline
+/// so the platform view controllers (`au_view_controller_*.mm`,
+/// `au_v2_cocoa_view.mm`) share one definition.
+inline bool dev_editor_hot_reload_enabled() {
+    const char* v = std::getenv("PULP_DEV_HOT_RELOAD");
+    if (!v) return false;
+    switch (v[0]) {
+        case '1': case 't': case 'T': case 'y': case 'Y': return true;
+        default: return false;
+    }
+}
 
 /// Role of a view attached to a ViewBridge. The primary editor is
 /// `Editor`; auxiliary panels (component inspector, remote preview)
