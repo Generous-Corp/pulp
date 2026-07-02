@@ -176,6 +176,26 @@ TEST_CASE("Resampler preserves in-band sine amplitude (44.1→48k)",
     REQUIRE_THAT(static_cast<double>(peak), WithinAbs(1.0, 5e-3));
 }
 
+TEST_CASE("Resampler integer-ratio fast path preserves in-band amplitude",
+          "[signal][resampler]") {
+    // Integer ratios (2x down, 2x up) drive the phase accumulator onto exact phase
+    // boundaries, so the fractional weight is exactly 0 and only the first polyphase
+    // branch contributes — the case the inner loop skips the second MAC for. A
+    // 1 kHz tone well inside both passbands must survive the fast path at full gain.
+    struct Case { double in; double out; };
+    for (const Case c : {Case{96000.0, 48000.0}, Case{48000.0, 96000.0}}) {
+        Resampler r;
+        r.prepare(c.in, c.out, 1, 8192);
+        const auto in = sine(1000.0, c.in, 8192);
+        const auto out = resample_mono(r, in, r.max_output_for(in.size()));
+        REQUIRE(out.size() > 1024u);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        const float peak = steady_peak(out, 256);
+        INFO("ratio " << c.in << "->" << c.out << " peak=" << peak);
+        REQUIRE_THAT(static_cast<double>(peak), WithinAbs(1.0, 5e-3));
+    }
+}
+
 TEST_CASE("Resampler 1 kHz round-trip 44.1→48→44.1 reconstructs the sine",
           "[signal][resampler]") {
     // Acceptance check uses sample-by-sample RMS-error against a
