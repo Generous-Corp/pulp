@@ -257,8 +257,13 @@ public:
         }
         taps_per_phase_ = taps_per_phase;
 
-        // Pre-size delay lines so we never allocate in the hot path.
-        delays_.assign(channels_, std::vector<float>(taps_per_phase, 0.0f));
+        // Pre-size delay lines so we never allocate in the hot path. Each line is
+        // DOUBLE the tap count: every input sample is written at both `write_pos`
+        // and `write_pos + taps` (a mirror), so the most-recent-`taps` window is
+        // always a contiguous physical span. The convolution then reads it with a
+        // plain pointer walk instead of a per-tap wrap branch — same taps in the
+        // same order (bit-identical), but branch-free and vectorizable.
+        delays_.assign(channels_, std::vector<float>(taps_per_phase * 2u, 0.0f));
         write_pos_.assign(channels_, 0u);
 
         // Output scratch — worst-case output count for a max-size input block.
@@ -320,7 +325,11 @@ public:
                 }
                 for (std::size_t c = 0; c < channels_; ++c) {
                     auto& d = delays_[c];
-                    d[write_pos_[c]] = input[c][input_consumed];
+                    const float xs = input[c][input_consumed];
+                    // Mirror-write at `wp` and `wp + taps` so the read window stays
+                    // contiguous (see the convolution below).
+                    d[write_pos_[c]] = xs;
+                    d[write_pos_[c] + taps_per_phase_] = xs;
                     // write_pos_ stays in [0, taps), so a compare-and-reset is the
                     // same result as the modulo without the per-input-sample divide.
                     if (++write_pos_[c] >= taps_per_phase_) write_pos_[c] = 0u;
@@ -346,24 +355,26 @@ public:
                 const auto& ph1 = phases_[p1];
 
                 // Convolve: y = sum_k h[k] * x[wp - 1 - k] (most recent first).
+                // The mirror write makes that window the contiguous physical span
+                // ending at `wp - 1 + taps`, so `win[taps-1-k]` walks the exact same
+                // taps in the exact same order as the old modulo walk (bit-identical)
+                // with no per-tap branch — the compiler can vectorize the reduction.
+                const float* win = &d[wp];   // window = win[0 .. taps-1], oldest→newest
+                const std::size_t T = taps_per_phase_;
                 double acc0 = 0.0, acc1 = 0.0;
-                std::size_t idx = (wp == 0 ? taps_per_phase_ - 1u : wp - 1u);
                 if (frac != 0.0) {
-                    for (std::size_t k = 0; k < taps_per_phase_; ++k) {
-                        const float xs = d[idx];
-                        acc0 += static_cast<double>(xs) * static_cast<double>(ph0[k]);
-                        acc1 += static_cast<double>(xs) * static_cast<double>(ph1[k]);
-                        idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
+                    for (std::size_t k = 0; k < T; ++k) {
+                        const double xs = static_cast<double>(win[T - 1u - k]);
+                        acc0 += xs * static_cast<double>(ph0[k]);
+                        acc1 += xs * static_cast<double>(ph1[k]);
                     }
                 } else {
                     // Integer phase position (e.g. integer resample ratios): the
                     // second phase is weighted by frac == 0, so it never reaches the
                     // output — skip the redundant second MAC. y == acc0 exactly, so
                     // this is bit-identical to evaluating both phases.
-                    for (std::size_t k = 0; k < taps_per_phase_; ++k) {
-                        acc0 += static_cast<double>(d[idx]) * static_cast<double>(ph0[k]);
-                        idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
-                    }
+                    for (std::size_t k = 0; k < T; ++k)
+                        acc0 += static_cast<double>(win[T - 1u - k]) * static_cast<double>(ph0[k]);
                 }
                 const double y = acc0 + frac * (acc1 - acc0);
                 output[c][out_n] = static_cast<float>(y);
