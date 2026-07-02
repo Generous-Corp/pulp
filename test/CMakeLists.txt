@@ -4236,7 +4236,7 @@ pulp_add_test_suite(pulp-test-script SOURCES test_script_engine.cpp LIBRARIES pu
 
 # Scripted UI hot reload/theme reload tests
 add_executable(pulp-test-scripted-ui test_scripted_ui.cpp)
-target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view pulp::format Catch2::Catch2WithMain)
 if(TARGET pulp-render)
     target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::render)
 endif()

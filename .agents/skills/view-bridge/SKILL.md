@@ -1109,3 +1109,20 @@ the dev tool. Editor polling runs every tick regardless; the flag only decides
 whether the watcher acts. To use the in-DAW edit→see-it loop, export
 `PULP_DEV_HOT_RELOAD=1` in the DAW's environment before launching it. (Live-swap
 plan item 1.3.)
+
+## Scripted UI joins a unified live-swap transaction (SwapUnit)
+
+`ScriptedUiSwapUnit` (`core/format/include/pulp/format/reload/scripted_ui_swap_unit.hpp`)
+adapts a `ScriptedUiSession` to the `SwapUnit` contract so a UI swap composes with
+a DSP swap (`DspReloadSwapUnit`) under `apply_live_swap` — a content pack that
+carries both UI and DSP applies as ONE transaction (item 1.8b/2.5b). Notes:
+- The adapter is **path-based**: `to_stage()` captures `session.script_path()`,
+  `apply` = `reload_from(new_script)`, `rollback` = `reload_from(prev_script)`.
+  It reuses the public `reload_from` (last-good, state-preserving) — no new view
+  API. The UX unit is ordered FIRST (cheap to re-apply); a later DSP failure rolls
+  it back to the previous bundle.
+- It lives in the FORMAT layer (format→view is the allowed direction; view never
+  links format), in its own header so DSP-only users don't pull in view.
+- Value-perfect widget-state restore across a rollback is a refinement (rollback
+  re-runs the previous script; `reload_from`'s own snapshot/restore preserves
+  matching widget values across the rebuild).

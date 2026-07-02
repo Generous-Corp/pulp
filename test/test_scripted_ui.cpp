@@ -7,6 +7,7 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <algorithm>
@@ -729,4 +730,46 @@ TEST_CASE("ScriptedUiSession reload latency baseline", "[view][scripted-ui][.ben
          << "ms p95=" << p95 << "ms worst=" << totals.back() << "ms (60fps frame=16.7ms)");
     CHECK(p50 >= 0.0);
     fs::remove_all(temp_dir);
+}
+
+// ── UX SwapUnit adapter (live-swap item 1.8b/2.5b) ────────────────────────────
+TEST_CASE("ScriptedUiSwapUnit applies + rolls back a UI swap via apply_live_swap",
+          "[view][scripted-ui][swap-unit][1.8]") {
+    const auto dir = make_temp_dir("pulp-ux-swapunit");
+    const auto ui_a = dir / "a.js";
+    const auto ui_b = dir / "b.js";
+    write_text(ui_a, "createLabel('v', 'A', '');");
+    write_text(ui_b, "createLabel('v', 'B', '');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = ui_a});
+    std::string err;
+    REQUIRE(session.load(&err));
+    REQUIRE(session.script_path() == ui_a);
+
+    using pulp::format::reload::apply_live_swap;
+    using pulp::format::reload::ScriptedUiSwapUnit;
+    using pulp::format::reload::SwapStage;
+    using pulp::format::reload::SwapUnit;
+
+    SECTION("UX-only transaction commits the swap") {
+        ScriptedUiSwapUnit ux(session, ui_b);
+        std::vector<SwapUnit*> units{&ux};
+        REQUIRE(apply_live_swap(units).ok);
+        REQUIRE(session.script_path() == ui_b);
+    }
+
+    SECTION("a later stage failing rolls the UX back to the previous script") {
+        ScriptedUiSwapUnit ux(session, ui_b);
+        // UX first, then a stand-in DSP stage that rejects → UX must roll back.
+        std::vector<SwapStage> stages{ux.to_stage(),
+                                      SwapStage{"dsp", [] { return false; }, [] {}}};
+        auto r = apply_live_swap(stages);
+        REQUIRE_FALSE(r.ok);
+        REQUIRE(r.failed_stage == "dsp");
+        REQUIRE(session.script_path() == ui_a);   // rolled back to the pre-swap UI
+    }
 }
